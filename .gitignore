@@ -1,1 +1,10 @@
 .env
+
+# Rust build artifacts
+/target
+
+# Local telex stores / test artifacts
+*.db
+*.db-wal
+*.db-shm
+/.e2e

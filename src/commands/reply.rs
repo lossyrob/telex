@@ -1,0 +1,66 @@
+use anyhow::{anyhow, Result};
+
+use crate::cli::{Ctx, ReplyArgs};
+use crate::model::{now_ms, Attention, NewMessage};
+use crate::output::emit;
+
+pub async fn run(ctx: &Ctx, args: ReplyArgs) -> Result<i32> {
+    let backend = ctx.backend().await?;
+    let parent = backend
+        .get_message(args.to_message)
+        .await?
+        .ok_or_else(|| anyhow!("message {} not found", args.to_message))?;
+
+    // Reply goes back to the parent's sender.
+    let to = parent
+        .from_addr
+        .clone()
+        .ok_or_else(|| anyhow!("message {} has no from address to reply to", parent.id))?;
+
+    let subject = args
+        .subject
+        .clone()
+        .or_else(|| parent.subject.as_ref().map(|s| format!("Re: {s}")));
+    let from = args.from.clone().or_else(|| ctx.address.clone());
+    let attention = Attention::parse(&args.attention)?;
+
+    backend.ensure_address(&to, None, None, None).await?;
+
+    let new = NewMessage {
+        parent_id: Some(parent.id),
+        from_addr: from,
+        to_addr: to.clone(),
+        cc: None,
+        kind: args.kind.clone(),
+        attention,
+        requires_disposition: args.requires_disposition,
+        subject,
+        body: args.body.clone(),
+        metadata: None,
+        sent_at_ms: now_ms(),
+    };
+    let row = backend.insert_message(&new).await?;
+    backend.notify_new(&to, row.id, row.sent_at_ms).await.ok();
+
+    let occ = backend.occupancy(&to, ctx.cfg.liveness_window_secs).await?;
+    let delivery = if occ.occupied {
+        "delivered"
+    } else {
+        "queued-unoccupied"
+    };
+    let receipt = serde_json::json!({
+        "receipt": delivery,
+        "id": row.id,
+        "thread_id": row.thread_id,
+        "parent_id": row.parent_id,
+        "to": to,
+        "occupied": occ.occupied,
+    });
+    emit(ctx.fmt, &receipt, || {
+        println!(
+            "{delivery}: id={} thread={} reply-to={} to={}",
+            row.id, row.thread_id, parent.id, to
+        );
+    });
+    Ok(0)
+}

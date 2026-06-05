@@ -568,25 +568,74 @@ that the occupant has yet been woken to act.
 
 ## CLI design direction
 
-Exact verbs are deferred, but the likely shape is:
+The v0 command surface is settled:
 
-```text
-telex attach
-telex detach
-telex send
-telex inbox
-telex wait
-telex read
-telex reply
-telex ack
-telex handle
-telex defer
-telex escalate
-telex close
-telex address list
-telex address retire
-telex export
-```
+### Global options (apply to all subcommands)
+
+- `--backend <sqlite|postgres>`  default `sqlite` (or `$TELEX_BACKEND`)
+- `--db <path>`                  SQLite file, default `~/.telex/telex.db` (or `$TELEX_DB`)
+- `--address <addr>`             default address (or `$TELEX_ADDRESS`)
+- `--json` / `--text`            output format; default JSON when stdout is not a TTY,
+                                 text when interactive.
+- Postgres connection via env (same as spike): `TELEX_PG_HOST`, `TELEX_PG_USER`,
+  `TELEX_PG_DB`, `TELEX_PG_PASSWORD` (Entra access token OR SQL password).
+
+### Commands (grouped)
+
+PRESENCE
+- `telex attach --address <addr> [--description <s>] [--scope <s>] [--tags <a,b>]
+     [--heartbeat-secs N] [--poll-secs N]`
+  Become live occupant; hold lease; run holder; blocks. Exclusive: fails if the address
+  is already occupied by a live lease (reports current occupant). Registers the directory
+  description on attach.
+- `telex detach --address <addr>`  Release the lease (and stop a running holder).
+
+RECEIVE
+- `telex wait --address <addr> [--timeout-ms N]`
+  Block on the holder; on delivery print one message as JSON and exit 0. Exit codes:
+  0 delivered, 2 idle-timeout, 3 holder-gone, 4 holder-hung.
+- `telex inbox [--address <addr>] [--all] [--limit N]`
+  List actionable (requires-disposition, not yet terminally dispositioned) and recent
+  messages for the address.
+- `telex read --id <message-id> [--thread] [--full]`
+  Read a message; `--thread` shows compact thread context; `--full` full history.
+
+SEND
+- `telex send --to <addr> [--subject <s>] --body <s> [--cc <a,b>] [--kind <s>]
+     [--attention interrupt|next-checkpoint|background|fyi] [--requires-disposition]
+     [--metadata <json>]`
+  Send a message. Prints a receipt stating delivered/queued-unoccupied/rejected-retired
+  plus the new message id.
+- `telex reply --to-message <id> --body <s> [--attention ...] [--requires-disposition]`
+  Reply; threads under the parent (inherits thread_id, sets parent_id).
+
+DISPOSITION (flat verbs; all take `--id <message-id>` and optional `--note <s>`)
+- `telex ack --id <id>`        acknowledged
+- `telex handle --id <id>`     handled
+- `telex defer --id <id>`      deferred
+- `telex reject --id <id>`     rejected
+- `telex close --id <id>`      closed
+- `telex escalate --id <id>`   escalated
+
+DIRECTORY
+- `telex address list [--scope <s>] [--match <substr>] [--tag <t>] [--all]`
+  Show addresses with description, occupancy, liveness grade.
+- `telex address show --address <addr>`  Detail for one address + lease/occupancy.
+- `telex address retire --address <addr>`  Retire (drops from normal listings).
+- `telex resolve --match <substr> | --tag <t> [--scope <s>]`
+  Resolve target(s) by description/tag; prints matching address(es) + descriptions.
+
+AUDIT
+- `telex export [--address <addr>] [--thread <id>] [--since <id>]`
+  Emit messages + disposition history as JSON lines (jsonl) for audit/provenance.
+
+SETUP
+- `telex init [--backend ...] [--db ...]`  Create `~/.telex/` and initialize schema.
+- `telex status [--address <addr>]`  Show config, backend, address, holder/IPC + occupancy.
+
+Two v0 details are settled: `attach` blocks as the resident holder — there is no
+separate `serve` verb; the holder IS `attach`. Disposition verbs are flat
+(`telex ack`, `telex handle`, ...), not nested under a `disp` parent.
 
 The CLI should optimize for agents:
 
@@ -709,7 +758,7 @@ as a first-class object.
 
 Deferred questions:
 
-- exact CLI verb surface and output contract;
+- output contract details beyond the frozen v0 verb surface;
 - exact message/disposition schema;
 - final address grammar;
 - per-address ACLs and authorization;

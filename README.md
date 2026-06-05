@@ -26,3 +26,6 @@ For the trail of significant decisions (language, architecture, protocol), see
 For the throwaway validation spike that de-risked the design (Rust + Postgres +
 Entra, the two-process waiter, TTL/poll, and a live two-session test), see
 [spike/](spike/).
+
+V0 is being implemented as a single `telex` binary at the repo root. `SKILL.md`
+teaches agents how to use it, and early releases are published by GitHub Actions.

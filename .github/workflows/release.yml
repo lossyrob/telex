@@ -1,0 +1,84 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-pc-windows-msvc
+            os: windows-latest
+            archive: zip
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-latest
+            archive: tar.gz
+          - target: aarch64-apple-darwin
+            os: macos-latest
+            archive: tar.gz
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+          target: ${{ matrix.target }}
+
+      - name: Install Linux TLS dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Build release binary
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $tag = "${{ github.ref_name }}"
+          $target = "${{ matrix.target }}"
+          $archive = "telex-$tag-$target.zip"
+          New-Item -ItemType Directory -Force -Path dist, package | Out-Null
+          Copy-Item "target\$target\release\telex.exe" "package\telex.exe" -Force
+          Compress-Archive -Path "package\telex.exe" -DestinationPath "dist\$archive" -Force
+
+      - name: Package Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="${{ github.ref_name }}"
+          target="${{ matrix.target }}"
+          archive="telex-${tag}-${target}.tar.gz"
+          mkdir -p dist package
+          cp "target/${target}/release/telex" package/telex
+          tar -C package -czf "dist/${archive}" telex
+
+      - name: Upload archive artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: telex-${{ github.ref_name }}-${{ matrix.target }}
+          path: dist/telex-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
+          if-no-files-found: error
+
+      - name: Publish GitHub Release asset
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ${{ github.ref_name }}
+          generate_release_notes: true
+          fail_on_unmatched_files: true
+          files: dist/telex-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}

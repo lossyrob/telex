@@ -271,3 +271,29 @@ SQLite (local) and Postgres (networked, with or without Entra) are both viable u
 one semantic core, and full v0 implementation can proceed. The spike also noted a
 small operational fix for the build: the Entra token cache TTL must be shorter than
 the token's actual lifetime (a 50-min cache outlived a token during testing).
+
+## 0007 — v0 command surface settled (attach blocks as holder; flat disposition verbs)
+
+- **Date:** 2026-06-05
+- **Status:** Accepted
+
+**Context.** Before implementing v0, Telex needed the full `telex` command surface
+and distributable shape aligned across the design docs, agent instructions, and release
+plan. Two open questions were whether `attach` should block as the holder or whether a
+separate `serve` verb should exist, and whether disposition verbs should be flat or
+nested under a `disp` parent.
+
+**Decision.** `attach` blocks and IS the resident holder; there is no `serve` verb.
+Disposition verbs are flat: `telex ack`, `telex handle`, `telex defer`, `telex reject`,
+`telex close`, and `telex escalate`. V0 is a single `telex` binary with all subcommands;
+SQLite is the zero-config default, while Postgres (with or without Entra) is the
+networked backend. The holder and ephemeral `telex wait` client communicate through
+named-pipe IPC on Windows and unix-socket IPC elsewhere. V0 ships a derived inbox (no
+per-recipient delivery table), single primary `to` plus optional `cc`, threading via
+`thread_id`/`parent_id`, and a dispositions table.
+
+**Consequences.** The holder's lifetime equals the blocking `attach` invocation: it is
+a session-attached background task, not a detached daemon. Flat verbs keep the
+agent-facing surface terse. The spike's throwaway crate stays in `spike/`, while v0 is
+a fresh implementation at the repo root. Distribution will be GitHub Releases of the
+single binary via GitHub Actions.
