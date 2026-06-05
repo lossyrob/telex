@@ -1,0 +1,242 @@
+# Telex Decision Log
+
+A lightweight running record of significant decisions. This is the trail for the
+*big* choices — language, architecture, protocol shape, backend strategy — not
+every small implementation call.
+
+## When to add an entry
+
+Add an entry when a decision is **load-bearing and would be costly or confusing to
+relitigate later**. A good test: *would a future contributor (or future you) want
+to know why this was chosen, and be tempted to undo it without that context?*
+
+- **Do** record: language, architecture boundaries, protocol/schema shape, backend
+  choices, security/auth direction, major scope cuts, anything reversing a prior
+  entry.
+- **Don't** record: naming, file layout, routine refactors, library micro-choices,
+  anything easily changed and locally obvious.
+
+Keep entries short. Three or four sentences per field is plenty. The point is a
+trail, not a thesis.
+
+## Conventions
+
+- Entries are **append-only** and numbered sequentially (`0001`, `0002`, …).
+- Don't rewrite a past decision — supersede it. Add a new entry, set the old one's
+  status to `Superseded by NNNN`, and note what changed.
+- **Status** is one of: `Proposed`, `Accepted`, `Accepted (pending validation)`,
+  `Superseded by NNNN`, `Deprecated`.
+- If a single file ever gets unwieldy, split into a `decisions/` directory with one
+  file per entry, preserving the numbers.
+
+### Entry template
+
+```markdown
+## NNNN — Title
+
+- **Date:** YYYY-MM-DD
+- **Status:** Proposed | Accepted | Accepted (pending validation) | Superseded by NNNN | Deprecated
+
+**Context.** Why this came up; the forces and constraints in play.
+
+**Decision.** What we chose.
+
+**Consequences.** Trade-offs accepted, follow-ups, and what would cause us to revisit.
+```
+
+---
+
+## 0001 — Keep a lightweight decision log
+
+- **Date:** 2026-06-05
+- **Status:** Accepted
+
+**Context.** The project is early and the design is still fluid across several
+top-level documents (thesis, design, dispatch). Big decisions are being made in
+conversation and risk being lost or silently relitigated. Full per-file ADRs felt
+like too much ceremony for a project this young and would invite over-recording.
+
+**Decision.** Maintain a single append-only `DECISIONS.md` with short numbered
+entries (Context / Decision / Consequences + Status), reserved for load-bearing
+decisions. Graduate to a `decisions/` directory only if the single file becomes
+unwieldy.
+
+**Consequences.** A low-friction trail for the choices that matter, without
+documenting every small call. Requires the discipline to actually add an entry when
+a big decision lands. Superseding rather than editing preserves history.
+
+## 0002 — Implement Telex in Rust
+
+- **Date:** 2026-06-05
+- **Status:** Accepted
+
+**Context.** Telex needs a single, fast-starting native binary: agents invoke the
+CLI constantly and in loops, so per-invocation startup cost matters, ruling out
+Node/Python/TS for the shipped artifact. The semantic core is fundamentally a set
+of state machines — delivery, disposition, attention, address lifecycle, lease, and
+answerback grades — whose whole value is keeping distinct states honestly distinct.
+The waiter is a long-running daemon that must not lie about liveness (reconnect,
+lease holding, crash-safety, LISTEN/NOTIFY). Go was the main alternative, trading
+type-modeling rigor for faster iteration and a more mature Azure SDK.
+
+**Decision.** Build Telex in Rust. Rust's sum types and exhaustive `match` enforce
+at compile time the exact state distinctions the product is selling (making illegal
+states unrepresentable), and tokio gives a trustworthy, low-overhead background
+waiter. The CLI-first, backend-as-broker boundary decouples Telex's language from
+any consumer (e.g. Streamliner), making this a low-regret choice on the
+integration axis.
+
+**Consequences.** We accept slower compile times and higher cost of churn while the
+design is still moving — a real tax given the design is actively evolving. We also
+accept that the Azure SDK for Rust (Entra → Postgres auth) is younger than Go's;
+this is the main technical risk.
+
+This decision is **pending validation by a spike** before committing the full
+implementation. The spike must prove, in Rust, the riskiest assumptions behind
+answerback and the networked backend:
+
+1. a Postgres **session-scoped advisory lock that auto-releases on connection
+   drop** (kill the process → lock gone → address unoccupied, with no reaper
+   daemon);
+2. **LISTEN/NOTIFY** waking a blocked waiter;
+3. **Entra token auth** to an Azure Postgres Flexible Server.
+
+If the spike (especially the Entra/async path) proves unworkable or unpleasant
+enough to outweigh the modeling benefits, this entry will be superseded — most
+likely in favor of Go.
+
+**Validation outcome (2026-06-05).** The spike (`spike/`) passed and this decision
+is accepted. Rust reached the Azure Postgres Flexible Server with Entra auth from a
+normal `az login` (TLS via Windows schannel, no OpenSSL), the one item flagged as the
+main technical risk — the only friction was an incorrect token resource on the first
+attempt (the correct one is `https://ossrdbms-aad.database.windows.net`). The
+liveness/answerback assumptions were re-shaped during the spike: items 1 and 2
+(advisory lock, `LISTEN/NOTIFY`) were superseded by a simpler TTL-heartbeat +
+poll-with-cursor baseline (see 0005), which the spike validated instead, including a
+live two-session cross-machine-style messaging test.
+
+## 0003 — Telex owns long-duration waiting (native waiter, not agent-authored loops)
+
+- **Date:** 2026-06-05
+- **Status:** Accepted
+
+**Context.** Agent loop skills (e.g. the `loop` skill) work well for dynamic,
+agent-authored checks, and it is tempting to implement Telex's waiting the same way —
+have the agent script repeated short-lived CLI calls. But the strongest answerback
+grade, a connection-bound lease that releases the instant a session dies, requires a
+single long-lived process to hold the backend connection (and Postgres advisory lock)
+for the whole mission. Repeated short-lived invocations open and close a connection
+each time and structurally cannot hold such a lease, silently degrading answerback to
+the weaker heartbeat/TTL grade. Implementing the wait in agent scripts would also tie
+the liveness guarantee to a specific agent platform, undercutting vendor-neutrality.
+
+**Decision.** Telex provides the blocking wait as a native primitive (`telex wait`)
+owned by the Telex binary, holding the lease and blocking efficiently (`LISTEN/NOTIFY`
+on Postgres, poll on SQLite). Agents and sub-agents **supervise** the native waiter —
+launch, restart, reconnect, relay actionable messages, refresh the work-scope brief —
+but do not reimplement it. Generic loop/skill mechanisms remain appropriate for other
+dynamic, agent-invented checks; they are just not how Telex message-waiting and
+answerback are built.
+
+**Consequences.** Telex must implement robust native blocking, reconnection, and
+cursor resume rather than leaning on external scripts. The native waiter's process
+identity becomes the thing that backs connection-bound liveness. This adds two items
+to the spike (ref 0002): a durable native `telex wait` process, and a Copilot CLI
+sub-agent that supervises it (restart/reconnect/relay) and accepts a mid-run steer to
+update the work-scope brief — which also exercises the CLI's steerable sub-agent
+functionality.
+
+## 0004 — Split the waiter into a resident holder and an ephemeral delivery client
+
+- **Date:** 2026-06-05
+- **Status:** Accepted
+
+**Context.** Connection-bound liveness (0003) wants one long-lived process holding
+the backend connection and advisory lock. But agent runtimes can only reason about a
+message once the delivering call **returns**: delivery requires a process exit and a
+turn, after which the agent acts and resumes waiting. A single call cannot both block
+indefinitely and invoke agent turns mid-wait. If the lease-holding process were the
+one that exits to deliver each message, the lease would release during exactly the
+window when the agent is most alive — handling the message — falsely reporting the
+line dead.
+
+**Decision.** Split the waiter into two processes. A **resident holder** holds the
+backend connection and lease, buffers actionable messages locally, and never takes an
+agent turn — so it stays up for the whole mission. An **ephemeral delivery client**
+(`telex wait`) blocks on the holder over fast local IPC and exits the instant a
+message is ready, handing it to the agent; the agent dispositions and calls
+`telex wait` again. The exit that delivers to the agent happens at the client layer,
+so the agent's turn never drops the backend connection and the address stays
+`occupied` while a message is being handled. This preserves the familiar
+exit-with-info-then-restart loop cadence, but only the cheap local client exits per
+turn.
+
+**Consequences.** The holder's lifecycle must track the session's — it must be a
+session-owned process, **not** a fully detached daemon, so that session/terminal/
+machine death kills it and releases the lease promptly; a detached holder would
+outlive a dead session and lie about liveness. The supervising sub-agent launches and
+monitors the holder, runs the delivery-client loop, and relays to the foreground. The
+spike (ref 0002, 0003) must validate the two-process model: killing the holder
+releases the lock fast, while repeatedly exiting/restarting the delivery client keeps
+the lock held, and binding the holder to session lifetime makes session-kill release
+the lock. The pure-TTL alternative (let `telex wait` hold the lock, cover agent-turn
+gaps with a heartbeat grace) was rejected as the default because it reintroduces TTL
+and still flips to "dead" on any turn longer than the grace window; TTL remains the
+SQLite-grade path where no resident holder exists.
+
+**Validation outcome (2026-06-05).** The spike validated the two-process model. The
+holder survived repeated waiter exit/restart cycles with the address remaining
+`occupied` throughout; killing the holder dropped liveness (after the TTL window);
+holder-gone and a wedged/hung holder were detected by the client via distinct exit
+codes (`3` gone, `4` hung). A live two-session "increment game" exchanged messages
+both directions through the shared backend using exactly this topology — each session
+running an attached holder plus an attached waiter that exits on delivery, notifies
+the agent, and is restarted. Note: with the TTL baseline (0005) the holder no longer
+holds an advisory lock, but the two-process split is, if anything, more necessary,
+because the holder is now what keeps the TTL heartbeat alive across agent turns.
+
+## 0005 — TTL-heartbeat + poll-with-cursor as the v0 baseline; defer LISTEN/NOTIFY and advisory locks
+
+- **Date:** 2026-06-05
+- **Status:** Accepted
+
+**Context.** Early notes (and the research brief) treated Postgres `LISTEN/NOTIFY`
+(push delivery) and session-scoped advisory locks (connection-bound liveness) as
+central design wins. Both are Postgres-only, add real complexity, and have no SQLite
+equivalent — so each is a second code path on top of the portable one that must be
+written anyway (poll-with-cursor for delivery; TTL heartbeat for liveness, which
+SQLite needs regardless). Telex's workload is agent-turn-scale (seconds), where
+sub-second push buys nothing and a 1–2s indexed poll is trivial load. The capability
+model already anticipates both grades (`push: native | poll`, `lease: connection |
+ttl | advisory`).
+
+**Decision.** Make **TTL-heartbeat liveness** and **poll-with-cursor delivery** the
+single portable v0 baseline for both SQLite and Postgres. Treat `LISTEN/NOTIFY` and
+advisory locks as **later, optional Postgres-only upgrades** that raise push latency
+and the answerback grade — added behind the existing capability flags only if a
+measured need appears — not v0 prerequisites.
+
+**Consequences.** One delivery path and one liveness path across both backends,
+substantially less Postgres-specific complexity, and an honest-but-weaker liveness
+grade in v0 ("last seen within the TTL window" rather than "dead the instant the
+connection drops"). Receipts must state the grade honestly. The spike confirmed
+poll + TTL is sufficient end-to-end — including the live two-session test — and that
+neither `LISTEN/NOTIFY` nor advisory locks were needed to make the model work. This
+supersedes the liveness/push portions of 0002's original spike plan (items 1 and 2);
+the advisory-lock-on-disconnect upgrade remains a documented future option, not a
+commitment.
+
+**Measured latency (2026-06-05).** An instrumented spike run compared poll
+vs push delivery and decomposed end-to-end lag (see `spike/README.md`). Backend
+delivery: poll ~0.6 s avg (≈ ½ the 1 s poll interval, ~1 s worst case), push ~0.14 s
+(≈ cloud round-trip floor); `bench` standalone showed poll median ~500 ms vs push
+~65 ms. But the dominant end-to-end term was **agent-wake latency — the runtime
+waking the agent after the waiter exits — at ~6–26 s**, one to two orders of
+magnitude larger than any backend lag and entirely above the telex layer. This both
+confirms the choice (push cannot fix the lag that actually dominates agent-to-agent
+messaging) and reframes it: push is worth having for machine-to-machine dispatch
+(DISPATCH.md), not for perceived agent-loop latency. The run also surfaced two
+fixable transport costs — per-call Entra token fetch (~2.7 s, fixed by caching) and
+per-`send` connection setup to a cloud DB (~0.4 s warm, up to ~2.8 s cold) — noting a
+future option to route sends through a warm/pooled connection rather than a fresh
+short-lived one.

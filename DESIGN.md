@@ -140,6 +140,15 @@ The core adapts behavior:
   window";
 - if liveness is weak, receipts should say so honestly.
 
+**v0 baseline (see decision 0005).** The portable v0 baseline uses
+**poll-with-cursor** delivery and **TTL-heartbeat** liveness for *both* SQLite and
+Postgres — a single code path on each axis. `LISTEN/NOTIFY` (native push) and
+connection-bound advisory locks (exact liveness) are deferred to later, optional
+Postgres-only upgrades behind these same capability flags, added only if a measured
+need appears. The spike validated that poll + TTL is sufficient at agent-turn scale,
+including live two-session messaging, so the Postgres-specific mechanisms are not v0
+prerequisites.
+
 ### SQLite
 
 SQLite is the local substrate. It should support the same semantic model but with
@@ -154,21 +163,26 @@ weaker liveness:
 
 ### Postgres
 
-Postgres is the reference networked backend. It supports the strongest
-cross-machine behavior without a custom hosted API:
+Postgres is the reference networked backend. It supports strong cross-machine
+behavior without a custom hosted API:
 
 - durable messages and audit history in tables;
 - indexed inbox/thread queries;
-- `LISTEN/NOTIFY` for push waiters;
-- advisory locks for live address leases;
 - transactional message append plus recipient creation;
 - Entra credentials as a first-class authentication target for Azure Database for
   PostgreSQL Flexible Server.
 
-The key design win is connection-bound liveness. A session holding a Postgres
-advisory lock serves an address. If the session, terminal, or machine dies, the
-connection drops and Postgres releases the lock. The address becomes unoccupied
-without a reaper daemon guessing from stale heartbeats.
+In v0, Postgres runs the same poll-with-cursor delivery and TTL-heartbeat liveness as
+SQLite (decision 0005); it earns its place through durability, indexed queries, and
+networked multi-machine access rather than through push or connection-bound liveness.
+
+A later, optional upgrade can raise Postgres's fidelity: `LISTEN/NOTIFY` for push
+waiters and session-scoped advisory locks for connection-bound liveness. The
+potential design win there is that a session holding a Postgres advisory lock serves
+an address, and if the session, terminal, or machine dies, the connection drops and
+Postgres releases the lock — the address becomes unoccupied without a reaper daemon
+guessing from stale heartbeats. This is a future enhancement, not a v0 requirement,
+and v0 must remain correct without it.
 
 ### Entra authentication
 
@@ -236,6 +250,57 @@ Retirement matters because old workstreams and nodes should not stay casually
 messageable. A closed Streamliner workstream from last week should remain in
 history but disappear from normal address completion and default resolution.
 
+## Address directory and registration
+
+Addressing only helps if a sender can find the address. The first and simplest
+form of discovery is a **self-registered directory**: when a session attaches it
+registers a short, human- and agent-readable description of what it is doing, and
+that description travels with the address in directory listings.
+
+This is a V0 concern and deliberately small. It needs no broadcast, no semantic
+search, and no capability negotiation — only that an occupant describe itself on
+attach and that listings return those descriptions. It is enough for a sender to
+think "the session working on issue 215," scan the directory, and resolve the
+target itself.
+
+On attach a session should be able to declare:
+
+- a one-line `description` — "session working on issue 215", "auth DB migration
+  worker";
+- optional `tags` — coarse labels such as `issue:215`, `repo:telex`, `db`;
+- optional `scope` — the project or workstream the address belongs to.
+
+Two layers of description exist, and V0 only requires the first:
+
+- **Occupant-declared (ephemeral):** what the current lease holder says it is
+  doing. It travels with the lease and changes when the occupant changes. This
+  alone satisfies "find the session working on issue 215."
+- **Address-declared (durable):** a stable description of the responsibility
+  itself, independent of any occupant. Useful when a supervisor such as
+  Streamliner pre-creates addresses from work geometry. Optional in V0.
+
+`telex address list` should therefore return more than bare addresses. For each
+active address it should show the description, occupancy, and liveness grade, so an
+agent can scan the directory and resolve a target by reading descriptions:
+
+```text
+$ telex address list --scope project:telex
+ADDRESS                                OCCUPANCY    DESCRIPTION
+workstream:telex/node:issue-215        occupied     session working on issue 215
+workstream:telex/role:orchestrator     occupied     telex orchestrator
+workstream:telex/node:directory        unoccupied   passive directory design (queued)
+```
+
+A simple substring or tag filter (for example `telex address list --match 215` or
+`--tag issue:215`) is enough for V0 resolution. Anything richer — natural-language
+matching, broadcast "who can handle this?" enquiries, or capability bidding — is
+deliberately deferred to active dispatch (see [DISPATCH.md](DISPATCH.md)).
+
+Directory listings should respect the same scoping and lifecycle rules as the rest
+of the address model: retired addresses drop out of normal listings, and on a
+shared backend, directory visibility should be project-scoped rather than a global
+enumeration of every principal's addresses.
+
 ## Leases and answerback
 
 A lease binds a live occupant to a durable address.
@@ -245,6 +310,7 @@ address: workstream:dbagent/role:orchestrator
 occupant: session:abc123
 host: devbox-2
 principal: rob@example.com
+description: dbagent orchestrator
 since: ...
 backendProof: heartbeat | advisory-lock | connection
 ```
@@ -383,6 +449,93 @@ auditability and explainability.
 The waiter loop is the current concrete mechanism for answerback and action
 delivery.
 
+**Telex owns long-duration waiting.** The blocking wait is a native Telex primitive
+(`telex wait`), not something an agent reconstructs with generic loop skills, shell
+polling, or repeated short-lived CLI invocations. This is a deliberate boundary with
+a concrete technical reason, not just a consistency preference.
+
+The strongest answerback grade — a connection-bound lease that releases the instant a
+session dies — requires a single long-lived process to hold the backend connection
+(and, on Postgres, the advisory lock) for the duration of the mission. A pattern of
+repeated short-lived invocations (`check`, sleep, `check`) opens and closes a
+connection each time and structurally cannot hold a connection-bound lease; it would
+silently degrade answerback to the weaker heartbeat/TTL grade. So the long wait must
+live inside one durable Telex process that holds the lease and blocks efficiently
+(poll-with-cursor in the v0 baseline; `LISTEN/NOTIFY` is a later optional Postgres
+push upgrade — see decision 0005).
+
+This creates a real tension with how agent runtimes work: an agent can only reason
+about a message once the call delivering it **returns**. Delivery to the reasoning
+layer therefore requires a process exit and a turn — the agent reads the message,
+acts, dispositions, and resumes waiting. A single call cannot both block indefinitely
+and invoke agent turns mid-wait. If the lease-holding process were the one that exits
+to deliver, the lease would release during exactly the window when the agent is most
+alive — handling the message — which is backwards.
+
+Telex resolves this by splitting the waiter into **two processes**:
+
+- a **resident holder** — long-lived, holds the backend connection and writes the
+  lease's TTL heartbeat, polls for actionable messages from a cursor, and buffers them
+  locally (on the optional Postgres upgrade it can instead hold an advisory lock and
+  run `LISTEN/NOTIFY`). It never needs to take an agent turn, so it can stay up for the
+  whole mission. This is the literal answerback drum: it answers liveness
+  automatically and continuously while the agent works elsewhere.
+- an **ephemeral delivery client** (`telex wait`) — blocks on the resident holder
+  over fast local IPC, and **exits** the moment an actionable message is ready,
+  handing it to the agent. The agent reasons, dispositions, and calls `telex wait`
+  again.
+
+The crucial property: the exit that hands a message to the agent happens at the
+*client* layer, while the lease (and its heartbeat) lives in the *holder*. The agent's
+turn therefore does **not** drop the backend connection or lapse the heartbeat, and
+the address stays correctly `occupied` while the agent is actively handling a message
+— exactly when a naive single-process waiter would falsely report the line dead. This
+also preserves the familiar exit-with-info-then-restart cadence of background-task
+loops, but only
+the cheap local delivery client exits per turn; the durable backend connection is
+never disturbed.
+
+The holder-to-client handoff follows one rule: **delivery is the exit trigger.** The
+holder never sends a separate "you should exit" signal; handing the client a message
+*is* the instruction to exit. Concretely, the holder runs a small local IPC endpoint
+(a named pipe on Windows, a unix socket elsewhere) and acts as a local server.
+`telex wait` connects, sends a request describing what it is waiting for
+(address(es), attention filter, since-cursor), then blocks on a socket read. The
+holder replies immediately if a matching message is already buffered; otherwise it
+registers the client as a waiter and stays silent, leaving the read blocked. When an
+actionable message arrives, the holder writes the framed payload to the waiting
+client's socket; the read returns, the client prints the concise payload to stdout,
+and exits. The wakeup is push — the holder's write releases the client's read — with
+no local polling.
+
+Delivery state, cursor position, and pending disposition live in the **holder** (and
+ultimately the backend), never in the ephemeral client, which is a stateless courier.
+A later `telex ack`/`telex handle` is another short call that updates that state.
+
+The client contract distinguishes outcomes by exit code: a delivered message; a
+`--timeout` expiry with no message, so a supervisor can refresh and re-issue without
+blocking forever (agent runtimes cap tool-call duration); and a holder-gone error,
+signalling the supervisor to restart and reconnect the holder.
+
+For the spike, the local socket server can be skipped in favour of a local SQLite (or
+file) buffer that the holder writes and `telex wait` blocks on via a short local poll
+or file-change watch — enough to prove the two-process liveness property before
+adding push IPC.
+
+Because liveness is bound to the holder, the holder's lifecycle must track the
+session's. It should be a session-owned process, **not** a fully detached daemon, so
+that when the session, terminal, or machine dies, the holder dies with it and the
+lease releases promptly. A fully detached holder would outlive a dead session and lie
+about liveness — worse than no guarantee.
+
+The agent's job is therefore to **supervise**, not to **be**, the waiter. A
+supervising sub-agent launches and monitors the resident holder (restarting and
+reconnecting it on failure), runs the `telex wait` delivery loop, relays actionable
+payloads to the foreground, and refreshes the work-scope brief — the Plane A control
+role described in [DISPATCH.md](DISPATCH.md). Generic loop/skill mechanisms remain
+appropriate for dynamic, agent-invented checks; they are simply not how Telex
+message-waiting and answerback are implemented.
+
 The loop should:
 
 - attach to one or more addresses;
@@ -397,6 +550,21 @@ If a message arrives while an agent is mid-task, the expected session protocol i
 not "drop everything." The agent should inspect the summary. If it is not
 interrupt-grade, it should create or remember a todo and finish the current work
 to a safe stopping point before handling the message.
+
+### A note on latency: "interrupt" means next turn
+
+Spike measurements (see [spike/](spike/README.md)) decomposed end-to-end
+delivery and found that the dominant term is **agent-wake latency** — the time the
+host agent runtime takes to wake the foreground into a new turn after the waiter
+delivers — at roughly **6–26 seconds**, one to two orders of magnitude larger than
+Telex's own delivery (sub-second). No agent runtime today can preempt a foreground
+agent mid-turn. Telex's `interrupt` attention level therefore means "deliver at the
+next turn boundary," not "stop the running model now." Backend transport choices
+(poll vs push, a shorter poll interval) move the sub-second term and matter for
+machine-to-machine dispatch, but they do not change the perceived agent-to-agent
+latency, which is governed by the runtime. The design and any receipts should be
+honest about this: answerback proves the line is open and the message delivered, not
+that the occupant has yet been woken to act.
 
 ## CLI design direction
 
@@ -550,4 +718,12 @@ Deferred questions:
 - how much profile validation belongs in Telex vs the consuming system;
 - packaging name if bare `telex` package names are occupied;
 - whether Redis or another backend should be added after SQLite/Postgres;
-- how exports to Markdown/Git should be shaped for audit and review.
+- how exports to Markdown/Git should be shaped for audit and review;
+- directory resolution fidelity for V0 (substring/tag) and when richer matching is
+  justified;
+- whether address descriptions live on the address, the lease, or both, and how
+  the two stay in sync;
+- directory visibility and scoping on a shared backend.
+
+Active discovery, broadcast enquiries, and Contract-Net dispatch are explored
+separately in [DISPATCH.md](DISPATCH.md), which carries its own open questions.

@@ -15,3 +15,14 @@ For the name, its history, and the metaphor that anchors the project, see
 
 For the build-facing thesis and design capture, see
 [PRODUCT-THESIS.md](PRODUCT-THESIS.md) and [DESIGN.md](DESIGN.md).
+
+For a forward-looking exploration of network discovery and active dispatch —
+broadcast enquiries, answerback bidding, and Contract-Net — see
+[DISPATCH.md](DISPATCH.md).
+
+For the trail of significant decisions (language, architecture, protocol), see
+[DECISIONS.md](DECISIONS.md).
+
+For the throwaway validation spike that de-risked the design (Rust + Postgres +
+Entra, the two-process waiter, TTL/poll, and a live two-session test), see
+[spike/](spike/).
