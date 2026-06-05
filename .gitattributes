@@ -1,0 +1,6 @@
+# Force LF line endings for text files on every platform, regardless of each
+# developer's local core.autocrlf setting.
+* text=auto eol=lf
+
+# Shell scripts must stay LF because they execute in Unix-like environments.
+*.sh text eol=lf
