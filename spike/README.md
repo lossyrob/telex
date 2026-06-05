@@ -19,6 +19,8 @@ was proven.
 | **Hang** detection (wedged holder / stale DB heartbeat) | ✅ waiter exit code 4 |
 | Two independent agent sessions exchange messages through the shared backend | ✅ live cross-session "increment game", 3 round-trips both ways |
 | Sub-agent topology (main owns holder, sub runs waiter, reports on completion) | ✅ |
+| **One `Backend` trait, two implementations** (Postgres + SQLite), same holder/waiter/sender code | ✅ same generic binaries over `--backend postgres` and `--backend sqlite` |
+| **SQLite multi-process concurrency** on one shared file (the local two-session case) | ✅ 6 concurrent writer processes + 2 holders, 90 writes, 0 failures, 91/91 distinct ids, no corruption (WAL + `busy_timeout`) |
 
 Notably, **`LISTEN/NOTIFY` and advisory locks were not needed** — poll + TTL was
 sufficient for the agent-turn-scale workload. See decision 0005.
@@ -49,11 +51,31 @@ Push improves the backend leg (≈630→140 ms) and matters for machine-to-machi
 dispatch, but cannot reduce agent-wake. Token caching and connection reuse are the
 fixable transport-side costs.
 
+## Backend abstraction & SQLite
+
+A `Backend` trait (`src/backend.rs`) abstracts the primitives the holder/waiter/
+sender need — ensure-address, claim-lease, heartbeat, max-id, fetch-after-cursor,
+insert, notify, occupancy — with two implementations: `PgBackend` (tokio-postgres)
+and `SqliteBackend` (rusqlite + `spawn_blocking`). The same generic binaries select
+a backend with `--backend postgres|sqlite` (and `--db <path>` for SQLite). The
+ephemeral `waiter` needs no backend knowledge at all — it only speaks the local
+socket protocol to the holder.
+
+This made the "same semantic core, two backends" promise (decision 0005) concrete
+and validated the SQLite-specific risk: **multi-process concurrency on one shared
+file.** With `PRAGMA journal_mode=WAL` and `busy_timeout=5000`, a stress of 6
+concurrent writer processes (90 inserts) running alongside 2 holders (each
+heartbeating and polling the same file) produced **0 write failures and 91/91
+distinct, monotonic ids** — no `SQLITE_BUSY` surfacing, no loss, no corruption.
+Monotonic AUTOINCREMENT under contention matters because the cursor-based delivery
+model depends on it. SQLite delivery (poll-only) and TTL liveness behaved
+identically to Postgres through the trait.
+
 ## Binaries
 
-- `initdb` — apply the spike schema.
-- `holder` — resident answerback drum: holds the connection, writes the TTL
-  heartbeat, learns of messages (poll-with-cursor, plus optional `--push`
+- `initdb` — apply the Postgres schema (SQLite schema is created on first connect).
+- `holder` — resident answerback drum (backend-generic via `--backend`): holds the
+  connection, writes the TTL heartbeat, learns of messages (poll-with-cursor, plus optional `--push`
   LISTEN/NOTIFY), buffers them, and serves waiters over a local TCP socket.
   Long-lived.
 - `waiter` — ephemeral delivery client: blocks on the holder, prints one message as

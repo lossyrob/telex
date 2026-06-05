@@ -240,3 +240,34 @@ fixable transport costs — per-call Entra token fetch (~2.7 s, fixed by caching
 per-`send` connection setup to a cloud DB (~0.4 s warm, up to ~2.8 s cold) — noting a
 future option to route sends through a warm/pooled connection rather than a fresh
 short-lived one.
+
+## 0006 — Backend trait validated over Postgres and SQLite; SQLite is concurrency-safe for the local case
+
+- **Date:** 2026-06-05
+- **Status:** Accepted
+
+**Context.** Before this spike, every validation had been Postgres-only. SQLite is
+half the v0 surface (decision 0005's "same semantic core, two backends"), and its
+real risk — multiple processes coordinating over one shared file for the local
+two-session case — was entirely unproven. SQLite is single-writer and can surface
+`SQLITE_BUSY` under contention.
+
+**Decision.** Build the v0 backend layer behind a small `Backend` trait
+(ensure-address, claim-lease, heartbeat, max-id, fetch-after-cursor, insert, notify,
+occupancy), with Postgres and SQLite implementations selected at runtime; keep the
+ephemeral delivery client backend-agnostic (it speaks only the local holder socket).
+For SQLite, use WAL mode with a `busy_timeout`; store lease heartbeat as epoch-ms and
+compute occupancy in code. Push (`LISTEN/NOTIFY`) stays a Postgres-only extra; SQLite
+relies on poll, which is the v0 baseline anyway.
+
+**Consequences.** The spike implemented this trait with both backends and ran the
+same generic `holder`/`waiter`/`sender` binaries over each. SQLite multi-process
+concurrency held under stress: 6 concurrent writer processes (90 inserts) alongside 2
+holders heartbeating and polling the same file produced **0 write failures, 91/91
+distinct and monotonic ids, no corruption**, with WAL + `busy_timeout` absorbing
+contention. Monotonic AUTOINCREMENT under concurrent writes is confirmed, which the
+cursor delivery model depends on. With this, the last major v0 unknown is closed:
+SQLite (local) and Postgres (networked, with or without Entra) are both viable under
+one semantic core, and full v0 implementation can proceed. The spike also noted a
+small operational fix for the build: the Entra token cache TTL must be shorter than
+the token's actual lifetime (a 50-min cache outlived a token during testing).

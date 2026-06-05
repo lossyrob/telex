@@ -1,7 +1,8 @@
-//! Report whether an address is occupied, by TTL heartbeat freshness.
+//! Report whether an address is occupied, by TTL heartbeat freshness, via the
+//! chosen backend.
 use anyhow::Result;
 use clap::Parser;
-use telex_spike::connect;
+use telex_spike::make_backend;
 
 #[derive(Parser)]
 struct Args {
@@ -9,38 +10,26 @@ struct Args {
     address: String,
     #[arg(long, default_value_t = 15)]
     window_secs: i64,
+    #[arg(long, default_value = "postgres")]
+    backend: String,
+    #[arg(long, default_value = "telex-spike.db")]
+    db: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let client = connect().await?;
-    let row = client
-        .query_opt(
-            "SELECT occupant, \
-                    EXTRACT(EPOCH FROM (now()-heartbeat_at))::float8 AS age, \
-                    (heartbeat_at > now() - make_interval(secs => $2::double precision)) AS occupied \
-             FROM leases WHERE address=$1",
-            &[&args.address, &(args.window_secs as f64)],
-        )
-        .await?;
-    match row {
-        None => println!(
-            "{}",
-            serde_json::json!({"address": args.address, "occupied": false, "reason": "no lease"})
-        ),
-        Some(r) => {
-            let occupied: bool = r.get("occupied");
-            let age: f64 = r.get("age");
-            let occupant: Option<String> = r.get("occupant");
-            println!(
-                "{}",
-                serde_json::json!({
-                    "address": args.address, "occupied": occupied,
-                    "age_secs": age, "occupant": occupant
-                })
-            );
-        }
-    }
+    let backend = make_backend(&args.backend, &args.db).await?;
+    let occ = backend.occupancy(&args.address, args.window_secs).await?;
+    println!(
+        "{}",
+        serde_json::json!({
+            "address": args.address,
+            "backend": backend.kind(),
+            "occupied": occ.occupied,
+            "age_secs": occ.age_secs,
+            "occupant": occ.occupant
+        })
+    );
     Ok(())
 }

@@ -6,7 +6,7 @@ $tokenFile = Join-Path $env:TEMP 'telex_pg_token.txt'
 $useCache = $false
 if (Test-Path $tokenFile) {
     $age = (Get-Date) - (Get-Item $tokenFile).LastWriteTime
-    if ($age.TotalMinutes -lt 50) { $useCache = $true }
+    if ($age.TotalMinutes -lt 10) { $useCache = $true }
 }
 if ($useCache) {
     $env:TELEX_PG_PASSWORD = (Get-Content $tokenFile -Raw).Trim()

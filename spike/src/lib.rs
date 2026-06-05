@@ -6,6 +6,9 @@ use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+pub mod backend;
+pub use backend::{make_backend, Backend, MsgRow as BackendMsgRow, Occupancy};
+
 pub fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_string())
 }

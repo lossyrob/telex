@@ -1,10 +1,8 @@
-//! Insert a message for an address (simulates an incoming Telex message).
-//! Stamps `sent_at_ms` (client wall clock) and fires a NOTIFY so push-mode
-//! listeners can wake immediately.
+//! Insert a message for an address via the chosen backend, stamp `sent_at_ms`,
+//! and fire a best-effort push notify (no-op on SQLite).
 use anyhow::Result;
 use clap::Parser;
-use serde_json::json;
-use telex_spike::{connect, now_ms, NOTIFY_CHANNEL};
+use telex_spike::{make_backend, now_ms};
 
 #[derive(Parser)]
 struct Args {
@@ -14,26 +12,21 @@ struct Args {
     body: String,
     #[arg(long, default_value = "background")]
     attention: String,
+    #[arg(long, default_value = "postgres")]
+    backend: String,
+    #[arg(long, default_value = "telex-spike.db")]
+    db: String,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    let client = connect().await?;
+    let backend = make_backend(&args.backend, &args.db).await?;
     let sent_at_ms = now_ms();
-    let row = client
-        .query_one(
-            "INSERT INTO messages(address, body, attention, sent_at_ms) \
-             VALUES ($1,$2,$3,$4) RETURNING id",
-            &[&args.address, &args.body, &args.attention, &sent_at_ms],
-        )
+    let id = backend
+        .insert_message(&args.address, &args.body, &args.attention, sent_at_ms)
         .await?;
-    let id: i64 = row.get("id");
-    let payload = json!({"address": args.address, "id": id, "sent_at_ms": sent_at_ms}).to_string();
-    client
-        .execute("SELECT pg_notify($1, $2)", &[&NOTIFY_CHANNEL, &payload])
-        .await?;
-    println!("inserted message id={id} to {} (notified)", args.address);
+    backend.notify_new(&args.address, id, sent_at_ms).await?;
+    println!("inserted message id={id} to {} via {}", args.address, backend.kind());
     Ok(())
 }
-

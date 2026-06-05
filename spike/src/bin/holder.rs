@@ -1,11 +1,7 @@
-//! Resident holder: the answerback drum.
-//!
-//! Holds a long-lived Postgres connection, writes a TTL heartbeat for one
-//! address, learns of new messages (poll-with-cursor by default, plus optional
-//! LISTEN/NOTIFY push with `--push`), buffers them, and serves ephemeral waiters
-//! over a local TCP socket (stand-in for a named pipe). It never takes an agent
-//! turn, so it survives across waiter exits and agent turns — the property the
-//! two-process split exists to prove.
+//! Resident holder: the answerback drum. Backend-generic — runs over Postgres or
+//! SQLite via the `Backend` trait. Holds the lease (TTL heartbeat), learns of
+//! messages (poll-with-cursor; optional `--push` LISTEN/NOTIFY on Postgres),
+//! buffers them, and serves ephemeral waiters over a local TCP socket.
 
 use anyhow::Result;
 use clap::Parser;
@@ -14,13 +10,11 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use telex_spike::{
-    connect, make_tls, now_ms, pg_config, Frame, NotifyPayload, Request, NOTIFY_CHANNEL,
-};
+use telex_spike::{make_backend, now_ms, pg_config, Backend, Frame, NotifyPayload, Request, NOTIFY_CHANNEL};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, Notify};
-use tokio_postgres::{AsyncMessage, Client};
+use tokio_postgres::AsyncMessage;
 
 #[derive(Parser)]
 struct Args {
@@ -28,6 +22,10 @@ struct Args {
     address: String,
     #[arg(long, default_value_t = 47655)]
     port: u16,
+    #[arg(long, default_value = "postgres")]
+    backend: String,
+    #[arg(long, default_value = "telex-spike.db")]
+    db: String,
     #[arg(long, default_value_t = 5)]
     heartbeat_secs: u64,
     #[arg(long, default_value_t = 1)]
@@ -36,17 +34,15 @@ struct Args {
     keepalive_secs: u64,
     #[arg(long, default_value = "spike-holder")]
     occupant: String,
-    /// Enable LISTEN/NOTIFY push delivery in addition to the poll backstop.
+    /// Enable LISTEN/NOTIFY push (Postgres only) in addition to the poll backstop.
     #[arg(long)]
     push: bool,
-    /// After N seconds, stop heartbeating and stop answering waiters — to
-    /// exercise the waiter's hang detection.
     #[arg(long)]
     simulate_hang_after_secs: Option<u64>,
 }
 
 #[derive(Clone)]
-struct MsgRow {
+struct Buffered {
     id: i64,
     address: String,
     body: String,
@@ -56,7 +52,7 @@ struct MsgRow {
 }
 
 struct State {
-    queue: Mutex<VecDeque<MsgRow>>,
+    queue: Mutex<VecDeque<Buffered>>,
     notify: Notify,
     cursor: Mutex<i64>,
     last_heartbeat_ms: AtomicI64,
@@ -71,18 +67,9 @@ fn whoami() -> String {
     std::env::var("USERNAME").unwrap_or_else(|_| "unknown".into())
 }
 
-/// Pull rows past the cursor and buffer them. Serialized by holding the cursor
-/// lock across the query, so the poll and push paths cannot double-deliver.
-async fn drain_new(client: &Client, address: &str, st: &State, source: &str) {
+async fn drain_new(backend: &Arc<dyn Backend>, address: &str, st: &State, source: &str) {
     let mut cur = st.cursor.lock().await;
-    let rows = match client
-        .query(
-            "SELECT id, address, body, attention, COALESCE(sent_at_ms,0) AS sent_at_ms \
-             FROM messages WHERE address=$1 AND id>$2 ORDER BY id",
-            &[&address, &*cur],
-        )
-        .await
-    {
+    let rows = match backend.fetch_after(address, *cur).await {
         Ok(r) => r,
         Err(e) => {
             eprintln!("[holder] drain ({source}) error: {e}");
@@ -94,15 +81,7 @@ async fn drain_new(client: &Client, address: &str, st: &State, source: &str) {
     }
     let recv = now_ms();
     let mut q = st.queue.lock().await;
-    for row in rows {
-        let m = MsgRow {
-            id: row.get("id"),
-            address: row.get("address"),
-            body: row.get("body"),
-            attention: row.get("attention"),
-            sent_at_ms: row.get("sent_at_ms"),
-            buffered_at_ms: recv,
-        };
+    for m in rows {
         let lag = if m.sent_at_ms > 0 {
             format!("{} ms", recv - m.sent_at_ms)
         } else {
@@ -110,7 +89,14 @@ async fn drain_new(client: &Client, address: &str, st: &State, source: &str) {
         };
         eprintln!("[holder] buffered id={} via {source} lag={lag}", m.id);
         *cur = m.id;
-        q.push_back(m);
+        q.push_back(Buffered {
+            id: m.id,
+            address: m.address,
+            body: m.body,
+            attention: m.attention,
+            sent_at_ms: m.sent_at_ms,
+            buffered_at_ms: recv,
+        });
     }
     drop(q);
     drop(cur);
@@ -120,6 +106,7 @@ async fn drain_new(client: &Client, address: &str, st: &State, source: &str) {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+    let backend = make_backend(&args.backend, &args.db).await?;
     let state = Arc::new(State {
         queue: Mutex::new(VecDeque::new()),
         notify: Notify::new(),
@@ -129,38 +116,16 @@ async fn main() -> Result<()> {
         keepalive: Duration::from_secs(args.keepalive_secs),
     });
 
-    let setup = connect().await?;
-    setup
-        .execute(
-            "INSERT INTO addresses(address, description) VALUES ($1,$2) \
-             ON CONFLICT (address) DO NOTHING",
-            &[&args.address, &"spike address"],
-        )
+    backend.ensure_address(&args.address, "spike address").await?;
+    backend
+        .claim_lease(&args.address, &args.occupant, &hostname(), &whoami())
         .await?;
-    setup
-        .execute(
-            "INSERT INTO leases(address, occupant, host, principal, heartbeat_at) \
-             VALUES ($1,$2,$3,$4, now()) \
-             ON CONFLICT (address) DO UPDATE SET occupant=excluded.occupant, \
-                 host=excluded.host, principal=excluded.principal, heartbeat_at=now()",
-            &[&args.address, &args.occupant, &hostname(), &whoami()],
-        )
-        .await?;
-    // Start the cursor at the current max id so we only deliver new messages.
-    {
-        let max: i64 = setup
-            .query_one(
-                "SELECT COALESCE(MAX(id),0) m FROM messages WHERE address=$1",
-                &[&args.address],
-            )
-            .await?
-            .get("m");
-        *state.cursor.lock().await = max;
-    }
+    *state.cursor.lock().await = backend.max_id(&args.address).await?;
 
     eprintln!(
-        "[holder] pid={} address={} port={} heartbeat={}s poll={}s push={}",
+        "[holder] pid={} backend={} address={} port={} heartbeat={}s poll={}s push={}",
         std::process::id(),
+        backend.kind(),
         args.address,
         args.port,
         args.heartbeat_secs,
@@ -172,15 +137,15 @@ async fn main() -> Result<()> {
         let st = state.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(after)).await;
-            eprintln!("[holder] *** SIMULATING HANG NOW (no more heartbeats or keepalives) ***");
+            eprintln!("[holder] *** SIMULATING HANG NOW ***");
             st.hung.store(true, Ordering::SeqCst);
         });
     }
 
-    // Heartbeat task (TTL liveness) on its own connection.
+    // Heartbeat task.
     {
         let st = state.clone();
-        let hb = connect().await?;
+        let backend = backend.clone();
         let address = args.address.clone();
         let interval = args.heartbeat_secs.max(1);
         tokio::spawn(async move {
@@ -190,10 +155,7 @@ async fn main() -> Result<()> {
                 if st.hung.load(Ordering::SeqCst) {
                     continue;
                 }
-                match hb
-                    .execute("UPDATE leases SET heartbeat_at = now() WHERE address=$1", &[&address])
-                    .await
-                {
+                match backend.heartbeat(&address).await {
                     Ok(_) => st.last_heartbeat_ms.store(now_ms(), Ordering::SeqCst),
                     Err(e) => eprintln!("[holder] heartbeat error: {e}"),
                 }
@@ -201,10 +163,10 @@ async fn main() -> Result<()> {
         });
     }
 
-    // Poll task (cursor-based delivery backstop) on its own connection.
+    // Poll task (delivery backstop for both backends).
     {
         let st = state.clone();
-        let poll = connect().await?;
+        let backend = backend.clone();
         let address = args.address.clone();
         let interval = args.poll_secs.max(1);
         tokio::spawn(async move {
@@ -214,18 +176,16 @@ async fn main() -> Result<()> {
                 if st.hung.load(Ordering::SeqCst) {
                     continue;
                 }
-                drain_new(&poll, &address, &st, "poll").await;
+                drain_new(&backend, &address, &st, "poll").await;
             }
         });
     }
 
-    // Optional push: a LISTEN connection signals, a query connection drains.
-    if args.push {
+    // Optional Postgres push.
+    if args.push && backend.kind() == "postgres" {
         let notify_new = Arc::new(Notify::new());
-
-        // LISTEN connection, driven via poll_message.
         {
-            let (listen_client, listen_conn) = pg_config()?.connect(make_tls()?).await?;
+            let (listen_client, listen_conn) = pg_config()?.connect(telex_spike::make_tls()?).await?;
             let notify_new = notify_new.clone();
             let address = args.address.clone();
             tokio::spawn(async move {
@@ -255,11 +215,9 @@ async fn main() -> Result<()> {
             Box::leak(Box::new(listen_client));
             eprintln!("[holder] push enabled (LISTEN {NOTIFY_CHANNEL})");
         }
-
-        // Drain-on-signal task.
         {
             let st = state.clone();
-            let push_conn = connect().await?;
+            let backend = backend.clone();
             let address = args.address.clone();
             tokio::spawn(async move {
                 loop {
@@ -267,10 +225,12 @@ async fn main() -> Result<()> {
                     if st.hung.load(Ordering::SeqCst) {
                         continue;
                     }
-                    drain_new(&push_conn, &address, &st, "push").await;
+                    drain_new(&backend, &address, &st, "push").await;
                 }
             });
         }
+    } else if args.push {
+        eprintln!("[holder] --push ignored: backend {} has no native push", backend.kind());
     }
 
     let listener = TcpListener::bind(("127.0.0.1", args.port)).await?;
@@ -303,7 +263,7 @@ async fn handle_conn(stream: TcpStream, st: Arc<State>) -> Result<()> {
         Request::Wait { timeout_ms, .. } => {
             let deadline = Instant::now() + Duration::from_millis(timeout_ms);
             let mut ka = tokio::time::interval(st.keepalive);
-            ka.tick().await; // consume immediate tick
+            ka.tick().await;
             loop {
                 if let Some(msg) = {
                     let mut q = st.queue.lock().await;
@@ -323,7 +283,6 @@ async fn handle_conn(stream: TcpStream, st: Arc<State>) -> Result<()> {
                     .await;
                 }
                 if st.hung.load(Ordering::SeqCst) {
-                    // Wedge: never respond again, so the waiter's hang timer fires.
                     std::future::pending::<()>().await;
                 }
                 let remaining = deadline.saturating_duration_since(Instant::now());
