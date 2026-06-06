@@ -116,12 +116,12 @@ Global options apply to all subcommands.
 
 | Option | Purpose |
 |---|---|
-| `--backend <sqlite|postgres>` | Backend; default `sqlite` or `$TELEX_BACKEND`. |
-| `--db <path>` | SQLite file; default `~/.telex/telex.db` or `$TELEX_DB`. |
+| `--backend <name>` | Use a configured backend by name (or `$TELEX_BACKEND`); defaults to the configured default backend, or an implicit `default` sqlite store. |
+| `--db <path>` | Override the SQLite path for this invocation (sqlite backends only; or `$TELEX_DB`). |
 | `--address <addr>` | Default address or `$TELEX_ADDRESS`. |
 | `--json` / `--text` | Output format; default JSON when stdout is not a TTY, text when interactive. |
 
-Postgres connection is configured with `TELEX_PG_HOST`, `TELEX_PG_USER`, `TELEX_PG_DB`, and `TELEX_PG_PASSWORD`.
+Postgres connections are configured once as named backends with `telex backend add` (see Backends), not via per-call environment variables.
 
 ## Command reference
 
@@ -177,8 +177,19 @@ Postgres connection is configured with `TELEX_PG_HOST`, `TELEX_PG_USER`, `TELEX_
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex init` | Create `~/.telex/` and initialize schema. | `--backend <sqlite|postgres>`, `--db <path>` |
-| `telex status` | Show config, backend, address, holder/IPC, and occupancy. | `--address <addr>` |
+| `telex init` | Create `~/.telex/`, write a default sqlite backend, and initialize its schema. | `--backend <name>`, `--db <path>` |
+| `telex status` | Show the resolved backend, address, holder/IPC, and occupancy. | `--address <addr>` |
+
+### BACKENDS
+
+| Command | Purpose | Key flags |
+|---|---|---|
+| `telex backend add <name>` | Add (or update) a named backend. | `--sqlite [--path <p>]` or `--postgres <conn-string> [--schema <s>] [--password-env <VAR>] [--password-command <cmd>]`, `--default` |
+| `telex backend list` | List configured backends and the default. | |
+| `telex backend show <name>` | Show one backend's config (secrets redacted). | |
+| `telex backend default <name>` | Set the default backend. | |
+| `telex backend remove <name>` | Remove a backend. | |
+| `telex backend kinds` | List backend kinds compiled into this build. | |
 
 ## Attention levels
 
@@ -212,24 +223,39 @@ Agent wake dominates perceived latency: measured waiter-exit-to-agent-turn time 
 
 ## Backends
 
-SQLite is the zero-config default. If you do nothing, Telex uses `--backend sqlite` with database file `~/.telex/telex.db`. Override on any command with `--db <path>`, or set `TELEX_BACKEND=sqlite` and `TELEX_DB=<path>`.
+A **backend** is a named, configured store (a "key"). Selection is by name:
+`--backend <name>` → `$TELEX_BACKEND` → the configured `default` → an implicit `default`
+sqlite store at `~/.telex/telex.db`. So with no setup, telex just works on local SQLite.
 
-For networked coordination, select Postgres on any command:
+Configure backends once with `telex backend add`. The first one added becomes the default;
+`--default` (or `telex backend default <name>`) changes it.
 
 ```sh
-telex --backend postgres <command>
+# Local sqlite (usually unnecessary — it's the implicit default):
+telex backend add local --sqlite
+
+# Networked Postgres, password from an env var:
+telex backend add staging --postgres "postgresql://app@staging-db:5432/telex?sslmode=require" \
+  --password-env STAGING_PG_PASSWORD --schema telex
+
+# Azure Postgres with an Entra access token fetched on demand:
+telex backend add prod \
+  --postgres "host=myserver.postgres.database.azure.com port=5432 user=me@example.com dbname=postgres sslmode=require" \
+  --password-command "az account get-access-token --resource https://ossrdbms-aad.database.windows.net --query accessToken --output tsv" \
+  --schema telex --default
 ```
 
-Configure Postgres with:
+Then select a backend per command, or rely on the default:
 
-```text
-TELEX_PG_HOST
-TELEX_PG_USER
-TELEX_PG_DB
-TELEX_PG_PASSWORD
+```sh
+telex --backend staging inbox
+telex send --to node:x --body "hi"     # uses the default backend
+telex backend list
 ```
 
-`TELEX_PG_PASSWORD` may be either a SQL password or an Entra access token.
+The Postgres connection string is a libpq URI or a key=value DSN. Provide the password by
+reference (`--password-env`, `--password-command`) rather than embedding it. A first-class
+`--entra` auth mode (token via the Azure SDK, incl. managed identity) is planned.
 
 ## Worked example: two sessions
 

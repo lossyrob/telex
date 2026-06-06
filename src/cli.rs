@@ -5,9 +5,10 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use std::sync::Arc;
 
-use crate::backend::{make_backend, Backend};
+use crate::backend::Backend;
 use crate::config::Config;
 use crate::output::Format;
+use crate::profiles::BackendProfile;
 
 #[derive(Parser)]
 #[command(
@@ -18,11 +19,11 @@ use crate::output::Format;
 typed operational messages with answerback liveness, and leave an auditable disposition record."
 )]
 pub struct Cli {
-    /// Backend to use: sqlite (default) or postgres.
+    /// Configured backend to use, by name (default: the configured default backend).
     #[arg(long, global = true, env = "TELEX_BACKEND")]
     pub backend: Option<String>,
 
-    /// SQLite database path (default: ~/.telex/telex.db).
+    /// Override the SQLite path for this invocation (sqlite backends only).
     #[arg(long, global = true, env = "TELEX_DB")]
     pub db: Option<String>,
 
@@ -84,6 +85,10 @@ pub enum Command {
     Address(AddressCmd),
     /// Resolve target address(es) by description match or tag.
     Resolve(ResolveArgs),
+
+    /// Manage configured backends (named profiles in ~/.telex/config.toml).
+    #[command(subcommand)]
+    Backend(BackendCmd),
 
     /// Export messages and disposition history as JSON lines.
     Export(ExportArgs),
@@ -277,6 +282,58 @@ pub struct ExportArgs {
     pub since: i64,
 }
 
+#[derive(Subcommand)]
+pub enum BackendCmd {
+    /// Add (or update) a named backend.
+    Add(BackendAddArgs),
+    /// List configured backends.
+    List,
+    /// Show one backend's configuration (secrets redacted).
+    Show {
+        /// Backend name.
+        name: String,
+    },
+    /// Remove a configured backend.
+    Remove {
+        /// Backend name.
+        name: String,
+    },
+    /// Set the default backend.
+    Default {
+        /// Backend name.
+        name: String,
+    },
+    /// List the backend kinds compiled into this build.
+    Kinds,
+}
+
+#[derive(Args)]
+pub struct BackendAddArgs {
+    /// Name (key) for this backend.
+    pub name: String,
+    /// Configure a SQLite backend (path defaults to ~/.telex/telex.db).
+    #[arg(long)]
+    pub sqlite: bool,
+    /// Configure a Postgres backend from this connection string (libpq URI or key=value DSN).
+    #[arg(long, value_name = "CONN")]
+    pub postgres: Option<String>,
+    /// SQLite file path (with --sqlite).
+    #[arg(long)]
+    pub path: Option<String>,
+    /// Postgres schema to isolate telex tables in.
+    #[arg(long)]
+    pub schema: Option<String>,
+    /// Read the Postgres password from this environment variable.
+    #[arg(long)]
+    pub password_env: Option<String>,
+    /// Obtain the Postgres password by running this shell command (its stdout).
+    #[arg(long)]
+    pub password_command: Option<String>,
+    /// Make this the default backend.
+    #[arg(long)]
+    pub default: bool,
+}
+
 /// Shared command context.
 pub struct Ctx {
     pub cfg: Config,
@@ -285,8 +342,18 @@ pub struct Ctx {
 }
 
 impl Ctx {
+    /// Resolve and build the selected backend (initializing its schema).
     pub async fn backend(&self) -> Result<Arc<dyn Backend>> {
-        make_backend(&self.cfg.backend, &self.cfg.db_path_str()).await
+        let (_name, profile) = self.resolved()?;
+        crate::profiles::build(&profile, self.cfg.db_override.as_deref()).await
+    }
+
+    /// Resolve which backend is selected, without connecting.
+    pub fn resolved(&self) -> Result<(String, BackendProfile)> {
+        crate::profiles::resolve(
+            self.cfg.backend_selector.as_deref(),
+            self.cfg.db_override.as_deref(),
+        )
     }
 }
 
@@ -324,6 +391,7 @@ pub async fn run() -> i32 {
         Command::Escalate(a) => crate::commands::disposition::run(&ctx, "escalated", a).await,
         Command::Address(cmd) => crate::commands::address::run(&ctx, cmd).await,
         Command::Resolve(a) => crate::commands::address::resolve(&ctx, a).await,
+        Command::Backend(cmd) => crate::commands::backend::run(&ctx, cmd).await,
         Command::Export(a) => crate::commands::export::run(&ctx, a).await,
     };
 

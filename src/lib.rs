@@ -7,6 +7,7 @@ pub mod config;
 pub mod ipc;
 pub mod model;
 pub mod output;
+pub mod profiles;
 
 #[cfg(not(any(feature = "sqlite", feature = "postgres")))]
 compile_error!("enable at least one backend feature: `sqlite` and/or `postgres`");

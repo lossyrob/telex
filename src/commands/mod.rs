@@ -2,6 +2,7 @@
 
 pub mod address;
 pub mod attach;
+pub mod backend;
 pub mod detach;
 pub mod disposition;
 pub mod export;

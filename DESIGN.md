@@ -572,13 +572,16 @@ The v0 command surface is settled:
 
 ### Global options (apply to all subcommands)
 
-- `--backend <sqlite|postgres>`  default `sqlite` (or `$TELEX_BACKEND`)
-- `--db <path>`                  SQLite file, default `~/.telex/telex.db` (or `$TELEX_DB`)
+- `--backend <name>`             use a configured backend by name (or `$TELEX_BACKEND`);
+                                 defaults to the configured default, else an implicit
+                                 `default` sqlite store
+- `--db <path>`                  override the SQLite path for this invocation (or `$TELEX_DB`)
 - `--address <addr>`             default address (or `$TELEX_ADDRESS`)
 - `--json` / `--text`            output format; default JSON when stdout is not a TTY,
                                  text when interactive.
-- Postgres connection via env (same as spike): `TELEX_PG_HOST`, `TELEX_PG_USER`,
-  `TELEX_PG_DB`, `TELEX_PG_PASSWORD` (Entra access token OR SQL password).
+- Postgres connections are configured once as named backends (`telex backend add`), with a
+  connection string and a password reference (`--password-env`/`--password-command`), not
+  per-call environment variables. See "Backend profiles" below.
 
 ### Commands (grouped)
 
@@ -630,8 +633,24 @@ AUDIT
   Emit messages + disposition history as JSON lines (jsonl) for audit/provenance.
 
 SETUP
-- `telex init [--backend ...] [--db ...]`  Create `~/.telex/` and initialize schema.
-- `telex status [--address <addr>]`  Show config, backend, address, holder/IPC + occupancy.
+- `telex init [--backend <name>] [--db <path>]`  Create `~/.telex/`, write a default
+  sqlite backend, and initialize its schema.
+- `telex status [--address <addr>]`  Show the resolved backend, address, holder/IPC + occupancy.
+
+BACKENDS (named profiles in `~/.telex/config.toml`)
+- `telex backend add <name> --sqlite [--path <p>]`
+- `telex backend add <name> --postgres <conn-string> [--schema <s>] [--password-env <VAR>] [--password-command <cmd>] [--default]`
+- `telex backend list | show <name> | default <name> | remove <name> | kinds`
+
+A **backend** is a named, configured store; the driver **kind** (sqlite/postgres) is set at
+`add` time and reflects the build's compiled-in features (`telex backend kinds`). Selection
+is by name: `--backend <name>` → `$TELEX_BACKEND` → the config `default` pointer → an implicit
+`default` sqlite store, so a fresh machine works with zero setup. The first backend added
+becomes the default; name and default pointer are orthogonal, so reassigning the default
+never requires renaming. Postgres backends store a connection string (libpq URI or key=value
+DSN) plus a password reference; secrets are not written to the config file. This is the
+storage axis of the modular-backends model (see DECISIONS 0008); auth (`--entra`, AWS/GCP
+IAM) is the second axis, layered behind features.
 
 Two v0 details are settled: `attach` blocks as the resident holder — there is no
 separate `serve` verb; the holder IS `attach`. Disposition verbs are flat

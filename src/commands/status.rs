@@ -4,11 +4,13 @@ use crate::cli::Ctx;
 use crate::output::emit;
 
 pub async fn run(ctx: &Ctx) -> Result<i32> {
+    let (name, profile) = ctx.resolved()?;
     let backend = ctx.backend().await?;
     let caps = backend.capabilities();
     let mut info = serde_json::json!({
-        "backend": backend.kind(),
-        "db": ctx.cfg.db_path_str(),
+        "backend": name,
+        "kind": backend.kind(),
+        "target": profile.target(),
         "default_address": ctx.cfg.default_address,
         "liveness_window_secs": ctx.cfg.liveness_window_secs,
         "capabilities": {
@@ -29,8 +31,8 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
     }
 
     emit(ctx.fmt, &info, || {
-        println!("backend  {}", backend.kind());
-        println!("db       {}", ctx.cfg.db_path_str());
+        println!("backend  {} ({})", name, backend.kind());
+        println!("target   {}", profile.target());
         println!(
             "address  {}",
             ctx.address.clone().unwrap_or_else(|| "(none)".into())

@@ -164,7 +164,19 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
 
     // Optional Postgres push (no-op where the backend or this build lacks it).
     if args.push {
-        handle_push(&state, &backend, &address);
+        #[cfg(feature = "postgres")]
+        if backend.kind() == "postgres" {
+            let (_n, profile) = ctx.resolved()?;
+            let (pgcfg, _schema) = crate::profiles::pg_connect_config(&profile).await?;
+            spawn_pg_push(&state, &backend, &address, pgcfg);
+        } else {
+            eprintln!(
+                "[holder] --push ignored: backend {} has no native push",
+                backend.kind()
+            );
+        }
+        #[cfg(not(feature = "postgres"))]
+        eprintln!("[holder] --push ignored: this build has no postgres backend");
     }
 
     // Serve waiters until shutdown.
@@ -205,28 +217,16 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
     Ok(0)
 }
 
-/// Dispatch the optional native-push wiring. Two cfg'd variants keep the postgres-only
-/// path (and its dependencies) out of builds without the postgres feature.
+/// Spawn the optional Postgres LISTEN/NOTIFY push tasks using a ready-to-connect config.
+/// Compiled only with the postgres feature; poll remains the delivery backstop regardless.
 #[cfg(feature = "postgres")]
-fn handle_push(state: &Arc<State>, backend: &Arc<dyn Backend>, address: &str) {
-    if backend.kind() == "postgres" {
-        spawn_pg_push(state, backend, address);
-    } else {
-        eprintln!(
-            "[holder] --push ignored: backend {} has no native push",
-            backend.kind()
-        );
-    }
-}
-
-#[cfg(not(feature = "postgres"))]
-fn handle_push(_state: &Arc<State>, _backend: &Arc<dyn Backend>, _address: &str) {
-    eprintln!("[holder] --push ignored: this build has no postgres backend");
-}
-
-#[cfg(feature = "postgres")]
-fn spawn_pg_push(state: &Arc<State>, backend: &Arc<dyn Backend>, address: &str) {
-    use crate::backend::postgres::{make_tls, pg_config, NOTIFY_CHANNEL};
+fn spawn_pg_push(
+    state: &Arc<State>,
+    backend: &Arc<dyn Backend>,
+    address: &str,
+    pg_config: tokio_postgres::Config,
+) {
+    use crate::backend::postgres::{make_tls, NOTIFY_CHANNEL};
     use futures_util::{stream, StreamExt};
     use tokio_postgres::AsyncMessage;
 
@@ -238,9 +238,8 @@ fn spawn_pg_push(state: &Arc<State>, backend: &Arc<dyn Backend>, address: &str) 
         let address = address.to_string();
         tokio::spawn(async move {
             let (listen_client, mut listen_conn) = match async {
-                let cfg = pg_config()?;
                 let tls = make_tls()?;
-                Ok::<_, anyhow::Error>(cfg.connect(tls).await?)
+                Ok::<_, anyhow::Error>(pg_config.connect(tls).await?)
             }
             .await
             {

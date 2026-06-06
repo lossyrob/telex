@@ -1,14 +1,16 @@
-//! Configuration resolution: backend selection, SQLite path, default address, and
-//! `~/.telex/` locations. Resolution order is CLI flag, then environment variable,
-//! then a built-in default.
+//! Process-level settings (backend selector, db override, default address, liveness
+//! window) and `~/.telex/` locations. The actual backend configuration lives in
+//! `profiles` (config.toml); this module only carries the per-invocation selection.
 
 use anyhow::{anyhow, Result};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug)]
 pub struct Config {
-    pub backend: String,
-    pub db_path: PathBuf,
+    /// `--backend <name>` (or `$TELEX_BACKEND`): which configured backend to use.
+    pub backend_selector: Option<String>,
+    /// `--db <path>` (or `$TELEX_DB`): override the SQLite path for this invocation.
+    pub db_override: Option<String>,
     pub default_address: Option<String>,
     pub liveness_window_secs: i64,
 }
@@ -35,38 +37,23 @@ pub fn ensure_home() -> Result<PathBuf> {
 }
 
 impl Config {
-    /// Resolve config from explicit CLI overrides plus environment/defaults.
+    /// Carry the CLI/env selections through (clap already applies the env fallbacks).
     pub fn resolve(
         backend: Option<String>,
         db: Option<String>,
         address: Option<String>,
     ) -> Result<Self> {
-        let backend = backend
-            .or_else(|| std::env::var("TELEX_BACKEND").ok())
-            .unwrap_or_else(|| "sqlite".to_string());
-
-        let db_path = match db.or_else(|| std::env::var("TELEX_DB").ok()) {
-            Some(p) => PathBuf::from(p),
-            None => telex_home()?.join("telex.db"),
-        };
-
-        let default_address = address.or_else(|| std::env::var("TELEX_ADDRESS").ok());
-
         let liveness_window_secs = std::env::var("TELEX_LIVENESS_WINDOW_SECS")
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(15);
 
         Ok(Config {
-            backend,
-            db_path,
-            default_address,
+            backend_selector: backend,
+            db_override: db,
+            default_address: address,
             liveness_window_secs,
         })
-    }
-
-    pub fn db_path_str(&self) -> String {
-        self.db_path.to_string_lossy().to_string()
     }
 
     /// Resolve the address to operate on, preferring an explicit value over the default.

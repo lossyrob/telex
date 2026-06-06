@@ -1,7 +1,7 @@
 //! Postgres backend: the networked substrate. Same semantic model as SQLite, with
 //! epoch-ms integer timestamps for parity. v0 uses TTL-heartbeat liveness and
-//! poll-with-cursor delivery; LISTEN/NOTIFY push is a best-effort extra. Auth via the
-//! `TELEX_PG_*` env vars, where the password may be an Entra access token or a SQL password.
+//! poll-with-cursor delivery; LISTEN/NOTIFY push is a best-effort extra. Connection
+//! config and credentials come from a backend profile (see `profiles`), not the env.
 
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -16,29 +16,6 @@ pub struct PgBackend {
     client: tokio_postgres::Client,
 }
 
-fn env_or(key: &str, default: &str) -> String {
-    std::env::var(key).unwrap_or_else(|_| default.to_string())
-}
-
-pub fn pg_config() -> Result<tokio_postgres::Config> {
-    let host = env_or("TELEX_PG_HOST", "localhost");
-    let user = env_or("TELEX_PG_USER", "postgres");
-    let db = env_or("TELEX_PG_DB", "postgres");
-    let port: u16 = env_or("TELEX_PG_PORT", "5432").parse().unwrap_or(5432);
-    let password = std::env::var("TELEX_PG_PASSWORD")
-        .context("TELEX_PG_PASSWORD must be set (Entra access token or SQL password)")?;
-
-    let mut config = tokio_postgres::Config::new();
-    config
-        .host(&host)
-        .port(port)
-        .user(&user)
-        .dbname(&db)
-        .password(password)
-        .ssl_mode(tokio_postgres::config::SslMode::Require);
-    Ok(config)
-}
-
 pub fn make_tls() -> Result<postgres_native_tls::MakeTlsConnector> {
     let tls = native_tls::TlsConnector::builder()
         .build()
@@ -46,32 +23,8 @@ pub fn make_tls() -> Result<postgres_native_tls::MakeTlsConnector> {
     Ok(postgres_native_tls::MakeTlsConnector::new(tls))
 }
 
-pub async fn connect() -> Result<tokio_postgres::Client> {
-    let (client, connection) = pg_config()?
-        .connect(make_tls()?)
-        .await
-        .context("connecting to postgres")?;
-    tokio::spawn(async move {
-        if let Err(e) = connection.await {
-            eprintln!("[telex] postgres connection ended: {e}");
-        }
-    });
-    // Optional schema isolation: keep telex tables in their own namespace so they can
-    // coexist with other applications (or older spikes) in a shared database.
-    if let Ok(schema) = std::env::var("TELEX_PG_SCHEMA") {
-        let schema = sanitize_ident(&schema)?;
-        client
-            .batch_execute(&format!(
-                "CREATE SCHEMA IF NOT EXISTS {schema}; SET search_path TO {schema}, public;"
-            ))
-            .await
-            .context("setting TELEX_PG_SCHEMA search_path")?;
-    }
-    Ok(client)
-}
-
-/// Allow only a safe SQL identifier for the schema name (no injection via search_path).
-fn sanitize_ident(s: &str) -> Result<String> {
+/// Allow only a safe SQL identifier for a schema name (no injection via search_path).
+pub fn sanitize_ident(s: &str) -> Result<String> {
     if !s.is_empty()
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         && s.chars()
@@ -81,9 +34,7 @@ fn sanitize_ident(s: &str) -> Result<String> {
     {
         Ok(s.to_string())
     } else {
-        anyhow::bail!(
-            "invalid TELEX_PG_SCHEMA '{s}' (use letters, digits, underscore; not leading digit)"
-        )
+        anyhow::bail!("invalid schema '{s}' (use letters, digits, underscore; not a leading digit)")
     }
 }
 
@@ -189,10 +140,31 @@ fn map_lease(r: &Row) -> LeaseRow {
 }
 
 impl PgBackend {
-    pub async fn connect() -> Result<Self> {
-        Ok(Self {
-            client: connect().await?,
-        })
+    /// Connect using a fully-built config (host/user/db/password) and an optional schema
+    /// to isolate telex tables in. The password is resolved by the caller (profile).
+    pub async fn connect_with(
+        config: tokio_postgres::Config,
+        schema: Option<&str>,
+    ) -> Result<Self> {
+        let (client, connection) = config
+            .connect(make_tls()?)
+            .await
+            .context("connecting to postgres")?;
+        tokio::spawn(async move {
+            if let Err(e) = connection.await {
+                eprintln!("[telex] postgres connection ended: {e}");
+            }
+        });
+        if let Some(s) = schema {
+            let s = sanitize_ident(s)?;
+            client
+                .batch_execute(&format!(
+                    "CREATE SCHEMA IF NOT EXISTS {s}; SET search_path TO {s}, public;"
+                ))
+                .await
+                .context("setting schema search_path")?;
+        }
+        Ok(Self { client })
     }
 }
 

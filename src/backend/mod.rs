@@ -2,9 +2,8 @@
 //! selected at runtime. The ephemeral `wait` client never touches this — it speaks only
 //! to the holder over local IPC. This is the "same semantic core, two backends" promise.
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use async_trait::async_trait;
-use std::sync::Arc;
 
 use crate::model::*;
 
@@ -80,37 +79,6 @@ pub trait Backend: Send + Sync {
 
     /// Best-effort push signal (Postgres LISTEN/NOTIFY); a no-op where unsupported.
     async fn notify_new(&self, address: &str, id: i64, sent_at_ms: i64) -> Result<()>;
-}
-
-/// Build a backend from a kind string and SQLite path, initializing its schema.
-/// Arms are compiled in only when their feature is enabled; an unavailable backend
-/// returns an actionable error telling the user how to get a build that includes it.
-#[allow(unused_variables)]
-pub async fn make_backend(kind: &str, db_path: &str) -> Result<Arc<dyn Backend>> {
-    match kind {
-        #[cfg(feature = "sqlite")]
-        "sqlite" => {
-            let b = sqlite::SqliteBackend::open(db_path)?;
-            b.init_schema().await?;
-            Ok(Arc::new(b))
-        }
-        #[cfg(feature = "postgres")]
-        "postgres" | "pg" => {
-            let b = postgres::PgBackend::connect().await?;
-            b.init_schema().await?;
-            Ok(Arc::new(b))
-        }
-        other => {
-            let feat = match other {
-                "pg" => "postgres",
-                k => k,
-            };
-            bail!(
-                "backend '{other}' is not available in this build of telex. \
-                 Reinstall with `cargo install telex --features {feat}`, or use a build that includes it."
-            )
-        }
-    }
 }
 
 /// The backend kinds compiled into this build (for `telex backend kinds` / diagnostics).
