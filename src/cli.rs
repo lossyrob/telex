@@ -329,6 +329,15 @@ pub struct BackendAddArgs {
     /// Obtain the Postgres password by running this shell command (its stdout).
     #[arg(long)]
     pub password_command: Option<String>,
+    /// Use Microsoft Entra auth for Postgres (token fetched via the Azure SDK).
+    #[arg(long)]
+    pub entra: bool,
+    /// Entra credential mode: auto (dev/CLI login), cli, or managed (devbox/VM identity).
+    #[arg(long, value_name = "MODE")]
+    pub entra_cred: Option<String>,
+    /// Override the Entra token scope.
+    #[arg(long)]
+    pub entra_scope: Option<String>,
     /// Make this the default backend.
     #[arg(long)]
     pub default: bool,

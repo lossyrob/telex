@@ -66,5 +66,8 @@ jobs:
       - name: Build postgres-only
         run: cargo build --no-default-features --features postgres
 
+      - name: Build entra (Azure SDK)
+        run: cargo build --features entra
+
       - name: Build default (all backends)
         run: cargo build

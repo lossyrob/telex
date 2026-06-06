@@ -40,6 +40,10 @@ postgres-native-tls = { version = "0.5", optional = true }
 native-tls = { version = "0.2", optional = true }
 futures-util = { version = "0.3", optional = true }
 
+# Entra auth for Postgres (feature: entra) — the GA Azure SDK.
+azure_identity = { version = "1", optional = true }
+azure_core = { version = "1", optional = true }
+
 # Vendor OpenSSL on Linux only when the Postgres backend (native-tls) is enabled, so
 # Linux release builds are self-contained. Windows uses schannel, macOS Security.framework.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -51,7 +55,7 @@ openssl = { version = "0.10", features = ["vendored"], optional = true }
 default = ["sqlite", "postgres"]
 sqlite = ["dep:rusqlite"]
 postgres = ["dep:tokio-postgres", "dep:postgres-native-tls", "dep:native-tls", "dep:futures-util", "dep:openssl"]
-# entra = ["postgres", "dep:azure_identity", "dep:azure_core"]  # added with the config/profile system
+entra = ["postgres", "dep:azure_identity", "dep:azure_core"]
 
 [profile.release]
 strip = true

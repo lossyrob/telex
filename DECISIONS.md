@@ -342,3 +342,15 @@ external backend actually needs it. The Azure SDK was validated empirically befo
 entry: GA at 1.0.0 (retiring 0002's churn risk), ~15 lines to fetch a token, worked with
 the existing `az login`, and `ManagedIdentityCredential` enables true zero-login devbox
 setup with internal token caching.
+
+**Validation outcome (2026-06-06).** Implemented and validated. Backends are now optional
+Cargo features (`sqlite`, `postgres`, `entra`); `cargo build` proven for default, sqlite-only,
+postgres-only, and `--features entra`, with the sqlite-only dep tree confirmed free of the
+postgres stack and a clear "reinstall with --features" error for unavailable kinds. The
+storage axis shipped as named backend profiles (`telex backend add/list/show/remove/default/
+kinds`, config.toml). The auth axis shipped: `--entra` fetches a token via the GA Azure SDK
+(`DeveloperToolsCredential`/`ManagedIdentityCredential`) behind the `entra` feature, validated
+live against Azure Postgres Flexible Server; non-entra builds refuse entra backends with an
+actionable error. Published release binaries build `--features entra` (batteries-included);
+the crate default stays lean (sqlite+postgres) for fast iteration. Remaining from this entry:
+the conformance suite (issue #1) and the eventual `telex-core` + `telex-backend-*` crate split.

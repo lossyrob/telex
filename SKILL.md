@@ -184,7 +184,7 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex backend add <name>` | Add (or update) a named backend. | `--sqlite [--path <p>]` or `--postgres <conn-string> [--schema <s>] [--password-env <VAR>] [--password-command <cmd>]`, `--default` |
+| `telex backend add <name>` | Add (or update) a named backend. | `--sqlite [--path <p>]` or `--postgres <conn-string> [--schema <s>]` plus auth: `--entra [--entra-cred auto\|cli\|managed]`, `--password-env <VAR>`, or `--password-command <cmd>`; `--default` |
 | `telex backend list` | List configured backends and the default. | |
 | `telex backend show <name>` | Show one backend's config (secrets redacted). | |
 | `telex backend default <name>` | Set the default backend. | |
@@ -238,12 +238,16 @@ telex backend add local --sqlite
 telex backend add staging --postgres "postgresql://app@staging-db:5432/telex?sslmode=require" \
   --password-env STAGING_PG_PASSWORD --schema telex
 
-# Azure Postgres with an Entra access token fetched on demand:
+# Azure Postgres with Entra (token fetched on demand by telex itself):
 telex backend add prod \
   --postgres "host=myserver.postgres.database.azure.com port=5432 user=me@example.com dbname=postgres sslmode=require" \
-  --password-command "az account get-access-token --resource https://ossrdbms-aad.database.windows.net --query accessToken --output tsv" \
-  --schema telex --default
+  --entra --schema telex --default
 ```
+
+`--entra` requires a telex build with the `entra` feature (the published release binaries
+include it). On a laptop it uses your `az login`; on a devbox/VM with a managed identity use
+`--entra-cred managed` for zero-login setup. As an alternative on builds without `entra`, you
+can supply the token yourself via `--password-command` (e.g. `az account get-access-token ...`).
 
 Then select a backend per command, or rely on the default:
 
@@ -254,8 +258,9 @@ telex backend list
 ```
 
 The Postgres connection string is a libpq URI or a key=value DSN. Provide the password by
-reference (`--password-env`, `--password-command`) rather than embedding it. A first-class
-`--entra` auth mode (token via the Azure SDK, incl. managed identity) is planned.
+reference (`--entra`, `--password-env`, or `--password-command`) rather than embedding it.
+`--entra` (Azure SDK; supports `az login` and managed identity) is available in builds with
+the `entra` feature — which the published release binaries include.
 
 ## Worked example: two sessions
 

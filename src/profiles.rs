@@ -50,6 +50,12 @@ pub struct BackendProfile {
     /// Optional schema to isolate telex tables in.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub schema: Option<String>,
+    /// Entra credential mode: "auto" (dev/CLI login), "cli", or "managed".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entra_cred: Option<String>,
+    /// Override the Entra token scope (defaults to the Azure PG Flexible Server scope).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entra_scope: Option<String>,
 }
 
 impl BackendProfile {
@@ -128,6 +134,8 @@ pub fn implicit_sqlite(db_override: Option<&str>) -> BackendProfile {
         password_env: None,
         password_command: None,
         schema: None,
+        entra_cred: None,
+        entra_scope: None,
     }
 }
 
@@ -191,9 +199,22 @@ pub async fn pg_connect_config(
                 );
             }
         }
-        "entra" => bail!(
-            "this backend uses Entra auth, which requires a telex build with the `entra` feature"
-        ),
+        "entra" => {
+            #[cfg(feature = "entra")]
+            {
+                let scope = profile
+                    .entra_scope
+                    .as_deref()
+                    .unwrap_or(crate::credential::DEFAULT_ENTRA_SCOPE);
+                let mode = profile.entra_cred.as_deref().unwrap_or("auto");
+                let token = crate::credential::entra_token(scope, mode).await?;
+                cfg.password(token);
+            }
+            #[cfg(not(feature = "entra"))]
+            bail!(
+                "this backend uses Entra auth, which requires a telex build with `--features entra`"
+            );
+        }
         other => bail!("unknown auth mode '{other}' (expected password or entra)"),
     }
     Ok((cfg, profile.schema.clone()))

@@ -21,6 +21,13 @@ fn add(ctx: &Ctx, args: BackendAddArgs) -> Result<i32> {
     if args.sqlite && args.postgres.is_some() {
         bail!("specify only one of --sqlite or --postgres");
     }
+    if args.entra && args.postgres.is_none() {
+        bail!("--entra applies to a --postgres backend");
+    }
+    if args.entra && (args.password_env.is_some() || args.password_command.is_some()) {
+        bail!("--entra cannot be combined with --password-env/--password-command");
+    }
+
     let profile = if args.sqlite {
         BackendProfile {
             kind: "sqlite".into(),
@@ -30,16 +37,29 @@ fn add(ctx: &Ctx, args: BackendAddArgs) -> Result<i32> {
             password_env: None,
             password_command: None,
             schema: None,
+            entra_cred: None,
+            entra_scope: None,
         }
     } else if let Some(conn) = &args.postgres {
+        let auth = if args.entra { "entra" } else { "password" };
         BackendProfile {
             kind: "postgres".into(),
             path: None,
             url: Some(conn.clone()),
-            auth: Some("password".into()),
+            auth: Some(auth.into()),
             password_env: args.password_env.clone(),
             password_command: args.password_command.clone(),
             schema: args.schema.clone(),
+            entra_cred: if args.entra {
+                args.entra_cred.clone()
+            } else {
+                None
+            },
+            entra_scope: if args.entra {
+                args.entra_scope.clone()
+            } else {
+                None
+            },
         }
     } else {
         bail!("specify a backend kind: --sqlite or --postgres <connection-string>");
@@ -120,7 +140,9 @@ fn show(ctx: &Ctx, name: &str) -> Result<i32> {
         .backends
         .get(name)
         .ok_or_else(|| anyhow!("no backend named '{name}'"))?;
-    let password_source = if p.password_env.is_some() {
+    let password_source = if p.auth.as_deref() == Some("entra") {
+        "entra"
+    } else if p.password_env.is_some() {
         "env"
     } else if p.password_command.is_some() {
         "command"

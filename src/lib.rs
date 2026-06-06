@@ -4,6 +4,8 @@ pub mod backend;
 pub mod cli;
 pub mod commands;
 pub mod config;
+#[cfg(feature = "entra")]
+pub mod credential;
 pub mod ipc;
 pub mod model;
 pub mod output;
