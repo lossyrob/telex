@@ -162,14 +162,9 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         });
     }
 
-    // Optional Postgres push.
-    if args.push && backend.kind() == "postgres" {
-        spawn_pg_push(&state, &backend, &address);
-    } else if args.push {
-        eprintln!(
-            "[holder] --push ignored: backend {} has no native push",
-            backend.kind()
-        );
+    // Optional Postgres push (no-op where the backend or this build lacks it).
+    if args.push {
+        handle_push(&state, &backend, &address);
     }
 
     // Serve waiters until shutdown.
@@ -210,6 +205,26 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
     Ok(0)
 }
 
+/// Dispatch the optional native-push wiring. Two cfg'd variants keep the postgres-only
+/// path (and its dependencies) out of builds without the postgres feature.
+#[cfg(feature = "postgres")]
+fn handle_push(state: &Arc<State>, backend: &Arc<dyn Backend>, address: &str) {
+    if backend.kind() == "postgres" {
+        spawn_pg_push(state, backend, address);
+    } else {
+        eprintln!(
+            "[holder] --push ignored: backend {} has no native push",
+            backend.kind()
+        );
+    }
+}
+
+#[cfg(not(feature = "postgres"))]
+fn handle_push(_state: &Arc<State>, _backend: &Arc<dyn Backend>, _address: &str) {
+    eprintln!("[holder] --push ignored: this build has no postgres backend");
+}
+
+#[cfg(feature = "postgres")]
 fn spawn_pg_push(state: &Arc<State>, backend: &Arc<dyn Backend>, address: &str) {
     use crate::backend::postgres::{make_tls, pg_config, NOTIFY_CHANNEL};
     use futures_util::{stream, StreamExt};

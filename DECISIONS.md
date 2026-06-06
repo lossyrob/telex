@@ -297,3 +297,48 @@ a session-attached background task, not a detached daemon. Flat verbs keep the
 agent-facing surface terse. The spike's throwaway crate stays in `spike/`, while v0 is
 a fresh implementation at the repo root. Distribution will be GitHub Releases of the
 single binary via GitHub Actions.
+
+## 0008 — Modular backends via Cargo features; storage and auth as separate pluggable axes
+
+- **Date:** 2026-06-05
+- **Status:** Accepted
+
+**Context.** Telex should invite contributors (and AI coding agents) to add whatever
+backend they need without forcing everyone to pull in everyone else's dependencies — a
+SQLite-only or AWS user should not compile the Azure SDK (measured at ~185 transitive
+crates: reqwest/hyper/rustls), and vice versa. Python expresses this with extras
+(`pip install pkg[flex]`), but Rust compiles to a single static binary and selects
+dependencies at *compile time*; it has no ergonomic runtime plugin system (dynamic
+loading exists via `libloading`/WASM but is fragile — no stable ABI — and not worth it
+now). The author expects to maintain only the Azure Postgres Flexible Server backend for
+a while but wants the door open for community AWS/GCP backends.
+
+**Decision.** Use **Cargo feature flags as the extras analog**: backend dependencies are
+`optional` and gated behind named features (`sqlite`, `postgres`, `entra`, future
+`aws-iam`/`gcp-iam`), so `cargo install telex --features postgres,entra` pulls exactly
+what's wanted and nothing else. Model **two orthogonal pluggable axes**: *storage
+backends* (the existing `Backend` trait) and *auth/credential providers* (a `Credential`
+trait — `password`, `entra`, later `aws-iam`/`gcp-iam`), so a Postgres backend can pair
+with any cloud's auth and each cloud SDK is isolated behind its own feature. The backend
+factory gates each arm with `#[cfg(feature = ...)]` and returns an actionable error
+("not in this build — `cargo install telex --features <kind>`") when a backend isn't
+compiled in; a `telex backend kinds` lists what's compiled in. Because prebuilt binaries
+bake features in, distribution serves two audiences: `cargo install --features …` for the
+à la carte path, plus a small curated set of prebuilt release variants (batteries-included
+default = sqlite+postgres+entra; a minimal sqlite-only build), expandable per-cloud later.
+Entra auth uses the **now-GA Azure SDK** (`azure_identity`/`azure_core` 1.0;
+`DeveloperToolsCredential` for `az login`, `ManagedIdentityCredential` for no-login
+devboxes), gated behind the `entra` feature; non-Azure secrets use `--password-env` /
+`--password-command` rather than plaintext in config. The **backend conformance test
+suite** (issue #1) is the contribution contract test.
+
+**Consequences.** Each build pays only for the backends/auth it enables; the Azure SDK
+lands only with `entra`. Trade-off: features are additive and chosen at build time, not
+hot-swappable at runtime; prebuilt-binary users pick a variant or `cargo install`.
+Implementation lands incrementally: (1) feature-gate `sqlite`/`postgres` now; (2) add the
+`entra` feature + Azure SDK with the config/profile system; (3) conformance suite and a
+later `telex-core` + `telex-backend-*` crate split (for out-of-tree backends) when an
+external backend actually needs it. The Azure SDK was validated empirically before this
+entry: GA at 1.0.0 (retiring 0002's churn risk), ~15 lines to fetch a token, worked with
+the existing `az login`, and `ManagedIdentityCredential` enables true zero-login devbox
+setup with internal token caching.

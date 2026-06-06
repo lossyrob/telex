@@ -8,7 +8,9 @@ use std::sync::Arc;
 
 use crate::model::*;
 
+#[cfg(feature = "postgres")]
 pub mod postgres;
+#[cfg(feature = "sqlite")]
 pub mod sqlite;
 
 /// What a backend can do, so the core can adapt behavior honestly.
@@ -81,18 +83,42 @@ pub trait Backend: Send + Sync {
 }
 
 /// Build a backend from a kind string and SQLite path, initializing its schema.
+/// Arms are compiled in only when their feature is enabled; an unavailable backend
+/// returns an actionable error telling the user how to get a build that includes it.
+#[allow(unused_variables)]
 pub async fn make_backend(kind: &str, db_path: &str) -> Result<Arc<dyn Backend>> {
     match kind {
+        #[cfg(feature = "sqlite")]
         "sqlite" => {
             let b = sqlite::SqliteBackend::open(db_path)?;
             b.init_schema().await?;
             Ok(Arc::new(b))
         }
+        #[cfg(feature = "postgres")]
         "postgres" | "pg" => {
             let b = postgres::PgBackend::connect().await?;
             b.init_schema().await?;
             Ok(Arc::new(b))
         }
-        other => bail!("unknown backend '{other}' (expected sqlite|postgres)"),
+        other => {
+            let feat = match other {
+                "pg" => "postgres",
+                k => k,
+            };
+            bail!(
+                "backend '{other}' is not available in this build of telex. \
+                 Reinstall with `cargo install telex --features {feat}`, or use a build that includes it."
+            )
+        }
     }
+}
+
+/// The backend kinds compiled into this build (for `telex backend kinds` / diagnostics).
+pub fn available_kinds() -> &'static [&'static str] {
+    &[
+        #[cfg(feature = "sqlite")]
+        "sqlite",
+        #[cfg(feature = "postgres")]
+        "postgres",
+    ]
 }
