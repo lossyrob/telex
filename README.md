@@ -28,4 +28,6 @@ Entra, the two-process waiter, TTL/poll, and a live two-session test), see
 [spike/](spike/).
 
 V0 is being implemented as a single `telex` binary at the repo root. `SKILL.md`
-teaches agents how to use it, and early releases are published by GitHub Actions.
+teaches agents how to use it — and ships *inside* the binary, so the only onboarding
+step is to install telex and run `telex skill`. Early releases are published by GitHub
+Actions.

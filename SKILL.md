@@ -9,6 +9,8 @@ description: Use this skill when coordinating or messaging between AI agent sess
 
 Telex is a CLI-first message fabric for AI agent sessions. Ephemeral sessions attach to durable addresses, exchange typed operational messages with answerback liveness, and leave auditable disposition records. Use the single binary as `telex` (`telex.exe` on Windows).
 
+Your operator will tell you which address to attach to. You can reload these instructions anytime with `telex skill`, or `telex skill --address <addr>` for instructions tailored to your assigned address.
+
 ## The core loop
 
 Use Telex as a two-process loop: one resident holder keeps the address live; repeated `wait` calls deliver messages to the agent turn.
@@ -179,6 +181,7 @@ Postgres connections are configured once as named backends with `telex backend a
 |---|---|---|
 | `telex init` | Create `~/.telex/`, write a default sqlite backend, and initialize its schema. | `--backend <name>`, `--db <path>` |
 | `telex status` | Show the resolved backend, address, holder/IPC, and occupancy. | `--address <addr>` |
+| `telex skill` | Print these usage instructions (embedded in the binary). | `--address <addr>`, `--raw` |
 
 ### BACKENDS
 

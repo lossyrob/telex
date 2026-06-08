@@ -16,7 +16,8 @@ use crate::profiles::BackendProfile;
     version,
     about = "A CLI-first message fabric for AI agent sessions",
     long_about = "Telex lets ephemeral agent sessions attach to durable addresses, exchange \
-typed operational messages with answerback liveness, and leave an auditable disposition record."
+typed operational messages with answerback liveness, and leave an auditable disposition record. \
+Run `telex skill` to load agent usage instructions for this build."
 )]
 pub struct Cli {
     /// Configured backend to use, by name (default: the configured default backend).
@@ -49,6 +50,8 @@ pub enum Command {
     Init,
     /// Show config, backend, address, holder/occupancy status.
     Status,
+    /// Print the agent usage skill (how to use telex) for this build.
+    Skill(SkillArgs),
 
     /// Become the live occupant of an address; hold the lease and run the holder (blocks).
     Attach(AttachArgs),
@@ -282,6 +285,16 @@ pub struct ExportArgs {
     pub since: i64,
 }
 
+#[derive(Args)]
+pub struct SkillArgs {
+    /// Tailor the instructions for a specific assigned address.
+    #[arg(long)]
+    pub address: Option<String>,
+    /// Print the embedded SKILL.md verbatim (including frontmatter).
+    #[arg(long)]
+    pub raw: bool,
+}
+
 #[derive(Subcommand)]
 pub enum BackendCmd {
     /// Add (or update) a named backend.
@@ -385,6 +398,7 @@ pub async fn run() -> i32 {
     let result: Result<i32> = match cli.command {
         Command::Init => crate::commands::init::run(&ctx).await,
         Command::Status => crate::commands::status::run(&ctx).await,
+        Command::Skill(a) => crate::commands::skill::run(&ctx, a).await,
         Command::Attach(a) => crate::commands::attach::run(&ctx, a).await,
         Command::Detach => crate::commands::detach::run(&ctx).await,
         Command::Wait(a) => crate::commands::wait::run(&ctx, a).await,

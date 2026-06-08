@@ -636,6 +636,8 @@ SETUP
 - `telex init [--backend <name>] [--db <path>]`  Create `~/.telex/`, write a default
   sqlite backend, and initialize its schema.
 - `telex status [--address <addr>]`  Show the resolved backend, address, holder/IPC + occupancy.
+- `telex skill [--address <addr>] [--raw]`  Print the agent usage instructions embedded in
+  the binary (the `SKILL.md` for this build), optionally tailored to an assigned address.
 
 BACKENDS (named profiles in `~/.telex/config.toml`)
 - `telex backend add <name> --sqlite [--path <p>]`
