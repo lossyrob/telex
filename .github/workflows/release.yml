@@ -54,7 +54,10 @@ jobs:
           $archive = "telex-$tag-$target.zip"
           New-Item -ItemType Directory -Force -Path dist, package | Out-Null
           Copy-Item "target\$target\release\telex.exe" "package\telex.exe" -Force
-          Compress-Archive -Path "package\telex.exe" -DestinationPath "dist\$archive" -Force
+          Copy-Item "LICENSE" "package\LICENSE" -Force
+          Compress-Archive -Path "package\*" -DestinationPath "dist\$archive" -Force
+          $hash = (Get-FileHash "dist\$archive" -Algorithm SHA256).Hash.ToLower()
+          "$hash  $archive" | Out-File -Encoding ascii -NoNewline "dist\$archive.sha256"
 
       - name: Package Unix binary
         if: runner.os != 'Windows'
@@ -66,13 +69,15 @@ jobs:
           archive="telex-${tag}-${target}.tar.gz"
           mkdir -p dist package
           cp "target/${target}/release/telex" package/telex
-          tar -C package -czf "dist/${archive}" telex
+          cp LICENSE package/LICENSE
+          tar -C package -czf "dist/${archive}" telex LICENSE
+          ( cd dist && shasum -a 256 "${archive}" > "${archive}.sha256" )
 
       - name: Upload archive artifact
         uses: actions/upload-artifact@v4
         with:
           name: telex-${{ github.ref_name }}-${{ matrix.target }}
-          path: dist/telex-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
+          path: dist/telex-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}*
           if-no-files-found: error
 
       - name: Publish GitHub Release asset
@@ -82,4 +87,6 @@ jobs:
           name: ${{ github.ref_name }}
           generate_release_notes: true
           fail_on_unmatched_files: true
-          files: dist/telex-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
+          files: |
+            dist/telex-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}
+            dist/telex-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}.sha256
