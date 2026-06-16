@@ -29,8 +29,9 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
 
     if let Some(addr) = &args.address {
         println!("## Your assignment\n");
-        println!("You are assigned the telex address `{addr}`. Attach to it as a session-attached");
-        println!("background task (it must die with this session), then run the wait loop:\n");
+        println!("You are assigned the telex address `{addr}`. Run the holder and the wait loop as");
+        println!("session-attached background tasks (they must die with this session, not detached);");
+        println!("a supervisor relays delivered messages to you at your next turn:\n");
         println!("```sh");
         println!("telex attach --address {addr} --description \"<what you are working on>\"");
         println!("telex wait --address {addr}");

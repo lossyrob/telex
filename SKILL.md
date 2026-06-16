@@ -13,7 +13,7 @@ Your operator will tell you which address to attach to. You can reload these ins
 
 ## The core loop
 
-Use Telex as a two-process loop: one resident holder keeps the address live; repeated `wait` calls deliver messages to the agent turn.
+Use Telex as a two-process loop, and run **both** processes as session-attached background tasks — never in the foreground, never as detached daemons. A supervisor (a background task or sub-agent) owns the holder and the `wait` loop and relays each delivered message to the foreground agent, which acts at its next turn. One resident holder keeps the address live; repeated `wait` calls deliver messages.
 
 1. Start the holder as a **session-attached background task**. It must die with the session; never run it as a detached daemon. The holder owns the lease/heartbeat, so tying its lifetime to the session prevents stale liveness after the session dies.
 
@@ -27,7 +27,7 @@ Use Telex as a two-process loop: one resident holder keeps the address live; rep
    telex attach --address <addr> --description "<s>" --scope <s> --tags <a,b> --heartbeat-secs N --poll-secs N
    ```
 
-2. Loop on `wait`. `wait` connects to the running holder, blocks, prints one delivered message as JSON, and exits.
+2. Loop on `wait` from the **same supervising background task** — never block the foreground agent on it. `wait` connects to the running holder, blocks, prints one delivered message as JSON, and exits; the supervisor relays that payload to the foreground agent and re-issues `wait`.
 
    ```sh
    telex wait --address <addr>
@@ -267,13 +267,13 @@ the `entra` feature — which the published release binaries include.
 
 ## Worked example: two sessions
 
-Session A attaches to a durable address and waits. Start `attach` as a session-attached background task, not detached.
+Session A attaches to a durable address and waits. Run both `attach` and the `wait` loop as session-attached background tasks, never detached.
 
 ```sh
 telex attach --address session:a --description "session A waiting for coordination" --scope project:telex --tags repo:telex,role:worker
 ```
 
-Then in Session A's foreground loop:
+Then A's supervisor runs the `wait` loop as a session-attached background task too (not the foreground agent), relaying each delivered message to A:
 
 ```sh
 telex wait --address session:a
@@ -285,7 +285,7 @@ Session B also starts its own holder as a session-attached background task.
 telex attach --address session:b --description "session B requesting status" --scope project:telex --tags repo:telex,role:requester
 ```
 
-Then Session B's foreground finds A and sends a disposition-required message.
+Then Session B finds A and sends a disposition-required message. One-shot commands like `resolve` and `send` run directly — no background task needed; only the holder and `wait` loop are backgrounded.
 
 ```sh
 telex address list --scope project:telex --match "session A"
@@ -293,7 +293,7 @@ telex resolve --match "waiting for coordination" --scope project:telex
 telex send --to session:a --subject "Status request" --body "Please send your current status." --attention interrupt --requires-disposition
 ```
 
-A's `wait` exits 0 and prints the delivered message as JSON. A reads the id from the JSON, handles the work, dispositions it, and replies in the same thread.
+A's background `wait` exits 0 with the delivered message as JSON; the supervisor relays it to A. A reads the id from the JSON, handles the work, dispositions it, and replies in the same thread.
 
 ```sh
 telex handle --id <message-id-from-wait-json> --note "status prepared"
