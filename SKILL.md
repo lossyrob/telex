@@ -13,18 +13,18 @@ Your operator will tell you which address to attach to. You can reload these ins
 
 ## The core loop
 
-Use Telex as a two-process loop: a resident **holder** keeps the address live, and a supervisor loops `wait` to deliver messages. The holder and the `wait` loop are **background processes**, and each needs two independent properties — set both:
+Use Telex as a two-process loop: a resident **holder** keeps the address live, and a single-shot `telex wait` delivers one message and completes. Both run as **background processes**, and each needs two independent properties — set both:
 
-| Property | Holder + `wait` loop | Why |
+| Property | Holder + each `wait` | Why |
 |---|---|---|
 | Foreground or background? | **Background** (non-blocking) | so they don't consume your turns — the foreground stays free to act and take operator input |
 | Session-bound or persistent? | **Session-bound** — killed when your session ends | so the lease releases promptly once you're gone; a process that outlives the session keeps answering liveness for a session that no longer exists |
 
-So: **background and session-bound.** Never start them as persistent / standalone / daemonized processes that survive the session — that orphans the holder and corrupts liveness. The supervisor (a background task or sub-agent) owns the holder and the `wait` loop and surfaces each delivered message to the foreground agent, which acts at its next turn.
+So: **background and session-bound.** Never start them as persistent / standalone / daemonized processes that survive the session — that orphans the holder and corrupts liveness. You drive the loop one delivery at a time: each single-shot `telex wait` surfaces a message to you when the command **completes**, and then you re-arm a fresh one (see **The re-arm pattern** below).
 
 > **Two unrelated meanings of "attach/detach" — don't conflate them.**
 > - **telex `attach` / `detach`** are **lease** verbs: occupy or release an address. They say nothing about OS process lifecycle.
-> - Your **agent runtime** separately decides whether a background process is **session-bound** (dies with the session — what you want) or **fully detached / persistent** (outlives it — never use this for the holder or the `wait` loop).
+> - Your **agent runtime** separately decides whether a background process is **session-bound** (dies with the session — what you want) or **fully detached / persistent** (outlives it — never use this for the holder or a `wait`).
 >
 > The holder is long-lived, but unlike a typical server it must **not** be marked persistent. *(In Copilot CLI terms: start them async with `detach: false` — the default — never `detach: true`, even though they run long.)*
 
@@ -44,28 +44,24 @@ So: **background and session-bound.** Never start them as persistent / standalon
    telex attach --address <addr> --description "<s>" --scope <s> --tags <a,b> --heartbeat-secs N --poll-secs N
    ```
 
-2. Run the `wait` re-arm loop **inside the supervisor**, never in the foreground. Each `wait` connects to the holder, blocks until a message is delivered, prints it as JSON, and exits. The supervisor handles every exit code itself and **surfaces to the foreground only on a code-0 delivery**, carrying that JSON payload; codes 2/3/4 never reach the foreground.
+2. Wait for one message with a **single-shot** background `telex wait` — **not** an internal loop. It connects to the holder, blocks until one message is delivered, prints it as JSON, and **completes**. The command *completing* is your wake signal (see the box below); you re-arm at your turn level, not inside a shell loop.
 
    ```sh
-   telex wait --address <addr>
+   telex wait --address <addr>          # one delivery, then the command completes
    ```
 
-   Exit codes — and who handles them:
+   Omit `--timeout-ms` so the command completes **only on a real delivery** — then every wake is an actual message. Use a timeout only if your runtime caps command duration; a timeout just completes the command with exit 2 ("nothing yet"), and you re-arm.
 
-   | Code | Meaning | Supervisor action | Reaches foreground? |
-   |---:|---|---|:---:|
-   | 0 | delivered | Emit the JSON payload to the foreground agent, then re-arm `wait`. | **yes** |
-   | 2 | idle-timeout | Re-arm `wait` silently. Do **not** wake the foreground. | no |
-   | 3 | holder-gone | Re-run `attach`, then re-arm `wait`. | no |
-   | 4 | holder-hung | Re-run `attach`, then re-arm `wait`. | no |
+   When the `wait` command completes, read its exit code and output:
 
-   **In a background relay, prefer a blocking wait: omit `--timeout-ms` (or set it large) so `wait` completes exactly once, on real delivery.** A short timeout manufactures code-2 churn for no benefit — `holder-gone` is still detected promptly. Use `--timeout-ms N` only when your runtime caps individual command duration, forcing the supervisor to re-arm on a timer:
+   | Exit | Meaning | What you do |
+   |---:|---|---|
+   | 0 | delivered | Read the JSON message, act on it, disposition it, then re-arm a fresh `wait`. |
+   | 2 | idle-timeout | Nothing arrived before `--timeout-ms` (only if you set one); just re-arm. |
+   | 3 | holder-gone | Restart the holder (`telex attach`), then re-arm. |
+   | 4 | holder-hung | Restart the holder (`telex attach`), then re-arm. |
 
-   ```sh
-   telex wait --address <addr> --timeout-ms N   # only when commands are duration-capped
-   ```
-
-3. When the supervisor surfaces a delivery, the **foreground agent** acts and runs an appropriate disposition verb with the message id from the JSON.
+3. When a `wait` completes with a message (exit 0), act on it and run an appropriate disposition verb with the message id from the JSON.
 
    ```sh
    telex handle --id <message-id> --note "completed"
@@ -73,26 +69,29 @@ So: **background and session-bound.** Never start them as persistent / standalon
 
    Disposition verbs are `telex ack`, `telex handle`, `telex defer`, `telex reject`, `telex close`, and `telex escalate`; all take `--id <message-id>` and optional `--note <s>`. Non-terminal dispositions (`ack`, `defer`, `escalate`) still need a final terminal disposition later.
 
-### Supervisor recipe
+### The re-arm pattern (one wait per turn, not a shell loop)
 
-The supervisor owns `attach` plus the `wait` re-arm loop and is the only thing that blocks:
+Drive the loop from your own turn cycle, one delivery at a time:
 
 ```text
-telex attach --address <addr> --description "<s>"   # background; holds the lease
-loop:
-  run: telex wait --address <addr>
-  exit 0      -> emit stdout (the JSON message) to the foreground agent; continue
-  exit 2      -> continue                            # idle-timeout: never surfaces
-  exit 3 or 4 -> telex attach --address <addr> ...; continue   # holder gone/hung: re-attach
+once:   telex attach --address <addr> --description "<s>"   # background, session-bound; holds the lease
+then repeat, one per turn:
+  1. start a SINGLE background command:  telex wait --address <addr>
+  2. it blocks until one message, prints JSON, and COMPLETES -> your runtime notifies you
+  3. read the completed command's output:
+       exit 0   -> act on the JSON, then disposition it
+       exit 3/4 -> restart telex attach (holder gone/hung)
+       exit 2   -> (only if you set --timeout-ms) nothing arrived
+  4. re-arm: start a fresh single `telex wait` background command
 ```
 
-This re-arm loop **is** the sanctioned pattern — it is not the "ad hoc shell polling" warned against here. The difference: the supervisor blocks in `wait` for push delivery from the holder and only re-issues on exit; ad hoc polling is the *foreground* agent repeatedly checking the inbox on its own timer. Do not do the latter — Telex owns long-duration waiting, and the holder keeps answerback live while the agent is between turns or handling a message.
+This is not "ad hoc shell polling": each `telex wait` blocks for push delivery from the holder, and you only relaunch after one completes. (Ad hoc polling would be repeatedly running `telex inbox` on a timer with no holder — don't do that.) Telex owns the long-duration waiting; the holder keeps answerback live between your turns.
 
 Messages buffer in the holder, so re-arm timing is safe: a second message that arrives while the foreground is still handling the first is delivered by the next `wait`. Deliveries serialize at the agent's turn pace; none are dropped.
 
 One-shot commands (`send`, `reply`, `resolve`, `address list`, `inbox`, and the disposition verbs) run directly from the foreground **while the background `wait` is blocked** — they reach the holder/backend independently and need no background task of their own.
 
-> **Gotcha — the self-wake loop.** If the supervisor surfaces idle-timeouts (exit 2) to the foreground, the foreground wakes with no message, re-issues `wait`, and wakes again — a self-wake cycle that starves operator input and looks like a hung session. Cause: treating exit 2 as a foreground event. Fix: handle 2/3/4 entirely inside the supervisor and surface only exit 0.
+> **Gotcha — the invisible-loop trap.** Do **not** wrap `telex wait` in an infinite background loop (`while true; do telex wait; done`). Many agent runtimes only surface a background command's output **when the command completes** — an internal loop never completes, so deliveries pile up in the loop's buffer and never wake you (you'd have to manually poll the background shell). `telex wait` exits on each delivery on purpose: let the **completion** drive a fresh single-shot re-arm at your turn level. Also avoid a short `--timeout-ms`, which wakes you on idle-timeouts carrying no message.
 
 ## Sending and finding other sessions
 
@@ -312,14 +311,14 @@ the `entra` feature — which the published release binaries include.
 
 ## Worked example: two sessions
 
-Session A attaches to a durable address and waits. Run both `telex attach` (the holder) and the `wait` loop in the background, bound to A's session — never as persistent processes that outlive it.
+Session A attaches to a durable address and waits. Run `telex attach` (the holder) and each single-shot `telex wait` in the background, bound to A's session — never as persistent processes that outlive it.
 
 ```sh
 export TELEX_ADDRESS=session:a   # all of A's commands default to this address (and its from)
 telex attach --address session:a --description "session A waiting for coordination" --scope project:telex --tags repo:telex,role:worker
 ```
 
-Then A's supervisor runs the `wait` loop in the background too (session-bound, not the foreground agent), relaying each delivered message to A:
+Then A waits with a **single-shot** background `telex wait` (session-bound, not blocking the foreground); it completes on the next delivery, which notifies A:
 
 ```sh
 telex wait --address session:a
@@ -332,7 +331,7 @@ export TELEX_ADDRESS=session:b   # B's from; A's reply will route back here
 telex attach --address session:b --description "session B requesting status" --scope project:telex --tags repo:telex,role:requester
 ```
 
-Then Session B finds A and sends a disposition-required message. One-shot commands like `resolve` and `send` run directly — no background task needed; only the holder and `wait` loop are backgrounded.
+Then Session B finds A and sends a disposition-required message. One-shot commands like `resolve` and `send` run directly — no background task needed; only the holder and each `telex wait` run in the background.
 
 ```sh
 telex address list --scope project:telex --match "session A"
@@ -340,7 +339,7 @@ telex resolve --match "waiting for coordination" --scope project:telex
 telex send --to session:a --subject "Status request" --body "Please send your current status." --attention interrupt --requires-disposition
 ```
 
-A's background `wait` exits 0 with the delivered message as JSON; the supervisor relays it to A. A reads the id from the JSON, handles the work, dispositions it, and replies in the same thread.
+A's `wait` command completes (exit 0) with the delivered message as JSON, which notifies A. A reads the id from the JSON, handles the work, dispositions it, replies in the same thread, and re-arms a fresh `wait`.
 
 ```sh
 telex handle --id <message-id-from-wait-json> --note "status prepared"
