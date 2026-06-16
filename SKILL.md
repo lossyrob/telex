@@ -27,28 +27,28 @@ Use Telex as a two-process loop, and run **both** processes as session-attached 
    telex attach --address <addr> --description "<s>" --scope <s> --tags <a,b> --heartbeat-secs N --poll-secs N
    ```
 
-2. Loop on `wait` from the **same supervising background task** — never block the foreground agent on it. `wait` connects to the running holder, blocks, prints one delivered message as JSON, and exits; the supervisor relays that payload to the foreground agent and re-issues `wait`.
+2. Run the `wait` re-arm loop **inside the supervisor**, never in the foreground. Each `wait` connects to the holder, blocks until a message is delivered, prints it as JSON, and exits. The supervisor handles every exit code itself and **surfaces to the foreground only on a code-0 delivery**, carrying that JSON payload; codes 2/3/4 never reach the foreground.
 
    ```sh
    telex wait --address <addr>
    ```
 
-   Exit codes:
+   Exit codes — and who handles them:
 
-   | Code | Meaning | Agent action |
-   |---:|---|---|
-   | 0 | delivered | Read the JSON payload, act, disposition the message, then wait again. |
-   | 2 | idle-timeout | No message before `--timeout-ms`; re-issue `wait`. |
-   | 3 | holder-gone | Restart `attach`, then wait again. |
-   | 4 | holder-hung | Restart `attach`, then wait again. |
+   | Code | Meaning | Supervisor action | Reaches foreground? |
+   |---:|---|---|:---:|
+   | 0 | delivered | Emit the JSON payload to the foreground agent, then re-arm `wait`. | **yes** |
+   | 2 | idle-timeout | Re-arm `wait` silently. Do **not** wake the foreground. | no |
+   | 3 | holder-gone | Re-run `attach`, then re-arm `wait`. | no |
+   | 4 | holder-hung | Re-run `attach`, then re-arm `wait`. | no |
 
-   If your runtime caps command duration, use:
+   **In a background relay, prefer a blocking wait: omit `--timeout-ms` (or set it large) so `wait` completes exactly once, on real delivery.** A short timeout manufactures code-2 churn for no benefit — `holder-gone` is still detected promptly. Use `--timeout-ms N` only when your runtime caps individual command duration, forcing the supervisor to re-arm on a timer:
 
    ```sh
-   telex wait --address <addr> --timeout-ms N
+   telex wait --address <addr> --timeout-ms N   # only when commands are duration-capped
    ```
 
-3. After handling a delivered message, run an appropriate disposition verb with the message id from the JSON.
+3. When the supervisor surfaces a delivery, the **foreground agent** acts and runs an appropriate disposition verb with the message id from the JSON.
 
    ```sh
    telex handle --id <message-id> --note "completed"
@@ -56,7 +56,26 @@ Use Telex as a two-process loop, and run **both** processes as session-attached 
 
    Disposition verbs are `telex ack`, `telex handle`, `telex defer`, `telex reject`, `telex close`, and `telex escalate`; all take `--id <message-id>` and optional `--note <s>`. Non-terminal dispositions (`ack`, `defer`, `escalate`) still need a final terminal disposition later.
 
-Do not rebuild this with ad hoc shell polling. Telex owns long-duration waiting; the holder keeps answerback live while the agent is between turns or handling a message.
+### Supervisor recipe
+
+The supervisor owns `attach` plus the `wait` re-arm loop and is the only thing that blocks:
+
+```text
+telex attach --address <addr> --description "<s>"   # background; holds the lease
+loop:
+  run: telex wait --address <addr>
+  exit 0      -> emit stdout (the JSON message) to the foreground agent; continue
+  exit 2      -> continue                            # idle-timeout: never surfaces
+  exit 3 or 4 -> telex attach --address <addr> ...; continue   # holder gone/hung: re-attach
+```
+
+This re-arm loop **is** the sanctioned pattern — it is not the "ad hoc shell polling" warned against here. The difference: the supervisor blocks in `wait` for push delivery from the holder and only re-issues on exit; ad hoc polling is the *foreground* agent repeatedly checking the inbox on its own timer. Do not do the latter — Telex owns long-duration waiting, and the holder keeps answerback live while the agent is between turns or handling a message.
+
+Messages buffer in the holder, so re-arm timing is safe: a second message that arrives while the foreground is still handling the first is delivered by the next `wait`. Deliveries serialize at the agent's turn pace; none are dropped.
+
+One-shot commands (`send`, `reply`, `resolve`, `address list`, `inbox`, and the disposition verbs) run directly from the foreground **while the background `wait` is blocked** — they reach the holder/backend independently and need no background task of their own.
+
+> **Gotcha — the self-wake loop.** If the supervisor surfaces idle-timeouts (exit 2) to the foreground, the foreground wakes with no message, re-issues `wait`, and wakes again — a self-wake cycle that starves operator input and looks like a hung session. Cause: treating exit 2 as a foreground event. Fix: handle 2/3/4 entirely inside the supervisor and surface only exit 0.
 
 ## Sending and finding other sessions
 
