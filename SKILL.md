@@ -21,6 +21,10 @@ Use Telex as a two-process loop, and run **both** processes as session-attached 
    telex attach --address <addr> --description "<what this session is doing>"
    ```
 
+   Export `TELEX_ADDRESS=<addr>` for the session so every later command — `wait`, `inbox`,
+   `send`, `reply` — defaults to this address, including the `from` stamped on what you send
+   (see **Your identity** below).
+
    Optional attach flags:
 
    ```sh
@@ -79,6 +83,15 @@ One-shot commands (`send`, `reply`, `resolve`, `address list`, `inbox`, and the 
 
 ## Sending and finding other sessions
 
+**Your identity — the `from` address.** Every `send` and `reply` stamps a `from` taken from
+`--from`, else `$TELEX_ADDRESS` / the global `--address`. Set it to the address you serve (the
+one you attached to) so replies route back to your inbox. If `from` is unset the message is
+**un-repliable**: `telex reply` to it fails with "no from address," and any reply has nowhere to
+go. So export `TELEX_ADDRESS=<your-addr>` once after attaching (recommended), or pass
+`--from <your-addr>` on each send. Use a *different* `--from` only deliberately — e.g. a one-shot
+sender declaring a reply-to it will attach to later; a `from` you don't actually serve means
+replies queue in an inbox nobody is watching.
+
 Find targets by their self-registered attach descriptions, scope, or tags.
 
 ```sh
@@ -97,7 +110,7 @@ telex send --to <addr> --subject "<subject>" --body "<body>"
 Useful send flags:
 
 ```sh
-telex send --to <addr> --subject "<s>" --body "<s>" --cc <a,b> --kind <s> --attention interrupt|next-checkpoint|background|fyi --requires-disposition --metadata <json>
+telex send --to <addr> --from <your-addr> --subject "<s>" --body "<s>" --cc <a,b> --kind <s> --attention interrupt|next-checkpoint|background|fyi --requires-disposition --metadata <json>
 ```
 
 `send` prints a receipt: `delivered`, `queued-unoccupied`, or `rejected-retired`, plus the new message id.
@@ -108,7 +121,7 @@ Reply inside an existing thread:
 telex reply --to-message <message-id> --body "<body>"
 ```
 
-Optional reply flags are `--attention interrupt|next-checkpoint|background|fyi` and `--requires-disposition`.
+Optional reply flags are `--from <your-addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, and `--requires-disposition`. As with `send`, `--from` defaults to `$TELEX_ADDRESS` / `--address`; the reply's destination is taken from the parent message's sender (so the parent must itself have had a `from`).
 
 ## Reading
 
@@ -139,7 +152,7 @@ Global options apply to all subcommands.
 |---|---|
 | `--backend <name>` | Use a configured backend by name (or `$TELEX_BACKEND`); defaults to the configured default backend, or an implicit `default` sqlite store. |
 | `--db <path>` | Override the SQLite path for this invocation (sqlite backends only; or `$TELEX_DB`). |
-| `--address <addr>` | Default address or `$TELEX_ADDRESS`. |
+| `--address <addr>` | Default address (or `$TELEX_ADDRESS`) for commands that act on one address; also the default `from` for `send`/`reply`. |
 | `--json` / `--text` | Output format; default JSON when stdout is not a TTY, text when interactive. |
 
 Postgres connections are configured once as named backends with `telex backend add` (see Backends), not via per-call environment variables.
@@ -165,8 +178,8 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex send` | Send a message and print a delivery/queue/reject receipt plus message id. | `--to <addr>`, `--subject <s>`, `--body <s>`, `--cc <a,b>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition`, `--metadata <json>` |
-| `telex reply` | Reply under a parent message thread. | `--to-message <id>`, `--body <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition` |
+| `telex send` | Send a message and print a delivery/queue/reject receipt plus message id. | `--to <addr>`, `--from <addr>`, `--subject <s>`, `--body <s>`, `--cc <a,b>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition`, `--metadata <json>` |
+| `telex reply` | Reply under a parent message thread. | `--to-message <id>`, `--body <s>`, `--from <addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition` |
 
 ### DISPOSITION
 
@@ -289,6 +302,7 @@ the `entra` feature — which the published release binaries include.
 Session A attaches to a durable address and waits. Run both `attach` and the `wait` loop as session-attached background tasks, never detached.
 
 ```sh
+export TELEX_ADDRESS=session:a   # all of A's commands default to this address (and its from)
 telex attach --address session:a --description "session A waiting for coordination" --scope project:telex --tags repo:telex,role:worker
 ```
 
@@ -301,6 +315,7 @@ telex wait --address session:a
 Session B also starts its own holder as a session-attached background task.
 
 ```sh
+export TELEX_ADDRESS=session:b   # B's from; A's reply will route back here
 telex attach --address session:b --description "session B requesting status" --scope project:telex --tags repo:telex,role:requester
 ```
 
