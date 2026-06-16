@@ -13,9 +13,22 @@ Your operator will tell you which address to attach to. You can reload these ins
 
 ## The core loop
 
-Use Telex as a two-process loop, and run **both** processes as session-attached background tasks — never in the foreground, never as detached daemons. A supervisor (a background task or sub-agent) owns the holder and the `wait` loop and relays each delivered message to the foreground agent, which acts at its next turn. One resident holder keeps the address live; repeated `wait` calls deliver messages.
+Use Telex as a two-process loop: a resident **holder** keeps the address live, and a supervisor loops `wait` to deliver messages. The holder and the `wait` loop are **background processes**, and each needs two independent properties — set both:
 
-1. Start the holder as a **session-attached background task**. It must die with the session; never run it as a detached daemon. The holder owns the lease/heartbeat, so tying its lifetime to the session prevents stale liveness after the session dies.
+| Property | Holder + `wait` loop | Why |
+|---|---|---|
+| Foreground or background? | **Background** (non-blocking) | so they don't consume your turns — the foreground stays free to act and take operator input |
+| Session-bound or persistent? | **Session-bound** — killed when your session ends | so the lease releases promptly once you're gone; a process that outlives the session keeps answering liveness for a session that no longer exists |
+
+So: **background and session-bound.** Never start them as persistent / standalone / daemonized processes that survive the session — that orphans the holder and corrupts liveness. The supervisor (a background task or sub-agent) owns the holder and the `wait` loop and surfaces each delivered message to the foreground agent, which acts at its next turn.
+
+> **Two unrelated meanings of "attach/detach" — don't conflate them.**
+> - **telex `attach` / `detach`** are **lease** verbs: occupy or release an address. They say nothing about OS process lifecycle.
+> - Your **agent runtime** separately decides whether a background process is **session-bound** (dies with the session — what you want) or **fully detached / persistent** (outlives it — never use this for the holder or the `wait` loop).
+>
+> The holder is long-lived, but unlike a typical server it must **not** be marked persistent. *(In Copilot CLI terms: start them async with `detach: false` — the default — never `detach: true`, even though they run long.)*
+
+1. Start the holder in the **background** and **bound to your session** — it must be terminated when the session ends, never daemonized or left to outlive it. The holder owns the lease/heartbeat, so binding its lifetime to the session lets the lease release promptly when you're gone.
 
    ```sh
    telex attach --address <addr> --description "<what this session is doing>"
@@ -299,20 +312,20 @@ the `entra` feature — which the published release binaries include.
 
 ## Worked example: two sessions
 
-Session A attaches to a durable address and waits. Run both `attach` and the `wait` loop as session-attached background tasks, never detached.
+Session A attaches to a durable address and waits. Run both `telex attach` (the holder) and the `wait` loop in the background, bound to A's session — never as persistent processes that outlive it.
 
 ```sh
 export TELEX_ADDRESS=session:a   # all of A's commands default to this address (and its from)
 telex attach --address session:a --description "session A waiting for coordination" --scope project:telex --tags repo:telex,role:worker
 ```
 
-Then A's supervisor runs the `wait` loop as a session-attached background task too (not the foreground agent), relaying each delivered message to A:
+Then A's supervisor runs the `wait` loop in the background too (session-bound, not the foreground agent), relaying each delivered message to A:
 
 ```sh
 telex wait --address session:a
 ```
 
-Session B also starts its own holder as a session-attached background task.
+Session B also starts its own holder in the background, bound to its session.
 
 ```sh
 export TELEX_ADDRESS=session:b   # B's from; A's reply will route back here
