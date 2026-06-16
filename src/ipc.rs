@@ -15,7 +15,8 @@ pub enum Request {
         address: String,
         #[serde(default)]
         since: i64,
-        timeout_ms: u64,
+        #[serde(default)]
+        timeout_ms: Option<u64>,
     },
     /// Liveness probe; the holder answers immediately with Pong.
     Ping,

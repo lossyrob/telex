@@ -127,9 +127,9 @@ pub struct AttachArgs {
 
 #[derive(Args)]
 pub struct WaitArgs {
-    /// Give up waiting after this many milliseconds (exit code 2).
-    #[arg(long, default_value_t = 55_000)]
-    pub timeout_ms: u64,
+    /// Give up waiting after this many milliseconds (exit code 2); default is no idle timeout.
+    #[arg(long)]
+    pub timeout_ms: Option<u64>,
     /// Resume delivery strictly after this message id.
     #[arg(long, default_value_t = 0)]
     pub since: i64,

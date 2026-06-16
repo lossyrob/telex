@@ -44,7 +44,7 @@ So: **background and session-bound.** Never start them as persistent / standalon
    telex attach --address <addr> --description "<s>" --scope <s> --tags <a,b> --heartbeat-secs N --poll-secs N
    ```
 
-2. Wait for one message with a **single-shot** background `telex wait` — **not** an internal loop. It connects to the holder, blocks until one message is delivered, prints it as JSON, and **completes**. The command *completing* is your wake signal (see the box below); you re-arm at your turn level, not inside a shell loop.
+2. Wait for one message with a **single-shot** background `telex wait` — **not** an internal loop. It connects to the holder, blocks until one message is delivered, prints it as JSON, and **completes**. The command *completing* is your wake signal (see the box below). On delivery, **immediately re-arm a fresh background `wait` before doing substantive work on the delivered message**; re-arm at your turn level, not inside a shell loop.
 
    ```sh
    telex wait --address <addr>          # one delivery, then the command completes
@@ -56,12 +56,12 @@ So: **background and session-bound.** Never start them as persistent / standalon
 
    | Exit | Meaning | What you do |
    |---:|---|---|
-   | 0 | delivered | Read the JSON message, act on it, disposition it, then re-arm a fresh `wait`. |
+   | 0 | delivered | Read/save the JSON message, immediately re-arm a fresh background `wait`, then act on and disposition the saved message. |
    | 2 | idle-timeout | Nothing arrived before `--timeout-ms` (only if you set one); just re-arm. |
    | 3 | holder-gone | Restart the holder (`telex attach`), then re-arm. |
    | 4 | holder-hung | Restart the holder (`telex attach`), then re-arm. |
 
-3. When a `wait` completes with a message (exit 0), act on it and run an appropriate disposition verb with the message id from the JSON.
+3. After re-arming, act on the saved message and run an appropriate disposition verb with the message id from the JSON.
 
    ```sh
    telex handle --id <message-id> --note "completed"
@@ -69,25 +69,24 @@ So: **background and session-bound.** Never start them as persistent / standalon
 
    Disposition verbs are `telex ack`, `telex handle`, `telex defer`, `telex reject`, `telex close`, and `telex escalate`; all take `--id <message-id>` and optional `--note <s>`. Non-terminal dispositions (`ack`, `defer`, `escalate`) still need a final terminal disposition later.
 
-### The re-arm pattern (one wait per turn, not a shell loop)
+### The re-arm pattern (one wait per delivery, not a shell loop)
 
 Drive the loop from your own turn cycle, one delivery at a time:
 
 ```text
 once:   telex attach --address <addr> --description "<s>"   # background, session-bound; holds the lease
-then repeat, one per turn:
+then repeat, one delivery at a time:
   1. start a SINGLE background command:  telex wait --address <addr>
   2. it blocks until one message, prints JSON, and COMPLETES -> your runtime notifies you
   3. read the completed command's output:
-       exit 0   -> act on the JSON, then disposition it
+       exit 0   -> save the JSON, immediately start a fresh background wait, then act/disposition
        exit 3/4 -> restart telex attach (holder gone/hung)
        exit 2   -> (only if you set --timeout-ms) nothing arrived
-  4. re-arm: start a fresh single `telex wait` background command
 ```
 
 This is not "ad hoc shell polling": each `telex wait` blocks for push delivery from the holder, and you only relaunch after one completes. (Ad hoc polling would be repeatedly running `telex inbox` on a timer with no holder — don't do that.) Telex owns the long-duration waiting; the holder keeps answerback live between your turns.
 
-Messages buffer in the holder, so re-arm timing is safe: a second message that arrives while the foreground is still handling the first is delivered by the next `wait`. Deliveries serialize at the agent's turn pace; none are dropped.
+Messages buffer in the holder, so immediate re-arm timing is safe: the delivered message has already been popped from the holder queue, and a second message that arrives while you are handling the first is delivered by the next `wait`. Re-arm first so a new message can complete its own `wait` early and be available for your next turn; none are dropped.
 
 One-shot commands (`send`, `reply`, `resolve`, `address list`, `inbox`, and the disposition verbs) run directly from the foreground **while the background `wait` is blocked** — they reach the holder/backend independently and need no background task of their own.
 
@@ -339,12 +338,12 @@ telex resolve --match "waiting for coordination" --scope project:telex
 telex send --to session:a --subject "Status request" --body "Please send your current status." --attention interrupt --requires-disposition
 ```
 
-A's `wait` command completes (exit 0) with the delivered message as JSON, which notifies A. A reads the id from the JSON, handles the work, dispositions it, replies in the same thread, and re-arms a fresh `wait`.
+A's `wait` command completes (exit 0) with the delivered message as JSON, which notifies A. A saves the JSON and **immediately re-arms** a fresh background `wait`, then reads the id from the saved JSON, handles the work, dispositions it, and replies in the same thread.
 
 ```sh
+telex wait --address session:a   # start this as a fresh background wait immediately
 telex handle --id <message-id-from-wait-json> --note "status prepared"
 telex reply --to-message <message-id-from-wait-json> --body "Status: holder is live; continuing work." --attention next-checkpoint
-telex wait --address session:a
 ```
 
 Session B waits, receives A's reply, and closes or handles it.

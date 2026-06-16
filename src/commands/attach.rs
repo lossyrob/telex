@@ -321,7 +321,7 @@ where
             Ok(())
         }
         Request::Wait { timeout_ms, .. } => {
-            let deadline = Instant::now() + Duration::from_millis(timeout_ms);
+            let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
             let mut ka = tokio::time::interval(st.keepalive);
             ka.tick().await; // consume the immediate first tick
             loop {
@@ -349,15 +349,25 @@ where
                     )
                     .await;
                 }
-                let remaining = deadline.saturating_duration_since(Instant::now());
-                tokio::select! {
-                    _ = st.notify.notified() => continue,
-                    _ = ka.tick() => {
-                        let age = now_ms() - st.last_heartbeat_ms.load(Ordering::SeqCst);
-                        send(&mut write_half, &Frame::Keepalive { heartbeat_age_ms: age }).await?;
+                if let Some(deadline) = deadline {
+                    let remaining = deadline.saturating_duration_since(Instant::now());
+                    tokio::select! {
+                        _ = st.notify.notified() => continue,
+                        _ = ka.tick() => {
+                            let age = now_ms() - st.last_heartbeat_ms.load(Ordering::SeqCst);
+                            send(&mut write_half, &Frame::Keepalive { heartbeat_age_ms: age }).await?;
+                        }
+                        _ = tokio::time::sleep(remaining) => {
+                            return send(&mut write_half, &Frame::Timeout).await;
+                        }
                     }
-                    _ = tokio::time::sleep(remaining) => {
-                        return send(&mut write_half, &Frame::Timeout).await;
+                } else {
+                    tokio::select! {
+                        _ = st.notify.notified() => continue,
+                        _ = ka.tick() => {
+                            let age = now_ms() - st.last_heartbeat_ms.load(Ordering::SeqCst);
+                            send(&mut write_half, &Frame::Keepalive { heartbeat_age_ms: age }).await?;
+                        }
                     }
                 }
             }
