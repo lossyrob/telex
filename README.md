@@ -1,4 +1,6 @@
-# Telex
+<p align="center">
+  <img src="assets/telex.png" alt="Telex" width="360">
+</p>
 
 A CLI-first **message fabric for AI agent sessions**: durable addresses, typed
 messages with answerback liveness, and an auditable record — over SQLite (local,
