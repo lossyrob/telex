@@ -33,8 +33,7 @@ arch="$(uname -m)"
 case "${os}-${arch}" in
   Linux-x86_64|Linux-amd64)   target="x86_64-unknown-linux-gnu" ;;
   Darwin-arm64|Darwin-aarch64) target="aarch64-apple-darwin" ;;
-  Darwin-x86_64)
-    err "no prebuilt binary for Intel macOS yet — install with: cargo install --git https://github.com/${REPO} --features entra" ;;
+  Darwin-x86_64)               target="x86_64-apple-darwin" ;;
   *)
     err "unsupported platform ${os}-${arch} — install with: cargo install --git https://github.com/${REPO} --features entra" ;;
 esac

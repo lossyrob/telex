@@ -15,10 +15,13 @@ $repo = 'lossyrob/telex'
 $installDir = if ($env:TELEX_INSTALL_DIR) { $env:TELEX_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'telex\bin' }
 
 $arch = $env:PROCESSOR_ARCHITECTURE
-if ($arch -ne 'AMD64') {
-    throw "no prebuilt Windows binary for $arch yet - install with: cargo install --git https://github.com/$repo --features entra"
+switch ($arch) {
+    'AMD64' { $target = 'x86_64-pc-windows-msvc' }
+    'ARM64' { $target = 'aarch64-pc-windows-msvc' }
+    default {
+        throw "no prebuilt Windows binary for $arch yet - install with: cargo install --git https://github.com/$repo --features entra"
+    }
 }
-$target = 'x86_64-pc-windows-msvc'
 
 $headers = @{ 'User-Agent' = 'telex-install' }
 if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $($env:GITHUB_TOKEN)" }
