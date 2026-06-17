@@ -11,14 +11,27 @@ are left unchanged (no `ratatui`/`crossterm` in core), so the agent install stay
 
 Backend construction is **already factored** in `profiles.rs`
 (`resolve(selector, db) -> (String, BackendProfile)` and `build(profile, db) ->
-Arc<dyn Backend>`, both public). The console reuses these directly; we add only a thin
-`telex::open_backend(selector, db)` convenience that both `Ctx::backend()` and the
-console call, to avoid duplicating the two-step dance. No behavior change to the CLI.
+Arc<dyn Backend>`, both public). **The console calls `profiles::resolve` +
+`profiles::build` directly.** We do **not** refactor `Ctx::backend()` (avoids any CLI
+regression risk — review finding #5); at most we add a *purely additive* convenience
+wrapper that the CLI is not required to adopt.
 
 Live tail is pull-only cursor polling: the cursor is the max message `id` seen; each
 tick calls `export(None, None, cursor)` (global) or `export(Some(addr), None, cursor)`
 (scoped) and advances the cursor. The console never holds a lease or heartbeats, and
 contains **no blocking `telex wait`**.
+
+**Feed startup / backfill (review finding #1 — must-fix).** `export` has no `LIMIT`,
+so an unbounded `export(None, None, 0)` on a large DB is unsafe. On startup the console
+reads a **global max message id** and seeds the cursor for a bounded recent window:
+- Add one read-only core helper `Backend::max_message_id() -> i64` (global
+  `SELECT COALESCE(MAX(id),0) FROM messages`), implemented in both SQLite and Postgres.
+  (No global max-id method exists today — `max_id` is per-`to_addr`.)
+- `--backfill <N>` (default `200`): start cursor at `max(0, max_message_id - N)` so the
+  feed shows recent context then tails. `--backfill 0` = tail-from-now only;
+  `--backfill all` loads full history (explicit opt-in). Messages are append-only (no
+  deletes), so "last N ids" ≈ "last N messages" is a safe approximation.
+The in-memory ring (cap ~2000) bounds retention thereafter.
 
 ## Key Decisions
 
@@ -45,6 +58,18 @@ contains **no blocking `telex wait`**.
   not mid-draw).
 - **Cursor = max id.** Feed merges newly fetched rows (id-ordered) onto an in-memory
   ring (cap e.g. last N=2000) to bound memory.
+- **Two poll cadences (review finding #4):** a fast **feed tick** (~1s, `--poll-secs`)
+  for messages, and a slower **directory tick** (~3–5s) for `list_addresses` +
+  per-address `occupancy`/`get_lease`. Occupancy results are cached; per-address lookups
+  are bounded in concurrency and a single address failure must not break the UI
+  (degrade that row to "unknown", keep rendering).
+- **Disposition / actionable semantics (review finding #3):** Feed rows render from raw
+  `MessageRow` (show a "needs-disposition" marker from `requires_disposition`; do **not**
+  fake a global actionable rollup). Latest disposition + full history are loaded **lazily
+  for the selected row** via `dispositions_for` into the detail pane. The **Addresses**
+  drilldown uses `inbox(addr, all, limit)` (which already returns `latest_disposition` +
+  `actionable` per recipient) — **not** `export` — so per-address actionable/disposition
+  state is correct.
 - **Read-only.** No send/reply/disposition. Keymap: `Tab` cycle view, `j/k`/arrows
   nav, `Enter` open Thread for selected msg, `a` jump to address (Addresses view),
   `t` toggle tail, `f` set address filter (text input), `Esc` clear filter/back,
@@ -62,40 +87,61 @@ Implementation is **sequential** (the views share `AppState`, the view router, a
 conflict). Todos below are phases, each with success criteria. IDs use
 `lite:telex-tui-inspector:work:<slug>`.
 
-### 1. `scaffold` — workspace + crate + backend-open helper
-- Add `members = ["telex-console"]` to root `[workspace]` (keep `exclude=["spike"]`).
-- Create `telex-console/Cargo.toml` + minimal `src/main.rs` that parses args, calls
-  `telex::open_backend(...)`, prints backend kind, and exits.
-- Add `pub async fn open_backend(selector: Option<&str>, db: Option<&str>) ->
-  Result<Arc<dyn Backend>>` to the lib (wrap `profiles::resolve`+`profiles::build`);
-  refactor `Ctx::backend()` to delegate to it (no behavior change).
+### 1. `scaffold` — workspace + crate + global max-id helper
+- Add `members = ["telex-console"]` to root `[workspace]`, **preserving** existing
+  `exclude = ["spike"]`, resolver, and root `[profile.release]` (review finding #6).
+- Create `telex-console/Cargo.toml` + minimal `src/main.rs` that parses args, opens the
+  backend via `telex::profiles::resolve` + `telex::profiles::build` (no `Ctx::backend()`
+  refactor — review finding #5), prints backend kind, and exits.
+- Add `async fn Backend::max_message_id() -> Result<i64>` to the trait + SQLite and
+  Postgres impls (`SELECT COALESCE(MAX(id),0) FROM messages`) — needed for bounded feed
+  backfill (review finding #1). (Optional: a purely additive `telex::open_backend`
+  wrapper; the CLI is left unmodified.)
 - **Success:** `cargo build` (workspace) and `cargo build -p telex` both green;
-  `cargo tree -p telex` shows **no** `ratatui`/`crossterm`; `telex-console --help` runs.
+  `cargo tree -p telex` shows **no** `ratatui`/`crossterm`; `telex-console --help` runs;
+  `cargo install --git <repo>` still selects core `telex`, and
+  `cargo install --git <repo> telex-console` selects the console (verify resolution; no
+  live install required).
 
 ### 2. `app-shell` — terminal, event loop, router, chrome
-- Panic-safe terminal init/restore (raw mode, alternate screen; restore on
-  Drop/panic hook). Select-loop in `event.rs`. `AppState` + `View` router. Header bar
-  (backend kind, target, ● LIVE/⏸, counts) and footer keybinding hints. `q` quits.
+- Panic-safe terminal lifecycle: an RAII **terminal guard** (restores raw mode + leaves
+  alternate screen on `Drop`) plus a chained **panic hook** that restores the terminal
+  before printing the panic (review finding #7). Select-loop in `event.rs`. `AppState` +
+  `View` router. Header bar (backend kind, target, ● LIVE/⏸, active filter, counts) and
+  footer keybinding hints. `q` quits.
+- Keep `update(state, event) -> state-change` **UI-free and pure** and `render(state)`
+  read-only, so both are unit-testable (seam for tick/input ordering — finding #7).
 - `Store` in `data.rs` wrapping `Arc<dyn Backend>` (methods may start as stubs).
 - **Success:** console launches against a temp sqlite db, shows empty chrome, `q`
-  exits cleanly with terminal restored; no panics on resize.
+  exits cleanly with terminal restored; no panics on resize or on a very small terminal
+  (renders a graceful "terminal too small" notice below a minimum size).
 
 ### 3. `feed-view` — global live tail
+- On entry, seed the cursor for bounded backfill: `cursor = max(0, max_message_id - N)`
+  with `N = --backfill` (default 200; `0` = tail-only; `all` = full) — review finding #1.
 - `Store::feed_since(cursor, filter)` via `export(None,None,cursor)`; cursor advance;
-  bounded in-memory list; auto-scroll when tailing; row format
-  `time attn from→to kind subj/body`; `theme` symbols/colors; `t` toggle tail.
+  bounded in-memory ring (~2000); auto-scroll when tailing; rows render from **raw
+  `MessageRow`** with a `requires_disposition` "needs-disposition" marker (no faked
+  global actionable rollup — finding #3); row format `time attn from→to kind subj/body`;
+  `theme` symbols/colors; `t` toggle tail.
 - Selecting a row populates the shared detail pane (lazy `dispositions(id)` +
-  pretty `metadata`).
+  pretty `metadata`; handle absent/odd/non-UTF8 metadata and very long bodies via
+  wrapping/scroll).
 - **Success:** seeding messages via the `Backend` (temp db) makes them appear within
-  one poll interval; tail toggle stops/starts auto-scroll; detail renders body +
-  metadata + dispositions.
+  one poll interval; backfill shows the last N on launch then tails; tail toggle
+  stops/starts auto-scroll; detail renders body + metadata + dispositions.
 
 ### 4. `addresses-view` — Miller-column drill-down
 - Left: `addresses_with_occupancy()` (`list_addresses` + per-address `occupancy`/
-  `get_lease`) with ●live/○idle. Center: messages for selected address
-  (`address_messages` via `export(Some(addr),...)` or `inbox`). Right: shared detail.
+  `get_lease`) refreshed on the **slower directory cadence**, cached, with bounded
+  concurrency; a per-address lookup failure degrades that row to `?`/"unknown" without
+  breaking the UI (review finding #4). Dots: ●live/○idle/?unknown.
+- Center: messages for the selected address via **`inbox(addr, all, limit)`** (returns
+  `latest_disposition` + `actionable` per recipient — finding #3), not `export`. Right:
+  shared detail.
 - **Success:** addresses list with correct occupancy dots; selecting an address lists
-  its messages; detail pane works; `Enter` opens the message's Thread.
+  its messages with disposition/actionable state; detail pane works; `Enter` opens the
+  message's Thread.
 
 ### 5. `thread-detail` — transcript view
 - `Store::thread(id)` (`thread_messages`) rendered as an indented transcript by
@@ -130,14 +176,24 @@ docs depends on feed-view, addresses-view, thread-detail, address-filter
 
 - **Build:** `cargo build` (workspace) and `cargo build -p telex` (core unchanged).
 - **Lean-core check:** `cargo tree -p telex` excludes `ratatui`/`crossterm`.
+- **Install resolution (finding #6):** confirm `cargo install --git <repo>` selects core
+  `telex` and `cargo install --git <repo> telex-console` selects the console; root
+  `exclude=["spike"]`/resolver/`[profile.release]` preserved.
 - **Lint:** `cargo clippy --workspace` clean (or no new warnings).
 - **Unit tests (logic, headless):** seed a temp `SqliteBackend` via the trait and test
-  `Store` reads; test cursor-advance/feed-merge, address-filter predicate, and thread
-  grouping. Pure-logic functions kept UI-free for testability.
-- **Postgres parity:** confirm `export(None,None,since)` id-cursor semantics match
-  SQLite (code review of `backend/postgres.rs`); no live PG required for v1.
+  `Store` reads; test `max_message_id` + backfill cursor seeding, cursor-advance/
+  feed-merge, address-filter predicate, and thread grouping. Pure-logic functions kept
+  UI-free for testability.
+- **Render tests (finding #7):** ratatui `TestBackend` snapshot/layout tests for the
+  empty state, a too-small terminal, and a populated feed; assert no panic and key
+  regions present.
+- **Postgres parity (finding #2):** source-verify `backend/postgres.rs` implements the
+  same contract the console relies on — `export(None,None,since)` global id-cursor,
+  `thread_messages`, `inbox` (latest_disposition/actionable), `dispositions_for`,
+  `occupancy`/`get_lease`, and the new `max_message_id` — and document a manual PG smoke
+  procedure. No live PG required for v1 sign-off, but the checklist must be explicit.
 - **Manual smoke:** seed a temp db with `telex send`, run `telex-console --db <tmp>`,
-  verify live tail + navigation, clean exit/terminal restore.
+  verify backfill + live tail + navigation + filter, clean exit/terminal restore.
 
 ## Out of Scope (deferred follow-ups)
 - Attention/kind filters and `/` full-text search (only address filter in v1).
