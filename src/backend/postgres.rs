@@ -369,6 +369,14 @@ impl Backend for PgBackend {
             .get("m"))
     }
 
+    async fn max_message_id(&self) -> Result<i64> {
+        Ok(self
+            .client
+            .query_one("SELECT COALESCE(MAX(id),0) AS m FROM messages", &[])
+            .await?
+            .get("m"))
+    }
+
     async fn fetch_after(&self, address: &str, cursor: i64) -> Result<Vec<MessageRow>> {
         let sql = format!("SELECT {MSG_COLS} FROM messages WHERE to_addr=$1 AND id>$2 ORDER BY id");
         let rows = self.client.query(&sql, &[&address, &cursor]).await?;

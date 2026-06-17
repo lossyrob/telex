@@ -394,6 +394,13 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn max_message_id(&self) -> Result<i64> {
+        self.run(move |c| {
+            Ok(c.query_row("SELECT COALESCE(MAX(id),0) FROM messages", [], |r| r.get(0))?)
+        })
+        .await
+    }
+
     async fn fetch_after(&self, address: &str, cursor: i64) -> Result<Vec<MessageRow>> {
         let a = address.to_string();
         self.run(move |c| {

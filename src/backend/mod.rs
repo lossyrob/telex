@@ -54,6 +54,9 @@ pub trait Backend: Send + Sync {
 
     // ---- messages ----
     async fn max_id(&self, address: &str) -> Result<i64>;
+    /// The greatest message id across all addresses (0 if empty). Used by read-only
+    /// consumers (e.g. the console) to seed a bounded backfill cursor for the global feed.
+    async fn max_message_id(&self) -> Result<i64>;
     async fn fetch_after(&self, address: &str, cursor: i64) -> Result<Vec<MessageRow>>;
     /// Record that `message_id` was handed to a waiter for `recipient` (the served address), so a
     /// later holder does not redeliver it. Durable: this is what turns the in-memory delivery

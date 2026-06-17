@@ -10,6 +10,7 @@ default-run = "telex"
 # Keep the throwaway feasibility crate in spike/ out of this package's workspace so
 # `cargo build` at the repo root builds only the real telex binary.
 [workspace]
+members = ["telex-console"]
 exclude = ["spike"]
 
 [[bin]]
