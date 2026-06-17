@@ -264,6 +264,10 @@ fn default_sqlite_path() -> String {
         .unwrap_or_else(|_| "telex.db".into())
 }
 
+// Only the sqlite path-resolution code calls `expand_tilde`; under non-sqlite feature sets
+// (e.g. `--no-default-features --features postgres`) it is unreferenced, and the CI build runs
+// with `-D warnings`, which would otherwise reject it as dead code.
+#[cfg_attr(not(feature = "sqlite"), allow(dead_code))]
 fn expand_tilde(p: &str) -> String {
     if let Some(rest) = p.strip_prefix("~/").or_else(|| p.strip_prefix("~\\")) {
         if let Some(home) = dirs::home_dir() {
