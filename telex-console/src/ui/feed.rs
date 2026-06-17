@@ -12,8 +12,8 @@ use crate::ui::{detail, theme};
 use telex::model::MessageRow;
 
 pub fn render(f: &mut Frame, area: Rect, st: &AppState) {
-    let cols = Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)])
-        .split(area);
+    let cols =
+        Layout::horizontal([Constraint::Percentage(60), Constraint::Percentage(40)]).split(area);
 
     let rows = st.visible_feed();
     render_list(f, cols[0], &rows, st.feed_sel);
@@ -52,7 +52,10 @@ pub fn row_line(m: &MessageRow) -> Line<'static> {
         .clone()
         .unwrap_or_else(|| m.body.lines().next().unwrap_or("").to_string());
     Line::from(vec![
-        Span::styled(theme::hms_utc(m.sent_at_ms), Style::default().fg(Color::DarkGray)),
+        Span::styled(
+            theme::hms_utc(m.sent_at_ms),
+            Style::default().fg(Color::DarkGray),
+        ),
         Span::raw(" "),
         Span::styled(
             theme::attn_symbol(&m.attention).to_string(),

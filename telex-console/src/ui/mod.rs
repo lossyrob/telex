@@ -31,9 +31,12 @@ pub fn render(f: &mut Frame, st: &AppState) {
         return;
     }
 
-    let chunks =
-        Layout::vertical([Constraint::Length(1), Constraint::Min(1), Constraint::Length(1)])
-            .split(area);
+    let chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .split(area);
 
     render_header(f, chunks[0], st);
     match st.view {
@@ -62,7 +65,10 @@ fn render_header(f: &mut Frame, area: ratatui::layout::Rect, st: &AppState) {
         .unwrap_or_default();
 
     let mut spans = vec![
-        Span::styled(" telex-console ", Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            " telex-console ",
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
         Span::raw(format!(
             "│ {}({}) │ {view} │ ",
             st.backend_name, st.backend_kind
@@ -124,7 +130,12 @@ mod tests {
     }
 
     fn state() -> AppState {
-        AppState::new("default".into(), "sqlite".into(), None, Backfill::Recent(200))
+        AppState::new(
+            "default".into(),
+            "sqlite".into(),
+            None,
+            Backfill::Recent(200),
+        )
     }
 
     fn msg(id: i64, from: &str, to: &str, subject: &str) -> MessageRow {

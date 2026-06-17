@@ -55,7 +55,11 @@ fn render_transcript(f: &mut Frame, area: Rect, st: &AppState) {
     );
 }
 
-fn transcript_item(m: &MessageRow, by_id: &HashMap<i64, &MessageRow>, st: &AppState) -> ListItem<'static> {
+fn transcript_item(
+    m: &MessageRow,
+    by_id: &HashMap<i64, &MessageRow>,
+    st: &AppState,
+) -> ListItem<'static> {
     let indent = "  ".repeat(reply_depth(m, by_id));
     let subject = m
         .subject
@@ -67,11 +71,12 @@ fn transcript_item(m: &MessageRow, by_id: &HashMap<i64, &MessageRow>, st: &AppSt
             theme::attn_symbol(&m.attention).to_string(),
             Style::default().fg(theme::attn_color(&m.attention)),
         ),
-        Span::styled(
-            format!(" #{} ", m.id),
-            Style::default().fg(Color::DarkGray),
-        ),
-        Span::raw(format!("{} → {} ", m.from_addr.as_deref().unwrap_or("?"), m.to_addr)),
+        Span::styled(format!(" #{} ", m.id), Style::default().fg(Color::DarkGray)),
+        Span::raw(format!(
+            "{} → {} ",
+            m.from_addr.as_deref().unwrap_or("?"),
+            m.to_addr
+        )),
         Span::styled(format!("[{}] ", m.kind), Style::default().fg(Color::Cyan)),
         Span::raw(subject),
     ];

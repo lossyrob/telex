@@ -67,7 +67,9 @@ async fn main() -> Result<()> {
 ///    backend), even when a non-sqlite default is configured. This is what a user means
 ///    by "point the console at this database file."
 /// 3. neither → the configured default backend (or the zero-config implicit sqlite).
-async fn open_backend(args: &Args) -> Result<(String, std::sync::Arc<dyn telex::backend::Backend>)> {
+async fn open_backend(
+    args: &Args,
+) -> Result<(String, std::sync::Arc<dyn telex::backend::Backend>)> {
     let (name, profile) = if args.backend.is_some() {
         telex::profiles::resolve(args.backend.as_deref(), args.db.as_deref())?
     } else if args.db.is_some() {

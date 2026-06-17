@@ -21,7 +21,13 @@ pub fn render(f: &mut Frame, area: Rect, st: &AppState) {
     .split(area);
 
     let addrs = st.visible_addresses();
-    render_addresses(f, cols[0], &addrs, st.addr_sel, st.addr_focus == AddrFocus::List);
+    render_addresses(
+        f,
+        cols[0],
+        &addrs,
+        st.addr_sel,
+        st.addr_focus == AddrFocus::List,
+    );
     render_messages(
         f,
         cols[1],
@@ -33,13 +39,7 @@ pub fn render(f: &mut Frame, area: Rect, st: &AppState) {
     detail::render(f, cols[2], st, selected);
 }
 
-fn render_addresses(
-    f: &mut Frame,
-    area: Rect,
-    addrs: &[&AddressEntry],
-    sel: usize,
-    focused: bool,
-) {
+fn render_addresses(f: &mut Frame, area: Rect, addrs: &[&AddressEntry], sel: usize, focused: bool) {
     let block = Block::default()
         .borders(Borders::ALL)
         .title(title(" addresses ", focused));
@@ -68,7 +68,9 @@ fn render_addresses(
     let mut state = ListState::default();
     state.select(Some(sel.min(addrs.len().saturating_sub(1))));
     f.render_stateful_widget(
-        List::new(items).block(block).highlight_style(highlight(focused)),
+        List::new(items)
+            .block(block)
+            .highlight_style(highlight(focused)),
         area,
         &mut state,
     );
@@ -117,7 +119,9 @@ fn render_messages(f: &mut Frame, area: Rect, msgs: &[InboxItem], sel: usize, fo
     let mut state = ListState::default();
     state.select(Some(sel.min(msgs.len().saturating_sub(1))));
     f.render_stateful_widget(
-        List::new(items).block(block).highlight_style(highlight(focused)),
+        List::new(items)
+            .block(block)
+            .highlight_style(highlight(focused)),
         area,
         &mut state,
     );
@@ -127,7 +131,9 @@ fn title(text: &str, focused: bool) -> Span<'static> {
     if focused {
         Span::styled(
             text.to_string(),
-            Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD),
+            Style::default()
+                .fg(Color::Cyan)
+                .add_modifier(Modifier::BOLD),
         )
     } else {
         Span::raw(text.to_string())

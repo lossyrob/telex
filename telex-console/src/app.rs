@@ -407,9 +407,7 @@ impl AppState {
             }
             View::Addresses => match self.addr_focus {
                 AddrFocus::List => self.addr_sel = self.visible_addresses().len().saturating_sub(1),
-                AddrFocus::Messages => {
-                    self.addr_msg_sel = self.addr_msgs.len().saturating_sub(1)
-                }
+                AddrFocus::Messages => self.addr_msg_sel = self.addr_msgs.len().saturating_sub(1),
             },
             View::Thread => self.thread_sel = self.thread.len().saturating_sub(1),
         }
@@ -649,7 +647,10 @@ mod tests {
     use super::*;
 
     fn key(c: char) -> KeyEvent {
-        KeyEvent::new(KeyCode::Char(c), ratatui::crossterm::event::KeyModifiers::NONE)
+        KeyEvent::new(
+            KeyCode::Char(c),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        )
     }
 
     fn msg(id: i64, from: &str, to: &str) -> MessageRow {
@@ -672,7 +673,12 @@ mod tests {
     }
 
     fn state() -> AppState {
-        AppState::new("default".into(), "sqlite".into(), None, Backfill::Recent(200))
+        AppState::new(
+            "default".into(),
+            "sqlite".into(),
+            None,
+            Backfill::Recent(200),
+        )
     }
 
     #[test]
@@ -731,7 +737,10 @@ mod tests {
     fn entering_addresses_requests_message_load() {
         let mut s = state();
         s.addresses = vec![addr_entry("node:a")];
-        let cmds = s.on_key(KeyEvent::new(KeyCode::Tab, ratatui::crossterm::event::KeyModifiers::NONE));
+        let cmds = s.on_key(KeyEvent::new(
+            KeyCode::Tab,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(s.view, View::Addresses);
         assert_eq!(cmds, vec![Cmd::LoadAddressMessages("node:a".into())]);
     }
@@ -767,9 +776,15 @@ mod tests {
     fn tab_cycles_feed_and_addresses() {
         let mut s = state();
         assert_eq!(s.view, View::Feed);
-        s.on_key(KeyEvent::new(KeyCode::Tab, ratatui::crossterm::event::KeyModifiers::NONE));
+        s.on_key(KeyEvent::new(
+            KeyCode::Tab,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(s.view, View::Addresses);
-        s.on_key(KeyEvent::new(KeyCode::Tab, ratatui::crossterm::event::KeyModifiers::NONE));
+        s.on_key(KeyEvent::new(
+            KeyCode::Tab,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(s.view, View::Feed);
     }
 
@@ -777,7 +792,10 @@ mod tests {
     fn enter_on_feed_requests_thread_load() {
         let mut s = state();
         s.apply_feed(vec![msg(7, "a", "b")]);
-        let cmds = s.on_key(KeyEvent::new(KeyCode::Enter, ratatui::crossterm::event::KeyModifiers::NONE));
+        let cmds = s.on_key(KeyEvent::new(
+            KeyCode::Enter,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(cmds, vec![Cmd::LoadThread(7)]);
         assert_eq!(s.prev_view, View::Feed);
     }
@@ -789,7 +807,10 @@ mod tests {
         assert!(matches!(s.mode, Mode::Filter(_)));
         s.on_key(key('a'));
         s.on_key(key('b'));
-        s.on_key(KeyEvent::new(KeyCode::Enter, ratatui::crossterm::event::KeyModifiers::NONE));
+        s.on_key(KeyEvent::new(
+            KeyCode::Enter,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
         assert_eq!(s.filter.as_deref(), Some("ab"));
         assert_eq!(s.mode, Mode::Normal);
     }

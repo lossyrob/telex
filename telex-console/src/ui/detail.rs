@@ -26,7 +26,10 @@ pub fn render(f: &mut Frame, area: Rect, st: &AppState, msg: Option<&MessageRow>
 
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(vec![
-        Span::styled(format!("#{}", m.id), Style::default().add_modifier(Modifier::BOLD)),
+        Span::styled(
+            format!("#{}", m.id),
+            Style::default().add_modifier(Modifier::BOLD),
+        ),
         Span::raw("  "),
         Span::styled(
             format!("[{}]", m.attention),
@@ -93,7 +96,9 @@ pub fn render(f: &mut Frame, area: Rect, st: &AppState, msg: Option<&MessageRow>
     }
 
     f.render_widget(
-        Paragraph::new(lines).wrap(Wrap { trim: false }).block(block),
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .block(block),
         area,
     );
 }

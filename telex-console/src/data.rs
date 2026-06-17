@@ -119,9 +119,18 @@ mod tests {
         let b = SqliteBackend::open(":memory:").unwrap();
         b.init_schema().await.unwrap();
         let backend: Arc<dyn Backend> = Arc::new(b);
-        backend.ensure_address("node:demo", None, None, None).await.unwrap();
-        backend.insert_message(&new_msg("node:demo", "me", "one")).await.unwrap();
-        backend.insert_message(&new_msg("node:demo", "me", "two")).await.unwrap();
+        backend
+            .ensure_address("node:demo", None, None, None)
+            .await
+            .unwrap();
+        backend
+            .insert_message(&new_msg("node:demo", "me", "one"))
+            .await
+            .unwrap();
+        backend
+            .insert_message(&new_msg("node:demo", "me", "two"))
+            .await
+            .unwrap();
         (Store::new(backend.clone()), backend)
     }
 
@@ -143,11 +152,13 @@ mod tests {
         let addrs = store.addresses().await.unwrap();
         assert!(addrs.iter().any(|a| a.address.address == "node:demo"));
         // never occupied in this test => Idle, not Unknown
-        let demo = addrs.iter().find(|a| a.address.address == "node:demo").unwrap();
+        let demo = addrs
+            .iter()
+            .find(|a| a.address.address == "node:demo")
+            .unwrap();
         assert_eq!(demo.occupancy, Occ::Idle);
 
         let inbox = store.address_inbox("node:demo", 50).await.unwrap();
         assert_eq!(inbox.len(), 2);
     }
 }
-
