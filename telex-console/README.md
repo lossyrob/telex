@@ -1,0 +1,94 @@
+# telex-console
+
+A read-only, live-tailing terminal UI for inspecting a [Telex](../README.md) message
+fabric — the operator's console. Watch every message stream by in real time, browse the
+address directory with occupancy, and read threaded conversations with their disposition
+history.
+
+It is a **separate, separately-installable** binary that reuses the core `telex` library
+in-process (via the `Backend` trait), so the core `telex` binary stays dependency-light
+for agents. It works against either backend — local SQLite or networked Postgres.
+
+> **Read-only by design.** `telex-console` never claims a lease, sends a heartbeat, or
+> mutates anything. It only reads, polling on a timer (no blocking `telex wait`).
+
+## Install
+
+```sh
+cargo install --git https://github.com/lossyrob/telex telex-console
+```
+
+Or, from a checkout of this repo:
+
+```sh
+cargo build -p telex-console      # target/debug/telex-console
+cargo install --path telex-console
+```
+
+## Usage
+
+```sh
+telex-console                          # inspect the configured default backend
+telex-console --db ~/.telex/telex.db   # inspect a specific SQLite store
+telex-console --backend prod           # inspect a configured backend by name
+telex-console --address orchestrator   # start with an address filter applied
+```
+
+Backend selection mirrors the `telex` CLI (`--backend` / `--db` and the
+`TELEX_BACKEND` / `TELEX_DB` environment variables). As a convenience for inspection,
+`--db <path>` on its own opens that SQLite file directly, even when a non-SQLite default
+backend is configured.
+
+### Options
+
+| Flag | Default | Meaning |
+|------|---------|---------|
+| `--backend <name>` | configured default | Use a configured backend profile by name. |
+| `--db <path>` | — | Inspect a SQLite file directly. |
+| `--address <text>` | — | Seed the address filter on startup. |
+| `--poll-secs <n>` | `1` | Feed poll interval, in seconds. |
+| `--backfill <n\|0\|all>` | `200` | Recent messages to load on startup before tailing. `0` = tail only; `all` = full history. |
+
+## Views and keys
+
+Three views over a shared detail pane on the right. `Tab` cycles **Feed ⇄ Addresses**;
+`Enter` opens the **Thread** for the selected message.
+
+- **Feed** — the global, chronological stream of all messages, live-tailing the newest at
+  the bottom. A `*` marks messages that require a disposition.
+- **Addresses** — a Miller-column drill-down: the address directory (with ● live / ○ idle
+  / ? unknown occupancy) → that address's recent messages (with latest disposition) →
+  detail.
+- **Thread** — the selected message's thread as an indented transcript, with inline
+  disposition summaries.
+
+| Key | Action |
+|-----|--------|
+| `q` | quit |
+| `Tab` | switch view (Feed ⇄ Addresses) |
+| `j` / `k` or `↓` / `↑` | move selection |
+| `←` / `→` | switch column (Addresses view) |
+| `Enter` | open the thread for the selected message |
+| `t` | toggle live tail (auto-scroll) |
+| `f` | set the address filter (type, then `Enter`; `Esc` cancels) |
+| `g` / `G` | jump to top / bottom |
+| `Esc` | leave Thread / clear the filter |
+
+The header shows the backend, current view, live/paused state, active filter, and counts.
+Below ~50×8 the UI shows a "terminal too small" notice instead of cramped panes.
+
+## How it reads
+
+The feed is a cursor poll over the core `Backend::export(None, None, cursor)` (global,
+id-ordered); the cursor advances past the greatest message id seen, and the in-memory feed
+is bounded to the most recent ~2000 messages. The address directory and occupancy refresh
+on a slower cadence than the feed, and a single failed address lookup degrades to
+"unknown" rather than breaking the view. Dispositions are loaded lazily for the selected
+message.
+
+## Limitations
+
+- Address filtering only (substring on `from`/`to`); attention/kind filters and free-text
+  search are not yet implemented.
+- No write actions (send, reply, disposition) — read-only.
+- SQLite is the primary tested backend; Postgres is supported through the same trait.
