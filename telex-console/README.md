@@ -9,8 +9,10 @@ It is a **separate, separately-installable** binary that reuses the core `telex`
 in-process (via the `Backend` trait), so the core `telex` binary stays dependency-light
 for agents. It works against either backend — local SQLite or networked Postgres.
 
-> **Read-only by design.** `telex-console` never claims a lease, sends a heartbeat, or
-> mutates anything. It only reads, polling on a timer (no blocking `telex wait`).
+> **Read-only by design.** `telex-console` never sends a message, claims a lease,
+> heartbeats, or writes a disposition — it only reads, polling on a timer (no blocking
+> `telex wait`). It opens the store the same way the `telex` CLI does, which ensures the
+> schema exists; against an existing telex database that is a no-op.
 
 ## Install
 
@@ -92,3 +94,10 @@ message.
   search are not yet implemented.
 - No write actions (send, reply, disposition) — read-only.
 - SQLite is the primary tested backend; Postgres is supported through the same trait.
+- The backend is opened like the CLI (which runs `CREATE TABLE IF NOT EXISTS` and, for
+  SQLite, sets WAL mode). This is a no-op on an existing telex store and the console issues
+  no message/lease/disposition writes, but it is not yet strictly read-only against a
+  read-only file or a `SELECT`-only Postgres role — a dedicated read-only open path is a
+  planned follow-up.
+- The feed retains the most recent ~2000 messages in memory; when paused with more than
+  that arriving, selection tracks position rather than a pinned message id.

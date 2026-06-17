@@ -34,7 +34,9 @@ pub struct AddressEntry {
     pub occupancy: Occ,
 }
 
-/// Read-only store over a backend.
+/// Read-only store over a backend. Cheap to clone (shares the backend `Arc`), so it can
+/// be handed to a background directory-refresh task.
+#[derive(Clone)]
 pub struct Store {
     backend: Arc<dyn Backend>,
 }

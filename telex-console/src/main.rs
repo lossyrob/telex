@@ -1,7 +1,7 @@
 //! `telex-console` — a read-only, live-tailing terminal UI for inspecting a Telex
 //! message fabric. It opens the same backend the `telex` CLI would (via the core
 //! library's profile resolution) and reads messages, addresses, threads, and
-//! dispositions. It never holds a lease, heartbeats, or mutates state.
+//! dispositions. It never sends, holds a lease, heartbeats, or writes a disposition.
 
 mod app;
 mod data;

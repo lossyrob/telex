@@ -99,6 +99,9 @@ pub struct AppState {
     pub feed: Vec<MessageRow>,
     pub feed_cursor: i64,
     pub feed_sel: usize,
+    /// True once the backfill cursor has been seeded from the global max id. Until then
+    /// we must not poll, to avoid an unbounded `export` from cursor 0 on a transient error.
+    pub feed_seeded: bool,
 
     // Addresses
     pub addresses: Vec<AddressEntry>,
@@ -106,6 +109,8 @@ pub struct AppState {
     pub addr_focus: AddrFocus,
     pub addr_msgs: Vec<InboxItem>,
     pub addr_msg_sel: usize,
+    /// The address `addr_msgs` was loaded for, so we can detect staleness.
+    pub addr_msgs_for: Option<String>,
 
     // Thread
     pub thread: Vec<MessageRow>,
@@ -140,11 +145,13 @@ impl AppState {
             feed: Vec::new(),
             feed_cursor: 0,
             feed_sel: 0,
+            feed_seeded: false,
             addresses: Vec::new(),
             addr_sel: 0,
             addr_focus: AddrFocus::List,
             addr_msgs: Vec::new(),
             addr_msg_sel: 0,
+            addr_msgs_for: None,
             thread: Vec::new(),
             thread_sel: 0,
             thread_root: None,
@@ -190,10 +197,7 @@ impl AppState {
     pub fn selected_message_id(&self) -> Option<i64> {
         match self.view {
             View::Feed => self.visible_feed().get(self.feed_sel).map(|m| m.id),
-            View::Addresses => match self.addr_focus {
-                AddrFocus::Messages => self.addr_msgs.get(self.addr_msg_sel).map(|i| i.message.id),
-                AddrFocus::List => self.addr_msgs.first().map(|i| i.message.id),
-            },
+            View::Addresses => self.addr_msgs.get(self.addr_msg_sel).map(|i| i.message.id),
             View::Thread => self.thread.get(self.thread_sel).map(|m| m.id),
         }
     }
@@ -224,7 +228,7 @@ impl AppState {
         }
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
-            KeyCode::Tab => self.cycle_view(),
+            KeyCode::Tab => return self.cycle_view(),
             KeyCode::Char('t') => {
                 self.tailing = !self.tailing;
                 if self.tailing {
@@ -254,6 +258,12 @@ impl AppState {
                 } else if self.filter.is_some() {
                     self.filter = None;
                     self.clamp_selection();
+                    // The selected address may have changed; reconcile its message pane.
+                    if self.view == View::Addresses {
+                        if let Some(addr) = self.selected_address() {
+                            return vec![Cmd::LoadAddressMessages(addr)];
+                        }
+                    }
                 }
             }
             _ => {}
@@ -287,13 +297,27 @@ impl AppState {
         Vec::new()
     }
 
-    fn cycle_view(&mut self) {
+    fn cycle_view(&mut self) -> Vec<Cmd> {
         self.view = match self.view {
             View::Feed => View::Addresses,
             View::Addresses => View::Feed,
             // From Thread, Tab returns to where you came from.
             View::Thread => self.prev_view,
         };
+        self.enter_addresses_reload()
+    }
+
+    /// When the Addresses view becomes active, load messages for the selected address if
+    /// the message pane is stale (or unloaded).
+    fn enter_addresses_reload(&mut self) -> Vec<Cmd> {
+        if self.view == View::Addresses {
+            if let Some(addr) = self.selected_address() {
+                if self.addr_msgs_for.as_deref() != Some(addr.as_str()) {
+                    return vec![Cmd::LoadAddressMessages(addr)];
+                }
+            }
+        }
+        Vec::new()
     }
 
     fn move_down(&mut self) -> Vec<Cmd> {
@@ -477,44 +501,57 @@ impl AppState {
                 Ok(items) => {
                     self.addr_msgs = items;
                     self.addr_msg_sel = 0;
+                    self.addr_msgs_for = Some(addr);
                 }
                 Err(e) => self.status = Some(format!("inbox load failed: {e}")),
             },
         }
     }
 
-    async fn init(&mut self, store: &Store) {
+    /// Seed the feed cursor from the global max id (bounded backfill) and do the first poll.
+    async fn init_feed(&mut self, store: &Store) {
+        self.seed_cursor(store).await;
+        self.poll_feed(store).await;
+    }
+
+    async fn seed_cursor(&mut self, store: &Store) {
         match store.max_message_id().await {
-            Ok(max) => self.feed_cursor = self.backfill.initial_cursor(max),
+            Ok(max) => {
+                self.feed_cursor = self.backfill.initial_cursor(max);
+                self.feed_seeded = true;
+            }
             Err(e) => self.status = Some(format!("backend error: {e}")),
         }
-        self.poll_feed(store).await;
-        self.refresh_directory(store).await;
     }
 
     async fn poll_feed(&mut self, store: &Store) {
+        if !self.feed_seeded {
+            // Never export from the default cursor 0 (an unbounded full-table load): retry
+            // seeding first and skip this tick if the max id still can't be read.
+            self.seed_cursor(store).await;
+            if !self.feed_seeded {
+                return;
+            }
+        }
         match store.feed_since(self.feed_cursor).await {
             Ok(rows) => self.apply_feed(rows),
             Err(e) => self.status = Some(format!("feed poll failed: {e}")),
         }
     }
 
-    async fn refresh_directory(&mut self, store: &Store) {
-        match store.addresses().await {
-            Ok(addrs) => {
-                self.addresses = addrs;
-                self.clamp_selection();
-                if self.view == View::Addresses
-                    && self.addr_msgs.is_empty()
-                    && !self.addresses.is_empty()
-                {
-                    if let Some(addr) = self.selected_address() {
-                        self.exec(Cmd::LoadAddressMessages(addr), store).await;
-                    }
+    /// Apply a fresh address-directory snapshot (computed off the main loop). Returns a
+    /// reload command when the message pane is stale relative to the selected address.
+    pub fn apply_addresses(&mut self, addrs: Vec<AddressEntry>) -> Option<Cmd> {
+        self.addresses = addrs;
+        self.clamp_selection();
+        if self.view == View::Addresses && !self.addresses.is_empty() {
+            if let Some(addr) = self.selected_address() {
+                if self.addr_msgs_for.as_deref() != Some(addr.as_str()) {
+                    return Some(Cmd::LoadAddressMessages(addr));
                 }
             }
-            Err(e) => self.status = Some(format!("directory refresh failed: {e}")),
         }
+        None
     }
 
     /// Lazily load dispositions for the currently selected message (only when changed).
@@ -530,6 +567,8 @@ impl AppState {
     }
 }
 
+type DirResult = Result<Vec<AddressEntry>, String>;
+
 /// Run the interactive console until the user quits.
 pub async fn run(mut state: AppState, store: Store, poll_secs: u64) -> Result<()> {
     let mut term = terminal::init()?;
@@ -539,7 +578,14 @@ pub async fn run(mut state: AppState, store: Store, poll_secs: u64) -> Result<()
     let mut feed_tick = tokio::time::interval(Duration::from_secs(poll_secs.max(1)));
     let mut dir_tick = tokio::time::interval(Duration::from_secs(DIRECTORY_TICK_SECS));
 
-    state.init(&store).await;
+    // The address-directory refresh (an occupancy fan-out across all addresses) runs in a
+    // spawned task so it never stalls input or rendering. `dir_inflight` coalesces ticks
+    // that arrive while a refresh is still running.
+    let (dir_tx, mut dir_rx) = tokio::sync::mpsc::unbounded_channel::<DirResult>();
+    let mut dir_inflight = false;
+
+    state.init_feed(&store).await;
+    spawn_directory_refresh(&store, &dir_tx, &mut dir_inflight);
     state.ensure_detail(&store).await;
 
     loop {
@@ -556,7 +602,22 @@ pub async fn run(mut state: AppState, store: Store, poll_secs: u64) -> Result<()
                 None => state.should_quit = true,
             },
             _ = feed_tick.tick() => state.poll_feed(&store).await,
-            _ = dir_tick.tick() => state.refresh_directory(&store).await,
+            _ = dir_tick.tick() => {
+                if !dir_inflight {
+                    spawn_directory_refresh(&store, &dir_tx, &mut dir_inflight);
+                }
+            }
+            Some(result) = dir_rx.recv() => {
+                dir_inflight = false;
+                match result {
+                    Ok(addrs) => {
+                        if let Some(cmd) = state.apply_addresses(addrs) {
+                            state.exec(cmd, &store).await;
+                        }
+                    }
+                    Err(e) => state.status = Some(format!("directory refresh failed: {e}")),
+                }
+            }
         }
 
         state.ensure_detail(&store).await;
@@ -568,6 +629,19 @@ pub async fn run(mut state: AppState, store: Store, poll_secs: u64) -> Result<()
     drop(_guard);
     let _ = terminal::restore();
     Ok(())
+}
+
+fn spawn_directory_refresh(
+    store: &Store,
+    tx: &tokio::sync::mpsc::UnboundedSender<DirResult>,
+    inflight: &mut bool,
+) {
+    *inflight = true;
+    let store = store.clone();
+    let tx = tx.clone();
+    tokio::spawn(async move {
+        let _ = tx.send(store.addresses().await.map_err(|e| e.to_string()));
+    });
 }
 
 #[cfg(test)]
@@ -625,6 +699,41 @@ mod tests {
         assert_eq!(s.feed.len(), 3);
         // tailing => selection at newest
         assert_eq!(s.feed_sel, 2);
+    }
+
+    fn addr_entry(a: &str) -> AddressEntry {
+        AddressEntry {
+            address: telex::model::AddressRow {
+                address: a.into(),
+                description: None,
+                scope: None,
+                tags: None,
+                status: "active".into(),
+                created_at_ms: 0,
+            },
+            occupancy: crate::data::Occ::Idle,
+        }
+    }
+
+    #[test]
+    fn apply_addresses_reloads_when_stale() {
+        let mut s = state();
+        s.view = View::Addresses;
+        // No messages loaded yet => stale => request load for the selected address.
+        let cmd = s.apply_addresses(vec![addr_entry("node:a"), addr_entry("node:b")]);
+        assert_eq!(cmd, Some(Cmd::LoadAddressMessages("node:a".into())));
+        // Once loaded for node:a, a refresh that keeps node:a selected is not stale.
+        s.addr_msgs_for = Some("node:a".into());
+        assert_eq!(s.apply_addresses(vec![addr_entry("node:a")]), None);
+    }
+
+    #[test]
+    fn entering_addresses_requests_message_load() {
+        let mut s = state();
+        s.addresses = vec![addr_entry("node:a")];
+        let cmds = s.on_key(KeyEvent::new(KeyCode::Tab, ratatui::crossterm::event::KeyModifiers::NONE));
+        assert_eq!(s.view, View::Addresses);
+        assert_eq!(cmds, vec![Cmd::LoadAddressMessages("node:a".into())]);
     }
 
     #[test]
