@@ -32,7 +32,7 @@ maps directly to the system:
 | Historical telex | Telex for agents | Design consequence |
 |---|---|---|
 | Telex number | Durable address | Address a responsibility, not a process |
-| Answerback / WRU | Lease + waiter loop | Confirm identity/liveness without interrupting the agent |
+| Answerback / WRU | Lease + waiter loop (the station) | Confirm identity/liveness without interrupting the agent |
 | Teleprinter | CLI endpoint | Agents send, wait, read, report, and disposition |
 | Switched text network | Pluggable backend | Same protocol locally and across machines |
 | Store-and-forward relay | Queued delivery | Sender and recipient need not coexist |
@@ -43,6 +43,35 @@ maps directly to the system:
 
 The metaphor should keep influencing names and behavior, especially around
 answerback, store-and-forward, line-open receipts, and paper-trail auditability.
+
+### Station: the running presence serving an address
+
+A **station** is the running presence a session sets up to serve a telex address —
+the resident **holder** plus its **waiter** loop, taken together. It is the umbrella
+noun for "the thing you start to serve an address": not the passive directory act of
+registering an address, and not a metaphor-losing generic like "listener". A real
+telex **station** was the staffed installation that served a telex **number**, which
+maps exactly onto the holder (holds the line/lease) and the waiter (the answerback
+drum). The term also gives plain-language invariants a clean noun — e.g. "two
+stations can't hold one number."
+
+A station is what a session runs to serve an address. Internally it is composed of
+the **holder** (lease + heartbeat + IPC server) and the **waiter** (the `telex wait`
+loop / answerback). "Station" is the umbrella concept; "holder" and "waiter" remain
+the precise terms for the two-process mechanics where that precision matters (notably
+the [SKILL.md](SKILL.md) re-arm pattern and the `[holder]` operational logs).
+
+| Telex metaphor | Telex term | Meaning |
+|---|---|---|
+| Telex number | **address** | the durable responsibility |
+| Telex station | **station** | the running presence serving an address: holder + waiter |
+| Holding the line | **lease** | the station's exclusive claim on the address |
+| Answerback | **waiter** | the answerback drum the station responds with (internal role) |
+| The teleprinter | **holder** | the resident process that holds the lease + serves waiters (internal role) |
+
+`attach` and `detach` remain the **lease verbs**: `attach` starts a station on the
+address (claiming the lease); `detach` stops the station and releases the lease. The
+CLI verbs are unchanged — "station" is vocabulary, not a new command.
 
 ## Architecture overview
 
@@ -485,6 +514,11 @@ Telex resolves this by splitting the waiter into **two processes**:
   handing it to the agent. The agent reasons, dispositions, and calls `telex wait`
   again.
 
+Together, the resident holder and the waiter loop it serves are the **station** —
+the running presence serving the address. "Holder" and "waiter" name the two-process
+mechanics below; "station" is the umbrella term for the pair (see
+[Station](#station-the-running-presence-serving-an-address)).
+
 The crucial property: the exit that hands a message to the agent happens at the
 *client* layer, while the lease (and its heartbeat) lives in the *holder*. The agent's
 turn therefore does **not** drop the backend connection or lapse the heartbeat, and
@@ -588,10 +622,11 @@ The v0 command surface is settled:
 PRESENCE
 - `telex attach --address <addr> [--description <s>] [--scope <s>] [--tags <a,b>]
      [--heartbeat-secs N] [--poll-secs N]`
-  Become live occupant; hold lease; run holder; blocks. Exclusive: fails if the address
+  Become live occupant; start a station on the address (hold lease; run holder);
+  blocks. Exclusive: fails if the address
   is already occupied by a live lease (reports current occupant). Registers the directory
   description on attach.
-- `telex detach --address <addr>`  Release the lease (and stop a running holder).
+- `telex detach --address <addr>`  Stop the station and release the lease.
 
 RECEIVE
 - `telex wait --address <addr> [--timeout-ms N]`

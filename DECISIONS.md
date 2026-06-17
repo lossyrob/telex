@@ -354,3 +354,35 @@ live against Azure Postgres Flexible Server; non-entra builds refuse entra backe
 actionable error. Published release binaries build `--features entra` (batteries-included);
 the crate default stays lean (sqlite+postgres) for fast iteration. Remaining from this entry:
 the conformance suite (issue #1) and the eventual `telex-core` + `telex-backend-*` crate split.
+
+## 0009 — "Station" as the user/agent-facing name for the running presence (holder + waiter)
+
+- **Date:** 2026-06-17
+- **Status:** Accepted
+
+**Context.** The two-process model (0004) gave us precise internal roles — the resident
+**holder** and the **waiter** (`telex wait`) loop — but no single user/agent-facing noun
+for *the thing you set up to serve an address*. Prose drifted between "a resident holder
+keeps the address live," "the waiter loop," and "listener," none of which name the pair as
+one concept. The passive directory act ("register an address") and metaphor-losing generics
+("listener") were both inadequate. A real telex **station** was the staffed installation
+that served a telex **number** — which maps exactly onto holder (holds the line/lease) +
+waiter (answerback drum), and gives plain-language invariants a clean noun ("two stations
+can't hold one number").
+
+**Decision.** Adopt **station** as the umbrella user/agent-facing term: *the running
+presence a session sets up to serve an address — holder + waiter, together.* Frame `attach`
+as "start a station on the address" and `detach` as "stop the station and release the
+lease," **without renaming any CLI verb** (`attach`/`detach`/`wait` are unchanged — this is
+vocabulary, not behavior). Keep **holder** and **waiter** as the precise terms wherever the
+two-process mechanics need precision (the SKILL.md re-arm pattern and exit-code table, the
+DESIGN.md waiter-loop section, and the `[holder]` operational logs). The canonical
+definition and the metaphor vocabulary table live in [DESIGN.md](DESIGN.md) ("Station: the
+running presence serving an address"); SKILL.md, README.md, and CLI help adopt the term.
+
+**Consequences.** A terminology/docs pass only — no lease, liveness, or messaging behavior
+change and no verb renames. Internal symbol renames (e.g. the `[holder]` log prefix, struct
+jargon) were intentionally left untouched to keep the diff reviewable; a future contributor
+could deepen the rename if desired. This entry records a naming choice (normally out of
+scope per the log conventions) because the term is load-bearing for cross-document
+consistency and was an explicit deliverable (issue #8).

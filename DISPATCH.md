@@ -61,8 +61,9 @@ consumers narrow it.
 
 A naive broadcast spams every working agent, breaking Telex's core "do not
 interrupt the foreground" invariant. The resolution is that an enquiry is delivered
-to the address's **answerback drum — the background waiter — and the waiter reasons
-about it autonomously.**
+to the address's **answerback drum — the background waiter of its station — and the
+waiter reasons about it autonomously.** (The station is the running presence serving
+the address: its holder holds the lease; its waiter answers and, here, reasons.)
 
 Historical answerback automatically answered *who are you?* The waiter now
 automatically answers *are you a good fit for this?* — light reasoning, no

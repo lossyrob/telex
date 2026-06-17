@@ -13,7 +13,7 @@ Your operator will tell you which address to attach to. You can reload these ins
 
 ## The core loop
 
-Use Telex as a two-process loop: a resident **holder** keeps the address live, and a single-shot `telex wait` delivers one message and completes. Both run as **background processes**, and each needs two independent properties — set both:
+Use Telex as a two-process loop. The running presence you set up to serve an address is its **station**: a resident **holder** that keeps the address live, plus a **waiter** — a single-shot `telex wait` that delivers one message and completes. (`attach` starts the station; `detach` stops it. The CLI verbs are unchanged — "station" is the umbrella noun for the holder + waiter pair.) Both processes run as **background processes**, and each needs two independent properties — set both:
 
 | Property | Holder + each `wait` | Why |
 |---|---|---|
@@ -23,7 +23,7 @@ Use Telex as a two-process loop: a resident **holder** keeps the address live, a
 So: **background and session-bound.** Never start them as persistent / standalone / daemonized processes that survive the session — that orphans the holder and corrupts liveness. You drive the loop one delivery at a time: each single-shot `telex wait` surfaces a message to you when the command **completes**, and then you re-arm a fresh one (see **The re-arm pattern** below).
 
 > **Two unrelated meanings of "attach/detach" — don't conflate them.**
-> - **telex `attach` / `detach`** are **lease** verbs: occupy or release an address. They say nothing about OS process lifecycle.
+> - **telex `attach` / `detach`** are **lease** verbs: `attach` starts a station on the address (occupy), `detach` stops it (release). They say nothing about OS process lifecycle.
 > - Your **agent runtime** separately decides whether a background process is **session-bound** (dies with the session — what you want) or **fully detached / persistent** (outlives it — never use this for the holder or a `wait`).
 >
 > The holder is long-lived, but unlike a typical server it must **not** be marked persistent. *(In Copilot CLI terms: start them async with `detach: false` — the default — never `detach: true`, even though they run long.)*
@@ -187,8 +187,8 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex attach` | Become the live occupant, hold the lease, run the holder, and register the directory description. Blocks. Fails if the address is already occupied by a live lease. | `--address <addr>`, `--description <s>`, `--scope <s>`, `--tags <a,b>`, `--heartbeat-secs N`, `--poll-secs N` |
-| `telex detach` | Release the lease and stop a running holder. | `--address <addr>` |
+| `telex attach` | Start a station on the address: become the live occupant, hold the lease, run the holder, and register the directory description. Blocks. Fails if the address is already occupied by a live lease. | `--address <addr>`, `--description <s>`, `--scope <s>`, `--tags <a,b>`, `--heartbeat-secs N`, `--poll-secs N` |
+| `telex detach` | Stop the station: release the lease and stop a running holder. | `--address <addr>` |
 
 ### RECEIVE
 
@@ -323,7 +323,7 @@ the `entra` feature — which the published release binaries include.
 
 ## Worked example: two sessions
 
-Session A attaches to a durable address and waits. Run `telex attach` (the holder) and each single-shot `telex wait` in the background, bound to A's session — never as persistent processes that outlive it.
+Session A attaches to a durable address and waits. Run `telex attach` (the station's holder) and each single-shot `telex wait` (its waiter) in the background, bound to A's session — never as persistent processes that outlive it.
 
 ```sh
 export TELEX_ADDRESS=session:a   # all of A's commands default to this address (and its from)
@@ -336,14 +336,14 @@ Then A waits with a **single-shot** background `telex wait` (session-bound, not 
 telex wait --address session:a
 ```
 
-Session B also starts its own holder in the background, bound to its session.
+Session B also starts its own station in the background, bound to its session.
 
 ```sh
 export TELEX_ADDRESS=session:b   # B's from; A's reply will route back here
 telex attach --address session:b --description "session B requesting status" --scope project:telex --tags repo:telex,role:requester
 ```
 
-Then Session B finds A and sends a disposition-required message. One-shot commands like `resolve` and `send` run directly — no background task needed; only the holder and each `telex wait` run in the background.
+Then Session B finds A and sends a disposition-required message. One-shot commands like `resolve` and `send` run directly — no background task needed; only the station's holder and each `telex wait` run in the background.
 
 ```sh
 telex address list --scope project:telex --match "session A"
