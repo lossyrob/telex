@@ -98,8 +98,12 @@ impl SqliteBackend {
             }
         }
         let conn = Connection::open(path)?;
+        // Set busy_timeout *first*: the journal_mode=WAL switch takes a write lock, so when
+        // several connections open the same fresh database at once (multiple holders/senders
+        // starting together), a still-default zero timeout would surface a spurious
+        // "database is locked" instead of waiting for the brief switch to finish.
         conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; PRAGMA busy_timeout=5000;",
+            "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
         )?;
         Ok(Self {
             conn: Arc::new(Mutex::new(conn)),
