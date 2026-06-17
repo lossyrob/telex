@@ -1,0 +1,687 @@
+//! Application state, input handling, and the async run loop.
+//!
+//! Navigation (`on_key`) is pure and UI-free so it can be unit-tested; anything that
+//! touches the backend is an async `Cmd` executed by the run loop. Rendering reads state
+//! read-only (see [`crate::ui`]).
+
+use std::collections::HashMap;
+use std::time::Duration;
+
+use anyhow::Result;
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
+
+use crate::data::{AddressEntry, Store};
+use crate::{filter, terminal, ui};
+use telex::model::{DispositionRow, InboxItem, MessageRow};
+
+/// Maximum messages retained in the in-memory feed ring.
+const FEED_CAP: usize = 2000;
+/// How often the address directory / occupancy is refreshed (slower than the feed).
+const DIRECTORY_TICK_SECS: u64 = 4;
+
+/// Which top-level view is active.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum View {
+    Feed,
+    Addresses,
+    Thread,
+}
+
+/// Within the Addresses view, which column has focus.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AddrFocus {
+    List,
+    Messages,
+}
+
+/// Input mode: normal navigation, or editing the address filter.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Mode {
+    Normal,
+    Filter(String),
+}
+
+/// Startup feed backfill policy.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Backfill {
+    TailOnly,
+    Recent(i64),
+    All,
+}
+
+impl Backfill {
+    pub fn parse(s: &str) -> Result<Self> {
+        let t = s.trim();
+        if t.eq_ignore_ascii_case("all") {
+            return Ok(Backfill::All);
+        }
+        let n: i64 = t
+            .parse()
+            .map_err(|_| anyhow::anyhow!("--backfill must be a number, 0, or 'all' (got '{s}')"))?;
+        Ok(if n <= 0 {
+            Backfill::TailOnly
+        } else {
+            Backfill::Recent(n)
+        })
+    }
+
+    /// Initial feed cursor given the current global max id.
+    fn initial_cursor(self, max_id: i64) -> i64 {
+        match self {
+            Backfill::All => 0,
+            Backfill::TailOnly => max_id,
+            Backfill::Recent(n) => (max_id - n).max(0),
+        }
+    }
+}
+
+/// Async work requested by `on_key` and run by the loop.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Cmd {
+    LoadThread(i64),
+    LoadAddressMessages(String),
+}
+
+/// All application state.
+pub struct AppState {
+    pub backend_name: String,
+    pub backend_kind: String,
+    pub backfill: Backfill,
+
+    pub view: View,
+    pub prev_view: View,
+    pub should_quit: bool,
+    pub tailing: bool,
+    pub mode: Mode,
+    pub status: Option<String>,
+
+    // Feed
+    pub feed: Vec<MessageRow>,
+    pub feed_cursor: i64,
+    pub feed_sel: usize,
+
+    // Addresses
+    pub addresses: Vec<AddressEntry>,
+    pub addr_sel: usize,
+    pub addr_focus: AddrFocus,
+    pub addr_msgs: Vec<InboxItem>,
+    pub addr_msg_sel: usize,
+
+    // Thread
+    pub thread: Vec<MessageRow>,
+    pub thread_sel: usize,
+    pub thread_root: Option<i64>,
+    /// Dispositions per message in the open thread (loaded when the thread is opened).
+    pub thread_disp: HashMap<i64, Vec<DispositionRow>>,
+
+    // Detail (dispositions for the currently selected message, loaded lazily)
+    pub detail_disp: Option<(i64, Vec<DispositionRow>)>,
+
+    pub filter: Option<String>,
+}
+
+impl AppState {
+    pub fn new(
+        backend_name: String,
+        backend_kind: String,
+        focus_address: Option<String>,
+        backfill: Backfill,
+    ) -> Self {
+        let mut s = Self {
+            backend_name,
+            backend_kind,
+            backfill,
+            view: View::Feed,
+            prev_view: View::Feed,
+            should_quit: false,
+            tailing: true,
+            mode: Mode::Normal,
+            status: None,
+            feed: Vec::new(),
+            feed_cursor: 0,
+            feed_sel: 0,
+            addresses: Vec::new(),
+            addr_sel: 0,
+            addr_focus: AddrFocus::List,
+            addr_msgs: Vec::new(),
+            addr_msg_sel: 0,
+            thread: Vec::new(),
+            thread_sel: 0,
+            thread_root: None,
+            thread_disp: HashMap::new(),
+            detail_disp: None,
+            filter: None,
+        };
+        if let Some(a) = focus_address {
+            if !a.trim().is_empty() {
+                s.filter = Some(a);
+            }
+        }
+        s
+    }
+
+    // ---- derived views ----
+
+    /// Feed rows passing the active filter, oldest first.
+    pub fn visible_feed(&self) -> Vec<&MessageRow> {
+        match &self.filter {
+            Some(f) => self
+                .feed
+                .iter()
+                .filter(|m| filter::message_matches(f, m))
+                .collect(),
+            None => self.feed.iter().collect(),
+        }
+    }
+
+    /// Address entries passing the active filter.
+    pub fn visible_addresses(&self) -> Vec<&AddressEntry> {
+        match &self.filter {
+            Some(f) => self
+                .addresses
+                .iter()
+                .filter(|a| filter::address_matches(f, &a.address.address))
+                .collect(),
+            None => self.addresses.iter().collect(),
+        }
+    }
+
+    /// The message id currently selected (depends on view/focus), if any.
+    pub fn selected_message_id(&self) -> Option<i64> {
+        match self.view {
+            View::Feed => self.visible_feed().get(self.feed_sel).map(|m| m.id),
+            View::Addresses => match self.addr_focus {
+                AddrFocus::Messages => self.addr_msgs.get(self.addr_msg_sel).map(|i| i.message.id),
+                AddrFocus::List => self.addr_msgs.first().map(|i| i.message.id),
+            },
+            View::Thread => self.thread.get(self.thread_sel).map(|m| m.id),
+        }
+    }
+
+    fn selected_feed_thread(&self) -> Option<i64> {
+        self.visible_feed().get(self.feed_sel).map(|m| m.thread_id)
+    }
+
+    fn selected_addr_thread(&self) -> Option<i64> {
+        self.addr_msgs
+            .get(self.addr_msg_sel)
+            .map(|i| i.message.thread_id)
+    }
+
+    fn selected_address(&self) -> Option<String> {
+        self.visible_addresses()
+            .get(self.addr_sel)
+            .map(|a| a.address.address.clone())
+    }
+
+    // ---- key handling (pure) ----
+
+    /// Handle a key press. Mutates navigation state and returns async commands to run.
+    pub fn on_key(&mut self, key: KeyEvent) -> Vec<Cmd> {
+        self.status = None;
+        if let Mode::Filter(_) = self.mode {
+            return self.on_key_filter(key);
+        }
+        match key.code {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Tab => self.cycle_view(),
+            KeyCode::Char('t') => {
+                self.tailing = !self.tailing;
+                if self.tailing {
+                    self.feed_sel = self.visible_feed().len().saturating_sub(1);
+                }
+            }
+            KeyCode::Char('f') => self.mode = Mode::Filter(self.filter.clone().unwrap_or_default()),
+            KeyCode::Char('j') | KeyCode::Down => return self.move_down(),
+            KeyCode::Char('k') | KeyCode::Up => return self.move_up(),
+            KeyCode::Char('g') | KeyCode::Home => self.go_top(),
+            KeyCode::Char('G') | KeyCode::End => self.go_bottom(),
+            KeyCode::Right | KeyCode::Char('l') => {
+                if self.view == View::Addresses {
+                    self.addr_focus = AddrFocus::Messages;
+                    self.addr_msg_sel = 0;
+                }
+            }
+            KeyCode::Left | KeyCode::Char('h') => {
+                if self.view == View::Addresses {
+                    self.addr_focus = AddrFocus::List;
+                }
+            }
+            KeyCode::Enter => return self.on_enter(),
+            KeyCode::Esc => {
+                if self.view == View::Thread {
+                    self.view = self.prev_view;
+                } else if self.filter.is_some() {
+                    self.filter = None;
+                    self.clamp_selection();
+                }
+            }
+            _ => {}
+        }
+        Vec::new()
+    }
+
+    fn on_key_filter(&mut self, key: KeyEvent) -> Vec<Cmd> {
+        let Mode::Filter(buf) = &mut self.mode else {
+            return Vec::new();
+        };
+        match key.code {
+            KeyCode::Enter => {
+                let f = buf.trim().to_string();
+                self.filter = if f.is_empty() { None } else { Some(f) };
+                self.mode = Mode::Normal;
+                self.clamp_selection();
+                if self.view == View::Addresses {
+                    if let Some(addr) = self.selected_address() {
+                        return vec![Cmd::LoadAddressMessages(addr)];
+                    }
+                }
+            }
+            KeyCode::Esc => self.mode = Mode::Normal,
+            KeyCode::Backspace => {
+                buf.pop();
+            }
+            KeyCode::Char(c) => buf.push(c),
+            _ => {}
+        }
+        Vec::new()
+    }
+
+    fn cycle_view(&mut self) {
+        self.view = match self.view {
+            View::Feed => View::Addresses,
+            View::Addresses => View::Feed,
+            // From Thread, Tab returns to where you came from.
+            View::Thread => self.prev_view,
+        };
+    }
+
+    fn move_down(&mut self) -> Vec<Cmd> {
+        match self.view {
+            View::Feed => {
+                let len = self.visible_feed().len();
+                if len > 0 && self.feed_sel + 1 < len {
+                    self.feed_sel += 1;
+                }
+                if self.feed_sel + 1 < len {
+                    // moved off the bottom: stop auto-following
+                    self.tailing = false;
+                }
+            }
+            View::Addresses => match self.addr_focus {
+                AddrFocus::List => {
+                    let len = self.visible_addresses().len();
+                    if len > 0 && self.addr_sel + 1 < len {
+                        self.addr_sel += 1;
+                        if let Some(addr) = self.selected_address() {
+                            return vec![Cmd::LoadAddressMessages(addr)];
+                        }
+                    }
+                }
+                AddrFocus::Messages => {
+                    if self.addr_msg_sel + 1 < self.addr_msgs.len() {
+                        self.addr_msg_sel += 1;
+                    }
+                }
+            },
+            View::Thread => {
+                if self.thread_sel + 1 < self.thread.len() {
+                    self.thread_sel += 1;
+                }
+            }
+        }
+        Vec::new()
+    }
+
+    fn move_up(&mut self) -> Vec<Cmd> {
+        match self.view {
+            View::Feed => {
+                if self.feed_sel > 0 {
+                    self.feed_sel -= 1;
+                    self.tailing = false;
+                }
+            }
+            View::Addresses => match self.addr_focus {
+                AddrFocus::List => {
+                    if self.addr_sel > 0 {
+                        self.addr_sel -= 1;
+                        if let Some(addr) = self.selected_address() {
+                            return vec![Cmd::LoadAddressMessages(addr)];
+                        }
+                    }
+                }
+                AddrFocus::Messages => {
+                    self.addr_msg_sel = self.addr_msg_sel.saturating_sub(1);
+                }
+            },
+            View::Thread => {
+                self.thread_sel = self.thread_sel.saturating_sub(1);
+            }
+        }
+        Vec::new()
+    }
+
+    fn go_top(&mut self) {
+        match self.view {
+            View::Feed => {
+                self.feed_sel = 0;
+                self.tailing = false;
+            }
+            View::Addresses => match self.addr_focus {
+                AddrFocus::List => self.addr_sel = 0,
+                AddrFocus::Messages => self.addr_msg_sel = 0,
+            },
+            View::Thread => self.thread_sel = 0,
+        }
+    }
+
+    fn go_bottom(&mut self) {
+        match self.view {
+            View::Feed => {
+                self.feed_sel = self.visible_feed().len().saturating_sub(1);
+                self.tailing = true;
+            }
+            View::Addresses => match self.addr_focus {
+                AddrFocus::List => self.addr_sel = self.visible_addresses().len().saturating_sub(1),
+                AddrFocus::Messages => {
+                    self.addr_msg_sel = self.addr_msgs.len().saturating_sub(1)
+                }
+            },
+            View::Thread => self.thread_sel = self.thread.len().saturating_sub(1),
+        }
+    }
+
+    fn on_enter(&mut self) -> Vec<Cmd> {
+        match self.view {
+            View::Feed => {
+                if let Some(tid) = self.selected_feed_thread() {
+                    self.prev_view = View::Feed;
+                    return vec![Cmd::LoadThread(tid)];
+                }
+            }
+            View::Addresses => {
+                if self.addr_focus == AddrFocus::List {
+                    self.addr_focus = AddrFocus::Messages;
+                    self.addr_msg_sel = 0;
+                } else if let Some(tid) = self.selected_addr_thread() {
+                    self.prev_view = View::Addresses;
+                    return vec![Cmd::LoadThread(tid)];
+                }
+            }
+            View::Thread => {}
+        }
+        Vec::new()
+    }
+
+    /// Keep selection indices within bounds after data/filter changes.
+    fn clamp_selection(&mut self) {
+        let fl = self.visible_feed().len();
+        if self.feed_sel >= fl {
+            self.feed_sel = fl.saturating_sub(1);
+        }
+        let al = self.visible_addresses().len();
+        if self.addr_sel >= al {
+            self.addr_sel = al.saturating_sub(1);
+        }
+        if self.addr_msg_sel >= self.addr_msgs.len() {
+            self.addr_msg_sel = self.addr_msgs.len().saturating_sub(1);
+        }
+    }
+
+    // ---- data application (pure given inputs) ----
+
+    /// Merge newly fetched feed rows (id-ordered) and advance the cursor. Auto-scrolls
+    /// to the newest row while tailing.
+    pub fn apply_feed(&mut self, rows: Vec<MessageRow>) {
+        if rows.is_empty() {
+            return;
+        }
+        if let Some(last) = rows.last() {
+            self.feed_cursor = self.feed_cursor.max(last.id);
+        }
+        self.feed.extend(rows);
+        if self.feed.len() > FEED_CAP {
+            let drop = self.feed.len() - FEED_CAP;
+            self.feed.drain(0..drop);
+        }
+        if self.tailing {
+            self.feed_sel = self.visible_feed().len().saturating_sub(1);
+        } else {
+            self.clamp_selection();
+        }
+    }
+
+    // ---- async execution ----
+
+    async fn exec(&mut self, cmd: Cmd, store: &Store) {
+        match cmd {
+            Cmd::LoadThread(tid) => match store.thread(tid).await {
+                Ok(msgs) => {
+                    let mut disp = HashMap::new();
+                    for m in &msgs {
+                        if let Ok(d) = store.dispositions(m.id).await {
+                            if !d.is_empty() {
+                                disp.insert(m.id, d);
+                            }
+                        }
+                    }
+                    self.thread = msgs;
+                    self.thread_disp = disp;
+                    self.thread_sel = self.thread.len().saturating_sub(1);
+                    self.thread_root = Some(tid);
+                    self.view = View::Thread;
+                }
+                Err(e) => self.status = Some(format!("thread load failed: {e}")),
+            },
+            Cmd::LoadAddressMessages(addr) => match store.address_inbox(&addr, 200).await {
+                Ok(items) => {
+                    self.addr_msgs = items;
+                    self.addr_msg_sel = 0;
+                }
+                Err(e) => self.status = Some(format!("inbox load failed: {e}")),
+            },
+        }
+    }
+
+    async fn init(&mut self, store: &Store) {
+        match store.max_message_id().await {
+            Ok(max) => self.feed_cursor = self.backfill.initial_cursor(max),
+            Err(e) => self.status = Some(format!("backend error: {e}")),
+        }
+        self.poll_feed(store).await;
+        self.refresh_directory(store).await;
+    }
+
+    async fn poll_feed(&mut self, store: &Store) {
+        match store.feed_since(self.feed_cursor).await {
+            Ok(rows) => self.apply_feed(rows),
+            Err(e) => self.status = Some(format!("feed poll failed: {e}")),
+        }
+    }
+
+    async fn refresh_directory(&mut self, store: &Store) {
+        match store.addresses().await {
+            Ok(addrs) => {
+                self.addresses = addrs;
+                self.clamp_selection();
+                if self.view == View::Addresses
+                    && self.addr_msgs.is_empty()
+                    && !self.addresses.is_empty()
+                {
+                    if let Some(addr) = self.selected_address() {
+                        self.exec(Cmd::LoadAddressMessages(addr), store).await;
+                    }
+                }
+            }
+            Err(e) => self.status = Some(format!("directory refresh failed: {e}")),
+        }
+    }
+
+    /// Lazily load dispositions for the currently selected message (only when changed).
+    async fn ensure_detail(&mut self, store: &Store) {
+        let Some(id) = self.selected_message_id() else {
+            return;
+        };
+        if self.detail_disp.as_ref().map(|(i, _)| *i) == Some(id) {
+            return;
+        }
+        let disps = store.dispositions(id).await.unwrap_or_default();
+        self.detail_disp = Some((id, disps));
+    }
+}
+
+/// Run the interactive console until the user quits.
+pub async fn run(mut state: AppState, store: Store, poll_secs: u64) -> Result<()> {
+    let mut term = terminal::init()?;
+    let _guard = terminal::Guard;
+
+    let mut input = crate::event::input_events();
+    let mut feed_tick = tokio::time::interval(Duration::from_secs(poll_secs.max(1)));
+    let mut dir_tick = tokio::time::interval(Duration::from_secs(DIRECTORY_TICK_SECS));
+
+    state.init(&store).await;
+    state.ensure_detail(&store).await;
+
+    loop {
+        term.draw(|f| ui::render(f, &state))?;
+
+        tokio::select! {
+            maybe = input.recv() => match maybe {
+                Some(Event::Key(k)) if k.kind == KeyEventKind::Press => {
+                    for cmd in state.on_key(k) {
+                        state.exec(cmd, &store).await;
+                    }
+                }
+                Some(_) => {}
+                None => state.should_quit = true,
+            },
+            _ = feed_tick.tick() => state.poll_feed(&store).await,
+            _ = dir_tick.tick() => state.refresh_directory(&store).await,
+        }
+
+        state.ensure_detail(&store).await;
+        if state.should_quit {
+            break;
+        }
+    }
+
+    drop(_guard);
+    let _ = terminal::restore();
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn key(c: char) -> KeyEvent {
+        KeyEvent::new(KeyCode::Char(c), ratatui::crossterm::event::KeyModifiers::NONE)
+    }
+
+    fn msg(id: i64, from: &str, to: &str) -> MessageRow {
+        MessageRow {
+            id,
+            thread_id: id,
+            parent_id: None,
+            from_addr: Some(from.into()),
+            to_addr: to.into(),
+            cc: None,
+            kind: "note".into(),
+            attention: "background".into(),
+            requires_disposition: false,
+            subject: Some(format!("subj {id}")),
+            body: "body".into(),
+            metadata: None,
+            sent_at_ms: 0,
+            created_at_ms: 0,
+        }
+    }
+
+    fn state() -> AppState {
+        AppState::new("default".into(), "sqlite".into(), None, Backfill::Recent(200))
+    }
+
+    #[test]
+    fn backfill_parse() {
+        assert_eq!(Backfill::parse("all").unwrap(), Backfill::All);
+        assert_eq!(Backfill::parse("0").unwrap(), Backfill::TailOnly);
+        assert_eq!(Backfill::parse("50").unwrap(), Backfill::Recent(50));
+        assert!(Backfill::parse("nope").is_err());
+    }
+
+    #[test]
+    fn backfill_initial_cursor() {
+        assert_eq!(Backfill::All.initial_cursor(100), 0);
+        assert_eq!(Backfill::TailOnly.initial_cursor(100), 100);
+        assert_eq!(Backfill::Recent(30).initial_cursor(100), 70);
+        assert_eq!(Backfill::Recent(500).initial_cursor(100), 0);
+    }
+
+    #[test]
+    fn apply_feed_advances_cursor_and_tails() {
+        let mut s = state();
+        s.apply_feed(vec![msg(1, "a", "b"), msg(2, "a", "b"), msg(3, "a", "b")]);
+        assert_eq!(s.feed_cursor, 3);
+        assert_eq!(s.feed.len(), 3);
+        // tailing => selection at newest
+        assert_eq!(s.feed_sel, 2);
+    }
+
+    #[test]
+    fn moving_up_stops_tailing() {
+        let mut s = state();
+        s.apply_feed(vec![msg(1, "a", "b"), msg(2, "a", "b"), msg(3, "a", "b")]);
+        assert!(s.tailing);
+        s.on_key(key('k'));
+        assert!(!s.tailing);
+        assert_eq!(s.feed_sel, 1);
+        // new data arrives but we should not jump to bottom
+        s.apply_feed(vec![msg(4, "a", "b")]);
+        assert_eq!(s.feed_sel, 1);
+    }
+
+    #[test]
+    fn filter_narrows_feed_and_clamps() {
+        let mut s = state();
+        s.apply_feed(vec![
+            msg(1, "impl-215", "orch"),
+            msg(2, "node:ci", "orch"),
+            msg(3, "impl-215", "orch"),
+        ]);
+        s.filter = Some("impl".into());
+        assert_eq!(s.visible_feed().len(), 2);
+        s.clamp_selection();
+        assert!(s.feed_sel < 2);
+    }
+
+    #[test]
+    fn tab_cycles_feed_and_addresses() {
+        let mut s = state();
+        assert_eq!(s.view, View::Feed);
+        s.on_key(KeyEvent::new(KeyCode::Tab, ratatui::crossterm::event::KeyModifiers::NONE));
+        assert_eq!(s.view, View::Addresses);
+        s.on_key(KeyEvent::new(KeyCode::Tab, ratatui::crossterm::event::KeyModifiers::NONE));
+        assert_eq!(s.view, View::Feed);
+    }
+
+    #[test]
+    fn enter_on_feed_requests_thread_load() {
+        let mut s = state();
+        s.apply_feed(vec![msg(7, "a", "b")]);
+        let cmds = s.on_key(KeyEvent::new(KeyCode::Enter, ratatui::crossterm::event::KeyModifiers::NONE));
+        assert_eq!(cmds, vec![Cmd::LoadThread(7)]);
+        assert_eq!(s.prev_view, View::Feed);
+    }
+
+    #[test]
+    fn filter_entry_mode_edits_buffer() {
+        let mut s = state();
+        s.on_key(key('f'));
+        assert!(matches!(s.mode, Mode::Filter(_)));
+        s.on_key(key('a'));
+        s.on_key(key('b'));
+        s.on_key(KeyEvent::new(KeyCode::Enter, ratatui::crossterm::event::KeyModifiers::NONE));
+        assert_eq!(s.filter.as_deref(), Some("ab"));
+        assert_eq!(s.mode, Mode::Normal);
+    }
+}

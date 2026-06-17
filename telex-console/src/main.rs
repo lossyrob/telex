@@ -2,12 +2,19 @@
 //! message fabric. It opens the same backend the `telex` CLI would (via the core
 //! library's profile resolution) and reads messages, addresses, threads, and
 //! dispositions. It never holds a lease, heartbeats, or mutates state.
-//!
-//! This `main` is the scaffold stage: it resolves and opens the backend and reports
-//! basic facts. The interactive TUI is layered on in subsequent stages.
+
+mod app;
+mod data;
+mod event;
+mod filter;
+mod terminal;
+mod ui;
 
 use anyhow::Result;
 use clap::Parser;
+
+use crate::app::{AppState, Backfill};
+use crate::data::Store;
 
 /// Command-line surface. Mirrors the `telex` CLI's backend selection globals so the
 /// console opens the same store.
@@ -43,18 +50,13 @@ struct Args {
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    let backfill = Backfill::parse(&args.backfill)?;
     let (name, backend) = open_backend(&args).await?;
+    let store = Store::new(backend);
+    let kind = store.kind().to_string();
 
-    let max_id = backend.max_message_id().await?;
-    println!(
-        "telex-console: backend '{name}' (kind={}), max_message_id={max_id}",
-        backend.kind()
-    );
-    println!(
-        "(scaffold) address={:?} poll_secs={} backfill={}",
-        args.address, args.poll_secs, args.backfill
-    );
-    Ok(())
+    let state = AppState::new(name, kind, args.address.clone(), backfill);
+    app::run(state, store, args.poll_secs).await
 }
 
 /// Resolve and open the backend to inspect, reusing the core library's profile logic.
