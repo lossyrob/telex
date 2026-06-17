@@ -5,6 +5,9 @@ use crate::model::{now_ms, Attention, NewMessage, STATUS_RETIRED};
 use crate::output::emit;
 
 pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
+    // Resolve the body before any backend side effects so an invalid --body/--body-file
+    // combination fails without auto-creating the destination address.
+    let body = crate::commands::resolve_body(args.body.clone(), args.body_file.clone())?;
     let backend = ctx.backend().await?;
     let attention = Attention::parse(&args.attention)?;
 
@@ -34,7 +37,7 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
         attention,
         requires_disposition: args.requires_disposition,
         subject: args.subject.clone(),
-        body: args.body.clone(),
+        body,
         metadata: args.metadata.clone(),
         sent_at_ms: now_ms(),
     };

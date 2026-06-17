@@ -116,6 +116,7 @@ Then send to the selected address.
 
 ```sh
 telex send --to <addr> --subject "<subject>" --body "<body>"
+telex send --to <addr> --subject "<subject>" --body-file <path>   # body from a UTF-8 file (`-` = stdin)
 ```
 
 Useful send flags:
@@ -124,15 +125,27 @@ Useful send flags:
 telex send --to <addr> --from <your-addr> --subject "<s>" --body "<s>" --cc <a,b> --kind <s> --attention interrupt|next-checkpoint|background|fyi --requires-disposition --metadata <json>
 ```
 
+`--body` and `--body-file` are mutually exclusive and exactly one is required. Prefer
+`--body-file` for non-trivial or multiline content — Markdown, code blocks, JSON, quoted command
+output — to avoid shell quoting headaches and command-line length limits. The file is read as
+UTF-8 and sent exactly as written (no trimming, so trailing newlines are preserved);
+`--body-file -` reads the body from stdin.
+
+```sh
+# Recommended for multiline/structured messages:
+telex send --to <addr> --subject "Status" --body-file message.md --requires-disposition
+```
+
 `send` prints a receipt: `delivered`, `queued-unoccupied`, or `rejected-retired`, plus the new message id.
 
 Reply inside an existing thread:
 
 ```sh
 telex reply --to-message <message-id> --body "<body>"
+telex reply --to-message <message-id> --body-file <path>   # reply body from a UTF-8 file (`-` = stdin)
 ```
 
-Optional reply flags are `--from <your-addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, and `--requires-disposition`. As with `send`, `--from` defaults to `$TELEX_ADDRESS` / `--address`; the reply's destination is taken from the parent message's sender (so the parent must itself have had a `from`).
+Optional reply flags are `--body-file <path>` (UTF-8 file body, `-` for stdin; mutually exclusive with `--body`, exactly one of the two required), `--from <your-addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, and `--requires-disposition`. As with `send`, `--from` defaults to `$TELEX_ADDRESS` / `--address`; the reply's destination is taken from the parent message's sender (so the parent must itself have had a `from`).
 
 ## Reading
 
@@ -189,8 +202,8 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex send` | Send a message and print a delivery/queue/reject receipt plus message id. | `--to <addr>`, `--from <addr>`, `--subject <s>`, `--body <s>`, `--cc <a,b>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition`, `--metadata <json>` |
-| `telex reply` | Reply under a parent message thread. | `--to-message <id>`, `--body <s>`, `--from <addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition` |
+| `telex send` | Send a message and print a delivery/queue/reject receipt plus message id. | `--to <addr>`, `--from <addr>`, `--subject <s>`, `--body <s>`, `--body-file <path>`, `--cc <a,b>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition`, `--metadata <json>` |
+| `telex reply` | Reply under a parent message thread. | `--to-message <id>`, `--body <s>`, `--body-file <path>`, `--from <addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition` |
 
 ### DISPOSITION
 

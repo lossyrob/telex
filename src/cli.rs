@@ -172,9 +172,12 @@ pub struct SendArgs {
     /// Subject line.
     #[arg(long)]
     pub subject: Option<String>,
-    /// Message body.
+    /// Message body (inline). Mutually exclusive with --body-file; exactly one is required.
     #[arg(long)]
-    pub body: String,
+    pub body: Option<String>,
+    /// Read the message body from a UTF-8 file (`-` reads stdin). Mutually exclusive with --body.
+    #[arg(long)]
+    pub body_file: Option<String>,
     /// Comma-separated cc addresses (visible, not interrupting).
     #[arg(long)]
     pub cc: Option<String>,
@@ -200,9 +203,12 @@ pub struct ReplyArgs {
     /// The message id being replied to.
     #[arg(long)]
     pub to_message: i64,
-    /// Reply body.
+    /// Reply body (inline). Mutually exclusive with --body-file; exactly one is required.
     #[arg(long)]
-    pub body: String,
+    pub body: Option<String>,
+    /// Read the reply body from a UTF-8 file (`-` reads stdin). Mutually exclusive with --body.
+    #[arg(long)]
+    pub body_file: Option<String>,
     /// Subject (defaults to "Re: <parent subject>").
     #[arg(long)]
     pub subject: Option<String>,
