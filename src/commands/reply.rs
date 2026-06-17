@@ -5,6 +5,9 @@ use crate::model::{now_ms, Attention, NewMessage};
 use crate::output::emit;
 
 pub async fn run(ctx: &Ctx, args: ReplyArgs) -> Result<i32> {
+    // Resolve the body up front so an invalid --body/--body-file combination fails before any
+    // backend lookups or address creation.
+    let body = crate::commands::resolve_body(args.body.clone(), args.body_file.clone())?;
     let backend = ctx.backend().await?;
     let parent = backend
         .get_message(args.to_message)
@@ -35,7 +38,7 @@ pub async fn run(ctx: &Ctx, args: ReplyArgs) -> Result<i32> {
         attention,
         requires_disposition: args.requires_disposition,
         subject,
-        body: args.body.clone(),
+        body,
         metadata: None,
         sent_at_ms: now_ms(),
     };
