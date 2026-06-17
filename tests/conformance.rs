@@ -95,19 +95,43 @@ where
     concurrency(make_store().await).await;
 }
 
-/// `init_schema` must be safe to call repeatedly.
+/// `init_schema` must be safe to call repeatedly *and non-destructive*: re-initialising a
+/// store that already holds data must preserve it (a backend that drops/recreates tables on
+/// init would corrupt a live store and must fail here).
 async fn schema_idempotent(store: Store) {
     let b = store.connect().await;
+
+    // Seed one of each persisted entity (connect already ran init_schema once).
+    b.ensure_address("idem:1", Some("d"), None, None)
+        .await
+        .unwrap();
+    let mut needs = new_msg("idem:1");
+    needs.requires_disposition = true;
+    let m = b.insert_message(&needs).await.unwrap();
+    b.insert_disposition(m.id, "idem:1", "acknowledged", None, None)
+        .await
+        .unwrap();
+
+    // Re-initialising repeatedly must be a no-op that preserves existing data.
     for _ in 0..3 {
         b.init_schema()
             .await
             .expect("init_schema must be idempotent");
     }
-    // The store is still usable after repeated init.
-    b.ensure_address("idem:1", Some("d"), None, None)
-        .await
-        .unwrap();
-    assert!(b.get_address("idem:1").await.unwrap().is_some());
+
+    assert!(
+        b.get_address("idem:1").await.unwrap().is_some(),
+        "init_schema must not drop existing addresses"
+    );
+    assert!(
+        b.get_message(m.id).await.unwrap().is_some(),
+        "init_schema must not drop existing messages"
+    );
+    assert_eq!(
+        b.dispositions_for(m.id).await.unwrap().len(),
+        1,
+        "init_schema must not drop existing dispositions"
+    );
 }
 
 /// Addresses/directory: ensure/get/list; status transitions; retired drops from default
@@ -566,17 +590,23 @@ mod sqlite_fixture {
         std::fs::create_dir_all(&root).unwrap();
         let counter = Arc::new(AtomicU64::new(0));
 
-        {
-            let root = root.clone();
+        // Run the battery on a task so a scenario panic still lets us remove the temp dir.
+        let run_root = root.clone();
+        let result = tokio::spawn(async move {
             run_all(move || {
-                let root = root.clone();
+                let root = run_root.clone();
                 let counter = counter.clone();
                 Box::pin(async move { make_store(root, counter) })
             })
             .await;
-        }
+        })
+        .await;
 
         std::fs::remove_dir_all(&root).ok();
+
+        if let Err(e) = result {
+            std::panic::resume_unwind(e.into_panic());
+        }
     }
 }
 
@@ -658,21 +688,45 @@ mod postgres_fixture {
             }
         }
 
-        let base = std::env::var("TELEX_PG_SCHEMA").unwrap_or_else(|_| "telex_conformance".into());
+        let base = sanitize_ident(
+            &std::env::var("TELEX_PG_SCHEMA").unwrap_or_else(|_| "telex_conformance".into()),
+        )
+        .expect("TELEX_PG_SCHEMA must be a valid identifier");
         let schema = sanitize_ident(&format!("{base}_{}_{}", std::process::id(), now_ms()))
             .expect("derived schema name must be a valid identifier");
 
-        // Drop any leftover, run the battery against a fresh schema, then drop it.
-        admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
-            .await
-            .expect("pre-run schema drop");
+        // Sweep schemas left over by a previously hard-killed run (exact-prefix match, no LIKE
+        // wildcards), so this run starts clean and prior leftovers are reclaimed — the
+        // per-run-unique name means a plain pre-drop could never have matched them.
+        let prefix = format!("{base}_");
+        admin_exec(
+            &cfg,
+            &format!(
+                "DO $$ DECLARE s text; BEGIN \
+                   FOR s IN SELECT schema_name FROM information_schema.schemata \
+                            WHERE left(schema_name, {len}) = '{prefix}' \
+                   LOOP EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', s); END LOOP; \
+                 END $$;",
+                len = prefix.chars().count()
+            ),
+        )
+        .await
+        .expect("pre-run leftover sweep");
 
+        // Run the battery on a task so a scenario panic still triggers schema cleanup.
         let cfg_run = cfg.clone();
         let schema_run = schema.clone();
-        run_all(move || make_store(cfg_run.clone(), schema_run.clone())).await;
+        let result = tokio::spawn(async move {
+            run_all(move || make_store(cfg_run.clone(), schema_run.clone())).await;
+        })
+        .await;
 
         admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
             .await
             .expect("post-run schema drop");
+
+        if let Err(e) = result {
+            std::panic::resume_unwind(e.into_panic());
+        }
     }
 }
