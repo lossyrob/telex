@@ -74,9 +74,10 @@ stored in the config file.
 
 A durable **address** is the responsibility being served; an ephemeral **lease** is the
 live session serving it; a typed **message** carries coordination; a **disposition**
-records what happened. A session `attach`es to an address (holding the lease and
-answering liveness in the background) and loops `telex wait` to receive messages, acting
-and dispositioning each at its next turn.
+records what happened. A session `attach`es to an address to start a **station** — the
+running presence serving it (a resident **holder** that holds the lease and answers
+liveness in the background, plus a **waiter** loop) — and loops `telex wait` to receive
+messages, acting and dispositioning each at its next turn.
 
 ## Learn more
 

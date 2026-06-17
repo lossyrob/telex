@@ -48,14 +48,14 @@ pub struct Cli {
 pub enum Command {
     /// Initialize ~/.telex and the backend schema.
     Init,
-    /// Show config, backend, address, holder/occupancy status.
+    /// Show config, backend, address, station/occupancy status.
     Status,
     /// Print the agent usage skill (how to use telex) for this build.
     Skill(SkillArgs),
 
-    /// Become the live occupant of an address; hold the lease and run the holder (blocks).
+    /// Start a station on an address: become the live occupant, hold the lease, run the holder (blocks).
     Attach(AttachArgs),
-    /// Release the lease for an address (and stop a running holder).
+    /// Stop the station for an address: release the lease and stop a running holder.
     Detach,
 
     /// Block until an actionable message arrives, print it as JSON, and exit.

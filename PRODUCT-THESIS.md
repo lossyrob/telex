@@ -87,9 +87,9 @@ responsible recipient. Telex must preserve that distinction.
 
 ### Answerback is infrastructure-supplied liveness
 
-A working agent should not be interrupted by "are you there?" pings. The waiter
-loop or backend connection supplies answerback automatically by holding the
-address lease and proving whether the line is open.
+A working agent should not be interrupted by "are you there?" pings. The address's
+**station** — its waiter loop or backend connection — supplies answerback automatically
+by holding the address lease and proving whether the line is open.
 
 ### Store and forward is required
 
