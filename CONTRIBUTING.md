@@ -41,3 +41,5 @@ TELEX_PG_URL='postgresql://user@host:5432/telex?sslmode=disable' \
 - `TELEX_PG_PASSWORD` — optional; applied to the connection if the URL omits a password.
 - `TELEX_PG_SCHEMA` — optional schema prefix (default `telex_conformance`); the suite
   creates a per-run schema under it and drops it when finished.
+- `TELEX_PG_REQUIRE=1` — fail instead of skipping when `TELEX_PG_URL` is unset/empty, so a CI
+  job that intends to exercise the Postgres leg can't pass by silently skipping it.

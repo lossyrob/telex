@@ -84,6 +84,22 @@ async fn run_all<F>(make_store: F)
 where
     F: Fn() -> BoxFut<Store>,
 {
+    // Coverage checklist — every `Backend` trait method must be exercised by at least one
+    // scenario here; when the trait grows, add the method + a scenario so the battery fails
+    // loudly instead of silently leaving new contract surface untested:
+    //   kind / capabilities / notify_new ........ capabilities_and_signals
+    //   init_schema ............................. schema_idempotent
+    //   ensure_address / get_address /
+    //     set_address_status / list_addresses ... addresses_directory
+    //   claim_lease / heartbeat / release_lease /
+    //     get_lease / occupancy ................. leases_liveness
+    //   max_id / fetch_after .................... cursor_delivery, concurrency
+    //   insert_message / get_message /
+    //     thread_messages ....................... messages_threading
+    //   inbox ................................... inbox_derivation
+    //   insert_disposition / dispositions_for ... dispositions, inbox_derivation
+    //   export .................................. export_filters
+    capabilities_and_signals(make_store().await).await;
     schema_idempotent(make_store().await).await;
     addresses_directory(make_store().await).await;
     leases_liveness(make_store().await).await;
@@ -93,6 +109,33 @@ where
     dispositions(make_store().await).await;
     export_filters(make_store().await).await;
     concurrency(make_store().await).await;
+}
+
+/// Capabilities + signals smoke coverage: `kind`, `capabilities`, and the best-effort
+/// `notify_new` must be callable and self-consistent, so a new backend can't leave the
+/// metadata/notify surface silently untested.
+async fn capabilities_and_signals(store: Store) {
+    let b = store.connect().await;
+
+    assert!(
+        !b.kind().is_empty(),
+        "kind() must be a non-empty backend name"
+    );
+    let caps = b.capabilities();
+    assert!(
+        !caps.push.is_empty(),
+        "capabilities.push must describe a delivery mechanism"
+    );
+    assert!(
+        !caps.lease.is_empty(),
+        "capabilities.lease must describe a liveness mechanism"
+    );
+
+    // notify_new is a best-effort signal (a no-op where push is unsupported); it must never
+    // error, even for an address with no occupant or messages.
+    b.notify_new("sig:1", 1, now_ms())
+        .await
+        .expect("notify_new must be a safe best-effort signal");
 }
 
 /// `init_schema` must be safe to call repeatedly *and non-destructive*: re-initialising a
@@ -111,6 +154,7 @@ async fn schema_idempotent(store: Store) {
     b.insert_disposition(m.id, "idem:1", "acknowledged", None, None)
         .await
         .unwrap();
+    b.claim_lease(&new_claim("idem:1", "A"), 15).await.unwrap();
 
     // Re-initialising repeatedly must be a no-op that preserves existing data.
     for _ in 0..3 {
@@ -131,6 +175,10 @@ async fn schema_idempotent(store: Store) {
         b.dispositions_for(m.id).await.unwrap().len(),
         1,
         "init_schema must not drop existing dispositions"
+    );
+    assert!(
+        b.get_lease("idem:1").await.unwrap().is_some(),
+        "init_schema must not drop existing leases"
     );
 }
 
@@ -231,6 +279,22 @@ async fn leases_liveness(store: Store) {
         LeaseOutcome::Claimed => panic!("a live address must not be reclaimable by another"),
     }
 
+    // Authorization: a non-holder cannot release someone else's lease (no lease theft).
+    assert!(
+        !b.release_lease(addr, "B").await.unwrap(),
+        "release_lease must reject a non-holder"
+    );
+    assert_eq!(
+        b.get_lease(addr)
+            .await
+            .unwrap()
+            .unwrap()
+            .occupant
+            .as_deref(),
+        Some("A"),
+        "a rejected release leaves the original holder in place"
+    );
+
     // Same-occupant re-claim is a heartbeat refresh: since_ms is preserved, heartbeat moves.
     tokio::time::sleep(Duration::from_millis(20)).await;
     assert!(matches!(
@@ -239,7 +303,10 @@ async fn leases_liveness(store: Store) {
     ));
     let l2 = b.get_lease(addr).await.unwrap().unwrap();
     assert_eq!(l2.since_ms, since1, "since_ms is stable across refresh");
-    assert!(l2.heartbeat_at_ms >= l1.heartbeat_at_ms);
+    assert!(
+        l2.heartbeat_at_ms > l1.heartbeat_at_ms,
+        "a same-occupant re-claim must advance heartbeat_at_ms"
+    );
 
     // Explicit heartbeat keeps the lease live.
     b.heartbeat(addr).await.unwrap();
@@ -416,6 +483,24 @@ async fn inbox_derivation(store: Store) {
         .await
         .unwrap();
     assert!(b.inbox(addr, false, 50).await.unwrap().is_empty());
+
+    // Reopen: a *later* non-terminal disposition makes the message actionable again. This
+    // distinguishes "latest-per-(message,recipient) wins" from a weaker "any terminal
+    // disposition exists" rule — a backend implementing the latter would wrongly keep it gone.
+    b.insert_disposition(m3.id, addr, "acknowledged", None, None)
+        .await
+        .unwrap();
+    let reopened = b.inbox(addr, false, 50).await.unwrap();
+    assert_eq!(
+        reopened.len(),
+        1,
+        "a later non-terminal disposition reopens the message (latest wins, not any-terminal)"
+    );
+    assert_eq!(reopened[0].message.id, m3.id);
+    assert_eq!(
+        reopened[0].latest_disposition.as_deref(),
+        Some("acknowledged")
+    );
 }
 
 /// Dispositions: insert; latest-per-(message, recipient) wins; terminality semantics; and a
@@ -505,8 +590,10 @@ async fn export_filters(store: Store) {
     assert!(since.iter().all(|m| m.id > a.id));
 }
 
-/// Concurrency: multiple independent connections inserting concurrently produce distinct,
-/// monotonic ids with no lost writes (the cursor model depends on this).
+/// Concurrency: multiple independent connections inserting concurrently each receive a
+/// distinct id with no lost writes (the cursor model depends on this). Each writer records the
+/// ids it was handed, so the assertions exercise concurrent id *assignment* rather than merely
+/// restating `fetch_after`'s `ORDER BY id`.
 async fn concurrency(store: Store) {
     let addr = "conc:1";
     const WRITERS: usize = 4;
@@ -521,28 +608,60 @@ async fn concurrency(store: Store) {
         let store = store.clone();
         handles.push(tokio::spawn(async move {
             let b = store.connect().await;
+            let mut mine = Vec::with_capacity(PER_WRITER);
             for _ in 0..PER_WRITER {
-                b.insert_message(&new_msg(addr)).await.unwrap();
+                mine.push(b.insert_message(&new_msg(addr)).await.unwrap().id);
             }
+            mine
         }));
     }
+    let mut assigned: Vec<i64> = Vec::new();
     for h in handles {
-        h.await.unwrap();
+        assigned.extend(h.await.unwrap());
     }
 
-    let b = store.connect().await;
-    let rows = b.fetch_after(addr, 0).await.unwrap();
     let total = WRITERS * PER_WRITER;
-    assert_eq!(rows.len(), total, "no lost writes under concurrency");
-
-    let ids: Vec<i64> = rows.iter().map(|m| m.id).collect();
-    let unique: HashSet<i64> = ids.iter().copied().collect();
-    assert_eq!(unique.len(), total, "ids are distinct under concurrency");
-    assert!(
-        ids.windows(2).all(|w| w[0] < w[1]),
-        "ids are strictly monotonic in cursor order"
+    // Every insert across every connection was handed a distinct id (no collisions).
+    let assigned_set: HashSet<i64> = assigned.iter().copied().collect();
+    assert_eq!(
+        assigned_set.len(),
+        total,
+        "concurrent inserts must each receive a distinct id"
     );
-    assert_eq!(b.max_id(addr).await.unwrap(), *ids.last().unwrap());
+
+    // The store holds exactly the ids handed back to the writers — no lost writes, none extra.
+    let conn = store.connect().await;
+    let rows = conn.fetch_after(addr, 0).await.unwrap();
+    let stored: HashSet<i64> = rows.iter().map(|m| m.id).collect();
+    assert_eq!(
+        stored, assigned_set,
+        "persisted ids must be exactly the ids handed back to the writers (no lost writes)"
+    );
+    assert_eq!(
+        conn.max_id(addr).await.unwrap(),
+        *assigned_set.iter().max().unwrap(),
+        "max_id reflects the highest assigned id"
+    );
+}
+
+// ----------------------------------------------------------------------------------------
+// Fixture harness
+// ----------------------------------------------------------------------------------------
+
+/// Run the full battery, then run `cleanup` whether the battery succeeded *or panicked*, and
+/// finally re-raise any panic so the test still fails. Centralises the panic-safe teardown so
+/// each fixture only supplies its own store factory and cleanup action.
+async fn run_with_cleanup<F, C, CFut>(make_store: F, cleanup: C)
+where
+    F: Fn() -> BoxFut<Store> + Send + 'static,
+    C: FnOnce() -> CFut,
+    CFut: Future<Output = ()>,
+{
+    let result = tokio::spawn(async move { run_all(make_store).await }).await;
+    cleanup().await;
+    if let Err(e) = result {
+        std::panic::resume_unwind(e.into_panic());
+    }
 }
 
 // ----------------------------------------------------------------------------------------
@@ -590,23 +709,18 @@ mod sqlite_fixture {
         std::fs::create_dir_all(&root).unwrap();
         let counter = Arc::new(AtomicU64::new(0));
 
-        // Run the battery on a task so a scenario panic still lets us remove the temp dir.
         let run_root = root.clone();
-        let result = tokio::spawn(async move {
-            run_all(move || {
+        run_with_cleanup(
+            move || {
                 let root = run_root.clone();
                 let counter = counter.clone();
                 Box::pin(async move { make_store(root, counter) })
-            })
-            .await;
-        })
+            },
+            move || async move {
+                std::fs::remove_dir_all(&root).ok();
+            },
+        )
         .await;
-
-        std::fs::remove_dir_all(&root).ok();
-
-        if let Err(e) = result {
-            std::panic::resume_unwind(e.into_panic());
-        }
     }
 }
 
@@ -669,9 +783,20 @@ mod postgres_fixture {
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn postgres_conformance() {
+        // `TELEX_PG_REQUIRE=1` turns a missing/empty `TELEX_PG_URL` into a failure instead of a
+        // silent skip, so a CI job that means to exercise the Postgres leg can't pass by
+        // accidentally skipping it.
+        let require = std::env::var("TELEX_PG_REQUIRE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
         let url = match std::env::var("TELEX_PG_URL") {
             Ok(u) if !u.trim().is_empty() => u,
             _ => {
+                assert!(
+                    !require,
+                    "TELEX_PG_REQUIRE is set but TELEX_PG_URL is unset/empty; \
+                     refusing to skip the Postgres conformance suite."
+                );
                 eprintln!(
                     "[conformance] TELEX_PG_URL not set; skipping the Postgres conformance suite."
                 );
@@ -695,38 +820,44 @@ mod postgres_fixture {
         let schema = sanitize_ident(&format!("{base}_{}_{}", std::process::id(), now_ms()))
             .expect("derived schema name must be a valid identifier");
 
-        // Sweep schemas left over by a previously hard-killed run (exact-prefix match, no LIKE
-        // wildcards), so this run starts clean and prior leftovers are reclaimed — the
-        // per-run-unique name means a plain pre-drop could never have matched them.
-        let prefix = format!("{base}_");
+        // Reclaim schemas leaked by a previously *hard-killed* run without ever touching a live
+        // one. Match only the exact per-run shape `^{base}_<pid>_<ms>$` AND require the embedded
+        // creation timestamp to be older than a generous cutoff, so a concurrently running
+        // suite's recent schema is never dropped; the active schema is excluded too. Unrelated
+        // operator schemas don't match the shape and are left alone. (`base` is a sanitised
+        // identifier, so it is safe to interpolate into the regex and literal.)
+        let cutoff_ms = now_ms() - 3_600_000; // 1 hour
         admin_exec(
             &cfg,
             &format!(
-                "DO $$ DECLARE s text; BEGIN \
+                "DO $$ DECLARE s text; ts bigint; BEGIN \
                    FOR s IN SELECT schema_name FROM information_schema.schemata \
-                            WHERE left(schema_name, {len}) = '{prefix}' \
-                   LOOP EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', s); END LOOP; \
-                 END $$;",
-                len = prefix.chars().count()
+                            WHERE schema_name ~ '^{base}_[0-9]+_[0-9]+$' \
+                   LOOP ts := substring(s from '_([0-9]+)$')::bigint; \
+                     IF ts < {cutoff_ms} AND s <> '{schema}' THEN \
+                       EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', s); \
+                     END IF; \
+                   END LOOP; END $$;"
             ),
         )
         .await
         .expect("pre-run leftover sweep");
 
-        // Run the battery on a task so a scenario panic still triggers schema cleanup.
         let cfg_run = cfg.clone();
         let schema_run = schema.clone();
-        let result = tokio::spawn(async move {
-            run_all(move || make_store(cfg_run.clone(), schema_run.clone())).await;
-        })
+        let cfg_cleanup = cfg.clone();
+        let schema_cleanup = schema.clone();
+        run_with_cleanup(
+            move || make_store(cfg_run.clone(), schema_run.clone()),
+            move || async move {
+                admin_exec(
+                    &cfg_cleanup,
+                    &format!("DROP SCHEMA IF EXISTS {schema_cleanup} CASCADE"),
+                )
+                .await
+                .expect("post-run schema drop");
+            },
+        )
         .await;
-
-        admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
-            .await
-            .expect("post-run schema drop");
-
-        if let Err(e) = result {
-            std::panic::resume_unwind(e.into_panic());
-        }
     }
 }

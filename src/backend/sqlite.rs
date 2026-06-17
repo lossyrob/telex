@@ -98,10 +98,13 @@ impl SqliteBackend {
             }
         }
         let conn = Connection::open(path)?;
-        // Set busy_timeout *first*: the journal_mode=WAL switch takes a write lock, so when
-        // several connections open the same fresh database at once (multiple holders/senders
-        // starting together), a still-default zero timeout would surface a spurious
-        // "database is locked" instead of waiting for the brief switch to finish.
+        // Set busy_timeout *before* the journal_mode=WAL switch: that switch briefly takes a
+        // write lock, so when several connections open the same fresh database at once
+        // (multiple holders/senders starting together) a still-default zero timeout makes the
+        // contended opener fail with a spurious "database is locked" instead of waiting. This
+        // greatly reduces such startup errors — though it is not an absolute guarantee, since
+        // SQLite skips the busy handler on a simultaneous SHARED->EXCLUSIVE WAL promotion to
+        // avoid deadlock. The backend conformance concurrency scenario exercises this path.
         conn.execute_batch(
             "PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL;",
         )?;

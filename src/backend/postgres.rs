@@ -25,16 +25,21 @@ pub fn make_tls() -> Result<postgres_native_tls::MakeTlsConnector> {
 
 /// Allow only a safe SQL identifier for a schema name (no injection via search_path).
 pub fn sanitize_ident(s: &str) -> Result<String> {
-    if !s.is_empty()
+    // Postgres truncates identifiers to NAMEDATALEN-1 (63) bytes, so anything longer would be
+    // silently shortened — a footgun that can collide two distinct schema names. Reject it.
+    let valid = !s.is_empty()
+        && s.len() <= 63
         && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         && s.chars()
             .next()
             .map(|c| !c.is_ascii_digit())
-            .unwrap_or(false)
-    {
+            .unwrap_or(false);
+    if valid {
         Ok(s.to_string())
     } else {
-        anyhow::bail!("invalid schema '{s}' (use letters, digits, underscore; not a leading digit)")
+        anyhow::bail!(
+            "invalid schema '{s}' (use 1-63 chars: letters, digits, underscore; not a leading digit)"
+        )
     }
 }
 
@@ -533,5 +538,36 @@ impl Backend for PgBackend {
             .execute("SELECT pg_notify($1,$2)", &[&NOTIFY_CHANNEL, &payload])
             .await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_ident;
+
+    #[test]
+    fn sanitize_ident_accepts_valid_names() {
+        for s in ["telex", "telex_conformance", "s_1_2", "A9"] {
+            assert_eq!(sanitize_ident(s).unwrap(), s);
+        }
+    }
+
+    #[test]
+    fn sanitize_ident_rejects_invalid_names() {
+        // Empty, leading digit, illegal chars / injection attempts.
+        for s in ["", "1abc", "a-b", "a;b", "a b", "public.bad", "a\"b"] {
+            assert!(sanitize_ident(s).is_err(), "should reject {s:?}");
+        }
+    }
+
+    #[test]
+    fn sanitize_ident_enforces_63_byte_limit() {
+        let max = "a".repeat(63);
+        assert_eq!(sanitize_ident(&max).unwrap(), max);
+        let over = "a".repeat(64);
+        assert!(
+            sanitize_ident(&over).is_err(),
+            "identifiers over 63 bytes must be rejected, not silently truncated"
+        );
     }
 }
