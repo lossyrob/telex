@@ -53,7 +53,7 @@ pub fn row_line(m: &MessageRow) -> Line<'static> {
         .unwrap_or_else(|| m.body.lines().next().unwrap_or("").to_string());
     Line::from(vec![
         Span::styled(
-            theme::hms_utc(m.sent_at_ms),
+            theme::hms(m.sent_at_ms),
             Style::default().fg(Color::DarkGray),
         ),
         Span::raw(" "),

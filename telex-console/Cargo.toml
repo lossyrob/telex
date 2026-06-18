@@ -18,6 +18,8 @@ tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "sync"
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 serde_json = "1"
+# Used only to capture the system local UTC offset once at startup for display.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 [features]
 # Allow inspecting Entra-authenticated Postgres backends by enabling the core's entra path.

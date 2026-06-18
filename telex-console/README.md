@@ -57,6 +57,7 @@ backend is configured.
 | `--address <text>` | — | Seed the address filter on startup. |
 | `--poll-secs <n>` | `1` | Feed poll interval, in seconds. |
 | `--backfill <n\|0\|all>` | `200` | Recent messages to load on startup before tailing. `0` = tail only; `all` = full history. |
+| `--utc` | off | Show timestamps in UTC instead of system local time. |
 
 ## Views and keys
 
@@ -89,7 +90,10 @@ rare duplicate delivery is normal, not an error.
 | `g` / `G` | jump to top / bottom |
 | `Esc` | leave Thread / clear the filter |
 
-The header shows the backend, current view, live/paused state, active filter, and counts.
+The header shows the backend, current view, live/paused state, active filter, counts, and
+the timestamp timezone (`local` by default, or `UTC` with `--utc`). Timestamps are
+`HH:MM:SS` time-of-day; the underlying store records full epoch-millisecond UTC, which
+`telex export` emits verbatim.
 Below ~50×8 the UI shows a "terminal too small" notice instead of cramped panes.
 
 ### Live tail vs. paused

@@ -4,7 +4,7 @@
 mod addresses;
 mod detail;
 mod feed;
-mod theme;
+pub mod theme;
 mod thread;
 
 use ratatui::layout::{Constraint, Layout};
@@ -75,9 +75,10 @@ fn render_header(f: &mut Frame, area: ratatui::layout::Rect, st: &AppState) {
         )),
         Span::styled(live_txt, Style::default().fg(live_color)),
         Span::raw(format!(
-            "{filter_txt} │ msgs:{} addrs:{}",
+            "{filter_txt} │ msgs:{} addrs:{} │ {}",
             st.feed.len(),
-            st.addresses.len()
+            st.addresses.len(),
+            theme::tz_label()
         )),
     ];
     if let Some(err) = &st.status {

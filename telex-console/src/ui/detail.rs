@@ -52,7 +52,7 @@ pub fn render(f: &mut Frame, area: Rect, st: &AppState, msg: Option<&MessageRow>
     }
     lines.push(Line::from(format!(
         "sent: {}   thread #{}",
-        theme::hms_utc(m.sent_at_ms),
+        theme::hms(m.sent_at_ms),
         m.thread_id
     )));
     if let Some(s) = &m.subject {
@@ -141,7 +141,7 @@ fn disposition_line(d: &DispositionRow) -> Line<'static> {
     if let Some(by) = &d.by_principal {
         spans.push(Span::raw(format!(" by {by}")));
     }
-    spans.push(Span::raw(format!(" @{}", theme::hms_utc(d.at_ms))));
+    spans.push(Span::raw(format!(" @{}", theme::hms(d.at_ms))));
     if let Some(note) = &d.note {
         spans.push(Span::styled(
             format!(" — {note}"),
@@ -157,7 +157,7 @@ fn delivery_line(d: &DeliveryRow) -> Line<'static> {
         d.occupant.as_deref().unwrap_or("?")
     ))];
     spans.push(Span::styled(
-        format!(" @{}", theme::hms_utc(d.delivered_at_ms)),
+        format!(" @{}", theme::hms(d.delivered_at_ms)),
         Style::default().fg(Color::Gray),
     ));
     Line::from(spans)

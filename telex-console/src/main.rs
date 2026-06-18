@@ -44,12 +44,17 @@ struct Args {
     /// Recent messages to backfill on startup: a number, `0` (tail-only), or `all`.
     #[arg(long, default_value = "200")]
     backfill: String,
+
+    /// Show timestamps in UTC instead of system local time.
+    #[arg(long)]
+    utc: bool,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
 
+    ui::theme::init_time_zone(args.utc);
     let backfill = Backfill::parse(&args.backfill)?;
     let (name, backend) = open_backend(&args).await?;
     let store = Store::new(backend);
