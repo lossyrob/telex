@@ -4,7 +4,7 @@
 //! caller passes `--session-pid <pid>` (or sets `$TELEX_SESSION_PID`), the holder polls that pid
 //! and, the moment it stops existing, releases its lease and exits through the normal shutdown
 //! path. This is defense-in-depth: even a mis-launched *detached* holder cannot outlive the
-//! session that spawned it (Decision 0004 made enforceable rather than advisory; Decision 0010).
+//! session that spawned it (Decision 0004 made enforceable rather than advisory; Decision 0011).
 //!
 //! [`process_alive`] is intentionally conservative: if it cannot positively determine that a
 //! process is gone (e.g. it exists but we lack the rights to query it), it reports the process as
