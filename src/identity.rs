@@ -49,6 +49,12 @@ pub fn plan_from(
     requires_disposition: bool,
     attention: Attention,
 ) -> FromPlan {
+    // Treat an empty/whitespace-only --from or $TELEX_ADDRESS as unset, so it can't slip past the
+    // un-repliable guardrail as a "real" identity that is itself un-repliable (replies to "" go
+    // nowhere).
+    let explicit_from = explicit_from.filter(|s| !s.trim().is_empty());
+    let env_address = env_address.filter(|s| !s.trim().is_empty());
+
     // Explicit `--from`, then env/`--address`, always win — never forced to the held lease.
     if let Some(addr) = explicit_from.or(env_address) {
         let served = live_holders.iter().any(|h| h == addr);
@@ -120,6 +126,9 @@ pub async fn resolve_from(
     requires_disposition: bool,
     attention: Attention,
 ) -> FromPlan {
+    // Mirror plan_from's normalization so we don't ping an empty address.
+    let explicit_from = explicit_from.filter(|s| !s.trim().is_empty());
+    let env_address = env_address.filter(|s| !s.trim().is_empty());
     let live: Vec<String> = if let Some(addr) = explicit_from.or(env_address) {
         if registry::is_served_locally(addr, backend).await {
             vec![addr.to_string()]
@@ -276,5 +285,34 @@ mod tests {
             } => assert!(w.contains("un-repliable")),
             other => panic!("expected un-repliable warning, got {other:?}"),
         }
+    }
+
+    // Empty/whitespace --from or $TELEX_ADDRESS is normalized to unset, so it is caught by the
+    // guardrail instead of slipping through as an un-repliable identity.
+    #[test]
+    fn empty_explicit_from_is_treated_as_unset_and_refused() {
+        let plan = plan_from(Some("  "), None, &[], true, Attention::Background);
+        match plan {
+            FromPlan::Refuse { receipt, .. } => assert_eq!(receipt, RECEIPT_UNREPLIABLE),
+            other => panic!("expected refuse, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn empty_env_address_falls_through_to_inference() {
+        let plan = plan_from(
+            None,
+            Some(""),
+            &holders(&["A"]),
+            false,
+            Attention::Background,
+        );
+        assert_eq!(
+            plan,
+            FromPlan::Proceed {
+                from: Some("A".to_string()),
+                warning: None
+            }
+        );
     }
 }
