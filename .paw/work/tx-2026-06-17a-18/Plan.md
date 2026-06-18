@@ -72,19 +72,34 @@ the queue, which is cosmetic, not a correctness gate.
   scaffolding in the trait. (Greenfield, single-user, pre-beta — clean removal over dead code.)
 
 ### Holder (`src/commands/attach.rs`)
-- `State`: drop `cursor`; add `seen: Mutex<HashSet<i64>>` (ids currently buffered / in the
-  pop→mark handoff window).
-- Replace `drain_new` with `drain`: `fetch_undelivered(address)`, then for each row not already in
-  `seen`, insert into `seen` and push onto the queue; `notify_waiters()` if anything was queued.
+- `State`: drop `cursor`; add `seen: Mutex<HashSet<i64>>` — a **monotonic** "ids this holder has
+  ever queued" guard (never pruned; see Synchronization below).
+- Replace `drain_new` with `drain`: `fetch_undelivered(address)`, then under the `seen` lock, for
+  each row, enqueue **iff `seen.insert(row.id)` returns true** (newly inserted); `notify_waiters()`
+  if anything was queued.
 - Startup: remove `start_cursor = max_id` and the separate `undelivered_backlog` seeding block; run
   one initial `drain` (after the heartbeat task is live) — it naturally fetches the full backlog.
   The poll task and the optional push task call the same `drain`.
-- `handle_conn`: on a **successful** `mark_delivered`, remove the id from `seen` (keeps `seen`
-  bounded to in-flight ids; the deliveries table now excludes it from `fetch_undelivered`, so no
-  drain can re-queue it). On a write failure the id stays in `seen` (the message is requeued at the
-  front, still in flight). On a `mark_delivered` *failure* (logged, delivery still reported success)
-  the id stays in `seen` so this holder won't redeliver — matching the existing at-least-once
-  contract.
+- `handle_conn`: unchanged delivery/mark/requeue flow — **no `seen` pruning** (see below). The
+  durable `deliveries` mark still prevents cross-restart redelivery; `seen` prevents intra-holder
+  re-queue.
+
+### Synchronization — why monotonic `seen` is race-free (resolves planning-review blocking #1)
+Both planning reviewers flagged a TOCTOU if `seen` were pruned on `mark_delivered`: a `drain` that
+snapshotted `fetch_undelivered` (row N, no delivery record yet) *before* a concurrent waiter marked
+N delivered and pruned N from `seen` would then insert N and re-queue it → a **new steady-state
+duplicate** the cursor model never had. We close this by **never pruning `seen`**:
+- Once N is queued, `N ∈ seen` for the holder's lifetime. Any later/stale drain that fetched N
+  pre-mark finds `N ∈ seen` and skips it. No duplicate.
+- Concurrent poll+push drains both fetch N; the `HashSet::insert` under the `seen` mutex is the
+  serialization point — exactly one returns `true` and enqueues. No duplicate.
+- No drain ever needs to re-queue an already-seen id: the only re-queue path is the
+  write-failure front-requeue of the *same* buffered item (id stays in `seen`). No loss.
+This is simpler than pruning (no handoff-path bookkeeping) and holds **no lock across DB I/O**.
+Trade-off: `seen` grows by one `i64` per distinct message this holder queues over its lifetime.
+At telex's scale (single-user, pre-beta, session-bound holders that restart regularly) this is
+negligible (~tens of MB even at 1M messages); recorded as a known bound with a deferred prune
+option in DECISIONS 0011.
 
 ### Behavior delta to call out
 Previously the live path queued any `id > cursor` regardless of disposition; now the live drain
@@ -92,27 +107,69 @@ excludes a message whose latest disposition is already terminal (e.g. `telex han
 before any waiter popped it). This makes the live path consistent with the backlog path and with
 "don't deliver an already-handled message"; it is a deliberate, minor improvement, not a regression.
 
+### Performance note (resolves planning-review non-blocking; recorded in 0011)
+`fetch_undelivered` has **no id floor**, so each poll/push tick scans an address's messages and
+anti-joins `deliveries` (unique `(message_id, recipient)`) plus the latest-disposition correlated
+subquery (`dispositions_msg_idx`). Cost is O(address history), not O(new) like the old cursor seek.
+Acceptable at telex's scale, and the undelivered result set stays small (anti-join). A naive
+low-water floor is **deliberately not** added: advancing a floor to the max delivered/visible id
+would re-introduce exactly this bug, because a late-committing lower id sits *below* that floor and
+breaks contiguity. A safe floor needs the contiguous-delivered-prefix accounting for the in-flight
+commit horizon (snapshot `xmin`) — the same complexity Option A was rejected for — so it (and an
+optional `dispositions(message_id, recipient, id)` index / partial undelivered index) is deferred
+and recorded in DECISIONS 0011 as the eventual mitigation.
+
 ## Validation (Postgres is NOT in CI — issue #19)
 
-Green CI is necessary but **not sufficient**; CI has no real Postgres. Three layers:
+Green CI is necessary but **not sufficient**; CI has no real Postgres. Layers:
 1. **Backend conformance** (`tests/conformance.rs`, SQLite always + Postgres when `TELEX_PG_URL`
    set): a scenario asserting `fetch_undelivered` returns a **lower undelivered id even after a
-   higher id is `mark_delivered`** — the backend-level invariant that closes the gap.
-2. **Postgres MVCC out-of-order-commit test** (PG-only, gated by `TELEX_PG_URL`): use raw
-   `tokio_postgres` transactions to force two inserts to **commit in reverse id order** (hold T_a@N
-   open, commit T_b@N+1, mark N+1 delivered, then commit T_a) and assert `fetch_undelivered` now
-   returns N — while the old `id > cursor` query would not. This is the faithful reproduction.
-3. **Holder-level test** (`attach.rs` tests, SQLite, deterministic, runs in CI): mark a higher id
-   delivered, run `drain`, assert the lower undelivered id is queued (the live holder no longer
-   skips it). Reproduces the *consequence* without needing real concurrency.
+   higher id is `mark_delivered`** (the gap-closing invariant), plus terminal-disposition exclusion
+   and address scoping. Replaces `cursor_delivery`; folds in `delivery_backlog`.
+2. **Postgres MVCC out-of-order-commit test** (PG-only, gated by `TELEX_PG_URL`): a **separate
+   `#[tokio::test]` in `postgres_fixture`** (not inside `run_all`, which only hands a `Store`). It
+   parses `cfg`/schema like `postgres_conformance`, then opens **two independent `tokio_postgres`
+   connections** (search_path = test schema) and forces reverse-id commit order with minimal raw
+   inserts (`INSERT INTO {schema}.messages(to_addr, body, sent_at_ms, created_at_ms) ...`;
+   `thread_id` NULL is fine — `map_message` falls back to `id`):
+   - conn A: `BEGIN; INSERT ... RETURNING id` → `idA` (hold open, uncommitted/invisible).
+   - conn B: `BEGIN; INSERT ... RETURNING id; COMMIT` → `idB` (`idB > idA`).
+   - fresh `PgBackend.fetch_undelivered` returns only `idB`; `mark_delivered(idB)`.
+   - conn A: `COMMIT`. Now `fetch_undelivered` returns `idA` — the late lower id, deliverable live.
+   - **Contrast** with an inline raw `SELECT id FROM {schema}.messages WHERE to_addr=$1 AND id>$idB`
+     (NOT the removed `fetch_after`): it returns nothing — i.e. the old cursor model would skip
+     `idA`. This is the faithful reproduction.
+3. **Holder-level tests** (`attach.rs` tests, SQLite, deterministic, run in CI): the headline test
+   asserts a waiter **actually receives** the lower undelivered id over the `duplex` harness (the
+   literal acceptance bar): mark a higher id delivered, run `drain`, connect a waiter, assert it is
+   handed the lower id. Plus: drain **idempotency** (a second `drain` does not re-queue a queued or a
+   delivered id — the monotonic-`seen` + deliveries guarantees), terminal-disposition **live
+   exclusion**, and the existing write-failure path extended to assert no duplicate after a
+   subsequent `drain`.
 Document exactly how to run layer 2 locally; flag the CI gap (refs #19) in PR + field report.
 
 ## Docs / decisions
-- **DECISIONS.md 0011** (append-only, next number): record the rethink — live-holder visibility via
-  per-recipient delivery state; supersede the live-drain cursor clause of 0010/0005.
-- **DESIGN.md**: update the holder "poll-with-cursor" delivery description to "poll the undelivered
-  set (deliveries-table authority)"; reference 0011. Minimal, honest edits to load-bearing spots.
+- **DECISIONS.md 0011** (append-only, next number after 0010): record the rethink — live-holder
+  visibility via per-recipient delivery state; **supersede** (do not rewrite) the live-drain cursor
+  clause of 0005/0010, set their Status to note the supersede. Record: the monotonic-`seen`
+  trade-off, the O(history) per-tick cost, and why a safe low-water floor is deferred. Note that the
+  validated-trait-surface enumerations in 0006/0010 (`max_id`, `fetch_after`, `undelivered_backlog`)
+  are superseded by their removal.
+- **DESIGN.md**: update the holder "poll-with-cursor" delivery description (the load-bearing spot,
+  ~line 507) to "poll the undelivered set (deliveries-table authority)"; reference 0011. Minimal,
+  honest edits.
+- **Conformance coverage checklist** (`tests/conformance.rs:96-97`): remap to
+  `mark_delivered / fetch_undelivered` and the renamed scenario.
 - **Docs.md** block for the PR body (paw-docs-guidance).
+
+## Planning-docs review outcome (gpt-5.5 + claude-opus-4.8)
+Direction APPROVED by both. Blocking findings resolved above: (1) the `seen` TOCTOU duplicate →
+monotonic `seen`, never pruned, atomic check-insert; (2) PG test must not call the removed
+`fetch_after` → inline raw cursor SQL for the contrast; (3) PG test feasibility → separate gated
+`#[tokio::test]` with two raw connections + minimal inserts. Non-blocking items (per-tick cost
+acknowledgement, expanded tests incl. end-to-end waiter delivery + terminal-exclusion + idempotency,
+doc consistency) folded in. Trait removal confirmed safe (only `attach.rs` + conformance call them;
+`spike/` is a separate crate).
 
 ## Work items (SQL todos)
 - `backend-fetch-undelivered` — trait + postgres + sqlite: add `fetch_undelivered`, remove
