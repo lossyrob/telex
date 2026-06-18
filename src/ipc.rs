@@ -29,11 +29,14 @@ pub enum Request {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Frame {
     /// Periodic "I'm alive" carrying the age of the holder's last DB heartbeat.
-    Keepalive {
-        heartbeat_age_ms: i64,
-    },
+    Keepalive { heartbeat_age_ms: i64 },
     Pong {
         heartbeat_age_ms: i64,
+        /// The address this holder serves. Lets a `ping` confirm it reached the holder for the
+        /// address it asked about, not a different holder whose endpoint name happens to collide
+        /// under the lossy `sanitize()`. `default` for frames from older holders that omit it.
+        #[serde(default)]
+        served_address: Option<String>,
     },
     /// Acknowledge a Shutdown request before the holder exits.
     ShuttingDown,
@@ -185,3 +188,132 @@ mod platform {
 }
 
 pub use platform::{connect, Conn, Listener};
+
+/// The platform IPC endpoint name for an address (named pipe on Windows, socket path on Unix).
+/// Best-effort, for the holder registry's `socket` field and debugging.
+pub fn endpoint(address: &str) -> Option<String> {
+    #[cfg(windows)]
+    {
+        Some(pipe_name(address))
+    }
+    #[cfg(unix)]
+    {
+        socket_path(address)
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned())
+    }
+}
+
+/// Liveness probe: connect to the holder for `address`, send `Ping`, and confirm a `Pong` whose
+/// `served_address` matches. The whole connect+write+read is bounded by a short timeout so a stale
+/// endpoint (dead/hung holder) fails fast and never stalls a caller (e.g. `send`'s `from`
+/// resolution). Returns `false` on any error, timeout, or address mismatch.
+pub async fn ping(address: &str) -> bool {
+    use std::time::Duration;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    let address = address.to_string();
+    let probe = async move {
+        let stream = connect(&address).await.ok()?;
+        let (read_half, mut write_half) = tokio::io::split(stream);
+        let mut line = serde_json::to_string(&Request::Ping).ok()?;
+        line.push('\n');
+        write_half.write_all(line.as_bytes()).await.ok()?;
+        write_half.flush().await.ok()?;
+
+        let mut reader = BufReader::new(read_half);
+        let mut buf = String::new();
+        if reader.read_line(&mut buf).await.ok()? == 0 {
+            return None;
+        }
+        match serde_json::from_str::<Frame>(buf.trim()).ok()? {
+            Frame::Pong {
+                served_address: Some(served),
+                ..
+            } => Some(served == address),
+            _ => Some(false),
+        }
+    };
+
+    matches!(
+        tokio::time::timeout(Duration::from_millis(250), probe).await,
+        Ok(Some(true))
+    )
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    /// Module-wide lock for tests that mutate the process-global `TELEX_HOME` (Unix endpoint paths
+    /// derive from it). Rust runs tests in parallel threads in one binary, so any test touching
+    /// `TELEX_HOME` must hold this first. No `serial_test` dev-dep is available.
+    pub static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Acquire `ENV_LOCK`, tolerating poisoning from a panicking earlier test.
+    pub fn env_guard() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Spawn a minimal holder that answers each connection's `Ping` with a `Pong` stamped with
+    /// `served_address`, so `ipc::ping` has a real endpoint to probe in tests. Abort the returned
+    /// handle to stop it.
+    pub fn spawn_pong_holder(address: &str) -> tokio::task::JoinHandle<()> {
+        let mut listener = Listener::bind(address).expect("bind test holder");
+        let served = address.to_string();
+        tokio::spawn(async move {
+            loop {
+                match listener.accept().await {
+                    Ok(conn) => {
+                        let served = served.clone();
+                        tokio::spawn(async move {
+                            let (read_half, mut write_half) = tokio::io::split(conn);
+                            let mut reader = BufReader::new(read_half);
+                            let mut line = String::new();
+                            if reader.read_line(&mut line).await.unwrap_or(0) == 0 {
+                                return;
+                            }
+                            let frame = Frame::Pong {
+                                heartbeat_age_ms: 0,
+                                served_address: Some(served),
+                            };
+                            if let Ok(mut s) = serde_json::to_string(&frame) {
+                                s.push('\n');
+                                let _ = write_half.write_all(s.as_bytes()).await;
+                                let _ = write_half.flush().await;
+                            }
+                        });
+                    }
+                    Err(_) => return,
+                }
+            }
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pong_serde_tolerates_missing_served_address() {
+        // Frames from an older holder omit served_address; it must default to None.
+        let f: Frame = serde_json::from_str(r#"{"type":"pong","heartbeat_age_ms":5}"#).unwrap();
+        match f {
+            Frame::Pong {
+                heartbeat_age_ms,
+                served_address,
+            } => {
+                assert_eq!(heartbeat_age_ms, 5);
+                assert_eq!(served_address, None);
+            }
+            _ => panic!("expected pong"),
+        }
+    }
+
+    #[test]
+    fn sanitize_maps_unsafe_chars_to_underscore() {
+        assert_eq!(sanitize("impl:tx-2026:issue-4"), "impl_tx-2026_issue-4");
+    }
+}

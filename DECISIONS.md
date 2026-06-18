@@ -386,3 +386,48 @@ jargon) were intentionally left untouched to keep the diff reviewable; a future 
 could deepen the rename if desired. This entry records a naming choice (normally out of
 scope per the log conventions) because the term is load-bearing for cross-document
 consistency and was an explicit deliverable (issue #8).
+
+## 0010 — Default message `from` to the locally-held lease via a local holder registry; guard un-repliable disposition-required sends
+
+- **Date:** 2026-06-17
+- **Status:** Accepted
+
+**Context.** `send`/`reply` derived `from` only from `--from` or `$TELEX_ADDRESS`/`--address`,
+with no link to the lease a session actually holds. Forget to set it and the message goes out
+`from = None` — **un-repliable** (`telex reply` hard-errors, replies have nowhere to go). A real
+session hit exactly this. telex couldn't infer the held address: the holder (`attach`) and `send`
+are separate processes, the holder kept no local record, the IPC endpoint name is a *lossy*
+`sanitize()` that can't be reverse-mapped, and the backend lease row has no reverse index from
+"this session" to "the address it holds" (issue #4).
+
+**Decision.** The holder publishes a **local registry record** once its endpoint is live —
+`run_dir()/holders/<sanitized-address>-<pid>.json` carrying
+`{ address, backend, host, pid, socket, started_at_ms }` — and `send`/`reply` resolve `from` with
+precedence **`--from` > `$TELEX_ADDRESS`/`--address` > the uniquely live local station** for the
+current backend. Specific forks chosen (alternatives in parentheses): (a) **liveness by `ipc::ping`,
+not pid-alive** — dependency-free, cross-platform, and semantically tighter ("replies here are
+answerable"); a hard-killed holder's record is ignored because its endpoint no longer answers.
+(b) **`Frame::Pong` now echoes `served_address`** and a ping is "live" only if it matches, closing
+a soundness gap where the lossy `sanitize()` could let a probe reach a *different* holder whose
+endpoint name collides. (c) **Filename keyed by `(sanitized, pid)`** (not bare `<sanitized>`) so
+distinct addresses that sanitize alike don't overwrite each other; the file's `address` field is
+authoritative. (d) **Records scoped to `(backend, host)`** so a station on one backend is never
+inferred for a send on another (a real cross-backend foot-gun); prune-on-claim and remove-on-clean-
+exit keep them tidy. (e) **Guardrails:** a would-be un-repliable send that *requires disposition* is
+**refused** (`refused-unrepliable`, exit 4); inference with more than one live station is **refused**
+listing candidates (`refused-ambiguous-from`, exit 4); an explicit/env `from` not served locally
+**warns** ("replies will queue unwatched") but proceeds. Identity is *defaulted, never forced* —
+explicit `--from`/env always win, preserving one-shot reply-to senders, multi-address supervisors,
+and operator-as-system sends.
+
+**Consequences.** After `attach`, plain `telex send` "just works" and `$TELEX_ADDRESS` becomes
+optional convenience rather than a required convention; SKILL.md's identity section collapses
+accordingly. Inference is **local and same-backend only** — a holder on another host or backend
+can't be inferred (intended scope). No new runtime dependencies (registry is `serde_json` + `std::fs`;
+liveness reuses the existing IPC `Ping`/`Pong`). Resolution touches IPC only when `from` is otherwise
+unresolved (or once, to validate a set `from` for the soft-warn), bounded by a ≤250 ms ping timeout,
+so configured senders pay ~one local round-trip and unconfigured-but-attached senders pay one ping.
+Known follow-ups: records left by hard-killed holders for addresses never re-attached are ignored but
+not yet garbage-collected (bounded by prune-on-claim + the fast-fail ping); the per-invocation `--db`
+override is not part of the backend scope key; `reply` could additionally default `from` from the
+parent's `to_addr` (deferred — a preference call, not done here to keep `send`/`reply` uniform).
