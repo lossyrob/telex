@@ -149,8 +149,10 @@ disposition). One-time transition note: the first holder started after upgrading
 durable delivery recovers its full undelivered history for the address — every message that is not
 terminally dispositioned, **including fire-and-forget `fyi`/`note` messages that are never
 dispositioned** — because there are no prior delivery records yet. Expect a one-time backlog on that
-first start; disposition or ignore it, after which steady-state delivery records keep the backlog
-empty.
+first start. The backlog is a snapshot taken when the holder starts: dispositioning a message via
+`telex inbox` only prevents a *future* holder from re-recovering it — it won't pull back a message
+already seeded into the running holder's queue, which is delivered (then marked) once. After that
+first drain, steady-state delivery records keep the backlog empty.
 
 Reply inside an existing thread:
 

@@ -115,14 +115,11 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         }
     }
 
-    // Seed the holder from durable state so a restart recovers the queued backlog instead of
-    // skipping it. `start_cursor` is the delivery high-water for the streaming drain; the backlog
-    // is everything at or below it that was queued (and not yet delivered or terminally
-    // dispositioned) while the address was unoccupied. The `id <= start_cursor` bound makes the
-    // seeded backlog and the `fetch_after` (id > cursor) drain partition cleanly, so a message
-    // inserted between these two snapshots is drained — never both drained and seeded.
+    // `start_cursor` is the delivery high-water for the streaming drain. The holder seeds its queue
+    // from the durable backlog further below — after the heartbeat task is live — so a restart
+    // recovers the messages queued while the address was unoccupied instead of skipping past
+    // `max_id`.
     let start_cursor = backend.max_id(&address).await?;
-    let backlog = backend.undelivered_backlog(&address, start_cursor).await?;
 
     let state = Arc::new(State {
         queue: Mutex::new(VecDeque::new()),
@@ -135,22 +132,6 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         address: address.clone(),
         occupant: occupant.clone(),
     });
-
-    // Enqueue the recovered backlog (oldest first) before serving waiters, so the first `wait`
-    // after a restart receives what was queued while the address was unoccupied.
-    if !backlog.is_empty() {
-        let recv = now_ms();
-        let n = backlog.len();
-        let mut q = state.queue.lock().await;
-        for row in backlog {
-            q.push_back(Buffered {
-                row,
-                buffered_at_ms: recv,
-            });
-        }
-        drop(q);
-        eprintln!("[holder] recovered {n} queued message(s) from durable backlog");
-    }
 
     eprintln!(
         "[holder] pid={pid} backend={} address={address} heartbeat={}s poll={}s push={}",
@@ -176,6 +157,31 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
                 }
             }
         });
+    }
+
+    // Recover the durable backlog now that the heartbeat task is keeping the lease fresh — a large
+    // first-upgrade backlog can take a moment to materialize, and we don't want that to delay the
+    // first heartbeat and make the freshly-claimed lease look stale within the liveness window. The
+    // backlog is everything at or below `start_cursor` that was queued (and not yet delivered or
+    // terminally dispositioned) while the address was unoccupied; the `id <= start_cursor` bound
+    // makes the seeded backlog and the `fetch_after` (id > cursor) drain partition cleanly, so a
+    // message inserted between the two snapshots is drained — never both drained and seeded. This is
+    // a start-time snapshot: a message terminally dispositioned via `telex inbox` after seeding but
+    // before a waiter pops it is still delivered once here (and then marked, so it is not
+    // re-recovered on a later restart).
+    let backlog = backend.undelivered_backlog(&address, start_cursor).await?;
+    if !backlog.is_empty() {
+        let recv = now_ms();
+        let n = backlog.len();
+        let mut q = state.queue.lock().await;
+        for row in backlog {
+            q.push_back(Buffered {
+                row,
+                buffered_at_ms: recv,
+            });
+        }
+        drop(q);
+        eprintln!("[holder] recovered {n} queued message(s) from durable backlog");
     }
 
     // Poll task (delivery backstop for both backends).
@@ -394,8 +400,10 @@ where
                         Err(e) => {
                             // The waiter never received it (write/flush failed). Requeue at the front
                             // so the next waiter still gets it instead of dropping it on a transient
-                            // connection error, then wake any other waiter parked on `notify` so the
-                            // requeued message is picked up promptly rather than waiting a keepalive.
+                            // connection error, then nudge any waiter currently parked on `notify`.
+                            // `notify_waiters()` stores no permit: if no waiter is parked right now the
+                            // wake is a no-op and the message is picked up by the next `wait` at the
+                            // loop top (or, for a `--timeout-ms` waiter, the next keepalive re-check).
                             {
                                 let mut q = st.queue.lock().await;
                                 q.push_front(buf);
