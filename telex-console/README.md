@@ -27,6 +27,13 @@ cargo build -p telex-console      # target/debug/telex-console
 cargo install --path telex-console
 ```
 
+To inspect an **Entra-authenticated Postgres** backend, build with the `entra` feature
+(same as the core `telex` binary):
+
+```sh
+cargo install --git https://github.com/lossyrob/telex telex-console --features entra
+```
+
 ## Usage
 
 ```sh

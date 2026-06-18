@@ -62,10 +62,12 @@ stays dependency-light.
 ```sh
 cargo install --git https://github.com/lossyrob/telex telex-console
 telex-console                         # the configured default backend
-telex-console --db ~/.telex/telex.db  # point at a specific SQLite store
+telex-console --backend local         # a configured backend, by name
+telex-console --db ~/.telex/telex.db  # or point at a specific SQLite store
 ```
 
-Read-only by design — it never holds a lease or changes state. See
+For an Entra Postgres backend, build the console with `--features entra` (like the core
+binary). Read-only by design — it never holds a lease or changes state. See
 **[telex-console/README.md](telex-console/README.md)**.
 
 ## Networked backends
