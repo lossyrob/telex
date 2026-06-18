@@ -94,6 +94,7 @@ where
     //   claim_lease / heartbeat / release_lease /
     //     get_lease / occupancy ................. leases_liveness
     //   max_id / fetch_after .................... cursor_delivery, concurrency
+    //   mark_delivered / undelivered_backlog .... delivery_backlog
     //   insert_message / get_message /
     //     thread_messages ....................... messages_threading
     //   inbox ................................... inbox_derivation
@@ -104,6 +105,7 @@ where
     addresses_directory(make_store().await).await;
     leases_liveness(make_store().await).await;
     cursor_delivery(make_store().await).await;
+    delivery_backlog(make_store().await).await;
     messages_threading(make_store().await).await;
     inbox_derivation(make_store().await).await;
     dispositions(make_store().await).await;
@@ -386,6 +388,102 @@ async fn cursor_delivery(store: Store) {
     assert!(
         b.fetch_after(addr, m3.id).await.unwrap().is_empty(),
         "no rows beyond the head"
+    );
+}
+
+/// Durable delivery backlog: `mark_delivered` records a holder->waiter handoff, and
+/// `undelivered_backlog(addr, upto_id)` returns the messages at or below the holder's start cursor
+/// that are neither delivered nor terminally dispositioned, in id order — exactly the set a holder
+/// re-enqueues on restart so messages queued while unoccupied are not skipped past `max_id`.
+async fn delivery_backlog(store: Store) {
+    let b = store.connect().await;
+    let addr = "backlog:1";
+
+    // Three messages queued while the address was unoccupied (no holder ever delivered them).
+    let m1 = b.insert_message(&new_msg(addr)).await.unwrap();
+    let m2 = b.insert_message(&new_msg(addr)).await.unwrap();
+    let m3 = b.insert_message(&new_msg(addr)).await.unwrap();
+    // A message to another address must never leak into this address's backlog.
+    let other = b.insert_message(&new_msg("backlog:other")).await.unwrap();
+
+    let head = b.max_id(addr).await.unwrap();
+    assert_eq!(head, m3.id);
+
+    // All three are undelivered and undispositioned -> the full backlog, ordered by id.
+    let bl = b.undelivered_backlog(addr, head).await.unwrap();
+    assert_eq!(
+        bl.iter().map(|m| m.id).collect::<Vec<_>>(),
+        vec![m1.id, m2.id, m3.id],
+        "undelivered, non-terminal messages are the backlog, ordered by id"
+    );
+    assert!(
+        !bl.iter().any(|m| m.id == other.id),
+        "another address's messages never appear in this backlog"
+    );
+
+    // The upto_id bound excludes messages above the holder's start cursor: those belong to the
+    // streaming `fetch_after` drain, not the seeded backlog. This is the no-double-delivery guard.
+    let bounded = b.undelivered_backlog(addr, m2.id).await.unwrap();
+    assert_eq!(
+        bounded.iter().map(|m| m.id).collect::<Vec<_>>(),
+        vec![m1.id, m2.id],
+        "undelivered_backlog honors the id<=upto_id high-water bound"
+    );
+
+    // Delivering m1 (the holder->waiter handoff) drops it from the backlog: not redelivered.
+    b.mark_delivered(m1.id, addr, Some("holderA"))
+        .await
+        .unwrap();
+    let after = b.undelivered_backlog(addr, head).await.unwrap();
+    assert_eq!(
+        after.iter().map(|m| m.id).collect::<Vec<_>>(),
+        vec![m2.id, m3.id],
+        "a delivered message is not re-surfaced as backlog"
+    );
+
+    // A terminal disposition on a never-delivered message also removes it — covers out-of-band
+    // recovery via `inbox` + manual disposition without the message ever passing through `wait`.
+    b.insert_disposition(m2.id, addr, "handled", None, None)
+        .await
+        .unwrap();
+    let after2 = b.undelivered_backlog(addr, head).await.unwrap();
+    assert_eq!(
+        after2.iter().map(|m| m.id).collect::<Vec<_>>(),
+        vec![m3.id],
+        "a terminally dispositioned message is excluded from the backlog"
+    );
+
+    // A non-terminal disposition keeps a never-delivered message in the backlog.
+    b.insert_disposition(m3.id, addr, "acknowledged", None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        b.undelivered_backlog(addr, head)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect::<Vec<_>>(),
+        vec![m3.id],
+        "a non-terminal disposition (acknowledged) does not remove a message from the backlog"
+    );
+
+    // Two-signal interaction: a *delivered* message that is later terminally dispositioned and then
+    // reopened (latest disposition non-terminal) must STILL stay out of the backlog. The durable
+    // delivery record dominates the disposition state, so a reopen never resurrects an already-
+    // delivered message — distinguishing this from inbox's latest-disposition-wins rule.
+    b.mark_delivered(m3.id, addr, Some("holderA"))
+        .await
+        .unwrap();
+    b.insert_disposition(m3.id, addr, "closed", None, None)
+        .await
+        .unwrap();
+    b.insert_disposition(m3.id, addr, "acknowledged", None, None)
+        .await
+        .unwrap();
+    assert!(
+        b.undelivered_backlog(addr, head).await.unwrap().is_empty(),
+        "a delivered message stays out of the backlog even when reopened (delivery record dominates)"
     );
 }
 
@@ -758,7 +856,7 @@ mod postgres_fixture {
                 &cfg,
                 &format!(
                     "TRUNCATE {schema}.addresses, {schema}.leases, {schema}.messages, \
-                     {schema}.dispositions RESTART IDENTITY"
+                     {schema}.dispositions, {schema}.deliveries RESTART IDENTITY"
                 ),
             )
             .await
