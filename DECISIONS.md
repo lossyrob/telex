@@ -410,9 +410,10 @@ Windows (`src/session_watch.rs`). When the pid is gone, the task triggers the **
 (`release_lease` + IPC-endpoint cleanup) — no second release path. The liveness check is
 conservative: only a definite "no such process" releases; an existing-but-unqueryable process or
 any ambiguous probe error is treated as alive. `--no-session-bind` runs a deliberately persistent
-holder and overrides `--session-pid` / the env var (precedence resolved at runtime, **not** via
-clap `conflicts_with`, because clap 4 would reject `TELEX_SESSION_PID=… --no-session-bind` before
-the holder runs). Default behavior with no flag/env is unchanged (no binding).
+holder and overrides `--session-pid` / the env var. Both the binding **precedence** and the
+`$TELEX_SESSION_PID` **parse** happen at runtime (not via clap `conflicts_with`/`env`), so a
+malformed or conflicting env value never fails `attach` — `--no-session-bind` always wins
+cleanly. Default behavior with no flag/env is unchanged (no binding).
 
 **Consequences.** Even a mis-launched detached holder cannot outlive its session: this turns 0004
 from advisory into enforceable and complements the TTL/occupancy model (0005) by stopping the

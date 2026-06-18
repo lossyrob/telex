@@ -16,26 +16,67 @@
 //! small at a few-second poll cadence; a reuse-immune inherited-fd path is a documented future
 //! upgrade (issue #5, deferred).
 
-/// Resolve which pid (if any) the holder should bind its lifetime to, given the parsed flags.
+/// Why the holder is running unbound (persistent). Carried so the holder can log a clear,
+/// always-visible reason rather than silently running with no session binding.
+#[derive(Debug, PartialEq, Eq)]
+pub enum UnboundReason {
+    /// No `--session-pid` flag and no `$TELEX_SESSION_PID` — the legacy default (logged quietly).
+    NotRequested,
+    /// `--no-session-bind` was passed (the persistent-holder escape hatch).
+    OptedOut,
+    /// A `0` pid was supplied (flag or env) — the "no binding" sentinel.
+    ZeroSentinel,
+    /// `$TELEX_SESSION_PID` was set to something that is not a valid pid; ignored, holder runs
+    /// persistent. Carries the raw value for diagnostics.
+    MalformedEnv(String),
+}
+
+/// The resolved session-binding decision for the holder.
+#[derive(Debug, PartialEq, Eq)]
+pub enum SessionBinding {
+    /// Watch this pid; release the lease and exit when it dies.
+    Bound(u32),
+    /// Run a persistent holder (no binding), for the given reason.
+    Unbound(UnboundReason),
+}
+
+/// Resolve whether and to which pid the holder should bind its lifetime, from the parsed flags and
+/// the raw `$TELEX_SESSION_PID` value.
 ///
-/// Precedence is handled here rather than via clap `conflicts_with` so that an environment-sourced
-/// `$TELEX_SESSION_PID` never *errors* against an explicit `--no-session-bind`: opting out always
-/// wins cleanly. (clap 4 treats env-sourced values as "present" for conflict checks, so
-/// `conflicts_with` would reject `TELEX_SESSION_PID=… --no-session-bind` before the holder runs.)
-/// Returns:
-/// - `None` when binding is disabled (`--no-session-bind`), no pid was supplied, or the pid is the
-///   `0` sentinel → run a persistent holder (unchanged legacy behavior).
-/// - `Some(pid)` when a non-zero session pid was supplied (flag or env) and binding is not disabled.
-pub fn resolve_session_pid(no_session_bind: bool, session_pid: Option<u32>) -> Option<u32> {
+/// Precedence is resolved here at runtime rather than via clap `conflicts_with` *and* the env value
+/// is parsed here rather than by clap, so that `--no-session-bind` always wins **without ever
+/// erroring** — even when `$TELEX_SESSION_PID` is unset, malformed, or conflicting. (clap 4 treats
+/// env-sourced values as "present" for conflict checks and would parse `TELEX_SESSION_PID` at parse
+/// time, so a malformed env would otherwise fail every `attach`, including `--no-session-bind`.)
+///
+/// Order: `--no-session-bind` → explicit `--session-pid` flag → `$TELEX_SESSION_PID`. A `0` from
+/// either source is the "unbound" sentinel; a non-numeric env value is reported as malformed and
+/// the holder runs persistent.
+pub fn resolve_session_pid(
+    no_session_bind: bool,
+    flag_pid: Option<u32>,
+    env_pid: Option<&str>,
+) -> SessionBinding {
     if no_session_bind {
-        return None;
+        return SessionBinding::Unbound(UnboundReason::OptedOut);
     }
-    // Treat 0 as an "unbound" sentinel: pid 0 is never a real session, and a runtime that exports
-    // `TELEX_SESSION_PID=0` to mean "no binding" should get persistent-holder behavior, not an
-    // immediate self-exit.
-    match session_pid {
-        Some(0) | None => None,
-        some => some,
+    if let Some(p) = flag_pid {
+        return bind_or_sentinel(p);
+    }
+    match env_pid.map(str::trim) {
+        None | Some("") => SessionBinding::Unbound(UnboundReason::NotRequested),
+        Some(s) => match s.parse::<u32>() {
+            Ok(p) => bind_or_sentinel(p),
+            Err(_) => SessionBinding::Unbound(UnboundReason::MalformedEnv(s.to_string())),
+        },
+    }
+}
+
+fn bind_or_sentinel(pid: u32) -> SessionBinding {
+    if pid == 0 {
+        SessionBinding::Unbound(UnboundReason::ZeroSentinel)
+    } else {
+        SessionBinding::Bound(pid)
     }
 }
 
@@ -120,31 +161,79 @@ mod platform {
 
 #[cfg(test)]
 mod tests {
-    use super::{process_alive, resolve_session_pid};
+    use super::{process_alive, resolve_session_pid, SessionBinding, UnboundReason};
 
     #[test]
     fn resolve_no_bind_wins_over_pid_and_env() {
-        // `--no-session-bind` opts out even when a pid was supplied (e.g. from $TELEX_SESSION_PID),
+        // `--no-session-bind` opts out even with a flag pid or a (valid or malformed) env value,
         // and must never error — protecting the persistent-holder escape hatch (AC3).
-        assert_eq!(resolve_session_pid(true, Some(1234)), None);
-        assert_eq!(resolve_session_pid(true, None), None);
+        assert_eq!(
+            resolve_session_pid(true, Some(1234), Some("5678")),
+            SessionBinding::Unbound(UnboundReason::OptedOut)
+        );
+        assert_eq!(
+            resolve_session_pid(true, None, Some("not-a-pid")),
+            SessionBinding::Unbound(UnboundReason::OptedOut)
+        );
     }
 
     #[test]
-    fn resolve_binds_to_supplied_pid() {
-        assert_eq!(resolve_session_pid(false, Some(1234)), Some(1234));
+    fn resolve_binds_to_flag_pid() {
+        assert_eq!(
+            resolve_session_pid(false, Some(1234), None),
+            SessionBinding::Bound(1234)
+        );
+    }
+
+    #[test]
+    fn resolve_binds_to_env_pid() {
+        assert_eq!(
+            resolve_session_pid(false, None, Some("4321")),
+            SessionBinding::Bound(4321)
+        );
+    }
+
+    #[test]
+    fn resolve_flag_beats_env() {
+        assert_eq!(
+            resolve_session_pid(false, Some(11), Some("22")),
+            SessionBinding::Bound(11)
+        );
     }
 
     #[test]
     fn resolve_default_is_unbound() {
         // No flag, no env → legacy behavior: persistent holder, no binding.
-        assert_eq!(resolve_session_pid(false, None), None);
+        assert_eq!(
+            resolve_session_pid(false, None, None),
+            SessionBinding::Unbound(UnboundReason::NotRequested)
+        );
+        assert_eq!(
+            resolve_session_pid(false, None, Some("  ")),
+            SessionBinding::Unbound(UnboundReason::NotRequested)
+        );
     }
 
     #[test]
-    fn resolve_zero_pid_is_unbound_sentinel() {
+    fn resolve_zero_is_unbound_sentinel() {
         // `--session-pid 0` / `TELEX_SESSION_PID=0` means "no binding", not "watch pid 0".
-        assert_eq!(resolve_session_pid(false, Some(0)), None);
+        assert_eq!(
+            resolve_session_pid(false, Some(0), None),
+            SessionBinding::Unbound(UnboundReason::ZeroSentinel)
+        );
+        assert_eq!(
+            resolve_session_pid(false, None, Some("0")),
+            SessionBinding::Unbound(UnboundReason::ZeroSentinel)
+        );
+    }
+
+    #[test]
+    fn resolve_malformed_env_is_unbound_not_error() {
+        // A malformed env (not no-bind) must not crash attach: report it and run persistent.
+        assert_eq!(
+            resolve_session_pid(false, None, Some("not-a-pid")),
+            SessionBinding::Unbound(UnboundReason::MalformedEnv("not-a-pid".to_string()))
+        );
     }
 
     #[test]

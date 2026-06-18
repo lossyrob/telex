@@ -126,9 +126,10 @@ pub struct AttachArgs {
     /// Bind the holder's lifetime to this session/launcher pid: when that process exits, the
     /// holder releases its lease and exits (the same shutdown tail as `detach`/ctrl-c). The
     /// belt-and-suspenders companion to launching the holder background + session-bound — even a
-    /// mis-launched detached holder cannot then outlive its session. Defaults from
-    /// `$TELEX_SESSION_PID`.
-    #[arg(long, env = "TELEX_SESSION_PID")]
+    /// mis-launched detached holder cannot then outlive its session. If unset, the
+    /// `$TELEX_SESSION_PID` environment variable is consulted at runtime (so that a malformed env
+    /// value never fails `--no-session-bind`).
+    #[arg(long)]
     pub session_pid: Option<u32>,
     /// Interval (seconds) for the `--session-pid` liveness check; keep it well inside the lease
     /// liveness window so the address frees promptly.
