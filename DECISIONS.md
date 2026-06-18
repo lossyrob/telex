@@ -479,15 +479,32 @@ message already buffered in the holder's queue is still delivered, since `handle
 re-check disposition at the handoff),
 making the live path consistent with the backlog path — a deliberate, minor improvement. Cost: with
 no id floor, each poll/push tick is O(address history) rather than O(new) — it anti-joins
-`deliveries` and the latest-disposition subquery over the address's messages (the undelivered result
-stays small). Acceptable at telex's single-user pre-beta scale. A safe id floor is **deliberately
+`deliveries` and the latest-disposition subquery over the address's messages; the **cost is
+proportional to the scanned history, not the (small) undelivered result**. Acceptable at telex's
+single-user pre-beta scale. A safe id floor is **deliberately
 deferred**: advancing a floor to the max delivered/visible id would re-introduce exactly this bug,
 because a late-committing lower id sits *below* that floor; a correct floor needs the
 contiguous-delivered prefix accounting for the in-flight commit horizon (snapshot `xmin`) — the same
 complexity a snapshot-aware cursor was rejected for — and an optional
-`dispositions(message_id, recipient, id)` / partial-undelivered index is the eventual mitigation.
+`dispositions(message_id, recipient, id)` / partial-undelivered index is the eventual mitigation
+(target before beta / multi-user / hot-address use).
 `seen` grows by one `i64` per distinct message this holder queues over its lifetime (negligible;
-holders are session-bound and restart regularly); a bounded prune is left for the watermark work.
+holders are session-bound and restart regularly; the drain logs `seen` size for observability on a
+pinned long-lived holder); a bounded prune is left for the watermark work.
+**Isolation precondition.** Correctness rests on each poll re-snapshotting the latest committed
+state — i.e. the backend connection reads under READ COMMITTED in autocommit. A non-default
+`default_transaction_isolation` (REPEATABLE READ / SERIALIZABLE, set at the server or role — a
+one-liner on managed Postgres) would freeze the snapshot and re-open this race, *without touching
+telex code*. `PgBackend::connect_with` therefore pins `SET SESSION CHARACTERISTICS AS TRANSACTION
+ISOLATION LEVEL READ COMMITTED`; the holder never drains inside a long-lived transaction.
+**Ordering / receipt contract.** Delivery is no longer strictly id-monotonic under out-of-order
+commits (the lower id can be delivered after the higher one) — this is the *required* behavior for
+the acceptance bar. Receipt order is best-effort-by-id, at-least-once; no `wait`-side consumer treats
+the message `id` as a receive high-water mark (the `Request::Wait { since }` cursor field is accepted
+but ignored). The pre-existing swallow-and-log on a persistent `mark_delivered` failure means an
+un-recorded id stays eligible and is **re-delivered on every restart** (no loss, but the "narrow
+duplicate window" framing of 0010 understates this persistent-failure case); a failure counter/cap
+is possible future work.
 Greenfield: no migration machinery added (pre-first-non-beta, single-user). **CI gap:** the
 build/test matrix does not run a real Postgres (issue #19), so green CI does *not* validate this
 fix's core behavior — it is validated by the gated Postgres tests, run locally against a real server

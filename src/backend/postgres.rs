@@ -168,6 +168,19 @@ impl PgBackend {
                 eprintln!("[telex] postgres connection ended: {e}");
             }
         });
+        // The holder's live drain (`fetch_undelivered`) is correct only if every poll re-snapshots
+        // the latest committed state — i.e. each autocommit query runs under READ COMMITTED. A
+        // server- or role-level `default_transaction_isolation` of REPEATABLE READ/SERIALIZABLE
+        // (a one-liner on managed Postgres) would otherwise freeze the snapshot and re-open the
+        // issue #18 race (a frozen snapshot cannot see a later-committing lower id). Pin it on the
+        // session so the guarantee does not depend on external configuration; telex never drains
+        // inside a long-lived transaction. See DECISIONS 0011.
+        client
+            .batch_execute(
+                "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED",
+            )
+            .await
+            .context("pinning READ COMMITTED isolation")?;
         if let Some(s) = schema {
             let s = sanitize_ident(s)?;
             client

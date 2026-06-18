@@ -31,7 +31,11 @@ struct State {
     /// drain serialization point: concurrent poll/push drains — and a stale drain whose
     /// `fetch_undelivered` snapshot predates a concurrent `mark_delivered` — can never re-queue a
     /// message. Never pruned (that is what keeps the dedup race-free); the durable delivery record,
-    /// not this set, is what prevents redelivery across restarts. See DECISIONS 0011.
+    /// not this set, is what prevents redelivery across restarts. It grows by one `i64` per distinct
+    /// message this holder queues over its lifetime — bounded in practice because holders are
+    /// session-bound and restart between sessions; a pinned, very-long-lived holder on a busy
+    /// address is the case to watch (the drain logs `seen` size so the growth is observable). A
+    /// bounded prune is deferred precisely because a naive one re-opens the TOCTOU. See DECISIONS 0011.
     seen: Mutex<HashSet<i64>>,
     last_heartbeat_ms: AtomicI64,
     keepalive: Duration,
@@ -74,8 +78,12 @@ async fn drain(backend: &Arc<dyn Backend>, address: &str, st: &State, source: &s
         }
     }
     drop(q);
+    let seen_len = seen.len();
     drop(seen);
     if queued > 0 {
+        // Log the dedup-set size alongside the queue activity so the monotonic `seen` growth is
+        // observable on a pinned, long-lived holder before it could ever matter (see `seen` doc).
+        eprintln!("[holder] drain ({source}) queued {queued} (seen={seen_len})");
         st.notify.notify_waiters();
     }
 }
@@ -749,5 +757,84 @@ mod tests {
             st.queue.lock().await.is_empty(),
             "a terminally dispositioned message is not queued by the live drain"
         );
+    }
+
+    /// Concurrency safety of the drain dedup (SF-6): startup/poll/push all call `drain` and may run
+    /// concurrently; the ONLY thing preventing a double-enqueue is the monotonic `seen` lock. Drive
+    /// many drains truly in parallel (multi-thread runtime) over the same `Arc<State>` and assert
+    /// each message is queued exactly once. This pins the race so a future lock-narrowing change
+    /// (e.g. releasing `seen` across the awaited fetch) that re-introduced the TOCTOU would fail here.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn concurrent_drains_never_double_enqueue() {
+        let backend = temp_backend().await;
+        let addr = "attach:concurrent";
+        const N: usize = 25;
+        for _ in 0..N {
+            backend.insert_message(&note(addr)).await.unwrap();
+        }
+
+        let st = state_with(backend.clone(), addr);
+        let mut handles = Vec::new();
+        for _ in 0..8 {
+            let st = st.clone();
+            let backend = backend.clone();
+            let addr = addr.to_string();
+            handles.push(tokio::spawn(async move {
+                drain(&backend, &addr, &st, "race").await;
+            }));
+        }
+        for h in handles {
+            h.await.unwrap();
+        }
+
+        let queued: Vec<i64> = st.queue.lock().await.iter().map(|b| b.row.id).collect();
+        let distinct: HashSet<i64> = queued.iter().copied().collect();
+        assert_eq!(
+            queued.len(),
+            N,
+            "exactly N messages queued — concurrent drains never double-enqueue"
+        );
+        assert_eq!(distinct.len(), N, "every queued id is distinct");
+    }
+
+    /// A message terminally dispositioned out-of-band AFTER it is queued is still delivered (TO-2):
+    /// `handle_conn` does not re-check disposition at the handoff. Pinning this guards the no-drop
+    /// invariant — a future maintainer must not add a naive pop-time disposition re-check that could
+    /// drop an already-buffered message (the live drain's pre-queue filter is the only exclusion).
+    #[tokio::test]
+    async fn terminal_disposition_after_queue_still_delivers() {
+        let backend = temp_backend().await;
+        let addr = "attach:terminal-after-queue";
+        let row = backend.insert_message(&note(addr)).await.unwrap();
+
+        let st = state_with(backend.clone(), addr);
+        drain(&st.backend, addr, &st, "test").await;
+        assert_eq!(st.queue.lock().await.len(), 1, "message queued");
+
+        // Out-of-band terminal disposition AFTER queueing (e.g. via `telex inbox`).
+        backend
+            .insert_disposition(row.id, addr, "handled", None, None)
+            .await
+            .unwrap();
+
+        let (client, server) = duplex(4096);
+        let holder = tokio::spawn({
+            let st = st.clone();
+            async move { handle_conn(server, st).await }
+        });
+        let (cr, mut cw) = tokio::io::split(client);
+        cw.write_all(&wait_request(addr).await).await.unwrap();
+        cw.flush().await.unwrap();
+        let mut reader = BufReader::new(cr);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        match serde_json::from_str::<Frame>(line.trim()).unwrap() {
+            Frame::Message { id, .. } => assert_eq!(
+                id, row.id,
+                "an already-queued message is delivered despite a later terminal disposition"
+            ),
+            other => panic!("expected a Message frame, got {other:?}"),
+        }
+        holder.await.unwrap().expect("clean handoff");
     }
 }
