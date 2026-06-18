@@ -2051,6 +2051,7 @@ dependencies = [
  "clap",
  "dirs",
  "futures-util",
+ "libc",
  "native-tls",
  "openssl",
  "postgres-native-tls",
@@ -2060,6 +2061,7 @@ dependencies = [
  "tokio",
  "tokio-postgres",
  "toml",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]

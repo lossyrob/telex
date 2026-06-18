@@ -149,6 +149,8 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         let interval = args.heartbeat_secs.max(1);
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_secs(interval));
+            // After a host sleep/stall, skip missed ticks rather than bursting catch-up work.
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tick.tick().await;
                 match backend.heartbeat(&address).await {
@@ -192,11 +194,73 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         let interval = args.poll_secs.max(1);
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_secs(interval));
+            // After a host sleep/stall, skip missed ticks rather than bursting catch-up polls.
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tick.tick().await;
                 drain_new(&backend, &address, &st, "poll").await;
             }
         });
+    }
+
+    // Session-binding watch (issue #5). When the holder is bound to a launcher/session pid, poll
+    // it and, the moment it is gone, route through the *same* shutdown path as `detach`/ctrl-c so
+    // the lease is released identically. Defense-in-depth: even a mis-launched detached holder
+    // cannot outlive the session that spawned it. The env var is read here (not by clap) so a
+    // malformed `$TELEX_SESSION_PID` never fails `--no-session-bind`.
+    use crate::session_watch::{SessionBinding, UnboundReason};
+    let env_pid = std::env::var("TELEX_SESSION_PID").ok();
+    match crate::session_watch::resolve_session_pid(
+        args.no_session_bind,
+        args.session_pid,
+        env_pid.as_deref(),
+    ) {
+        SessionBinding::Bound(session_pid) => {
+            // Keep the liveness check inside the lease window so the address always frees within
+            // it, even if a caller passes a poll interval larger than the window.
+            let window = ctx.cfg.liveness_window_secs.max(1) as u64;
+            let interval = args.session_poll_secs.max(1).min(window);
+            eprintln!(
+                "[holder] session-bound to pid {session_pid} (releases lease if it exits; poll {interval}s)"
+            );
+            let st = state.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_secs(interval));
+                // A liveness probe gains nothing from catch-up ticks: after a host sleep/stall,
+                // skip the missed ticks instead of bursting a run of `process_alive` syscalls.
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tick.tick().await;
+                    if !crate::session_watch::process_alive(session_pid) {
+                        eprintln!(
+                            "[holder] session {session_pid} gone; releasing lease and exiting"
+                        );
+                        st.shutdown.notify_one();
+                        break;
+                    }
+                }
+            });
+        }
+        // Always log *why* binding is off so the holder's binding state is visible in an incident
+        // (the silent legacy default is the only quiet case).
+        SessionBinding::Unbound(reason) => match reason {
+            UnboundReason::NotRequested => {}
+            UnboundReason::OptedOut => {
+                if args.session_pid.is_some() || env_pid.is_some() {
+                    eprintln!(
+                        "[holder] --no-session-bind set; ignoring any session pid and running persistent"
+                    );
+                }
+            }
+            UnboundReason::ZeroSentinel => {
+                eprintln!("[holder] session pid 0 (unbound sentinel); running persistent");
+            }
+            UnboundReason::MalformedEnv(raw) => {
+                eprintln!(
+                    "[holder] TELEX_SESSION_PID={raw:?} is not a valid pid; running persistent (unbound)"
+                );
+            }
+        },
     }
 
     // Optional Postgres push (no-op where the backend or this build lacks it).
