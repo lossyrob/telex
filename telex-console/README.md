@@ -92,6 +92,15 @@ rare duplicate delivery is normal, not an error.
 The header shows the backend, current view, live/paused state, active filter, and counts.
 Below ~50×8 the UI shows a "terminal too small" notice instead of cramped panes.
 
+### Live tail vs. paused
+
+The header's `● LIVE` / `⏸ PAUSED` indicator controls **auto-scroll only** — it does *not*
+stop polling. When paused, new messages still arrive (the `msgs:` count keeps climbing); the
+feed simply stays put on your selection instead of jumping to the newest row. The feed
+**auto-pauses** as soon as you scroll up (`k` / `↑`) or jump to the top (`g`), so reading
+history isn't interrupted by live arrivals. Press **`t`** (toggle) or **`G`** (jump to
+bottom) to resume tailing — the footer shows a `t/G resume-tail` hint while paused.
+
 ## How it reads
 
 The feed is a cursor poll over the core `Backend::export(None, None, cursor)` (global,

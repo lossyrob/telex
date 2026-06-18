@@ -56,7 +56,7 @@ fn render_header(f: &mut Frame, area: ratatui::layout::Rect, st: &AppState) {
     let (live_txt, live_color) = if st.tailing {
         ("● LIVE", Color::Green)
     } else {
-        ("⏸ PAUSED", Color::Yellow)
+        ("⏸ PAUSED (t resumes)", Color::Yellow)
     };
     let filter_txt = st
         .filter
@@ -97,12 +97,33 @@ fn render_footer(f: &mut Frame, area: ratatui::layout::Rect, st: &AppState) {
             Span::styled("filter> ", Style::default().fg(Color::Cyan)),
             Span::raw(buf.clone()),
             Span::styled("▏", Style::default().fg(Color::Cyan)),
-            Span::styled("   (Enter apply · Esc cancel)", Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                "   (Enter apply · Esc cancel)",
+                Style::default().fg(Color::DarkGray),
+            ),
         ]),
-        Mode::Normal => Line::from(Span::styled(
-            " q quit · Tab view · t tail · f filter · Enter thread · j/k move · ←/→ column · g/G ends · Esc back",
-            Style::default().fg(Color::DarkGray),
-        )),
+        Mode::Normal => {
+            // Surface the tail state in the key hint, and a prominent resume hint when paused
+            // so it's discoverable that new messages are still arriving but auto-scroll is off.
+            let tail_hint = if st.view == View::Feed && !st.tailing {
+                Span::styled(
+                    " t/G resume-tail ",
+                    Style::default()
+                        .fg(ratatui::style::Color::Black)
+                        .bg(ratatui::style::Color::Yellow),
+                )
+            } else {
+                Span::styled(" t tail ", Style::default().fg(Color::DarkGray))
+            };
+            Line::from(vec![
+                Span::styled(" q quit · Tab view ·", Style::default().fg(Color::DarkGray)),
+                tail_hint,
+                Span::styled(
+                    "· f filter · Enter thread · j/k move · ←/→ column · g/G ends · Esc back",
+                    Style::default().fg(Color::DarkGray),
+                ),
+            ])
+        }
     };
     f.render_widget(Paragraph::new(line), area);
 }
