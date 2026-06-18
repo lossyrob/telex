@@ -474,7 +474,9 @@ returned after the higher one is delivered — alongside a deterministic SQLite 
 asserting a waiter actually *receives* the lower id with no restart.
 
 **Consequences.** Behavior delta: the live drain now excludes a message whose latest disposition is
-already terminal (e.g. an out-of-band `telex handle` via `inbox` before any waiter popped it),
+already terminal (e.g. an out-of-band `telex handle` via `inbox` before any drain has queued it; a
+message already buffered in the holder's queue is still delivered, since `handle_conn` does not
+re-check disposition at the handoff),
 making the live path consistent with the backlog path — a deliberate, minor improvement. Cost: with
 no id floor, each poll/push tick is O(address history) rather than O(new) — it anti-joins
 `deliveries` and the latest-disposition subquery over the address's messages (the undelivered result

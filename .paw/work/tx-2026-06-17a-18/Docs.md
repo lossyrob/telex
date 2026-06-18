@@ -59,8 +59,10 @@ work exactly as before. The only observable difference is correctness — on Pos
 concurrently are no longer delayed-until-restart.
 
 One intentional, minor behavior change: a message whose **latest disposition is already terminal**
-(e.g. someone ran `telex handle` via `telex inbox` before any waiter popped it) is no longer handed
-to a waiter by the live drain — consistent with how the restart-backlog path already behaved.
+(e.g. someone ran `telex handle` via `telex inbox` before any drain has queued it) is no longer
+handed to a waiter by the live drain — consistent with how the restart-backlog path already behaved.
+A message already buffered in the holder's queue is still delivered (the handoff does not re-check
+disposition).
 
 ## API Reference
 
