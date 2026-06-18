@@ -276,6 +276,7 @@ the token's actual lifetime (a 50-min cache outlived a token during testing).
 
 - **Date:** 2026-06-05
 - **Status:** Accepted
+- **Amended:** the "no per-recipient delivery table" clause is superseded by 0010 (durable delivery tracking, issue #10); the rest of this entry stands.
 
 **Context.** Before implementing v0, Telex needed the full `telex` command surface
 and distributable shape aligned across the design docs, agent instructions, and release
@@ -435,3 +436,42 @@ correctly distinguished, and the `Pong` echoes the holder's store key so a same-
 for addresses never re-attached are ignored but not yet garbage-collected (bounded by prune-on-claim
 + the fast-fail ping); `reply` could additionally default `from` from the parent's `to_addr`
 (deferred — a preference call, not done here to keep `send`/`reply` uniform).
+
+## 0011 — Durable per-recipient delivery tracking for restart-safe backlog delivery
+
+- **Date:** 2026-06-17
+- **Status:** Accepted
+- **Supersedes:** the "no per-recipient delivery table" clause of 0007
+
+**Context.** 0007 shipped a derived inbox with *no* delivery table: the holder tracked
+delivery only through an in-memory cursor seeded to `max_id` at startup. That made the
+`queued-unoccupied` receipt non-durable — a message sent while an address was unoccupied was
+skipped on the next holder start and never delivered by `telex wait` (issue #10). Recovering
+delivery state across ephemeral holder restarts needs a *persistent* record of what has
+actually been handed to a waiter; a derived inbox (disposition-based) conflates "delivered"
+with "acted on" and cannot answer "was this ever delivered?".
+
+**Decision.** Add a durable `deliveries(message_id, recipient, occupant, delivered_at_ms)`
+table (`UNIQUE(message_id, recipient)`, idempotent `ON CONFLICT DO NOTHING`) plus two
+`Backend` methods, `mark_delivered` and `undelivered_backlog(address, upto_id)`. Delivery is
+committed at the holder→waiter frame handoff (recorded there). On holder start the queue is
+seeded with the undelivered, non-terminally-dispositioned backlog bounded by
+`id <= max_id`, which partitions cleanly against the `fetch_after` (`id > cursor`) drain so
+nothing is delivered twice. The contract is **at-least-once across holder restarts**, with two
+independent do-not-redeliver signals: a delivery record (primary) and a terminal disposition
+(secondary, for messages recovered out-of-band via `telex inbox`). A separate table — not a
+`delivered` flag on `messages`, nor a per-address watermark — was chosen because it preserves
+per-recipient delivery facts for audit and future `cc` fan-out and keeps the two signals
+orthogonal.
+
+**Consequences.** Schema grows by one table, auto-migrated via `CREATE TABLE IF NOT EXISTS`
+in `init_schema`. The first holder started after upgrading an *existing* database replays that
+address's full undelivered, non-terminal history once (including fire-and-forget `fyi`/`note`),
+because no prior delivery records exist; a one-time per-address watermark migration (seed
+delivery records for pre-existing `id <= max_id`) would avoid this and is the recommended
+follow-up before rollout against a database with real history (e.g. telex's own `local.db`).
+Exactly-once is explicitly *not* provided — there is no transactional waiter-ack, so a duplicate
+is possible only in the narrow window between frame-write and the durable mark. A pre-existing
+poll-with-cursor live-holder gap (a Postgres id allocated before the snapshot but committed
+after it) is unchanged but now self-heals on the next restart. Conformance covers both
+backends; see issue #10 / PR #15.
