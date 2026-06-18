@@ -386,3 +386,45 @@ jargon) were intentionally left untouched to keep the diff reviewable; a future 
 could deepen the rename if desired. This entry records a naming choice (normally out of
 scope per the log conventions) because the term is load-bearing for cross-document
 consistency and was an explicit deliverable (issue #8).
+
+## 0010 — Holder self-binds to its launching session (pid-watch); ppid-default declined, fd path deferred
+
+- **Date:** 2026-06-17
+- **Status:** Accepted (pending validation)
+
+**Context.** Decision 0004 requires the holder's lifetime to track its session — "a
+session-owned process, **not** a fully detached daemon" — so session death releases the lease
+promptly. Until now that was enforced only by convention (SKILL.md guidance to launch the holder
+background + session-bound). A single mis-launch (e.g. Copilot CLI `detach: true`, or any
+"daemonize" path) silently orphans the holder: it keeps heartbeating and the address falsely
+reports `occupied` for a session that no longer exists. Because the holder is exactly what keeps
+the TTL heartbeat alive across turns (0005), an orphaned holder defeats the TTL backstop — the
+failure is not self-correcting (issue #5).
+
+**Decision.** Make the binding enforceable **inside the binary**. The holder accepts
+`--session-pid <pid>` (env `TELEX_SESSION_PID`); a background watch task polls that pid
+(`--session-poll-secs`, default 2s, clamped to the lease liveness window) using a cross-platform
+liveness check — `kill(pid, 0)` on Unix, `OpenProcess(SYNCHRONIZE)` + `WaitForSingleObject` on
+Windows (`src/session_watch.rs`). When the pid is gone, the task triggers the **existing**
+`state.shutdown` signal, so release runs through the *same* tail as `detach`/ctrl-c
+(`release_lease` + IPC-endpoint cleanup) — no second release path. The liveness check is
+conservative: only a definite "no such process" releases; an existing-but-unqueryable process or
+any ambiguous probe error is treated as alive. `--no-session-bind` runs a deliberately persistent
+holder and overrides `--session-pid` / the env var (precedence resolved at runtime, **not** via
+clap `conflicts_with`, because clap 4 would reject `TELEX_SESSION_PID=… --no-session-bind` before
+the holder runs). Default behavior with no flag/env is unchanged (no binding).
+
+**Consequences.** Even a mis-launched detached holder cannot outlive its session: this turns 0004
+from advisory into enforceable and complements the TTL/occupancy model (0005) by stopping the
+heartbeat at session death. Scope deliberately bounded against the issue's broader proposal: (a)
+**a ppid/parent-pid default is declined** — launchers that spawn-and-return (common for
+async/background launches) would leave the holder watching a dead or reparented parent and make
+it self-exit immediately, breaking the primary use case; the issue itself names ppid "the central
+risk." The sanctioned binding is therefore the explicit `--session-pid`/env, not an implicit
+default. (b) The **inherited-fd / `--session-fd` path is deferred** — it is the pid-reuse-immune
+upgrade, but the pid-watch satisfies every acceptance criterion; it remains a documented future
+option. Known limitation: raw-pid watching is theoretically vulnerable to pid reuse within the
+poll window; the fd path is the future fix. Revisit if a runtime needs zero-config binding (would
+argue for the fd path) or if pid reuse proves to bite in practice. Cross-references: 0004 (holder
+lifetime tracks session), 0005 (TTL/poll baseline).
+

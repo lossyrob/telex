@@ -49,6 +49,15 @@ azure_core = { version = "1", optional = true }
 [target.'cfg(target_os = "linux")'.dependencies]
 openssl = { version = "0.10", features = ["vendored"], optional = true }
 
+# Session-binding liveness check (issue #5): watch a launcher/session pid and self-exit when it
+# dies. Both crates are already present in the lock tree (transitively via tokio), so pinning
+# them as direct platform-gated deps fixes the API surface without growing the dependency graph.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 [features]
 # Batteries-included default. Build a leaner binary with e.g.
 #   cargo install telex --no-default-features --features sqlite

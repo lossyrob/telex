@@ -123,6 +123,21 @@ pub struct AttachArgs {
     /// Enable Postgres LISTEN/NOTIFY push in addition to poll (no-op on SQLite).
     #[arg(long)]
     pub push: bool,
+    /// Bind the holder's lifetime to this session/launcher pid: when that process exits, the
+    /// holder releases its lease and exits (the same shutdown tail as `detach`/ctrl-c). The
+    /// belt-and-suspenders companion to launching the holder background + session-bound — even a
+    /// mis-launched detached holder cannot then outlive its session. Defaults from
+    /// `$TELEX_SESSION_PID`.
+    #[arg(long, env = "TELEX_SESSION_PID")]
+    pub session_pid: Option<u32>,
+    /// Interval (seconds) for the `--session-pid` liveness check; keep it well inside the lease
+    /// liveness window so the address frees promptly.
+    #[arg(long, default_value_t = 2)]
+    pub session_poll_secs: u64,
+    /// Do not bind to any session pid, even if `$TELEX_SESSION_PID` is set — for a deliberately
+    /// persistent, server-side holder that should outlive its launcher. Overrides `--session-pid`.
+    #[arg(long)]
+    pub no_session_bind: bool,
 }
 
 #[derive(Args)]

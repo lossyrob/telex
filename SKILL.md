@@ -44,6 +44,21 @@ So: **background and session-bound.** Never start them as persistent / standalon
    telex attach --address <addr> --description "<s>" --scope <s> --tags <a,b> --heartbeat-secs N --poll-secs N
    ```
 
+   **Belt-and-suspenders: `--session-pid`.** Launching the holder background + session-bound is
+   the contract, but it is enforced only by your runtime. As defense-in-depth, pass the durable
+   session/agent pid so the holder *itself* releases the lease and exits the moment that process
+   dies — even if it was accidentally launched detached:
+
+   ```sh
+   telex attach --address <addr> --description "<s>" --session-pid <your-session-pid>
+   # equivalently, export TELEX_SESSION_PID=<pid> once for the session
+   ```
+
+   The holder polls the pid (`--session-poll-secs N`, default 2; clamped to the lease liveness
+   window) and, on its death, runs the same release path as `detach`/ctrl-c. For a *deliberately*
+   persistent, server-side holder that should outlive its launcher, pass `--no-session-bind` (it
+   overrides `--session-pid` / `$TELEX_SESSION_PID`).
+
 2. Wait for one message with a **single-shot** background `telex wait` — **not** an internal loop. It connects to the holder, blocks until one message is delivered, prints it as JSON, and **completes**. The command *completing* is your wake signal (see the box below). On delivery, **immediately re-arm a fresh background `wait` before doing substantive work on the delivered message**; re-arm at your turn level, not inside a shell loop.
 
    ```sh
@@ -187,7 +202,7 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex attach` | Start a station on the address: become the live occupant, hold the lease, run the holder, and register the directory description. Blocks. Fails if the address is already occupied by a live lease. | `--address <addr>`, `--description <s>`, `--scope <s>`, `--tags <a,b>`, `--heartbeat-secs N`, `--poll-secs N` |
+| `telex attach` | Start a station on the address: become the live occupant, hold the lease, run the holder, and register the directory description. Blocks. Fails if the address is already occupied by a live lease. | `--address <addr>`, `--description <s>`, `--scope <s>`, `--tags <a,b>`, `--heartbeat-secs N`, `--poll-secs N`, `--session-pid <pid>` (env `TELEX_SESSION_PID`), `--session-poll-secs N`, `--no-session-bind` |
 | `telex detach` | Stop the station: release the lease and stop a running holder. | `--address <addr>` |
 
 ### RECEIVE

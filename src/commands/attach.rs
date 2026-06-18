@@ -162,6 +162,45 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         });
     }
 
+    // Session-binding watch (issue #5). When the holder is bound to a launcher/session pid, poll
+    // it and, the moment it is gone, route through the *same* shutdown path as `detach`/ctrl-c so
+    // the lease is released identically. Defense-in-depth: even a mis-launched detached holder
+    // cannot outlive the session that spawned it.
+    match crate::session_watch::resolve_session_pid(args.no_session_bind, args.session_pid) {
+        Some(session_pid) => {
+            // Keep the liveness check inside the lease window so the address always frees within
+            // it, even if a caller passes a poll interval larger than the window.
+            let window = ctx.cfg.liveness_window_secs.max(1) as u64;
+            let interval = args.session_poll_secs.max(1).min(window);
+            eprintln!(
+                "[holder] session-bound to pid {session_pid} (releases lease if it exits; poll {interval}s)"
+            );
+            let st = state.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_secs(interval));
+                loop {
+                    tick.tick().await;
+                    if !crate::session_watch::process_alive(session_pid) {
+                        eprintln!(
+                            "[holder] session {session_pid} gone; releasing lease and exiting"
+                        );
+                        st.shutdown.notify_one();
+                        break;
+                    }
+                }
+            });
+        }
+        None => {
+            if let Some(pid) = args.session_pid {
+                if args.no_session_bind {
+                    eprintln!(
+                        "[holder] --no-session-bind set; ignoring session pid {pid} and running persistent"
+                    );
+                }
+            }
+        }
+    }
+
     // Optional Postgres push (no-op where the backend or this build lacks it).
     if args.push {
         #[cfg(feature = "postgres")]
