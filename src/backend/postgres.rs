@@ -358,23 +358,6 @@ impl Backend for PgBackend {
         })
     }
 
-    async fn max_id(&self, address: &str) -> Result<i64> {
-        Ok(self
-            .client
-            .query_one(
-                "SELECT COALESCE(MAX(id),0) AS m FROM messages WHERE to_addr=$1",
-                &[&address],
-            )
-            .await?
-            .get("m"))
-    }
-
-    async fn fetch_after(&self, address: &str, cursor: i64) -> Result<Vec<MessageRow>> {
-        let sql = format!("SELECT {MSG_COLS} FROM messages WHERE to_addr=$1 AND id>$2 ORDER BY id");
-        let rows = self.client.query(&sql, &[&address, &cursor]).await?;
-        Ok(rows.iter().map(map_message).collect())
-    }
-
     async fn mark_delivered(
         &self,
         message_id: i64,
@@ -392,14 +375,17 @@ impl Backend for PgBackend {
         Ok(())
     }
 
-    async fn undelivered_backlog(&self, address: &str, upto_id: i64) -> Result<Vec<MessageRow>> {
-        // Backlog = messages addressed here, at or below the holder's start cursor, that have no
-        // delivery record AND whose latest disposition for this recipient is not terminal. The
-        // `id <= upto_id` bound partitions cleanly against the `fetch_after` (id > cursor) drain, so
-        // a message inserted between the cursor snapshot and this query is drained, not seeded.
+    async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>> {
+        // Undelivered = messages addressed here with no delivery record AND whose latest disposition
+        // for this recipient is not terminal, ordered by id. There is deliberately NO id floor: the
+        // holder's live drain queues exactly this set (deduped in-memory), so a concurrently-
+        // committed lower id — which by definition has no delivery record — is delivered live and is
+        // never skipped by a high-water cursor (issue #18 / DECISIONS 0011). Cost is O(address
+        // history) per call rather than O(new); acceptable at this scale, and a safe id floor is
+        // deferred because a naive one would re-open exactly this gap (see 0011).
         let sql = format!(
             "SELECT {MSG_COLS} FROM messages m \
-             WHERE m.to_addr=$1 AND m.id<=$2 \
+             WHERE m.to_addr=$1 \
                AND NOT EXISTS (SELECT 1 FROM deliveries d \
                                WHERE d.message_id=m.id AND d.recipient=$1) \
                AND COALESCE((SELECT disp.state FROM dispositions disp \
@@ -408,7 +394,7 @@ impl Backend for PgBackend {
              ORDER BY m.id",
             terminal_dispositions_sql_list()
         );
-        let rows = self.client.query(&sql, &[&address, &upto_id]).await?;
+        let rows = self.client.query(&sql, &[&address]).await?;
         Ok(rows.iter().map(map_message).collect())
     }
 

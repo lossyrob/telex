@@ -504,8 +504,9 @@ alive — handling the message — which is backwards.
 Telex resolves this by splitting the waiter into **two processes**:
 
 - a **resident holder** — long-lived, holds the backend connection and writes the
-  lease's TTL heartbeat, polls for actionable messages from a cursor, and buffers them
-  locally (on the optional Postgres upgrade it can instead hold an advisory lock and
+  lease's TTL heartbeat, polls for actionable messages — the **undelivered set** keyed on
+  per-recipient delivery state, not a monotonic id cursor (see decision 0011) — and buffers
+  them locally (on the optional Postgres upgrade it can instead hold an advisory lock and
   run `LISTEN/NOTIFY`). It never needs to take an agent turn, so it can stay up for the
   whole mission. This is the literal answerback drum: it answers liveness
   automatically and continuously while the agent works elsewhere.
@@ -542,7 +543,7 @@ client's socket; the read returns, the client prints the concise payload to stdo
 and exits. The wakeup is push — the holder's write releases the client's read — with
 no local polling.
 
-Delivery state, cursor position, and pending disposition live in the **holder** (and
+Delivery state and pending disposition live in the **holder** (and
 ultimately the backend), never in the ephemeral client, which is a stateless courier.
 A later `telex ack`/`telex handle` is another short call that updates that state.
 

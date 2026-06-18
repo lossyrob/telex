@@ -4,7 +4,7 @@
 //! Blocks for the mission; releases the lease on shutdown (Ctrl-C or a `detach` signal).
 
 use anyhow::Result;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -27,7 +27,12 @@ struct Buffered {
 struct State {
     queue: Mutex<VecDeque<Buffered>>,
     notify: Notify,
-    cursor: Mutex<i64>,
+    /// Monotonic "already queued by this holder" guard. The `HashSet::insert` under this lock is the
+    /// drain serialization point: concurrent poll/push drains — and a stale drain whose
+    /// `fetch_undelivered` snapshot predates a concurrent `mark_delivered` — can never re-queue a
+    /// message. Never pruned (that is what keeps the dedup race-free); the durable delivery record,
+    /// not this set, is what prevents redelivery across restarts. See DECISIONS 0011.
+    seen: Mutex<HashSet<i64>>,
     last_heartbeat_ms: AtomicI64,
     keepalive: Duration,
     shutdown: Notify,
@@ -36,9 +41,14 @@ struct State {
     occupant: String,
 }
 
-async fn drain_new(backend: &Arc<dyn Backend>, address: &str, st: &State, source: &str) {
-    let mut cur = st.cursor.lock().await;
-    let rows = match backend.fetch_after(address, *cur).await {
+/// Drain the backend's undelivered set into the local queue. Delivery state — not a monotonic id
+/// cursor — decides what is queued: `fetch_undelivered` returns every message addressed here with no
+/// delivery record and a non-terminal disposition, so a Postgres id that committed out of order
+/// (behind an already-delivered higher id) is picked up here and delivered by the *live* holder
+/// without a restart (issue #18 / DECISIONS 0011). The `seen` set deduplicates: only ids newly
+/// inserted under its lock are queued, so concurrent poll/push/startup drains never double-queue.
+async fn drain(backend: &Arc<dyn Backend>, address: &str, st: &State, source: &str) {
+    let rows = match backend.fetch_undelivered(address).await {
         Ok(r) => r,
         Err(e) => {
             eprintln!("[holder] drain ({source}) error: {e}");
@@ -49,17 +59,25 @@ async fn drain_new(backend: &Arc<dyn Backend>, address: &str, st: &State, source
         return;
     }
     let recv = now_ms();
+    let mut seen = st.seen.lock().await;
     let mut q = st.queue.lock().await;
+    let mut queued = 0usize;
     for row in rows {
-        *cur = row.id;
-        q.push_back(Buffered {
-            row,
-            buffered_at_ms: recv,
-        });
+        // `insert` returns false if this holder already queued the id — skip it. This is the only
+        // dedup gate; because `seen` is never pruned, a stale fetch cannot resurrect a delivered id.
+        if seen.insert(row.id) {
+            q.push_back(Buffered {
+                row,
+                buffered_at_ms: recv,
+            });
+            queued += 1;
+        }
     }
     drop(q);
-    drop(cur);
-    st.notify.notify_waiters();
+    drop(seen);
+    if queued > 0 {
+        st.notify.notify_waiters();
+    }
 }
 
 pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
@@ -115,16 +133,14 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         }
     }
 
-    // `start_cursor` is the delivery high-water for the streaming drain. The holder seeds its queue
-    // from the durable backlog further below — after the heartbeat task is live — so a restart
-    // recovers the messages queued while the address was unoccupied instead of skipping past
-    // `max_id`.
-    let start_cursor = backend.max_id(&address).await?;
-
+    // Delivery state — not a monotonic id cursor — drives the queue (DECISIONS 0011). The holder
+    // seeds and refills its queue from `fetch_undelivered` via the initial drain below (run after
+    // the heartbeat task is live), so a Postgres id committed out of order is delivered by the live
+    // holder without waiting for a restart.
     let state = Arc::new(State {
         queue: Mutex::new(VecDeque::new()),
         notify: Notify::new(),
-        cursor: Mutex::new(start_cursor),
+        seen: Mutex::new(HashSet::new()),
         last_heartbeat_ms: AtomicI64::new(now_ms()),
         keepalive: Duration::from_secs(args.keepalive_secs.max(1)),
         shutdown: Notify::new(),
@@ -159,30 +175,13 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         });
     }
 
-    // Recover the durable backlog now that the heartbeat task is keeping the lease fresh — a large
-    // first-upgrade backlog can take a moment to materialize, and we don't want that to delay the
-    // first heartbeat and make the freshly-claimed lease look stale within the liveness window. The
-    // backlog is everything at or below `start_cursor` that was queued (and not yet delivered or
-    // terminally dispositioned) while the address was unoccupied; the `id <= start_cursor` bound
-    // makes the seeded backlog and the `fetch_after` (id > cursor) drain partition cleanly, so a
-    // message inserted between the two snapshots is drained — never both drained and seeded. This is
-    // a start-time snapshot: a message terminally dispositioned via `telex inbox` after seeding but
-    // before a waiter pops it is still delivered once here (and then marked, so it is not
-    // re-recovered on a later restart).
-    let backlog = backend.undelivered_backlog(&address, start_cursor).await?;
-    if !backlog.is_empty() {
-        let recv = now_ms();
-        let n = backlog.len();
-        let mut q = state.queue.lock().await;
-        for row in backlog {
-            q.push_back(Buffered {
-                row,
-                buffered_at_ms: recv,
-            });
-        }
-        drop(q);
-        eprintln!("[holder] recovered {n} queued message(s) from durable backlog");
-    }
+    // Initial drain now that the heartbeat task is keeping the lease fresh (a large first-upgrade
+    // backlog can take a moment to materialize, and we don't want that to delay the first heartbeat
+    // and make the freshly-claimed lease look stale within the liveness window). This is the same
+    // `drain` the poll/push tasks run: it queues every undelivered, non-terminal message addressed
+    // here — including everything queued while the address was unoccupied — and the monotonic `seen`
+    // guard keeps it from racing the poll task's first tick into a double-queue.
+    drain(&backend, &address, &state, "startup").await;
 
     // Poll task (delivery backstop for both backends).
     {
@@ -194,7 +193,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
             let mut tick = tokio::time::interval(Duration::from_secs(interval));
             loop {
                 tick.tick().await;
-                drain_new(&backend, &address, &st, "poll").await;
+                drain(&backend, &address, &st, "poll").await;
             }
         });
     }
@@ -323,7 +322,7 @@ fn spawn_pg_push(
         tokio::spawn(async move {
             loop {
                 notify_new.notified().await;
-                drain_new(&backend, &address, &st, "push").await;
+                drain(&backend, &address, &st, "push").await;
             }
         });
     }
@@ -497,7 +496,7 @@ mod tests {
         Arc::new(State {
             queue: Mutex::new(VecDeque::new()),
             notify: Notify::new(),
-            cursor: Mutex::new(0),
+            seen: Mutex::new(HashSet::new()),
             last_heartbeat_ms: AtomicI64::new(now_ms()),
             keepalive: Duration::from_secs(30),
             shutdown: Notify::new(),
@@ -519,17 +518,16 @@ mod tests {
     }
 
     /// A successful handoff delivers the queued message AND records it durably, so a later holder
-    /// will not redeliver it: `undelivered_backlog` no longer returns it after delivery.
+    /// will not redeliver it: `fetch_undelivered` no longer returns it after delivery.
     #[tokio::test]
     async fn delivers_queued_message_and_records_durable_delivery() {
         let backend = temp_backend().await;
         let addr = "attach:deliver";
         let row = backend.insert_message(&note(addr)).await.unwrap();
-        let head = backend.max_id(addr).await.unwrap();
         assert_eq!(
-            backend.undelivered_backlog(addr, head).await.unwrap().len(),
+            backend.fetch_undelivered(addr).await.unwrap().len(),
             1,
-            "message is in the backlog before it is delivered"
+            "message is undelivered before it is delivered"
         );
 
         let st = state_with(backend.clone(), addr);
@@ -562,12 +560,8 @@ mod tests {
             .expect("handle_conn returns Ok on a clean handoff");
 
         assert!(
-            backend
-                .undelivered_backlog(addr, head)
-                .await
-                .unwrap()
-                .is_empty(),
-            "a delivered message must not reappear in the restart backlog"
+            backend.fetch_undelivered(addr).await.unwrap().is_empty(),
+            "a delivered message must not reappear as undelivered"
         );
     }
 
@@ -652,11 +646,108 @@ mod tests {
             1,
             "the message is requeued after a write failure, not dropped"
         );
-        let head = backend.max_id(addr).await.unwrap();
         assert_eq!(
-            backend.undelivered_backlog(addr, head).await.unwrap().len(),
+            backend.fetch_undelivered(addr).await.unwrap().len(),
             1,
-            "a message that never reached a waiter stays in the backlog (no spurious delivery mark)"
+            "a message that never reached a waiter stays undelivered (no spurious delivery mark)"
+        );
+    }
+
+    /// The gap-closing invariant at the holder level: a lower undelivered id is delivered by the
+    /// LIVE holder even after a higher id has already been delivered — the consequence of a Postgres
+    /// out-of-order commit, reproduced deterministically on SQLite (issue #18). The old high-water
+    /// cursor (seeded to the higher id) would have skipped the lower id until a restart; the
+    /// delivery-state drain queues it and a waiter actually receives it.
+    #[tokio::test]
+    async fn live_drain_delivers_lower_id_behind_a_delivered_higher_id() {
+        let backend = temp_backend().await;
+        let addr = "attach:reorder";
+        let lower = backend.insert_message(&note(addr)).await.unwrap();
+        let higher = backend.insert_message(&note(addr)).await.unwrap();
+        assert!(lower.id < higher.id);
+
+        // The higher id was already handed off (its durable delivery record exists); the lower id
+        // never was — exactly the state a commit-order skip leaves behind.
+        backend
+            .mark_delivered(higher.id, addr, Some("holderA"))
+            .await
+            .unwrap();
+
+        let st = state_with(backend.clone(), addr);
+        // A live drain (poll/push/startup all share this path) must queue the lower id.
+        drain(&st.backend, addr, &st, "test").await;
+        assert_eq!(
+            st.queue.lock().await.iter().map(|b| b.row.id).collect::<Vec<_>>(),
+            vec![lower.id],
+            "drain queues the undelivered lower id and not the already-delivered higher id"
+        );
+
+        // ...and a real waiter receives it over the IPC handoff (the literal acceptance bar).
+        let (client, server) = duplex(4096);
+        let holder = tokio::spawn({
+            let st = st.clone();
+            async move { handle_conn(server, st).await }
+        });
+        let (cr, mut cw) = tokio::io::split(client);
+        cw.write_all(&wait_request(addr).await).await.unwrap();
+        cw.flush().await.unwrap();
+        let mut reader = BufReader::new(cr);
+        let mut line = String::new();
+        reader.read_line(&mut line).await.unwrap();
+        match serde_json::from_str::<Frame>(line.trim()).unwrap() {
+            Frame::Message { id, .. } => {
+                assert_eq!(id, lower.id, "the live holder delivered the lower id, no restart")
+            }
+            other => panic!("expected a Message frame, got {other:?}"),
+        }
+        holder.await.unwrap().expect("clean handoff");
+
+        // Nothing remains undelivered, and a second drain re-queues nothing (idempotent).
+        assert!(backend.fetch_undelivered(addr).await.unwrap().is_empty());
+        drain(&st.backend, addr, &st, "test").await;
+        assert!(
+            st.queue.lock().await.is_empty(),
+            "a second drain does not re-queue a delivered id"
+        );
+    }
+
+    /// `drain` is idempotent within a holder: re-draining an already-queued (but not yet delivered)
+    /// message does not duplicate it. This is the monotonic-`seen` guard that makes concurrent
+    /// poll/push/startup drains safe (planning-review blocking finding #1).
+    #[tokio::test]
+    async fn drain_does_not_requeue_an_already_queued_message() {
+        let backend = temp_backend().await;
+        let addr = "attach:idemp";
+        backend.insert_message(&note(addr)).await.unwrap();
+
+        let st = state_with(backend.clone(), addr);
+        drain(&st.backend, addr, &st, "first").await;
+        drain(&st.backend, addr, &st, "second").await;
+        assert_eq!(
+            st.queue.lock().await.len(),
+            1,
+            "the message is queued exactly once across repeated drains"
+        );
+    }
+
+    /// A message whose latest disposition is terminal is excluded from the live drain (consistent
+    /// with the durable-backlog path): an out-of-band `telex handle` before any waiter pops it means
+    /// the message is already handled and must not be delivered.
+    #[tokio::test]
+    async fn drain_excludes_terminally_dispositioned_message() {
+        let backend = temp_backend().await;
+        let addr = "attach:terminal";
+        let row = backend.insert_message(&note(addr)).await.unwrap();
+        backend
+            .insert_disposition(row.id, addr, "handled", None, None)
+            .await
+            .unwrap();
+
+        let st = state_with(backend.clone(), addr);
+        drain(&st.backend, addr, &st, "test").await;
+        assert!(
+            st.queue.lock().await.is_empty(),
+            "a terminally dispositioned message is not queued by the live drain"
         );
     }
 }
