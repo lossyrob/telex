@@ -55,14 +55,24 @@ fn render_addresses(f: &mut Frame, area: Rect, addrs: &[&AddressEntry], sel: usi
     let items: Vec<ListItem> = addrs
         .iter()
         .map(|a| {
-            ListItem::new(Line::from(vec![
+            let mut spans = vec![
                 Span::styled(
                     theme::occ_symbol(a.occupancy).to_string(),
                     Style::default().fg(theme::occ_color(a.occupancy)),
                 ),
                 Span::raw(" "),
                 Span::raw(a.address.address.clone()),
-            ]))
+            ];
+            // Per-address undelivered backlog count (queued, not yet handed to a waiter).
+            if let Some(n) = a.undelivered {
+                if n > 0 {
+                    spans.push(Span::styled(
+                        format!("  {}{n}", theme::delivered_symbol(false)),
+                        Style::default().fg(theme::delivered_color(false)),
+                    ));
+                }
+            }
+            ListItem::new(Line::from(spans))
         })
         .collect();
     let mut state = ListState::default();

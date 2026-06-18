@@ -61,6 +61,24 @@ pub fn occ_color(occ: Occ) -> Color {
     }
 }
 
+/// Delivered-state badge symbol: a message either has a delivery record (reached a waiter)
+/// or is still queued. "Delivered" is distinct from "dispositioned/acted-on".
+pub fn delivered_symbol(delivered: bool) -> char {
+    if delivered {
+        '✓'
+    } else {
+        '⧗'
+    }
+}
+
+pub fn delivered_color(delivered: bool) -> Color {
+    if delivered {
+        Color::Green
+    } else {
+        Color::Yellow
+    }
+}
+
 /// Format an epoch-millisecond timestamp as a `HH:MM:SS` UTC time-of-day. Good enough
 /// for a live feed without pulling in a date/time dependency.
 pub fn hms_utc(ms: i64) -> String {

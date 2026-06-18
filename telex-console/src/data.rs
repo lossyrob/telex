@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use anyhow::Result;
 use telex::backend::Backend;
-use telex::model::{DispositionRow, InboxItem, MessageRow};
+use telex::model::{DeliveryRow, DispositionRow, InboxItem, MessageRow};
 
 pub use telex::model::AddressRow;
 
@@ -27,11 +27,14 @@ pub enum Occ {
     Unknown,
 }
 
-/// An address directory entry plus its resolved occupancy.
+/// An address directory entry plus its resolved occupancy and undelivered backlog count.
 #[derive(Clone, Debug)]
 pub struct AddressEntry {
     pub address: AddressRow,
     pub occupancy: Occ,
+    /// Count of messages queued to this address that have not been delivered to a waiter
+    /// and are not terminally dispositioned. `None` when the lookup failed.
+    pub undelivered: Option<usize>,
 }
 
 /// Read-only store over a backend. Cheap to clone (shares the backend `Arc`), so it can
@@ -60,10 +63,11 @@ impl Store {
         self.backend.export(None, None, cursor).await
     }
 
-    /// Address directory with per-address occupancy. A failed occupancy lookup degrades
-    /// that entry to `Occ::Unknown` rather than failing the whole call.
+    /// Address directory with per-address occupancy and undelivered backlog count. A failed
+    /// occupancy or backlog lookup degrades that field rather than failing the whole call.
     pub async fn addresses(&self) -> Result<Vec<AddressEntry>> {
         let window = liveness_window_secs();
+        let max_id = self.backend.max_message_id().await.unwrap_or(i64::MAX);
         let rows = self.backend.list_addresses(None, false).await?;
         let mut out = Vec::with_capacity(rows.len());
         for address in rows {
@@ -72,7 +76,17 @@ impl Store {
                 Ok(_) => Occ::Idle,
                 Err(_) => Occ::Unknown,
             };
-            out.push(AddressEntry { address, occupancy });
+            let undelivered = self
+                .backend
+                .undelivered_backlog(&address.address, max_id)
+                .await
+                .ok()
+                .map(|v| v.len());
+            out.push(AddressEntry {
+                address,
+                occupancy,
+                undelivered,
+            });
         }
         Ok(out)
     }
@@ -90,6 +104,11 @@ impl Store {
     /// Disposition history for a single message.
     pub async fn dispositions(&self, message_id: i64) -> Result<Vec<DispositionRow>> {
         self.backend.dispositions_for(message_id).await
+    }
+
+    /// Delivery records for a single message (one per recipient that received it).
+    pub async fn deliveries(&self, message_id: i64) -> Result<Vec<DeliveryRow>> {
+        self.backend.deliveries_for(message_id).await
     }
 }
 
@@ -160,5 +179,35 @@ mod tests {
 
         let inbox = store.address_inbox("node:demo", 50).await.unwrap();
         assert_eq!(inbox.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn undelivered_count_and_deliveries() {
+        let (store, backend) = seeded_store().await;
+        // Both messages are queued and undelivered.
+        let addrs = store.addresses().await.unwrap();
+        let demo = addrs
+            .iter()
+            .find(|a| a.address.address == "node:demo")
+            .unwrap();
+        assert_eq!(demo.undelivered, Some(2));
+
+        // Mark message 1 delivered; the backlog drops and the delivery record is readable.
+        backend
+            .mark_delivered(1, "node:demo", Some("holderA"))
+            .await
+            .unwrap();
+        let addrs = store.addresses().await.unwrap();
+        let demo = addrs
+            .iter()
+            .find(|a| a.address.address == "node:demo")
+            .unwrap();
+        assert_eq!(demo.undelivered, Some(1));
+
+        let dels = store.deliveries(1).await.unwrap();
+        assert_eq!(dels.len(), 1);
+        assert_eq!(dels[0].recipient, "node:demo");
+        assert_eq!(dels[0].occupant.as_deref(), Some("holderA"));
+        assert!(store.deliveries(2).await.unwrap().is_empty());
     }
 }

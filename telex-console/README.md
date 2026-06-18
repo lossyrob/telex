@@ -66,10 +66,16 @@ Three views over a shared detail pane on the right. `Tab` cycles **Feed ⇄ Addr
 - **Feed** — the global, chronological stream of all messages, live-tailing the newest at
   the bottom. A `*` marks messages that require a disposition.
 - **Addresses** — a Miller-column drill-down: the address directory (with ● live / ○ idle
-  / ? unknown occupancy) → that address's recent messages (with latest disposition) →
-  detail.
+  / ? unknown occupancy, and a `⧗N` badge for N undelivered queued messages) → that
+  address's recent messages (with latest disposition) → detail.
 - **Thread** — the selected message's thread as an indented transcript, with inline
   disposition summaries.
+
+The **detail pane** shows a delivery badge: `✓ delivered` (with the holder `occupant` and
+time it reached a waiter) or `⧗ undelivered` (queued, not yet handed to a waiter). Delivery
+is the durable record that a message reached a live `wait` — distinct from a *disposition*
+(which records that it was acted on). Per DECISIONS 0010 the contract is at-least-once, so a
+rare duplicate delivery is normal, not an error.
 
 | Key | Action |
 |-----|--------|
@@ -92,14 +98,18 @@ The feed is a cursor poll over the core `Backend::export(None, None, cursor)` (g
 id-ordered); the cursor advances past the greatest message id seen, and the in-memory feed
 is bounded to the most recent ~2000 messages. The address directory and occupancy refresh
 on a slower cadence than the feed, and a single failed address lookup degrades to
-"unknown" rather than breaking the view. Dispositions are loaded lazily for the selected
-message.
+"unknown" rather than breaking the view. Dispositions and delivery records are loaded lazily
+for the selected message; the per-address undelivered count comes from
+`Backend::undelivered_backlog`, refreshed on the directory cadence.
 
 ## Limitations
 
 - Address filtering only (substring on `from`/`to`); attention/kind filters and free-text
   search are not yet implemented.
 - No write actions (send, reply, disposition) — read-only.
+- The delivered/undelivered badge is shown in the detail pane for the selected message
+  (loaded lazily) and as a per-address count; there is no per-row feed badge yet (it would
+  cost a delivery lookup per visible row each poll).
 - SQLite is the primary tested backend; Postgres is supported through the same trait.
 - The backend is opened like the CLI (which runs `CREATE TABLE IF NOT EXISTS` and, for
   SQLite, sets WAL mode). This is a no-op on an existing telex store and the console issues

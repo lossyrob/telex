@@ -12,7 +12,7 @@ use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind};
 
 use crate::data::{AddressEntry, Store};
 use crate::{filter, terminal, ui};
-use telex::model::{DispositionRow, InboxItem, MessageRow};
+use telex::model::{DeliveryRow, DispositionRow, InboxItem, MessageRow};
 
 /// Maximum messages retained in the in-memory feed ring.
 const FEED_CAP: usize = 2000;
@@ -121,6 +121,8 @@ pub struct AppState {
 
     // Detail (dispositions for the currently selected message, loaded lazily)
     pub detail_disp: Option<(i64, Vec<DispositionRow>)>,
+    /// Delivery records for the currently selected message, loaded lazily.
+    pub detail_deliv: Option<(i64, Vec<DeliveryRow>)>,
 
     pub filter: Option<String>,
 }
@@ -157,6 +159,7 @@ impl AppState {
             thread_root: None,
             thread_disp: HashMap::new(),
             detail_disp: None,
+            detail_deliv: None,
             filter: None,
         };
         if let Some(a) = focus_address {
@@ -562,6 +565,8 @@ impl AppState {
         }
         let disps = store.dispositions(id).await.unwrap_or_default();
         self.detail_disp = Some((id, disps));
+        let dels = store.deliveries(id).await.unwrap_or_default();
+        self.detail_deliv = Some((id, dels));
     }
 }
 
@@ -718,6 +723,7 @@ mod tests {
                 created_at_ms: 0,
             },
             occupancy: crate::data::Occ::Idle,
+            undelivered: None,
         }
     }
 

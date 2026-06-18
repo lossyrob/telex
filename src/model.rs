@@ -222,6 +222,18 @@ pub struct DispositionRow {
     pub at_ms: i64,
 }
 
+/// A durable record that a message was handed to a waiter for `recipient`. Distinct from a
+/// disposition: delivery is "reached a live `wait`", not "acted on". `occupant` is the holder
+/// that performed the handoff. (Schema: `deliveries`, added in DECISIONS 0010.)
+#[derive(Clone, Debug, Serialize)]
+pub struct DeliveryRow {
+    pub id: i64,
+    pub message_id: i64,
+    pub recipient: String,
+    pub occupant: Option<String>,
+    pub delivered_at_ms: i64,
+}
+
 /// A message plus its current disposition status, for inbox listing.
 #[derive(Clone, Debug, Serialize)]
 pub struct InboxItem {

@@ -95,6 +95,9 @@ pub trait Backend: Send + Sync {
         by: Option<&str>,
     ) -> Result<DispositionRow>;
     async fn dispositions_for(&self, message_id: i64) -> Result<Vec<DispositionRow>>;
+    /// Delivery records for a message (one per recipient that received it). Read side of
+    /// `mark_delivered`; the source of truth for "was this delivered, when, to which holder."
+    async fn deliveries_for(&self, message_id: i64) -> Result<Vec<DeliveryRow>>;
 
     /// Best-effort push signal (Postgres LISTEN/NOTIFY); a no-op where unsupported.
     async fn notify_new(&self, address: &str, id: i64, sent_at_ms: i64) -> Result<()>;

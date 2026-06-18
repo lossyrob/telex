@@ -662,6 +662,28 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn deliveries_for(&self, message_id: i64) -> Result<Vec<DeliveryRow>> {
+        self.run(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT id, message_id, recipient, occupant, delivered_at_ms \
+                 FROM deliveries WHERE message_id=?1 ORDER BY id",
+            )?;
+            let rows = stmt
+                .query_map(params![message_id], |r| {
+                    Ok(DeliveryRow {
+                        id: r.get(0)?,
+                        message_id: r.get(1)?,
+                        recipient: r.get(2)?,
+                        occupant: r.get(3)?,
+                        delivered_at_ms: r.get(4)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
     async fn notify_new(&self, _address: &str, _id: i64, _sent_at_ms: i64) -> Result<()> {
         Ok(()) // no native push; poll covers it
     }

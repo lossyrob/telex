@@ -9,7 +9,7 @@ use ratatui::Frame;
 
 use crate::app::AppState;
 use crate::ui::theme;
-use telex::model::{DispositionRow, MessageRow};
+use telex::model::{DeliveryRow, DispositionRow, MessageRow};
 
 /// Render the detail pane for `msg` (or a placeholder when nothing is selected).
 pub fn render(f: &mut Frame, area: Rect, st: &AppState, msg: Option<&MessageRow>) {
@@ -84,6 +84,36 @@ pub fn render(f: &mut Frame, area: Rect, st: &AppState, msg: Option<&MessageRow>
         .filter(|(id, _)| *id == m.id)
         .map(|(_, d)| d.as_slice())
         .unwrap_or(&[]);
+    let dels = st
+        .detail_deliv
+        .as_ref()
+        .filter(|(id, _)| *id == m.id)
+        .map(|(_, d)| d.as_slice())
+        .unwrap_or(&[]);
+
+    // Delivery badge: delivered (reached a waiter) is distinct from dispositioned/acted-on.
+    lines.push(Line::from(""));
+    if dels.is_empty() {
+        lines.push(Line::from(vec![
+            Span::styled(
+                format!("{} undelivered", theme::delivered_symbol(false)),
+                Style::default().fg(theme::delivered_color(false)),
+            ),
+            Span::styled(
+                " (queued; not yet handed to a waiter)",
+                Style::default().fg(Color::DarkGray),
+            ),
+        ]));
+    } else {
+        lines.push(Line::from(vec![Span::styled(
+            format!("{} delivered", theme::delivered_symbol(true)),
+            Style::default().fg(theme::delivered_color(true)),
+        )]));
+        for d in dels {
+            lines.push(delivery_line(d));
+        }
+    }
+
     if !disps.is_empty() {
         lines.push(Line::from(""));
         lines.push(Line::styled(
@@ -118,6 +148,18 @@ fn disposition_line(d: &DispositionRow) -> Line<'static> {
             Style::default().fg(Color::Gray),
         ));
     }
+    Line::from(spans)
+}
+
+fn delivery_line(d: &DeliveryRow) -> Line<'static> {
+    let mut spans = vec![Span::raw(format!(
+        "  → {}",
+        d.occupant.as_deref().unwrap_or("?")
+    ))];
+    spans.push(Span::styled(
+        format!(" @{}", theme::hms_utc(d.delivered_at_ms)),
+        Style::default().fg(Color::Gray),
+    ));
     Line::from(spans)
 }
 

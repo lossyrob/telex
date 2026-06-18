@@ -584,6 +584,27 @@ impl Backend for PgBackend {
             .collect())
     }
 
+    async fn deliveries_for(&self, message_id: i64) -> Result<Vec<DeliveryRow>> {
+        let rows = self
+            .client
+            .query(
+                "SELECT id, message_id, recipient, occupant, delivered_at_ms \
+                 FROM deliveries WHERE message_id=$1 ORDER BY id",
+                &[&message_id],
+            )
+            .await?;
+        Ok(rows
+            .iter()
+            .map(|r| DeliveryRow {
+                id: r.get("id"),
+                message_id: r.get("message_id"),
+                recipient: r.get("recipient"),
+                occupant: r.get("occupant"),
+                delivered_at_ms: r.get("delivered_at_ms"),
+            })
+            .collect())
+    }
+
     async fn notify_new(&self, address: &str, id: i64, sent_at_ms: i64) -> Result<()> {
         let payload =
             serde_json::json!({"address": address, "id": id, "sent_at_ms": sent_at_ms}).to_string();
