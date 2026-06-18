@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionEnd": [
+      {
+        "type": "command",
+        "powershell": "pwsh -NoProfile -NoLogo -File \"$env:COPILOT_PLUGIN_ROOT\\scripts\\session-end.ps1\"",
+        "bash": "\"$COPILOT_PLUGIN_ROOT/scripts/session-end.sh\"",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

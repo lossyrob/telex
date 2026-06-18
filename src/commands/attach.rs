@@ -123,6 +123,12 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
     // `max_id`.
     let start_cursor = backend.max_id(&address).await?;
 
+    // Record this station in the session ownership registry so a Copilot CLI `sessionEnd` hook can
+    // detach it when the session ends (dismiss or quit). Best-effort: never fail attach on this.
+    if let Err(e) = crate::session_registry::register_station(&address) {
+        eprintln!("[holder] session registry: register failed (continuing): {e}");
+    }
+
     let state = Arc::new(State {
         address: address.clone(),
         backend_key: backend_key.clone(),
@@ -335,6 +341,11 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         .release_lease(&address, &occupant)
         .await
         .unwrap_or(false);
+    // Drop this station from the session ownership registry; the lease is gone, so the sessionEnd
+    // hook should no longer try to detach it. Best-effort.
+    if let Err(e) = crate::session_registry::unregister_station(&address) {
+        eprintln!("[holder] session registry: unregister failed (ignoring): {e}");
+    }
     eprintln!("[holder] lease released={released}; exiting");
     Ok(0)
 }

@@ -46,6 +46,12 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
         .unwrap_or_default();
     let released = backend.release_lease(&address, &occupant).await?;
 
+    // Drop the station from the session ownership registry. The holder unregisters on its own clean
+    // shutdown, but detach also covers the case where the holder is already gone. Best-effort.
+    if let Err(e) = crate::session_registry::unregister_station(&address) {
+        eprintln!("telex: session registry unregister failed (ignoring): {e}");
+    }
+
     let out = json!({
         "address": address,
         "ipc_shutdown": via_ipc,

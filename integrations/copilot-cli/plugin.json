@@ -1,0 +1,11 @@
+{
+  "name": "telex",
+  "description": "Telex station lifecycle for Copilot CLI: detach a session's telex stations when the session ends (dismiss or quit), so detached background holders never orphan.",
+  "version": "0.0.1",
+  "author": {
+    "name": "Rob Emanuele"
+  },
+  "license": "MIT",
+  "keywords": ["telex", "station", "lifecycle", "hooks"],
+  "hooks": "hooks.json"
+}
