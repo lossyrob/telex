@@ -138,6 +138,22 @@ telex send --to <addr> --subject "Status" --body-file message.md --requires-disp
 
 `send` prints a receipt: `delivered`, `queued-unoccupied`, or `rejected-retired`, plus the new message id.
 
+A `queued-unoccupied` receipt is **durable**: the message is persisted and delivered by a later
+`telex wait` once a station re-occupies the address. On start, a holder recovers the queued backlog
+for its address, so messages sent while it was away are not lost — you do not need to scrape `inbox`
+to recover them. Messages already delivered to a waiter, or that you have terminally dispositioned
+(`handle`/`reject`/`close`), are not redelivered. Delivery is at-least-once across a holder restart:
+delivery is committed when the holder hands the frame to a `wait`, so a waiter that dies after the
+frame is sent but before it prints still counts as delivered (recover it from `inbox` if it required
+disposition). One-time transition note: the first holder started after upgrading to a build with
+durable delivery recovers its full undelivered history for the address — every message that is not
+terminally dispositioned, **including fire-and-forget `fyi`/`note` messages that are never
+dispositioned** — because there are no prior delivery records yet. Expect a one-time backlog on that
+first start. The backlog is a snapshot taken when the holder starts: dispositioning a message via
+`telex inbox` only prevents a *future* holder from re-recovering it — it won't pull back a message
+already seeded into the running holder's queue, which is delivered (then marked) once. After that
+first drain, steady-state delivery records keep the backlog empty.
+
 Reply inside an existing thread:
 
 ```sh

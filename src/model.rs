@@ -99,8 +99,26 @@ impl Disposition {
     }
 
     pub fn is_terminal_str(s: &str) -> bool {
-        matches!(s, "handled" | "rejected" | "closed")
+        TERMINAL_DISPOSITIONS.contains(&s)
     }
+}
+
+/// The terminal disposition states: a message whose latest disposition is one of these is done
+/// and drops out of the actionable inbox (and out of the holder's restart backlog). Single source
+/// of truth so the Rust check (`Disposition::is_terminal_str`) and the SQL backends that test
+/// terminality inline cannot drift apart.
+pub const TERMINAL_DISPOSITIONS: [&str; 3] = ["handled", "rejected", "closed"];
+
+/// SQL value-list fragment of the terminal disposition states, e.g. `'handled','rejected','closed'`,
+/// for inlining into a backend query. The values are fixed internal literals (never user input), so
+/// interpolating them is injection-safe; deriving the fragment from `TERMINAL_DISPOSITIONS` keeps the
+/// backends in lockstep with the canonical Rust definition.
+pub fn terminal_dispositions_sql_list() -> String {
+    TERMINAL_DISPOSITIONS
+        .iter()
+        .map(|s| format!("'{s}'"))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 pub const STATUS_ACTIVE: &str = "active";

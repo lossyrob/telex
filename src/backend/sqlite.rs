@@ -63,6 +63,14 @@ CREATE TABLE IF NOT EXISTS dispositions (
     at_ms        INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS dispositions_msg_idx ON dispositions(message_id, id);
+CREATE TABLE IF NOT EXISTS deliveries (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    message_id      INTEGER NOT NULL,
+    recipient       TEXT NOT NULL,
+    occupant        TEXT,
+    delivered_at_ms INTEGER NOT NULL,
+    UNIQUE(message_id, recipient)
+);
 "#;
 
 /// Column list used by every message SELECT so row mapping stays positional and stable.
@@ -394,6 +402,52 @@ impl Backend for SqliteBackend {
             let mut stmt = c.prepare(&sql)?;
             let rows = stmt
                 .query_map(params![a, cursor], map_message)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    async fn mark_delivered(
+        &self,
+        message_id: i64,
+        recipient: &str,
+        occupant: Option<&str>,
+    ) -> Result<()> {
+        let (r, o) = (recipient.to_string(), occupant.map(str::to_string));
+        let now = now_ms();
+        self.run(move |c| {
+            c.execute(
+                "INSERT INTO deliveries(message_id, recipient, occupant, delivered_at_ms) \
+                 VALUES (?1,?2,?3,?4) ON CONFLICT(message_id, recipient) DO NOTHING",
+                params![message_id, r, o, now],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn undelivered_backlog(&self, address: &str, upto_id: i64) -> Result<Vec<MessageRow>> {
+        let a = address.to_string();
+        self.run(move |c| {
+            // Backlog = messages addressed here, at or below the holder's start cursor, that have no
+            // delivery record AND whose latest disposition for this recipient is not terminal. The
+            // `id <= upto_id` bound partitions cleanly against the `fetch_after` (id > cursor) drain,
+            // so a message inserted between the cursor snapshot and this query is drained, not seeded.
+            let sql = format!(
+                "SELECT {MSG_COLS} FROM messages m \
+                 WHERE m.to_addr=?1 AND m.id<=?2 \
+                   AND NOT EXISTS (SELECT 1 FROM deliveries d \
+                                   WHERE d.message_id=m.id AND d.recipient=?1) \
+                   AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                 WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                 ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({}) \
+                 ORDER BY m.id",
+                terminal_dispositions_sql_list()
+            );
+            let mut stmt = c.prepare(&sql)?;
+            let rows = stmt
+                .query_map(params![a, upto_id], map_message)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })

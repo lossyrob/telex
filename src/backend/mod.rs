@@ -55,6 +55,22 @@ pub trait Backend: Send + Sync {
     // ---- messages ----
     async fn max_id(&self, address: &str) -> Result<i64>;
     async fn fetch_after(&self, address: &str, cursor: i64) -> Result<Vec<MessageRow>>;
+    /// Record that `message_id` was handed to a waiter for `recipient` (the served address), so a
+    /// later holder does not redeliver it. Durable: this is what turns the in-memory delivery
+    /// cursor into a restart-survivable mark. `occupant` is optional audit context (which holder).
+    async fn mark_delivered(
+        &self,
+        message_id: i64,
+        recipient: &str,
+        occupant: Option<&str>,
+    ) -> Result<()>;
+    /// Messages addressed to `address`, with id `<= upto_id`, that have NOT yet been delivered to a
+    /// waiter and whose latest disposition for that recipient is not terminal, ordered by id. A
+    /// holder enqueues these at startup so messages queued while the address was unoccupied are
+    /// delivered when a holder returns — instead of being skipped past `max_id`. The `upto_id`
+    /// high-water bound (the holder's start cursor) is what keeps the seeded backlog and the
+    /// `fetch_after` drain (`id > cursor`) from overlapping, so nothing is delivered twice.
+    async fn undelivered_backlog(&self, address: &str, upto_id: i64) -> Result<Vec<MessageRow>>;
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow>;
     async fn get_message(&self, id: i64) -> Result<Option<MessageRow>>;
     async fn thread_messages(&self, thread_id: i64) -> Result<Vec<MessageRow>>;

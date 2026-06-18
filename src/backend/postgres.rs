@@ -92,6 +92,14 @@ CREATE TABLE IF NOT EXISTS dispositions (
     at_ms        bigint NOT NULL
 );
 CREATE INDEX IF NOT EXISTS dispositions_msg_idx ON dispositions(message_id, id);
+CREATE TABLE IF NOT EXISTS deliveries (
+    id              bigserial PRIMARY KEY,
+    message_id      bigint NOT NULL,
+    recipient       text NOT NULL,
+    occupant        text,
+    delivered_at_ms bigint NOT NULL,
+    UNIQUE(message_id, recipient)
+);
 "#;
 
 const MSG_COLS: &str = "id, thread_id, parent_id, from_addr, to_addr, cc, kind, attention, \
@@ -364,6 +372,43 @@ impl Backend for PgBackend {
     async fn fetch_after(&self, address: &str, cursor: i64) -> Result<Vec<MessageRow>> {
         let sql = format!("SELECT {MSG_COLS} FROM messages WHERE to_addr=$1 AND id>$2 ORDER BY id");
         let rows = self.client.query(&sql, &[&address, &cursor]).await?;
+        Ok(rows.iter().map(map_message).collect())
+    }
+
+    async fn mark_delivered(
+        &self,
+        message_id: i64,
+        recipient: &str,
+        occupant: Option<&str>,
+    ) -> Result<()> {
+        let now = now_ms();
+        self.client
+            .execute(
+                "INSERT INTO deliveries(message_id, recipient, occupant, delivered_at_ms) \
+                 VALUES ($1,$2,$3,$4) ON CONFLICT (message_id, recipient) DO NOTHING",
+                &[&message_id, &recipient, &occupant, &now],
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn undelivered_backlog(&self, address: &str, upto_id: i64) -> Result<Vec<MessageRow>> {
+        // Backlog = messages addressed here, at or below the holder's start cursor, that have no
+        // delivery record AND whose latest disposition for this recipient is not terminal. The
+        // `id <= upto_id` bound partitions cleanly against the `fetch_after` (id > cursor) drain, so
+        // a message inserted between the cursor snapshot and this query is drained, not seeded.
+        let sql = format!(
+            "SELECT {MSG_COLS} FROM messages m \
+             WHERE m.to_addr=$1 AND m.id<=$2 \
+               AND NOT EXISTS (SELECT 1 FROM deliveries d \
+                               WHERE d.message_id=m.id AND d.recipient=$1) \
+               AND COALESCE((SELECT disp.state FROM dispositions disp \
+                             WHERE disp.message_id=m.id AND disp.recipient=$1 \
+                             ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({}) \
+             ORDER BY m.id",
+            terminal_dispositions_sql_list()
+        );
+        let rows = self.client.query(&sql, &[&address, &upto_id]).await?;
         Ok(rows.iter().map(map_message).collect())
     }
 
