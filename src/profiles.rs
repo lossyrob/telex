@@ -73,6 +73,31 @@ impl BackendProfile {
     }
 }
 
+/// A stable key identifying the *effective* physical store this profile resolves to — including the
+/// inputs that change which store is actually opened: the sqlite `--db` override + `~` expansion
+/// (mirroring `build`), and the postgres `schema` (the telex-table isolation boundary). The holder
+/// registry is scoped by this key so a station on one store is never inferred as the `from` for a
+/// send on another (DECISIONS 0010). Unlike `target()` (a display string) it must distinguish
+/// same-server/different-schema and same-profile/different-`--db` stores.
+pub fn store_key(profile: &BackendProfile, db_override: Option<&str>) -> String {
+    match profile.kind.as_str() {
+        "sqlite" => {
+            let path = db_override
+                .map(str::to_string)
+                .or_else(|| profile.path.clone())
+                .map(|p| expand_tilde(&p))
+                .unwrap_or_else(default_sqlite_path);
+            format!("sqlite:{path}")
+        }
+        "postgres" => format!(
+            "postgres:{}|{}",
+            profile.url.as_deref().map(redact_conn).unwrap_or_default(),
+            profile.schema.as_deref().unwrap_or("")
+        ),
+        other => format!("{other}:{}", profile.target()),
+    }
+}
+
 pub fn config_path() -> Result<PathBuf> {
     if let Ok(p) = std::env::var("TELEX_CONFIG") {
         return Ok(PathBuf::from(p));

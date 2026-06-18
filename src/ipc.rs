@@ -37,6 +37,12 @@ pub enum Frame {
         /// under the lossy `sanitize()`. `default` for frames from older holders that omit it.
         #[serde(default)]
         served_address: Option<String>,
+        /// The effective store key this holder serves (see `profiles::store_key`). Lets a `ping`
+        /// confirm the holder is on the *same backend* being queried — the IPC endpoint is keyed by
+        /// address only, so a holder serving the same address on a different store would otherwise
+        /// answer and look live. `default` for frames from older holders that omit it.
+        #[serde(default)]
+        served_backend: Option<String>,
     },
     /// Acknowledge a Shutdown request before the holder exits.
     ShuttingDown,
@@ -205,14 +211,17 @@ pub fn endpoint(address: &str) -> Option<String> {
 }
 
 /// Liveness probe: connect to the holder for `address`, send `Ping`, and confirm a `Pong` whose
-/// `served_address` matches. The whole connect+write+read is bounded by a short timeout so a stale
-/// endpoint (dead/hung holder) fails fast and never stalls a caller (e.g. `send`'s `from`
-/// resolution). Returns `false` on any error, timeout, or address mismatch.
-pub async fn ping(address: &str) -> bool {
+/// `served_address` and `served_backend` both match. The whole connect+write+read is bounded by a
+/// short timeout so a stale endpoint (dead/hung holder) fails fast and never stalls a caller (e.g.
+/// `send`'s `from` resolution). The backend check matters because the endpoint is keyed by address
+/// only: a holder serving the same address on a *different* store would otherwise answer and look
+/// live. Returns `false` on any error, timeout, or mismatch.
+pub async fn ping(address: &str, expected_backend: &str) -> bool {
     use std::time::Duration;
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 
     let address = address.to_string();
+    let expected_backend = expected_backend.to_string();
     let probe = async move {
         let stream = connect(&address).await.ok()?;
         let (read_half, mut write_half) = tokio::io::split(stream);
@@ -228,9 +237,10 @@ pub async fn ping(address: &str) -> bool {
         }
         match serde_json::from_str::<Frame>(buf.trim()).ok()? {
             Frame::Pong {
-                served_address: Some(served),
+                served_address: Some(served_addr),
+                served_backend: Some(served_backend),
                 ..
-            } => Some(served == address),
+            } => Some(served_addr == address && served_backend == expected_backend),
             _ => Some(false),
         }
     };
@@ -257,16 +267,18 @@ pub(crate) mod test_support {
     }
 
     /// Spawn a minimal holder that answers each connection's `Ping` with a `Pong` stamped with
-    /// `served_address`, so `ipc::ping` has a real endpoint to probe in tests. Abort the returned
-    /// handle to stop it.
-    pub fn spawn_pong_holder(address: &str) -> tokio::task::JoinHandle<()> {
+    /// `served_address` + `served_backend`, so `ipc::ping` has a real endpoint to probe in tests.
+    /// Abort the returned handle to stop it.
+    pub fn spawn_pong_holder(address: &str, backend: &str) -> tokio::task::JoinHandle<()> {
         let mut listener = Listener::bind(address).expect("bind test holder");
         let served = address.to_string();
+        let served_backend = backend.to_string();
         tokio::spawn(async move {
             loop {
                 match listener.accept().await {
                     Ok(conn) => {
                         let served = served.clone();
+                        let served_backend = served_backend.clone();
                         tokio::spawn(async move {
                             let (read_half, mut write_half) = tokio::io::split(conn);
                             let mut reader = BufReader::new(read_half);
@@ -277,6 +289,7 @@ pub(crate) mod test_support {
                             let frame = Frame::Pong {
                                 heartbeat_age_ms: 0,
                                 served_address: Some(served),
+                                served_backend: Some(served_backend),
                             };
                             if let Ok(mut s) = serde_json::to_string(&frame) {
                                 s.push('\n');
@@ -297,16 +310,18 @@ mod tests {
     use super::*;
 
     #[test]
-    fn pong_serde_tolerates_missing_served_address() {
-        // Frames from an older holder omit served_address; it must default to None.
+    fn pong_serde_tolerates_missing_served_fields() {
+        // Frames from an older holder omit served_address/served_backend; they must default to None.
         let f: Frame = serde_json::from_str(r#"{"type":"pong","heartbeat_age_ms":5}"#).unwrap();
         match f {
             Frame::Pong {
                 heartbeat_age_ms,
                 served_address,
+                served_backend,
             } => {
                 assert_eq!(heartbeat_age_ms, 5);
                 assert_eq!(served_address, None);
+                assert_eq!(served_backend, None);
             }
             _ => panic!("expected pong"),
         }

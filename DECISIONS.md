@@ -427,7 +427,11 @@ can't be inferred (intended scope). No new runtime dependencies (registry is `se
 liveness reuses the existing IPC `Ping`/`Pong`). Resolution touches IPC only when `from` is otherwise
 unresolved (or once, to validate a set `from` for the soft-warn), bounded by a ≤250 ms ping timeout,
 so configured senders pay ~one local round-trip and unconfigured-but-attached senders pay one ping.
-Known follow-ups: records left by hard-killed holders for addresses never re-attached are ignored but
-not yet garbage-collected (bounded by prune-on-claim + the fast-fail ping); the per-invocation `--db`
-override is not part of the backend scope key; `reply` could additionally default `from` from the
-parent's `to_addr` (deferred — a preference call, not done here to keep `send`/`reply` uniform).
+The registry scope key is the **effective store identity** (`profiles::store_key`): the resolved
+sqlite path after `--db` override and `~` expansion, and the postgres connection plus `schema` — not
+the human-readable `target()` — so schema-isolated multi-store and `--db`-overridden deployments are
+correctly distinguished, and the `Pong` echoes the holder's store key so a same-address holder on a
+*different* store can't be mistaken for live. Known follow-ups: records left by hard-killed holders
+for addresses never re-attached are ignored but not yet garbage-collected (bounded by prune-on-claim
++ the fast-fail ping); `reply` could additionally default `from` from the parent's `to_addr`
+(deferred — a preference call, not done here to keep `send`/`reply` uniform).

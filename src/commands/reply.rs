@@ -13,7 +13,7 @@ pub async fn run(ctx: &Ctx, args: ReplyArgs) -> Result<i32> {
 
     // Resolve `from` (and apply the un-repliable / ambiguity guardrails) before any backend side
     // effect, so a refused reply neither opens the store nor creates the reply destination.
-    let backend_key = ctx.resolved()?.1.target();
+    let backend_key = ctx.store_key()?;
     let from = match resolve_from(
         args.from.as_deref(),
         ctx.address.as_deref(),

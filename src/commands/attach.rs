@@ -26,6 +26,7 @@ struct Buffered {
 
 struct State {
     address: String,
+    backend: String,
     queue: Mutex<VecDeque<Buffered>>,
     notify: Notify,
     cursor: Mutex<i64>,
@@ -65,7 +66,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
     let backend = ctx.backend().await?;
 
     let pid = std::process::id() as i64;
-    let backend_key = ctx.resolved()?.1.target();
+    let backend_key = ctx.store_key()?;
     let occupant = args
         .occupant
         .clone()
@@ -116,6 +117,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
 
     let state = Arc::new(State {
         address: address.clone(),
+        backend: backend_key.clone(),
         queue: Mutex::new(VecDeque::new()),
         notify: Notify::new(),
         cursor: Mutex::new(backend.max_id(&address).await?),
@@ -333,6 +335,7 @@ where
                 &Frame::Pong {
                     heartbeat_age_ms: age,
                     served_address: Some(st.address.clone()),
+                    served_backend: Some(st.backend.clone()),
                 },
             )
             .await

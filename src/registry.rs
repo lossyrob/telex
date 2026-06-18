@@ -129,13 +129,14 @@ pub fn candidate_addresses(records: &[HolderRecord], backend: &str, host: &str) 
 }
 
 /// Addresses of *live* local holders on `backend` for this host: registry candidates whose endpoint
-/// answers an `ipc::ping`. Stale records (dead/hung holder) are dropped here.
+/// answers an `ipc::ping` for this backend. Stale records (dead/hung holder, or a holder that now
+/// serves the same address on a *different* store) are dropped here.
 pub async fn live_local_holders(backend: &str) -> Vec<String> {
     let host = config::hostname();
     let candidates = candidate_addresses(&list(), backend, &host);
     let mut live = Vec::new();
     for addr in candidates {
-        if ipc::ping(&addr).await {
+        if ipc::ping(&addr, backend).await {
             live.push(addr);
         }
     }
@@ -144,13 +145,13 @@ pub async fn live_local_holders(backend: &str) -> Vec<String> {
 
 /// Whether a live local holder on `backend` (this host) currently serves `address`. Used for the
 /// soft-warn on an explicit/`$TELEX_ADDRESS` `from` that this host isn't actually serving. The
-/// registry gate makes it backend-scoped; the ping confirms liveness.
+/// registry gate makes it backend-scoped; the ping confirms liveness *and* same-backend identity.
 pub async fn is_served_locally(address: &str, backend: &str) -> bool {
     let host = config::hostname();
     let has_record = list()
         .iter()
         .any(|r| r.address == address && r.backend == backend && r.host == host);
-    has_record && ipc::ping(address).await
+    has_record && ipc::ping(address, backend).await
 }
 
 #[cfg(test)]
@@ -261,7 +262,7 @@ mod tests {
         let dead_addr = format!("test:dead:{}-{}", std::process::id(), now_ms());
 
         // A live holder for live_addr; a stale record for dead_addr with no holder.
-        let holder = spawn_pong_holder(&live_addr);
+        let holder = spawn_pong_holder(&live_addr, backend);
         tokio::time::sleep(std::time::Duration::from_millis(80)).await;
         write(&rec(&live_addr, backend, &host, 1)).unwrap();
         write(&rec(&dead_addr, backend, &host, 2)).unwrap();
@@ -277,6 +278,15 @@ mod tests {
         assert!(is_served_locally(&live_addr, backend).await);
         assert!(!is_served_locally(&live_addr, "other-store").await);
         assert!(!is_served_locally(&dead_addr, backend).await);
+
+        // Cross-backend stale record: a record for live_addr on a *different* store must NOT be
+        // treated as live just because live_addr's endpoint (serving `backend`) answers — the ping
+        // checks served_backend, so the other-store record is correctly skipped.
+        write(&rec(&live_addr, "store-2", &host, 3)).unwrap();
+        assert!(
+            live_local_holders("store-2").await.is_empty(),
+            "a same-address holder on another store must not satisfy store-2 inference"
+        );
 
         holder.abort();
         match prev {

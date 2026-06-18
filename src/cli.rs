@@ -383,6 +383,16 @@ impl Ctx {
             self.cfg.db_override.as_deref(),
         )
     }
+
+    /// Effective store key for the selected backend, used to scope the holder registry so a
+    /// station on one store is never inferred as `from` for a send on another.
+    pub fn store_key(&self) -> Result<String> {
+        let (_name, profile) = self.resolved()?;
+        Ok(crate::profiles::store_key(
+            &profile,
+            self.cfg.db_override.as_deref(),
+        ))
+    }
 }
 
 pub async fn run() -> i32 {
