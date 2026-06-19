@@ -538,13 +538,17 @@ telex cannot observe. So abandonment detection must come from the session layer.
 **Decision.** Ship a Copilot CLI plugin (`integrations/copilot-cli/`) whose `sessionEnd` hook
 detaches the stations a session owns, and have `telex attach` record that ownership so the hook
 knows what to close. The registry is **one file per station** — `<registry_dir>/<sessionId>/
-<sanitized-address>.json` = `{ address, telex, env }` — so concurrent attaches in a single
-session (e.g. an orchestrator plus workers) never race on a shared file. `registry_dir` is
-`\` else `<telex_home>/sessions`; `sessionId` is `\`
-else `\` (the same id the hook receives). Each record captures the
-backend-selecting env present at attach (`TELEX_HOME`/`TELEX_CONFIG`/`TELEX_DB`/
-`TELEX_BACKEND`) and the holder's binary path, so the hook's `telex detach` resolves the same
-store even when the holder is already gone and only the lease lingers. `attach` registers after
+<sanitized-address>-<hash>.json` = `{ address, telex, env }` — so concurrent attaches in a single
+session (e.g. an orchestrator plus workers) never race on a shared file, and addresses that
+sanitize alike never collide (the filename suffixes a hash of the full address). `registry_dir`
+is `$TELEX_SESSION_DIR` else `<telex_home>/sessions`; `sessionId` is `$TELEX_SESSION_ID` else
+`$COPILOT_AGENT_SESSION_ID` (the same id the hook receives). `address` is authoritative; the
+recorded `telex` path and backend-selecting `env` (`TELEX_HOME`/`TELEX_CONFIG`/`TELEX_DB`/
+`TELEX_BACKEND`) are informational. The hook runs `telex session-end`, which reads `sessionId`
+from the piped payload and stops each registered holder **in-process over local IPC** — it does
+not exec the recorded binary or apply the recorded env, so it is backend-independent and cannot
+be redirected by a crafted record; the holder releases its own lease on shutdown, and any
+already-gone holder's lease lapses via the TTL window. `attach` registers after
 claiming the lease; the holder's clean shutdown and `detach` both unregister. When no session id
 is resolvable the registry is disabled and every operation is a best-effort no-op — telex stays
 fully usable without the integration, and registry errors never fail an attach/detach.
@@ -555,7 +559,8 @@ death (crash/kill, where no hook runs). The two mechanisms cover disjoint termin
 neither alone is complete. Re-attendance on **resume** is deliberately left to a **manual command**
 (re-run `attach`) rather than a `sessionStart` hook, to avoid auto-reopening stations the user
 may not want back; this makes #10 (deliver queued backlog after holder restart) a prerequisite for
-clean re-attend. Deferred: a dedicated re-attend command, a `sessionStart`-resume hook, and a
-fix for `detach`'s cosmetic `lease_released:false` receipt when the holder self-released over
-IPC. Cross-references: 0004 (holder lifetime tracks session), 0005 (TTL/occupancy), 0011
+clean re-attend. Deferred: a dedicated re-attend command, a `sessionStart`-resume hook, a registry
+GC/TTL prune for session dirs left behind by failed detaches, packaging the plugin in the release
+archive, and a fix for `detach`'s cosmetic `lease_released:false` receipt when the holder
+self-released over IPC. Cross-references: 0004 (holder lifetime tracks session), 0005 (TTL/occupancy), 0011
 (pid-watch for process death).

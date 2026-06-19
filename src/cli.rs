@@ -95,6 +95,12 @@ pub enum Command {
 
     /// Export messages and disposition history as JSON lines.
     Export(ExportArgs),
+
+    /// Detach the stations a Copilot CLI session owns (driven by the plugin `sessionEnd` hook).
+    /// Reads the hook JSON payload on stdin (or use `--session-id`), then stops each registered
+    /// station for that session. Backend-independent; safe as a best-effort hook (always exits 0).
+    #[command(name = "session-end")]
+    SessionEnd(SessionEndArgs),
 }
 
 #[derive(Args)]
@@ -317,6 +323,14 @@ pub struct SkillArgs {
     pub raw: bool,
 }
 
+#[derive(Args)]
+pub struct SessionEndArgs {
+    /// Session id whose stations to detach. When omitted, the Copilot CLI `sessionEnd` JSON
+    /// payload is read from stdin and its `sessionId` is used.
+    #[arg(long)]
+    pub session_id: Option<String>,
+}
+
 #[derive(Subcommand)]
 pub enum BackendCmd {
     /// Add (or update) a named backend.
@@ -448,6 +462,7 @@ pub async fn run() -> i32 {
         Command::Resolve(a) => crate::commands::address::resolve(&ctx, a).await,
         Command::Backend(cmd) => crate::commands::backend::run(&ctx, cmd).await,
         Command::Export(a) => crate::commands::export::run(&ctx, a).await,
+        Command::SessionEnd(a) => crate::commands::session_end::run(&ctx, a).await,
     };
 
     match result {

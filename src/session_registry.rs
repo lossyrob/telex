@@ -22,12 +22,23 @@
 //! callers must never fail an attach/detach because the registry could not be written.
 
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::ipc::sanitize;
+
+/// Per-station registry filename. `sanitize` alone collapses distinct addresses (`a:b`, `a.b`,
+/// `a_b` all become `a_b`), so a same-session collision would overwrite one station's record and
+/// leave it un-reaped. Suffix a hash of the *full* address (the authoritative address still lives
+/// in the JSON body). The sibling holder registry defends the same way by keying on (address, pid).
+fn record_filename(address: &str) -> String {
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    address.hash(&mut h);
+    format!("{}-{:016x}.json", sanitize(address), h.finish())
+}
 
 /// Backend-selecting env vars captured at attach time, so the hook's `telex detach` resolves the
 /// same store the holder used. This matters when the holder is already gone and only the lease
@@ -115,7 +126,7 @@ pub fn unregister_station(address: &str) -> Result<()> {
 pub fn register_station_in(dir: &Path, session: &str, record: &StationRecord) -> Result<()> {
     let sdir = dir.join(session);
     std::fs::create_dir_all(&sdir)?;
-    let path = sdir.join(format!("{}.json", sanitize(&record.address)));
+    let path = sdir.join(record_filename(&record.address));
     let json = serde_json::to_string_pretty(record)?;
     let tmp = path.with_extension("json.tmp");
     std::fs::write(&tmp, json)?;
@@ -127,7 +138,7 @@ pub fn register_station_in(dir: &Path, session: &str, record: &StationRecord) ->
 /// empty. Missing files are not an error.
 pub fn unregister_station_in(dir: &Path, session: &str, address: &str) -> Result<()> {
     let sdir = dir.join(session);
-    let path = sdir.join(format!("{}.json", sanitize(address)));
+    let path = sdir.join(record_filename(address));
     let _ = std::fs::remove_file(&path);
     if let Ok(mut entries) = std::fs::read_dir(&sdir) {
         if entries.next().is_none() {
@@ -140,6 +151,15 @@ pub fn unregister_station_in(dir: &Path, session: &str, address: &str) -> Result
 /// List the stations recorded for `session` under `dir` (used by tests and tooling; the hook
 /// reads the files directly in shell).
 pub fn list_stations_in(dir: &Path, session: &str) -> Result<Vec<StationRecord>> {
+    Ok(list_station_files_in(dir, session)?
+        .into_iter()
+        .map(|(_, rec)| rec)
+        .collect())
+}
+
+/// Like [`list_stations_in`] but also returns each record's file path, so a caller can remove the
+/// exact file it acted on (rather than recomputing the name) — surgical per-record cleanup.
+pub fn list_station_files_in(dir: &Path, session: &str) -> Result<Vec<(PathBuf, StationRecord)>> {
     let sdir = dir.join(session);
     let mut out = Vec::new();
     let entries = match std::fs::read_dir(&sdir) {
@@ -153,12 +173,22 @@ pub fn list_stations_in(dir: &Path, session: &str) -> Result<Vec<StationRecord>>
         }
         if let Ok(text) = std::fs::read_to_string(&p) {
             if let Ok(rec) = serde_json::from_str::<StationRecord>(&text) {
-                out.push(rec);
+                out.push((p, rec));
             }
         }
     }
-    out.sort_by(|a, b| a.address.cmp(&b.address));
+    out.sort_by(|a, b| a.1.address.cmp(&b.1.address));
     Ok(out)
+}
+
+/// Remove the session directory if it has no remaining records. Best-effort.
+pub fn prune_empty_session_dir(dir: &Path, session: &str) {
+    let sdir = dir.join(session);
+    if let Ok(mut entries) = std::fs::read_dir(&sdir) {
+        if entries.next().is_none() {
+            let _ = std::fs::remove_dir(&sdir);
+        }
+    }
 }
 
 fn captured_env() -> BTreeMap<String, String> {
@@ -288,5 +318,27 @@ mod tests {
         let dir = temp_dir();
         // No session dir at all → still Ok (no-op).
         unregister_station_in(&dir, "nope", "station:gone").unwrap();
+    }
+
+    #[test]
+    fn colliding_sanitize_addresses_get_distinct_files() {
+        let dir = temp_dir();
+        let session = "sess-collide";
+        // `a:b`, `a.b`, `a_b` all sanitize to `a_b` — the hash suffix must keep them distinct.
+        register_station_in(&dir, session, &rec("a:b")).unwrap();
+        register_station_in(&dir, session, &rec("a.b")).unwrap();
+        register_station_in(&dir, session, &rec("a_b")).unwrap();
+        let listed = list_stations_in(&dir, session).unwrap();
+        assert_eq!(
+            listed.len(),
+            3,
+            "colliding addresses must not overwrite each other"
+        );
+        // Removing one leaves the others intact.
+        unregister_station_in(&dir, session, "a.b").unwrap();
+        let listed = list_stations_in(&dir, session).unwrap();
+        assert_eq!(listed.len(), 2);
+        assert!(listed.iter().any(|r| r.address == "a:b"));
+        assert!(listed.iter().any(|r| r.address == "a_b"));
     }
 }
