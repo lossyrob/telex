@@ -6,10 +6,12 @@ pub mod commands;
 pub mod config;
 #[cfg(feature = "entra")]
 pub mod credential;
+pub mod identity;
 pub mod ipc;
 pub mod model;
 pub mod output;
 pub mod profiles;
+pub mod registry;
 pub mod session_watch;
 
 #[cfg(not(any(feature = "sqlite", feature = "postgres")))]

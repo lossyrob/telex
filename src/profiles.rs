@@ -73,6 +73,45 @@ impl BackendProfile {
     }
 }
 
+/// A stable key identifying the *effective* physical store this profile resolves to — including the
+/// inputs that change which store is actually opened: the sqlite `--db` override + `~` expansion
+/// (mirroring `build`), and the postgres `schema` (the telex-table isolation boundary). The holder
+/// registry is scoped by this key so a station on one store is never inferred as the `from` for a
+/// send on another (DECISIONS 0010). Unlike `target()` (a display string) it must distinguish
+/// same-server/different-schema and same-profile/different-`--db` stores.
+pub fn store_key(profile: &BackendProfile, db_override: Option<&str>) -> String {
+    match profile.kind.as_str() {
+        "sqlite" => {
+            let path = db_override
+                .map(str::to_string)
+                .or_else(|| profile.path.clone())
+                .map(|p| expand_tilde(&p))
+                .unwrap_or_else(default_sqlite_path);
+            // Absolutize a relative path against the CWD so the *same* relative string
+            // (e.g. `telex.db`) used from different working directories doesn't collide on one
+            // store key — store_key exists precisely to keep distinct physical stores apart.
+            // (Default and `~`-expanded paths are already absolute.)
+            let path = {
+                let p = std::path::Path::new(&path);
+                if p.is_absolute() {
+                    path
+                } else {
+                    std::env::current_dir()
+                        .map(|cwd| cwd.join(p).to_string_lossy().into_owned())
+                        .unwrap_or(path)
+                }
+            };
+            format!("sqlite:{path}")
+        }
+        "postgres" => format!(
+            "postgres:{}|{}",
+            profile.url.as_deref().map(redact_conn).unwrap_or_default(),
+            profile.schema.as_deref().unwrap_or("")
+        ),
+        other => format!("{other}:{}", profile.target()),
+    }
+}
+
 pub fn config_path() -> Result<PathBuf> {
     if let Ok(p) = std::env::var("TELEX_CONFIG") {
         return Ok(PathBuf::from(p));
@@ -298,4 +337,74 @@ fn redact_conn(conn: &str) -> String {
         }
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sqlite_profile(path: Option<&str>) -> BackendProfile {
+        BackendProfile {
+            kind: "sqlite".into(),
+            path: path.map(str::to_string),
+            url: None,
+            auth: None,
+            password_env: None,
+            password_command: None,
+            schema: None,
+            entra_cred: None,
+            entra_scope: None,
+        }
+    }
+
+    #[test]
+    fn store_key_keeps_absolute_sqlite_path() {
+        let abs = if cfg!(windows) {
+            r"C:\tmp\telex.db"
+        } else {
+            "/tmp/telex.db"
+        };
+        let p = sqlite_profile(Some(abs));
+        assert_eq!(store_key(&p, None), format!("sqlite:{abs}"));
+    }
+
+    #[test]
+    fn store_key_absolutizes_relative_sqlite_path() {
+        let p = sqlite_profile(Some("telex.db"));
+        let key = store_key(&p, None);
+        let path = key.strip_prefix("sqlite:").expect("sqlite-prefixed key");
+        assert!(
+            std::path::Path::new(path).is_absolute(),
+            "relative path should be absolutized, got {path}"
+        );
+        assert!(path.ends_with("telex.db"));
+    }
+
+    #[test]
+    fn store_key_db_override_wins_over_profile_path() {
+        let p = sqlite_profile(Some("/tmp/profile.db"));
+        let key = store_key(
+            &p,
+            Some(if cfg!(windows) {
+                r"C:\tmp\override.db"
+            } else {
+                "/tmp/override.db"
+            }),
+        );
+        assert!(key.contains("override.db") && !key.contains("profile.db"));
+    }
+
+    #[test]
+    fn store_key_postgres_includes_schema() {
+        let mut p = sqlite_profile(None);
+        p.kind = "postgres".into();
+        p.url = Some("postgres://u@host:5432/db".into());
+        p.schema = Some("tenant_a".into());
+        let key = store_key(&p, None);
+        assert!(key.starts_with("postgres:"), "key: {key}");
+        assert!(
+            key.ends_with("|tenant_a"),
+            "schema must be in the key: {key}"
+        );
+    }
 }

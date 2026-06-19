@@ -25,6 +25,8 @@ struct Buffered {
 }
 
 struct State {
+    address: String,
+    backend_key: String,
     queue: Mutex<VecDeque<Buffered>>,
     notify: Notify,
     cursor: Mutex<i64>,
@@ -32,7 +34,6 @@ struct State {
     keepalive: Duration,
     shutdown: Notify,
     backend: Arc<dyn Backend>,
-    address: String,
     occupant: String,
 }
 
@@ -67,6 +68,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
     let backend = ctx.backend().await?;
 
     let pid = std::process::id() as i64;
+    let backend_key = ctx.store_key()?;
     let occupant = args
         .occupant
         .clone()
@@ -122,6 +124,8 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
     let start_cursor = backend.max_id(&address).await?;
 
     let state = Arc::new(State {
+        address: address.clone(),
+        backend_key: backend_key.clone(),
         queue: Mutex::new(VecDeque::new()),
         notify: Notify::new(),
         cursor: Mutex::new(start_cursor),
@@ -129,7 +133,6 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         keepalive: Duration::from_secs(args.keepalive_secs.max(1)),
         shutdown: Notify::new(),
         backend: backend.clone(),
-        address: address.clone(),
         occupant: occupant.clone(),
     });
 
@@ -284,6 +287,23 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
     let mut listener = ipc::Listener::bind(&address)?;
     eprintln!("[holder] listening for waiters on {address}");
 
+    // Publish the local holder registry record now that the endpoint is live, so `send`/`reply`
+    // can default `from` to this lease. We hold the exclusive lease, so any prior record for this
+    // (address, backend) is stale — prune it first. Best-effort: a failure here only disables the
+    // from-default convenience, never the station itself.
+    crate::registry::prune_address(&address, &backend_key);
+    let record = crate::registry::HolderRecord {
+        address: address.clone(),
+        backend: backend_key.clone(),
+        host: config::hostname(),
+        pid,
+        socket: ipc::endpoint(&address),
+        started_at_ms: now_ms(),
+    };
+    if let Err(e) = crate::registry::write(&record) {
+        eprintln!("[holder] registry write failed (from-default disabled): {e}");
+    }
+
     loop {
         tokio::select! {
             accepted = listener.accept() => {
@@ -310,6 +330,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         }
     }
 
+    crate::registry::remove(&address, pid);
     let released = backend
         .release_lease(&address, &occupant)
         .await
@@ -412,6 +433,8 @@ where
                 &mut write_half,
                 &Frame::Pong {
                     heartbeat_age_ms: age,
+                    served_address: Some(st.address.clone()),
+                    served_backend: Some(st.backend_key.clone()),
                 },
             )
             .await
@@ -559,6 +582,7 @@ mod tests {
 
     fn state_with(backend: Arc<dyn Backend>, address: &str) -> Arc<State> {
         Arc::new(State {
+            backend_key: backend.kind().to_string(),
             queue: Mutex::new(VecDeque::new()),
             notify: Notify::new(),
             cursor: Mutex::new(0),

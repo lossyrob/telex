@@ -368,6 +368,29 @@ Detailed takeover policy can be deferred. The safe default should be:
 This default is safe enough to build while leaving room for supervisor authority,
 stale takeover, worker pools, and delegation later.
 
+### Local holder registry (from-by-default)
+
+The holder (`attach`) and `send`/`reply` are separate processes, so a sender has no
+direct way to know which address this session is actually serving — the holder writes no
+other local record, the IPC endpoint name is a *lossy* `sanitize()` that can't be
+reverse-mapped, and the backend lease row has no reverse index from "this session" to
+"the address it holds." Forcing every send to carry `--from`/`$TELEX_ADDRESS` made
+un-repliable messages (`from = None`) an easy and silent foot-gun.
+
+To make the common case correct by default, the holder publishes a tiny **local registry
+record** once its endpoint is live: a JSON file under `run_dir()/holders/` carrying
+`{ address, backend, host, pid, socket, started_at_ms }`. `send`/`reply` resolve `from`
+as `--from` > `$TELEX_ADDRESS`/`--address` > **the uniquely live local station** for the
+current backend, found by reading the registry and confirming liveness with an `ipc::ping`
+(the holder echoes its `served_address` in the `Pong`, so a probe can't be fooled by a
+colliding endpoint name). Records are scoped to `(backend, host)`, so a station on one
+backend is never inferred for a send on a different one; the holder prunes any prior record
+for its `(address, backend)` on claim (safe under lease exclusivity) and removes its own on
+clean exit. A record left by a hard-killed holder is simply ignored — its endpoint no
+longer answers. Identity is *defaulted*, never *forced*: explicit `--from`/env always win,
+preserving one-shot reply-to senders, multi-address supervisors, and operator-as-system
+sends. A disposition-required send that would still be un-repliable is refused outright.
+
 ## Messaging model
 
 A Telex message is a typed operational record. It is not a transcript dump and
