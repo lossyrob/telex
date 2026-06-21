@@ -4,6 +4,7 @@
 mod addresses;
 mod detail;
 mod feed;
+mod reader;
 pub mod theme;
 mod thread;
 
@@ -43,6 +44,7 @@ pub fn render(f: &mut Frame, st: &AppState) {
         View::Feed => feed::render(f, chunks[1], st),
         View::Addresses => addresses::render(f, chunks[1], st),
         View::Thread => thread::render(f, chunks[1], st),
+        View::Reader => reader::render(f, chunks[1], st),
     }
     render_footer(f, chunks[2], st);
 }
@@ -52,6 +54,7 @@ fn render_header(f: &mut Frame, area: ratatui::layout::Rect, st: &AppState) {
         View::Feed => "FEED",
         View::Addresses => "ADDRESSES",
         View::Thread => "THREAD",
+        View::Reader => "READER",
     };
     let (live_txt, live_color) = if st.tailing {
         ("● LIVE", Color::Green)
@@ -93,6 +96,14 @@ fn render_header(f: &mut Frame, area: ratatui::layout::Rect, st: &AppState) {
 }
 
 fn render_footer(f: &mut Frame, area: ratatui::layout::Rect, st: &AppState) {
+    if st.view == View::Reader {
+        let line = Line::from(Span::styled(
+            " j/k scroll · Space/b page · g/G top/bottom · ←/Esc back · q quit",
+            Style::default().fg(Color::DarkGray),
+        ));
+        f.render_widget(Paragraph::new(line), area);
+        return;
+    }
     let line = match &st.mode {
         Mode::Filter(buf) => Line::from(vec![
             Span::styled("filter> ", Style::default().fg(Color::Cyan)),
@@ -120,7 +131,7 @@ fn render_footer(f: &mut Frame, area: ratatui::layout::Rect, st: &AppState) {
                 Span::styled(" q quit · Tab view ·", Style::default().fg(Color::DarkGray)),
                 tail_hint,
                 Span::styled(
-                    "· f filter · Enter thread · j/k move · ←/→ column · g/G ends · Esc back",
+                    "· f filter · Enter open · o read · j/k move · ←/→ column · g/G ends · Esc back",
                     Style::default().fg(Color::DarkGray),
                 ),
             ])

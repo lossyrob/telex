@@ -71,6 +71,8 @@ Three views over a shared detail pane on the right. `Tab` cycles **Feed ⇄ Addr
   address's recent messages (with latest disposition) → detail.
 - **Thread** — the selected message's thread as an indented transcript, with inline
   disposition summaries.
+- **Reader** — a full-screen, scrollable view of a single message for reading long bodies
+  and metadata in full (see below).
 
 The **detail pane** shows a delivery badge: `✓ delivered` (with the holder `occupant` and
 time it reached a waiter) or `⧗ undelivered` (queued, not yet handed to a waiter). Delivery
@@ -84,11 +86,29 @@ rare duplicate delivery is normal, not an error.
 | `Tab` | switch view (Feed ⇄ Addresses) |
 | `j` / `k` or `↓` / `↑` | move selection |
 | `←` / `→` | switch column (Addresses view) |
-| `Enter` | open the thread for the selected message |
+| `Enter` | open the thread (Feed/Addresses) or the message reader (Thread) |
+| `o` | open the selected message in the full-screen reader (any view) |
 | `t` | toggle live tail (auto-scroll) |
 | `f` | set the address filter (type, then `Enter`; `Esc` cancels) |
 | `g` / `G` | jump to top / bottom |
-| `Esc` | leave Thread / clear the filter |
+| `Esc` | leave Reader/Thread / clear the filter |
+
+### Reading long messages (the reader)
+
+The side detail pane clips anything taller than itself. To read a long body or metadata in
+full, open the **reader**: press `Enter` on a message in the Thread view, or `o` from any
+view. It shows the whole message — headers, full body, pretty metadata, delivery records,
+and dispositions — full-screen and **scrollable**, with a scrollbar and a `line X/Y`
+indicator in the title.
+
+| Key (reader) | Action |
+|--------------|--------|
+| `j` / `k` or `↓` / `↑` | scroll one line |
+| `Space` / `b` (or `PgDn` / `PgUp`) | scroll one page |
+| `g` / `G` | jump to top / bottom |
+| `←` / `Esc` | close the reader (back to where you opened it) |
+| `q` | quit |
+
 
 The header shows the backend, current view, live/paused state, active filter, counts, and
 the timestamp timezone (`local` by default, or `UTC` with `--utc`). Timestamps are

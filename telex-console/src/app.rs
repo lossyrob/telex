@@ -4,6 +4,7 @@
 //! touches the backend is an async `Cmd` executed by the run loop. Rendering reads state
 //! read-only (see [`crate::ui`]).
 
+use std::cell::Cell;
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -25,6 +26,8 @@ pub enum View {
     Feed,
     Addresses,
     Thread,
+    /// Full-screen, scrollable reader for a single message.
+    Reader,
 }
 
 /// Within the Addresses view, which column has focus.
@@ -124,6 +127,18 @@ pub struct AppState {
     /// Delivery records for the currently selected message, loaded lazily.
     pub detail_deliv: Option<(i64, Vec<DeliveryRow>)>,
 
+    // Reader (full-screen single-message view)
+    /// The message currently open in the reader (snapshot taken when opened).
+    pub reader_msg: Option<MessageRow>,
+    /// The view to return to when the reader is closed.
+    pub reader_from: View,
+    /// Reader vertical scroll offset, in rendered rows.
+    pub reader_scroll: u16,
+    /// Maximum scroll offset, computed during render and read back when scrolling.
+    pub reader_max_scroll: Cell<u16>,
+    /// Reader viewport height (page size), computed during render.
+    pub reader_page: Cell<u16>,
+
     pub filter: Option<String>,
 }
 
@@ -160,6 +175,11 @@ impl AppState {
             thread_disp: HashMap::new(),
             detail_disp: None,
             detail_deliv: None,
+            reader_msg: None,
+            reader_from: View::Feed,
+            reader_scroll: 0,
+            reader_max_scroll: Cell::new(0),
+            reader_page: Cell::new(0),
             filter: None,
         };
         if let Some(a) = focus_address {
@@ -202,6 +222,7 @@ impl AppState {
             View::Feed => self.visible_feed().get(self.feed_sel).map(|m| m.id),
             View::Addresses => self.addr_msgs.get(self.addr_msg_sel).map(|i| i.message.id),
             View::Thread => self.thread.get(self.thread_sel).map(|m| m.id),
+            View::Reader => self.reader_msg.as_ref().map(|m| m.id),
         }
     }
 
@@ -229,6 +250,9 @@ impl AppState {
         if let Mode::Filter(_) = self.mode {
             return self.on_key_filter(key);
         }
+        if self.view == View::Reader {
+            return self.on_key_reader(key);
+        }
         match key.code {
             KeyCode::Char('q') => self.should_quit = true,
             KeyCode::Tab => return self.cycle_view(),
@@ -239,6 +263,7 @@ impl AppState {
                 }
             }
             KeyCode::Char('f') => self.mode = Mode::Filter(self.filter.clone().unwrap_or_default()),
+            KeyCode::Char('o') => self.open_reader(),
             KeyCode::Char('j') | KeyCode::Down => return self.move_down(),
             KeyCode::Char('k') | KeyCode::Up => return self.move_up(),
             KeyCode::Char('g') | KeyCode::Home => self.go_top(),
@@ -306,6 +331,7 @@ impl AppState {
             View::Addresses => View::Feed,
             // From Thread, Tab returns to where you came from.
             View::Thread => self.prev_view,
+            View::Reader => self.reader_from,
         };
         self.enter_addresses_reload()
     }
@@ -356,6 +382,7 @@ impl AppState {
                     self.thread_sel += 1;
                 }
             }
+            View::Reader => {}
         }
         Vec::new()
     }
@@ -384,6 +411,7 @@ impl AppState {
             View::Thread => {
                 self.thread_sel = self.thread_sel.saturating_sub(1);
             }
+            View::Reader => {}
         }
         Vec::new()
     }
@@ -399,6 +427,7 @@ impl AppState {
                 AddrFocus::Messages => self.addr_msg_sel = 0,
             },
             View::Thread => self.thread_sel = 0,
+            View::Reader => {}
         }
     }
 
@@ -413,6 +442,7 @@ impl AppState {
                 AddrFocus::Messages => self.addr_msg_sel = self.addr_msgs.len().saturating_sub(1),
             },
             View::Thread => self.thread_sel = self.thread.len().saturating_sub(1),
+            View::Reader => {}
         }
     }
 
@@ -433,7 +463,54 @@ impl AppState {
                     return vec![Cmd::LoadThread(tid)];
                 }
             }
-            View::Thread => {}
+            // In a thread, Enter opens the selected message in the full-screen reader.
+            View::Thread => self.open_reader(),
+            View::Reader => {}
+        }
+        Vec::new()
+    }
+
+    /// Open the full-screen reader on the message selected in the current view.
+    fn open_reader(&mut self) {
+        let msg = match self.view {
+            View::Feed => self.visible_feed().get(self.feed_sel).map(|m| (*m).clone()),
+            View::Addresses => self
+                .addr_msgs
+                .get(self.addr_msg_sel)
+                .map(|i| i.message.clone()),
+            View::Thread => self.thread.get(self.thread_sel).cloned(),
+            View::Reader => self.reader_msg.clone(),
+        };
+        if let Some(m) = msg {
+            self.reader_from = self.view;
+            self.reader_msg = Some(m);
+            self.reader_scroll = 0;
+            self.view = View::Reader;
+        }
+    }
+
+    /// Key handling while the full-screen reader is open: scroll and close.
+    fn on_key_reader(&mut self, key: KeyEvent) -> Vec<Cmd> {
+        let max = self.reader_max_scroll.get();
+        let page = self.reader_page.get().max(1);
+        match key.code {
+            KeyCode::Char('q') => self.should_quit = true,
+            KeyCode::Esc | KeyCode::Left | KeyCode::Char('h') => self.view = self.reader_from,
+            KeyCode::Char('j') | KeyCode::Down => {
+                self.reader_scroll = (self.reader_scroll + 1).min(max);
+            }
+            KeyCode::Char('k') | KeyCode::Up => {
+                self.reader_scroll = self.reader_scroll.saturating_sub(1);
+            }
+            KeyCode::Char(' ') | KeyCode::PageDown => {
+                self.reader_scroll = (self.reader_scroll + page).min(max);
+            }
+            KeyCode::Char('b') | KeyCode::PageUp => {
+                self.reader_scroll = self.reader_scroll.saturating_sub(page);
+            }
+            KeyCode::Char('g') | KeyCode::Home => self.reader_scroll = 0,
+            KeyCode::Char('G') | KeyCode::End => self.reader_scroll = max,
+            _ => {}
         }
         Vec::new()
     }
@@ -593,6 +670,9 @@ pub async fn run(mut state: AppState, store: Store, poll_secs: u64) -> Result<()
 
     loop {
         term.draw(|f| ui::render(f, &state))?;
+        // Render computed the reader's content height; clamp the scroll offset so a
+        // shrunk message (or a resize) can't leave us parked past the end.
+        state.reader_scroll = state.reader_scroll.min(state.reader_max_scroll.get());
 
         tokio::select! {
             maybe = input.recv() => match maybe {
@@ -749,6 +829,66 @@ mod tests {
         ));
         assert_eq!(s.view, View::Addresses);
         assert_eq!(cmds, vec![Cmd::LoadAddressMessages("node:a".into())]);
+    }
+
+    #[test]
+    fn o_opens_reader_and_esc_returns() {
+        let mut s = state();
+        s.apply_feed(vec![msg(9, "a", "b")]);
+        s.on_key(key('o'));
+        assert_eq!(s.view, View::Reader);
+        assert_eq!(s.reader_from, View::Feed);
+        assert_eq!(s.reader_msg.as_ref().map(|m| m.id), Some(9));
+        assert_eq!(s.selected_message_id(), Some(9));
+        s.on_key(KeyEvent::new(
+            KeyCode::Esc,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+        assert_eq!(s.view, View::Feed);
+    }
+
+    #[test]
+    fn enter_in_thread_opens_reader_not_thread_reload() {
+        let mut s = state();
+        s.view = View::Thread;
+        s.prev_view = View::Feed;
+        s.thread = vec![msg(3, "a", "b"), msg(4, "a", "b")];
+        s.thread_sel = 1;
+        let cmds = s.on_key(KeyEvent::new(
+            KeyCode::Enter,
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+        assert!(cmds.is_empty());
+        assert_eq!(s.view, View::Reader);
+        assert_eq!(s.reader_from, View::Thread);
+        assert_eq!(s.reader_msg.as_ref().map(|m| m.id), Some(4));
+        // returning from the reader must not clobber the thread's own back-target
+        assert_eq!(s.prev_view, View::Feed);
+    }
+
+    #[test]
+    fn reader_scroll_clamps_to_bounds() {
+        let mut s = state();
+        s.apply_feed(vec![msg(1, "a", "b")]);
+        s.on_key(key('o'));
+        s.reader_max_scroll.set(5);
+        s.reader_page.set(3);
+        // scrolling up at the top stays at 0
+        s.on_key(key('k'));
+        assert_eq!(s.reader_scroll, 0);
+        // line down, then page down clamps at max
+        s.on_key(key('j'));
+        assert_eq!(s.reader_scroll, 1);
+        s.on_key(key(' '));
+        assert_eq!(s.reader_scroll, 4);
+        s.on_key(KeyEvent::new(
+            KeyCode::Char('G'),
+            ratatui::crossterm::event::KeyModifiers::NONE,
+        ));
+        assert_eq!(s.reader_scroll, 5);
+        // never exceeds max
+        s.on_key(key('j'));
+        assert_eq!(s.reader_scroll, 5);
     }
 
     #[test]
