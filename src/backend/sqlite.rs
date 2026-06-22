@@ -382,32 +382,6 @@ impl Backend for SqliteBackend {
         .await
     }
 
-    async fn max_id(&self, address: &str) -> Result<i64> {
-        let a = address.to_string();
-        self.run(move |c| {
-            Ok(c.query_row(
-                "SELECT COALESCE(MAX(id),0) FROM messages WHERE to_addr=?1",
-                params![a],
-                |r| r.get(0),
-            )?)
-        })
-        .await
-    }
-
-    async fn fetch_after(&self, address: &str, cursor: i64) -> Result<Vec<MessageRow>> {
-        let a = address.to_string();
-        self.run(move |c| {
-            let sql =
-                format!("SELECT {MSG_COLS} FROM messages WHERE to_addr=?1 AND id>?2 ORDER BY id");
-            let mut stmt = c.prepare(&sql)?;
-            let rows = stmt
-                .query_map(params![a, cursor], map_message)?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            Ok(rows)
-        })
-        .await
-    }
-
     async fn mark_delivered(
         &self,
         message_id: i64,
@@ -427,16 +401,16 @@ impl Backend for SqliteBackend {
         .await
     }
 
-    async fn undelivered_backlog(&self, address: &str, upto_id: i64) -> Result<Vec<MessageRow>> {
+    async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>> {
         let a = address.to_string();
         self.run(move |c| {
-            // Backlog = messages addressed here, at or below the holder's start cursor, that have no
-            // delivery record AND whose latest disposition for this recipient is not terminal. The
-            // `id <= upto_id` bound partitions cleanly against the `fetch_after` (id > cursor) drain,
-            // so a message inserted between the cursor snapshot and this query is drained, not seeded.
+            // See Backend::fetch_undelivered / DECISIONS 0013: undelivered (no delivery record) +
+            // non-terminal, ordered by id, with no id floor. SQLite serializes writes so commit
+            // order == id order and it was never affected by issue #18, but it uses the same
+            // delivery-state authority so the holder keeps a single code path across backends.
             let sql = format!(
                 "SELECT {MSG_COLS} FROM messages m \
-                 WHERE m.to_addr=?1 AND m.id<=?2 \
+                 WHERE m.to_addr=?1 \
                    AND NOT EXISTS (SELECT 1 FROM deliveries d \
                                    WHERE d.message_id=m.id AND d.recipient=?1) \
                    AND COALESCE((SELECT disp.state FROM dispositions disp \
@@ -447,7 +421,7 @@ impl Backend for SqliteBackend {
             );
             let mut stmt = c.prepare(&sql)?;
             let rows = stmt
-                .query_map(params![a, upto_id], map_message)?
+                .query_map(params![a], map_message)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })

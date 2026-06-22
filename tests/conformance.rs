@@ -93,8 +93,8 @@ where
     //     set_address_status / list_addresses ... addresses_directory
     //   claim_lease / heartbeat / release_lease /
     //     get_lease / occupancy ................. leases_liveness
-    //   max_id / fetch_after .................... cursor_delivery, concurrency
-    //   mark_delivered / undelivered_backlog .... delivery_backlog
+    //   fetch_undelivered ....................... undelivered_delivery, delivery_backlog, concurrency
+    //   mark_delivered .......................... undelivered_delivery, delivery_backlog
     //   insert_message / get_message /
     //     thread_messages ....................... messages_threading
     //   inbox ................................... inbox_derivation
@@ -104,7 +104,7 @@ where
     schema_idempotent(make_store().await).await;
     addresses_directory(make_store().await).await;
     leases_liveness(make_store().await).await;
-    cursor_delivery(make_store().await).await;
+    undelivered_delivery(make_store().await).await;
     delivery_backlog(make_store().await).await;
     messages_threading(make_store().await).await;
     inbox_derivation(make_store().await).await;
@@ -356,45 +356,58 @@ async fn leases_liveness(store: Store) {
     assert!(!b.release_lease("lease:none", "X").await.unwrap());
 }
 
-/// Cursor delivery: `max_id`/`fetch_after` return rows strictly after the cursor in
-/// monotonic id order, scoped to one recipient address.
-async fn cursor_delivery(store: Store) {
+/// Undelivered delivery: `fetch_undelivered` returns every message addressed here that has no
+/// delivery record and a non-terminal disposition, in id order, scoped to one recipient — and
+/// crucially returns a lower undelivered id even after a HIGHER id has been delivered. That last
+/// property is what closes the Postgres commit-order gap (issue #18): visibility no longer depends
+/// on a monotonic id cursor, so a concurrently-committed lower id is never skipped.
+async fn undelivered_delivery(store: Store) {
     let b = store.connect().await;
-    let addr = "cur:1";
+    let addr = "und:1";
 
     let m1 = b.insert_message(&new_msg(addr)).await.unwrap();
     let m2 = b.insert_message(&new_msg(addr)).await.unwrap();
     let m3 = b.insert_message(&new_msg(addr)).await.unwrap();
     assert!(m1.id < m2.id && m2.id < m3.id, "ids are monotonic");
 
-    // A message to another address must not bleed into this cursor.
-    b.insert_message(&new_msg("cur:other")).await.unwrap();
+    // A message to another address must not bleed into this recipient's undelivered set.
+    b.insert_message(&new_msg("und:other")).await.unwrap();
 
-    assert_eq!(b.max_id(addr).await.unwrap(), m3.id);
-
-    let from_zero = b.fetch_after(addr, 0).await.unwrap();
+    let all = b.fetch_undelivered(addr).await.unwrap();
     assert_eq!(
-        from_zero.iter().map(|m| m.id).collect::<Vec<_>>(),
-        vec![m1.id, m2.id, m3.id]
+        all.iter().map(|m| m.id).collect::<Vec<_>>(),
+        vec![m1.id, m2.id, m3.id],
+        "all undelivered messages for the address, ordered by id, nothing from other addresses"
     );
 
-    let after_first = b.fetch_after(addr, m1.id).await.unwrap();
+    // The gap-closing invariant: deliver the HIGHER ids m2 and m3; the lower undelivered m1 must
+    // still be returned. A high-water cursor parked at m3 would skip m1 — `fetch_undelivered` does
+    // not, because delivery state (not id ordering) decides visibility.
+    b.mark_delivered(m2.id, addr, Some("holderA")).await.unwrap();
+    b.mark_delivered(m3.id, addr, Some("holderA")).await.unwrap();
     assert_eq!(
-        after_first.iter().map(|m| m.id).collect::<Vec<_>>(),
-        vec![m2.id, m3.id],
-        "fetch_after returns rows strictly after the cursor"
+        b.fetch_undelivered(addr)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect::<Vec<_>>(),
+        vec![m1.id],
+        "a lower undelivered id survives delivery of higher ids (issue #18 invariant)"
     );
 
+    // Delivering the last one empties the set.
+    b.mark_delivered(m1.id, addr, Some("holderA")).await.unwrap();
     assert!(
-        b.fetch_after(addr, m3.id).await.unwrap().is_empty(),
-        "no rows beyond the head"
+        b.fetch_undelivered(addr).await.unwrap().is_empty(),
+        "no undelivered messages remain once all are delivered"
     );
 }
 
-/// Durable delivery backlog: `mark_delivered` records a holder->waiter handoff, and
-/// `undelivered_backlog(addr, upto_id)` returns the messages at or below the holder's start cursor
-/// that are neither delivered nor terminally dispositioned, in id order — exactly the set a holder
-/// re-enqueues on restart so messages queued while unoccupied are not skipped past `max_id`.
+/// Delivery + disposition interplay: `mark_delivered` records a holder->waiter handoff, and
+/// `fetch_undelivered` excludes a message once it is delivered OR terminally dispositioned, in id
+/// order — the two orthogonal do-not-deliver signals (a delivery record, primary; a terminal
+/// disposition, secondary for out-of-band `inbox` recovery), with the delivery record dominating.
 async fn delivery_backlog(store: Store) {
     let b = store.connect().await;
     let addr = "backlog:1";
@@ -403,42 +416,30 @@ async fn delivery_backlog(store: Store) {
     let m1 = b.insert_message(&new_msg(addr)).await.unwrap();
     let m2 = b.insert_message(&new_msg(addr)).await.unwrap();
     let m3 = b.insert_message(&new_msg(addr)).await.unwrap();
-    // A message to another address must never leak into this address's backlog.
+    // A message to another address must never leak into this address's undelivered set.
     let other = b.insert_message(&new_msg("backlog:other")).await.unwrap();
 
-    let head = b.max_id(addr).await.unwrap();
-    assert_eq!(head, m3.id);
-
-    // All three are undelivered and undispositioned -> the full backlog, ordered by id.
-    let bl = b.undelivered_backlog(addr, head).await.unwrap();
+    // All three are undelivered and undispositioned -> the full set, ordered by id.
+    let bl = b.fetch_undelivered(addr).await.unwrap();
     assert_eq!(
         bl.iter().map(|m| m.id).collect::<Vec<_>>(),
         vec![m1.id, m2.id, m3.id],
-        "undelivered, non-terminal messages are the backlog, ordered by id"
+        "undelivered, non-terminal messages, ordered by id"
     );
     assert!(
         !bl.iter().any(|m| m.id == other.id),
-        "another address's messages never appear in this backlog"
+        "another address's messages never appear here"
     );
 
-    // The upto_id bound excludes messages above the holder's start cursor: those belong to the
-    // streaming `fetch_after` drain, not the seeded backlog. This is the no-double-delivery guard.
-    let bounded = b.undelivered_backlog(addr, m2.id).await.unwrap();
-    assert_eq!(
-        bounded.iter().map(|m| m.id).collect::<Vec<_>>(),
-        vec![m1.id, m2.id],
-        "undelivered_backlog honors the id<=upto_id high-water bound"
-    );
-
-    // Delivering m1 (the holder->waiter handoff) drops it from the backlog: not redelivered.
+    // Delivering m1 (the holder->waiter handoff) drops it from the undelivered set: not redelivered.
     b.mark_delivered(m1.id, addr, Some("holderA"))
         .await
         .unwrap();
-    let after = b.undelivered_backlog(addr, head).await.unwrap();
+    let after = b.fetch_undelivered(addr).await.unwrap();
     assert_eq!(
         after.iter().map(|m| m.id).collect::<Vec<_>>(),
         vec![m2.id, m3.id],
-        "a delivered message is not re-surfaced as backlog"
+        "a delivered message is not re-surfaced as undelivered"
     );
 
     // A terminal disposition on a never-delivered message also removes it — covers out-of-band
@@ -446,32 +447,32 @@ async fn delivery_backlog(store: Store) {
     b.insert_disposition(m2.id, addr, "handled", None, None)
         .await
         .unwrap();
-    let after2 = b.undelivered_backlog(addr, head).await.unwrap();
+    let after2 = b.fetch_undelivered(addr).await.unwrap();
     assert_eq!(
         after2.iter().map(|m| m.id).collect::<Vec<_>>(),
         vec![m3.id],
-        "a terminally dispositioned message is excluded from the backlog"
+        "a terminally dispositioned message is excluded"
     );
 
-    // A non-terminal disposition keeps a never-delivered message in the backlog.
+    // A non-terminal disposition keeps a never-delivered message in the undelivered set.
     b.insert_disposition(m3.id, addr, "acknowledged", None, None)
         .await
         .unwrap();
     assert_eq!(
-        b.undelivered_backlog(addr, head)
+        b.fetch_undelivered(addr)
             .await
             .unwrap()
             .iter()
             .map(|m| m.id)
             .collect::<Vec<_>>(),
         vec![m3.id],
-        "a non-terminal disposition (acknowledged) does not remove a message from the backlog"
+        "a non-terminal disposition (acknowledged) does not exclude a message"
     );
 
     // Two-signal interaction: a *delivered* message that is later terminally dispositioned and then
-    // reopened (latest disposition non-terminal) must STILL stay out of the backlog. The durable
-    // delivery record dominates the disposition state, so a reopen never resurrects an already-
-    // delivered message — distinguishing this from inbox's latest-disposition-wins rule.
+    // reopened (latest disposition non-terminal) must STILL stay excluded. The durable delivery
+    // record dominates the disposition state, so a reopen never resurrects an already-delivered
+    // message — distinguishing this from inbox's latest-disposition-wins rule.
     b.mark_delivered(m3.id, addr, Some("holderA"))
         .await
         .unwrap();
@@ -482,8 +483,8 @@ async fn delivery_backlog(store: Store) {
         .await
         .unwrap();
     assert!(
-        b.undelivered_backlog(addr, head).await.unwrap().is_empty(),
-        "a delivered message stays out of the backlog even when reopened (delivery record dominates)"
+        b.fetch_undelivered(addr).await.unwrap().is_empty(),
+        "a delivered message stays excluded even when reopened (delivery record dominates)"
     );
 }
 
@@ -689,9 +690,9 @@ async fn export_filters(store: Store) {
 }
 
 /// Concurrency: multiple independent connections inserting concurrently each receive a
-/// distinct id with no lost writes (the cursor model depends on this). Each writer records the
-/// ids it was handed, so the assertions exercise concurrent id *assignment* rather than merely
-/// restating `fetch_after`'s `ORDER BY id`.
+/// distinct id with no lost writes. Each writer records the ids it was handed, so the assertions
+/// exercise concurrent id *assignment* rather than merely restating `fetch_undelivered`'s
+/// `ORDER BY id`.
 async fn concurrency(store: Store) {
     let addr = "conc:1";
     const WRITERS: usize = 4;
@@ -728,17 +729,18 @@ async fn concurrency(store: Store) {
     );
 
     // The store holds exactly the ids handed back to the writers — no lost writes, none extra.
+    // None are delivered, so the undelivered set is the full set of stored ids.
     let conn = store.connect().await;
-    let rows = conn.fetch_after(addr, 0).await.unwrap();
+    let rows = conn.fetch_undelivered(addr).await.unwrap();
     let stored: HashSet<i64> = rows.iter().map(|m| m.id).collect();
     assert_eq!(
         stored, assigned_set,
         "persisted ids must be exactly the ids handed back to the writers (no lost writes)"
     );
     assert_eq!(
-        conn.max_id(addr).await.unwrap(),
+        rows.iter().map(|m| m.id).max().unwrap(),
         *assigned_set.iter().max().unwrap(),
-        "max_id reflects the highest assigned id"
+        "the highest persisted id matches the highest assigned id"
     );
 }
 
@@ -957,5 +959,182 @@ mod postgres_fixture {
             },
         )
         .await;
+    }
+
+    /// Issue #18, against real Postgres MVCC: a lower id committed AFTER a higher id (reverse commit
+    /// order) must still be delivered by the LIVE holder with no restart. Two independent
+    /// connections insert to one address; connection A holds the LOWER id in an open transaction
+    /// while connection B commits the HIGHER id. After the higher id is delivered and A finally
+    /// commits, `fetch_undelivered` must return the lower id — whereas the old high-water cursor
+    /// (`WHERE id > <delivered>`) would skip it. This is the faithful reproduction the conformance
+    /// battery (which inserts via auto-committing `insert_message`) cannot express. Gated on
+    /// `TELEX_PG_URL`; uses a distinct `telex_issue18_*` schema so it never collides with the
+    /// conformance schema.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn postgres_out_of_order_commit_delivers_lower_id() {
+        let require = std::env::var("TELEX_PG_REQUIRE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let url = match std::env::var("TELEX_PG_URL") {
+            Ok(u) if !u.trim().is_empty() => u,
+            _ => {
+                assert!(
+                    !require,
+                    "TELEX_PG_REQUIRE is set but TELEX_PG_URL is unset/empty; \
+                     refusing to skip the issue-#18 out-of-order-commit test."
+                );
+                eprintln!(
+                    "[conformance] TELEX_PG_URL not set; skipping the issue-#18 out-of-order test."
+                );
+                return;
+            }
+        };
+
+        let mut cfg: tokio_postgres::Config = url
+            .parse()
+            .expect("TELEX_PG_URL must be a libpq URI or key=value DSN");
+        if let Ok(pw) = std::env::var("TELEX_PG_PASSWORD") {
+            if !pw.is_empty() {
+                cfg.password(pw);
+            }
+        }
+        let schema = sanitize_ident(&format!("telex_issue18_{}_{}", std::process::id(), now_ms()))
+            .expect("derived schema name must be a valid identifier");
+
+        // Create the schema + tables via the backend, then run the body with panic-safe cleanup.
+        let b = PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .expect("connect postgres");
+        b.init_schema().await.expect("init postgres schema");
+        drop(b);
+
+        let cfg_body = cfg.clone();
+        let schema_body = schema.clone();
+        let result = tokio::spawn(async move {
+            out_of_order_commit_body(cfg_body, &schema_body).await;
+        })
+        .await;
+
+        admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+            .await
+            .expect("post-test schema drop");
+        if let Err(e) = result {
+            std::panic::resume_unwind(e.into_panic());
+        }
+    }
+
+    /// Open two independent connections, force reverse-id commit order, and assert
+    /// `fetch_undelivered` sees the late lower id while a raw `id > <delivered>` cursor does not.
+    async fn out_of_order_commit_body(cfg: tokio_postgres::Config, schema: &str) {
+        let addr = "reorder:pg";
+
+        // Connection A: BEGIN; insert the LOWER id; hold the transaction open (uncommitted, so the
+        // row is invisible to every other connection).
+        let (ca, ca_conn) = cfg
+            .connect(make_tls().expect("tls"))
+            .await
+            .expect("connect A");
+        let ca_handle = tokio::spawn(async move {
+            let _ = ca_conn.await;
+        });
+        ca.batch_execute(&format!("SET search_path TO {schema}; BEGIN"))
+            .await
+            .unwrap();
+        let id_lower: i64 = ca
+            .query_one(
+                "INSERT INTO messages(to_addr, body, sent_at_ms, created_at_ms) \
+                 VALUES ($1,'lower',0,0) RETURNING id",
+                &[&addr],
+            )
+            .await
+            .unwrap()
+            .get("id");
+
+        // Connection B (auto-commit): insert the HIGHER id and commit it immediately.
+        let (cb, cb_conn) = cfg
+            .connect(make_tls().expect("tls"))
+            .await
+            .expect("connect B");
+        let cb_handle = tokio::spawn(async move {
+            let _ = cb_conn.await;
+        });
+        cb.batch_execute(&format!("SET search_path TO {schema}"))
+            .await
+            .unwrap();
+        let id_higher: i64 = cb
+            .query_one(
+                "INSERT INTO messages(to_addr, body, sent_at_ms, created_at_ms) \
+                 VALUES ($1,'higher',0,0) RETURNING id",
+                &[&addr],
+            )
+            .await
+            .unwrap()
+            .get("id");
+        assert!(
+            id_higher > id_lower,
+            "B must allocate a higher id than A (got {id_higher} vs {id_lower})"
+        );
+
+        // The holder's backend connection. Only the committed higher id is visible; A's lower id is
+        // still in flight.
+        let backend = PgBackend::connect_with(cfg.clone(), Some(schema))
+            .await
+            .expect("connect backend");
+        let before: Vec<i64> = backend
+            .fetch_undelivered(addr)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            before,
+            vec![id_higher],
+            "only the committed higher id is visible while A's transaction is open"
+        );
+
+        // The holder delivers the higher id (this is the moment a high-water cursor would advance
+        // past it and lose the still-uncommitted lower id forever, until a restart).
+        backend
+            .mark_delivered(id_higher, addr, Some("holder-pg"))
+            .await
+            .unwrap();
+
+        // Now A commits: the LOWER id becomes visible, committed *behind* the delivered higher id.
+        ca.batch_execute("COMMIT").await.unwrap();
+
+        // THE FIX: the live holder's drain query returns the late lower id — no restart required.
+        let undelivered: Vec<i64> = backend
+            .fetch_undelivered(addr)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            undelivered,
+            vec![id_lower],
+            "fetch_undelivered returns the concurrently-committed lower id (issue #18 closed)"
+        );
+
+        // CONTRAST: the OLD high-water cursor model (`id > <delivered>`) skips it. We run that raw
+        // query inline (the `fetch_after` method that did this is removed) to show it misses the
+        // lower id even though it is now committed and undelivered — exactly the bug #18 fixes.
+        let cursor_rows = cb
+            .query(
+                "SELECT id FROM messages WHERE to_addr=$1 AND id>$2 ORDER BY id",
+                &[&addr, &id_higher],
+            )
+            .await
+            .unwrap();
+        assert!(
+            cursor_rows.is_empty(),
+            "a high-water cursor parked at the delivered id skips the lower id (the #18 bug)"
+        );
+
+        drop(ca);
+        drop(cb);
+        let _ = ca_handle.await;
+        let _ = cb_handle.await;
     }
 }

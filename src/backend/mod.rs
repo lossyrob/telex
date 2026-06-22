@@ -53,24 +53,24 @@ pub trait Backend: Send + Sync {
     async fn occupancy(&self, address: &str, window_secs: i64) -> Result<Occupancy>;
 
     // ---- messages ----
-    async fn max_id(&self, address: &str) -> Result<i64>;
-    async fn fetch_after(&self, address: &str, cursor: i64) -> Result<Vec<MessageRow>>;
-    /// Record that `message_id` was handed to a waiter for `recipient` (the served address), so a
-    /// later holder does not redeliver it. Durable: this is what turns the in-memory delivery
-    /// cursor into a restart-survivable mark. `occupant` is optional audit context (which holder).
+    /// Record that `message_id` was handed to a waiter for `recipient` (the served address), so no
+    /// holder redelivers it. Durable: this is the per-recipient delivery fact that makes delivery
+    /// state survive holder restarts. `occupant` is optional audit context (which holder).
     async fn mark_delivered(
         &self,
         message_id: i64,
         recipient: &str,
         occupant: Option<&str>,
     ) -> Result<()>;
-    /// Messages addressed to `address`, with id `<= upto_id`, that have NOT yet been delivered to a
-    /// waiter and whose latest disposition for that recipient is not terminal, ordered by id. A
-    /// holder enqueues these at startup so messages queued while the address was unoccupied are
-    /// delivered when a holder returns — instead of being skipped past `max_id`. The `upto_id`
-    /// high-water bound (the holder's start cursor) is what keeps the seeded backlog and the
-    /// `fetch_after` drain (`id > cursor`) from overlapping, so nothing is delivered twice.
-    async fn undelivered_backlog(&self, address: &str, upto_id: i64) -> Result<Vec<MessageRow>>;
+    /// Every message addressed to `address` that has NOT yet been delivered to a waiter AND whose
+    /// latest disposition for that recipient is not terminal, ordered by id. This is the holder's
+    /// single source of truth for "what still needs delivering": the live drain queues whatever this
+    /// returns (deduped in-memory), so delivery never depends on a monotonic id cursor. On Postgres
+    /// that is what closes the commit-order gap (issue #18) — a concurrently-committed lower id has
+    /// no delivery record, so it is returned and delivered by the *live* holder, no restart required.
+    /// The two do-not-deliver signals are a delivery record (primary) and a terminal disposition
+    /// (secondary, for messages recovered out-of-band via `telex inbox`); see DECISIONS 0013.
+    async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>>;
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow>;
     async fn get_message(&self, id: i64) -> Result<Option<MessageRow>>;
     async fn thread_messages(&self, thread_id: i64) -> Result<Vec<MessageRow>>;

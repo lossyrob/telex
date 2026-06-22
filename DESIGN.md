@@ -125,7 +125,7 @@ Backends provide primitives:
 - subscribe or poll;
 - claim/release lease;
 - resolve address;
-- persist cursor/disposition state.
+- persist delivery/disposition state.
 
 Backend features may enforce mechanical invariants, but should not define the
 product semantics. Postgres can use constraints, indexes, transactions,
@@ -163,15 +163,17 @@ type BackendCapabilities = {
 The core adapts behavior:
 
 - if push is native, `wait` subscribes;
-- if push is unavailable, `wait` polls from a cursor;
+- if push is unavailable, the holder polls for undelivered messages;
 - if leases are connection-bound, liveness can be exact;
 - if leases are TTL/heartbeat-based, liveness is "last seen within lease
   window";
 - if liveness is weak, receipts should say so honestly.
 
 **v0 baseline (see decision 0005).** The portable v0 baseline uses
-**poll-with-cursor** delivery and **TTL-heartbeat** liveness for *both* SQLite and
-Postgres — a single code path on each axis. `LISTEN/NOTIFY` (native push) and
+**poll** delivery and **TTL-heartbeat** liveness for *both* SQLite and
+Postgres — a single code path on each axis. The holder polls the **undelivered set** keyed on
+per-recipient delivery state rather than a monotonic id cursor (decision 0013, which superseded the
+original poll-with-cursor mechanism). `LISTEN/NOTIFY` (native push) and
 connection-bound advisory locks (exact liveness) are deferred to later, optional
 Postgres-only upgrades behind these same capability flags, added only if a measured
 need appears. The spike validated that poll + TTL is sufficient at agent-turn scale,
@@ -183,7 +185,7 @@ prerequisites.
 SQLite is the local substrate. It should support the same semantic model but with
 weaker liveness:
 
-- messages, recipients, threads, addresses, cursors, and dispositions live in
+- messages, recipients, threads, addresses, delivery state, and dispositions live in
   tables;
 - waiting uses polling or file-change observation;
 - leases use heartbeat rows and TTL windows;
@@ -201,7 +203,8 @@ behavior without a custom hosted API:
 - Entra credentials as a first-class authentication target for Azure Database for
   PostgreSQL Flexible Server.
 
-In v0, Postgres runs the same poll-with-cursor delivery and TTL-heartbeat liveness as
+In v0, Postgres runs the same poll delivery (the undelivered-set drain of decision 0013) and
+TTL-heartbeat liveness as
 SQLite (decision 0005); it earns its place through durability, indexed queries, and
 networked multi-machine access rather than through push or connection-bound liveness.
 
@@ -513,8 +516,8 @@ repeated short-lived invocations (`check`, sleep, `check`) opens and closes a
 connection each time and structurally cannot hold a connection-bound lease; it would
 silently degrade answerback to the weaker heartbeat/TTL grade. So the long wait must
 live inside one durable Telex process that holds the lease and blocks efficiently
-(poll-with-cursor in the v0 baseline; `LISTEN/NOTIFY` is a later optional Postgres
-push upgrade — see decision 0005).
+(polling the undelivered set in the v0 baseline — see decision 0013; `LISTEN/NOTIFY` is a later
+optional Postgres push upgrade — see decision 0005).
 
 This creates a real tension with how agent runtimes work: an agent can only reason
 about a message once the call delivering it **returns**. Delivery to the reasoning
@@ -527,8 +530,9 @@ alive — handling the message — which is backwards.
 Telex resolves this by splitting the waiter into **two processes**:
 
 - a **resident holder** — long-lived, holds the backend connection and writes the
-  lease's TTL heartbeat, polls for actionable messages from a cursor, and buffers them
-  locally (on the optional Postgres upgrade it can instead hold an advisory lock and
+  lease's TTL heartbeat, polls for actionable messages — the **undelivered set** keyed on
+  per-recipient delivery state, not a monotonic id cursor (see decision 0013) — and buffers
+  them locally (on the optional Postgres upgrade it can instead hold an advisory lock and
   run `LISTEN/NOTIFY`). It never needs to take an agent turn, so it can stay up for the
   whole mission. This is the literal answerback drum: it answers liveness
   automatically and continuously while the agent works elsewhere.
@@ -565,7 +569,7 @@ client's socket; the read returns, the client prints the concise payload to stdo
 and exits. The wakeup is push — the holder's write releases the client's read — with
 no local polling.
 
-Delivery state, cursor position, and pending disposition live in the **holder** (and
+Delivery state and pending disposition live in the **holder** (and
 ultimately the backend), never in the ephemeral client, which is a stateless courier.
 A later `telex ack`/`telex handle` is another short call that updates that state.
 

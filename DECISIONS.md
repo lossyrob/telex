@@ -440,7 +440,7 @@ for addresses never re-attached are ignored but not yet garbage-collected (bound
 ## 0011 — Durable per-recipient delivery tracking for restart-safe backlog delivery
 
 - **Date:** 2026-06-17
-- **Status:** Accepted
+- **Status:** Accepted (live-holder drain mechanism superseded by 0013; the `deliveries` table and its restart-recovery role are retained and reinforced)
 - **Supersedes:** the "no per-recipient delivery table" clause of 0007
 
 **Context.** 0007 shipped a derived inbox with *no* delivery table: the holder tracked
@@ -476,7 +476,7 @@ poll-with-cursor live-holder gap (a Postgres id allocated before the snapshot bu
 after it) is unchanged but now self-heals on the next restart. Conformance covers both
 backends; see issue #10 / PR #15.
 
-## 0011 — Holder self-binds to its launching session (pid-watch); ppid-default declined, fd path deferred
+## 0012 — Holder self-binds to its launching session (pid-watch); ppid-default declined, fd path deferred
 
 - **Date:** 2026-06-17
 - **Status:** Accepted (pending validation)
@@ -517,3 +517,86 @@ option. Known limitation: raw-pid watching is theoretically vulnerable to pid re
 poll window; the fd path is the future fix. Revisit if a runtime needs zero-config binding (would
 argue for the fd path) or if pid reuse proves to bite in practice. Cross-references: 0004 (holder
 lifetime tracks session), 0005 (TTL/poll baseline).
+
+## 0013 — Live-holder visibility via per-recipient delivery state (drop the high-water cursor)
+
+- **Date:** 2026-06-18
+- **Status:** Accepted
+- **Supersedes:** the live-holder **drain mechanism** of 0005 (poll-with-cursor) and 0011 (the
+  in-memory high-water `id > cursor` streaming drain). The `deliveries` table from 0011 is retained
+  and promoted from a restart-recovery aid to the live drain's source of truth.
+
+**Context.** 0011 closed the *restart* case of the Postgres commit-order gap but explicitly left the
+*live-holder* window open (0011 Consequences: "a Postgres id allocated before the snapshot but
+committed after it … self-heals on the next restart"). On Postgres an id is allocated at insert time
+but only becomes visible at commit time, and concurrent transactions can commit out of id order, so
+an id allocated before — but committed after — a higher id becomes visible *behind* the holder's
+monotonic cursor (`fetch_after`: `id > cursor`) and is skipped by the **live** holder until the next
+restart (issue #18). SQLite serializes writes (commit order == id order) and was never affected. The
+root flaw is that "have I delivered this?" was answered by id ordering, which Postgres MVCC does not
+guarantee. A cursor cannot both deliver a high id *now* and re-detect a late lower id later without
+re-delivering the high id — so any robust fix needs per-message delivery state, which 0011 already
+gives us.
+
+**Decision.** Make the live holder drain the **undelivered set**, authoritative on delivery state,
+never on id ordering. A new `Backend::fetch_undelivered(address)` returns every message addressed to
+`address` with no `deliveries` record for that recipient and a non-terminal latest disposition,
+ordered by id (the 0011 `undelivered_backlog` predicate with the `id <= upto_id` bound removed). The
+holder's poll, optional LISTEN/NOTIFY push, and startup all run this one `drain`; the in-memory
+high-water cursor is deleted, and with it the now-obsolete `fetch_after`, `max_id`, and
+`undelivered_backlog` Backend methods (the trait-surface enumerations in 0006/0011 that named them
+are superseded). Intra-holder dedup (don't re-queue a message already buffered but not yet handed
+off) uses a **monotonic** in-memory `seen: HashSet<i64>` — an id is queued at most once per holder
+lifetime; the `HashSet::insert` under its lock is the drain serialization point. `seen` is
+deliberately **never pruned**: pruning on `mark_delivered` would re-open a TOCTOU where a drain whose
+`fetch_undelivered` snapshot predates a concurrent mark re-queues the just-pruned id (a duplicate the
+cursor model never had). Startup backlog seeding and the live drain thereby unify into the same
+query.
+
+**Robustness.** Whether a message is queued depends only on two durable facts — a delivery record
+(primary) and a terminal disposition (secondary) — never on its id relative to a cursor. MVCC commit
+order is therefore irrelevant: the instant a lower id becomes visible (its txn commits), it is by
+definition undelivered and non-terminal, so the next drain tick (poll backstop, or immediately on
+push) queues and delivers it. There is no value of any cursor that can exclude it, because there is
+no cursor. The only ordering still used, `ORDER BY id`, is presentation-only. This is verified
+against real Postgres by a test (`postgres_out_of_order_commit_delivers_lower_id`) that forces two
+transactions to commit in reverse id order on independent connections and asserts the lower id is
+returned after the higher one is delivered — alongside a deterministic SQLite holder-level test
+asserting a waiter actually *receives* the lower id with no restart.
+
+**Consequences.** Behavior delta: the live drain now excludes a message whose latest disposition is
+already terminal (e.g. an out-of-band `telex handle` via `inbox` before any drain has queued it; a
+message already buffered in the holder's queue is still delivered, since `handle_conn` does not
+re-check disposition at the handoff),
+making the live path consistent with the backlog path — a deliberate, minor improvement. Cost: with
+no id floor, each poll/push tick is O(address history) rather than O(new) — it anti-joins
+`deliveries` and the latest-disposition subquery over the address's messages; the **cost is
+proportional to the scanned history, not the (small) undelivered result**. Acceptable at telex's
+single-user pre-beta scale. A safe id floor is **deliberately
+deferred**: advancing a floor to the max delivered/visible id would re-introduce exactly this bug,
+because a late-committing lower id sits *below* that floor; a correct floor needs the
+contiguous-delivered prefix accounting for the in-flight commit horizon (snapshot `xmin`) — the same
+complexity a snapshot-aware cursor was rejected for — and an optional
+`dispositions(message_id, recipient, id)` / partial-undelivered index is the eventual mitigation
+(target before beta / multi-user / hot-address use).
+`seen` grows by one `i64` per distinct message this holder queues over its lifetime (negligible;
+holders are session-bound and restart regularly; the drain logs `seen` size for observability on a
+pinned long-lived holder); a bounded prune is left for the watermark work.
+**Isolation precondition.** Correctness rests on each poll re-snapshotting the latest committed
+state — i.e. the backend connection reads under READ COMMITTED in autocommit. A non-default
+`default_transaction_isolation` (REPEATABLE READ / SERIALIZABLE, set at the server or role — a
+one-liner on managed Postgres) would freeze the snapshot and re-open this race, *without touching
+telex code*. `PgBackend::connect_with` therefore pins `SET SESSION CHARACTERISTICS AS TRANSACTION
+ISOLATION LEVEL READ COMMITTED`; the holder never drains inside a long-lived transaction.
+**Ordering / receipt contract.** Delivery is no longer strictly id-monotonic under out-of-order
+commits (the lower id can be delivered after the higher one) — this is the *required* behavior for
+the acceptance bar. Receipt order is best-effort-by-id, at-least-once; no `wait`-side consumer treats
+the message `id` as a receive high-water mark (the `Request::Wait { since }` cursor field is accepted
+but ignored). The pre-existing swallow-and-log on a persistent `mark_delivered` failure means an
+un-recorded id stays eligible and is **re-delivered on every restart** (no loss, but the "narrow
+duplicate window" framing of 0011 understates this persistent-failure case); a failure counter/cap
+is possible future work.
+Greenfield: no migration machinery added (pre-first-non-beta, single-user). **CI gap:** the
+build/test matrix does not run a real Postgres (issue #19), so green CI does *not* validate this
+fix's core behavior — it is validated by the gated Postgres tests, run locally against a real server
+(`TELEX_PG_URL=… TELEX_PG_REQUIRE=1 cargo test --test conformance`). See issue #18.

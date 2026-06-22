@@ -181,10 +181,12 @@ disposition). One-time transition note: the first holder started after upgrading
 durable delivery recovers its full undelivered history for the address — every message that is not
 terminally dispositioned, **including fire-and-forget `fyi`/`note` messages that are never
 dispositioned** — because there are no prior delivery records yet. Expect a one-time backlog on that
-first start. The backlog is a snapshot taken when the holder starts: dispositioning a message via
-`telex inbox` only prevents a *future* holder from re-recovering it — it won't pull back a message
-already seeded into the running holder's queue, which is delivered (then marked) once. After that
-first drain, steady-state delivery records keep the backlog empty.
+first start. The live holder continuously delivers the address's undelivered, non-terminal messages
+(delivery is tracked per recipient, not by message-id order, so concurrently-sent messages are never
+skipped): terminally dispositioning a message via `telex inbox` keeps it from being delivered to a
+`wait` only while it has **not yet been handed to the holder's queue** — a message already buffered
+in the running holder's queue is delivered (then marked) once. Steady-state delivery records keep
+this set empty.
 
 Reply inside an existing thread:
 
