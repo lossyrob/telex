@@ -9,7 +9,6 @@
   "createdAt": "2026-06-22T16:05:00Z",
   "updatedAt": "2026-06-22T16:05:00Z",
   "trackingIssue": {
-    "type": "github",
     "owner": "lossyrob",
     "repo": "telex",
     "number": 32
@@ -116,31 +115,36 @@
       "id": "design-aligned",
       "title": "Design foundation aligned",
       "summary": "Daemon architecture, liveness model, protocol, durable-buffer reuse, and upgrade design are explicit and builder-validated.",
-      "dependsOn": ["design-gate"]
+      "status": "planned",
+      "nodeIds": ["design-foundation", "design-gate"]
     },
     {
       "id": "daemon-core-usable",
       "title": "Daemon core usable (SQLite)",
       "summary": "A CLI session attends and receives through the always-on daemon with zero per-session telex processes; SQLite path proven.",
-      "dependsOn": ["daemon-core"]
+      "status": "planned",
+      "nodeIds": ["daemon-core"]
     },
     {
       "id": "sqlite-unblock-shipped",
       "title": "SQLite unblock shipped",
       "summary": "First operator-unblocking slice: daemon-core + fencing-proof + Copilot plugin + minimal upgrade floor on SQLite - a real session can take the new plugin + telex and be unblocked.",
-      "dependsOn": ["copilot-plugin"]
+      "status": "planned",
+      "nodeIds": ["daemon-core", "fencing-proof", "copilot-plugin"]
     },
     {
       "id": "complete",
       "title": "Both backends + plugin + upgrade complete",
       "summary": "Postgres parity, the Copilot plugin (hook + skill), and seamless upgrade all landed.",
-      "dependsOn": ["postgres-parity", "copilot-plugin", "seamless-upgrade"]
+      "status": "planned",
+      "nodeIds": ["postgres-parity", "copilot-plugin", "seamless-upgrade"]
     },
     {
       "id": "closure-ready",
       "title": "Closure ready",
       "summary": "End-to-end unblock validated; superseded mechanisms and docs retired/updated.",
-      "dependsOn": ["closure-gate"]
+      "status": "planned",
+      "nodeIds": ["closure-gate"]
     }
   ]
 }
