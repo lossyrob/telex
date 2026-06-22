@@ -25,6 +25,8 @@ struct Buffered {
 }
 
 struct State {
+    address: String,
+    backend_key: String,
     queue: Mutex<VecDeque<Buffered>>,
     notify: Notify,
     /// Monotonic "already queued by this holder" guard. The `HashSet::insert` under this lock is the
@@ -35,13 +37,12 @@ struct State {
     /// message this holder queues over its lifetime — bounded in practice because holders are
     /// session-bound and restart between sessions; a pinned, very-long-lived holder on a busy
     /// address is the case to watch (the drain logs `seen` size so the growth is observable). A
-    /// bounded prune is deferred precisely because a naive one re-opens the TOCTOU. See DECISIONS 0011.
+    /// bounded prune is deferred precisely because a naive one re-opens the TOCTOU. See DECISIONS 0013.
     seen: Mutex<HashSet<i64>>,
     last_heartbeat_ms: AtomicI64,
     keepalive: Duration,
     shutdown: Notify,
     backend: Arc<dyn Backend>,
-    address: String,
     occupant: String,
 }
 
@@ -49,7 +50,7 @@ struct State {
 /// cursor — decides what is queued: `fetch_undelivered` returns every message addressed here with no
 /// delivery record and a non-terminal disposition, so a Postgres id that committed out of order
 /// (behind an already-delivered higher id) is picked up here and delivered by the *live* holder
-/// without a restart (issue #18 / DECISIONS 0011). The `seen` set deduplicates: only ids newly
+/// without a restart (issue #18 / DECISIONS 0013). The `seen` set deduplicates: only ids newly
 /// inserted under its lock are queued, so concurrent poll/push/startup drains never double-queue.
 async fn drain(backend: &Arc<dyn Backend>, address: &str, st: &State, source: &str) {
     let rows = match backend.fetch_undelivered(address).await {
@@ -93,6 +94,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
     let backend = ctx.backend().await?;
 
     let pid = std::process::id() as i64;
+    let backend_key = ctx.store_key()?;
     let occupant = args
         .occupant
         .clone()
@@ -141,11 +143,13 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         }
     }
 
-    // Delivery state — not a monotonic id cursor — drives the queue (DECISIONS 0011). The holder
+    // Delivery state — not a monotonic id cursor — drives the queue (DECISIONS 0013). The holder
     // seeds and refills its queue from `fetch_undelivered` via the initial drain below (run after
     // the heartbeat task is live), so a Postgres id committed out of order is delivered by the live
     // holder without waiting for a restart.
     let state = Arc::new(State {
+        address: address.clone(),
+        backend_key: backend_key.clone(),
         queue: Mutex::new(VecDeque::new()),
         notify: Notify::new(),
         seen: Mutex::new(HashSet::new()),
@@ -153,7 +157,6 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         keepalive: Duration::from_secs(args.keepalive_secs.max(1)),
         shutdown: Notify::new(),
         backend: backend.clone(),
-        address: address.clone(),
         occupant: occupant.clone(),
     });
 
@@ -173,6 +176,8 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         let interval = args.heartbeat_secs.max(1);
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_secs(interval));
+            // After a host sleep/stall, skip missed ticks rather than bursting catch-up work.
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tick.tick().await;
                 match backend.heartbeat(&address).await {
@@ -199,11 +204,73 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         let interval = args.poll_secs.max(1);
         tokio::spawn(async move {
             let mut tick = tokio::time::interval(Duration::from_secs(interval));
+            // After a host sleep/stall, skip missed ticks rather than bursting catch-up polls.
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
             loop {
                 tick.tick().await;
                 drain(&backend, &address, &st, "poll").await;
             }
         });
+    }
+
+    // Session-binding watch (issue #5). When the holder is bound to a launcher/session pid, poll
+    // it and, the moment it is gone, route through the *same* shutdown path as `detach`/ctrl-c so
+    // the lease is released identically. Defense-in-depth: even a mis-launched detached holder
+    // cannot outlive the session that spawned it. The env var is read here (not by clap) so a
+    // malformed `$TELEX_SESSION_PID` never fails `--no-session-bind`.
+    use crate::session_watch::{SessionBinding, UnboundReason};
+    let env_pid = std::env::var("TELEX_SESSION_PID").ok();
+    match crate::session_watch::resolve_session_pid(
+        args.no_session_bind,
+        args.session_pid,
+        env_pid.as_deref(),
+    ) {
+        SessionBinding::Bound(session_pid) => {
+            // Keep the liveness check inside the lease window so the address always frees within
+            // it, even if a caller passes a poll interval larger than the window.
+            let window = ctx.cfg.liveness_window_secs.max(1) as u64;
+            let interval = args.session_poll_secs.max(1).min(window);
+            eprintln!(
+                "[holder] session-bound to pid {session_pid} (releases lease if it exits; poll {interval}s)"
+            );
+            let st = state.clone();
+            tokio::spawn(async move {
+                let mut tick = tokio::time::interval(Duration::from_secs(interval));
+                // A liveness probe gains nothing from catch-up ticks: after a host sleep/stall,
+                // skip the missed ticks instead of bursting a run of `process_alive` syscalls.
+                tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                loop {
+                    tick.tick().await;
+                    if !crate::session_watch::process_alive(session_pid) {
+                        eprintln!(
+                            "[holder] session {session_pid} gone; releasing lease and exiting"
+                        );
+                        st.shutdown.notify_one();
+                        break;
+                    }
+                }
+            });
+        }
+        // Always log *why* binding is off so the holder's binding state is visible in an incident
+        // (the silent legacy default is the only quiet case).
+        SessionBinding::Unbound(reason) => match reason {
+            UnboundReason::NotRequested => {}
+            UnboundReason::OptedOut => {
+                if args.session_pid.is_some() || env_pid.is_some() {
+                    eprintln!(
+                        "[holder] --no-session-bind set; ignoring any session pid and running persistent"
+                    );
+                }
+            }
+            UnboundReason::ZeroSentinel => {
+                eprintln!("[holder] session pid 0 (unbound sentinel); running persistent");
+            }
+            UnboundReason::MalformedEnv(raw) => {
+                eprintln!(
+                    "[holder] TELEX_SESSION_PID={raw:?} is not a valid pid; running persistent (unbound)"
+                );
+            }
+        },
     }
 
     // Optional Postgres push (no-op where the backend or this build lacks it).
@@ -226,6 +293,23 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
     // Serve waiters until shutdown.
     let mut listener = ipc::Listener::bind(&address)?;
     eprintln!("[holder] listening for waiters on {address}");
+
+    // Publish the local holder registry record now that the endpoint is live, so `send`/`reply`
+    // can default `from` to this lease. We hold the exclusive lease, so any prior record for this
+    // (address, backend) is stale — prune it first. Best-effort: a failure here only disables the
+    // from-default convenience, never the station itself.
+    crate::registry::prune_address(&address, &backend_key);
+    let record = crate::registry::HolderRecord {
+        address: address.clone(),
+        backend: backend_key.clone(),
+        host: config::hostname(),
+        pid,
+        socket: ipc::endpoint(&address),
+        started_at_ms: now_ms(),
+    };
+    if let Err(e) = crate::registry::write(&record) {
+        eprintln!("[holder] registry write failed (from-default disabled): {e}");
+    }
 
     loop {
         tokio::select! {
@@ -253,6 +337,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         }
     }
 
+    crate::registry::remove(&address, pid);
     let released = backend
         .release_lease(&address, &occupant)
         .await
@@ -355,6 +440,8 @@ where
                 &mut write_half,
                 &Frame::Pong {
                     heartbeat_age_ms: age,
+                    served_address: Some(st.address.clone()),
+                    served_backend: Some(st.backend_key.clone()),
                 },
             )
             .await
@@ -502,6 +589,7 @@ mod tests {
 
     fn state_with(backend: Arc<dyn Backend>, address: &str) -> Arc<State> {
         Arc::new(State {
+            backend_key: backend.kind().to_string(),
             queue: Mutex::new(VecDeque::new()),
             notify: Notify::new(),
             seen: Mutex::new(HashSet::new()),

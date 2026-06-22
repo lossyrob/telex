@@ -174,7 +174,7 @@ impl PgBackend {
         // (a one-liner on managed Postgres) would otherwise freeze the snapshot and re-open the
         // issue #18 race (a frozen snapshot cannot see a later-committing lower id). Pin it on the
         // session so the guarantee does not depend on external configuration; telex never drains
-        // inside a long-lived transaction. See DECISIONS 0011.
+        // inside a long-lived transaction. See DECISIONS 0013.
         client
             .batch_execute(
                 "SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED",
@@ -393,9 +393,9 @@ impl Backend for PgBackend {
         // for this recipient is not terminal, ordered by id. There is deliberately NO id floor: the
         // holder's live drain queues exactly this set (deduped in-memory), so a concurrently-
         // committed lower id — which by definition has no delivery record — is delivered live and is
-        // never skipped by a high-water cursor (issue #18 / DECISIONS 0011). Cost is O(address
+        // never skipped by a high-water cursor (issue #18 / DECISIONS 0013). Cost is O(address
         // history) per call rather than O(new); acceptable at this scale, and a safe id floor is
-        // deferred because a naive one would re-open exactly this gap (see 0011).
+        // deferred because a naive one would re-open exactly this gap (see 0013).
         let sql = format!(
             "SELECT {MSG_COLS} FROM messages m \
              WHERE m.to_addr=$1 \

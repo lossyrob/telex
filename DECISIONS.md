@@ -388,10 +388,59 @@ could deepen the rename if desired. This entry records a naming choice (normally
 scope per the log conventions) because the term is load-bearing for cross-document
 consistency and was an explicit deliverable (issue #8).
 
-## 0010 — Durable per-recipient delivery tracking for restart-safe backlog delivery
+## 0010 — Default message `from` to the locally-held lease via a local holder registry; guard un-repliable disposition-required sends
 
 - **Date:** 2026-06-17
-- **Status:** Accepted (live-holder drain mechanism superseded by 0011; the `deliveries` table and its restart-recovery role are retained and reinforced)
+- **Status:** Accepted
+
+**Context.** `send`/`reply` derived `from` only from `--from` or `$TELEX_ADDRESS`/`--address`,
+with no link to the lease a session actually holds. Forget to set it and the message goes out
+`from = None` — **un-repliable** (`telex reply` hard-errors, replies have nowhere to go). A real
+session hit exactly this. telex couldn't infer the held address: the holder (`attach`) and `send`
+are separate processes, the holder kept no local record, the IPC endpoint name is a *lossy*
+`sanitize()` that can't be reverse-mapped, and the backend lease row has no reverse index from
+"this session" to "the address it holds" (issue #4).
+
+**Decision.** The holder publishes a **local registry record** once its endpoint is live —
+`run_dir()/holders/<sanitized-address>-<pid>.json` carrying
+`{ address, backend, host, pid, socket, started_at_ms }` — and `send`/`reply` resolve `from` with
+precedence **`--from` > `$TELEX_ADDRESS`/`--address` > the uniquely live local station** for the
+current backend. Specific forks chosen (alternatives in parentheses): (a) **liveness by `ipc::ping`,
+not pid-alive** — dependency-free, cross-platform, and semantically tighter ("replies here are
+answerable"); a hard-killed holder's record is ignored because its endpoint no longer answers.
+(b) **`Frame::Pong` now echoes `served_address`** and a ping is "live" only if it matches, closing
+a soundness gap where the lossy `sanitize()` could let a probe reach a *different* holder whose
+endpoint name collides. (c) **Filename keyed by `(sanitized, pid)`** (not bare `<sanitized>`) so
+distinct addresses that sanitize alike don't overwrite each other; the file's `address` field is
+authoritative. (d) **Records scoped to `(backend, host)`** so a station on one backend is never
+inferred for a send on another (a real cross-backend foot-gun); prune-on-claim and remove-on-clean-
+exit keep them tidy. (e) **Guardrails:** a would-be un-repliable send that *requires disposition* is
+**refused** (`refused-unrepliable`, exit 4); inference with more than one live station is **refused**
+listing candidates (`refused-ambiguous-from`, exit 4); an explicit/env `from` not served locally
+**warns** ("replies will queue unwatched") but proceeds. Identity is *defaulted, never forced* —
+explicit `--from`/env always win, preserving one-shot reply-to senders, multi-address supervisors,
+and operator-as-system sends.
+
+**Consequences.** After `attach`, plain `telex send` "just works" and `$TELEX_ADDRESS` becomes
+optional convenience rather than a required convention; SKILL.md's identity section collapses
+accordingly. Inference is **local and same-backend only** — a holder on another host or backend
+can't be inferred (intended scope). No new runtime dependencies (registry is `serde_json` + `std::fs`;
+liveness reuses the existing IPC `Ping`/`Pong`). Resolution touches IPC only when `from` is otherwise
+unresolved (or once, to validate a set `from` for the soft-warn), bounded by a ≤250 ms ping timeout,
+so configured senders pay ~one local round-trip and unconfigured-but-attached senders pay one ping.
+The registry scope key is the **effective store identity** (`profiles::store_key`): the resolved
+sqlite path after `--db` override and `~` expansion, and the postgres connection plus `schema` — not
+the human-readable `target()` — so schema-isolated multi-store and `--db`-overridden deployments are
+correctly distinguished, and the `Pong` echoes the holder's store key so a same-address holder on a
+*different* store can't be mistaken for live. Known follow-ups: records left by hard-killed holders
+for addresses never re-attached are ignored but not yet garbage-collected (bounded by prune-on-claim
++ the fast-fail ping); `reply` could additionally default `from` from the parent's `to_addr`
+(deferred — a preference call, not done here to keep `send`/`reply` uniform).
+
+## 0011 — Durable per-recipient delivery tracking for restart-safe backlog delivery
+
+- **Date:** 2026-06-17
+- **Status:** Accepted (live-holder drain mechanism superseded by 0013; the `deliveries` table and its restart-recovery role are retained and reinforced)
 - **Supersedes:** the "no per-recipient delivery table" clause of 0007
 
 **Context.** 0007 shipped a derived inbox with *no* delivery table: the holder tracked
@@ -427,16 +476,58 @@ poll-with-cursor live-holder gap (a Postgres id allocated before the snapshot bu
 after it) is unchanged but now self-heals on the next restart. Conformance covers both
 backends; see issue #10 / PR #15.
 
-## 0011 — Live-holder visibility via per-recipient delivery state (drop the high-water cursor)
+## 0012 — Holder self-binds to its launching session (pid-watch); ppid-default declined, fd path deferred
+
+- **Date:** 2026-06-17
+- **Status:** Accepted (pending validation)
+
+**Context.** Decision 0004 requires the holder's lifetime to track its session — "a
+session-owned process, **not** a fully detached daemon" — so session death releases the lease
+promptly. Until now that was enforced only by convention (SKILL.md guidance to launch the holder
+background + session-bound). A single mis-launch (e.g. Copilot CLI `detach: true`, or any
+"daemonize" path) silently orphans the holder: it keeps heartbeating and the address falsely
+reports `occupied` for a session that no longer exists. Because the holder is exactly what keeps
+the TTL heartbeat alive across turns (0005), an orphaned holder defeats the TTL backstop — the
+failure is not self-correcting (issue #5).
+
+**Decision.** Make the binding enforceable **inside the binary**. The holder accepts
+`--session-pid <pid>` (env `TELEX_SESSION_PID`); a background watch task polls that pid
+(`--session-poll-secs`, default 2s, clamped to the lease liveness window) using a cross-platform
+liveness check — `kill(pid, 0)` on Unix, `OpenProcess(SYNCHRONIZE)` + `WaitForSingleObject` on
+Windows (`src/session_watch.rs`). When the pid is gone, the task triggers the **existing**
+`state.shutdown` signal, so release runs through the *same* tail as `detach`/ctrl-c
+(`release_lease` + IPC-endpoint cleanup) — no second release path. The liveness check is
+conservative: only a definite "no such process" releases; an existing-but-unqueryable process or
+any ambiguous probe error is treated as alive. `--no-session-bind` runs a deliberately persistent
+holder and overrides `--session-pid` / the env var. Both the binding **precedence** and the
+`$TELEX_SESSION_PID` **parse** happen at runtime (not via clap `conflicts_with`/`env`), so a
+malformed or conflicting env value never fails `attach` — `--no-session-bind` always wins
+cleanly. Default behavior with no flag/env is unchanged (no binding).
+
+**Consequences.** Even a mis-launched detached holder cannot outlive its session: this turns 0004
+from advisory into enforceable and complements the TTL/occupancy model (0005) by stopping the
+heartbeat at session death. Scope deliberately bounded against the issue's broader proposal: (a)
+**a ppid/parent-pid default is declined** — launchers that spawn-and-return (common for
+async/background launches) would leave the holder watching a dead or reparented parent and make
+it self-exit immediately, breaking the primary use case; the issue itself names ppid "the central
+risk." The sanctioned binding is therefore the explicit `--session-pid`/env, not an implicit
+default. (b) The **inherited-fd / `--session-fd` path is deferred** — it is the pid-reuse-immune
+upgrade, but the pid-watch satisfies every acceptance criterion; it remains a documented future
+option. Known limitation: raw-pid watching is theoretically vulnerable to pid reuse within the
+poll window; the fd path is the future fix. Revisit if a runtime needs zero-config binding (would
+argue for the fd path) or if pid reuse proves to bite in practice. Cross-references: 0004 (holder
+lifetime tracks session), 0005 (TTL/poll baseline).
+
+## 0013 — Live-holder visibility via per-recipient delivery state (drop the high-water cursor)
 
 - **Date:** 2026-06-18
 - **Status:** Accepted
-- **Supersedes:** the live-holder **drain mechanism** of 0005 (poll-with-cursor) and 0010 (the
-  in-memory high-water `id > cursor` streaming drain). The `deliveries` table from 0010 is retained
+- **Supersedes:** the live-holder **drain mechanism** of 0005 (poll-with-cursor) and 0011 (the
+  in-memory high-water `id > cursor` streaming drain). The `deliveries` table from 0011 is retained
   and promoted from a restart-recovery aid to the live drain's source of truth.
 
-**Context.** 0010 closed the *restart* case of the Postgres commit-order gap but explicitly left the
-*live-holder* window open (0010 Consequences: "a Postgres id allocated before the snapshot but
+**Context.** 0011 closed the *restart* case of the Postgres commit-order gap but explicitly left the
+*live-holder* window open (0011 Consequences: "a Postgres id allocated before the snapshot but
 committed after it … self-heals on the next restart"). On Postgres an id is allocated at insert time
 but only becomes visible at commit time, and concurrent transactions can commit out of id order, so
 an id allocated before — but committed after — a higher id becomes visible *behind* the holder's
@@ -444,16 +535,16 @@ monotonic cursor (`fetch_after`: `id > cursor`) and is skipped by the **live** h
 restart (issue #18). SQLite serializes writes (commit order == id order) and was never affected. The
 root flaw is that "have I delivered this?" was answered by id ordering, which Postgres MVCC does not
 guarantee. A cursor cannot both deliver a high id *now* and re-detect a late lower id later without
-re-delivering the high id — so any robust fix needs per-message delivery state, which 0010 already
+re-delivering the high id — so any robust fix needs per-message delivery state, which 0011 already
 gives us.
 
 **Decision.** Make the live holder drain the **undelivered set**, authoritative on delivery state,
 never on id ordering. A new `Backend::fetch_undelivered(address)` returns every message addressed to
 `address` with no `deliveries` record for that recipient and a non-terminal latest disposition,
-ordered by id (the 0010 `undelivered_backlog` predicate with the `id <= upto_id` bound removed). The
+ordered by id (the 0011 `undelivered_backlog` predicate with the `id <= upto_id` bound removed). The
 holder's poll, optional LISTEN/NOTIFY push, and startup all run this one `drain`; the in-memory
 high-water cursor is deleted, and with it the now-obsolete `fetch_after`, `max_id`, and
-`undelivered_backlog` Backend methods (the trait-surface enumerations in 0006/0010 that named them
+`undelivered_backlog` Backend methods (the trait-surface enumerations in 0006/0011 that named them
 are superseded). Intra-holder dedup (don't re-queue a message already buffered but not yet handed
 off) uses a **monotonic** in-memory `seen: HashSet<i64>` — an id is queued at most once per holder
 lifetime; the `HashSet::insert` under its lock is the drain serialization point. `seen` is
@@ -503,7 +594,7 @@ the acceptance bar. Receipt order is best-effort-by-id, at-least-once; no `wait`
 the message `id` as a receive high-water mark (the `Request::Wait { since }` cursor field is accepted
 but ignored). The pre-existing swallow-and-log on a persistent `mark_delivered` failure means an
 un-recorded id stays eligible and is **re-delivered on every restart** (no loss, but the "narrow
-duplicate window" framing of 0010 understates this persistent-failure case); a failure counter/cap
+duplicate window" framing of 0011 understates this persistent-failure case); a failure counter/cap
 is possible future work.
 Greenfield: no migration machinery added (pre-first-non-beta, single-user). **CI gap:** the
 build/test matrix does not run a real Postgres (issue #19), so green CI does *not* validate this

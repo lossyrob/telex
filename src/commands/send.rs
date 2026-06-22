@@ -1,6 +1,7 @@
 use anyhow::Result;
 
 use crate::cli::{Ctx, SendArgs};
+use crate::identity::{resolve_from, FromPlan};
 use crate::model::{now_ms, Attention, NewMessage, STATUS_RETIRED};
 use crate::output::emit;
 
@@ -8,8 +9,40 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
     // Resolve the body before any backend side effects so an invalid --body/--body-file
     // combination fails without auto-creating the destination address.
     let body = crate::commands::resolve_body(args.body.clone(), args.body_file.clone())?;
-    let backend = ctx.backend().await?;
     let attention = Attention::parse(&args.attention)?;
+
+    // Resolve `from` (and apply the un-repliable / ambiguity guardrails) before any backend side
+    // effect too, so a refused send neither opens the store nor auto-creates the destination.
+    let backend_key = ctx.store_key()?;
+    let from = match resolve_from(
+        args.from.as_deref(),
+        ctx.address.as_deref(),
+        &backend_key,
+        args.requires_disposition,
+        attention,
+    )
+    .await
+    {
+        FromPlan::Refuse { receipt, message } => {
+            let out = serde_json::json!({
+                "receipt": receipt,
+                "to": args.to,
+                "reason": message,
+            });
+            emit(ctx.fmt, &out, || {
+                println!("refused: {message}");
+            });
+            return Ok(4);
+        }
+        FromPlan::Proceed { from, warning } => {
+            if let Some(w) = warning {
+                eprintln!("telex: warning: {w}");
+            }
+            from
+        }
+    };
+
+    let backend = ctx.backend().await?;
 
     // Reject sends to a retired address; auto-create unknown addresses as a queue target.
     match backend.get_address(&args.to).await? {
@@ -27,10 +60,9 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
         None => backend.ensure_address(&args.to, None, None, None).await?,
     }
 
-    let from = args.from.clone().or_else(|| ctx.address.clone());
     let new = NewMessage {
         parent_id: None,
-        from_addr: from,
+        from_addr: from.clone(),
         to_addr: args.to.clone(),
         cc: args.cc.clone(),
         kind: args.kind.clone(),
@@ -61,6 +93,7 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
         "id": row.id,
         "thread_id": row.thread_id,
         "to": args.to,
+        "from": from,
         "attention": row.attention,
         "requires_disposition": row.requires_disposition,
         "occupied": occ.occupied,

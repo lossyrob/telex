@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 
 use crate::cli::{Ctx, ReplyArgs};
+use crate::identity::{resolve_from, FromPlan};
 use crate::model::{now_ms, Attention, NewMessage};
 use crate::output::emit;
 
@@ -8,6 +9,39 @@ pub async fn run(ctx: &Ctx, args: ReplyArgs) -> Result<i32> {
     // Resolve the body up front so an invalid --body/--body-file combination fails before any
     // backend lookups or address creation.
     let body = crate::commands::resolve_body(args.body.clone(), args.body_file.clone())?;
+    let attention = Attention::parse(&args.attention)?;
+
+    // Resolve `from` (and apply the un-repliable / ambiguity guardrails) before any backend side
+    // effect, so a refused reply neither opens the store nor creates the reply destination.
+    let backend_key = ctx.store_key()?;
+    let from = match resolve_from(
+        args.from.as_deref(),
+        ctx.address.as_deref(),
+        &backend_key,
+        args.requires_disposition,
+        attention,
+    )
+    .await
+    {
+        FromPlan::Refuse { receipt, message } => {
+            let out = serde_json::json!({
+                "receipt": receipt,
+                "reply_to": args.to_message,
+                "reason": message,
+            });
+            emit(ctx.fmt, &out, || {
+                println!("refused: {message}");
+            });
+            return Ok(4);
+        }
+        FromPlan::Proceed { from, warning } => {
+            if let Some(w) = warning {
+                eprintln!("telex: warning: {w}");
+            }
+            from
+        }
+    };
+
     let backend = ctx.backend().await?;
     let parent = backend
         .get_message(args.to_message)
@@ -24,14 +58,12 @@ pub async fn run(ctx: &Ctx, args: ReplyArgs) -> Result<i32> {
         .subject
         .clone()
         .or_else(|| parent.subject.as_ref().map(|s| format!("Re: {s}")));
-    let from = args.from.clone().or_else(|| ctx.address.clone());
-    let attention = Attention::parse(&args.attention)?;
 
     backend.ensure_address(&to, None, None, None).await?;
 
     let new = NewMessage {
         parent_id: Some(parent.id),
-        from_addr: from,
+        from_addr: from.clone(),
         to_addr: to.clone(),
         cc: None,
         kind: args.kind.clone(),
@@ -57,6 +89,7 @@ pub async fn run(ctx: &Ctx, args: ReplyArgs) -> Result<i32> {
         "thread_id": row.thread_id,
         "parent_id": row.parent_id,
         "to": to,
+        "from": from,
         "occupied": occ.occupied,
     });
     emit(ctx.fmt, &receipt, || {

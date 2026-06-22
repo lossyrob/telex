@@ -34,15 +34,32 @@ So: **background and session-bound.** Never start them as persistent / standalon
    telex attach --address <addr> --description "<what this session is doing>"
    ```
 
-   Export `TELEX_ADDRESS=<addr>` for the session so every later command — `wait`, `inbox`,
-   `send`, `reply` — defaults to this address, including the `from` stamped on what you send
-   (see **Your identity** below).
+   After attaching, `send`/`reply` automatically stamp `from` with this address (the lease you
+   hold), so replies route back to you with no extra setup. Exporting `TELEX_ADDRESS=<addr>` is
+   optional now — it still makes `wait`/`inbox` default to this address and lets `send`/`reply`
+   skip the local lease lookup — but you no longer have to set it just to be repliable (see
+   **Your identity** below).
 
    Optional attach flags:
 
    ```sh
    telex attach --address <addr> --description "<s>" --scope <s> --tags <a,b> --heartbeat-secs N --poll-secs N
    ```
+
+   **Belt-and-suspenders: `--session-pid`.** Launching the holder background + session-bound is
+   the contract, but it is enforced only by your runtime. As defense-in-depth, pass the durable
+   session/agent pid so the holder *itself* releases the lease and exits the moment that process
+   dies — even if it was accidentally launched detached:
+
+   ```sh
+   telex attach --address <addr> --description "<s>" --session-pid <your-session-pid>
+   # equivalently, export TELEX_SESSION_PID=<pid> once for the session
+   ```
+
+   The holder polls the pid (`--session-poll-secs N`, default 2; clamped to the lease liveness
+   window) and, on its death, runs the same release path as `detach`/ctrl-c. For a *deliberately*
+   persistent, server-side holder that should outlive its launcher, pass `--no-session-bind` (it
+   overrides `--session-pid` / `$TELEX_SESSION_PID`).
 
 2. Wait for one message with a **single-shot** background `telex wait` — **not** an internal loop. It connects to the holder, blocks until one message is delivered, prints it as JSON, and **completes**. The command *completing* is your wake signal (see the box below). On delivery, **immediately re-arm a fresh background `wait` before doing substantive work on the delivered message**; re-arm at your turn level, not inside a shell loop.
 
@@ -94,14 +111,29 @@ One-shot commands (`send`, `reply`, `resolve`, `address list`, `inbox`, and the 
 
 ## Sending and finding other sessions
 
-**Your identity — the `from` address.** Every `send` and `reply` stamps a `from` taken from
-`--from`, else `$TELEX_ADDRESS` / the global `--address`. Set it to the address you serve (the
-one you attached to) so replies route back to your inbox. If `from` is unset the message is
-**un-repliable**: `telex reply` to it fails with "no from address," and any reply has nowhere to
-go. So export `TELEX_ADDRESS=<your-addr>` once after attaching (recommended), or pass
-`--from <your-addr>` on each send. Use a *different* `--from` only deliberately — e.g. a one-shot
-sender declaring a reply-to it will attach to later; a `from` you don't actually serve means
-replies queue in an inbox nobody is watching.
+**Your identity — the `from` address.** Every `send`/`reply` stamps a `from` so replies can route
+back to you. It resolves in precedence order: explicit `--from`, else `$TELEX_ADDRESS` / the global
+`--address`, else **the address of the live station you're holding locally**. So once you've
+`attach`ed, plain `telex send --to <addr>` just works — `from` defaults to the lease you hold, no
+`--from` or `export` required.
+
+Guardrails the binary enforces:
+
+- **Un-repliable + needs disposition is refused.** A `--requires-disposition` send with no
+  resolvable `from` is rejected (`receipt: refused-unrepliable`, exit 4) — a message someone must
+  act on but can't reply to is almost always a mistake. Provide a `from` (attach, `--from`, or
+  `$TELEX_ADDRESS`).
+- **Ambiguous inference is refused.** If you hold *more than one* local station and pass no
+  `--from`/env, the send is refused (`receipt: refused-ambiguous-from`, exit 4) and lists the
+  candidates rather than guessing which identity to send as.
+- **Sending as an address you don't serve warns.** If `from` resolves (via `--from`/env) to an
+  address with no live local station, the send still succeeds but warns *"replies will queue
+  unwatched."*
+
+Use a `--from` you don't actually serve only deliberately — e.g. a one-shot sender declaring a
+reply-to it will `attach` to later, a multi-address supervisor choosing an identity, or an operator
+sending as a system address; explicit `--from`/`$TELEX_ADDRESS` always win over the held-lease
+default.
 
 Find targets by their self-registered attach descriptions, scope, or tags.
 
@@ -194,7 +226,7 @@ Global options apply to all subcommands.
 |---|---|
 | `--backend <name>` | Use a configured backend by name (or `$TELEX_BACKEND`); defaults to the configured default backend, or an implicit `default` sqlite store. |
 | `--db <path>` | Override the SQLite path for this invocation (sqlite backends only; or `$TELEX_DB`). |
-| `--address <addr>` | Default address (or `$TELEX_ADDRESS`) for commands that act on one address; also the default `from` for `send`/`reply`. |
+| `--address <addr>` | Default address (or `$TELEX_ADDRESS`) for commands that act on one address; also a `from` fallback for `send`/`reply` (which otherwise default `from` to the live local station you hold). |
 | `--json` / `--text` | Output format; default JSON when stdout is not a TTY, text when interactive. |
 
 Postgres connections are configured once as named backends with `telex backend add` (see Backends), not via per-call environment variables.
@@ -205,7 +237,7 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex attach` | Start a station on the address: become the live occupant, hold the lease, run the holder, and register the directory description. Blocks. Fails if the address is already occupied by a live lease. | `--address <addr>`, `--description <s>`, `--scope <s>`, `--tags <a,b>`, `--heartbeat-secs N`, `--poll-secs N` |
+| `telex attach` | Start a station on the address: become the live occupant, hold the lease, run the holder, and register the directory description. Blocks. Fails if the address is already occupied by a live lease. | `--address <addr>`, `--description <s>`, `--scope <s>`, `--tags <a,b>`, `--heartbeat-secs N`, `--poll-secs N`, `--session-pid <pid>` (env `TELEX_SESSION_PID`), `--session-poll-secs N`, `--no-session-bind` |
 | `telex detach` | Stop the station: release the lease and stop a running holder. | `--address <addr>` |
 
 ### RECEIVE
@@ -344,7 +376,7 @@ the `entra` feature — which the published release binaries include.
 Session A attaches to a durable address and waits. Run `telex attach` (the station's holder) and each single-shot `telex wait` (its waiter) in the background, bound to A's session — never as persistent processes that outlive it.
 
 ```sh
-export TELEX_ADDRESS=session:a   # all of A's commands default to this address (and its from)
+export TELEX_ADDRESS=session:a   # optional: defaults A's wait/inbox to this address
 telex attach --address session:a --description "session A waiting for coordination" --scope project:telex --tags repo:telex,role:worker
 ```
 
@@ -357,8 +389,8 @@ telex wait --address session:a
 Session B also starts its own station in the background, bound to its session.
 
 ```sh
-export TELEX_ADDRESS=session:b   # B's from; A's reply will route back here
 telex attach --address session:b --description "session B requesting status" --scope project:telex --tags repo:telex,role:requester
+# B's send below stamps from=session:b automatically (the lease B holds); A's reply routes back here.
 ```
 
 Then Session B finds A and sends a disposition-required message. One-shot commands like `resolve` and `send` run directly — no background task needed; only the station's holder and each `telex wait` run in the background.

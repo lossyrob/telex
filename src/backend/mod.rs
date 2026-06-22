@@ -69,7 +69,7 @@ pub trait Backend: Send + Sync {
     /// that is what closes the commit-order gap (issue #18) — a concurrently-committed lower id has
     /// no delivery record, so it is returned and delivered by the *live* holder, no restart required.
     /// The two do-not-deliver signals are a delivery record (primary) and a terminal disposition
-    /// (secondary, for messages recovered out-of-band via `telex inbox`); see DECISIONS 0011.
+    /// (secondary, for messages recovered out-of-band via `telex inbox`); see DECISIONS 0013.
     async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>>;
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow>;
     async fn get_message(&self, id: i64) -> Result<Option<MessageRow>>;

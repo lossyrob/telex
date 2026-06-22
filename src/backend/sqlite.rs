@@ -404,7 +404,7 @@ impl Backend for SqliteBackend {
     async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>> {
         let a = address.to_string();
         self.run(move |c| {
-            // See Backend::fetch_undelivered / DECISIONS 0011: undelivered (no delivery record) +
+            // See Backend::fetch_undelivered / DECISIONS 0013: undelivered (no delivery record) +
             // non-terminal, ordered by id, with no id floor. SQLite serializes writes so commit
             // order == id order and it was never affected by issue #18, but it uses the same
             // delivery-state authority so the holder keeps a single code path across backends.

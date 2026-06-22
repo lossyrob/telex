@@ -123,6 +123,22 @@ pub struct AttachArgs {
     /// Enable Postgres LISTEN/NOTIFY push in addition to poll (no-op on SQLite).
     #[arg(long)]
     pub push: bool,
+    /// Bind the holder's lifetime to this session/launcher pid: when that process exits, the
+    /// holder releases its lease and exits (the same shutdown tail as `detach`/ctrl-c). The
+    /// belt-and-suspenders companion to launching the holder background + session-bound — even a
+    /// mis-launched detached holder cannot then outlive its session. If unset, the
+    /// `$TELEX_SESSION_PID` environment variable is consulted at runtime (so that a malformed env
+    /// value never fails `--no-session-bind`).
+    #[arg(long)]
+    pub session_pid: Option<u32>,
+    /// Interval (seconds) for the `--session-pid` liveness check; keep it well inside the lease
+    /// liveness window so the address frees promptly.
+    #[arg(long, default_value_t = 2)]
+    pub session_poll_secs: u64,
+    /// Do not bind to any session pid, even if `$TELEX_SESSION_PID` is set — for a deliberately
+    /// persistent, server-side holder that should outlive its launcher. Overrides `--session-pid`.
+    #[arg(long)]
+    pub no_session_bind: bool,
 }
 
 #[derive(Args)]
@@ -382,6 +398,16 @@ impl Ctx {
             self.cfg.backend_selector.as_deref(),
             self.cfg.db_override.as_deref(),
         )
+    }
+
+    /// Effective store key for the selected backend, used to scope the holder registry so a
+    /// station on one store is never inferred as `from` for a send on another.
+    pub fn store_key(&self) -> Result<String> {
+        let (_name, profile) = self.resolved()?;
+        Ok(crate::profiles::store_key(
+            &profile,
+            self.cfg.db_override.as_deref(),
+        ))
     }
 }
 

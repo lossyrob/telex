@@ -172,7 +172,7 @@ The core adapts behavior:
 **v0 baseline (see decision 0005).** The portable v0 baseline uses
 **poll** delivery and **TTL-heartbeat** liveness for *both* SQLite and
 Postgres — a single code path on each axis. The holder polls the **undelivered set** keyed on
-per-recipient delivery state rather than a monotonic id cursor (decision 0011, which superseded the
+per-recipient delivery state rather than a monotonic id cursor (decision 0013, which superseded the
 original poll-with-cursor mechanism). `LISTEN/NOTIFY` (native push) and
 connection-bound advisory locks (exact liveness) are deferred to later, optional
 Postgres-only upgrades behind these same capability flags, added only if a measured
@@ -203,7 +203,7 @@ behavior without a custom hosted API:
 - Entra credentials as a first-class authentication target for Azure Database for
   PostgreSQL Flexible Server.
 
-In v0, Postgres runs the same poll delivery (the undelivered-set drain of decision 0011) and
+In v0, Postgres runs the same poll delivery (the undelivered-set drain of decision 0013) and
 TTL-heartbeat liveness as
 SQLite (decision 0005); it earns its place through durability, indexed queries, and
 networked multi-machine access rather than through push or connection-bound liveness.
@@ -371,6 +371,29 @@ Detailed takeover policy can be deferred. The safe default should be:
 This default is safe enough to build while leaving room for supervisor authority,
 stale takeover, worker pools, and delegation later.
 
+### Local holder registry (from-by-default)
+
+The holder (`attach`) and `send`/`reply` are separate processes, so a sender has no
+direct way to know which address this session is actually serving — the holder writes no
+other local record, the IPC endpoint name is a *lossy* `sanitize()` that can't be
+reverse-mapped, and the backend lease row has no reverse index from "this session" to
+"the address it holds." Forcing every send to carry `--from`/`$TELEX_ADDRESS` made
+un-repliable messages (`from = None`) an easy and silent foot-gun.
+
+To make the common case correct by default, the holder publishes a tiny **local registry
+record** once its endpoint is live: a JSON file under `run_dir()/holders/` carrying
+`{ address, backend, host, pid, socket, started_at_ms }`. `send`/`reply` resolve `from`
+as `--from` > `$TELEX_ADDRESS`/`--address` > **the uniquely live local station** for the
+current backend, found by reading the registry and confirming liveness with an `ipc::ping`
+(the holder echoes its `served_address` in the `Pong`, so a probe can't be fooled by a
+colliding endpoint name). Records are scoped to `(backend, host)`, so a station on one
+backend is never inferred for a send on a different one; the holder prunes any prior record
+for its `(address, backend)` on claim (safe under lease exclusivity) and removes its own on
+clean exit. A record left by a hard-killed holder is simply ignored — its endpoint no
+longer answers. Identity is *defaulted*, never *forced*: explicit `--from`/env always win,
+preserving one-shot reply-to senders, multi-address supervisors, and operator-as-system
+sends. A disposition-required send that would still be un-repliable is refused outright.
+
 ## Messaging model
 
 A Telex message is a typed operational record. It is not a transcript dump and
@@ -493,7 +516,7 @@ repeated short-lived invocations (`check`, sleep, `check`) opens and closes a
 connection each time and structurally cannot hold a connection-bound lease; it would
 silently degrade answerback to the weaker heartbeat/TTL grade. So the long wait must
 live inside one durable Telex process that holds the lease and blocks efficiently
-(polling the undelivered set in the v0 baseline — see decision 0011; `LISTEN/NOTIFY` is a later
+(polling the undelivered set in the v0 baseline — see decision 0013; `LISTEN/NOTIFY` is a later
 optional Postgres push upgrade — see decision 0005).
 
 This creates a real tension with how agent runtimes work: an agent can only reason
@@ -508,7 +531,7 @@ Telex resolves this by splitting the waiter into **two processes**:
 
 - a **resident holder** — long-lived, holds the backend connection and writes the
   lease's TTL heartbeat, polls for actionable messages — the **undelivered set** keyed on
-  per-recipient delivery state, not a monotonic id cursor (see decision 0011) — and buffers
+  per-recipient delivery state, not a monotonic id cursor (see decision 0013) — and buffers
   them locally (on the optional Postgres upgrade it can instead hold an advisory lock and
   run `LISTEN/NOTIFY`). It never needs to take an agent turn, so it can stay up for the
   whole mission. This is the literal answerback drum: it answers liveness

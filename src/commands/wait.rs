@@ -68,7 +68,10 @@ pub async fn run(ctx: &Ctx, args: WaitArgs) -> Result<i32> {
                     }
                 };
                 match frame {
-                    Frame::Keepalive { heartbeat_age_ms } | Frame::Pong { heartbeat_age_ms } => {
+                    Frame::Keepalive { heartbeat_age_ms }
+                    | Frame::Pong {
+                        heartbeat_age_ms, ..
+                    } => {
                         if heartbeat_age_ms > args.stale_heartbeat_ms {
                             eprintln!(
                                 "[wait] HUNG: holder DB heartbeat stale ({heartbeat_age_ms} ms)"
