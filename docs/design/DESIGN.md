@@ -190,7 +190,10 @@ The core adapts behavior:
 
 **v0 baseline (see decision 0005).** The portable v0 baseline uses
 **poll** delivery and **TTL-heartbeat** liveness for *both* SQLite and
-Postgres — a single code path on each axis. The exchange polls the **undelivered set** keyed on
+Postgres — a single code path on each axis. (Under the local exchange, decision 0017
+narrows TTL-heartbeat to the *daemon-down backstop* role; live-session liveness is then
+the hook + watch-pid + stale-attendance model — see [daemon.md](daemon.md).) The exchange
+polls the **undelivered set** keyed on
 per-recipient delivery state rather than a monotonic id cursor (decision 0013, which superseded the
 original poll-with-cursor mechanism). `LISTEN/NOTIFY` (native push) and
 connection-bound advisory locks (exact liveness) are deferred to later, optional

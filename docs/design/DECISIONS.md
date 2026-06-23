@@ -276,7 +276,7 @@ the token's actual lifetime (a 50-min cache outlived a token during testing).
 
 - **Date:** 2026-06-05
 - **Status:** Accepted
-- **Amended:** the "no per-recipient delivery table" clause is superseded by 0010 (durable delivery tracking, issue #10); the rest of this entry stands.
+- **Amended:** the "no per-recipient delivery table" clause is superseded by 0011 (durable delivery tracking, issue #10); the rest of this entry stands.
 
 **Context.** Before implementing v0, Telex needed the full `telex` command surface
 and distributable shape aligned across the design docs, agent instructions, and release

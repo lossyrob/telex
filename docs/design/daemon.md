@@ -98,7 +98,9 @@ A client performs **connect-or-spawn**:
 1. Try to connect to the singleton endpoint and complete the [Hello handshake](#6-ipc-protocol).
 2. On success → use it.
 3. On failure (no endpoint, or stale endpoint that fails Hello) → acquire the
-   **spawn-lock**, then spawn the daemon, await its **readiness ACK**, and connect.
+   **spawn-lock**, then spawn the daemon and **retry connect-and-Hello** until `HelloAck`
+   completes within the readiness window ([§2.3](#23-readiness-ack)) — this `HelloAck`
+   **is** the readiness ACK; no out-of-band readiness signal exists.
 
 The **spawn-lock** is an OS-level mutual exclusion that prevents a thundering herd (N
 sessions first-using the exchange at once spawning N daemons): the canonical mechanism is
@@ -396,7 +398,7 @@ evidence is categorically different from "idle" and must never be routed through
 | # | Trigger | Mechanism | Teardown |
 |---|---|---|---|
 | 1 | **sessionEnd hook** (clean quit/dismiss) | `DeregisterSession(session_id, admin_cap)` | immediate, addresses released |
-| 2 | **watch-pid failure** (anchor pid dead OR start-time mismatch) | the daemon's local watcher issues an **internal `DeregisterSession`** for that session, **bypassing `occupied_stale`** | immediate |
+| 2 | **watch-pid failure** — the typed predicate resolves dead per [§9.1](#91-typed-watch-pid-predicates-oq3) (no `anchor` pid survives, or any `required` pid is gone, or a start-time mismatch) | the daemon's local watcher issues an **internal `DeregisterSession`** for that session, **bypassing `occupied_stale`** | immediate |
 | 3 | **operator takeover** | privileged `Takeover` (see [§10.2](#102-takeover-atomic-at-the-exchange-da-5)) | atomic re-bind |
 | 4 | **daemon-down TTL** | lease lapses after the daemon-down window; respawn re-claims | backstop only |
 
@@ -622,10 +624,12 @@ Recovery is a three-state machine over attendance records:
 - **`suspect`** — every row recovered from durable storage on respawn starts here. The
   daemon **MUST NOT heartbeat or deliver** for a `suspect` row (it has no proof the
   session is still alive).
-- **`verified`** — promoted by a successful `Register`, `ReRegister`, or an authenticated
-  `Wait`-connect carrying a valid `TELEX_SESSION_ID` (+ `admin_cap` where the operation is
-  privileged). Promotion claims a **new epoch** ([§11.1](#111-epoch-lifecycle-oq1)),
-  refreshes `last_confirmed`, and rebuilds the `watch_pids` set.
+- **`verified`** — promoted by a successful `Register` or `ReRegister`. A `Wait`
+  reconnect promotes only **indirectly** — via the auto-`ReRegister` triggered on
+  `UnknownSession` (see [§14.4](#144-wait-auto-re-register)); the `Wait` IPC frame itself
+  remains sessionless ([§6.2](#62-request--response-frames)). Promotion claims a **new
+  epoch** ([§11.1](#111-epoch-lifecycle-oq1)), refreshes `last_confirmed`, and rebuilds
+  the `watch_pids` set.
 - **`lapsed`** — a `suspect` row that ages out via the daemon-down TTL window or
   stale-attendance/takeover with no proof. Its lease is released/fenced; it is not a
   permanent zombie.
@@ -639,12 +643,15 @@ set, and IPC waiter registrations.
 
 `wait` is the **only long-lived client** able to re-prove a running session after a
 respawn (the loader's `attach` is one-shot and already exited). On reconnect-on-EOF,
-`wait` MUST **auto-`ReRegister`** from inherited env (`TELEX_SESSION_ID`, the watch-pids,
-and `admin_cap` if needed) **before** failing. A `Wait` that returns `UnknownSession`
-triggers the same `ReRegister` then retries. `ReRegister` is **idempotent**: concurrent
-waits for one `session_id` converge to a single map entry (`daemon.md`'s rule:
-last-writer-wins on the address set, or union — `daemon-core` picks and freezes one;
-default **union**, so a multi-address session is never narrowed by one re-register).
+`wait` MUST **auto-`ReRegister`** from inherited env (`TELEX_SESSION_ID` and the
+watch-pids) **before** failing. `ReRegister` is unprivileged — no `admin_cap` is required
+(per [§7.1](#71-scoped-capability-model-v1-one-instance-admin-token)); the `admin_cap`
+remains available in env for any privileged follow-up. A `Wait` that returns
+`UnknownSession` triggers the same `ReRegister` then retries. `ReRegister` is
+**idempotent**: concurrent waits for one `session_id` converge to a single map entry by
+**union** of their address sets (so a multi-address session is never narrowed by one
+re-register; `daemon-core` MAY freeze an alternative single rule, but union is the
+default).
 
 ### 14.5 Daemon-down and the TTL backstop
 
