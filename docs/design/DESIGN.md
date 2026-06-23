@@ -413,14 +413,15 @@ a sender needs a correct default `from`. Forcing every send to carry
 `--from`/`$TELEX_ADDRESS` made un-repliable messages (`from = None`) an easy, silent
 foot-gun.
 
-The local exchange owns the authoritative `session_id -> addresses` map (see
+The local exchange owns the authoritative `(store_key, session_id) -> addresses` map (see
 [daemon.md](daemon.md), daemon-native session ownership), so `from` resolves with
 precedence **`--from` > `$TELEX_ADDRESS`/`--address` > the exchange's
-`ResolveFrom(TELEX_SESSION_ID)`** against *that session's* registered addresses: exactly
-one inferred succeeds, multiple refuses as `ambiguous-from`, none falls back to the
-existing unrepliable rules. The exchange **never** infers across all of its addresses
-(it serves many sessions), so a multi-session exchange cannot misattribute a send; the
-harness propagates `TELEX_SESSION_ID` to the `send`/`reply` process. Identity is
+`ResolveFrom(store_key, session_id)`** against *that session's* registered addresses **for
+that store only**: exactly one inferred succeeds, multiple refuses as `ambiguous-from`, none
+falls back to the existing unrepliable rules. The exchange **never** infers across all of its
+addresses (it serves many sessions across many stores), so a multi-session, multi-store
+exchange cannot misattribute a send; the harness propagates `store_key` + `TELEX_SESSION_ID`
+to the `send`/`reply` process. Identity is
 *defaulted, never forced*: explicit `--from`/env always win, preserving one-shot
 reply-to senders, multi-address supervisors, and operator-as-system sends. A
 disposition-required send that would still be un-repliable is refused outright. (This

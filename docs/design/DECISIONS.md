@@ -391,7 +391,7 @@ consistency and was an explicit deliverable (issue #8).
 ## 0010 — Default message `from` to the locally-held lease via a local holder registry; guard un-repliable disposition-required sends
 
 - **Date:** 2026-06-17
-- **Status:** Accepted (the `from`-default *policy* stands; its *mechanism* — the `run_dir()/holders/` registry keyed off a resident holder — is superseded by 0019, which resolves `from` via the exchange's daemon-native `ResolveFrom(TELEX_SESSION_ID)`)
+- **Status:** Accepted (the `from`-default *policy* stands; its *mechanism* — the `run_dir()/holders/` registry keyed off a resident holder — is superseded by 0019, which resolves `from` via the exchange's daemon-native **`ResolveFrom(store_key, session_id)`**, scoped to that store only, never across sessions or stores)
 
 **Context.** `send`/`reply` derived `from` only from `--from` or `$TELEX_ADDRESS`/`--address`,
 with no link to the lease a session actually holds. Forget to set it and the message goes out
@@ -875,11 +875,25 @@ separately-spawned `sessionEnd` hook can derive, so the healthy-disconnect path 
 degrade to the TTL backstop (the incarnation is a same-user-readable token, an accidental-race
 guard, not a security boundary — v1 no-intra-user-isolation). The daemon-down TTL's dependence
 on a trustworthy respawn wall clock is made explicit and **fail-closed via operator
-`Takeover`** under backward/slept skew. Copilot JSON parsing never becomes a core protocol
+`Takeover`** under backward/slept skew. **Round-6 sharpening (R6-1/2/3, council-of-record):**
+the round-5 mandatory token-file is **removed** — it could not give the separately-spawned
+`sessionEnd` hook (which has only a *recurring* `session_id`, no per-life env) a trustworthy
+per-life token, and a shared file reopened the stale-hook race. The hook is therefore
+**demoted to a non-authoritative `SessionEndHint`** (no incarnation) that triggers a
+**latched, liveness-vetoed, double-checked** teardown of the exact proven-dead life — liveness
+is a *veto*, never authorization; the unhooked-dead residual is reclaimed by stale-attendance /
+takeover (which is now **seq-fenced**: only a *current-seq* telex action refreshes attendance,
+so a merely-surviving old process cannot keep a dismissed life fresh). The incarnation order is
+now a **daemon-assigned durable monotonic `session_seq`** (not a loader wall-clock — removing
+the equal-ms/backward-skew defects). `Takeover` gains a **`force` break-glass** mode that
+seq-bumps and bypasses the `occupied_stale` time proof, resolving the daemon-down-TTL recovery
+self-contradiction. The authoritative-hook path is the **reopen condition**: a Copilot API to
+inject the current incarnation into the `sessionEnd` hook env would restore an immediate
+seq-gated `DeregisterSession`. Copilot JSON parsing never becomes a core protocol
 dependency. The Layer-1 protocol shape is specified here and stabilizes for #12-SDK reuse at
 `daemon-core` (the compatibility table is daemon-core-owned). Reopen if a plugin API appears
-that lets the hook env be pre-populated from an `attach`-time value (then a per-session cap
-becomes the v1 path), or if `wait` Re-register is impossible because the IPC transport masks
+that lets the hook env be pre-populated from an `attach`-time value (then an authoritative
+seq-gated hook returns), or if `wait` Re-register is impossible because the IPC transport masks
 socket-EOF.
 
 ## 0020 — Minimal upgrade floor and the two-phase legacy/non-epoch cutover rule
@@ -910,11 +924,16 @@ already-in-flight legacy frame is bounded by at-least-once + `message_id` dedupe
 duplicate, never loss); the stronger "no frame reaches a recipient" needs a new legacy
 drain-barrier verb (trips the reopen condition) and is flagged for `daemon-core`. The
 forward-only downgrade barrier is made **executable** (round 2, M10) by an external gate the
-old binary cannot bypass (launcher/store lock, or a legacy-write-path hard-fail) plus a
-per-store exclusive, crash-safe migration. Exercised by dedicated real-legacy-holder and
-schema-downgrade gating tests on both backends. Full rollback/gc/UX and any epoch-aware
-downgrade *framework* are deferred to `seamless-upgrade`. Full contract in [daemon.md](daemon.md)
-§12, §16, §3.4.
+old binary cannot bypass: the **store-level legacy-write hard-fail is MANDATORY** (R3-S2/R4 —
+the migration renames/constrains the legacy lease columns so a directly-invoked pre-epoch
+binary errors before writing a non-epoch row), with the launcher/store lock as **additional**
+defense (it is bypassable by direct invocation, so it does not replace the hard-fail); plus a
+per-store exclusive, crash-safe migration that creates **both** the new lease columns and the
+`sessions` table atomically at one **schema-version publish point** (R6-Se). Exercised by
+dedicated real-legacy-holder and schema-downgrade gating tests on both backends, including a
+**directly-invoked** (not via the shim) pre-epoch binary. Full rollback/gc/UX and any
+epoch-aware downgrade *framework* are deferred to `seamless-upgrade`. Full contract in
+[daemon.md](daemon.md) §12, §16, §3.4.
 
 **Consequences.** The binary-lock is handled and the cutover is deterministic and
 *verified*; hard, forward-only cutover of existing sessions is acceptable (ratified).
