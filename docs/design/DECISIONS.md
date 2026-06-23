@@ -646,24 +646,34 @@ for *delivery*: the holder emits the `Frame::Message` **before** `mark_delivered
 (verified `src/commands/attach.rs:477` vs `:485`), so a graceful handoff or crash can
 double-deliver.
 
-**Decision.** Add a monotonic **`lease_epoch` + `owner_instance_id`** to the lease row.
-Claim/takeover increments the epoch via compare-and-set on the observed row; heartbeat
-and release are epoch/owner-guarded and **return a rowcount** (today `heartbeat` returns
-`Result<()>`); a 0-row heartbeat means a higher epoch exists → the daemon **self-demotes**.
-Fence **delivery emission server-side** via a typed
-`mark_delivered_if_current_owner(address, owner_instance_id, lease_epoch, message_id) ->
-Result<{Delivered | NotOwner | AlreadyDelivered}>`, with the ordering invariant that the
-daemon must receive a **non-`NotOwner`** result **before** emitting any `Frame::Message`.
-Handoff is ordered (quiesce → flush pending marks → unbind → claim epoch+1, no TTL gap).
-Postgres cross-machine reclaim is expressed **in epochs, not timing**. Remove the
-occupant-null release branch. Full contract in [daemon.md](daemon.md) §11.
+**Decision.** Add a monotonic, **never-reused** `lease_epoch` + `owner_instance_id` to the
+lease row. Claim/takeover is a **compare-and-set that pins the observed epoch AND owner and
+increments the epoch in the backend** (not the client; `NULL` epoch ≠ `0` — a separate
+legacy path). **Release does not delete the row** — it clears the owner and **retains the
+epoch high-water** (a normative no-delete invariant; deleting would reset the epoch and
+break the waiter epoch-filter and "higher epoch wins"). Heartbeat is epoch/owner-guarded,
+returns a rowcount, and updates **lease-liveness only** (not `attendance_last_confirmed_at`
+— see 0017); a 0-row heartbeat → **self-demote = stop emitting AND stop heartbeating
+(relinquish)**. Fence delivery server-side via
+`mark_delivered_if_current_owner(...) -> {Marked | AlreadyDelivered | NotOwner}` with the
+**at-least-once-preserving order EMIT → waiter-ACK → MARK**: the durable mark commits only
+after the wait client has flushed the message to its stdout boundary; any crash/rotation
+before MARK redelivers (a duplicate, never a loss); `NotOwner` is fatal (self-demote),
+`AlreadyDelivered` is success. Graceful handoff is an **owner-directed atomic transfer**
+(one guarded `UPDATE` `P@E → S@E+1`, no ownerless gap, no third-party hijack). Postgres
+cross-machine reclaim is expressed **in epochs**, with the stale precondition on a single
+backend clock domain. Full contract in [daemon.md](daemon.md) §11.
 
 **Consequences.** This is the real single-writer guarantee and the spine of daemon-down
-recovery, upgrade handoff, and Postgres reclaim. A distinct executable `fencing-proof`
-gate must prove epoch-guarded emission + ordered handoff (incl. ownership-loss-around-
-delivery) before Postgres/plugin/upgrade rely on it. Backends gain a rowcount-returning
-heartbeat and the typed delivery method (a backend-API change). Reopen if the guard
-cannot be implemented/tested for both backends.
+recovery, upgrade handoff, and Postgres reclaim, and it **strengthens ADR 0011**: the
+at-least-once commit point moves from the bare frame-handoff to the **waiter ACK**, closing
+a waiter-death-after-frame-write loss window (the earlier "mark-before-frame" ordering,
+caught at the design-gate, would have flipped 0011 into at-most-once loss). A distinct
+executable `fencing-proof` gate must prove the emit→ack→mark failpoints, epoch monotonicity
+across release/cleanup/re-claim, and the handoff crash matrix on both backends
+([daemon.md](daemon.md) §17 tests 4/6/7/9). Backends gain a rowcount-returning heartbeat, a
+non-deleting release, and the typed delivery method (backend-API changes). Reopen if the
+guard cannot be implemented/tested for both backends.
 
 ## 0016 — `seen`-dedup redesign for a long-lived daemon
 
@@ -711,20 +721,24 @@ start-time. There is **no idle-TTL teardown**; the precise rule is "no time-base
 dismissal of a *live* session, but **positive death evidence triggers immediate
 teardown**" via a four-case dismissal-path matrix (hook / watch-pid failure / takeover /
 daemon-down TTL). `occupied_stale` (derived from `attendance_last_confirmed_at`, refreshed
-by **positive presence only** — `sessionEnd` does not refresh) is reserved for the
-unobserved-death residual, and **operator takeover** (epoch-minting, atomic at the
-exchange) is the **load-bearing** recovery for it. Full contract in [daemon.md](daemon.md)
-§9–10.
+by **positive session-carrying presence only** — **not** the daemon's own heartbeat
+(heartbeat updates lease-liveness only), **not** a bare sessionless `Wait`, and **not**
+`sessionEnd`; on a single backend clock domain) is reserved for the unobserved-death
+residual, and **operator takeover** (epoch-minting, atomic at the exchange) is the
+**load-bearing** recovery for it. Full contract in [daemon.md](daemon.md) §9–10.
 
 **Consequences.** OQ3/OQ4 resolved with empirical grounding; the hook becomes necessary
 and stale-attendance/takeover load-bearing (council E). TTL's only remaining role is the
-daemon-down backstop. Reopen if a distinct, reliably-capturable per-session PID appears,
-or if takeover cannot give a safe recovery contract.
+daemon-down backstop. A design-gate gating test asserts the must-fix case: an unhooked
+dismiss whose loader survives goes `occupied_stale` (the daemon's heartbeat does **not**
+keep it fresh) and offers takeover, with no teardown of a live-but-idle session. Reopen if
+a distinct, reliably-capturable per-session PID appears, or if takeover cannot give a safe
+recovery contract.
 
 ## 0018 — Daemon singleton identity, lifecycle contract, and Status surface
 
 - **Date:** 2026-06-22
-- **Status:** Accepted (design); the four+one gating tests are `daemon-core` acceptance.
+- **Status:** Accepted (design); the gating tests (§17) are `daemon-core` acceptance.
 
 **Context.** "Per-user" must not mean globally user-wide: distinct config roots and
 protocol-majors must not collide on one exchange, and auto-spawn must survive a
@@ -739,13 +753,16 @@ retry/backoff/crashloop guards, daemon-down **exit codes** (0/2/3/4, extended), 
 bounded, **frozen Status field set** (epoch, instance, attendees with last-confirmed/
 stale, backoff, recent errors, protocol version). The **Status freeze line** (OQ7):
 freeze the field set + the gating tests' observable assertions; `daemon-core` owns
-rendering/format. Specify five gating tests (concurrent first-use, crash-during-`wait`,
+rendering/format. Specify the gating tests (initially five — concurrent first-use, crash-during-`wait`,
 competing daemons, handoff duplicates + ownership-loss-around-delivery, intra-daemon
 takeover local-eviction). Full contract in [daemon.md](daemon.md) §2–4, §17.
 
 **Consequences.** Cross-profile/version collisions are avoided; the lifecycle is testable
 as `daemon-core` acceptance. The Status surface is stable enough for downstream tooling
-without over-freezing implementation detail.
+without over-freezing implementation detail. The design-gate review expanded the gating
+set from five to **twelve** and added an explicit **per-backend conformance matrix**
+([daemon.md](daemon.md) §17), since the fence's whole point is cross-backend single-writer
+correctness.
 
 ## 0019 — Daemon-scoped capability/version IPC and daemon-native session ownership
 
@@ -766,24 +783,36 @@ hook (verified on `feature/copilot-session-end-plugin`) runs as a **separate pro
 cannot inherit a secret minted in the earlier `attach` process, so a per-session
 capability "held in the session env" is **not obtainable** in v1.
 
-**Decision.** A **daemon-scoped** endpoint with a **Hello/HelloAck version handshake**;
-requests carry `store_key`/`address`/`session_id`. A **scoped-capability** model: an
-**instance `admin_cap`** (a user-private secret file, `0600`/owner-ACL) authorizes
-privileged RPCs (`DeregisterSession`, `Detach`, `Takeover`, `Drain`, `Status detail`);
-`Register`/`ReRegister`/`Wait` are unprivileged same-trust. `scope`/`rotation` and
-`per_session_cap` fields are **reserved** (one token v1). Session ownership is
-**daemon-native**: the in-memory `session_id → addresses` map is the authority; the hook
-is a thin mapper calling `DeregisterSession(session_id, admin_cap)`; `from` defaults via
-`ResolveFrom(TELEX_SESSION_ID)` against *that session's* addresses (never across
-sessions); crash recovery uses a **`suspect`/`verified`/`lapsed`** state machine with
-`wait` auto-Re-register. Full contract in [daemon.md](daemon.md) §6–7, §14.
+**Decision.** A **daemon-scoped** endpoint with a **Hello/HelloAck version + capability
+handshake** that **fails closed** on security-sensitive incompatibility
+(`required_capabilities` + `auth_policy_version`; unknown required field/op →
+`Incompatible`, never a silently weaker path). Requests carry `store_key` (one exchange
+serves multiple stores). A **scoped-capability** model: an **instance `admin_cap`** —
+written to the **singleton-scoped** user-private file `<run_dir>/daemon-<H>.cap` (so two
+protocol-major-parallel daemons don't clobber one cap) — authorizes privileged RPCs;
+`Register`/`ReRegister`/`Wait` are unprivileged. The **OS enforces the user-private trust
+boundary** (Windows pipe DACL current-SID-only / Unix `0700` run dir; canonical
+owner-private `config_root`/`run_dir`; `O_NOFOLLOW`+atomic cap/lock; **peer-credential
+check** before `admin_cap`/data frames; spawn only the canonical executable). v1 is
+**same-user trust with NO intra-user isolation** (documented as a deliberate choice;
+`per_session_cap` reserved as the path to it). Session ownership is **daemon-native** and
+keyed by **`(store_key, session_id)`** with a monotonic **generation + tombstones** so a
+removal (`DeregisterSession`/`Detach`/`Takeover`) is not resurrected by a stale
+`ReRegister`; the hook is a thin mapper calling
+`DeregisterSession(store_key, session_id, admin_cap)`; `from` defaults via
+`ResolveFrom(store_key, session_id)` (never across sessions/stores) with **opportunistic
+re-register on `send`/`reply`/`ack`** so a mid-turn crash does not reintroduce ADR 0010's
+unrepliable-`from` foot-gun; crash recovery uses a **`suspect`/`verified`/`lapsed`** state
+machine. Full contract in [daemon.md](daemon.md) §6–7, §14.
 
 **Consequences.** Resolves OQ6 (proof without an external registry) and OQ8 (durable vs
-rebuilt attendance). Copilot JSON parsing never becomes a core protocol dependency. The
-Layer-1 IPC is the stabilized surface the #12 SDK reuses. Reopen if a plugin API appears
-that lets the hook env be pre-populated from an `attach`-time value (then a per-session
-cap becomes the v1 path), or if `wait` Re-register is impossible because the IPC transport
-masks socket-EOF.
+rebuilt attendance), and closes the design-gate review's must-resolve items on the IPC
+trust boundary, sessionless-`Wait`-as-presence, `ReRegister` resurrection, missing
+`store_key`, and cap-singleton-clobbering. Copilot JSON parsing never becomes a core
+protocol dependency. The Layer-1 IPC is the stabilized surface the #12 SDK reuses. Reopen
+if a plugin API appears that lets the hook env be pre-populated from an `attach`-time value
+(then a per-session cap becomes the v1 path), or if `wait` Re-register is impossible because
+the IPC transport masks socket-EOF.
 
 ## 0020 — Minimal upgrade floor and the two-phase legacy/non-epoch cutover rule
 
@@ -799,19 +828,27 @@ cannot fence a live legacy holder: it ships `Frame::Message` *before* its post-e
 self-demotion (verified `attach.rs`, `sqlite.rs`/`postgres.rs`).
 
 **Decision.** A **minimal upgrade floor** lands in `daemon-core`: a versioned install +
-launcher shim, `telex daemon stop --drain` (quiesce + flush + ordered release), and
-next-call respawn. The legacy cutover is **two-phase**: **drain** (confirm no legacy
-waiter is bound, via an address-keyed IPC probe with quit/handover or a bounded
-stale-window) **then claim** (`epoch=1`, NULL→0→1, under the row condition, atomically
-rotating occupant → owner_instance), with the frozen assertion *no `Frame::Message` from a
-non-epoch holder reaches a recipient after the daemon's waiter binds.* Full rollback/gc/UX
-is deferred to `seamless-upgrade`. Full contract in [daemon.md](daemon.md) §12, §16.
+launcher shim, `telex daemon stop --drain` (quiesce + flush in-flight EMIT→ACK→MARK +
+owner-directed transfer or non-deleting release), and next-call respawn; **v1 cutover is
+forward-only** (a too-old pre-epoch binary is gated closed by the store schema-version).
+The legacy cutover is **two-phase, prove-unbound**: **Phase 1** must *prove* no legacy
+waiter endpoint is bound — an address-keyed IPC probe with quit/handover that observes the
+endpoint gone, **or** quiescing the legacy process; a **bounded stale-window alone is
+removed** (a stale heartbeat does not prove the endpoint is unbound — a paused/partitioned/
+GC'd/suspended legacy holder can resume emitting). **Phase 2** claims `NULL → 1` via the
+explicit legacy CAS (`NULL` is never `0`). Frozen assertion: *no `Frame::Message` from a
+non-epoch holder reaches a recipient after the daemon binds*, exercised by a dedicated
+real-legacy-holder gating test on both backends. Full rollback/gc/UX and any epoch-aware
+downgrade are deferred to `seamless-upgrade`. Full contract in [daemon.md](daemon.md)
+§12, §16.
 
-**Consequences.** The binary-lock is handled and the cutover is deterministic; hard
-cutover of existing sessions is acceptable (ratified). *Preserved minority:* one reviewer
-held occupant-rotation alone suffices; the two-phase rule was adopted on the wire-level
-double-delivery proof. Reopen if the drain phase cannot be realized via the existing
-address-keyed IPC + bounded stale-wait (i.e. it needs a new IPC verb).
+**Consequences.** The binary-lock is handled and the cutover is deterministic and
+*verified*; hard, forward-only cutover of existing sessions is acceptable (ratified).
+*Preserved minority:* one reviewer held occupant-rotation alone suffices; the
+prove-unbound rule was adopted because the legacy heartbeat cannot self-demote and a stale
+heartbeat is not proof of an unbound endpoint (sharpened by the design-gate review). Reopen
+if Phase-1 prove-unbound cannot be realized via the address-keyed IPC probe + process
+quiesce (i.e. it needs a new IPC verb), which would make this an architectural change.
 
 ## 0021 — Verb + docs/SKILL cutover; design-layer relocation to `docs/design/`
 

@@ -384,7 +384,8 @@ continuously while the agent works.
 
 ### Lease collision and takeover
 
-Leases are exclusive and epoch-fenced. The safe default:
+Leases are exclusive and epoch-fenced. The frozen rules (normative mechanism in
+[daemon.md](daemon.md)):
 
 - leases for role/node/session addresses are exclusive;
 - `attach` fails if the address is already occupied by a live lease;

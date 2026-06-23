@@ -14,6 +14,15 @@ best placed to handle this?" and live agents answer for themselves.
 Treat everything here as a destination to build toward incrementally, reusing the
 existing message fabric rather than introducing new transport.
 
+> **Vocabulary note (local-daemon workstream).** This document still describes the
+> station as a resident **holder + waiter** and the waiter as the answerback drum. That
+> per-session model is superseded by the per-user **local exchange** (daemon) — see
+> [DESIGN.md](docs/design/DESIGN.md) and [docs/design/daemon.md](docs/design/daemon.md).
+> The dispatch vision here is unchanged in intent (a presence that reasons about
+> enquiries on the session's behalf), but the holder/waiter vocabulary cutover lands
+> **with `daemon-core`**, not in the design-foundation node — the same deferral applied
+> to `README.md` and `SKILL.md`.
+
 ## Where this sits: the discovery ladder
 
 Discovery spans a ladder from cheap-and-exact to powerful-and-fuzzy. Each rung

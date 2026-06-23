@@ -112,6 +112,15 @@ the end — and that maps onto two useful grades of liveness:
   acknowledged and handled, closed, or deferred by the occupant. This is the
   end-of-message confirmation that the exchange completed intact.
 
+> **Vocabulary note (local-daemon workstream).** The "station = background waiter loop /
+> answerback drum" framing above describes how sessions run *today*. The per-session
+> holder + waiter is superseded by an auto-spawned per-user **local exchange** (daemon)
+> that supplies answerback for all locally-attended addresses — see
+> [DESIGN.md](docs/design/DESIGN.md) and [docs/design/daemon.md](docs/design/daemon.md).
+> The metaphor (answerback as infrastructure-supplied liveness) is unchanged; only the
+> mechanism moves. This narrative cutover lands **with `daemon-core`** (as for `README.md`
+> and `SKILL.md`), not in the design-foundation node.
+
 How faithfully Telex can answer depends on the backend, and we are honest about
 that: on a local SQLite store the loop's heartbeat gives "last seen within its
 lease window"; on Postgres a connection-bound lease can release the instant a
