@@ -813,9 +813,11 @@ check** before `admin_cap`/data frames; spawn only the canonical executable). v1
 **same-user trust with NO intra-user isolation** (documented as a deliberate choice;
 `per_session_cap` reserved as the path to it). Session ownership is **daemon-native** and
 keyed by **`(store_key, session_id)`** with a durable **session-incarnation currency
-authority + per-address tombstones** so a removal (`DeregisterSession`/`Detach`/`Takeover`)
-is not resurrected by a stale `ReRegister`; the hook is a thin mapper calling
-`DeregisterSession(store_key, session_id, admin_cap)`; `from` defaults via
+authority + per-address tombstones**, **serialized on the `sessions` row** (a monotonic
+incarnation; all `Register`/`ReRegister`/`DeregisterSession`/`Detach` lock the row and gate on
+currency), so a removal (`DeregisterSession`/`Detach`/`Takeover`) is not resurrected by — nor
+applied by — a stale `ReRegister`/hook; the hook is a thin mapper calling
+`DeregisterSession(store_key, session_id, session_incarnation, admin_cap)`; `from` defaults via
 `ResolveFrom(store_key, session_id)` (never across sessions/stores) with **opportunistic
 re-register on `send`/`reply`/`ack`** so a mid-turn crash does not reintroduce ADR 0010's
 unrepliable-`from` foot-gun; crash recovery uses a **`suspect`/`verified`/`lapsed`** state
@@ -861,7 +863,19 @@ an address on `UnknownSession`; the **pending-bind** row is frozen **non-deliver
 the SQLite `BackendClock` is a **durable persisted high-water** clock (a process-monotonic
 clock would rebase across the restart its persisted timestamps are compared over); `Register`
 commits its `sessions`+`leases` writes in **one transaction**; and `Takeover` gains a typed
-`TookOver` response. Copilot JSON parsing never becomes a core protocol
+`TookOver` response. **Round-5 sharpening (R5-1/2, spar-of-record closed):** "one transaction"
+is atomic but not serializable under `READ COMMITTED`, so all four currency operations
+(`Register`/`ReRegister`/`DeregisterSession`/`Detach`) **serialize on the `sessions` row**
+(`SELECT … FOR UPDATE` / SQLite write-tx) with **conditional lease DML**, the incarnation is
+**monotonic `<mint_ms>.<nonce>`** and the `Register` bump **rejects a non-newer token** (a
+delayed old-life `Register` cannot overwrite a live newer current — the same atomicity-vs-
+isolation gap the delivery-mark lock closed); and the `session_incarnation` the gated removals
+need is carried in a **mandatory owner-private session token-file** at a path the
+separately-spawned `sessionEnd` hook can derive, so the healthy-disconnect path does not
+degrade to the TTL backstop (the incarnation is a same-user-readable token, an accidental-race
+guard, not a security boundary — v1 no-intra-user-isolation). The daemon-down TTL's dependence
+on a trustworthy respawn wall clock is made explicit and **fail-closed via operator
+`Takeover`** under backward/slept skew. Copilot JSON parsing never becomes a core protocol
 dependency. The Layer-1 protocol shape is specified here and stabilizes for #12-SDK reuse at
 `daemon-core` (the compatibility table is daemon-core-owned). Reopen if a plugin API appears
 that lets the hook env be pre-populated from an `attach`-time value (then a per-session cap
