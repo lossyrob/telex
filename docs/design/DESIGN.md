@@ -399,8 +399,12 @@ Because loader-level liveness is weak (a session can be dismissed without its pr
 tree dying), **stale-attendance and operator takeover are a load-bearing recovery path,
 not an edge case**: the exchange marks an unconfirmed address `occupied_stale` (without
 ever tearing down a live session) and allows an informed, epoch-minting operator
-takeover. The full state algebra is normative in [daemon.md](daemon.md) (stale-attendance
-and takeover).
+takeover. Takeover **fences, evicts, and tombstones** the stale binding and leaves the
+address for a follow-up `Register` to bind (it does not itself install a new occupant); a
+durable per-session **incarnation-currency authority** keeps a crashed-then-recovered
+session continuous while rejecting a stale or reused-session-id revival. The full state
+algebra is normative in [daemon.md](daemon.md) (stale-attendance, takeover, and session
+ownership).
 
 ### Default `from` via daemon session ownership
 

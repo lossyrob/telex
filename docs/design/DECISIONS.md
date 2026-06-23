@@ -681,7 +681,15 @@ precedence** (`NotOwner` is returned even if already delivered, so a superseded 
 self-demotes instead of treating `AlreadyDelivered` as success); the graceful handoff adds a
 successor-readiness precondition; and a separate **takeover CAS** gated on the
 `occupied_stale` *attendance* predicate is specified (the stale-heartbeat claim predicate
-does not fit takeover). Reopen if the guard cannot be implemented/tested for both backends.
+does not fit takeover). **Round-3 sharpening (R3-5, R3-S1):** the MARK's ownership-check and
+mark are frozen as **one atomic step** — a lease-row lock (`SELECT … FOR UPDATE` on Postgres /
+`BEGIN IMMEDIATE` on SQLite) taken before the mark, the **same** lock the owner-directed
+transfer and the takeover CAS take, so an ownership rotation cannot interpose *between* the
+check and the mark under `READ COMMITTED` (a two-step read-then-mark would reopen the
+`AlreadyDelivered`-masks-ownership race at the transaction level); and the ACK deadline's
+semantics are frozen (monotonic clock, exclusive boundary, ACK-vs-timer first-wins, and a
+repeated-timeout connection quarantine that bounds duplicate-redelivery storms). Reopen if
+the guard cannot be implemented/tested for both backends.
 
 ## 0016 — `seen`-dedup redesign for a long-lived daemon
 
@@ -804,9 +812,9 @@ owner-private `config_root`/`run_dir`; `O_NOFOLLOW`+atomic cap/lock; **peer-cred
 check** before `admin_cap`/data frames; spawn only the canonical executable). v1 is
 **same-user trust with NO intra-user isolation** (documented as a deliberate choice;
 `per_session_cap` reserved as the path to it). Session ownership is **daemon-native** and
-keyed by **`(store_key, session_id)`** with a monotonic **generation + tombstones** so a
-removal (`DeregisterSession`/`Detach`/`Takeover`) is not resurrected by a stale
-`ReRegister`; the hook is a thin mapper calling
+keyed by **`(store_key, session_id)`** with a durable **session-incarnation currency
+authority + per-address tombstones** so a removal (`DeregisterSession`/`Detach`/`Takeover`)
+is not resurrected by a stale `ReRegister`; the hook is a thin mapper calling
 `DeregisterSession(store_key, session_id, admin_cap)`; `from` defaults via
 `ResolveFrom(store_key, session_id)` (never across sessions/stores) with **opportunistic
 re-register on `send`/`reply`/`ack`** so a mid-turn crash does not reintroduce ADR 0010's
@@ -816,20 +824,35 @@ machine. Full contract in [daemon.md](daemon.md) §6–7, §14.
 **Consequences.** Resolves OQ6 (proof without an external registry) and OQ8 (durable vs
 rebuilt attendance), and closes the design-gate review's must-resolve items on the IPC
 trust boundary, sessionless-`Wait`-as-presence, `ReRegister` resurrection, missing
-`store_key`, and cap-singleton-clobbering. **Round-2 sharpening:** the generation +
-tombstone anti-resurrection guard is made **durable** (lease-row columns), **fail-closed**
-(`ReRegister` MUST carry a current generation), and **frozen** (union-of-non-tombstoned is
-the rule, no daemon-core alternative), with a GC horizon > max reconnect + daemon-down TTL;
-`ReRegister` is **session-scoped** (address-optional) so a foreground `send`/`reply` with no
-known address can still re-prove presence after a crash (closing the M8 recovery gap); client
-**MUST** verify the server peer + canonical-exe **before** sending `admin_cap` (server-auth
-is not a "should"), with a reuse-safe peer credential and a Windows first-instance exclusivity
-primitive; and `admin_cap` carries a no-log/redaction contract. Copilot JSON parsing never
-becomes a core protocol dependency. The Layer-1 protocol shape is specified here and
-stabilizes for #12-SDK reuse at `daemon-core` (the compatibility table is daemon-core-owned).
-Reopen if a plugin API appears that lets the hook env be pre-populated from an `attach`-time
-value (then a per-session cap becomes the v1 path), or if `wait` Re-register is impossible
-because the IPC transport masks socket-EOF.
+`store_key`, and cap-singleton-clobbering. **Round-2 sharpening:** the anti-resurrection
+guard is made **durable** (lease-row columns), **fail-closed** (`ReRegister` MUST carry a
+current token), and **frozen** (no daemon-core alternative), with a GC horizon > max
+reconnect + daemon-down TTL; `ReRegister` is **session-scoped** (address-optional) so a
+foreground `send`/`reply` with no known address can still re-prove presence after a crash;
+client **MUST** verify the server peer + canonical-exe **before** sending `admin_cap`, with a
+reuse-safe peer credential and a Windows first-instance exclusivity primitive; and `admin_cap`
+carries a no-log/redaction contract. **Round-3 sharpening (R3-2/3/6/7, spar-driven):** a
+cross-model spar showed the round-2 per-`(session_id, address)` *generation* was unsound — it
+either falsely invalidated a live sibling-address waiter, or (without a session-keyed
+authority) let a GC'd tombstone or a same-`session_id` respawn resurrect a removed address. So
+incarnation **currency** now lives in a durable **`sessions(store_key, session_id,
+current_incarnation, superseded_at)`** authority, and `ReRegister` is **two-gate**
+(currency-against-`sessions` **then** union-of-non-tombstoned-rows), which holds even after
+lease-row GC. `Takeover` is **fence-then-register** (it fences/evicts/tombstones and leaves a
+**bounded pending-bind** reservation; a follow-up `Register` binds — Takeover carries no
+session identity), with `owner_instance_id IS NOT NULL` partitioning it from the ownerless
+claim. `ReleaseOwnership` (daemon-stop/handoff) is split from **station-removal**: it clears
+ownership only, **preserves** the session binding, and does **not** tombstone (so §16 upgrade
+continuity holds); only station-removal tombstones. Heartbeat is **bound-rows-only**
+(`session_id IS NOT NULL`) so a pending-bind reservation ages into reclaimability instead of
+wedging. The **client→server** auth primitive is corrected to `GetNamedPipeServerProcessId` /
+connected-socket `SO_PEERCRED` (the prior `ImpersonateNamedPipeClient` is server-side), run
+**before any metadata disclosure**. Copilot JSON parsing never becomes a core protocol
+dependency. The Layer-1 protocol shape is specified here and stabilizes for #12-SDK reuse at
+`daemon-core` (the compatibility table is daemon-core-owned). Reopen if a plugin API appears
+that lets the hook env be pre-populated from an `attach`-time value (then a per-session cap
+becomes the v1 path), or if `wait` Re-register is impossible because the IPC transport masks
+socket-EOF.
 
 ## 0020 — Minimal upgrade floor and the two-phase legacy/non-epoch cutover rule
 

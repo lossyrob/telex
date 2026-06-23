@@ -95,12 +95,19 @@ The endpoint name embeds a hash of the singleton key:
 
 A client performs **connect-or-spawn**:
 
+0. **Authenticate the server first.** On the connected endpoint handle, verify the server's
+   process identity (client-side server-auth, [§7.2](#72-os-level-trust-boundary-mr5):
+   `GetNamedPipeServerProcessId` + PID/start-time/SID/canonical-exe on Windows, connected-socket
+   `SO_PEERCRED` + the same checks on Unix) **before sending `Hello` or any metadata**. A
+   server that fails this check is rejected without disclosing `store_key`/`session_id`.
 1. Try to connect to the singleton endpoint and complete the [Hello handshake](#6-ipc-protocol).
 2. On success → use it.
 3. On failure (no endpoint, or stale endpoint that fails Hello) → acquire the
    **spawn-lock**, then spawn the daemon and **retry connect-and-Hello** until `HelloAck`
    completes within the readiness window ([§2.3](#23-readiness-ack)) — this `HelloAck`
-   **is** the readiness ACK; no out-of-band readiness signal exists.
+   **is** the readiness ACK; no out-of-band readiness signal exists. (The client-side
+   server-auth of step 0 re-runs on each connect attempt, including against the
+   just-spawned daemon.)
 
 The **spawn-lock** is an OS-level mutual exclusion that prevents a thundering herd (N
 sessions first-using the exchange at once spawning N daemons): the canonical mechanism is
@@ -200,18 +207,27 @@ and a multi-store, populated-Postgres deployment needs a schema contract:
   self-enforcing, since such a binary would open the store and run the legacy
   `claim_lease`/`heartbeat`/`release_lease` paths, writing non-epoch rows and corrupting
   the fence. The barrier is therefore made enforceable by an **external gate the old binary
-  cannot bypass**, by one of:
-  - a **launcher/store lock** (the versioned shim refuses to exec a binary older than the
-    store's `telex_schema_version` before the binary ever opens the store); and/or
-  - a **store-level schema change that makes the old write paths hard-fail before they
-    touch lease rows** (e.g. renaming/constraining the legacy lease columns the pre-epoch
-    paths write, so an old binary errors out instead of silently writing non-epoch rows).
+  cannot bypass**:
+  - **Mandatory (R3-S2): a store-level schema change that makes the legacy write paths
+    hard-fail before they touch lease rows.** Because a launcher/shim is bypassable by
+    invoking an old binary **directly**, and an additive-only migration (`CREATE TABLE IF NOT
+    EXISTS` + additive columns) leaves the legacy `claim_lease`/`heartbeat`/`release_lease`
+    paths usable, only a **store-level hard-fail** is non-bypassable. The migration therefore
+    **renames/constrains** the legacy lease columns the pre-epoch paths write (or adds a
+    `CHECK`/`NOT NULL` those writes violate) so a directly-invoked old binary **errors out**
+    instead of silently writing a non-epoch row. This is **required** in v1, not optional.
+  - **Additional defense: a launcher/store lock** (the versioned shim refuses to exec a
+    binary older than the store's `telex_schema_version` before the binary ever opens the
+    store). It hardens the common path but does **not** replace the mandatory store-level
+    hard-fail, since direct invocation bypasses the shim.
 
   The migration that advances `telex_schema_version` is performed by the **first
   daemon-aware claimant** under a **per-store exclusive lock/transaction**, **before** any
   epoch-column writes, and is **crash-safe** (re-runnable; a partial migration is detected
   and completed/rolled back on the next open). A **downgrade/migration gate test on both
-  backends** is acceptance. The full migration/downgrade *framework* for a populated
+  backends** is acceptance, and it MUST exercise a pre-epoch binary invoked **directly**
+  (not only via the shim) against a migrated store, asserting it cannot write a non-epoch
+  row. The full migration/downgrade *framework* for a populated
   multi-store Postgres deployment stays `seamless-upgrade` scope; v1 freezes the version
   field, the executable barrier, and the migration's exclusivity/crash-safety.
 
@@ -250,16 +266,16 @@ AttendanceRecord {
   address:                      String,        // the telex number
   store_key:                    StoreKey,       // effective store identity (profiles::store_key); part of the authority key
   session_id:                   Option<String>, // opaque; the attending session
-  session_generation:           u64,            // monotonic per (store_key, session_id); tombstone guard (see §14.1)
+  session_incarnation:          Option<String>, // the session-life token (currency in `sessions`, see §14.1); denormalized here for the union
   occupant:                     String,         // human/host label of the occupant
   owner_instance_id:            Option<String>, // owning daemon instance, or NULL when released (epoch retained)
   lease_epoch:                  u64,            // monotonic, never-reused fence token (see §11)
   watch_pids:                   Vec<WatchPid>,  // liveness backstop (see §9)
   host:                         String,
-  last_heartbeat:               i64,            // backend-clock ms; lease liveness proof (heartbeat-only)
-  attendance_last_confirmed_at: i64,            // backend-clock ms; refreshed by POSITIVE session-carrying presence only (NOT heartbeat, NOT bare Wait)
+  last_heartbeat:               i64,            // backend-clock ms; lease liveness proof (heartbeat-only, bound rows only)
+  attendance_last_confirmed_at: Option<i64>,    // backend-clock ms; POSITIVE session-carrying presence only; NULL = never bound (pending-bind)
   state:                        Attendance,     // Suspect | Verified | Lapsed
-  occupied_stale:               bool,           // DERIVED: now - last_confirmed > stale_after, single clock domain
+  occupied_stale:               bool,           // DERIVED: owner set AND session_id set AND now - attendance > stale_after
 }
 
 WatchPid { pid: u32, start_time: u64, role: Anchor | Required }
@@ -268,7 +284,7 @@ Attendance = Suspect | Verified | Lapsed
 
 `owner_instance_id IS NULL` marks a **released-but-epoch-retained** row (occupancy is
 `owner_instance_id IS NOT NULL` and not stale, never row existence — see
-[§11.2](#112-epoch-guarded-heartbeat-non-deleting-release-and-self-demotion-mr2-mr3)).
+[§11.2](#112-epoch-guarded-heartbeat-non-deleting-releaseownership-and-self-demotion-mr2-mr3)).
 
 ### 5.1 Durable lease-row columns (new)
 
@@ -277,18 +293,46 @@ The backend `leases` table — today keyed by `address` only with **no owner gen
 `release_lease`) — gains:
 
 - **`lease_epoch INTEGER`** — the monotonic, never-reused fence token (retained across
-  release; see [§11.2](#112-epoch-guarded-heartbeat-non-deleting-release-and-self-demotion-mr2-mr3)).
+  release; see [§11.2](#112-epoch-guarded-heartbeat-non-deleting-releaseownership-and-self-demotion-mr2-mr3)).
 - **`owner_instance_id TEXT`** — the owning daemon instance, `NULL` when released.
 - **`last_heartbeat INTEGER`** — backend-clock ms lease-liveness proof (heartbeat-only).
 - **`attendance_last_confirmed_at INTEGER`** — backend-clock ms of last positive
   session-carrying confirmation (never written by heartbeat).
 - **`session_id TEXT`** — the attending session (so a respawned daemon can rebuild the
   `(store_key, session_id) → addresses` authority from durable rows as `suspect`).
-- **`session_generation INTEGER`** — the monotonic generation for `(store_key, session_id,
-  address)`; advanced by `Register`; the anti-resurrection guard (M3, [§14.1](#141-the-in-memory-store_key-session_id--addresses-authority)).
-- **`tombstoned_at INTEGER`** — set (with the generation frozen) by `DeregisterSession`/
-  `Detach`/`Takeover`/`release`; a non-NULL `tombstoned_at` at the current generation makes
-  a stale `ReRegister` fail closed (`Stale`). Durable so the guard survives a daemon crash.
+- **`session_incarnation TEXT`** — the **session-life token** for `(store_key, session_id)`,
+  denormalized from the `sessions` authority (below) onto each of the session's lease rows so
+  the address-optional `ReRegister` union can filter by it. Its **currency** (is this token
+  still the live one?) is decided by the `sessions` row, **not** by the lease rows — see
+  [§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table). (R3-6 /
+  spar: replaces the former per-`(session_id, address)` `session_generation`, which falsely
+  invalidated live waiters when a *sibling* address was registered.)
+- **`tombstoned_at INTEGER`** — set (at the current incarnation) by the **station-removal**
+  paths **`DeregisterSession`/`Detach`/`Takeover`/lapsed-TTL** — **not** by `ReleaseOwnership`
+  (which is a non-removing ownership handoff, [§11.2](#112-epoch-guarded-heartbeat-non-deleting-releaseownership-and-self-demotion-mr2-mr3)).
+  A non-NULL `tombstoned_at` on a row still at the session's current incarnation excludes that
+  address from the `ReRegister` union (`Stale`). Durable so the guard survives a daemon crash.
+
+The exchange also gains a durable **session authority** table, **`sessions`**, keyed by
+`(store_key, session_id)` — the single source of truth for *incarnation currency* (R3-6 /
+spar, [§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table)):
+
+```text
+sessions {
+  store_key:           String,
+  session_id:          String,
+  current_incarnation: String,        // the live session-life token; (store_key, session_id) PK
+  created_at:          i64,           // BackendClock ms
+  superseded_at:       Option<i64>,   // set when a NEW session-life supersedes this incarnation
+}
+```
+
+`current_incarnation` is minted when a `(store_key, session_id)` first registers and is
+**bumped (old one marked `superseded_at`)** only when a genuinely new session-life claims the
+same `session_id`; a daemon crash/respawn of a *still-live* session does **not** bump it (so
+crash-recovery keeps continuity, while session-id reuse fails closed). The `leases` table is
+**indexed by `(store_key, session_id)`** so the session-keyed rebuild/union is queryable, and
+both tables are retained through the GC horizon ([§14.5](#145-daemon-down-and-the-ttl-backstop)).
 
 Greenfield: added via `CREATE TABLE IF NOT EXISTS` / additive column add gated by the
 store schema-version ([§3.4](#34-per-store-isolation-and-schema-version-sf5); consistent
@@ -297,7 +341,7 @@ with ADR 0013). A row whose `lease_epoch` column is `NULL` is a **legacy** row (
 
 The **occupant-null release** branch (`release_lease ... WHERE address=? AND (occupant=?
 OR occupant IS NULL)`, verified in `sqlite.rs`/`postgres.rs`) is **removed**: release is
-strictly epoch- and owner-guarded (see [§11.2](#112-epoch-guarded-heartbeat-non-deleting-release-and-self-demotion-mr2-mr3)).
+strictly epoch- and owner-guarded (see [§11.2](#112-epoch-guarded-heartbeat-non-deleting-releaseownership-and-self-demotion-mr2-mr3)).
 
 ## 6. IPC protocol
 
@@ -337,11 +381,14 @@ client (or vice versa) detect skew deterministically instead of mis-framing, and
   are `required_capabilities`, so an old or hostile client cannot negotiate them away (it
   gets `Incompatible`/`Unauthorized`, not a weaker path).
 
-This is a stable Layer-1 surface for the plugin and the #12 SDK. A normative **IPC
-compatibility table** — `protocol_version`, minimum daemon/client, each capability's
-required-vs-optional status, unknown-field/unknown-op behavior, and the downgrade error
-code — is frozen as part of `daemon-core` acceptance, with **N/N-1 and N+1/N tests** for
-attach, wait reconnect/ReRegister, Drain, DeregisterSession, and Status.
+This **stabilizes** as a Layer-1 surface for the plugin and the #12 SDK **at `daemon-core`**
+(it is **not** claimed as an already-frozen surface in this node — consistent with [§6](#6-ipc-protocol)
+above). A normative **IPC compatibility table** — `protocol_version`, minimum daemon/client,
+each capability's required-vs-optional status, unknown-field/unknown-op behavior, and the
+downgrade error code — is **owned and frozen as part of `daemon-core` acceptance** (this node
+freezes the frame *shapes* and the fail-closed capability *policy*; `daemon-core` fills and
+freezes the version/min-version *table*), with **N/N-1 and N+1/N tests** for attach, wait
+reconnect/ReRegister, Drain, DeregisterSession, and Status.
 
 ### 6.2 Request / response frames
 
@@ -352,14 +399,14 @@ a station carry `store_key` because one exchange serves multiple stores:
 | Request | Purpose | Privileged? |
 |---|---|---|
 | `Hello` | version + capability handshake | no |
-| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[] }` | create/refresh a station (attach); establishes the session generation | no (same-trust) |
-| `ReRegister { store_key, session_id, session_generation, address?, watch_pids[] }` | idempotent re-register (address optional = session-scoped; rebuilds the set from durable rows) | no |
-| `DeregisterSession { store_key, session_id, proof }` | drop a session's addresses for that store (healthy disconnect); tombstones the generation | **yes** |
+| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[] }` | create/refresh a station (attach); mints/continues the session incarnation in `sessions` | no (same-trust) |
+| `ReRegister { store_key, session_id, session_incarnation, address?, watch_pids[] }` | idempotent re-register (address optional = session-scoped; currency-gated on `sessions` then rebuilds the set from durable rows) | no |
+| `DeregisterSession { store_key, session_id, proof }` | drop a session's addresses for that store (healthy disconnect); tombstones them + marks the incarnation `superseded` | **yes** |
 | `Detach { store_key, address, session_id, proof }` | remove one station; tombstones | **yes** |
 | `Wait { store_key, address, attention?, timeout_ms }` | block for one delivery (sessionless; not session presence) | no |
 | `DeliveryAck { store_key, address, message_id, lease_epoch, delivery_nonce }` | the waiter's post-flush, correlated delivery ack ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) | no |
 | `Status { store_key?, detail?, proof? }` | Status surface (detail requires proof) | detail: **yes** |
-| `Takeover { store_key, address, proof }` | operator takeover of a stale address; tombstones prior | **yes** |
+| `Takeover { store_key, address, proof }` | operator **fence + evict + tombstone** of a stale address (does **not** bind a new occupant — a follow-up `Register` does; [§10.2](#102-takeover-fence-then-register-da-5-r3-3)) | **yes** |
 | `Drain { proof }` | quiesce + flush + ordered transfer/exit (upgrade/stop) | **yes** |
 
 Responses:
@@ -367,16 +414,23 @@ Responses:
 | Response | Carries |
 |---|---|
 | `HelloAck` | protocol/daemon version, `auth_policy_version`, `required_capabilities`, accepted |
-| `Registered` | `lease_epoch`, `owner_instance_id`, `session_generation`, `state` (`suspect`/`verified`/`lapsed`) |
-| `Message` | `id, thread_id, parent_id, from_addr, to_addr, kind, attention, requires_disposition, subject, body, sent_at_ms, buffered_at_ms, lease_epoch` |
+| `Registered` | `lease_epoch`, `owner_instance_id`, `session_incarnation` (the current token from `sessions`), `state` (`suspect`/`verified`/`lapsed`) |
+| `Message` | `id, thread_id, parent_id, from_addr, to_addr, kind, attention, requires_disposition, subject, body, sent_at_ms, buffered_at_ms, lease_epoch, delivery_nonce` |
 | `Keepalive` | `heartbeat_age_ms` |
 | `Timeout` | — (idle-timeout) |
 | `StatusReport` | the [§4](#4-status-surface-the-frozen-contract-shape) fields |
 | `Ack` | generic success for Register/ReRegister/Detach/Deregister/Takeover/Drain/DeliveryAck |
-| `Error` | `{ code, message }` — incl. `UnknownSession`, `NotOwner`, `Unauthorized`, `Incompatible`, `Ambiguous`, `Stale` (tombstoned generation) |
+| `Error` | `{ code, message }` — incl. `UnknownSession`, `NotOwner`, `Unauthorized`, `Incompatible`, `Ambiguous`, `Stale` (superseded/tombstoned incarnation) |
 
-The `Message` frame carries `lease_epoch` and a per-emit `delivery_nonce`. **Ordering note
-(M1):** the daemon EMITs the frame under a non-durable **in-memory** current-owner
+The `Message` frame carries `lease_epoch` and a per-emit `delivery_nonce` (**R3-1**). The
+`delivery_nonce` is **frozen in scope**: a fresh, unique value minted by the daemon for
+*this* in-flight EMIT on *this* connection; the waiter MUST echo it verbatim in its
+`DeliveryAck`; it is **invalidated** (no longer accepted) on the matching MARK, on
+ACK-deadline timeout, or on connection close; and it is **not durable across a crash** (a
+redelivery after restart mints a new nonce). It exists only to correlate one ACK to one
+EMIT so a delayed/duplicate/wrong-connection ACK cannot commit a *different* in-flight
+delivery ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)). **Ordering
+note (M1):** the daemon EMITs the frame under a non-durable **in-memory** current-owner
 precheck, and records the **durable** delivery mark **only after** the waiter's
 `DeliveryAck` ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)). The
 durable mark is therefore **after** emission, not before — emitting "only after a durable
@@ -451,22 +505,38 @@ data-bearing ops like `Wait → Message` body are otherwise readable):
   contract** ([§2.3](#23-readiness-ack)): if the cap cannot be created owner-only — `ENOSPC`,
   permission, partial write, symlink — **startup fails** (the daemon never serves without an
   enforceable cap). These failpoints are acceptance tests.
-- **Peer authenticity — server AND client, both MUST.** Before the server sends `admin_cap`
-  or any data-bearing frame (`Message`) it MUST verify the peer is the same user; and **the
-  client MUST verify the server's peer credential and canonical-executable identity BEFORE
-  sending `admin_cap` or any data-bearing frame, failing closed otherwise** — a bearer
-  `admin_cap` is exfiltrated the instant it is sent to a hostile pre-bound server, so server
-  authenticity cannot be a "should." The credential primitive must be **reuse-safe**, not
-  bare PID: use `ImpersonateNamedPipeClient` / `SO_PEERCRED` with a stable handle, or a
-  **PID + process-start-time** guard (the same reuse defense as watch-pids,
-  [§9.1](#91-typed-watch-pid-predicates-oq3)), to close the TOCTOU where a client PID is
-  reused before its token is read. Connect-or-spawn ([§2.2](#22-auto-spawn-connect-or-spawn-and-the-spawn-lock)) therefore never trusts an arbitrary first endpoint binder, and the daemon **spawns only the canonical executable** (a verified absolute path), never a relative/`PATH`-resolved name.
+- **Peer authenticity — server AND client, both MUST, with the *correct directional
+  primitive* (R3-7).** Before the server sends `admin_cap` or any data-bearing frame
+  (`Message`) it MUST verify the connected peer is the same user; and **the client MUST
+  verify the server's process identity BEFORE sending `Hello` (which carries `store_key`),
+  before trusting `HelloAck`, and before sending `admin_cap` or any data-bearing frame**,
+  failing closed otherwise — a bearer `admin_cap` is exfiltrated the instant it is sent to a
+  hostile pre-bound server, and even `store_key`/`session_id` are metadata not to disclose to
+  an unauthenticated server, so server authenticity cannot be a "should" and cannot wait for
+  `HelloAck`. The two directions use **different OS primitives** (a common design error is to
+  cite the server-side primitive for the client check):
+  - **Server verifies client** (server-side): `ImpersonateNamedPipeClient` (Windows) /
+    `SO_PEERCRED` on the accepted socket (Unix) — the server inspecting who connected.
+  - **Client verifies server** (client-side): on the *connected* handle, **`GetNamedPipeServerProcessId`**
+    (Windows) to obtain the server PID, then verify **server PID + process-start-time, the
+    server token's owner SID, and the server binary's canonical-exe path/hash**; on Unix,
+    `getsockopt(SO_PEERCRED)` on the *connected* socket to read the server's uid + pid, then
+    the same start-time + canonical-exe verification. `ImpersonateNamedPipeClient` is a
+    **server-side** call and does **not** let a client authenticate a server.
+
+  Both credential checks MUST be **reuse-safe** (PID + process-start-time, the same reuse
+  defense as watch-pids, [§9.1](#91-typed-watch-pid-predicates-oq3)) to close the TOCTOU where
+  a PID is reused before its token is read. Connect-or-spawn ([§2.2](#22-auto-spawn-connect-or-spawn-and-the-spawn-lock))
+  therefore runs the **client-side server-auth as step 0, before the Hello handshake**, and
+  never trusts an arbitrary first endpoint binder; the daemon **spawns only the canonical
+  executable** (a verified absolute path), never a relative/`PATH`-resolved name.
 - **Capability redaction (S11).** `admin_cap`/`proof` are **bearer secrets** and MUST
   **never** appear in `Status.recent_errors`, `Error.message`, logs, or traces (redact to a
   fixed placeholder). Acceptance asserts no cap material in any diagnostic surface.
 - **Negative tests** (acceptance): a second OS principal cannot `Hello`/`Register`/`Wait`;
   a symlinked cap/lock is rejected; a **hostile pre-bound server is rejected client-side
-  BEFORE any cap disclosure**; a **second server instance is refused** by the exclusivity
+  BEFORE any metadata disclosure** (before the client sends `Hello`/`store_key`, not merely
+  before `admin_cap`); a **second server instance is refused** by the exclusivity
   primitive; a **PID-reuse race** does not authenticate the wrong process.
 
 ### 7.3 No intra-user isolation in v1 (mr6)
@@ -559,7 +629,7 @@ evidence is categorically different from "idle" and must never be routed through
 |---|---|---|---|
 | 1 | **sessionEnd hook** (clean quit/dismiss) | `DeregisterSession(store_key, session_id, admin_cap)` | immediate, addresses released |
 | 2 | **watch-pid failure** — the typed predicate resolves dead per [§9.1](#91-typed-watch-pid-predicates-oq3) (no `anchor` pid survives, or any `required` pid is gone, or a start-time mismatch) | the daemon's local watcher issues an **internal `DeregisterSession`** for that session, **bypassing `occupied_stale`** | immediate |
-| 3 | **operator takeover** | privileged `Takeover` (see [§10.2](#102-takeover-atomic-at-the-exchange-da-5)) | atomic re-bind |
+| 3 | **operator takeover** | privileged `Takeover` (see [§10.2](#102-takeover-fence-then-register-da-5-r3-3)) | fence + evict + tombstone; rebind via follow-up `Register` |
 | 4 | **daemon-down TTL** | lease lapses after the daemon-down window; respawn re-claims | backstop only |
 
 `occupied_stale` is reserved for the **unobserved-death case only**: no hook fired *and*
@@ -574,7 +644,7 @@ That is the residual the next section governs.
 signals only**: `Register`, verified `ReRegister`, and any future positive resume/connect
 hook (see [§16 OQ-γ](#open-question-resolutions)). It is **NOT** refreshed by the daemon's
 own heartbeat (which updates `last_heartbeat` only —
-[§11.2](#112-epoch-guarded-heartbeat-non-deleting-release-and-self-demotion-mr2-mr3)) and
+[§11.2](#112-epoch-guarded-heartbeat-non-deleting-releaseownership-and-self-demotion-mr2-mr3)) and
 **NOT** by a bare `Wait` connect (which is sessionless and proofless —
 [§7.3](#73-no-intra-user-isolation-in-v1-mr6)). Either would let a continuously-heartbeating
 daemon, or an unrelated same-user waiter, keep a dead-but-unhooked session permanently
@@ -582,9 +652,15 @@ fresh — defeating `occupied_stale`/takeover and reintroducing the zombie lease
 does NOT refresh** either — it is a *removal* signal; a **failed** `sessionEnd` records a
 `recent_error` and **leaves `last_confirmed` unchanged** (no refresh-then-fail reanimation).
 
-`occupied_stale` is **derived**, not stored: `now - attendance_last_confirmed_at >
-stale_after`, where `stale_after` is configurable (default a small multiple of the
-heartbeat/lease window; the exact default is frozen in `daemon-core`). Both `now` and
+`occupied_stale` is **derived**, not stored:
+`owner_instance_id IS NOT NULL AND session_id IS NOT NULL AND attendance_last_confirmed_at IS
+NOT NULL AND now - attendance_last_confirmed_at > stale_after`, where `stale_after` is
+configurable (default a small multiple of the heartbeat/lease window; the exact default is
+frozen in `daemon-core`). The `session_id`/`attendance NOT NULL` guards matter: a **pending-bind**
+row (post-takeover, owner set but `session_id`/`attendance` NULL — [§10.2](#102-takeover-fence-then-register-da-5-r3-3))
+is **not** `occupied_stale` (`now - NULL` is never `> stale_after`); it is reclaimed instead by
+the **un-heartbeated-aging** path ([§11.2](#112-epoch-guarded-heartbeat-non-deleting-releaseownership-and-self-demotion-mr2-mr3)),
+so the two recovery paths partition cleanly and neither wedges. Both `now` and
 `attendance_last_confirmed_at` are read from the **single backend/database-server clock
 domain** ([§11.5](#115-postgres-cross-machine-reclaim-in-epochs-not-timing)) — never one
 machine's local time compared against another's — and the clock source is injectable so
@@ -592,7 +668,7 @@ skewed-clock and suspend/resume cases are testable. It is surfaced in
 Status and `address list`. It **never triggers teardown** — an idle-but-alive session
 stays `occupied` and instantly wakeable (the operator's explicit requirement).
 
-### 10.2 Takeover (atomic at the exchange) (DA-5)
+### 10.2 Takeover (fence-then-register) (DA-5, R3-3)
 
 Because the exchange is a singleton, the common takeover case is **intra-daemon** (the
 stale station and the new claimant are served by the same daemon process). Backend epoch
@@ -604,40 +680,61 @@ critical section it:
 2. **evicts** the prior `session_id → addresses` entry for the rotated address,
 3. **closes** the IPC waiters bound under the prior occupant (their `wait` reads return a
    defined disconnect, not a silent hang),
-4. **binds** the address under the new occupant.
+4. **tombstones** the prior `(store_key, session_id, address)` binding.
 
-No observable intermediate state (no window where the address is both old-owned and
-new-owned). Takeover is a **privileged** `Takeover` RPC, allowed once the address is
-`occupied_stale`, and the response reports the prior occupant + `last_confirmed` so the
-operator decides informedly. There is **no idle teardown** — takeover is an explicit
-operator action, the recovery path for the weak-loader-liveness residual.
+Takeover does **not** bind a new occupant (R3-3 / spar): the `Takeover { store_key, address,
+proof }` RPC is an **operator/recovery** action carrying no session identity, so it cannot
+install one. After the CAS the row is `owner_instance_id = :me` (the daemon), a fresh
+`lease_epoch`, `session_id = NULL`, `attendance_last_confirmed_at = NULL` — a **pending-bind**
+reservation. A **subsequent `Register`** (by whoever wants the address) binds a new occupant
+against the fresh epoch ([§11.1](#111-epoch-lifecycle-oq1)). There is no window where the
+address is both old-owned and new-owned (the prior owner is fenced atomically); the
+intermediate **pending-bind** state is owned-but-session-less and **bounded** (below), not a
+silent hang. The response reports the prior occupant + `last_confirmed` so the operator
+decides informedly. There is **no idle teardown** — takeover is explicit, the recovery path
+for the weak-loader-liveness residual.
 
-**Normative takeover backend CAS (M6).** The load-bearing takeover case is *stale
+**Normative takeover backend CAS (M6, R3-3).** The load-bearing takeover case is *stale
 attendance with a still-fresh heartbeat* (an unhooked-dead session whose daemon still
 heartbeats the lease), so the normal stale-claim predicate
 (`owner_instance_id IS NULL OR last_heartbeat < :stale_cutoff`,
 [§11.1](#111-epoch-lifecycle-oq1)) **does not fire**. Takeover therefore has its own
-privileged CAS, gated on the **`occupied_stale` attendance predicate**, pinning the
-current epoch+owner and incrementing in-SQL:
+privileged CAS, gated on the **`occupied_stale` attendance predicate** and on the row being
+**occupied** (`owner_instance_id IS NOT NULL`, so it partitions cleanly from the normal
+ownerless-claim path), pinning the current epoch+owner and incrementing in-SQL:
 
 ```sql
 UPDATE leases
    SET owner_instance_id = :me,
        lease_epoch = lease_epoch + 1,
-       last_heartbeat = :backend_now
+       last_heartbeat = :backend_now,
+       session_id = NULL,                      -- pending-bind: no session until a follow-up Register
+       attendance_last_confirmed_at = NULL
  WHERE address = :addr
    AND lease_epoch = :observed_epoch
    AND owner_instance_id IS NOT DISTINCT FROM :observed_owner
-   AND (:backend_now - attendance_last_confirmed_at) > :stale_after   -- occupied_stale, NOT stale heartbeat
+   AND owner_instance_id IS NOT NULL                                    -- occupied (not the ownerless-claim branch)
+   AND session_id IS NOT NULL                                           -- a bound session to take over
+   AND (:backend_now - attendance_last_confirmed_at) > :stale_after     -- occupied_stale, NOT stale heartbeat
    -- → rows: 0|1
 ```
 
 It additionally **tombstones** the prior `(store_key, session_id, address)`
-([§14.1](#141-the-in-memory-store_key-session_id--addresses-authority)) in the same
-transaction. Like every claim it writes ownership/fence columns only (not `occupant`/
+([§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table)) in the
+same transaction. Like every claim it writes ownership/fence columns only (not `occupant`/
 `attendance_last_confirmed_at` — the new owner has no verified session until a `Register`).
-This CAS is cross-referenced from [§11.1](#111-epoch-lifecycle-oq1) and exercised by
-[§17](#17-gating-tests--per-backend-conformance-matrix-daemon-core-acceptance) tests 5 and 8.
+
+**Bounded pending-bind (R3-3 / spar — closing the post-takeover wedge).** A pending-bind row
+(`owner set, session_id = NULL`) is **not heartbeated** — the daemon heartbeats **only bound
+rows** (`session_id IS NOT NULL`, [§11.2](#112-epoch-guarded-heartbeat-non-deleting-releaseownership-and-self-demotion-mr2-mr3)).
+So if the follow-up `Register` never lands (it hangs/crashes), `last_heartbeat` simply ages
+and the **normal claim CAS reclaims the row** once `last_heartbeat < :stale_cutoff` — the
+reservation is bounded by `stale_cutoff` with **no extra column**. (Without this, a row left
+`owner set, attendance = NULL` would be neither `occupied_stale` — `now - NULL` is SQL-NULL,
+never `> stale_after` — nor normally claimable while the heartbeat looked fresh, i.e. a
+permanent wedge.) This CAS is cross-referenced from [§11.1](#111-epoch-lifecycle-oq1) and
+exercised by [§17](#17-gating-tests--per-backend-conformance-matrix-daemon-core-acceptance)
+tests 5 and 8.
 
 ## 11. Lease-epoch fence (the spine)
 
@@ -660,10 +757,17 @@ SQLite and Postgres; the per-backend conformance matrix is [§17](#17-gating-tes
   (`owner_instance_id`, `lease_epoch`, `last_heartbeat`); it does **not** write `occupant`
   or `attendance_last_confirmed_at` — those are **session** fields written only by
   `Register`/verified `ReRegister` ([§10.1](#101-last_confirmed-occupied_stale-and-the-hook-semantics-split-oq2-da-6)), so a bare recovery/stale-claim/takeover never forges session
-  presence. `:backend_now` is the **backend/database-server clock** (e.g. SQL
-  `CURRENT_TIMESTAMP`/`now()`), never a client-supplied local timestamp (single clock
-  domain, [§11.5](#115-postgres-cross-machine-reclaim-in-epochs-not-timing)). The normative
-  claim statement, identical on both backends:
+  presence. `:backend_now` is the **`BackendClock`** — a frozen contract with one
+  backend-specific implementation each (**R3-Sb**), never a client-supplied local timestamp:
+  on **Postgres** it is the true server clock (`now()`/`CURRENT_TIMESTAMP`, evaluated
+  server-side so every writer across processes/machines shares one domain); on **SQLite**
+  there is no server, so the single writer **is** the one daemon process and `BackendClock`
+  is that daemon's **injectable monotonic clock** (a single in-process monotonic source,
+  injectable for tests), which is the single domain precisely because SQLite admits exactly
+  one daemon-writer per store. Both implementations satisfy the same invariant — all of
+  `last_heartbeat`, `attendance_last_confirmed_at`, `stale_cutoff`, and the ACK deadline are
+  read from **one** clock domain ([§11.5](#115-postgres-cross-machine-reclaim-in-epochs-not-timing)).
+  The normative claim statement, identical on both backends:
 
   ```sql
   UPDATE leases
@@ -681,9 +785,14 @@ SQLite and Postgres; the per-backend conformance matrix is [§17](#17-gating-tes
   `:observed_epoch + 1`. (`Register` additionally sets `occupant` and
   `attendance_last_confirmed_at` in the same transaction as the claim.)
 - **First-ever absent row** (the address has no `leases` row yet) is created by an
-  **`INSERT ... ON CONFLICT(address) DO NOTHING`** that sets `lease_epoch = 1`; if the
-  insert conflicts (a row appeared concurrently), the claimant falls through to the
-  UPDATE CAS above. **Legacy rows** (a row whose `lease_epoch` column is `NULL`, predating
+  **`INSERT INTO leases (address, lease_epoch, owner_instance_id, last_heartbeat) VALUES
+  (:addr, 1, :me, :backend_now) ON CONFLICT(address) DO NOTHING`** — the insert both
+  **creates the epoch at `1` AND claims ownership** for the inserter (fence and ownership
+  columns set together, never a transient ownerless row at epoch 1). If the insert succeeds
+  (1 row) the claimant **owns the address at `lease_epoch = 1`** (then `Register` adds
+  `occupant`/`attendance` in the same transaction); if it conflicts (0 rows — a row appeared
+  concurrently), the claimant falls through to the UPDATE CAS above (which will pin the
+  now-observed epoch+owner). **Legacy rows** (a row whose `lease_epoch` column is `NULL`,
   the epoch column) take a **separate, explicit** path
   (`... WHERE address = :addr AND lease_epoch IS NULL`) that sets `lease_epoch = 1`.
   **`NULL` is never conflated with `0`** in the normal claim predicate (see
@@ -692,44 +801,64 @@ SQLite and Postgres; the per-backend conformance matrix is [§17](#17-gating-tes
   `occupant` is a **human/host label of the attending session** (informational), distinct
   from `owner_instance_id` (the daemon fencing identity) and never overwritten by a claim.
 
-### 11.2 Epoch-guarded heartbeat, non-deleting release, and self-demotion (mr2, mr3)
+### 11.2 Epoch-guarded heartbeat, non-deleting ReleaseOwnership, and self-demotion (mr2, mr3)
 
-**Heartbeat** is epoch+owner-guarded, returns a rowcount, and updates **lease-liveness
-proof only** — it does **not** touch `attendance_last_confirmed_at` (which is
-session-presence, refreshed only by Register / verified Re-register — see
-[§10.1](#101-last_confirmed-occupied_stale-and-the-hook-semantics-split-oq2-da-6)).
-Conflating the two would let the daemon's own continuous heartbeat keep a dead-but-
-unhooked session permanently fresh, defeating `occupied_stale`/takeover and
-reintroducing the zombie lease:
+**Heartbeat** is epoch+owner-guarded, returns a rowcount, updates **lease-liveness proof
+only** (not `attendance_last_confirmed_at`, which is session-presence, refreshed only by
+Register / verified Re-register — see [§10.1](#101-last_confirmed-occupied_stale-and-the-hook-semantics-split-oq2-da-6)),
+and is **scoped to bound rows** (`session_id IS NOT NULL`). Conflating heartbeat with
+attendance would let the daemon's own continuous heartbeat keep a dead-but-unhooked session
+permanently fresh; heartbeating an **un**bound row (a post-takeover pending-bind reservation,
+[§10.2](#102-takeover-fence-then-register-da-5-r3-3)) would keep that reservation permanently
+fresh and wedge the address — so a pending-bind row is deliberately **not** heartbeated and
+ages into reclaimability:
 
 ```sql
 heartbeat: UPDATE leases SET last_heartbeat = :backend_now
-            WHERE address=? AND lease_epoch=? AND owner_instance_id=?    -- → rows: 0|1
+            WHERE address=? AND lease_epoch=? AND owner_instance_id=?
+              AND session_id IS NOT NULL                            -- bound rows only (R3-3)
+            -- → rows: 0|1
 ```
 
-**Release does NOT delete the row.** Deleting would discard the only durable carrier of
-`lease_epoch`, so a later claim would see no row and reset the epoch (7 → 1), breaking
-monotonicity. Release clears ownership but **retains the epoch high-water**:
+**`ReleaseOwnership` does NOT delete the row, and does NOT tombstone (R3-2 / spar).**
+Deleting would discard the only durable carrier of `lease_epoch` (a later claim would reset
+the epoch 7 → 1, breaking monotonicity). `ReleaseOwnership` is the **daemon-stop / crash
+handoff** path: it clears the **fencing identity only** (`owner_instance_id`), and
+**preserves the session binding** (`session_id`, `session_incarnation`,
+`attendance_last_confirmed_at`) with **`tombstoned_at` left NULL**, so the same session's
+next-call `ReRegister` re-proves presence and re-claims under the **same incarnation**
+(§16 upgrade continuity):
 
 ```sql
-release:   UPDATE leases SET owner_instance_id = NULL, occupant = NULL
-            WHERE address=? AND lease_epoch=? AND owner_instance_id=?    -- → rows: 0|1
+ReleaseOwnership: UPDATE leases SET owner_instance_id = NULL
+                   WHERE address=? AND lease_epoch=? AND owner_instance_id=?   -- → rows: 0|1
 ```
 
-Occupancy is derived from `owner_instance_id IS NOT NULL` (and not stale), **never from
-row existence**. **Normative no-delete invariant:** no code path — release, detach,
-cleanup, GC, test helper, or migration — may `DELETE` a lease row whose `lease_epoch`
-matters; all of them tombstone (null the owner) and preserve the high-water epoch. (If
-true row reclamation is ever needed, the high-water moves to a separate append-only
+This is a **reserved-continuity** state, not removal: the ownerless row is **immediately
+re-claimable at the backend** (`owner_instance_id IS NULL`), but *who* may re-bind it is
+decided by the **incarnation currency** in `sessions`
+([§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table)) — the
+same session's current-incarnation `ReRegister` reclaims continuity, while any **other**
+session that claims the address re-binds it under its own `session_id`/incarnation (which
+removes the prior session from *that* address; the prior session's `ReRegister` then simply
+does not union an address whose `session_id` is no longer its own). **Station-removal**
+(`DeregisterSession`/`Detach`/`Takeover`/lapsed-TTL) is the **distinct** path that sets
+`tombstoned_at` (at the current incarnation) — `ReleaseOwnership` is never a station-removal.
+
+Occupancy is derived from `owner_instance_id IS NOT NULL` (and not stale), **never from row
+existence**. **Normative no-delete invariant:** no code path — `ReleaseOwnership`, detach,
+cleanup, GC before the horizon, test helper, or migration — may `DELETE` a lease row whose
+`lease_epoch` matters; all of them null the owner and preserve the high-water epoch. (If true
+row reclamation is ever needed, the high-water moves to a separate append-only
 `address_epoch(address, epoch)` table; out of scope for v1, where unbounded retired-row
 growth is acceptable at single-user scale — GC is issue #24.)
 
-A **0-row heartbeat or release** means a higher epoch exists. The daemon **self-demotes**
-for that address — and self-demotion means **stop emitting AND stop heartbeating
-(relinquish the address)**, close its waiters, and drop the in-memory station. It must
-not keep heartbeating (which would hold the lease fresh and starve a successor). (Today's
-`heartbeat` returns `Result<()>` with no rowcount — verified `sqlite.rs:325-333` /
-`postgres.rs:313-320` — so the rowcount-returning shape is a required backend-API change.)
+A **0-row heartbeat or `ReleaseOwnership`** means a higher epoch exists. The daemon
+**self-demotes** for that address — stop emitting AND stop heartbeating (relinquish the
+address), close its waiters, and drop the in-memory station. It must not keep heartbeating
+(which would hold the lease fresh and starve a successor). (Today's `heartbeat` returns
+`Result<()>` with no rowcount — verified `sqlite.rs:325-333` / `postgres.rs:313-320` — so the
+rowcount-returning shape is a required backend-API change.)
 
 ### 11.3 Server-side delivery fence (mr1 — at-least-once preserving)
 
@@ -761,17 +890,50 @@ The daemon, in a **per-address critical section**, for each undelivered message:
    ACK — not the socket write — is the commit signal: **"delivered" means the wait client
    completely flushed `M` to its stdout boundary** (not that a frame entered the IPC
    buffer; end-to-end application-consumption would need a separate consumer ack, out of
-   scope). The AWAIT is bounded by an **ACK deadline**: on timeout, EOF, or stdout
-   backpressure, the daemon **closes the waiter and releases the critical section WITHOUT a
-   MARK** — `M` stays undelivered and simply redelivers (at-least-once). This is what keeps
-   a wedged/backpressured/EOF-masked waiter from hanging the address (and from hanging
-   `stop --drain`, which must flush in-flight critical sections).
-4. **MARK** via `mark_delivered_if_current_owner(...)` only after a matching ACK. The
-   method checks **ownership first, in one transaction, with strict outcome precedence**:
+   scope). The AWAIT is bounded by an **ACK deadline** with **frozen semantics (R3-S1)**:
+   - **Source/default.** `ack_deadline` is a named config with a concrete `daemon-core`
+     default derived from the heartbeat/lease window (a small multiple, so a healthy-slow
+     stdout is not clipped); it is **not** open-ended.
+   - **Clock.** Measured on the **`BackendClock`/daemon monotonic clock**
+     ([§11.1](#111-epoch-lifecycle-oq1)), never wall-clock, so suspend/resume and skew are
+     testable and a backward clock step cannot expire it early.
+   - **Boundary.** The deadline is **exclusive**: the waiter is timed-out only when
+     `elapsed > ack_deadline` (exactly-at-deadline is not yet a timeout).
+   - **Timer-vs-ACK serialization.** The ACK arrival and the deadline timer race **inside the
+     per-address critical section**; the **first to fire wins and the other is ignored** (an
+     ACK that arrives after the timer has fired and closed the waiter is dropped — it cannot
+     resurrect a MARK; a timer that fires after a matching ACK has been accepted is a no-op).
+   - **Repeated-timeout backoff / quarantine.** After **K** consecutive ACK-deadline timeouts
+     on the same `(address, connection)` the daemon **quarantines that connection** (marks the
+     waiter unhealthy and stops re-selecting it for that address for a backoff window) so a
+     persistently slow/blocked stdout cannot spin the per-address critical section into a
+     duplicate-redelivery storm that starves later messages. `K` and the backoff are
+     `daemon-core` config with frozen defaults.
+
+   On timeout, EOF, or stdout backpressure the daemon **closes the waiter and releases the
+   critical section WITHOUT a MARK** — `M` stays undelivered and simply redelivers
+   (at-least-once). This keeps a wedged/backpressured/EOF-masked waiter from hanging the
+   address (and from hanging `stop --drain`, which must flush in-flight critical sections).
+4. **MARK** via `mark_delivered_if_current_owner(...)` only after a matching ACK. **The
+   ownership check and the mark MUST be one atomic step (R3-5).** Under the stated Postgres
+   `READ COMMITTED` autocommit model a two-step *read owner → mark* races a transfer/takeover
+   that rotates ownership between the read and the mark (the mark would then commit as a
+   non-current owner). The frozen shape locks the lease row first, in **one transaction**:
+   - **Postgres:** `SELECT owner_instance_id, lease_epoch FROM leases WHERE address=:addr FOR
+     UPDATE` (row-lock), compare to the caller's `(owner_instance_id, lease_epoch)`, then mark
+     the delivery, then `COMMIT`.
+   - **SQLite:** the same sequence inside a **`BEGIN IMMEDIATE`** transaction (a single
+     write-lock; the daemon is the lone writer), scoped so it does **not** serialize unrelated
+     addresses (the per-address critical section already holds, and the immediate-txn is held
+     only for the lock→compare→mark→commit, not across the EMIT/AWAIT).
+
+   The **owner-directed transfer** and the **Takeover CAS** take the **same lease-row lock**,
+   so they serialize against the mark — closing the rotate-between-check-and-mark race. The
+   method returns one of, with **strict outcome precedence**:
    - **`NotOwner`** (precedence-winning, **fatal**): returned whenever the caller is **not
      the current `(address, owner_instance_id, lease_epoch)`** — **even if the message is
      already delivered**. The daemon **self-demotes immediately**
-     ([§11.2](#112-epoch-guarded-heartbeat-non-deleting-release-and-self-demotion-mr2-mr3))
+     ([§11.2](#112-epoch-guarded-heartbeat-non-deleting-releaseownership-and-self-demotion-mr2-mr3))
      and stops draining the rest of the backlog. (Without this precedence, a successor `S`
      that marks first would make a stale predecessor `P` see `AlreadyDelivered` and keep
      emitting stale-epoch frames — the exact race the fence exists to stop.)
@@ -800,6 +962,15 @@ crash-after-EMIT/before-ACK, crash-after-ACK/before-MARK, waiter-death-after-EMI
 ACK**, and **ownership-rotation-after-EMIT plus successor-marks-then-predecessor-marks**,
 that every message reaches a waiter **at least once** (never zero) and that a superseded
 owner stops after one `NotOwner` (even when the message was already delivered by `S`).
+
+**Performance contract (R3-Sf).** The EMIT→ACK→MARK round-trip and its lease-row lock now sit
+on the **per-address hot path**, so the budget is frozen as acceptance, not left implicit:
+`daemon-core` freezes a **p95/p99 single-delivery fence latency budget** (local IPC RTT +
+one lease-row-locked mark) and a **numeric dedup resource contract** (the per-address
+`message_id` dedup set's bounded memory/row footprint and its retention window). These are
+**benchmarked** as part of the gating matrix; the fence is **not weakened** (e.g. dropping the
+ACK or the lock) to meet them — if a budget cannot be met, it is renegotiated explicitly, the
+correctness fence stays.
 
 ### 11.4 Ordered handoff = owner-directed atomic transfer (sf3)
 
@@ -835,9 +1006,11 @@ upgrade). `S` inherits the prior `attendance_last_confirmed_at`, so a station th
 Properties: no ownerless gap (`P@E → S@E+1` atomically); no third-party hijack (the owner
 is never `NULL`/stale during the transfer, so a normal stale-claim cannot interpose);
 monotonic (epoch increments once, in-SQL, `:backend_now` = server clock); concurrent
-transfers serialize on the row; `P`'s later heartbeat/release/mark at `E` returns 0 rows so
-`P` self-demotes; any `P`-emitted-but-unmarked message stays undelivered and `S`
-redelivers it. **Successor readiness is a precondition:** `P` performs the transfer **only
+transfers serialize on the row; the transfer's **pinned-row write also serializes against the
+delivery MARK's lease-row lock** (R3-5), so an in-flight mark sees either the pre- or
+post-transfer owner atomically, never a torn read; `P`'s later heartbeat/release/mark at `E`
+returns 0 rows so `P` self-demotes; any `P`-emitted-but-unmarked message stays undelivered and
+`S` redelivers it. **Successor readiness is a precondition:** `P` performs the transfer **only
 after `S` reports READY** (the `prepare` step); if `S` crashes **before** the transfer, the
 row is unchanged and `P` keeps ownership (abort the handoff, retry or fall back to release);
 if `S` crashes **after** the transfer, `S@E+1` is simply a crashed owner whose lease ages
@@ -981,7 +1154,7 @@ ordering or the fence**:
 
 ## 14. Daemon-native session ownership
 
-### 14.1 The in-memory `(store_key, session_id) → addresses` authority
+### 14.1 The `(store_key, session_id) → addresses` authority and the `sessions` table
 
 The exchange owns an **in-memory** authority map keyed by **`(store_key, session_id)` →
 `{addresses}`** for which addresses a session attends. The `store_key` is part of the key
@@ -994,28 +1167,60 @@ authority**. The Copilot hook becomes a **thin mapper**
 (`COPILOT_AGENT_SESSION_ID → TELEX_SESSION_ID`), and Copilot JSON parsing never becomes a
 core protocol dependency (it lives in the plugin layer).
 
-**Generations and tombstones (durable, fail-closed, frozen — M3).** Each
-`(store_key, session_id, address)` carries a monotonic **`session_generation`** and a
-**`tombstoned_at`**, both **durable columns on the lease row**
-([§5.1](#51-durable-lease-row-columns-new)) so the guard **survives a daemon crash**:
+**Session incarnation + tombstones (durable, fail-closed, frozen — M3, R3-6 / spar).** The
+anti-resurrection guard has **two distinct durable facts**, because one per-address column
+cannot do both jobs (the spar showed a single per-`(session_id, address)` generation either
+falsely rejects live sibling-address waiters *or*, without a session-keyed authority, lets a
+GC'd-tombstone or a same-`session_id` respawn resurrect a removed address):
 
-- `Register` advances the generation; `DeregisterSession`/`Detach`/`Takeover`/`release`
-  set `tombstoned_at` at the current generation, **atomically with** the removal in one
-  transaction.
-- `ReRegister` **MUST** carry a `session_generation`; one that is **missing, older, or
-  tombstoned** is rejected **fail-closed** with `Stale` and does **not** resurrect the
-  address. This closes the race (including across a crash) where a stale blocked `Wait`'s
-  EOF-reconnect `ReRegister` reorders around a legitimate removal and revives a dropped
-  address. The generation is propagated to the client via the `Registered` response and
-  carried in the session env / a session-owned token so `wait`/`send`/`reply` re-register
-  with the correct generation (see [§14.6](#146-resolvefrom-sendreply-recovery-and-presence-between-waits-mr6-mr7)).
-- A genuinely new session re-uses the address only by a fresh `Register` (new generation).
-- **GC horizon (frozen):** a tombstone is retained for at least
-  `max(reconnect/EOF-grace) + daemon-down-TTL` before it may be collected, so no
-  legitimately-slow reconnect outlives the tombstone that must reject it. The authority
-  semantics above are **frozen** here (no "`daemon-core` MAY choose an alternative" escape
-  hatch); the merge rule is union of non-tombstoned addresses at the current generation
-  ([§14.4](#144-wait-and-session-scoped-re-register)).
+1. **Incarnation currency — the `sessions` table** ([§5.1](#51-durable-lease-row-columns-new)),
+   keyed by `(store_key, session_id)`, is the **single source of truth** for "is incarnation
+   `I` still the live one?" The incarnation is a **per-session-life token minted by the loader
+   at session start** and carried in the session env (so every client of that life —
+   `wait`/`send`/`reply`/`ack` — holds the same token), which makes the mint/bump boundary
+   unambiguous: **`Register` *adopts* the loader's life-token** — if the `sessions` row is
+   absent it creates `current_incarnation = token`; if present **with the same token** it is a
+   no-op continuation (so a *sibling* address `Register`, or a same-life recovery, does **not**
+   change currency and a live waiter keeps a valid token); if present **with a different
+   token** the caller is a **genuinely new session-life reusing the `session_id`**, so it
+   atomically sets `current_incarnation = token` and stamps the prior one `superseded_at`
+   (fail-closed against the old life). **`ReRegister` never mints** — it only validates the
+   carried token's currency. A daemon crash/respawn of a *still-live* session re-presents the
+   **same** loader token (the env survives the daemon, not the session), so currency is
+   preserved; a reused `session_id` arrives with a **new** loader token, so it supersedes.
+   (This assumes a `session_id` is not shared by two *concurrently-live* sessions — true on
+   Copilot CLI, where `session_id` is unique per session-life; reuse is only sequential.)
+2. **Per-address membership — `tombstoned_at`** on the lease row, set by the **station-removal**
+   paths `DeregisterSession`/`Detach`/`Takeover`/lapsed-TTL (**not** `ReleaseOwnership`),
+   atomically with the removal.
+
+The rules, now frozen:
+
+- `ReRegister` **MUST** carry a `session_incarnation`, and is validated in **two gates, in
+  order**: (a) **currency** — `I` must equal `sessions.current_incarnation` with
+  `superseded_at IS NULL`, else `Stale` (this holds **even if the address row was GC'd** — the
+  `sessions` row, not the lease row, is the authority); then (b) **membership** — union the
+  session's lease rows where `session_incarnation = I AND tombstoned_at IS NULL`; a tombstoned
+  or foreign-`session_id` row is excluded.
+- This closes every resurrection path: a **same-incarnation Detached** address is excluded by
+  its tombstone; a **rebound** address carries another session's id/incarnation; a
+  **session-id-reuse** new life supersedes the old token; a **GC'd** row yields
+  `UnknownSession` (see below), never a silent revive.
+- **`UnknownSession` is not authority to resurrect (R3-Sa / spar).** A `ReRegister`/`Wait`
+  that finds no lease row returns `UnknownSession`; the client MUST treat it as "re-`Register`
+  **fresh** under my *current* session identity" (a new binding, validated against `sessions`),
+  **never** as "revive the address I remember." A stale token whose `sessions` currency has
+  been superseded gets `Stale` at gate (a), before any membership/GC consideration.
+- The incarnation is propagated to the client via the `Registered` response and carried in the
+  session env / a session-owned token so `wait`/`send`/`reply` re-register with the correct
+  token (see [§14.6](#146-resolvefrom-sendreply-recovery-and-presence-between-waits-mr6-mr7)).
+- **GC horizon (frozen):** a tombstoned lease row **and** a superseded `sessions` row are
+  retained for at least `max(reconnect/EOF-grace) + daemon-down-TTL` before collection, so no
+  legitimately-slow reconnect outlives the currency/tombstone fact that must reject it; a
+  reconnect arriving **exactly at** the horizon either still finds the row (→ `Stale`) or finds
+  it collected (→ `UnknownSession` → re-register-fresh) — both safe, never resurrection. The
+  authority semantics are **frozen** here (no "`daemon-core` MAY choose an alternative"
+  escape); the merge rule is the two-gate currency-then-union above.
 
 **Cross-address operation serialization (S4).** Per-address critical sections
 ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) protect single-address
@@ -1038,7 +1243,9 @@ only a session id). It cannot inherit a secret minted in the earlier `attach`/lo
 process's memory. So the proof in v1 is the **instance `admin_cap`**, read from the
 singleton-scoped user-private `<run_dir>/daemon-<H>.cap` ([§7.1](#71-scoped-capability-model-v1-one-instance-admin-token)):
 the hook presents `DeregisterSession(store_key, session_id, admin_cap)`; the daemon verifies the
-secret and that `(store_key, session_id)` is in its map, then drops the addresses. **No external
+secret and that `(store_key, session_id)` is in its map, then **tombstones the addresses and
+marks the `sessions` row `superseded_at`** (atomically — [§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table)),
+so a later stale `ReRegister` for that incarnation fails the currency gate. **No external
 session→address registry**, no per-session cap minted at Register in v1 (the
 `per_session_cap` field is reserved for a future intra-user-isolation threat model).
 
@@ -1062,29 +1269,34 @@ Recovery is a three-state machine over attendance records:
 
 **Durable vs rebuilt:** durable (recovered) = the lease rows — `address`, `occupant`,
 `lease_epoch`, `owner_instance_id`, `last_heartbeat`, `attendance_last_confirmed_at`,
-**`session_id`, `session_generation`, `tombstoned_at`** ([§5.1](#51-durable-lease-row-columns-new)) — plus the durable delivery buffer. On respawn the daemon **re-derives** the
-`(store_key, session_id) → addresses` authority map from those durable rows as `suspect`
-(generations and tombstones intact, so the anti-resurrection guard survives the crash).
-Rebuilt-by-client (lost on crash, re-established by re-register/verify) = promotion to
-`verified`, the live `watch_pids` set, and IPC waiter registrations.
+**`session_id`, `session_incarnation`, `tombstoned_at`** — **plus the `sessions` authority
+row** ([§5.1](#51-durable-lease-row-columns-new)) and the durable delivery buffer. On respawn
+the daemon **re-derives** the `(store_key, session_id) → addresses` authority map from those
+durable rows as `suspect` (the `sessions` currency + per-address tombstones intact, so the
+anti-resurrection guard survives the crash **without** bumping the incarnation — a still-live
+session keeps its token). Rebuilt-by-client (lost on crash, re-established by
+re-register/verify) = promotion to `verified`, the live `watch_pids` set, and IPC waiter
+registrations.
 
 ### 14.4 `wait` and session-scoped re-register
 
 `wait` is the **only long-lived client** able to re-prove a running session after a
 respawn (the loader's `attach` is one-shot and already exited). On reconnect-on-EOF,
 `wait` MUST **auto-`ReRegister`** (carrying its `store_key`, `session_id`,
-`session_generation`, address, and watch-pids) **before** failing; a `Wait` that returns
+`session_incarnation`, address, and watch-pids) **before** failing; a `Wait` that returns
 `UnknownSession` triggers the same `ReRegister` then retries. `ReRegister` is
 **unprivileged** — no `admin_cap` is required (per [§7.1](#71-scoped-capability-model-v1-one-instance-admin-token)); the cap's **only** acquisition path is the
 `daemon-<H>.cap` file (it is **not** carried in env — [§7.1](#71-scoped-capability-model-v1-one-instance-admin-token)).
 `ReRegister` is **session-scoped**: its `address` is **optional** — with an address it
 re-verifies that one station; **without** an address it re-verifies **all** of the
-session's durable-recovered addresses for that store (rebuilding the set from the durable
-rows that carry `session_id`). It is **idempotent**: concurrent waits for one
-`(store_key, session_id)` converge to a single map entry by **union of their non-tombstoned
-addresses at the current generation**; a tombstoned/older-generation address returns
-`Stale` and is **not** unioned back in ([§14.1](#141-the-in-memory-store_key-session_id--addresses-authority)). This union/generation rule is **frozen** (no
-`daemon-core` alternative).
+session's durable-recovered addresses for that store, by the **two-gate currency-then-union**
+rule of [§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table):
+first the carried `session_incarnation` MUST match `sessions.current_incarnation` (else
+`Stale`, even if the lease rows were GC'd), then the set is the **union of the session's
+lease rows where `session_incarnation = I AND tombstoned_at IS NULL`**. It is **idempotent**:
+concurrent waits for one `(store_key, session_id)` converge to a single map entry by that
+union; a tombstoned/foreign/superseded address is **not** unioned back in. This
+currency-then-union rule is **frozen** (no `daemon-core` alternative).
 
 ### 14.5 Daemon-down and the TTL backstop
 
@@ -1107,8 +1319,8 @@ reply needs it while the map is empty/`suspect`:
 - **send/reply on an empty/`suspect` map** (e.g. a crash mid-turn with no active `wait` to
   have re-registered) MUST first issue a **session-scoped `ReRegister`** (no address —
   [§14.4](#144-wait-and-session-scoped-re-register)) from inherited env (`store_key`,
-  `TELEX_SESSION_ID`, `session_generation`), which rebuilds the session's address set from
-  the durable rows, then retry `ResolveFrom`. The address-less session-scoped form is what
+  `TELEX_SESSION_ID`, `session_incarnation`), which currency-gates then rebuilds the session's
+  address set from the durable rows, then retry `ResolveFrom`. The address-less session-scoped form is what
   makes this work: a foreground `reply` does **not** know its address (that is exactly what
   `ResolveFrom` discovers), so an address-scoped `ReRegister` could not be formed — the
   session-scoped form re-derives the whole set. If it still resolves nothing, the send
@@ -1117,14 +1329,14 @@ reply needs it while the map is empty/`suspect`:
   blocked wait, kill+respawn the daemon mid-turn, `telex reply` without `--from` → the
   documented outcome).
 - **The one-shot verbs inherit a frozen station env contract:** `TELEX_SESSION_ID`,
-  `store_key`, and the `session_generation` are present in the env of every `send`/`reply`/
+  `store_key`, and the `session_incarnation` are present in the env of every `send`/`reply`/
   `wait`/`ack` the harness spawns (the plugin sets them, [§9](#9-liveness-model)), so the
   session-scoped re-register can always be formed.
 - **Presence between `wait` calls (mr7).** Only a blocked `wait` continuously re-proves a
   session; a foreground agent mid-task (between waits) during a `drain`/respawn would
   otherwise lose verified attendance and default-`from` until its next wait. To bound this,
   **`send`/`reply`/`ack` also opportunistically session-`ReRegister`** (cheap, idempotent,
-  generation-guarded), so any agent action re-proves presence — not only `wait`. The
+  currency-guarded), so any agent action re-proves presence — not only `wait`. The
   continuous-occupancy claim is therefore **action-triggered, not universal** (aligned in
   [§3.3](#33-wait-reconnect-on-eof-grace) and DESIGN.md): presence is continuous for a
   session that takes *any* telex action across the handoff; a fully idle session (no wait,
@@ -1213,19 +1425,19 @@ isolation precondition for all Postgres concurrency tests is **READ COMMITTED au
 | 1 | **Concurrent first-use** (thundering-herd auto-spawn) | required (multi-process) | required | exactly one daemon bound; losers connect; no duplicate/orphan |
 | 2 | **Crash-during-`wait`** (+ suspect-row invariant) | required | required | `wait` reconnects+auto-`ReRegister`s, no spurious exit 3; recovered rows are `suspect` and **not delivered** until `verified` |
 | 3 | **Competing daemons** | N/A (single-writer; commit order == id order) — assert single-writer holds | **required** (cross-process/cross-machine, fault injection) | higher epoch wins; loser self-demotes on 0-row heartbeat; no flip-flop; no delivery from demoted owner |
-| 4 | **Delivery at-least-once failpoints** (mr1) — crash-after-EMIT/before-ACK, crash-after-ACK/before-MARK, waiter-death-after-EMIT, ownership-rotation-after-EMIT | required | required | every message reaches a waiter **>=1** time (never 0); `NotOwner` makes the superseded owner stop after one; dedupe by `message_id` |
-| 5 | **Intra-daemon takeover local-eviction** | required | required | old-occupant `wait` gets a defined disconnect (not a hang); new-occupant `wait` gets subsequent messages; no both-owned intermediate state |
-| 6 | **Real legacy holder / non-epoch cutover** (mr4) — start an actual legacy holder + `lease_epoch IS NULL` row | required | required | Phase-1 prove-unbound holds; **no `Frame::Message` from the non-epoch holder reaches a recipient after the daemon binds**; legacy row advances `NULL → 1` |
-| 7 | **Epoch monotonicity across release/cleanup/re-claim** (mr2) | required | required | after release at epoch E and a cleanup pass, the next claim is **E+1 (never 1)**; no row deletion of an epoch-bearing address |
-| 8 | **Unhooked dismiss + loader survives** (mr3) | required | required | the daemon's own heartbeat does **not** refresh `attendance_last_confirmed_at`; `occupied_stale` becomes true and takeover is offered; the live-but-idle session is **not** torn down |
-| 9 | **Ordered-handoff crash matrix** (sf3) — kill after quiesce / after flush / after transfer | required | required | bounded idempotent recovery; no loss; no duplicate beyond at-least-once; no ownerless hijack window |
-| 10 | **OS trust boundary negatives** (mr5) | required (Unix 0700 socket / symlink) | required | a second OS principal cannot `Hello`/`Register`/`Wait`; symlinked cap/lock rejected; pre-bound hostile server rejected by peer check; non-owner-private `config_root`/`run_dir` rejected at startup |
-| 11 | **IPC version/capability compatibility** (sf2) — N/N-1 and N+1/N | required | required | security-sensitive `required_capabilities` mismatch fails closed (`Incompatible`/`Unauthorized`); attach/wait-reconnect/Drain/Deregister/Status behave per the compatibility table |
+| 4 | **Delivery at-least-once failpoints** (mr1) — crash-after-EMIT/before-ACK, crash-after-ACK/before-MARK, waiter-death-after-EMIT, ownership-rotation-after-EMIT, **ownership-rotation BETWEEN the mark's ownership-check and the mark** (R3-5) | required | required | every message reaches a waiter **>=1** time (never 0); the atomic lease-row-locked mark returns `NotOwner` on the between-check-and-mark rotation (precedence over `AlreadyDelivered`) → superseded owner stops after one; dedupe by `message_id` |
+| 5 | **Intra-daemon takeover local-eviction + bounded pending-bind** (R3-3) | required | required | old-occupant `wait` gets a defined disconnect (not a hang); post-takeover the row is **pending-bind** (`owner=daemon, session_id=NULL`) until a follow-up `Register` binds; a follow-up `Register` binds the new occupant; **if `Register` never lands the un-heartbeated row ages and is reclaimed (no permanent wedge)**; no both-owned intermediate state |
+| 6 | **Real legacy holder / non-epoch cutover** (mr4) — start an actual legacy holder + `lease_epoch IS NULL` row | required | required | Phase-1 prove-unbound holds; **no NEW `Frame::Message` is emitted by the non-epoch holder after the daemon binds** (a pre-barrier in-flight frame may still arrive and is **at-least-once duplicate-deduped by `message_id`**, never lost — per [§12](#12-legacy-cutover-oq5-da-1) M9); legacy row advances `NULL → 1` |
+| 7 | **Epoch monotonicity across release/cleanup/re-claim** (mr2) | required | required | after `ReleaseOwnership` at epoch E and a cleanup pass, the next claim is **E+1 (never 1)**; no row deletion of an epoch-bearing address |
+| 8 | **Unhooked dismiss + loader survives + takeover CAS boundary** (mr3, R3-3) | required | required | the daemon's own heartbeat does **not** refresh `attendance_last_confirmed_at`; `occupied_stale` becomes true **with a still-fresh heartbeat** and the **takeover CAS fires on the occupied-stale *attendance* predicate** (the boundary: stale-heartbeat-alone would NOT, ownerless would take the claim path); the live-but-idle session is **not** torn down |
+| 9 | **Ordered-handoff crash matrix + successor-readiness** (sf3) — kill after prepare / quiesce / flush / transfer, on **both** P and S | required | required | bounded idempotent recovery; no loss; no duplicate beyond at-least-once; no ownerless hijack window; **S-crash-before-transfer aborts the handoff (P keeps ownership), S-crash-after-transfer recovers via stale-claim**; a dead station stays `occupied_stale` across `stop --drain` + transfer (no attendance refresh) |
+| 10 | **OS trust boundary negatives** (mr5, R3-7) | required (Unix 0700 socket / symlink) | required | a second OS principal cannot `Hello`/`Register`/`Wait`; symlinked cap/lock rejected; **a pre-bound hostile server is rejected client-side BEFORE any metadata disclosure** (before `Hello`/`store_key`, via `GetNamedPipeServerProcessId`/connected-`SO_PEERCRED`); **a second server instance is refused** by the exclusivity primitive; a **PID-reuse race** does not authenticate the wrong process; **`admin_cap` never appears** in `Status`/`Error`/logs/traces; non-owner-private `config_root`/`run_dir` rejected at startup |
+| 11 | **IPC version/capability compatibility** (sf2) — N/N-1 and N+1/N | required | required | security-sensitive `required_capabilities` mismatch fails closed (`Incompatible`/`Unauthorized`); attach/wait-reconnect/Drain/Deregister/Status behave per the **`daemon-core`-owned IPC compatibility table** ([§6.1](#61-version-handshake--capability-negotiation-hello--helloack-sf2); this node freezes the frame shapes + fail-closed policy, `daemon-core` fills/freezes the version table this test asserts against) |
 | 12 | **N / N+1 protocol-major parallel** (mr8) | required | required | two protocol-major-parallel daemons under one config root each authenticate against their own `daemon-<H>.cap`; neither clobbers the other |
-| 13 | **Durable tombstone / generation / GC** (M3, S13) | required | required | a removal then a crash then a delayed `ReRegister` (older/missing generation) returns `Stale` (no resurrection); generation-wrap and the GC horizon (> max reconnect + daemon-down TTL) hold; tombstone survives respawn |
-| 14 | **Schema-version downgrade gate** (M10) | required | required | a pre-epoch binary is refused by the external gate (launcher lock or hard-failing legacy write path) **before** it writes a non-epoch row; mid-migration crash recovers under the per-store exclusive lock |
-| 15 | **ACK boundary + correlation failpoints** (M2, S1, S13) | required | required | partial/errored stdout flush is not an ACK; slow/blocked-stdout hits the ACK deadline → no MARK, redeliver, address not wedged, `stop --drain` does not hang; wrong-connection/stale/duplicate ACK never marks a different in-flight delivery |
-| 16 | **Cross-address operation atomicity** (S4) | required | required | `DeregisterSession`/`Drain` over many addresses is atomic at the durable layer and order-acquired; a mid-operation crash leaves a consistent state (no partial removal, no one-address resurrection, no deadlock) |
+| 13 | **Session incarnation currency / tombstone / GC** (M3, S13, R3-6, R3-Sa) | required | required | a **two-address** session crash + **address-less `ReRegister`** + `ResolveFrom` recovers **both** addresses; a **same-`session_id` daemon respawn keeps continuity** (incarnation NOT bumped → no false `Stale`); a **new session-life reusing `session_id`** supersedes the old incarnation (old stale `ReRegister` → `Stale`, **no resurrection**); a removal + crash + delayed stale `ReRegister` → `Stale`; a **GC'd tombstone** → `UnknownSession` → re-register-fresh (not revive); a **reconnect exactly at the GC horizon** is safe either way; tombstone + `sessions` row survive respawn |
+| 14 | **Schema-version downgrade gate** (M10, R3-S2) | required | required | a pre-epoch binary invoked **directly** (not via the shim) is refused by the **mandatory store-level legacy-write hard-fail** **before** it writes a non-epoch row (launcher lock asserted as additional defense); mid-migration crash recovers under the per-store exclusive lock |
+| 15 | **ACK boundary + correlation + deadline failpoints** (M2, S1, R3-S1) | required | required | partial/errored stdout flush is not an ACK; slow/blocked-stdout hits the ACK deadline → no MARK, redeliver, address not wedged, `stop --drain` does not hang; **ACK exactly-at-deadline is NOT a timeout, one-tick-late IS**; **repeated timeouts quarantine the slow connection** (no duplicate-storm starvation); wrong-connection/stale/duplicate ACK never marks a different in-flight delivery |
+| 16 | **Cross-address operation atomicity** (S4, R3-Sc) | required | required | `DeregisterSession`/`Drain` **and `ReRegister`/`Takeover`** over many addresses are atomic at the durable layer and fixed-order-acquired; a mid-operation crash leaves a consistent state (no partial removal, no one-address resurrection, no deadlock) |
 
 Tests 1–5 are the original five (4 and 5 strengthened); 6–16 are added by the two review
 rounds (6–12 round 1, 13–16 round 2). `fencing-proof` owns 3/4/6/7/9/15 on Postgres;
@@ -1239,13 +1451,13 @@ specifics (cross-referenced to the sections above):
 | OQ | Question | Resolution | Where |
 |---|---|---|---|
 | **1** | Epoch lifecycle | Monotonic, never-reused `lease_epoch` + `owner_instance_id`; pinned-epoch+owner **CAS that increments in-SQL** (NULL≠0); **non-deleting release** retains the epoch high-water (no-delete invariant); rowcount-guarded heartbeat (lease-liveness only) + self-demote that **stops heartbeating**; server-side delivery fence = **EMIT → waiter-ACK → epoch-guarded MARK** (at-least-once preserving, `NotOwner` fatal, `AlreadyDelivered` success); ordered handoff = **owner-directed atomic transfer**; Postgres reclaim in epochs with a single backend clock domain. | [§11](#11-lease-epoch-fence-the-spine) |
-| **2** | Stale-attendance threshold + takeover (no teardown) | `last_confirmed` refreshed by positive **session-carrying** presence only (NOT heartbeat, NOT bare Wait, NOT sessionEnd); `occupied_stale` derived from `stale_after` on a single backend clock domain; never tears down; takeover atomic at the exchange (mint epoch + evict map + close waiters + bind), allowed once stale. | [§10](#10-stale-attendance-and-takeover-no-teardown) |
+| **2** | Stale-attendance threshold + takeover (no teardown) | `last_confirmed` refreshed by positive **session-carrying** presence only (NOT heartbeat, NOT bare Wait, NOT sessionEnd); `occupied_stale` derived from `stale_after` on a single backend clock domain; never tears down; takeover = **fence + evict + close-waiters + tombstone** (mint epoch, leave **pending-bind** = owner-but-session-less, follow-up `Register` binds), allowed once `occupied_stale`; pending-bind bounded by un-heartbeated aging. | [§10](#10-stale-attendance-and-takeover-no-teardown) |
 | **3** | Typed `--watch-pid` shape | `anchor` (any-sufficient) vs `required` (all-necessary) + pid+start-time reuse guard; v1 floor = loader anchor + start-time; expose flags only with a real consumer; dismissal-path matrix routes positive death to immediate teardown. | [§9.1](#91-typed-watch-pid-predicates-oq3), [§9.3](#93-dismissal-path-matrix-the-four-disjoint-cases) |
 | **4** | Distinct per-session PID? | **No usable one** on Copilot CLI today (empirically grounded: inner worker pid not env-exposed and lazily spawned; ppid-walk rejected). Loader anchor + start-time is the sole env-sourced backstop; hook + stale-attendance/takeover carry the rest. | [§9.2](#92-per-session-pid-on-copilot-cli-oq4--resolved-none-usable) |
 | **5** | Legacy / non-epoch cutover | **Two-phase, prove-unbound**: Phase 1 proves the legacy waiter endpoint is unbound (address-keyed IPC probe + quit, or process quiesce) — a stale-window alone is insufficient; Phase 2 claims `NULL → 1` via the explicit legacy CAS. Frozen cutover assertion + a dedicated legacy-holder gating test on both backends. | [§12](#12-legacy-cutover-oq5-da-1) |
 | **6** | DeregisterSession proof (no external registry) | Instance `admin_cap` from the **singleton-scoped** user-private `daemon-<H>.cap`; OS owner-only enforcement + peer-credential check ([§7.2](#72-os-level-trust-boundary-mr5)); hook presents `(store_key, session_id, admin_cap)`; daemon verifies secret + `(store_key, session_id)` map membership. v1 = same-user trust, **no intra-user isolation** (documented); per-session cap reserved/deferred. | [§7](#7-authorization-and-the-trust-boundary), [§14.2](#142-deregistersession-proof-oq6) |
 | **7** | Status freeze line | Freeze the **field set + meaning** + the gating tests' observable assertions; `daemon-core` owns rendering/format/verbosity. | [§4](#4-status-surface-the-frozen-contract-shape), [§17](#17-gating-tests--per-backend-conformance-matrix-daemon-core-acceptance) |
-| **8** | Attendance durability across daemon crash | Durable = lease rows (incl. epoch/owner/last_confirmed) + delivery buffer; rebuilt-by-client = in-memory `(store_key, session_id)` map + watch-pids + IPC waiters. `suspect`/`verified`/`lapsed` recovery; `wait` (and send/reply/ack) auto-Re-register; generation/tombstone race-safety; daemon-down TTL backstop; no permanent zombie. | [§14.3](#143-crash-recovery-suspect--verified--lapsed-oq8-da-3), [§14.4](#144-wait-and-session-scoped-re-register) |
+| **8** | Attendance durability across daemon crash | Durable = lease rows (incl. epoch/owner/last_confirmed/`session_incarnation`/tombstone) **+ the `sessions` incarnation-currency authority** + delivery buffer; rebuilt-by-client = in-memory `(store_key, session_id)` map + watch-pids + IPC waiters. `suspect`/`verified`/`lapsed` recovery; `wait` (and send/reply/ack) auto-Re-register; **two-gate currency-then-union** anti-resurrection (incarnation currency in `sessions` decides validity even after lease-row GC); daemon-down TTL backstop; no permanent zombie. | [§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table), [§14.3](#143-crash-recovery-suspect--verified--lapsed-oq8-da-3), [§14.4](#144-wait-and-session-scoped-re-register) |
 
 **OQ-γ (adjacent, design-foundation council).** *sessionResume / positive-presence hook
 scope:* if a positive-presence resume/connect hook is added later, it **joins** the
@@ -1264,7 +1476,7 @@ existing decision log. Deferred items are explicit so they are not silently drop
 |---|---|
 | **0004** (resident holder + ephemeral client) | **Superseded** by the exchange: zero persistent session processes; one-shot verbs. |
 | **0009** (station = holder + waiter) | **Recast**: station = a registration in the local exchange (lease row + attendance record), not a resident pair. |
-| **0010** (local holder registry as `from`-default source) | **Superseded** as the `from` source: daemon-era `ResolveFrom(TELEX_SESSION_ID)` against the session's registered addresses ([§14.1](#141-the-in-memory-store_key-session_id--addresses-authority); DA-9). Never infer across sessions; harness propagates `TELEX_SESSION_ID` to `send`/`reply`. |
+| **0010** (local holder registry as `from`-default source) | **Superseded** as the `from` source: daemon-era `ResolveFrom(TELEX_SESSION_ID)` against the session's registered addresses ([§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table); DA-9). Never infer across sessions; harness propagates `TELEX_SESSION_ID` to `send`/`reply`. |
 | **0012** (holder self-binds via pid-watch; ppid declined) | **Relocated** into the exchange's typed watch-pid; ppid-walk stays rejected; reaffirmed by the OQ4 probe. |
 | **0013** (live drain on the undelivered set; `seen` never pruned) | **Drain retained**; the **never-prune `seen`** rationale is **superseded** (holder-restart assumption voided) by the bounded epoch-keyed fast-path ([§13](#13-delivery-and-the-seen-dedup-redesign-da-8)). |
 | **0005** (TTL-heartbeat liveness) | **Narrowed**: TTL survives only as the **daemon-down backstop** ([§14.5](#145-daemon-down-and-the-ttl-backstop)); it no longer governs live-session liveness (hook + watch-pid + stale-attendance do). |
