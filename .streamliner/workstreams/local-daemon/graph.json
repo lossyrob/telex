@@ -51,8 +51,10 @@
         "telex"
       ],
       "tracker": {
-        "type": "local",
-        "path": "tasks/design-foundation.md"
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 34
       },
       "dependsOn": []
     },
