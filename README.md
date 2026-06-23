@@ -82,8 +82,8 @@ messages, acting and dispositioning each at its next turn.
 ## Learn more
 
 - **[SKILL.md](SKILL.md)** — how agents use telex (also `telex skill`)
-- **[DESIGN.md](DESIGN.md)** — the working design
-- **[DECISIONS.md](DECISIONS.md)** — the decision log
+- **[DESIGN.md](docs/design/DESIGN.md)** — the working design
+- **[DECISIONS.md](docs/design/DECISIONS.md)** — the decision log
 - **[DISPATCH.md](DISPATCH.md)** — forward-looking discovery & dispatch (broadcast, Contract-Net)
 - **[TELEX.md](TELEX.md)** / **[PRODUCT-THESIS.md](PRODUCT-THESIS.md)** — the name, the metaphor, the thesis
 - **[spike/](spike/)** — the throwaway validation spike that de-risked the design

@@ -87,9 +87,10 @@ responsible recipient. Telex must preserve that distinction.
 
 ### Answerback is infrastructure-supplied liveness
 
-A working agent should not be interrupted by "are you there?" pings. The address's
-**station** — its waiter loop or backend connection — supplies answerback automatically
-by holding the address lease and proving whether the line is open.
+A working agent should not be interrupted by "are you there?" pings. An auto-spawned,
+per-user **local exchange** — a small background daemon that owns presence and delivery
+for the user's locally-attended addresses — supplies answerback automatically by holding
+each address lease and proving whether the line is open, so the agent never has to.
 
 ### Store and forward is required
 
@@ -124,6 +125,8 @@ The initial wedge is a CLI-first utility:
 - no required hosted control plane;
 - no mandatory MCP server;
 - no chat UI dependency;
+- an auto-spawned, zero-config **local exchange** for presence and delivery — implicit
+  and unmanaged, like `rust-analyzer` or `gopls`, not a server the user runs;
 - local SQLite for simple use and tests;
 - Postgres for networked, cross-machine use;
 - Entra credentials as a first-class Postgres authentication target;
