@@ -98,8 +98,11 @@ recovery path, and docs cutover with `daemon-core`) - see initial-shaping `Spar 
 1 outcomes` and `Council review outcomes`. The strategic decisions are bottomed out;
 the Postgres reclaim race and the upgrade handoff are resolved **by approach** (epoch
 fencing), with the exact epoch lifecycle owned by `design-foundation`. **Wave 1
-(`design-foundation`) is ready to launch** - now a single heavy design node whose
-deliverables interlock. Later-wave nodes (`daemon-core` onward) are sketches the
+(`design-foundation`) is launched** as issue #34 (worker on the
+`feature/design-foundation` worktree), producing the design layer toward the
+`design-gate` (a PR review). Workstream artifacts are edited in a dedicated
+`telex-streamliner` worktree (branch `streamliner`) that pushes to `main`, keeping the
+primary checkout clear. Later-wave nodes (`daemon-core` onward) are sketches the
 orchestrator may split, merge, or replace at promotion.
 
 ## Decisions
