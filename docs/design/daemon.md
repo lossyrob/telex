@@ -12,7 +12,7 @@ governs the mechanism** and DESIGN.md governs the framing.
 
 It was produced by the `local-daemon / design-foundation` node and is the design-gate
 artifact. The decisions it records are in [DECISIONS.md](DECISIONS.md) as ADRs
-0014–0021. The consolidated resolutions of the eight design-foundation open questions
+0014–0022. The consolidated resolutions of the eight design-foundation open questions
 are in the [Open-question resolutions](#open-question-resolutions) section, and the
 explicit relocate/supersede/defer accounting is in the
 [Relocations, supersessions, deferrals](#relocations-supersessions-deferrals) map.
@@ -559,7 +559,10 @@ data-bearing ops like `Wait → Message` body are otherwise readable):
   file cannot redirect or capture them. **Owner-only cap creation is part of the readiness
   contract** ([§2.3](#23-readiness-ack)): if the cap cannot be created owner-only — `ENOSPC`,
   permission, partial write, symlink — **startup fails** (the daemon never serves without an
-  enforceable cap). These failpoints are acceptance tests.
+  enforceable cap). These failpoints are acceptance tests. *Where* these paths resolve from, and
+  the **portability** of the owner-only requirement (the unattended environments that trip it, a
+  recommended resolution policy, and a single-tenant opt-out), are `daemon-core` policy —
+  [§7.4](#74-path-resolution-and-the-portability-of-fail-closed-startup-deferred-to-daemon-core).
 - **Peer authenticity — server AND client, both MUST, with the *correct directional
   primitive* (R3-7).** Before the server sends `admin_cap` or any data-bearing frame
   (`Message`) it MUST verify the connected peer is the same user; and **the client MUST
@@ -619,6 +622,68 @@ separately-spawned hook cannot have one, R6-1); the daemon checks the secret and
 `(store_key, session_id)` is in its map, then performs a **latched, liveness-vetoed,
 double-checked teardown** of the exact proven-dead life
 ([§14.2](#142-the-sessionend-hook-a-non-authoritative-liveness-hint-oq6-r6-1)).
+
+### 7.4 Path resolution and the portability of fail-closed startup (deferred to `daemon-core`)
+
+[§7.2](#72-os-level-trust-boundary-mr5) freezes a **requirement** (`config_root`/`run_dir`
+owner-private; the cap creatable owner-only) and a **behavior** (startup **fails closed**
+otherwise, as readiness acceptance tests). It deliberately does **not** freeze *where* those
+paths resolve from, nor *what to do on a filesystem that cannot represent owner-only
+permissions* — those are **`daemon-core` policy**. This subsection records why the gap matters
+and the recommended direction, so `daemon-core` starts from it rather than rediscovering it.
+
+**The failure surface is two independent trip-wires** ([§7.2](#72-os-level-trust-boundary-mr5)):
+*(a)* the directory is **not owned by the running uid**, and *(b)* it is
+**group/world-accessible**. On a normal interactive install (local disk,
+`~/.config`/`%LOCALAPPDATA%`, telex creating its own `0700` dir) neither fires and fail-closed
+startup is invisible. The concern is that the **environments where an agent runs unattended are
+exactly the ones that trip these**, and there the failure is **total** (telex will not run at
+all) and often **unwatched** (no human to read the error):
+
+- **Arbitrary-uid / non-root containers** (OpenShift, K8s `runAsNonRoot` with a random uid,
+  uid-remapped mounts): the mounted dir is not owned by the running uid → trips *(a)*. A
+  mainstream enterprise pattern, not an exotic one.
+- **Network / remapped filesystems** (NFS root-squash, SMB/CIFS, **9p on WSL2 and Docker
+  Desktop**, some CSI volumes): Unix ownership/permission bits are not faithfully represented, so
+  owner-only mode **cannot be set or verified** — a case **distinct** from *(a)*/*(b)*: the check
+  is not *false*, it is *unenforceable*.
+- **`$HOME`/`$XDG_RUNTIME_DIR` unset or shared** (cron, systemd units without `User=`, minimal CI
+  shells, distroless images): resolution can fall back to a world-writable location (`/tmp`, mode
+  `1777`) → trips *(b)*.
+- **Redirected / roaming profiles on Windows** (`%APPDATA%`/`%LOCALAPPDATA%` redirected to a
+  network home drive): network-FS semantics and non-local ACLs can trip the owner-only check.
+- **The umask footgun (an implementation-correctness item, not exotic).** If `daemon-core`
+  creates its own `run_dir` with `0755 & ~umask` rather than an **explicit `0700`**, a *normal*
+  user with `umask 022` gets a world-readable dir that **§7.2's own check rejects**. The dir MUST
+  be created with an explicit owner-only mode, independent of umask.
+
+**Recommended `daemon-core` policy (direction, not frozen here):**
+
+1. **Deterministic, documented path resolution with an explicit override** — an explicit
+   `TELEX_RUN_DIR` / `--run-dir` first, then `$XDG_RUNTIME_DIR`, then a private subtree under
+   `$HOME` — each created **explicit-`0700`**, and a refuse-to-run error that **names the
+   override** so the operator has an immediate remedy.
+2. **Distinguish "cannot enforce owner-only" from "permission denied"** with a specific,
+   **actionable** message (e.g. "`run_dir` is on a filesystem that cannot represent owner-only
+   permissions — set `TELEX_RUN_DIR` to a local owner-private path or tmpfs") rather than a
+   generic opaque failure. **Fail-closed actionability is part of the operability contract** even
+   though the message text is `daemon-core`'s.
+3. **Prefer `$XDG_RUNTIME_DIR` / tmpfs for the runtime artifacts** (socket, lockfile, cap) where
+   available — owner-private and local by construction on systemd — which sidesteps the
+   network-FS class for everything except the durable store (a separate backend concern).
+4. **An explicit, logged single-tenant opt-out** (e.g. `TELEX_TRUST_ENV=single-tenant`) for
+   environments that are *already* an isolation boundary (a dedicated container or VM). There the
+   owner-only-*file* defense is largely redundant with the container/VM boundary, so relaxing it
+   is defensible — but **only as an explicit, audited opt-in, never a silent fallback** (a silent
+   relaxation would void [§7.0](#70-v1-threat-model-normative)/[§7.2](#72-os-level-trust-boundary-mr5)).
+   This is the real security-vs-operability lever and is a **builder/operator policy call**, not
+   a default this design takes.
+
+**Acceptance.** The owner-private-rejection failpoint is already gated
+([§17](#17-gating-tests--per-backend-conformance-matrix-daemon-core-acceptance) test 10); the
+**cannot-enforce-owner-only** filesystem case and the **actionable-error** contract join it as
+`daemon-core` acceptance. The resolution order and the single-tenant opt-out, once `daemon-core`
+fixes them, get their own conformance points. Recorded as **ADR 0022**.
 
 ## 8. (reserved)
 
@@ -680,6 +745,18 @@ The `required` per-session predicate's "additional per-session pid" slot is docu
 necessary healthy-dismiss path and **stale-attendance/takeover the load-bearing
 unhooked-dismiss recovery** (council E), since loader-only liveness is weak (a single
 session's inner process dying while the loader survives is not caught by pid-watch).
+
+**Operator-confirmed harness facts (2026-06-23).** Two dismiss/resume behaviors were confirmed
+live on Copilot CLI and are recorded so `daemon-core` need not re-derive them: **(a) `session_id`
+is preserved across dismiss→resume** (a resumed session continues under the *same* id), and
+**(b) the loader/launch-parent pid survives a dismiss** (it is not killed on dismiss). Together
+they mean the dismiss→resume path is the **same-id `Continue`/`ReRegister` no-op-continuation**
+([§14.4](#144-wait-and-session-scoped-re-register)/[§14.6](#146-resolvefrom-sendreply-recovery-and-presence-between-waits-mr6-mr7)),
+and that a delayed dismiss-time `SessionEndHint` arriving *after* resume must not tear the
+resumed-alive life down — exactly the liveness veto of
+[§14.2](#142-the-sessionend-hook-a-non-authoritative-liveness-hint-oq6-r6-1) (loader pid alive →
+no-op). (b) is also **why the unhooked-dismiss residual exists at all**: because the anchor
+survives, an unhooked dismiss is caught by stale-attendance, not by pid-death.
 
 ### 9.3 Dismissal-path matrix (the four disjoint cases)
 
@@ -1557,6 +1634,15 @@ the *normal* [§9.3](#93-dismissal-path-matrix-the-four-disjoint-cases) teardown
 exact (latched, still-current, proven-dead) life. The hint needs no incarnation because it
 never acts on a life other than the one it observed.
 
+A **concrete, operator-confirmed instance (2026-06-23,
+[§9.2](#92-per-session-pid-on-copilot-cli-oq4--resolved-none-usable)):** on Copilot CLI a
+dismissed session is **resumed under the same `session_id` with its loader anchor still alive**.
+A dismiss-time hint *delayed past the resume* therefore presents the **same id for a life that is
+alive again** — the canonical recurrence this veto exists for: the latched watch-identity probes
+**alive**, so the hint no-ops and the resumed life is untouched. (This is *same-id resume*
+recurrence; whether a fully-ended `session_id` is ever reassigned to a brand-new life is a
+**separate, stronger** recurrence the demotion does not rely on.)
+
 **What the demotion costs:** *no safety* (the old incarnation-gated hook never had a real
 life discriminator, so it never bought safety the backstop does not) — only **latency** for
 the **unhooked-dead** case (the agent logically ended but a watched loader pid survives): the
@@ -1808,7 +1894,7 @@ isolation precondition for all Postgres concurrency tests is **READ COMMITTED au
 | 7 | **Epoch monotonicity across release/cleanup/re-claim** (mr2) | required | required | after `ReleaseOwnership` at epoch E and a cleanup pass, the next claim is **E+1 (never 1)**; no row deletion of an epoch-bearing address |
 | 8 | **Unhooked dismiss + loader survives + takeover CAS boundary** (mr3, R3-3) | required | required | the daemon's own heartbeat does **not** refresh `attendance_last_confirmed_at`; `occupied_stale` becomes true **with a still-fresh heartbeat** and the **takeover CAS fires on the occupied-stale *attendance* predicate** (the boundary: stale-heartbeat-alone would NOT, ownerless would take the claim path); the live-but-idle session is **not** torn down |
 | 9 | **Ordered-handoff crash matrix + successor-readiness** (sf3) — kill after prepare / quiesce / flush / transfer, on **both** P and S | required | required | bounded idempotent recovery; no loss; no duplicate beyond at-least-once; no ownerless hijack window; **S-crash-before-transfer aborts the handoff (P keeps ownership), S-crash-after-transfer recovers via stale-claim**; a dead station stays `occupied_stale` across `stop --drain` + transfer (no attendance refresh) |
-| 10 | **OS trust boundary negatives** (mr5, R3-7) | required (Unix 0700 socket / symlink) | required | a second OS principal cannot `Hello`/`Register`/`Wait`; symlinked cap/lock rejected; **a pre-bound hostile server is rejected client-side BEFORE any metadata disclosure** (before `Hello`/`store_key`, via `GetNamedPipeServerProcessId`/connected-`SO_PEERCRED`); **a second server instance is refused** by the exclusivity primitive; a **PID-reuse race** does not authenticate the wrong process; **`admin_cap` never appears** in `Status`/`Error`/logs/traces; non-owner-private `config_root`/`run_dir` rejected at startup |
+| 10 | **OS trust boundary negatives** (mr5, R3-7) | required (Unix 0700 socket / symlink) | required | a second OS principal cannot `Hello`/`Register`/`Wait`; symlinked cap/lock rejected; **a pre-bound hostile server is rejected client-side BEFORE any metadata disclosure** (before `Hello`/`store_key`, via `GetNamedPipeServerProcessId`/connected-`SO_PEERCRED`); **a second server instance is refused** by the exclusivity primitive; a **PID-reuse race** does not authenticate the wrong process; **`admin_cap` never appears** in `Status`/`Error`/logs/traces; non-owner-private `config_root`/`run_dir` rejected at startup; a `run_dir` on a filesystem that **cannot represent owner-only permissions** fails closed with an **actionable** error (names the `TELEX_RUN_DIR` override), not an opaque failure (§7.4) |
 | 11 | **IPC version/capability compatibility** (sf2, R6-Sb, R8-S1, R10-S2) — N/N-1 and N+1/N | required | required | security-sensitive `required_capabilities` mismatch fails closed (`Incompatible`/`Unauthorized`); attach/wait-reconnect/Drain/Deregister/Status behave per the **`daemon-core`-owned IPC compatibility table** ([§6.1](#61-version-handshake--capability-negotiation-hello--helloack-sf2)); the **`(session_seq, nonce)` token, the `Register.mode` enum (`Establish{establish_nonce, expected_prior_seq}`/`Continue`), the typed **`Stale{current_seq}`** payload + `nonce_seq` semantics, the `NeedsEstablish`/`Conflict` errors, and the `SessionEndHint`/`force`-Takeover frames are all part of that versioned surface** (R6-Sb, R8-S1, R10-S2) — N/N-1 cases assert an N-1 client/daemon either negotiates each or **fails closed**, **never silently degrades `Stale{current_seq}` to a bare `Stale`** (which would break the observe/retry loop) and never drops the seq gate or the `mode` discriminator (this node freezes the frame shapes + fail-closed policy, `daemon-core` fills/freezes the version table) |
 | 12 | **N / N+1 protocol-major parallel** (mr8) | required | required | two protocol-major-parallel daemons under one config root each authenticate against their own `daemon-<H>.cap`; neither clobbers the other |
 | 13 | **Session-seq currency / establish CAS / serialization** (M3, S13, R3-6, R4-1/4/S1, R5-1, R6-2, R7-1/Sa/Sg, R8-1, R9) | required | required | **live-sibling**: a `Continue` for sibling B does **NOT** falsely `Stale` A's waiter; **transition**: `Establish` seq=1, then `Establish(expected_prior_seq=1)` seq=2 → `ReRegister(seq1)=Stale`, `ReRegister(seq2)` passes; **idempotency (R7-1)**: a retried `Establish` (same `establish_nonce`, `nonce_seq==current`) returns the **same** seq; **idempotency horizon (R8-1)**: a replayed `Establish` whose nonce allocated an older seq, or whose `expected_prior_seq` no longer matches, **does NOT allocate** (`Stale{current_seq}`) and does **NOT** supersede a quiet-but-live newer life; **observe/retry (R9-2)**: a new life that `Establish`es with a stale `expected_prior_seq` gets **`Stale{current_seq}`** and a **bounded retry** with `expected_prior_seq=current` (same nonce) then allocates; **first-ever absent-row** insert: one of two concurrent establishers wins, the other gets `Stale{current_seq=1}` and retries; **post-force (R9-1)**: after `Takeover{force}` rotates `establish_nonce`, a replay of the **old** nonce is **`Stale`**, NOT handed the new seq; **no self-supersession (R7-1)**: a `Continue`/`ReRegister` that lost its token → **`NeedsEstablish`**, no seq bump; **`Conflict` (R7-Sa/R9-S1)**: a 2nd `Establish` vs an attendance-fresh life → `Conflict`; a **fast sequential restart** retries until the predecessor ages to `stale_after` then allocates; **cap-exhaustion (R10-S1):** a client that exhausts the bounded retry cap gets a **terminal, actionable `Stale`/`Conflict`** (never an unbounded loop); **concurrent serialization**: old `DeregisterSession(seq1)` vs new `Establish(seq2)` does not tombstone seq2; **state oracle (R6-Sd/R7-Sg):** assert post-state seq + leases intact (not response-code only); `sessions`+lease writes commit in **one serialized transaction** |

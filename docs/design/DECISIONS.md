@@ -727,7 +727,10 @@ not leaving zombies when a dismiss is unhooked. Empirically (live Copilot CLI pr
 1.0.64-1): `copilot.exe` is a supervisor that re-execs an identical-argv inner worker
 whose PID is **not** env-exposed **and spawns lazily**, so there is **no usable distinct
 per-session PID** beyond `COPILOT_LOADER_PID` — and finding the inner pid would need the
-ppid-walk 0012 rejects. Loader-only liveness is therefore weak.
+ppid-walk 0012 rejects. Loader-only liveness is therefore weak. Operator-confirmed
+(2026-06-23): `session_id` is **preserved across dismiss→resume** and the **loader pid survives
+dismiss** — so dismiss→resume is a same-id continuation, and an unhooked dismiss is caught by
+stale-attendance (the anchor survives), not by pid-death.
 
 **Decision.** Two paths: the **sessionEnd hook** is the healthy-disconnect *accelerator* —
 **non-authoritative (R6-1):** because the separately-spawned hook is given only a *recurring*
@@ -986,3 +989,39 @@ repo root"**: it was builder-directed during shaping and is flagged for orchestr
 reconciliation (updating the workstream brief/issue text is an orchestrator action). The
 `telex skill` embed path is preserved (`SKILL.md` did not move). Full verb/skill detail in
 [daemon.md](daemon.md) §15.
+
+## 0022 — Fail-closed startup portability and path-resolution policy (deferred to `daemon-core`)
+
+- **Date:** 2026-06-23
+- **Status:** Accepted (design)
+- **Refines:** 0018 (singleton identity / startup), 0017 (loader-anchor empirical grounding).
+
+**Context.** [daemon.md](daemon.md) §7.2 makes startup **fail closed** when `config_root`/
+`run_dir` are not owner-private or the `daemon-<H>.cap` cannot be created owner-only. That
+requirement and its fail-closed behavior are correct and frozen — but the design never pinned
+*where* those paths resolve from, nor what to do on a filesystem that **cannot represent**
+owner-only permissions. On a normal laptop install this never fires; the post-merge review
+surfaced that the **unattended environments where agents increasingly run** — arbitrary-uid
+containers, NFS/SMB/9p mounts (WSL2, Docker Desktop), unset `$HOME`/`$XDG_RUNTIME_DIR`, redirected
+Windows profiles — are exactly the ones that trip it, where the failure is **total and
+unwatched**.
+
+**Decision.** Keep the **requirement** (owner-private paths, owner-only cap) and the
+**fail-closed** behavior frozen (§7.2/§2.3). **Defer the path-resolution algorithm and the
+filesystem-portability policy to `daemon-core`**, with a recorded recommended direction
+([daemon.md](daemon.md) §7.4): (1) deterministic resolution with an explicit `TELEX_RUN_DIR`
+override and **explicit-`0700`** creation (umask-independent); (2) a distinct, **actionable**
+error for "cannot enforce owner-only" vs "permission denied"; (3) prefer `$XDG_RUNTIME_DIR`/tmpfs
+for runtime artifacts; (4) an **explicit, logged single-tenant opt-out** (e.g.
+`TELEX_TRUST_ENV=single-tenant`) for already-isolated container/VM environments — **opt-in only,
+never a silent fallback**, as it trades the file-level defense for operability and is a
+builder/operator policy call. Fail-closed **actionability** is part of the operability contract
+even though the message text is `daemon-core`'s.
+
+**Consequences.** The owner-private-rejection failpoint stays gated (§17 test 10), extended with
+the **cannot-enforce-owner-only** filesystem case and the **actionable-error** requirement; the
+resolution order and the single-tenant opt-out get conformance points when `daemon-core` fixes
+them. The single-tenant opt-out is a **new trust-model surface** flagged for builder/operator
+sign-off (this ADR recommends, it does not freeze the knob). Reopen if a target deployment needs
+owner-only relaxation by default, or if a portable owner-only-enforcement primitive removes the
+need for the opt-out.

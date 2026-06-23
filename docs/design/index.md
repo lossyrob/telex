@@ -32,7 +32,7 @@ The eight open questions carried into the local-daemon `design-foundation` node 
 lifecycle, stale-attendance/takeover, typed watch-pid, per-session PID, legacy cutover,
 DeregisterSession proof, the Status freeze line, and crash durability — are resolved in
 [daemon.md](daemon.md) (see its "Open-question resolutions" section), with the
-decisions recorded as ADRs 0014–0021 in [DECISIONS.md](DECISIONS.md).
+decisions recorded as ADRs 0014–0022 in [DECISIONS.md](DECISIONS.md).
 
 ## Scope note
 
