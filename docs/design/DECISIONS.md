@@ -826,9 +826,9 @@ rebuilt attendance), and closes the design-gate review's must-resolve items on t
 trust boundary, sessionless-`Wait`-as-presence, `ReRegister` resurrection, missing
 `store_key`, and cap-singleton-clobbering. **Round-2 sharpening:** the anti-resurrection
 guard is made **durable** (lease-row columns), **fail-closed** (`ReRegister` MUST carry a
-current token), and **frozen** (no daemon-core alternative), with a GC horizon > max
-reconnect + daemon-down TTL; `ReRegister` is **session-scoped** (address-optional) so a
-foreground `send`/`reply` with no known address can still re-prove presence after a crash;
+current token), and **frozen** (no daemon-core alternative); `ReRegister` is **session-scoped**
+(address-optional) so a foreground `send`/`reply` with no known address can still re-prove
+presence after a crash;
 client **MUST** verify the server peer + canonical-exe **before** sending `admin_cap`, with a
 reuse-safe peer credential and a Windows first-instance exclusivity primitive; and `admin_cap`
 carries a no-log/redaction contract. **Round-3 sharpening (R3-2/3/6/7, spar-driven):** a
@@ -836,9 +836,9 @@ cross-model spar showed the round-2 per-`(session_id, address)` *generation* was
 either falsely invalidated a live sibling-address waiter, or (without a session-keyed
 authority) let a GC'd tombstone or a same-`session_id` respawn resurrect a removed address. So
 incarnation **currency** now lives in a durable **`sessions(store_key, session_id,
-current_incarnation, superseded_at)`** authority, and `ReRegister` is **two-gate**
-(currency-against-`sessions` **then** union-of-non-tombstoned-rows), which holds even after
-lease-row GC. `Takeover` is **fence-then-register** (it fences/evicts/tombstones and leaves a
+current_incarnation)`** authority, and `ReRegister` is **two-gate**
+(currency-against-`sessions` **then** union-of-non-tombstoned-rows). `Takeover` is
+**fence-then-register** (it fences/evicts/tombstones and leaves a
 **bounded pending-bind** reservation; a follow-up `Register` binds — Takeover carries no
 session identity), with `owner_instance_id IS NOT NULL` partitioning it from the ownerless
 claim. `ReleaseOwnership` (daemon-stop/handoff) is split from **station-removal**: it clears
@@ -847,7 +847,21 @@ continuity holds); only station-removal tombstones. Heartbeat is **bound-rows-on
 (`session_id IS NOT NULL`) so a pending-bind reservation ages into reclaimability instead of
 wedging. The **client→server** auth primitive is corrected to `GetNamedPipeServerProcessId` /
 connected-socket `SO_PEERCRED` (the prior `ImpersonateNamedPipeClient` is server-side), run
-**before any metadata disclosure**. Copilot JSON parsing never becomes a core protocol
+**before any metadata disclosure**. **Round-4 sharpening (R4-1..R4-7):** the `sessions`
+authority is **current-only** (one row per `(store_key, session_id)`; a superseded token is
+simply `!= current_incarnation`, so no history column and no GC-horizon proof are needed);
+`Register` **carries** the `session_incarnation` (a Telex-loader-minted per-life token in
+`TELEX_SESSION_INCARNATION`, not a Copilot value) and the **removals are incarnation-gated**
+(a delayed old-life `sessionEnd`/`Detach` with a non-current token is a `Stale` no-op, closing
+the mirror resurrection where a stale removal kills a *new* same-id life); tombstoned lease
+rows are **not GC'd in v1** (consistent with the no-delete invariant — this, not a GC horizon,
+is what closes the same-incarnation sibling case), and **automatic** recovery never recreates
+an address on `UnknownSession`; the **pending-bind** row is frozen **non-deliverable**
+(delivery requires a verified bound session, so a `Wait` cannot bypass fence-then-register);
+the SQLite `BackendClock` is a **durable persisted high-water** clock (a process-monotonic
+clock would rebase across the restart its persisted timestamps are compared over); `Register`
+commits its `sessions`+`leases` writes in **one transaction**; and `Takeover` gains a typed
+`TookOver` response. Copilot JSON parsing never becomes a core protocol
 dependency. The Layer-1 protocol shape is specified here and stabilizes for #12-SDK reuse at
 `daemon-core` (the compatibility table is daemon-core-owned). Reopen if a plugin API appears
 that lets the hook env be pre-populated from an `attach`-time value (then a per-session cap
