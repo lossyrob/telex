@@ -332,6 +332,7 @@ sessions {
   session_seq:         i64,              // daemon-assigned, durable, monotonic per (store_key, session_id) (R6-2)
   nonce:               String,           // per-life uniqueness tie-breaker
   establish_nonce:     String,           // idempotency key of the establishing Register (R7-1)
+  nonce_seq:           i64,              // the seq establish_nonce allocated; rotated on any non-Establish bump (R9-1)
   watch_pid_identity:  Option<WatchSet>, // the current life's published watch-pid set (canonical), R7-2
   updated_at:          i64,              // BackendClock ms (see §11.1)
 }
@@ -356,17 +357,24 @@ liveness veto reads this column to decide death, its writer/format/empty-handlin
 
 The **incarnation is `<session_seq>.<nonce>`**, where **`session_seq` is assigned by the
 daemon** (not the loader's wall-clock — R6-2 replaces the round-5 `<mint_ms>.<nonce>`, which
-mis-ordered equal-millisecond lives and had no backward-skew recovery): at **establish** (a
-`Register{mode: Establish{establish_nonce}}`, R7-1) the daemon, **under the `sessions`-row
-lock**, sets `session_seq = current_seq + 1` (or `1` if absent) and a fresh `nonce`, records the
-`establish_nonce` (idempotent retry → same seq), and returns the token in `Registered`. The
+mis-ordered equal-millisecond lives and had no backward-skew recovery). **`Establish` is a
+prior-seq CAS** (`Register{mode: Establish{establish_nonce, expected_prior_seq}}`, R7-1/R8-1/R9):
+under the `sessions`-row lock the daemon (1) returns the **same** seq if `establish_nonce`
+matches the row **and** `nonce_seq == current_seq` (idempotent lost-`Registered` retry); else
+(2) if `current_seq == expected_prior_seq` **and** the prior life is not attendance-fresh,
+allocates `current_seq + 1` and records `(establish_nonce, nonce_seq = new seq)`; else (3)
+rejects — `Conflict` (prior attendance-fresh) or **`Stale{current_seq}`** (seq moved on). It is
+**never** an unconditional `current_seq + 1` bump. The client forms `expected_prior_seq` by the
+**observe/retry contract** (first attempt `0` or last-known seq; on `Stale{current_seq}` retry
+bounded with the same nonce and `expected_prior_seq = current_seq`; fresh nonce per new intent —
+[§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table), R9-2). The
 client (loader + its env-propagated verbs) carries `(session_seq, nonce)`. A
 `Register{mode: Continue}`/`ReRegister`/removal carries the token and is **conditional on
 `== current`** (else `Stale`; missing/unknown token → `NeedsEstablish`, never a silent
 establish), so a delayed old-life op (lower seq) is rejected and cannot
 clobber a live newer life. A daemon crash/respawn of a *still-live* session does **not** change
-the seq (crash-recovery keeps continuity); session-id reuse gets `current_seq + 1` and fails the
-old life closed. All four currency operations
+the seq (crash-recovery keeps continuity); session-id reuse allocates a new seq via the CAS and
+fails the old life closed. All four currency operations
 (`Register`/`ReRegister`/`DeregisterSession`/`Detach`) **serialize on the `sessions` row**
 (`SELECT … FOR UPDATE` / SQLite write transaction) before the currency check
 ([§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table)). The
@@ -467,7 +475,7 @@ Responses:
 | `StatusReport` | the [§4](#4-status-surface-the-frozen-contract-shape) fields |
 | `TookOver` | `prior_occupant`, `last_confirmed`, `lease_epoch`, `forced: bool` — the typed `Takeover` response (R4-7) so the operator decides informedly (the prose in [§10.2](#102-takeover-fence-then-register-da-5-r3-3) refers to this row, not a generic `Ack`) |
 | `Ack` | generic success for Register/ReRegister/Detach/Deregister/Drain/DeliveryAck |
-| `Error` | `{ code, message }` — incl. `UnknownSession`, `NotOwner`, `Unauthorized`, `Incompatible`, `Ambiguous`, `Stale` (non-current `(session_seq, nonce)` or tombstoned address), **`NeedsEstablish`** (a `Continue`/`ReRegister` whose token is missing/unknown — never a silent establish, R7-1), **`Conflict`** (a second concurrently-live `establish` for a `session_id` already live — surfaced, not silently superseded, R7-Sa) |
+| `Error` | `{ code, message, … }` — incl. `UnknownSession`, `NotOwner`, `Unauthorized`, `Incompatible`, `Ambiguous`, **`Stale{current_seq}`** (a non-current `(session_seq, nonce)` or a seq-mismatched `Establish` — carries the observed `current_seq` so the client can re-form `expected_prior_seq` and bounded-retry, R9-2; also = tombstoned address), **`NeedsEstablish`** (a `Continue`/`ReRegister` whose token is missing/unknown — never a silent establish, R7-1), **`Conflict`** (a second concurrently-live `Establish` for an attendance-fresh `session_id` — surfaced, not silently superseded; fast-restart retry per [§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table), R7-Sa/R9-S1) |
 
 The `Message` frame carries `lease_epoch` and a per-emit `delivery_nonce` (**R3-1**). The
 `delivery_nonce` is **frozen in scope**: a fresh, unique value minted by the daemon for
@@ -823,7 +831,10 @@ is **unavailable** (an untrustworthy/slept/backward-stepped respawn wall clock),
 make the normal CAS unable to fire — a self-contradiction that would strand the address. So
 `Takeover { …, force: true }` is a **privileged break-glass** action that, **under the
 `sessions`-row + address locks**, **atomically bumps `session_seq` (to `current_seq + 1`,
-invalidating *all* old-seq client ops and any in-flight hint) and mints a new `lease_epoch`**,
+invalidating *all* old-seq client ops and any in-flight hint), rotates the `sessions` row's
+`establish_nonce` to a fresh daemon-minted sentinel (advancing `nonce_seq` to the new seq —
+**R9-1**, so a post-force replay of the *old* `establish_nonce` cannot hit the case-(1)
+idempotency match and be handed the new seq; it is `Stale`), and mints a new `lease_epoch`**,
 **bypassing the `occupied_stale` time predicate** — the operator's explicit action *replaces*
 the unprovable time proof. It is **explicitly defined as operator-authorized supersession, not
 proof of death**: it **can** seize a still-live session (a false positive), which is the
@@ -1325,23 +1336,40 @@ GC'd-tombstone or a same-`session_id` respawn resurrect a removed address):
      session-start) is a **prior-seq CAS** under the `sessions`-row lock that **closes the
      idempotency horizon (R8-1)** — a previously-used `establish_nonce` can **never** allocate a
      new seq, so a delayed/replayed establish cannot silently supersede a later quiet-but-live
-     life:
-     1. **`establish_nonce == the row's recorded establish_nonce`** → **idempotent**: return the
-        *current* seq (a lost-`Registered` retry — same nonce, no double-bump), independent of
-        `expected_prior_seq`.
+     life. The row stores `establish_nonce` **paired with the seq it allocated**
+     (`(establish_nonce, nonce_seq)`):
+     1. **`establish_nonce == the row's recorded `establish_nonce` AND `nonce_seq == current_seq`**
+        → **idempotent**: return the *current* seq (a lost-`Registered` retry — same nonce, same
+        allocation, no double-bump), independent of `expected_prior_seq`. The **`nonce_seq ==
+        current_seq` clause is load-bearing (R9-1):** any **non-`Establish` seq bump** —
+        `Takeover{force:true}` ([§10.2](#102-takeover-fence-then-register-da-5-r3-3)) — **rotates
+        `establish_nonce` to a fresh daemon-minted sentinel and advances `nonce_seq`**, so a
+        post-force replay of the old nonce **cannot** match case (i) and be handed the new seq;
+        it falls to (3) and is `Stale`.
      2. else **`current_seq == expected_prior_seq`** (the establisher observed the world it is
         superseding) **AND the prior life is *not* attendance-fresh** → allocate
-        `current_seq + 1`, record the new `establish_nonce` (a genuine new life over a
-        gone/quiet predecessor — `expected_prior_seq = 0` for a first-ever establish).
+        `current_seq + 1`, record the new `(establish_nonce, nonce_seq = current_seq + 1)` (a
+        genuine new life over a gone/quiet predecessor — `expected_prior_seq = 0` for a
+        first-ever establish).
      3. else → **reject, never allocate**: if the prior life **is attendance-fresh** →
-        **`Conflict`** (a concurrent live same-`session_id` life, R7-Sa); if
-        `current_seq != expected_prior_seq` → **`Stale`** (a stale/replayed establish whose
-        observed world has moved on — e.g. a delayed L1 replay arriving after L2 established).
+        **`Conflict`** (a concurrent live same-`session_id` life, R7-Sa/R9-S1); if
+        `current_seq != expected_prior_seq` → **`Stale{current_seq}`** (a typed error carrying
+        the observed `current_seq`, R9-2) — a stale/replayed establish whose observed world has
+        moved on (e.g. a delayed L1 replay after L2 established, or a post-force retry).
 
-     `establish_nonce` is **high-entropy and single-use** (a fresh value per distinct establish
-     *intent*; a retry of the *same* intent reuses the *same* nonce). The row stores the current
-     `establish_nonce` + `session_seq`; the prior-seq CAS (not an unbounded used-nonce set) is
-     what makes a stale nonce non-allocating.
+     **Forming `expected_prior_seq` — the observe/retry contract (R9-2).** A client does **not**
+     guess: its **first** `Establish` carries `expected_prior_seq = 0` (or its last-known seq
+     from a prior `Registered`, when re-establishing). On a **seq-mismatch** the daemon returns
+     the typed **`Stale{current_seq}`**; the client then **retries — bounded (a small frozen
+     cap), with the *same* `establish_nonce`** (same establish intent) and `expected_prior_seq =
+     current_seq`. A genuinely **new** establish intent uses a **fresh** nonce; an **idempotent
+     retry** reuses the same nonce (so case (1) absorbs a lost-`Registered`). The **first-ever
+     absent row** is created by an `INSERT … ON CONFLICT DO NOTHING` (seq 1); a concurrent
+     absent-row establish that loses the insert gets `Stale{current_seq = 1}` and retries. The
+     **manual / no-loader** path is identical: a manual verb `Establish`es with a fresh nonce +
+     `expected_prior_seq = 0` and retries on `Stale`. `establish_nonce` is **high-entropy and
+     single-use** per intent. The prior-seq CAS (not an unbounded used-nonce set) is what makes a
+     stale nonce non-allocating.
    - **`Register{mode: Continue{(session_seq, nonce)}}`** (a mid-life address-add or re-prove)
      is a no-op continuation iff the carried token is current; a **non-current/older** token is
      **`Stale`**; a token that is **missing/unknown** returns **`NeedsEstablish`** — it is
@@ -1369,6 +1397,16 @@ GC'd-tombstone or a same-`session_id` respawn resurrect a removed address):
    attendance-fresh returns a **`Conflict` `Error`** (frozen in [§6.2](#62-request--response-frames),
    surfaced in `Status`, exercised by a gating test) rather than silently superseding; v1 does
    **not** support genuine concurrent same-id lives (out of scope, like intra-user isolation).
+   **Fast-restart recovery (R9-S1):** a *legitimate sequential* restart whose successor starts
+   **before the ended predecessor's attendance has aged to `occupied_stale`** also transiently
+   hits `Conflict` (the predecessor still looks attendance-fresh). v1 resolves this as a
+   **bounded transient `Establish` retry**: the successor re-attempts (with the **same**
+   `establish_nonce`) until the predecessor's attendance crosses `stale_after` (a dead
+   predecessor stops refreshing, so this is bounded by `stale_after`), after which branch (2)
+   allocates; an operator may instead `Takeover{force:true}` to skip the wait. A successor that
+   keeps `Conflict`ing past the bound surfaces the `Conflict` actionably (it indicates a genuine
+   still-live predecessor — the unsupported concurrent-lives case). The retry/`force` choice and
+   the `stale_after` floor are frozen in `daemon-core`.
 2. **Per-address membership — `tombstoned_at`** on the lease row, set by the **station-removal**
    paths `DeregisterSession`/`Detach`/`Takeover`/lapsed-TTL (**not** `ReleaseOwnership`),
    atomically with the removal.
@@ -1647,10 +1685,14 @@ reply needs it while the map is empty/`suspect`:
   `sessionEnd` hook, and that hook is now **non-authoritative and carries no incarnation**
   ([§14.2](#142-the-sessionend-hook-a-non-authoritative-liveness-hint-oq6-r6-1)), so no
   cross-process file channel is required. **No-loader / manual sessions:** a `telex` verb run
-  with **no** inherited `TELEX_SESSION_INCARNATION` performs an **establish `Register`** (the
-  daemon assigns a fresh `(session_seq, nonce)` and returns it) and exports it for the rest of
-  that manual invocation chain; a later manual verb that cannot inherit it simply
-  establishes again (the daemon's `current_seq + 1` keeps it from clobbering a newer current).
+  with **no** inherited `TELEX_SESSION_INCARNATION` performs an **`Establish`** (fresh
+  `establish_nonce` + `expected_prior_seq = 0`, the **prior-seq CAS** of
+  [§14.1](#141-the-store_key-session_id--addresses-authority-and-the-sessions-table) — observing
+  `Stale{current_seq}` and bounded-retrying if a prior life exists; the daemon assigns
+  `(session_seq, nonce)` and returns it) and exports it for the rest of that manual invocation
+  chain; a later manual verb that cannot inherit it `Establish`es again under the same CAS
+  (which, via `expected_prior_seq`/attendance-fresh, keeps it from clobbering a newer current —
+  it gets `Conflict`/`Stale` rather than an unconditional bump).
 - **Presence between `wait` calls (mr7).** Only a blocked `wait` continuously re-proves a
   session; a foreground agent mid-task (between waits) during a `drain`/respawn would
   otherwise lose verified attendance and default-`from` until its next wait. To bound this,
@@ -1757,12 +1799,12 @@ isolation precondition for all Postgres concurrency tests is **READ COMMITTED au
 | 10 | **OS trust boundary negatives** (mr5, R3-7) | required (Unix 0700 socket / symlink) | required | a second OS principal cannot `Hello`/`Register`/`Wait`; symlinked cap/lock rejected; **a pre-bound hostile server is rejected client-side BEFORE any metadata disclosure** (before `Hello`/`store_key`, via `GetNamedPipeServerProcessId`/connected-`SO_PEERCRED`); **a second server instance is refused** by the exclusivity primitive; a **PID-reuse race** does not authenticate the wrong process; **`admin_cap` never appears** in `Status`/`Error`/logs/traces; non-owner-private `config_root`/`run_dir` rejected at startup |
 | 11 | **IPC version/capability compatibility** (sf2, R6-Sb, R8-S1) — N/N-1 and N+1/N | required | required | security-sensitive `required_capabilities` mismatch fails closed (`Incompatible`/`Unauthorized`); attach/wait-reconnect/Drain/Deregister/Status behave per the **`daemon-core`-owned IPC compatibility table** ([§6.1](#61-version-handshake--capability-negotiation-hello--helloack-sf2)); the **`(session_seq, nonce)` token, the `Register.mode` enum (`Establish{establish_nonce, expected_prior_seq}`/`Continue`), the `NeedsEstablish`/`Conflict` errors, and the `SessionEndHint`/`force`-Takeover frames are all part of that versioned surface** (R6-Sb, R8-S1) — N/N-1 cases assert an N-1 client/daemon either negotiates each or **fails closed**, never silently drops the seq gate or the `mode` discriminator (this node freezes the frame shapes + fail-closed policy, `daemon-core` fills/freezes the version table) |
 | 12 | **N / N+1 protocol-major parallel** (mr8) | required | required | two protocol-major-parallel daemons under one config root each authenticate against their own `daemon-<H>.cap`; neither clobbers the other |
-| 13 | **Session-seq currency / establish discriminator / serialization** (M3, S13, R3-6, R4-1/4/S1, R5-1, R6-2, R7-1/Sa/Sg, R8-1) | required | required | **live-sibling**: a `Continue` for sibling B does **NOT** falsely `Stale` A's waiter; **transition**: `Establish` seq=1, then a new `Establish` seq=2 → `ReRegister(seq1)=Stale`, `ReRegister(seq2)` passes; **establish idempotency (R7-1)**: a retried `Establish` with the **same `establish_nonce`** returns the **same** seq (no double-bump); **idempotency horizon (R8-1)**: a **delayed/replayed `Establish` whose `establish_nonce` already allocated an older seq, or whose `expected_prior_seq` no longer matches**, arriving after a later establish, **does NOT allocate a new seq** (`Stale`) and does **NOT** supersede a quiet-but-live newer life (state oracle: newer seq + leases intact); **no self-supersession (R7-1)**: a `Continue`/`ReRegister` that **lost its token** returns **`NeedsEstablish`** and does **NOT** bump the seq; **`Conflict` (R7-Sa)**: a second `Establish` against an **attendance-fresh** live `session_id` returns `Conflict`, surfaced in `Status`; a **two-address** crash + address-less `ReRegister` + `ResolveFrom` recovers **both**; **same-`session_id` respawn keeps continuity**; **concurrent serialization (R5-1)**: an **old explicit `DeregisterSession(seq1)` racing a new `Establish(seq2)`** does **not** tombstone seq2's rows, and an **old `Continue(seq1)` racing current seq2** is `Stale` — **state oracle (R6-Sd/R7-Sg):** assert the post-state row carries seq2 and seq2's leases are intact (not response-code only); `sessions`+lease writes commit in **one serialized transaction** |
+| 13 | **Session-seq currency / establish CAS / serialization** (M3, S13, R3-6, R4-1/4/S1, R5-1, R6-2, R7-1/Sa/Sg, R8-1, R9) | required | required | **live-sibling**: a `Continue` for sibling B does **NOT** falsely `Stale` A's waiter; **transition**: `Establish` seq=1, then `Establish(expected_prior_seq=1)` seq=2 → `ReRegister(seq1)=Stale`, `ReRegister(seq2)` passes; **idempotency (R7-1)**: a retried `Establish` (same `establish_nonce`, `nonce_seq==current`) returns the **same** seq; **idempotency horizon (R8-1)**: a replayed `Establish` whose nonce allocated an older seq, or whose `expected_prior_seq` no longer matches, **does NOT allocate** (`Stale{current_seq}`) and does **NOT** supersede a quiet-but-live newer life; **observe/retry (R9-2)**: a new life that `Establish`es with a stale `expected_prior_seq` gets **`Stale{current_seq}`** and a **bounded retry** with `expected_prior_seq=current` (same nonce) then allocates; **first-ever absent-row** insert: one of two concurrent establishers wins, the other gets `Stale{current_seq=1}` and retries; **post-force (R9-1)**: after `Takeover{force}` rotates `establish_nonce`, a replay of the **old** nonce is **`Stale`**, NOT handed the new seq; **no self-supersession (R7-1)**: a `Continue`/`ReRegister` that lost its token → **`NeedsEstablish`**, no seq bump; **`Conflict` (R7-Sa/R9-S1)**: a 2nd `Establish` vs an attendance-fresh life → `Conflict`; a **fast sequential restart** retries until the predecessor ages to `stale_after` then allocates; **concurrent serialization**: old `DeregisterSession(seq1)` vs new `Establish(seq2)` does not tombstone seq2; **state oracle (R6-Sd/R7-Sg):** assert post-state seq + leases intact (not response-code only); `sessions`+lease writes commit in **one serialized transaction** |
 | 14 | **Schema-version downgrade gate + new-table migration** (M10, R3-S2, R4-Sc) | required | required | the per-store exclusive migration creates **both** the `sessions` table **and** the new lease columns **atomically** under one schema-version bump; a pre-epoch binary invoked **directly** (not via the shim) is refused by the **mandatory store-level legacy-write hard-fail** **before** it writes a non-epoch row (launcher lock asserted as additional defense); mid-migration crash recovers under the per-store exclusive lock |
 | 15 | **ACK boundary + correlation + deadline failpoints** (M2, S1, R3-S1) | required | required | partial/errored stdout flush is not an ACK; slow/blocked-stdout hits the ACK deadline → no MARK, redeliver, address not wedged, `stop --drain` does not hang; **ACK exactly-at-deadline is NOT a timeout, one-tick-late IS**; **repeated timeouts quarantine the slow connection** (no duplicate-storm starvation); wrong-connection/stale/duplicate ACK never marks a different in-flight delivery |
 | 16 | **Cross-address operation atomicity** (S4, R3-Sc) | required | required | `DeregisterSession`/`Drain` **and `ReRegister`/`Takeover`** over many addresses are atomic at the durable layer and fixed-order-acquired; a mid-operation crash leaves a consistent state (no partial removal, no one-address resurrection, no deadlock) |
 | 17 | **Non-authoritative sessionEnd hint** (R6-1, R8-2) | required | required | a `SessionEndHint` whose **latched current life's watch-pids are alive** is a **no-op** (veto — never tombstones a live life), incl. the **reuse-startup** case (an old-life hint arriving the instant after a new life established → no-op, **state oracle:** new life's rows intact); a hint whose **latched life is still current AND its pids are proven dead** tears down that exact life; a hint that **latches life A then life B establishes before the probe commits** does **NOT** tear down B (double-checked on the latched `(session_seq, nonce, watch_pid_identity)`); **same-life WatchSet replacement (R8-2):** a hint **latches W1**, then a **same-seq current-token `Continue`/`ReRegister` publishes W2** (W1 dead, W2 alive) → the recheck (which includes `watch_pid_identity`, not just `(seq, nonce)`) **no-ops** — a live life is **not** torn down; the OS pid probe is **not** held under the `sessions`-row lock |
-| 18 | **Durable BackendClock + daemon-down TTL + force-Takeover** (R4-6, R5-Sb, R6-3) | required (SQLite high-water) | required (PG server clock) | persisted `last_heartbeat`/`tombstoned_at`/`sessions.updated_at` stamped before a restart compare correctly against the respawned daemon's clock; the SQLite high-water never moves backward across restart/suspend/skew; a **slept / backward-wall-clock restart whose real downtime exceeds the TTL** does **not** fail open (no auto-lapse of a live address on an untrustworthy clock); recovery is via **`Takeover{force:true}`**, the break-glass **seq-bumping** supersession (bypasses the unavailable `occupied_stale` time proof; **state oracle:** post-state `session_seq` is bumped and old-seq ops are `Stale`), so no permanent zombie; a concurrent establish vs force-Takeover serializes on the `sessions` row (first commit wins) |
+| 18 | **Durable BackendClock + daemon-down TTL + force-Takeover** (R4-6, R5-Sb, R6-3, R9-1) | required (SQLite high-water) | required (PG server clock) | persisted `last_heartbeat`/`tombstoned_at`/`sessions.updated_at` stamped before a restart compare correctly against the respawned daemon's clock; the SQLite high-water never moves backward across restart/suspend/skew; a **slept / backward-wall-clock restart whose real downtime exceeds the TTL** does **not** fail open (no auto-lapse of a live address on an untrustworthy clock); recovery is via **`Takeover{force:true}`**, the break-glass **seq-bumping** supersession (bypasses the unavailable `occupied_stale` time proof; **state oracle:** post-state `session_seq` is bumped, **`establish_nonce` is rotated / `nonce_seq` advanced** so a post-force old-nonce `Establish` replay is `Stale` not handed the new seq (R9-1), and old-seq ops are `Stale`), so no permanent zombie; a concurrent establish vs force-Takeover serializes on the `sessions` row (first commit wins) |
 | 19 | **Seq-fenced attendance / unhooked-dead reclaim / hint no-op on absent identity** (R6-1, R7-2/Sg) | required | required | a dismissed session whose **loader/anchor pid survives** but issues **no current-seq telex action** has its `attendance_last_confirmed_at` go stale → `occupied_stale` fires → takeover reclaims (**state oracle:** post-state address is reclaimable, no leak); an **old-seq** `Register`/`ReRegister` (a superseded life's surviving process) **cannot** refresh attendance (`Stale`); heartbeat/bare-`Wait`/`SessionEndHint` never refresh attendance; **a `SessionEndHint` against a life with an absent/empty `watch_pid_identity` is a NO-OP** (absence ≠ death, R7-2) |
 
 Tests 1–5 are the original five (4 and 5 strengthened); 6–19 are added by the review
