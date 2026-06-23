@@ -729,19 +729,22 @@ whose PID is **not** env-exposed **and spawns lazily**, so there is **no usable 
 per-session PID** beyond `COPILOT_LOADER_PID` — and finding the inner pid would need the
 ppid-walk 0012 rejects. Loader-only liveness is therefore weak.
 
-**Decision.** Two paths: the **sessionEnd hook** is the healthy disconnect (quit +
-dismiss); a **typed `--watch-pid`** backstop catches the ungraceful case — `anchor`
-(any-sufficient) vs `required` (all-necessary) predicates plus a **pid + start-time reuse
-guard** (today `process_alive` is pid-only), v1 floor = a single loader **anchor** +
+**Decision.** Two paths: the **sessionEnd hook** is the healthy-disconnect *accelerator* —
+**non-authoritative (R6-1):** because the separately-spawned hook is given only a *recurring*
+`session_id`, it cannot identify its own life, so it sends a `SessionEndHint` (no incarnation)
+that triggers a **latched, liveness-vetoed, double-checked** teardown of the exact proven-dead
+life (never a live one); a **typed `--watch-pid`** backstop catches the ungraceful case —
+`anchor` (any-sufficient) vs `required` (all-necessary) predicates plus a **pid + start-time
+reuse guard** (today `process_alive` is pid-only), v1 floor = a single loader **anchor** +
 start-time. There is **no idle-TTL teardown**; the precise rule is "no time-based
 dismissal of a *live* session, but **positive death evidence triggers immediate
-teardown**" via a four-case dismissal-path matrix (hook / watch-pid failure / takeover /
+teardown**" via a four-case dismissal-path matrix (hint / watch-pid failure / takeover /
 daemon-down TTL). `occupied_stale` (derived from `attendance_last_confirmed_at`, refreshed
-by **positive session-carrying presence only** — **not** the daemon's own heartbeat
-(heartbeat updates lease-liveness only), **not** a bare sessionless `Wait`, and **not**
-`sessionEnd`; on a single backend clock domain) is reserved for the unobserved-death
-residual, and **operator takeover** (epoch-minting, atomic at the exchange) is the
-**load-bearing** recovery for it. Full contract in [daemon.md](daemon.md) §9–10.
+**only by a current-seq session-carrying action** — **not** the daemon's own heartbeat
+(heartbeat updates lease-liveness only), **not** a bare sessionless `Wait`, **not** a
+merely-surviving process, and **not** the hint; on a single backend clock domain) is reserved
+for the unobserved-death residual, and **operator takeover** (epoch-minting, atomic at the
+exchange) is the **load-bearing** recovery for it. Full contract in [daemon.md](daemon.md) §9–10.
 
 **Consequences.** OQ3/OQ4 resolved with empirical grounding; the hook becomes necessary
 and stale-attendance/takeover load-bearing (council E). TTL's only remaining role is the
@@ -812,16 +815,25 @@ owner-private `config_root`/`run_dir`; `O_NOFOLLOW`+atomic cap/lock; **peer-cred
 check** before `admin_cap`/data frames; spawn only the canonical executable). v1 is
 **same-user trust with NO intra-user isolation** (documented as a deliberate choice;
 `per_session_cap` reserved as the path to it). Session ownership is **daemon-native** and
-keyed by **`(store_key, session_id)`** with a durable **session-incarnation currency
-authority + per-address tombstones**, **serialized on the `sessions` row** (a monotonic
-incarnation; all `Register`/`ReRegister`/`DeregisterSession`/`Detach` lock the row and gate on
-currency), so a removal (`DeregisterSession`/`Detach`/`Takeover`) is not resurrected by — nor
-applied by — a stale `ReRegister`/hook; the hook is a thin mapper calling
-`DeregisterSession(store_key, session_id, session_incarnation, admin_cap)`; `from` defaults via
-`ResolveFrom(store_key, session_id)` (never across sessions/stores) with **opportunistic
-re-register on `send`/`reply`/`ack`** so a mid-turn crash does not reintroduce ADR 0010's
-unrepliable-`from` foot-gun; crash recovery uses a **`suspect`/`verified`/`lapsed`** state
-machine. Full contract in [daemon.md](daemon.md) §6–7, §14.
+keyed by **`(store_key, session_id)`** with a durable **`sessions` currency authority — a
+daemon-assigned monotonic `(session_seq, nonce)` (R6-2) + per-address tombstones** —
+**serialized on the `sessions` row** (all `Register`/`ReRegister`/`DeregisterSession`/`Detach`
+lock the row and gate on the carried `(session_seq, nonce)`; `Register` carries a **positive
+`Establish`/`Continue` mode** so a live session cannot self-supersede, R7-1), so a removal is
+neither resurrected by — nor applied by — a stale op. The **healthy-disconnect `sessionEnd`
+hook is non-authoritative** (R6-1): it sends `SessionEndHint(store_key, session_id, admin_cap)`
+with **no incarnation** (a recurring-`session_id`-only hook cannot identify its life) and the
+daemon runs a **latched, liveness-vetoed, double-checked** teardown of the exact proven-dead
+life; **there is no token-file**. **Explicit** removals (`DeregisterSession`/`Detach`) that hold
+the current token are seq-gated. `from` defaults via `ResolveFrom(store_key, session_id)` (never
+across sessions/stores) with **opportunistic re-register on `send`/`reply`/`ack`** so a mid-turn
+crash does not reintroduce ADR 0010's unrepliable-`from` foot-gun; crash recovery uses a
+**`suspect`/`verified`/`lapsed`** state machine. Full contract in [daemon.md](daemon.md)
+§6–7, §14. *(The round-3→5 sharpening paragraphs below are retained for **provenance**; where
+they describe an earlier `current_incarnation` single column, a loader-minted `<mint_ms>.<nonce>`,
+a mandatory token-file, or an incarnation-carrying/authoritative hook, they are **superseded by
+this Decision and the round-6 paragraph** — the final model is `(session_seq, nonce)` +
+non-authoritative `SessionEndHint` + no token-file.)*
 
 **Consequences.** Resolves OQ6 (proof without an external registry) and OQ8 (durable vs
 rebuilt attendance), and closes the design-gate review's must-resolve items on the IPC
