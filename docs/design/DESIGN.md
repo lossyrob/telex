@@ -578,11 +578,12 @@ exchange never sends a separate "you should exit" signal; handing the client a m
 *is* the instruction to exit. The exchange runs a daemon-scoped local IPC endpoint (a
 named pipe on Windows, a unix socket elsewhere). `telex wait` connects, completes the
 version handshake, sends a request describing what it is waiting for (store, address,
-attention filter), then blocks on a socket read. The exchange replies immediately if a
-matching message is buffered and the server-side delivery fence authorizes it (no frame
-unless the exchange still owns the lease epoch — see [daemon.md](daemon.md)); otherwise it
-registers the client as a waiter and stays silent. The wakeup is push — the exchange's
-write releases the client's read — with no local polling.
+attention filter), then blocks on a socket read. The exchange emits a matching message
+under an in-memory current-owner check and records the **durable** delivery mark only
+**after** the client acknowledges it (the at-least-once `EMIT → ACK → MARK` fence — see
+[daemon.md](daemon.md)); otherwise it registers the client as a waiter and stays silent.
+The wakeup is push — the exchange's write releases the client's read — with no local
+polling.
 
 Delivery state and pending disposition live in the **exchange** (and ultimately the
 backend), never in the ephemeral client, which is a stateless courier. A later

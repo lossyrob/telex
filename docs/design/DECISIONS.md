@@ -672,8 +672,16 @@ caught at the design-gate, would have flipped 0011 into at-most-once loss). A di
 executable `fencing-proof` gate must prove the emit→ack→mark failpoints, epoch monotonicity
 across release/cleanup/re-claim, and the handoff crash matrix on both backends
 ([daemon.md](daemon.md) §17 tests 4/6/7/9). Backends gain a rowcount-returning heartbeat, a
-non-deleting release, and the typed delivery method (backend-API changes). Reopen if the
-guard cannot be implemented/tested for both backends.
+non-deleting release, and the typed delivery method (backend-API changes). **Round-2
+sharpening:** the `DeliveryAck` is correlated to the exact in-flight
+`(connection, store_key, address, message_id, lease_epoch, delivery_nonce)` under a bounded
+ACK deadline (so a wrong/late ACK cannot mark the wrong delivery and a wedged waiter cannot
+hang the address or `stop --drain`); `mark_delivered_if_current_owner` has **outcome
+precedence** (`NotOwner` is returned even if already delivered, so a superseded owner
+self-demotes instead of treating `AlreadyDelivered` as success); the graceful handoff adds a
+successor-readiness precondition; and a separate **takeover CAS** gated on the
+`occupied_stale` *attendance* predicate is specified (the stale-heartbeat claim predicate
+does not fit takeover). Reopen if the guard cannot be implemented/tested for both backends.
 
 ## 0016 — `seen`-dedup redesign for a long-lived daemon
 
@@ -808,11 +816,20 @@ machine. Full contract in [daemon.md](daemon.md) §6–7, §14.
 **Consequences.** Resolves OQ6 (proof without an external registry) and OQ8 (durable vs
 rebuilt attendance), and closes the design-gate review's must-resolve items on the IPC
 trust boundary, sessionless-`Wait`-as-presence, `ReRegister` resurrection, missing
-`store_key`, and cap-singleton-clobbering. Copilot JSON parsing never becomes a core
-protocol dependency. The Layer-1 IPC is the stabilized surface the #12 SDK reuses. Reopen
-if a plugin API appears that lets the hook env be pre-populated from an `attach`-time value
-(then a per-session cap becomes the v1 path), or if `wait` Re-register is impossible because
-the IPC transport masks socket-EOF.
+`store_key`, and cap-singleton-clobbering. **Round-2 sharpening:** the generation +
+tombstone anti-resurrection guard is made **durable** (lease-row columns), **fail-closed**
+(`ReRegister` MUST carry a current generation), and **frozen** (union-of-non-tombstoned is
+the rule, no daemon-core alternative), with a GC horizon > max reconnect + daemon-down TTL;
+`ReRegister` is **session-scoped** (address-optional) so a foreground `send`/`reply` with no
+known address can still re-prove presence after a crash (closing the M8 recovery gap); client
+**MUST** verify the server peer + canonical-exe **before** sending `admin_cap` (server-auth
+is not a "should"), with a reuse-safe peer credential and a Windows first-instance exclusivity
+primitive; and `admin_cap` carries a no-log/redaction contract. Copilot JSON parsing never
+becomes a core protocol dependency. The Layer-1 protocol shape is specified here and
+stabilizes for #12-SDK reuse at `daemon-core` (the compatibility table is daemon-core-owned).
+Reopen if a plugin API appears that lets the hook env be pre-populated from an `attach`-time
+value (then a per-session cap becomes the v1 path), or if `wait` Re-register is impossible
+because the IPC transport masks socket-EOF.
 
 ## 0020 — Minimal upgrade floor and the two-phase legacy/non-epoch cutover rule
 
@@ -836,11 +853,17 @@ waiter endpoint is bound — an address-keyed IPC probe with quit/handover that 
 endpoint gone, **or** quiescing the legacy process; a **bounded stale-window alone is
 removed** (a stale heartbeat does not prove the endpoint is unbound — a paused/partitioned/
 GC'd/suspended legacy holder can resume emitting). **Phase 2** claims `NULL → 1` via the
-explicit legacy CAS (`NULL` is never `0`). Frozen assertion: *no `Frame::Message` from a
-non-epoch holder reaches a recipient after the daemon binds*, exercised by a dedicated
-real-legacy-holder gating test on both backends. Full rollback/gc/UX and any epoch-aware
-downgrade are deferred to `seamless-upgrade`. Full contract in [daemon.md](daemon.md)
-§12, §16.
+explicit legacy CAS (`NULL` is never `0`). Frozen assertion (sharpened round 2, M9): *no
+legacy (non-epoch) holder **emits** a new `Frame::Message` after the daemon binds* — an
+already-in-flight legacy frame is bounded by at-least-once + `message_id` dedupe (a deduped
+duplicate, never loss); the stronger "no frame reaches a recipient" needs a new legacy
+drain-barrier verb (trips the reopen condition) and is flagged for `daemon-core`. The
+forward-only downgrade barrier is made **executable** (round 2, M10) by an external gate the
+old binary cannot bypass (launcher/store lock, or a legacy-write-path hard-fail) plus a
+per-store exclusive, crash-safe migration. Exercised by dedicated real-legacy-holder and
+schema-downgrade gating tests on both backends. Full rollback/gc/UX and any epoch-aware
+downgrade *framework* are deferred to `seamless-upgrade`. Full contract in [daemon.md](daemon.md)
+§12, §16, §3.4.
 
 **Consequences.** The binary-lock is handled and the cutover is deterministic and
 *verified*; hard, forward-only cutover of existing sessions is acceptable (ratified).
