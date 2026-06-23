@@ -7,7 +7,7 @@ right *agent* on the network — not just the right address.
 
 Exploratory design capture, and a **forward-looking layer** rather than a V0
 requirement. Telex is useful with direct addressing and a passive, self-registered
-directory alone (see [DESIGN.md](DESIGN.md)). This document describes what becomes
+directory alone (see [DESIGN.md](docs/design/DESIGN.md)). This document describes what becomes
 possible *after* that foundation exists: a network where a session can ask "who is
 best placed to handle this?" and live agents answer for themselves.
 

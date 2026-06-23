@@ -149,7 +149,7 @@ functionality.
 ## 0004 — Split the waiter into a resident holder and an ephemeral delivery client
 
 - **Date:** 2026-06-05
-- **Status:** Accepted
+- **Status:** Superseded by 0014 (the per-user local exchange replaces the resident per-session holder; the ephemeral one-shot `wait` client is retained)
 
 **Context.** Connection-bound liveness (0003) wants one long-lived process holding
 the backend connection and advisory lock. But agent runtimes can only reason about a
@@ -198,7 +198,7 @@ because the holder is now what keeps the TTL heartbeat alive across agent turns.
 ## 0005 — TTL-heartbeat + poll-with-cursor as the v0 baseline; defer LISTEN/NOTIFY and advisory locks
 
 - **Date:** 2026-06-05
-- **Status:** Accepted
+- **Status:** Accepted (poll-with-cursor delivery superseded by 0013; TTL-heartbeat liveness narrowed by 0017 to the daemon-down backstop role)
 
 **Context.** Early notes (and the research brief) treated Postgres `LISTEN/NOTIFY`
 (push delivery) and session-scoped advisory locks (connection-bound liveness) as
@@ -359,7 +359,7 @@ the conformance suite (issue #1) and the eventual `telex-core` + `telex-backend-
 ## 0009 — "Station" as the user/agent-facing name for the running presence (holder + waiter)
 
 - **Date:** 2026-06-17
-- **Status:** Accepted
+- **Status:** Amended by 0014 ("station" recast as a registration in the local exchange — lease row + attendance record — rather than a resident holder + waiter pair; the term and its lease-verb framing are retained)
 
 **Context.** The two-process model (0004) gave us precise internal roles — the resident
 **holder** and the **waiter** (`telex wait`) loop — but no single user/agent-facing noun
@@ -391,7 +391,7 @@ consistency and was an explicit deliverable (issue #8).
 ## 0010 — Default message `from` to the locally-held lease via a local holder registry; guard un-repliable disposition-required sends
 
 - **Date:** 2026-06-17
-- **Status:** Accepted
+- **Status:** Accepted (the `from`-default *policy* stands; its *mechanism* — the `run_dir()/holders/` registry keyed off a resident holder — is superseded by 0019, which resolves `from` via the exchange's daemon-native `ResolveFrom(TELEX_SESSION_ID)`)
 
 **Context.** `send`/`reply` derived `from` only from `--from` or `$TELEX_ADDRESS`/`--address`,
 with no link to the lease a session actually holds. Forget to set it and the message goes out
@@ -479,7 +479,7 @@ backends; see issue #10 / PR #15.
 ## 0012 — Holder self-binds to its launching session (pid-watch); ppid-default declined, fd path deferred
 
 - **Date:** 2026-06-17
-- **Status:** Accepted (pending validation)
+- **Status:** Accepted (pending validation) (relocated by 0017: pid-watch moves from the per-session holder into the exchange as the typed `--watch-pid` backstop; the ppid-default rejection and fd-path deferral stand, reaffirmed by the OQ4 probe)
 
 **Context.** Decision 0004 requires the holder's lifetime to track its session — "a
 session-owned process, **not** a fully detached daemon" — so session death releases the lease
@@ -521,7 +521,7 @@ lifetime tracks session), 0005 (TTL/poll baseline).
 ## 0013 — Live-holder visibility via per-recipient delivery state (drop the high-water cursor)
 
 - **Date:** 2026-06-18
-- **Status:** Accepted
+- **Status:** Accepted (the undelivered-set drain is retained and reused by the exchange; the **never-prune in-memory `seen`** rationale — which relied on holder restart — is superseded by 0016's bounded, epoch-keyed fast-path for the long-lived daemon)
 - **Supersedes:** the live-holder **drain mechanism** of 0005 (poll-with-cursor) and 0011 (the
   in-memory high-water `id > cursor` streaming drain). The `deliveries` table from 0011 is retained
   and promoted from a restart-recovery aid to the live drain's source of truth.
@@ -600,3 +600,244 @@ Greenfield: no migration machinery added (pre-first-non-beta, single-user). **CI
 build/test matrix does not run a real Postgres (issue #19), so green CI does *not* validate this
 fix's core behavior — it is validated by the gated Postgres tests, run locally against a real server
 (`TELEX_PG_URL=… TELEX_PG_REQUIRE=1 cargo test --test conformance`). See issue #18.
+
+## 0014 — Per-user local exchange (daemon); zero persistent session processes
+
+- **Date:** 2026-06-22
+- **Status:** Accepted (design; gated by the design-foundation design-gate)
+- **Supersedes:** 0004 (resident holder + ephemeral client) — the holder is removed.
+- **Amends:** 0009 (station recast); moots #3 (binary relay / `wait --loop`).
+
+**Context.** Binding presence + delivery transport to an ephemeral per-session resident
+holder (0004) is the root cause of telex's recurring staleness: orphaned holders, zombie
+`occupied` leases, holder/waiter startup races, dismiss leaving a holder attached, and a
+forever-listener starving a session's turn loop. Presence ("address A is attended by a
+live agent") is irreducible, but it does **not** need to live in a per-session process;
+delivery transport is not session-coupled at all.
+
+**Decision.** Introduce an auto-spawned, single-instance, supervised **per-user local
+exchange** (a `telex daemon`) that owns the backend connection(s), the poll/LISTEN-NOTIFY
+loop, the durable delivery buffer, the attendance registry, the lease heartbeat (single
+writer), the IPC endpoint, and pid-watch. Delete the resident holder: `attach`/`detach`
+become one-shot register/deregister and `wait` a one-shot per-turn block, all against the
+exchange. The exchange is implicit and zero-config (like `rust-analyzer`/`gopls`). A
+**station** is recast as a registration in the exchange (lease row + attendance record),
+not a resident process. Full contract in [daemon.md](daemon.md).
+
+**Consequences.** A whole class of per-session-process bugs is removed rather than
+hardened: one supervised process instead of N ad-hoc tasks, a single writer of liveness,
+a cleaner crash signal, and a freed session turn loop. The cost is the new machinery this
+ADR series specifies — singleton identity (0018), the epoch fence (0015), capability/
+version IPC and session ownership (0019), the liveness model (0017), and an upgrade floor
+(0020). Reopen only if a server-side ownership guard proves un-implementable on both
+backends (see 0015). PRODUCT-THESIS.md and DESIGN.md are updated to the local-exchange
+framing.
+
+## 0015 — Server-side lease-epoch fence, ordered handoff, and epoch lifecycle
+
+- **Date:** 2026-06-22
+- **Status:** Accepted (design; `fencing-proof` node must prove it executable on both backends)
+
+**Context.** The lease row is keyed by `address` only with **no owner generation**
+(verified: `src/registry.rs`, the backend `claim_lease`/`heartbeat`/`release_lease`), so
+on stall/crash/handoff/reclaim an old daemon can write a row it no longer owns
+(duplicate delivery, ownership flip-flop). Worse, lease-row fencing alone is insufficient
+for *delivery*: the holder emits the `Frame::Message` **before** `mark_delivered` commits
+(verified `src/commands/attach.rs:477` vs `:485`), so a graceful handoff or crash can
+double-deliver.
+
+**Decision.** Add a monotonic **`lease_epoch` + `owner_instance_id`** to the lease row.
+Claim/takeover increments the epoch via compare-and-set on the observed row; heartbeat
+and release are epoch/owner-guarded and **return a rowcount** (today `heartbeat` returns
+`Result<()>`); a 0-row heartbeat means a higher epoch exists → the daemon **self-demotes**.
+Fence **delivery emission server-side** via a typed
+`mark_delivered_if_current_owner(address, owner_instance_id, lease_epoch, message_id) ->
+Result<{Delivered | NotOwner | AlreadyDelivered}>`, with the ordering invariant that the
+daemon must receive a **non-`NotOwner`** result **before** emitting any `Frame::Message`.
+Handoff is ordered (quiesce → flush pending marks → unbind → claim epoch+1, no TTL gap).
+Postgres cross-machine reclaim is expressed **in epochs, not timing**. Remove the
+occupant-null release branch. Full contract in [daemon.md](daemon.md) §11.
+
+**Consequences.** This is the real single-writer guarantee and the spine of daemon-down
+recovery, upgrade handoff, and Postgres reclaim. A distinct executable `fencing-proof`
+gate must prove epoch-guarded emission + ordered handoff (incl. ownership-loss-around-
+delivery) before Postgres/plugin/upgrade rely on it. Backends gain a rowcount-returning
+heartbeat and the typed delivery method (a backend-API change). Reopen if the guard
+cannot be implemented/tested for both backends.
+
+## 0016 — `seen`-dedup redesign for a long-lived daemon
+
+- **Date:** 2026-06-22
+- **Status:** Accepted (design)
+- **Supersedes:** the never-prune in-memory `seen` rationale of 0013 (the drain is retained).
+- **Elevates:** #26 from carry to a satisfied design prerequisite.
+
+**Context.** 0013 made the live drain authoritative on per-recipient delivery state and
+kept an in-memory `seen: HashSet<i64>` **deliberately never pruned**, justified *because
+holders restart regularly*. A long-lived exchange voids that assumption: `seen` would
+grow unbounded and carry stale identity across epochs/handoffs.
+
+**Decision.** Keep the durable `deliveries(message_id, recipient)` table (0011/0013) as
+the **cross-epoch/cross-restart dedup authority** (unchanged). Replace the unbounded
+in-memory set with a **bounded fast-path keyed by `(recipient, message_id, lease_epoch)`**,
+seeded from `fetch_undelivered` on claim, evicted on durable mark / terminal disposition /
+epoch transition, and **dropped wholesale on epoch loss** (self-demote, takeover). Full
+contract in [daemon.md](daemon.md) §13.
+
+**Consequences.** Dedup stays bounded and correct without relying on process restart, and
+the epoch-scoped key prevents a stale in-flight identity surviving a fence. #27
+(`mark_delivered` cap) and #24 (registry GC) remain carries.
+
+## 0017 — Liveness: sessionEnd hook + typed `--watch-pid`; minimal stale-attendance/takeover; no idle-TTL teardown
+
+- **Date:** 2026-06-22
+- **Status:** Accepted (design)
+- **Relocates:** 0012 (pid-watch moves from the holder into the exchange).
+- **Narrows:** 0005 (TTL survives only as the daemon-down backstop).
+
+**Context.** With the holder gone, the exchange needs a liveness model that keeps
+idle-but-alive sessions instantly wakeable (the operator's explicit requirement) while
+not leaving zombies when a dismiss is unhooked. Empirically (live Copilot CLI probe,
+1.0.64-1): `copilot.exe` is a supervisor that re-execs an identical-argv inner worker
+whose PID is **not** env-exposed **and spawns lazily**, so there is **no usable distinct
+per-session PID** beyond `COPILOT_LOADER_PID` — and finding the inner pid would need the
+ppid-walk 0012 rejects. Loader-only liveness is therefore weak.
+
+**Decision.** Two paths: the **sessionEnd hook** is the healthy disconnect (quit +
+dismiss); a **typed `--watch-pid`** backstop catches the ungraceful case — `anchor`
+(any-sufficient) vs `required` (all-necessary) predicates plus a **pid + start-time reuse
+guard** (today `process_alive` is pid-only), v1 floor = a single loader **anchor** +
+start-time. There is **no idle-TTL teardown**; the precise rule is "no time-based
+dismissal of a *live* session, but **positive death evidence triggers immediate
+teardown**" via a four-case dismissal-path matrix (hook / watch-pid failure / takeover /
+daemon-down TTL). `occupied_stale` (derived from `attendance_last_confirmed_at`, refreshed
+by **positive presence only** — `sessionEnd` does not refresh) is reserved for the
+unobserved-death residual, and **operator takeover** (epoch-minting, atomic at the
+exchange) is the **load-bearing** recovery for it. Full contract in [daemon.md](daemon.md)
+§9–10.
+
+**Consequences.** OQ3/OQ4 resolved with empirical grounding; the hook becomes necessary
+and stale-attendance/takeover load-bearing (council E). TTL's only remaining role is the
+daemon-down backstop. Reopen if a distinct, reliably-capturable per-session PID appears,
+or if takeover cannot give a safe recovery contract.
+
+## 0018 — Daemon singleton identity, lifecycle contract, and Status surface
+
+- **Date:** 2026-06-22
+- **Status:** Accepted (design); the four+one gating tests are `daemon-core` acceptance.
+
+**Context.** "Per-user" must not mean globally user-wide: distinct config roots and
+protocol-majors must not collide on one exchange, and auto-spawn must survive a
+thundering herd, crashes mid-`wait`, and competing daemons without lying about liveness.
+
+**Decision.** Key the singleton by **`(user SID, config root, protocol-major)`**; the
+exchange serves multiple stores and clients pass store identity explicitly (so the
+endpoint is daemon-scoped, not address-keyed). Make auto-spawn normative: an OS-level
+**spawn-lock** (bind-the-endpoint-as-the-lock), **connect-or-spawn**, **readiness ACK**,
+a **`wait` reconnect-on-EOF grace** (a restart/handoff is not a turn failure),
+retry/backoff/crashloop guards, daemon-down **exit codes** (0/2/3/4, extended), and a
+bounded, **frozen Status field set** (epoch, instance, attendees with last-confirmed/
+stale, backoff, recent errors, protocol version). The **Status freeze line** (OQ7):
+freeze the field set + the gating tests' observable assertions; `daemon-core` owns
+rendering/format. Specify five gating tests (concurrent first-use, crash-during-`wait`,
+competing daemons, handoff duplicates + ownership-loss-around-delivery, intra-daemon
+takeover local-eviction). Full contract in [daemon.md](daemon.md) §2–4, §17.
+
+**Consequences.** Cross-profile/version collisions are avoided; the lifecycle is testable
+as `daemon-core` acceptance. The Status surface is stable enough for downstream tooling
+without over-freezing implementation detail.
+
+## 0019 — Daemon-scoped capability/version IPC and daemon-native session ownership
+
+- **Date:** 2026-06-22
+- **Status:** Accepted (design)
+- **Scope.** This ADR covers **two** linked concerns and was kept as one entry for log
+  brevity (splitting was considered and declined): (a) the daemon-scoped, versioned,
+  capability-authorized **IPC**; and (b) **daemon-native session ownership** (the
+  in-memory `session_id → addresses` authority, `Register`/`Re-register`/
+  `DeregisterSession`, the `from`-default rule, and crash recovery).
+- **Reshapes:** #23 / PR #31 (drop the filesystem `session_registry` as authority).
+- **Supersedes:** 0010's `from`-default mechanism (the local holder registry).
+
+**Context.** Today `Wait`/`Shutdown` are **unauthenticated** (verified `src/ipc.rs`) and
+the endpoint is address-keyed. One exchange serves multiple sessions/stores for one user,
+so privileged operations need a proof and the protocol needs skew handling. The sessionEnd
+hook (verified on `feature/copilot-session-end-plugin`) runs as a **separate process** and
+cannot inherit a secret minted in the earlier `attach` process, so a per-session
+capability "held in the session env" is **not obtainable** in v1.
+
+**Decision.** A **daemon-scoped** endpoint with a **Hello/HelloAck version handshake**;
+requests carry `store_key`/`address`/`session_id`. A **scoped-capability** model: an
+**instance `admin_cap`** (a user-private secret file, `0600`/owner-ACL) authorizes
+privileged RPCs (`DeregisterSession`, `Detach`, `Takeover`, `Drain`, `Status detail`);
+`Register`/`ReRegister`/`Wait` are unprivileged same-trust. `scope`/`rotation` and
+`per_session_cap` fields are **reserved** (one token v1). Session ownership is
+**daemon-native**: the in-memory `session_id → addresses` map is the authority; the hook
+is a thin mapper calling `DeregisterSession(session_id, admin_cap)`; `from` defaults via
+`ResolveFrom(TELEX_SESSION_ID)` against *that session's* addresses (never across
+sessions); crash recovery uses a **`suspect`/`verified`/`lapsed`** state machine with
+`wait` auto-Re-register. Full contract in [daemon.md](daemon.md) §6–7, §14.
+
+**Consequences.** Resolves OQ6 (proof without an external registry) and OQ8 (durable vs
+rebuilt attendance). Copilot JSON parsing never becomes a core protocol dependency. The
+Layer-1 IPC is the stabilized surface the #12 SDK reuses. Reopen if a plugin API appears
+that lets the hook env be pre-populated from an `attach`-time value (then a per-session
+cap becomes the v1 path), or if `wait` Re-register is impossible because the IPC transport
+masks socket-EOF.
+
+## 0020 — Minimal upgrade floor and the two-phase legacy/non-epoch cutover rule
+
+- **Date:** 2026-06-22
+- **Status:** Accepted (design)
+- **Splits:** #6 (minimal floor here; full platform in `seamless-upgrade`, last).
+
+**Context.** The first daemon-aware install hits the Windows binary-lock (a running
+`telex` process locks the binary during swap — hit live this workstream), and the first
+rollout meets **legacy holders** and **non-epoch lease rows**. Occupant-rotation alone
+cannot fence a live legacy holder: it ships `Frame::Message` *before* its post-emit
+`mark_delivered`, and its `heartbeat` returns no rowcount so it cannot observe
+self-demotion (verified `attach.rs`, `sqlite.rs`/`postgres.rs`).
+
+**Decision.** A **minimal upgrade floor** lands in `daemon-core`: a versioned install +
+launcher shim, `telex daemon stop --drain` (quiesce + flush + ordered release), and
+next-call respawn. The legacy cutover is **two-phase**: **drain** (confirm no legacy
+waiter is bound, via an address-keyed IPC probe with quit/handover or a bounded
+stale-window) **then claim** (`epoch=1`, NULL→0→1, under the row condition, atomically
+rotating occupant → owner_instance), with the frozen assertion *no `Frame::Message` from a
+non-epoch holder reaches a recipient after the daemon's waiter binds.* Full rollback/gc/UX
+is deferred to `seamless-upgrade`. Full contract in [daemon.md](daemon.md) §12, §16.
+
+**Consequences.** The binary-lock is handled and the cutover is deterministic; hard
+cutover of existing sessions is acceptable (ratified). *Preserved minority:* one reviewer
+held occupant-rotation alone suffices; the two-phase rule was adopted on the wire-level
+double-delivery proof. Reopen if the drain phase cannot be realized via the existing
+address-keyed IPC + bounded stale-wait (i.e. it needs a new IPC verb).
+
+## 0021 — Verb + docs/SKILL cutover; design-layer relocation to `docs/design/`
+
+- **Date:** 2026-06-22
+- **Status:** Accepted (design)
+
+**Context.** The cutover must not rename verbs or describe a dead holder/waiter model
+mid-workstream, and the design layer needed a home that the Streamliner manifest expects
+(`docs/design/*.md`) and that node-worker sessions own — distinct from the loose,
+ad-hoc-edited root vision docs.
+
+**Decision.** **Keep the verb names** (`attach`/`detach`/`wait`; now one-shot against the
+exchange); Register/Re-register/DeregisterSession are IPC operations, not CLI renames; the
+held-stream `SessionConnect` is not adopted (preserved dissent). **Hide** the `telex
+daemon` entrypoint from normal help. **Single-source the skill**: root `SKILL.md` stays
+the canonical file (embedded via `include_str!` for `telex skill`, with a `--raw` form);
+the plugin consumes the same file (manifest pointer, else a thin wrapper `exec`ing `telex
+skill --raw`) — no divergent copy. `SKILL.md` + plugin-doc narrative updates land **with
+`daemon-core`**, never mid-workstream. **Relocate the design layer**: `DESIGN.md` and
+`DECISIONS.md` move to `docs/design/` (joined by the new `daemon.md` and `index.md`);
+`PRODUCT-THESIS.md`, `TELEX.md`, `DISPATCH.md`, `README.md`, and the binary-embedded
+`SKILL.md` stay at the repository root.
+
+**Consequences.** No rename/deprecation debt; instructions never describe a dead model
+mid-workstream. The relocation **deviates from issue #34's "keep the design layer at the
+repo root"**: it was builder-directed during shaping and is flagged for orchestrator
+reconciliation (updating the workstream brief/issue text is an orchestrator action). The
+`telex skill` embed path is preserved (`SKILL.md` did not move). Full verb/skill detail in
+[daemon.md](daemon.md) §15.

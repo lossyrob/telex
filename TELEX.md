@@ -5,7 +5,7 @@ agent coordination faces in the early AI era.
 
 This document keeps the name, history, and metaphor. For the build-facing product
 thesis and design capture, see [PRODUCT-THESIS.md](PRODUCT-THESIS.md) and
-[DESIGN.md](DESIGN.md).
+[DESIGN.md](docs/design/DESIGN.md).
 
 ## The name
 
