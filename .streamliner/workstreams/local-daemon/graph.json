@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-06-22T16:05:00Z",
+  "updatedAt": "2026-06-22T21:15:11.719Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -22,10 +22,22 @@
     }
   ],
   "designRefs": [
-    { "repoId": "telex", "path": "DESIGN.md" },
-    { "repoId": "telex", "path": "DECISIONS.md" },
-    { "repoId": "telex", "path": "PRODUCT-THESIS.md" },
-    { "repoId": "telex", "path": "SKILL.md" }
+    {
+      "repoId": "telex",
+      "path": "DESIGN.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "DECISIONS.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "PRODUCT-THESIS.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "SKILL.md"
+    }
   ],
   "nodes": [
     {
@@ -35,8 +47,13 @@
       "summary": "Make the daemon architecture explicit and validated: DECISIONS ADR(s), DESIGN.md station->daemon update, PRODUCT-THESIS.md no-server->local-daemon update, the IPC/attendance protocol, the liveness model (hook healthy-path + a generic, typed --watch-pid pid-watch backstop, no idle-TTL teardown) plus minimal stale-attendance (last-confirmed + occupied_stale + takeover, no teardown), the lease-epoch fencing token (epoch-guarded heartbeat/release; self-demote on a 0-row heartbeat), the daemon singleton identity (user SID + config root + protocol-major), durable-buffer reuse of 0011/0013, and the epoch-based upgrade/handoff design, the server-side epoch fence on delivery emission + ordered handoff, the seen-dedup redesign for a long-lived daemon, the daemon lifecycle contract + Status surface, the daemon-scoped capability/version-handshake IPC, daemon-native session RPCs (Register/Re-register/DeregisterSession), the takeover state algebra, and the verb/docs cutover. Resolves the open implementation-design questions.",
       "status": "ready",
       "attention": "focus",
-      "repoIds": ["telex"],
-      "tracker": { "type": "local", "path": "tasks/design-foundation.md" },
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "local",
+        "path": "tasks/design-foundation.md"
+      },
       "dependsOn": []
     },
     {
@@ -46,8 +63,12 @@
       "summary": "Builder validates the daemon architecture, liveness model, protocol, and upgrade design before any implementation proceeds. Spar + council critique resolved.",
       "status": "planned",
       "attention": "focus",
-      "repoIds": ["telex"],
-      "dependsOn": ["design-foundation"]
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "design-foundation"
+      ]
     },
     {
       "id": "daemon-core",
@@ -56,8 +77,12 @@
       "summary": "Auto-spawned per-user single-instance daemon (singleton keyed by user SID + config root + protocol-major) owning the SQLite poll loop, durable buffer (reuse 0011/0013 deliveries), daemon-scoped IPC (Register/Re-register/Deregister/DeregisterSession/Wait/Status; frames carry the lease epoch), attendance registry (in-memory session->addresses + attendance_last_confirmed_at staleness), daemon-written epoch-guarded lease heartbeat (self-demote on a 0-row heartbeat), server-side epoch-gated delivery emission (mark_delivered_if_current_owner; no Message frame unless the daemon owns the epoch), the redesigned bounded/durable dedup (the seen invariant no longer relies on holder restart), and a generic typed --watch-pid pid-watch backstop (v1 floor: loader anchor + start-time; harness-agnostic). Refactor attach/detach into one-shot register/deregister and wait into a daemon client, so a session runs zero persistent telex processes. Includes the minimal upgrade floor (versioned shim + daemon stop --drain + next-call respawn + legacy-holder/non-epoch-lease cutover rule) and the daemon lifecycle contract (OS spawn-lock, connect-or-spawn, readiness ACK, wait reconnect-on-EOF grace, exit codes, Status surface); acceptance includes the four lifecycle tests (concurrent first-use, crash-during-wait, competing daemons, handoff duplicates). With the Copilot plugin this is the first operator-unblocking slice: holder/waiter race + orphans + turn-loop starvation gone on SQLite.",
       "status": "planned",
       "attention": "focus",
-      "repoIds": ["telex"],
-      "dependsOn": ["design-gate"]
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "design-gate"
+      ]
     },
     {
       "id": "fencing-proof",
@@ -66,8 +91,12 @@
       "summary": "Executable proof that delivery emission is epoch-gated server-side and that graceful handoff/crash cannot double-deliver or flip ownership, on SQLite first. Distinct gate that postgres-parity, copilot-plugin, and seamless-upgrade depend on; downstream branches must not proceed until it passes.",
       "status": "planned",
       "attention": "focus",
-      "repoIds": ["telex"],
-      "dependsOn": ["daemon-core"]
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "daemon-core"
+      ]
     },
     {
       "id": "postgres-parity",
@@ -76,8 +105,12 @@
       "summary": "One LISTEN/NOTIFY connection in the daemon; daemon heartbeats local attendees' backend leases; per-machine presence with the backend lease as cross-machine source of truth. The daemon-respawn reclaim race is handled by epoch fencing; this node must prove epoch behavior under competing daemons/machines before it lands. Sketch; detailed at promotion.",
       "status": "planned",
       "attention": "watch",
-      "repoIds": ["telex"],
-      "dependsOn": ["fencing-proof"]
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "fencing-proof"
+      ]
     },
     {
       "id": "copilot-plugin",
@@ -86,8 +119,12 @@
       "summary": "sessionEnd hook calls a daemon-native DeregisterSession(session_id, proof) RPC (healthy disconnect, quit + dismiss) - the daemon's in-memory session->addresses map is the authority, NOT PR #31's filesystem registry (its hook plumbing is reused, the registry storage is dropped). The hook is a thin mapper of the Copilot env/payload (COPILOT_AGENT_SESSION_ID -> TELEX_SESSION_ID; COPILOT_LOADER_PID -> --watch-pid) onto generic inputs; the core COPILOT_* fallback is removed so Copilot JSON parsing is not a core protocol dependency. Move telex skill into a real Copilot plugin skill with one source serving both the CLI command and the plugin skill. Sketch; may split hook vs skill at promotion.",
       "status": "planned",
       "attention": "watch",
-      "repoIds": ["telex"],
-      "dependsOn": ["fencing-proof"]
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "fencing-proof"
+      ]
     },
     {
       "id": "seamless-upgrade",
@@ -96,8 +133,13 @@
       "summary": "Versioned install + stable launcher shim + telex upgrade/rollback/gc + daemon drain-restart/handoff (epoch-based), so upgrades never require tearing down stations. Floor (fencing-ready schema + minimal restart) already lands in daemon-core; this node adds the full upgrade platform LAST, after Postgres + plugin are proven, so it never blocks the operator unblock. Sketch; detailed at promotion.",
       "status": "planned",
       "attention": "watch",
-      "repoIds": ["telex"],
-      "dependsOn": ["postgres-parity", "copilot-plugin"]
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "postgres-parity",
+        "copilot-plugin"
+      ]
     },
     {
       "id": "closure-gate",
@@ -106,8 +148,14 @@
       "summary": "Builder validates the full system: give a real session the new plugin + new telex and confirm it is unblocked end-to-end. Retire superseded mechanisms (pid-watch-as-holder, #3 relay, the re-arm dance) and update SKILL.md.",
       "status": "planned",
       "attention": "focus",
-      "repoIds": ["telex"],
-      "dependsOn": ["postgres-parity", "copilot-plugin", "seamless-upgrade"]
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "postgres-parity",
+        "copilot-plugin",
+        "seamless-upgrade"
+      ]
     }
   ],
   "checkpoints": [
@@ -116,35 +164,64 @@
       "title": "Design foundation aligned",
       "summary": "Daemon architecture, liveness model, protocol, durable-buffer reuse, and upgrade design are explicit and builder-validated.",
       "status": "planned",
-      "nodeIds": ["design-foundation", "design-gate"]
+      "nodeIds": [
+        "design-foundation",
+        "design-gate"
+      ]
     },
     {
       "id": "daemon-core-usable",
-      "title": "Daemon core usable (SQLite)",
-      "summary": "A CLI session attends and receives through the always-on daemon with zero per-session telex processes; SQLite path proven.",
+      "title": "Daemon core usable + fencing proven (SQLite)",
+      "summary": "Daemon core on SQLite with server-side epoch-fenced delivery proven (fencing-proof); a session attends and receives with zero per-session telex processes. The SQLite operator-unblock slice is in reach, needing the plugin.",
       "status": "planned",
-      "nodeIds": ["daemon-core"]
+      "nodeIds": [
+        "daemon-core",
+        "fencing-proof"
+      ]
     },
     {
-      "id": "sqlite-unblock-shipped",
-      "title": "SQLite unblock shipped",
-      "summary": "First operator-unblocking slice: daemon-core + fencing-proof + Copilot plugin + minimal upgrade floor on SQLite - a real session can take the new plugin + telex and be unblocked.",
+      "id": "backends-and-plugin",
+      "title": "Both backends + Copilot plugin landed",
+      "summary": "Postgres parity and the Copilot plugin (daemon-native DeregisterSession + skill) landed; with the plugin on SQLite the first operator-unblock slice is shippable.",
       "status": "planned",
-      "nodeIds": ["daemon-core", "fencing-proof", "copilot-plugin"]
+      "nodeIds": [
+        "postgres-parity",
+        "copilot-plugin"
+      ]
     },
     {
       "id": "complete",
-      "title": "Both backends + plugin + upgrade complete",
-      "summary": "Postgres parity, the Copilot plugin (hook + skill), and seamless upgrade all landed.",
+      "title": "Full deliverable complete",
+      "summary": "The full seamless upgrade platform (#6) landed; both backends, the plugin, and upgrade are all in, pending closure validation.",
       "status": "planned",
-      "nodeIds": ["postgres-parity", "copilot-plugin", "seamless-upgrade"]
+      "nodeIds": [
+        "seamless-upgrade"
+      ]
     },
     {
       "id": "closure-ready",
       "title": "Closure ready",
       "summary": "End-to-end unblock validated; superseded mechanisms and docs retired/updated.",
       "status": "planned",
-      "nodeIds": ["closure-gate"]
+      "nodeIds": [
+        "closure-gate"
+      ]
     }
-  ]
+  ],
+  "presentation": {
+    "shortName": "TLX-D",
+    "color": "#e8114b"
+  },
+  "launchPolicy": {
+    "requiredTracker": "github-issue"
+  },
+  "launchDefaults": {
+    "promptProfileId": "paw-lite-loop-v7",
+    "terminal": {
+      "titleTemplate": "TLX-D {githubIssue}"
+    },
+    "launchAfterInit": true,
+    "reviewCompanion": true,
+    "reviewPromptTemplateId": "paw-review-loop-v2"
+  }
 }

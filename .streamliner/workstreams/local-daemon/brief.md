@@ -29,7 +29,7 @@ hard contracts up front - the daemon-scoped capability/version-handshake IPC, th
 (the centerpiece: daemon process, durable buffer, one-shot verbs, server-side
 epoch-fenced delivery, the lifecycle contract, and a minimal upgrade floor) on
 SQLite, which with the **Copilot plugin** is the first slice that can unblock the
-operator (the `sqlite-unblock-shipped` checkpoint). A distinct **fencing-proof** gate
+operator (reached when the plugin lands on SQLite). A distinct **fencing-proof** gate
 (epoch-guarded emission + ordered handoff, proven on SQLite) then blocks downstream
 work. **Postgres parity** extends the core under that proof and adds the cross-machine
 reclaim (competing daemons); **seamless upgrade** (#6) lands
