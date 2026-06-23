@@ -819,7 +819,10 @@ keyed by **`(store_key, session_id)`** with a durable **`sessions` currency auth
 daemon-assigned monotonic `(session_seq, nonce)` (R6-2) + per-address tombstones** —
 **serialized on the `sessions` row** (all `Register`/`ReRegister`/`DeregisterSession`/`Detach`
 lock the row and gate on the carried `(session_seq, nonce)`; `Register` carries a **positive
-`Establish`/`Continue` mode** so a live session cannot self-supersede, R7-1), so a removal is
+`Establish`/`Continue` mode** — `Establish` is a **prior-seq CAS** keyed by a high-entropy
+single-use `establish_nonce` + `expected_prior_seq`, so a live session cannot self-supersede
+**and** a previously-used nonce / stale replayed establish can never allocate a new seq or
+supersede a quiet-but-live later life, R7-1/R8-1), so a removal is
 neither resurrected by — nor applied by — a stale op. The **healthy-disconnect `sessionEnd`
 hook is non-authoritative** (R6-1): it sends `SessionEndHint(store_key, session_id, admin_cap)`
 with **no incarnation** (a recurring-`session_id`-only hook cannot identify its life) and the
