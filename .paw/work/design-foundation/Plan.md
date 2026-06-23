@@ -57,12 +57,12 @@ so the vocabulary survives the holder's removal.
 
 ## Work Items
 
-- [ ] **WI-1 — Establish `docs/design/` + migrate.** `git mv DESIGN.md DECISIONS.md
+- [x] **WI-1 — Establish `docs/design/` + migrate.** `git mv DESIGN.md DECISIONS.md
   docs/design/`; create `docs/design/index.md` skeleton; fix inbound links
   (`README.md`, `PRODUCT-THESIS.md`, inter-doc refs, `brief.md`/`tasks` only if they
   point at moved files — leave `.streamliner/` workstream docs as-is unless broken).
   Verify the `SKILL.md` embed path is untouched. (D1; structural prerequisite.)
-- [ ] **WI-2 — Author `docs/design/daemon.md` normative spec.** The core contract.
+- [x] **WI-2 — Author `docs/design/daemon.md` normative spec.** The core contract.
   Sections: local-exchange overview; singleton identity + auto-spawn; lifecycle state
   machine + Status surface (OQ7 frozen field set); daemon-scoped IPC protocol + version
   handshake; scoped-capability authorization (**admin-cap v1 per DA-2**; `per_session_cap`
@@ -77,14 +77,14 @@ so the vocabulary survives the holder's removal.
   with per-test observable assertions; **OQ-γ sessionResume-scope note**; relocations/
   supersedes/defers map; consolidated OQ resolutions. (Deliverables 4, 5, 6, 8, parts of
   1/9.)
-- [ ] **WI-3 — Rewrite `docs/design/DESIGN.md`** to the daemon end-state: local
+- [x] **WI-3 — Rewrite `docs/design/DESIGN.md`** to the daemon end-state: local
   exchange as design center; recast Station; replace the resident-holder/waiter-loop
   and local-holder-registry sections; point detail into `daemon.md`; keep
   telex/station vocabulary coherent. (Deliverable 2; D3.)
-- [ ] **WI-4 — Update `PRODUCT-THESIS.md`** — "one small binary, no server" ->
+- [x] **WI-4 — Update `PRODUCT-THESIS.md`** — "one small binary, no server" ->
   "one small binary + an auto-spawned local exchange (daemon)"; zero-config/implicit
   framing (like `rust-analyzer`/`gopls`); keep it vision-level. (Deliverable 3.)
-- [ ] **WI-5 — Author ADRs 0014–0021 in `docs/design/DECISIONS.md`.** Concise
+- [x] **WI-5 — Author ADRs 0014–0021 in `docs/design/DECISIONS.md`.** Concise
   decision records + supersessions, each pointing into `daemon.md`. **8 ADRs confirmed
   (Q-A resolved)**:
   - 0014 — Per-user local daemon (local exchange); zero persistent session processes.
@@ -106,12 +106,12 @@ so the vocabulary survives the holder's removal.
     *(OQ5)*
   - 0021 — Verb + docs/SKILL cutover (**single-source SKILL mechanism, DA-10**);
     design-layer relocation to `docs/design/`. *Records D1.*
-- [ ] **WI-6 — Consolidated OQ resolutions + relocations map.** A clearly labeled
+- [x] **WI-6 — Consolidated OQ resolutions + relocations map.** A clearly labeled
   section (in `daemon.md`, surfaced from `index.md`) resolving all 8 OQs with
   implementable specifics and pointing to where each is specified; plus the explicit
   relocate/supersede/defer table across #32/#23/#31/#5/#17/#3/#26/#27/#24/#6/#28/#33.
   (Deliverable 9 + the issue's "record deferred items explicitly.")
-- [ ] **WI-7 — Consistency + cross-reference audit + index finalize.** Whole-layer
+- [x] **WI-7 — Consistency + cross-reference audit + index finalize.** Whole-layer
   read for internal consistency (no doc describes a superseded mechanism as current
   except where explicitly framed as the v0-being-replaced); finalize `index.md`;
   verify every cross-link resolves; confirm no production code touched; draft the
