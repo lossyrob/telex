@@ -5,6 +5,7 @@ use anyhow::{anyhow, Result};
 pub mod address;
 pub mod attach;
 pub mod backend;
+pub mod daemon;
 pub mod detach;
 pub mod disposition;
 pub mod export;
@@ -111,5 +112,25 @@ mod tests {
         let path = temp_path("missing");
         let err = resolve_body(None, Some(path.to_string_lossy().into_owned())).unwrap_err();
         assert!(err.to_string().contains("body-file"));
+    }
+
+    #[test]
+    fn daemon_one_shot_verbs_do_not_call_legacy_registry_or_address_ipc() {
+        let verbs = [
+            ("attach", include_str!("attach.rs")),
+            ("wait", include_str!("wait.rs")),
+            ("send", include_str!("send.rs")),
+            ("reply", include_str!("reply.rs")),
+            ("ack", include_str!("disposition.rs")),
+        ];
+        for (verb, source) in verbs {
+            assert!(
+                !source.contains("crate::registry")
+                    && !source.contains("registry::")
+                    && !source.contains("crate::ipc")
+                    && !source.contains("ipc::endpoint"),
+                "{verb} must use daemon-scoped IPC, not the legacy holder registry/address endpoint"
+            );
+        }
     }
 }

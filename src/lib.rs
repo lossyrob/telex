@@ -6,6 +6,8 @@ pub mod commands;
 pub mod config;
 #[cfg(feature = "entra")]
 pub mod credential;
+pub mod daemon;
+pub mod daemon_ipc;
 pub mod identity;
 pub mod ipc;
 pub mod model;

@@ -347,9 +347,9 @@ async fn leases_liveness(store: Store) {
         Some("B")
     );
 
-    // Release frees the address.
+    // Release clears occupant fields but retains the row (epoch preserved for monotonicity).
     assert!(b.release_lease(stale, "B").await.unwrap());
-    assert!(b.get_lease(stale).await.unwrap().is_none());
+    // Row persists; occupancy is now false.
     assert!(!b.occupancy(stale, 1).await.unwrap().occupied);
 
     // Releasing a non-existent lease reports no change.
@@ -383,8 +383,12 @@ async fn undelivered_delivery(store: Store) {
     // The gap-closing invariant: deliver the HIGHER ids m2 and m3; the lower undelivered m1 must
     // still be returned. A high-water cursor parked at m3 would skip m1 — `fetch_undelivered` does
     // not, because delivery state (not id ordering) decides visibility.
-    b.mark_delivered(m2.id, addr, Some("holderA")).await.unwrap();
-    b.mark_delivered(m3.id, addr, Some("holderA")).await.unwrap();
+    b.mark_delivered(m2.id, addr, Some("holderA"))
+        .await
+        .unwrap();
+    b.mark_delivered(m3.id, addr, Some("holderA"))
+        .await
+        .unwrap();
     assert_eq!(
         b.fetch_undelivered(addr)
             .await
@@ -397,7 +401,9 @@ async fn undelivered_delivery(store: Store) {
     );
 
     // Delivering the last one empties the set.
-    b.mark_delivered(m1.id, addr, Some("holderA")).await.unwrap();
+    b.mark_delivered(m1.id, addr, Some("holderA"))
+        .await
+        .unwrap();
     assert!(
         b.fetch_undelivered(addr).await.unwrap().is_empty(),
         "no undelivered messages remain once all are delivered"
@@ -998,8 +1004,12 @@ mod postgres_fixture {
                 cfg.password(pw);
             }
         }
-        let schema = sanitize_ident(&format!("telex_issue18_{}_{}", std::process::id(), now_ms()))
-            .expect("derived schema name must be a valid identifier");
+        let schema = sanitize_ident(&format!(
+            "telex_issue18_{}_{}",
+            std::process::id(),
+            now_ms()
+        ))
+        .expect("derived schema name must be a valid identifier");
 
         // Create the schema + tables via the backend, then run the body with panic-safe cleanup.
         let b = PgBackend::connect_with(cfg.clone(), Some(&schema))
@@ -1136,5 +1146,333 @@ mod postgres_fixture {
         drop(cb);
         let _ = ca_handle.await;
         let _ = cb_handle.await;
+    }
+}
+
+// ----------------------------------------------------------------------------------------
+// SQLite epoch-aware storage tests (P1 — §11 / §13 / §17 rows 2,4,5,7,12,17,19)
+// ----------------------------------------------------------------------------------------
+
+#[cfg(feature = "sqlite")]
+mod sqlite_epoch_tests {
+    use super::*;
+    use telex::backend::sqlite::SqliteBackend;
+    use telex::model::{DeliveryOutcome, EpochClaimResult};
+
+    fn tmp_path(label: &str) -> String {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "telex-epoch-{}-{}-{}.db",
+            label,
+            std::process::id(),
+            now_ms()
+        ));
+        p.to_string_lossy().to_string()
+    }
+
+    async fn fresh(label: &str) -> (SqliteBackend, String) {
+        let path = tmp_path(label);
+        let b = SqliteBackend::open(&path).expect("open");
+        b.init_schema().await.expect("init");
+        (b, path)
+    }
+
+    /// After `release_lease`, the row must persist (epoch preserved); a second claim must get
+    /// epoch+1, not epoch=1 — proving the monotonic high-water mark is never reset.
+    #[tokio::test]
+    async fn epoch_non_deleting_release_and_monotonicity() {
+        let (b, _path) = fresh("epoch-monotone").await;
+        let addr = "epoch:monotone";
+        let claim = LeaseClaim {
+            address: addr.to_string(),
+            occupant: "A".into(),
+            ..Default::default()
+        };
+
+        // First claim → epoch 1.
+        b.claim_lease(&claim, 60).await.unwrap();
+        let row1 = b.get_lease(addr).await.unwrap().expect("row after claim");
+        assert_eq!(row1.lease_epoch, Some(1), "first claim epoch=1");
+
+        // Release — row must survive.
+        assert!(b.release_lease(addr, "A").await.unwrap());
+        let row2 = b.get_lease(addr).await.unwrap().expect("row after release");
+        assert_eq!(row2.lease_epoch, Some(1), "epoch preserved after release");
+        assert_eq!(row2.owner_instance_id, None, "owner cleared after release");
+
+        // Second claim (different occupant) must increment to epoch 2.
+        let claim2 = LeaseClaim {
+            address: addr.to_string(),
+            occupant: "B".into(),
+            ..Default::default()
+        };
+        b.claim_lease(&claim2, 60).await.unwrap();
+        let row3 = b
+            .get_lease(addr)
+            .await
+            .unwrap()
+            .expect("row after re-claim");
+        assert_eq!(
+            row3.lease_epoch,
+            Some(2),
+            "second claim epoch=2 (monotonic)"
+        );
+    }
+
+    /// `release_lease` must NOT delete the row (§11.2 non-deleting release).
+    #[tokio::test]
+    async fn epoch_release_no_row_deletion() {
+        let (b, _path) = fresh("epoch-nodelete").await;
+        let addr = "epoch:nodelete";
+        let claim = LeaseClaim {
+            address: addr.to_string(),
+            occupant: "X".into(),
+            ..Default::default()
+        };
+        b.claim_lease(&claim, 60).await.unwrap();
+        assert!(b.release_lease(addr, "X").await.unwrap());
+        // Row must still exist after release.
+        assert!(
+            b.get_lease(addr).await.unwrap().is_some(),
+            "release_lease must not delete the row"
+        );
+        // And occupancy must be false.
+        assert!(!b.occupancy(addr, 60).await.unwrap().occupied);
+    }
+
+    /// `heartbeat_epoch` returns `true` for current owner/epoch, `false` for stale/wrong.
+    #[tokio::test]
+    async fn epoch_heartbeat_staleness() {
+        let (b, _path) = fresh("epoch-hb").await;
+        let addr = "epoch:hb";
+        let owner = "owner-hb";
+
+        // Set up via claim_epoch_lease.
+        let stale_cutoff = now_ms() - 5_000; // already stale
+        let result = b
+            .claim_epoch_lease(addr, owner, stale_cutoff)
+            .await
+            .unwrap();
+        let epoch = match result {
+            EpochClaimResult::Claimed(ref e) => e.lease_epoch,
+            other => panic!("expected Claimed, got {:?}", other),
+        };
+
+        // Correct owner+epoch → returns true.
+        assert!(
+            b.heartbeat_epoch(addr, owner, epoch).await.unwrap(),
+            "heartbeat with correct owner+epoch must return true"
+        );
+
+        // Wrong epoch → returns false.
+        assert!(
+            !b.heartbeat_epoch(addr, owner, epoch + 99).await.unwrap(),
+            "heartbeat with wrong epoch must return false"
+        );
+
+        // Wrong owner → returns false.
+        assert!(
+            !b.heartbeat_epoch(addr, "impostor", epoch).await.unwrap(),
+            "heartbeat with wrong owner must return false"
+        );
+    }
+
+    /// `mark_consumed_if_current_owner` returns the correct `DeliveryOutcome` variant based on
+    /// ownership check and existing delivery state (§11.3 / §13).
+    #[tokio::test]
+    async fn epoch_mark_consumed_outcomes() {
+        let (b, _path) = fresh("epoch-consume").await;
+
+        let addr = "epoch:consume";
+        let owner = "owner-consume";
+
+        // Claim lease.
+        let stale_cutoff = now_ms() - 5_000;
+        let claim_result = b
+            .claim_epoch_lease(addr, owner, stale_cutoff)
+            .await
+            .unwrap();
+        let epoch = match claim_result {
+            EpochClaimResult::Claimed(ref e) => e.lease_epoch,
+            other => panic!("expected Claimed, got {:?}", other),
+        };
+
+        // Insert a message addressed to addr.
+        let msg = b
+            .insert_message(&NewMessage {
+                to_addr: addr.to_string(),
+                body: "hello".to_string(),
+                attention: Attention::Background,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mid = msg.id;
+
+        // Not owner (wrong owner_instance_id) → NotOwner wins over all.
+        assert_eq!(
+            b.mark_consumed_if_current_owner(addr, "impostor", epoch, mid)
+                .await
+                .unwrap(),
+            DeliveryOutcome::NotOwner
+        );
+
+        // AckNoOp case: message exists, delivery row pending (fan-out created by insert_message)
+        // but we haven't consumed it yet from the correct owner side — wait, the row DOES exist
+        // (fan-out created NULL). So this should be pending → Marked on first call.
+        // First call with correct owner/epoch → Marked.
+        assert_eq!(
+            b.mark_consumed_if_current_owner(addr, owner, epoch, mid)
+                .await
+                .unwrap(),
+            DeliveryOutcome::Marked,
+            "first mark should return Marked"
+        );
+
+        // Second call → AlreadyConsumed.
+        assert_eq!(
+            b.mark_consumed_if_current_owner(addr, owner, epoch, mid)
+                .await
+                .unwrap(),
+            DeliveryOutcome::AlreadyConsumed,
+            "second mark should return AlreadyConsumed"
+        );
+
+        // AckNoOp: message with no delivery row at all.
+        let msg2 = b
+            .insert_message(&NewMessage {
+                to_addr: "epoch:other".to_string(),
+                body: "other".to_string(),
+                attention: Attention::Background,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        // msg2.id was sent to a different address, so no delivery row for addr.
+        assert_eq!(
+            b.mark_consumed_if_current_owner(addr, owner, epoch, msg2.id)
+                .await
+                .unwrap(),
+            DeliveryOutcome::AckNoOp,
+            "no delivery row should return AckNoOp"
+        );
+
+        // NotOwner still takes precedence even if delivery row exists.
+        assert_eq!(
+            b.mark_consumed_if_current_owner(addr, "impostor", epoch, mid)
+                .await
+                .unwrap(),
+            DeliveryOutcome::NotOwner,
+            "NotOwner precedence over AlreadyConsumed"
+        );
+    }
+
+    /// Fan-out creates independent per-recipient delivery rows: acking the primary `to`
+    /// recipient does not consume the same message for a cc recipient.
+    #[tokio::test]
+    async fn epoch_fanout_is_per_recipient() {
+        let (b, _path) = fresh("epoch-fanout").await;
+
+        let to = "epoch:fanout:to";
+        let cc = "epoch:fanout:cc";
+        let owner_to = "owner-to";
+        let owner_cc = "owner-cc";
+
+        let cutoff = now_ms() - 5_000;
+        let to_epoch = match b.claim_epoch_lease(to, owner_to, cutoff).await.unwrap() {
+            EpochClaimResult::Claimed(e) => e.lease_epoch,
+            other => panic!("expected to claim, got {:?}", other),
+        };
+        let cc_epoch = match b.claim_epoch_lease(cc, owner_cc, cutoff).await.unwrap() {
+            EpochClaimResult::Claimed(e) => e.lease_epoch,
+            other => panic!("expected cc claim, got {:?}", other),
+        };
+
+        let msg = b
+            .insert_message(&NewMessage {
+                to_addr: to.to_string(),
+                cc: Some(cc.to_string()),
+                body: "fanout".to_string(),
+                attention: Attention::Background,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            b.fetch_undelivered(to).await.unwrap().len(),
+            1,
+            "to recipient has a pending delivery"
+        );
+        assert_eq!(
+            b.fetch_undelivered(cc).await.unwrap().len(),
+            1,
+            "cc recipient has an independent pending delivery"
+        );
+
+        assert_eq!(
+            b.mark_consumed_if_current_owner(to, owner_to, to_epoch, msg.id)
+                .await
+                .unwrap(),
+            DeliveryOutcome::Marked
+        );
+
+        assert!(
+            b.fetch_undelivered(to).await.unwrap().is_empty(),
+            "to recipient consumed"
+        );
+        assert_eq!(
+            b.fetch_undelivered(cc).await.unwrap().len(),
+            1,
+            "cc recipient is not cross-consumed by to ack"
+        );
+
+        assert_eq!(
+            b.mark_consumed_if_current_owner(cc, owner_cc, cc_epoch, msg.id)
+                .await
+                .unwrap(),
+            DeliveryOutcome::Marked,
+            "cc recipient can still mark its own delivery"
+        );
+    }
+
+    /// The durable clock must be monotonically non-decreasing across backend reopens.
+    #[tokio::test]
+    async fn epoch_durable_clock_monotonic() {
+        let path = tmp_path("epoch-clock");
+        let t2;
+        {
+            let b = SqliteBackend::open(&path).expect("open1");
+            b.init_schema().await.expect("init");
+            let t1 = b.durable_clock_now_ms().await.unwrap();
+            t2 = b.durable_clock_now_ms().await.unwrap();
+            assert!(t2 >= t1, "clock must not go backward within same session");
+        }
+        // Reopen: clock must be >= last persisted HWM.
+        {
+            let b2 = SqliteBackend::open(&path).expect("open2");
+            b2.init_schema().await.expect("init2");
+            let t3 = b2.durable_clock_now_ms().await.unwrap();
+            assert!(t3 >= t2, "clock after reopen must not move backward");
+        }
+    }
+
+    /// Opening the same SQLite store via `open_locked` twice must fail on the second call
+    /// while the first lock holder is alive.
+    #[tokio::test]
+    async fn epoch_store_lock_contention() {
+        let path = tmp_path("epoch-lock");
+        // Create the DB first so `open_locked` can stat the file for its ID.
+        {
+            let b = SqliteBackend::open(&path).expect("create db");
+            b.init_schema().await.expect("init");
+        }
+
+        let _b1 = SqliteBackend::open_locked(&path).expect("first lock must succeed");
+        let second = SqliteBackend::open_locked(&path);
+        assert!(
+            second.is_err(),
+            "second open_locked must fail while the first store lock is held"
+        );
     }
 }

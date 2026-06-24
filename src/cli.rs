@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 use crate::backend::Backend;
 use crate::config::Config;
+use crate::daemon_ipc::{WatchPidRole, WatchPidSpec};
 use crate::output::Format;
 use crate::profiles::BackendProfile;
 
@@ -53,10 +54,10 @@ pub enum Command {
     /// Print the agent usage skill (how to use telex) for this build.
     Skill(SkillArgs),
 
-    /// Start a station on an address: become the live occupant, hold the lease, run the holder (blocks).
+    /// Attach this session to an address and exit.
     Attach(AttachArgs),
-    /// Stop the station for an address: release the lease and stop a running holder.
-    Detach,
+    /// Detach this session's address membership.
+    Detach(DetachArgs),
 
     /// Block until an actionable message arrives, print it as JSON, and exit.
     Wait(WaitArgs),
@@ -93,6 +94,10 @@ pub enum Command {
     #[command(subcommand)]
     Backend(BackendCmd),
 
+    /// Hidden daemon lifecycle and diagnostics entrypoint.
+    #[command(hide = true, subcommand)]
+    Daemon(DaemonCmd),
+
     /// Export messages and disposition history as JSON lines.
     Export(ExportArgs),
 }
@@ -108,41 +113,44 @@ pub struct AttachArgs {
     /// Comma-separated coarse tags (e.g. issue:215,repo:telex).
     #[arg(long)]
     pub tags: Option<String>,
-    /// Lease heartbeat interval (seconds).
+    /// Deprecated compatibility flag; the daemon owns lease heartbeat cadence.
     #[arg(long, default_value_t = 5)]
     pub heartbeat_secs: u64,
-    /// Backend poll interval (seconds).
+    /// Deprecated compatibility flag; the daemon owns backend polling.
     #[arg(long, default_value_t = 1)]
     pub poll_secs: u64,
-    /// Keepalive frame interval to waiters (seconds).
+    /// Deprecated compatibility flag; daemon waiters use daemon IPC frames.
     #[arg(long, default_value_t = 3)]
     pub keepalive_secs: u64,
     /// Occupant identity recorded on the lease (default: session host/pid).
     #[arg(long)]
     pub occupant: Option<String>,
-    /// Enable Postgres LISTEN/NOTIFY push in addition to poll (no-op on SQLite).
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
+    /// Deprecated compatibility flag; daemon delivery owns push/poll behavior.
     #[arg(long)]
     pub push: bool,
-    /// Bind the holder's lifetime to this session/launcher pid: when that process exits, the
-    /// holder releases its lease and exits (the same shutdown tail as `detach`/ctrl-c). The
-    /// belt-and-suspenders companion to launching the holder background + session-bound — even a
-    /// mis-launched detached holder cannot then outlive its session. If unset, the
-    /// `$TELEX_SESSION_PID` environment variable is consulted at runtime (so that a malformed env
-    /// value never fails `--no-session-bind`).
+    /// Back-compat watch pid. Converted to an anchor watch-pid for daemon liveness.
     #[arg(long)]
     pub session_pid: Option<u32>,
-    /// Interval (seconds) for the `--session-pid` liveness check; keep it well inside the lease
-    /// liveness window so the address frees promptly.
+    /// Watch a pid as a typed liveness predicate. Accepts PID, anchor:PID, required:PID,
+    /// PID:anchor, or PID:required. Repeat to add multiple watch pids.
+    #[arg(long, value_parser = parse_watch_pid)]
+    pub watch_pid: Vec<WatchPidSpec>,
+    /// Deprecated compatibility flag; daemon liveness cadence is internal.
     #[arg(long, default_value_t = 2)]
     pub session_poll_secs: u64,
-    /// Do not bind to any session pid, even if `$TELEX_SESSION_PID` is set — for a deliberately
-    /// persistent, server-side holder that should outlive its launcher. Overrides `--session-pid`.
+    /// Do not convert `$TELEX_SESSION_PID` into a daemon watch-pid.
     #[arg(long)]
     pub no_session_bind: bool,
 }
 
 #[derive(Args)]
 pub struct WaitArgs {
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
     /// Give up waiting after this many milliseconds (exit code 2); default is no idle timeout.
     #[arg(long)]
     pub timeout_ms: Option<u64>,
@@ -152,9 +160,19 @@ pub struct WaitArgs {
     /// Treat the holder as hung if no frame arrives within this window (ms).
     #[arg(long, default_value_t = 8_000)]
     pub hang_ms: u64,
+    /// Retry daemon reconnect/re-register for this long after EOF/restart (ms).
+    #[arg(long, env = "TELEX_RECONNECT_GRACE_MS")]
+    pub reconnect_grace_ms: Option<u64>,
     /// Holder DB-heartbeat age beyond which it is considered degraded (ms).
     #[arg(long, default_value_t = 15_000)]
     pub stale_heartbeat_ms: i64,
+}
+
+#[derive(Args)]
+pub struct DetachArgs {
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Args)]
@@ -212,6 +230,9 @@ pub struct SendArgs {
     /// Arbitrary JSON metadata.
     #[arg(long)]
     pub metadata: Option<String>,
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Args)]
@@ -240,6 +261,9 @@ pub struct ReplyArgs {
     /// Message kind/profile label.
     #[arg(long, default_value = "note")]
     pub kind: String,
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Args)]
@@ -253,6 +277,9 @@ pub struct DispArgs {
     /// Recipient address whose disposition this is (defaults to the message's to_addr).
     #[arg(long)]
     pub recipient: Option<String>,
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -305,6 +332,43 @@ pub struct ExportArgs {
     /// Only messages with id greater than this.
     #[arg(long, default_value_t = 0)]
     pub since: i64,
+}
+
+#[derive(Subcommand)]
+pub enum DaemonCmd {
+    /// Run the daemon server loop.
+    Serve,
+    /// Show daemon singleton status.
+    Status,
+    /// Show daemon/protocol version metadata.
+    Version,
+    /// Mark one station idle without destroying membership or buffered deliveries.
+    Reset(DaemonResetArgs),
+    /// Mark all stations for a session idle without destroying membership or buffered deliveries.
+    SessionEnd(DaemonSessionEndArgs),
+    /// Stop the daemon.
+    Stop(DaemonStopArgs),
+}
+
+#[derive(Args)]
+pub struct DaemonStopArgs {
+    /// Drain in-flight work before exiting.
+    #[arg(long)]
+    pub drain: bool,
+}
+
+#[derive(Args)]
+pub struct DaemonResetArgs {
+    /// Address to mark idle (defaults to global --address).
+    #[arg(long)]
+    pub address: Option<String>,
+}
+
+#[derive(Args)]
+pub struct DaemonSessionEndArgs {
+    /// Stable session identity to mark ended.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Args)]
@@ -378,6 +442,45 @@ pub struct BackendAddArgs {
     pub default: bool,
 }
 
+fn parse_watch_pid(raw: &str) -> std::result::Result<WatchPidSpec, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("watch pid cannot be empty".to_string());
+    }
+
+    let parse_role = |s: &str| match s.to_ascii_lowercase().as_str() {
+        "anchor" => Ok(WatchPidRole::Anchor),
+        "required" => Ok(WatchPidRole::Required),
+        other => Err(format!(
+            "unknown watch-pid role {other:?}; use anchor or required"
+        )),
+    };
+    let parse_pid = |s: &str| {
+        s.parse::<u32>()
+            .map_err(|e| format!("invalid watch pid {s:?}: {e}"))
+    };
+
+    if let Some((a, b)) = raw.split_once(':') {
+        if let Ok(role) = parse_role(a) {
+            return Ok(WatchPidSpec {
+                pid: parse_pid(b)?,
+                role,
+            });
+        }
+        if let Ok(role) = parse_role(b) {
+            return Ok(WatchPidSpec {
+                pid: parse_pid(a)?,
+                role,
+            });
+        }
+        return Err(format!(
+            "watch pid {raw:?} must be PID, role:PID, or PID:role"
+        ));
+    }
+
+    Ok(WatchPidSpec::anchor(parse_pid(raw)?))
+}
+
 /// Shared command context.
 pub struct Ctx {
     pub cfg: Config,
@@ -432,13 +535,13 @@ pub async fn run() -> i32 {
         Command::Status => crate::commands::status::run(&ctx).await,
         Command::Skill(a) => crate::commands::skill::run(&ctx, a).await,
         Command::Attach(a) => crate::commands::attach::run(&ctx, a).await,
-        Command::Detach => crate::commands::detach::run(&ctx).await,
+        Command::Detach(a) => crate::commands::detach::run(&ctx, a).await,
         Command::Wait(a) => crate::commands::wait::run(&ctx, a).await,
         Command::Inbox(a) => crate::commands::inbox::run(&ctx, a).await,
         Command::Read(a) => crate::commands::read::run(&ctx, a).await,
         Command::Send(a) => crate::commands::send::run(&ctx, a).await,
         Command::Reply(a) => crate::commands::reply::run(&ctx, a).await,
-        Command::Ack(a) => crate::commands::disposition::run(&ctx, "acknowledged", a).await,
+        Command::Ack(a) => crate::commands::disposition::ack(&ctx, a).await,
         Command::Handle(a) => crate::commands::disposition::run(&ctx, "handled", a).await,
         Command::Defer(a) => crate::commands::disposition::run(&ctx, "deferred", a).await,
         Command::Reject(a) => crate::commands::disposition::run(&ctx, "rejected", a).await,
@@ -447,6 +550,7 @@ pub async fn run() -> i32 {
         Command::Address(cmd) => crate::commands::address::run(&ctx, cmd).await,
         Command::Resolve(a) => crate::commands::address::resolve(&ctx, a).await,
         Command::Backend(cmd) => crate::commands::backend::run(&ctx, cmd).await,
+        Command::Daemon(cmd) => crate::commands::daemon::run(&ctx, cmd).await,
         Command::Export(a) => crate::commands::export::run(&ctx, a).await,
     };
 
@@ -456,5 +560,88 @@ pub async fn run() -> i32 {
             eprintln!("telex: {e:#}");
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn daemon_subcommand_is_hidden_from_top_level_help() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(
+            !help.contains("daemon"),
+            "top-level help leaked daemon:\n{help}"
+        );
+    }
+
+    #[test]
+    fn hidden_daemon_subcommands_parse() {
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "daemon", "serve"])
+                .unwrap()
+                .command,
+            Command::Daemon(DaemonCmd::Serve)
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "daemon", "status"])
+                .unwrap()
+                .command,
+            Command::Daemon(DaemonCmd::Status)
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "daemon", "version"])
+                .unwrap()
+                .command,
+            Command::Daemon(DaemonCmd::Version)
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "daemon", "stop", "--drain"])
+                .unwrap()
+                .command,
+            Command::Daemon(DaemonCmd::Stop(DaemonStopArgs { drain: true }))
+        ));
+    }
+
+    #[test]
+    fn wait_reconnect_grace_flag_parses() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:a",
+            "wait",
+            "--reconnect-grace-ms",
+            "250",
+        ])
+        .unwrap();
+        let Command::Wait(args) = cli.command else {
+            panic!("expected wait command");
+        };
+        assert_eq!(args.reconnect_grace_ms, Some(250));
+    }
+
+    #[test]
+    fn attach_watch_pid_flag_accepts_typed_repeatable_values() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:a",
+            "attach",
+            "--watch-pid",
+            "anchor:123",
+            "--watch-pid",
+            "456:required",
+        ])
+        .unwrap();
+        let Command::Attach(args) = cli.command else {
+            panic!("expected attach command");
+        };
+        assert_eq!(args.watch_pid.len(), 2);
+        assert_eq!(args.watch_pid[0].pid, 123);
+        assert_eq!(args.watch_pid[0].role, WatchPidRole::Anchor);
+        assert_eq!(args.watch_pid[1].pid, 456);
+        assert_eq!(args.watch_pid[1].role, WatchPidRole::Required);
     }
 }

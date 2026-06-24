@@ -7,7 +7,7 @@ messages with answerback liveness, and an auditable record — over SQLite (loca
 zero-config) or Postgres (networked, with or without Microsoft Entra auth).
 
 One small binary, `telex`. It even carries its own usage instructions: run
-`telex skill`.
+`telex skill` (or `telex skill --raw` for the exact embedded skill file).
 
 ## Install
 
@@ -39,7 +39,8 @@ telex send --to me --body "hello"    # zero-config: a local SQLite store, no set
 telex --address me inbox             # read it back
 ```
 
-That's it — no server, no config. The default backend is a local SQLite store at
+That's it — no manual server setup and no config required. The first daemon-backed
+verb auto-spawns a per-user local exchange for the default local SQLite store at
 `~/.telex/telex.db`.
 
 ## For agents
@@ -72,12 +73,13 @@ stored in the config file.
 
 ## How it works (in one breath)
 
-A durable **address** is the responsibility being served; an ephemeral **lease** is the
-live session serving it; a typed **message** carries coordination; a **disposition**
-records what happened. A session `attach`es to an address to start a **station** — the
-running presence serving it (a resident **holder** that holds the lease and answers
-liveness in the background, plus a **waiter** loop) — and loops `telex wait` to receive
-messages, acting and dispositioning each at its next turn.
+A durable **address** is the responsibility being served; a per-user local
+**exchange** daemon owns SQLite presence, lease heartbeats, delivery buffering,
+and local IPC; a session `attach`es once to register an in-memory **station** for
+its stable `TELEX_SESSION_ID`; `wait` is a one-shot daemon client that receives
+one message and exits; `ack` is the explicit durable consumed mark. If the daemon
+restarts, the next verb reconnects, re-registers on `NeedsAttach`, and continues
+against the retained delivery buffer.
 
 ## Learn more
 

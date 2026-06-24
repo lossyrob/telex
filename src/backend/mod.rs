@@ -2,7 +2,7 @@
 //! selected at runtime. The ephemeral `wait` client never touches this — it speaks only
 //! to the holder over local IPC. This is the "same semantic core, two backends" promise.
 
-use anyhow::Result;
+use anyhow::{bail, Result};
 use async_trait::async_trait;
 
 use crate::model::*;
@@ -45,12 +45,79 @@ pub trait Backend: Send + Sync {
         include_retired: bool,
     ) -> Result<Vec<AddressRow>>;
 
-    // ---- leases / liveness ----
+    // ---- leases / liveness (v0 API; kept for backward compat) ----
     async fn claim_lease(&self, claim: &LeaseClaim, window_secs: i64) -> Result<LeaseOutcome>;
     async fn heartbeat(&self, address: &str) -> Result<()>;
+    /// Non-deleting release: clears ownership but retains the lease row and its epoch
+    /// high-water so the monotonic sequence is preserved for the next claimant.
     async fn release_lease(&self, address: &str, occupant: &str) -> Result<bool>;
     async fn get_lease(&self, address: &str) -> Result<Option<LeaseRow>>;
     async fn occupancy(&self, address: &str, window_secs: i64) -> Result<Occupancy>;
+
+    // ---- epoch-aware lease / delivery fence (P1 — SQLite only in this release) ----
+
+    /// Claim delivery ownership at the next epoch using a compare-and-set.
+    /// `stale_cutoff_ms` is the backend-clock threshold below which a live owner is
+    /// considered stale and the lease can be taken.  Returns `Claimed` or `AlreadyOwned`.
+    /// Default implementation returns an unsupported error so non-SQLite backends
+    /// compile without behavioral parity.
+    async fn claim_epoch_lease(
+        &self,
+        _address: &str,
+        _owner_instance_id: &str,
+        _stale_cutoff_ms: i64,
+    ) -> Result<EpochClaimResult> {
+        bail!("claim_epoch_lease: not supported by this backend")
+    }
+
+    /// Epoch-guarded heartbeat.  Returns `true` if the row was updated (caller still
+    /// owns the address at the given epoch), `false` if a higher epoch exists (self-demote).
+    async fn heartbeat_epoch(
+        &self,
+        _address: &str,
+        _owner_instance_id: &str,
+        _lease_epoch: i64,
+    ) -> Result<bool> {
+        bail!("heartbeat_epoch: not supported by this backend")
+    }
+
+    /// Non-deleting release of epoch ownership: clears `owner_instance_id` and preserves
+    /// `lease_epoch` so the next claimant continues the monotonic sequence.
+    /// Returns `true` if the row was updated, `false` if the caller was not the owner.
+    async fn release_epoch_lease(
+        &self,
+        _address: &str,
+        _owner_instance_id: &str,
+        _lease_epoch: i64,
+    ) -> Result<bool> {
+        bail!("release_epoch_lease: not supported by this backend")
+    }
+
+    /// Atomically check ownership and mark `(message_id, recipient)` as consumed.
+    /// The ownership check and the mark are one `BEGIN IMMEDIATE` transaction on SQLite
+    /// (`SELECT … FOR UPDATE` + mark on Postgres), so a between-check-and-mark ownership
+    /// rotation is caught.  `NotOwner` has strict precedence over all other outcomes.
+    async fn mark_consumed_if_current_owner(
+        &self,
+        _recipient: &str,
+        _owner_instance_id: &str,
+        _lease_epoch: i64,
+        _message_id: i64,
+    ) -> Result<DeliveryOutcome> {
+        bail!("mark_consumed_if_current_owner: not supported by this backend")
+    }
+
+    /// Read (and advance) the durable backend clock high-water mark.  On SQLite this is
+    /// a persisted `clock_hwm` row that never moves backward across restarts or wall-clock
+    /// skew.  Primarily useful for tests that need a stable time reference.
+    async fn durable_clock_now_ms(&self) -> Result<i64> {
+        bail!("durable_clock_now_ms: not supported by this backend")
+    }
+
+    /// Count retained per-recipient delivery rows for Status retention reporting.
+    async fn delivery_retention_count(&self) -> Result<i64> {
+        bail!("delivery_retention_count: not supported by this backend")
+    }
 
     // ---- messages ----
     /// Record that `message_id` was handed to a waiter for `recipient` (the served address), so no
@@ -62,14 +129,14 @@ pub trait Backend: Send + Sync {
         recipient: &str,
         occupant: Option<&str>,
     ) -> Result<()>;
-    /// Every message addressed to `address` that has NOT yet been delivered to a waiter AND whose
+    /// Every message addressed to `address` that has NOT yet been consumed (agent-acked) AND whose
     /// latest disposition for that recipient is not terminal, ordered by id. This is the holder's
     /// single source of truth for "what still needs delivering": the live drain queues whatever this
     /// returns (deduped in-memory), so delivery never depends on a monotonic id cursor. On Postgres
     /// that is what closes the commit-order gap (issue #18) — a concurrently-committed lower id has
     /// no delivery record, so it is returned and delivered by the *live* holder, no restart required.
-    /// The two do-not-deliver signals are a delivery record (primary) and a terminal disposition
-    /// (secondary, for messages recovered out-of-band via `telex inbox`); see DECISIONS 0013.
+    /// The two do-not-deliver signals are a consumed delivery record (primary) and a terminal
+    /// disposition (secondary, for messages recovered out-of-band via `telex inbox`); see DECISIONS 0013.
     async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>>;
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow>;
     async fn get_message(&self, id: i64) -> Result<Option<MessageRow>>;

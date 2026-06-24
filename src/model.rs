@@ -16,11 +16,12 @@ pub fn now_ms() -> i64 {
 
 /// How urgently a recipient should be woken. Note: "interrupt" means "deliver at the
 /// next turn boundary," not "preempt the running model" — agent-wake latency dominates.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "kebab-case")]
 pub enum Attention {
     Interrupt,
     NextCheckpoint,
+    #[default]
     Background,
     Fyi,
 }
@@ -146,10 +147,16 @@ pub struct LeaseRow {
     pub pid: Option<i64>,
     pub since_ms: i64,
     pub heartbeat_at_ms: i64,
+    /// Monotonic epoch high-water mark; None for rows not yet migrated to v2 schema.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lease_epoch: Option<i64>,
+    /// Owning daemon instance; None when the lease is released/unowned.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_instance_id: Option<String>,
 }
 
 /// A request to claim/refresh a lease on an address.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct LeaseClaim {
     pub address: String,
     pub occupant: String,
@@ -167,6 +174,46 @@ pub enum LeaseOutcome {
     Claimed,
     /// A different, still-live occupant holds it.
     AlreadyOccupied(LeaseRow),
+}
+
+/// Outcome of an explicit agent ack delivered via `mark_consumed_if_current_owner`.
+/// Outcome precedence (strictly ordered): NotOwner > AlreadyConsumed / AckNoOp > Marked.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DeliveryOutcome {
+    /// The message was successfully marked as consumed for this recipient.
+    Marked,
+    /// The message was already consumed (idempotent success; current owner confirmed first).
+    AlreadyConsumed,
+    /// No delivery row exists for `(message_id, recipient)`; inserts nothing.
+    /// Returned only after confirming current ownership.
+    AckNoOp,
+    /// Caller is not the current epoch owner. Precedence-winning and fatal for the caller:
+    /// the daemon must self-demote on this outcome, even if the message is already consumed.
+    NotOwner,
+}
+
+/// Successful result from `claim_epoch_lease`: the new epoch and the owner's identity.
+#[derive(Clone, Debug)]
+pub struct EpochClaimed {
+    pub lease_epoch: i64,
+    pub owner_instance_id: String,
+    /// True when a daemon-aware claimant converted a legacy/non-epoch row
+    /// (`lease_epoch IS NULL`) through the explicit cutover path.
+    pub legacy_cutover: bool,
+}
+
+/// Outcome of an epoch lease claim attempt.
+#[derive(Debug)]
+pub enum EpochClaimResult {
+    /// Caller now holds the lease at this epoch.
+    Claimed(EpochClaimed),
+    /// A different, still-live owner holds the lease.
+    AlreadyOwned {
+        lease_epoch: i64,
+        owner_instance_id: String,
+        lease_row: LeaseRow,
+    },
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -196,7 +243,7 @@ pub struct MessageRow {
 
 /// Fields supplied when inserting a new message. `thread_id`/`id` are assigned by
 /// the backend; if `parent_id` is set the backend inherits the parent's thread.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NewMessage {
     pub parent_id: Option<i64>,
     pub from_addr: Option<String>,

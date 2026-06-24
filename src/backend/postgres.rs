@@ -149,6 +149,8 @@ fn map_lease(r: &Row) -> LeaseRow {
         pid: r.get("pid"),
         since_ms: r.get("since_ms"),
         heartbeat_at_ms: r.get("heartbeat_at_ms"),
+        lease_epoch: None,
+        owner_instance_id: None,
     }
 }
 

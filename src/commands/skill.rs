@@ -30,16 +30,15 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
     if let Some(addr) = &args.address {
         println!("## Your assignment\n");
         println!(
-            "You are assigned the telex address `{addr}`. Serve it by starting a **station** — a"
+            "You are assigned the telex address `{addr}`. Serve it by registering a station with"
         );
         println!(
-            "background, session-bound `telex attach` holds the lease (terminated when this session ends,"
+            "one-shot `telex attach`; the auto-spawned per-user local exchange owns the lease,"
         );
-        println!("never daemonized to outlive it).");
-        println!("Then loop one delivery at a time: run a SINGLE `telex wait` in the background; when that");
-        println!("command completes you are notified — immediately re-arm a fresh background `wait`, then");
-        println!("act and disposition the delivered message. Don't wrap wait in an infinite loop (it hides");
-        println!("deliveries). attach/detach start and stop the station (the lease), not the OS process lifecycle.\n");
+        println!("delivery buffer, and liveness. Then loop one delivery at a time: run a SINGLE");
+        println!("`telex wait` in the background; when it completes, immediately re-arm a fresh");
+        println!("background `wait`, then `telex ack` and act/disposition the delivered message.");
+        println!("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");
         println!("```sh");
         println!("telex attach --address {addr} --description \"<what you are working on>\"");
         println!("telex wait --address {addr}");

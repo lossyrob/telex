@@ -30,6 +30,7 @@ toml = "0.8"
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "5"
+getrandom = "0.2"
 
 # SQLite backend (feature: sqlite)
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
@@ -56,7 +57,7 @@ openssl = { version = "0.10", features = ["vendored"], optional = true }
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_System_Threading"] }
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Threading"] }
 
 [features]
 # Batteries-included default. Build a leaner binary with e.g.
