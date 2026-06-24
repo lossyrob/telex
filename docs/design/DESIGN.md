@@ -603,7 +603,9 @@ backend), never in the ephemeral client, which is a stateless courier. A later
 The client contract distinguishes outcomes by exit code: a delivered message (`0`); a
 `--timeout` expiry with no message (`2`), so a supervisor can refresh without blocking
 forever (agent runtimes cap tool-call duration); a daemon-gone error (`3`) **after** the
-reconnect-on-EOF grace; and a daemon-hung error (`4`). Crucially, a daemon **restart or
+reconnect-on-EOF grace; a daemon-hung error (`4`); and **presence-ended (`5`)** when the exchange
+reaps the waiter (sessionEnd hook / loader-pid death / idle-TTL — the agent re-attaches + re-waits).
+Crucially, a daemon **restart or
 ordered handoff is not a turn failure**: `telex wait` reconnects within a short grace
 window and, on `NeedsAttach`, **explicitly re-attaches** the session from inherited environment
 before it would return `3` (see [daemon.md](daemon.md)).

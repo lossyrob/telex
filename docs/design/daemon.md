@@ -150,8 +150,8 @@ A normative state machine for the daemon process:
   reconnects with backoff, re-validates owned epochs, and returns to SERVING. It does
   **not** exit on a transient blip.
 - **DRAINING** — on `telex daemon stop --drain` or an upgrade handoff: quiesce new work,
-  flush in-flight EMIT→ACK→MARK, hand off owned epochs in order
-  ([§11.4 owner-directed transfer](#114-ordered-handoff--owner-directed-atomic-transfer-sf3)), then exit.
+  flush in-flight EMIT→ACK→MARK, hand off owned epochs in order (**Postgres**: live owner-directed
+  transfer; **SQLite**: release + next-call respawn — [§11.4](#114-ordered-handoff--owner-directed-atomic-transfer-sf3)), then exit.
 
 ### 3.1 Retry / backoff / crashloop
 
@@ -322,7 +322,7 @@ only** — never membership. The backend `leases` table — today keyed by `addr
 The durable **message/ack buffer** ([§13](#13-delivery-and-the-seen-dedup-redesign-da-8))
 is the `deliveries(message_id, recipient, …)` table of ADRs 0011/0013, and **gains durable
 per-message consumed state keyed by `(message_id, recipient)`** so the agent ack is
-**idempotent**: an `Ack{address, message_id}` upserts the `(message_id, recipient = address)` consumed mark; a
+**idempotent**: an `Ack{address, message_id}` **updates the existing** `(message_id, recipient = address)` delivery row to consumed; a **missing** row returns a typed **`AckNoOp`** and **inserts nothing** (never fabricates a consumed row); a
 replayed or duplicate ack is a no-op; an unacked message redelivers (at-least-once, dedup by
 `message_id` — [§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)).
 **Retention (S5):** an unacked `(message_id, recipient)` is retained until acked or terminal;
@@ -410,7 +410,10 @@ unique, stable `session_id` ([§14.1](#141-identity-and-in-memory-membership)); 
 incarnation token**. Membership is **in-memory and explicit-only**: a `Register` (attach)
 establishes it. When the exchange does not know a session/address (e.g. after a restart),
 `Wait`/`Send`/`Reply`/`Ack` return a typed **`NeedsAttach`** error (terminal for that op) and
-the agent explicitly re-attaches:
+the agent explicitly re-attaches **the addresses it still wants** — a `NeedsAttach` after a
+**deliberate `Detach`** is **terminal**: the agent does **not** auto-`Register` to resurrect a
+station it intentionally dropped (for `Ack`, the message simply redelivers to a future attendee,
+[§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)):
 
 | Request | Purpose | Privileged? |
 |---|---|---|
@@ -971,7 +974,7 @@ session it has no membership for.
 mark_consumed_if_current_owner(recipient, owner_instance_id, lease_epoch, message_id)
     -> Result<DeliveryOutcome>
 
-DeliveryOutcome = Marked | AlreadyConsumed | NotOwner
+DeliveryOutcome = Marked | AlreadyConsumed | AckNoOp | NotOwner
 ```
 
 The new commit boundary is **EMIT → the waiter PRINTS → the AGENT acks → the daemon MARKs**:
@@ -1034,6 +1037,17 @@ The new commit boundary is **EMIT → the waiter PRINTS → the AGENT acks → t
    - **`AlreadyConsumed`** → returned **only after** current ownership is confirmed;
      **success** (idempotent), continue draining. *Not* fatal.
    - **`Marked`** → success; continue draining.
+   - **`AckNoOp`** → returned (**after** current ownership is confirmed, like `AlreadyConsumed`)
+     when there is **no** `(message_id, recipient)` delivery row to mark: either the recipient was
+     **never delivered** this message, or the row was **already consumed and compacted** past the
+     idempotency horizon ([§5.1](#51-durable-lease-row-columns-new)/test 20). **Success,
+     idempotent, inserts nothing** — so a never-delivered `(message_id, recipient)` cannot be
+     masked by a fabricated consumed row, and a genuine later delivery still marks normally. The
+     **idempotency horizon MUST exceed the at-least-once redelivery window**, so a real redelivery
+     never arrives *after* compaction; thus never-delivered and consumed-and-compacted need not be
+     distinguished — both are the same safe no-op. Because `AckNoOp` is gated **behind** the
+     `NotOwner` check, a stale/superseded owner acking a never-delivered row still gets `NotOwner`
+     (and self-demotes), **never** `AckNoOp`.
 
 **Writer authority — three layers.** **(1) Per config root:** the **OS-singleton** (Unix
 flock/fcntl + AF_UNIX bind / Windows named-mutex + named-pipe first-instance,
@@ -1045,10 +1059,14 @@ file can be reached from **two distinct config roots** (two `--db`/`TELEX_DB` pa
 the same file), the daemon acquires a **canonical-store-scoped advisory lock** when it opens a
 SQLite store and **fails closed for that store** (refuses to serve it, surfaced in `Status`) if
 another exchange already holds it — so exactly one exchange writes a given SQLite store, even
-across config roots. **Lock semantics (frozen):** a **kernel/connection-owned OS advisory lock**
-(`flock`/`fcntl` on a lock sidecar beside the db file / `LockFileEx` on Windows), held for the
-**store-serving lifetime**, **auto-released on daemon crash** (so a dead daemon never wedges the
-stop/drain/respawn floor), and **released on clean `Drain`/stop** so a respawn re-acquires it.
+across config roots. **Lock semantics (frozen):** a **kernel/connection-owned OS advisory lock keyed by the canonical
+file identity** (device+inode on Unix / `GetFileInformationByHandle` file-id on Windows) —
+locking the **SQLite file itself** (`flock`/`fcntl` on its fd / `LockFileEx` on Windows), **not** a
+path-derived sidecar (two hardlink paths in different directories would otherwise get distinct
+sidecars and admit two writers for one inode); if the file identity cannot be mapped to a single
+lock target, **fail closed**. Held for the **store-serving lifetime**, **auto-released on daemon
+crash** (so a dead daemon never wedges the stop/drain/respawn floor), and **released on clean
+`Drain`/stop** so a respawn re-acquires it.
 **Canonical store identity** = the canonicalized absolute path resolved through symlinks/hardlinks
 plus, where available, device+inode / Windows file-id, normalized for case/short-name/UNC. On a
 **weak/network filesystem where advisory locking is inconclusive** (NFS/SMB/9p/WSL-DrvFs — the
@@ -1467,12 +1485,15 @@ downgrade note below):
 - **Versioned install + launcher shim.** A stable `telex` shim resolves to a versioned
   binary (`telex-<version>`), so an upgrade writes a new versioned binary without
   overwriting the locked one.
-- **`telex daemon stop --drain`.** Quiesce + flush in-flight EMIT→ACK→MARK + hand off via
-  the owner-directed transfer where a successor exists, else non-deleting release, in order
+- **`telex daemon stop --drain`.** Quiesce + flush in-flight EMIT→ACK→MARK + hand off **by
+  backend**: **Postgres** uses the live owner-directed transfer where a successor exists, else
+  non-deleting release; **SQLite** always uses **non-deleting release + next-call respawn** (no
+  live two-daemon overlap — the store-lock forbids it), in order
   ([§11.4](#114-ordered-handoff--owner-directed-atomic-transfer-sf3)), then exit — freeing
   the binary lock.
-- **Next-call respawn.** The next client connect-or-spawn starts the new version (handoff
-  reuses the transfer / stale-claim + crash-recovery). Presence across the respawn for a
+- **Next-call respawn.** The next client connect-or-spawn starts the new version (**SQLite**: the
+  release + next-call stale-claim floor; **Postgres** may use the live transfer; both reuse
+  stale-claim + crash-recovery). Presence across the respawn for a
   mid-task agent is covered by re-attach on `NeedsAttach`
   ([§14.6](#146-from-resolution-and-re-attach)).
 - **Legacy / non-epoch cutover** = the prove-unbound rule of [§12](#12-legacy-cutover-oq5-da-1).
@@ -1509,7 +1530,7 @@ isolation precondition for all Postgres concurrency tests is **READ COMMITTED au
 | 2 | **OS-singleton refuses a second instance + single-writer-per-store** (mr5, M4) | required | required | a second exchange process for the same singleton key is refused by the exclusivity primitive (Unix flock/fcntl + AF_UNIX bind / Windows named-mutex + named-pipe first-instance); **and** two **distinct config roots** pointing at the **same physical store** (same `--db`/`TELEX_DB`) — the second daemon **fails closed for that store** via the canonical-store-scoped advisory lock, so exactly one exchange writes a store **even across config roots** (**SQLite**: the canonical-store lock; on **Postgres** per-host exchanges legitimately coexist and the **lease-epoch** arbitrates — no store-lock refusal, see test 6) ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) |
 | 3 | **Crash-during-`wait` → `NeedsAttach` → re-attach** | required | required | `wait` against an unknown session/address returns typed **`NeedsAttach`** (no spurious exit 3); after an explicit `Register` + re-`Wait`, the waiter blocks normally; **a previously `Detach`ed address is NOT resurrected** — only addresses the agent explicitly re-attaches come back |
 | 4 | **Daemon restart: no loss, no resurrection** | required | required | messages durably buffered before the crash are delivered **at-least-once** on the next `attach` + `wait` + `ack` (no loss); the respawned exchange has **no in-memory membership** and rebuilds nothing from history; a removed address stays gone (no tombstone, no implicit rebuild) |
-| 5 | **Explicit-ack at-least-once + idempotent dedup + multi-recipient fan-out** (mr1, M1) — crash-after-PRINT/before-ACK, crash-after-ACK/before-MARK, two-waiters-both-print-then-one-ack, ack-after-station-idle, ack-replay, **one `message_id` fanned out to >=2 recipient addresses (to/cc/watcher) the session attends** | required | required | every message reaches a waiter **>=1** time (never 0); the stdout flush is **transport only** (never the consumed mark); the durable MARK fires only on the explicit agent `Ack`; the `Ack` carries the **delivered `address`** and marks **only** `(message_id, recipient = address)` — the **same `message_id`** acked for recipient `A` does **not** consume `(message_id, B)`, and an ack naming an address the session does not attend is **rejected**; the `(message_id, recipient)` consumed mark is **idempotent** (duplicate/late/replayed/post-idle acks converge, never double-consume); consumers dedupe by `message_id` |
+| 5 | **Explicit-ack at-least-once + idempotent dedup + multi-recipient fan-out** (mr1, M1) — crash-after-PRINT/before-ACK, crash-after-ACK/before-MARK, two-waiters-both-print-then-one-ack, ack-after-station-idle, ack-replay, **one `message_id` fanned out to >=2 recipient addresses (to/cc/watcher) the session attends** | required | required | every message reaches a waiter **>=1** time (never 0); the stdout flush is **transport only** (never the consumed mark); the durable MARK fires only on the explicit agent `Ack`; the `Ack` carries the **delivered `address`** and marks **only** `(message_id, recipient = address)` — the **same `message_id`** acked for recipient `A` does **not** consume `(message_id, B)`, and an ack naming an address the session does not attend is **rejected**; the `(message_id, recipient)` consumed mark is **idempotent** (duplicate/late/replayed/post-idle acks converge, never double-consume); an `Ack` for an **attended** address with **no delivery row** returns **`AckNoOp`** and inserts no consumed row (the message stays deliverable + markable afterward); consumers dedupe by `message_id` |
 | 6 | **Multi-writer Postgres delivery-ownership (epoch)** (mr3) | N/A (single-writer by the OS-singleton **+ the canonical-store lock**, [§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) — assert single-writer holds | **required** (cross-process/cross-machine, fault injection) | higher `lease_epoch` wins; the demoted owner **stops delivering** on its 0-row heartbeat / `NotOwner` mark; **no double-delivery**; no flip-flop |
 | 7 | **Delivery fence ownership-rotation race** (mr1, R3-5) — rotation between the mark's ownership-check and the mark, successor-marks-then-predecessor-marks | required | required | the atomic lease-row-locked mark returns **`NotOwner`** on a between-check-and-mark rotation (precedence over `AlreadyConsumed`, **even when already consumed by the successor**) → the superseded owner self-demotes and stops after one; no systematic stale re-delivery |
 | 8 | **Non-destructive reaping: sessionEnd hook** | required | required | an authoritative `sessionEnd` hook `(store_key, session_id, admin_cap)` **releases that session's blocked waiters + marks its stations IDLE**; it **never destroys a station**; a **late/spurious/duplicate hook** (unique `session_id`) costs at most one waiter re-arm, never data loss; the station + durable buffer survive and **wake on the next message** |
@@ -1524,7 +1545,7 @@ isolation precondition for all Postgres concurrency tests is **READ COMMITTED au
 | 17 | **N / N+1 protocol-major parallel** (mr8) | required | required | two protocol-major-parallel daemons under one config root each authenticate against their own `daemon-<H>.cap`; neither clobbers the other |
 | 18 | **Durable BackendClock + daemon-down TTL fail-closed** (R4-6, R5-Sb) | required (SQLite high-water) | required (PG server clock) | persisted `last_heartbeat` stamped before a restart compares correctly against the respawned daemon's clock; the SQLite high-water never moves backward across restart/suspend/skew; a **slept / backward-wall-clock restart whose real downtime exceeds the TTL** does **not** fail open (no auto-lapse of a live address on an untrustworthy clock); recovery of a wedged lease is via the non-destructive **operator reset** ([§10.2](#102-operator-reset)) — no eviction epoch, no permanent zombie |
 | 19 | **Cross-store isolation + from-Ambiguity** (M6) | required | required | the **same `session_id` registered in store A and store B**: a `SessionEndHook` / reap for store A releases **only A's** waiters and leaves B's station intact (the `(store_key, session_id)` keying, [§14.1](#141-identity-and-in-memory-membership)); a `from`-resolution that finds **multiple** attended addresses returns **`Ambiguous`** (never an arbitrary pick), and one that finds **none/unknown** returns **`NeedsAttach`** (never a silent `from = None`, [§14.6](#146-from-resolution-and-re-attach)) — fixtures MUST exercise multi-store and multi-address, not single-store/single-address; and a `session_id` re-presented inconsistently with same-session resume raises the **reuse tripwire** `Status`/audit warning (S3, [§14.1](#141-identity-and-in-memory-membership)), never silently proceeding |
-| 20 | **Delivery-fence latency + dedup-retention budget** (sf6, R3-Sf, S5) | required (benchmark) | required (benchmark) | **falsifiable shape**: workload = N concurrent single-deliveries; metric = per-delivery `EMIT→PRINT→ACK→MARK` fence latency measured at the agent-ack boundary (p95/p99) + the durable `deliveries(message_id, recipient)` dedup-buffer size; the gate **fails** if the measured p95/p99 exceeds, or the buffer/`max_in_flight_entries` exceed, the values in a **named `daemon-core` budget artifact** (numeric thresholds are `daemon-core`-owned; the artifact + this gate are not). Unacked retained until ack/terminal; acked **compacted after a frozen idempotency horizon**; the fence is **never weakened** (dropping the agent ack or the lock) to meet a budget |
+| 20 | **Delivery-fence latency + dedup-retention budget** (sf6, R3-Sf, S5) | required (benchmark) | required (benchmark) | **falsifiable shape**: workload = N concurrent single-deliveries; metric = per-delivery `EMIT→PRINT→ACK→MARK` fence latency measured at the agent-ack boundary (p95/p99) + the durable `deliveries(message_id, recipient)` dedup-buffer size; the gate **fails** if the measured p95/p99 exceeds, or the buffer/`max_in_flight_entries` exceed, the values in the `daemon-core` **delivery-budget spec** (a committed artifact / tracked `daemon-core` issue the gate runner reads; numeric thresholds are `daemon-core`-owned, the artifact + this gate are not). Unacked retained until ack/terminal; acked **compacted after a frozen idempotency horizon**; the fence is **never weakened** (dropping the agent ack or the lock) to meet a budget |
 
 Tests 1–7 cover the delivery/identity core; 8–11 the non-destructive reaping + idle-TTL +
 operator-reset model; 12–18 the cutover, epoch lifecycle, handoff, OS-trust, IPC-version, and
@@ -1611,6 +1632,7 @@ existing decision log. Deferred items are explicit so they are not silently drop
 - **#12** (embeddable SDK client) — separate solve; reuses this stabilized Layer-1 IPC.
 - **Startup path-resolution + portability policy** (ADR 0022, [§7.4](#74-path-resolution-and-the-portability-of-fail-closed-startup-deferred-to-daemon-core)) — the `run_dir`/`config_root` resolution algorithm, the cannot-enforce-owner-only handling, and the single-tenant opt-out are deferred to `daemon-core`; the owner-only **requirement** + **fail-closed** behavior are frozen.
 - **Status rendering / format / verbosity** ([§4](#4-status-surface-the-frozen-contract-shape), OQ7) — the field **set + meaning** + the gating tests' observable assertions are frozen; how `Status` is *rendered* (format, verbosity, human vs JSON) is `daemon-core`'s.
+- **Dismiss/resume + id-scheme spike (binding pre-implementation action).** Owner: `daemon-core`. Trigger: **before implementing `sessionEnd` dismiss behavior**. Action: run the dismiss/resume + `session_id` id-scheme spike; if dismiss does **not** fire `sessionEnd`, set the **idle-TTL as the primary dismiss bound** and tune its window ([§9](#9-liveness-model) caveat / reopen condition). Also confirms the `session_id`-uniqueness premise ([§14.1](#141-identity-and-in-memory-membership)).
 
 ### Reopen conditions (carried from the design-foundation council)
 
@@ -1623,7 +1645,8 @@ This is the **canonical** reopen register; ADR 0023 and the PR body carry summar
   the OS-singleton cannot make a single writer), **or a zero-downtime hot daemon handoff is
   introduced** (a brief intentional two-daemon overlap) — then revisit the OS-singleton-only
   writer authority for the single-host path (the lease-epoch fence already covers multi-writer
-  Postgres, and would extend to the hot-handoff overlap).
+  Postgres, and would extend to the hot-handoff overlap) — revisit the **single-host writer stack
+  (OS-singleton + canonical-store lock)**, not an OS-singleton alone.
 - **The SQLite single-host backend cannot enforce store-scoped locking, or compute a reliable
   canonical store identity** (a weak/network FS where advisory locks are inconclusive —
   [§7.4](#74-path-resolution-and-the-portability-of-fail-closed-startup-deferred-to-daemon-core)

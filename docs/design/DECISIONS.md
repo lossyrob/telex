@@ -645,8 +645,8 @@ framing.
 > waiter `DeliveryAck` / `delivery_nonce` / `AlreadyDelivered` and "delivered = stdout flush" — is
 > **superseded**: the durable consumed-MARK is now triggered by an **explicit agent
 > `Ack{address, message_id}`** (epoch-guarded, idempotent on `(message_id, recipient)`), the
-> waiter stdout flush is transport-only, and outcomes are `Marked` / `AlreadyConsumed` /
-> `NotOwner`. See [daemon.md](daemon.md) §11.3.
+> waiter stdout flush is transport-only, and outcomes are `Marked` / `AlreadyConsumed` / `AckNoOp`
+> (no delivery row to mark — never-delivered or consumed-and-compacted) / `NotOwner`. See [daemon.md](daemon.md) §11.3.
 
 **Context.** The lease row is keyed by `address` only with **no owner generation**
 (verified: `src/registry.rs`, the backend `claim_lease`/`heartbeat`/`release_lease`), so
