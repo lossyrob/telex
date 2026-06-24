@@ -30,7 +30,7 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
 
 The eight open questions carried into the local-daemon `design-foundation` node — epoch
 lifecycle, session presence + reaping, typed watch-pid, per-session PID, legacy cutover,
-**sessionEnd removal proof** (no external registry; explicit membership via `Detach`/`Ack`; was "DeregisterSession proof"), the Status freeze line, and crash durability — are resolved in
+**sessionEnd removal proof** (no external registry; explicit membership via `Detach`/`Ack`), the Status freeze line, and crash durability — are resolved in
 [daemon.md](daemon.md) (see its "Open-question resolutions" section), with the
 decisions recorded as ADRs 0014–0023 in [DECISIONS.md](DECISIONS.md). The
 session-ownership and liveness model was subsequently revised to a minimal form by **ADR
