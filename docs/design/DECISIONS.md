@@ -1176,3 +1176,60 @@ orchestrator reconciliation.
   **server-side** (never client-threaded) monotonic membership op-seq.
 - The `sessionEnd` hook does **not** fire on in-terminal dismiss (to be spiked) → the idle-TTL
   becomes the primary dismiss bound rather than a backstop.
+
+## 0024 — Legacy-holder cutover (one-time migration off the resident holder)
+
+- **Date:** 2026-06-24
+- **Status:** Accepted (migration; `daemon-core` acceptance)
+
+This is a **one-time migration** concern, not part of the standing daemon design (which owns
+lease epochs from `1`). It is recorded here so the durable contract in [daemon.md](daemon.md)
+stays free of transitional framing while the cutover mechanism is preserved.
+
+**Context.** The first daemon-aware rollout meets **legacy holders** (resident `attach`
+processes) and **non-epoch lease rows** (`lease_epoch IS NULL`). Occupant-rotation alone is
+insufficient: a legacy holder ships `Frame::Message` (`attach.rs:~477`) before its post-emit
+`mark_delivered` (`~485`), and its `heartbeat` returns `Result<()>` with no rowcount so it
+cannot observe self-demotion; if the daemon rebinds the address's waiter endpoint, two
+endpoints emit independently regardless of any post-emit row fence.
+
+**Decision — two-phase, prove-unbound:**
+
+- **Phase 1 — prove-unbound (drain).** Before binding its own waiter, the daemon-aware claimant
+  MUST establish that **no legacy waiter endpoint is bound** for the address, by one of: (1) an
+  **address-keyed IPC probe** to the legacy endpoint carrying a quit/handover signal, observing
+  the endpoint gone/closed; or (2) **terminating/quiescing** the legacy holder process (same
+  user). A bounded **stale-window wait alone is NOT sufficient** — a `SIGSTOP`/paused process,
+  partitioned backend, long GC, host sleep, or clock skew can age the heartbeat out while the
+  endpoint stays bound and later resumes emitting. A stale-window MAY be used only as a
+  *secondary* timeout after a probe has already shown the endpoint gone.
+- **Phase 2 — claim.** Only after Phase 1 proves unbound, claim via the explicit legacy CAS
+  `UPDATE ... SET lease_epoch=1, owner_instance_id=:me WHERE address=:addr AND lease_epoch IS
+  NULL` (ownership/fence columns only). `NULL` is never treated as `0` in the normal claim
+  predicate; the row gets its first epoch (`1`) exactly once, after which the rowcount-returning
+  epoch-guarded heartbeat/release apply.
+
+**Cutover gating assertion.** *No legacy (non-epoch) holder **emits** a new `Frame::Message`
+after the daemon's waiter binds.* Exercised by a dedicated migration test that starts a real
+legacy holder / non-epoch lease on both backends. Hard cutover of existing sessions is
+acceptable (ratified).
+
+**In-flight legacy frame (M9).** Phase-1 prove-unbound proves the legacy *endpoint* is closed,
+not that zero frames are in flight: a legacy holder may have already written a frame to its own
+wait client before the endpoint closed, and that client can flush to the recipient after the
+daemon binds. The assertion is therefore "no legacy holder **emits** after the barrier," not "no
+frame reaches a recipient": an already-in-flight legacy frame is bounded by **at-least-once +
+`message_id` dedupe** (the recipient dedupes it against the daemon's redelivery of the same
+`message_id`), so it is a deduped duplicate, never loss.
+
+**Stronger alternative (reopen).** A real drain barrier (quiesced + zero in-flight legacy `Wait`
+handlers + endpoint closed) would let the assertion be "no frame reaches a recipient," but needs
+a **new legacy IPC verb** (the legacy IPC exposes only `Shutdown`). `daemon-core` / the builder
+may adopt it; this decision takes the in-place at-least-once-dedupe resolution and flags the
+stronger option.
+
+**Forward-compatibility note (durable).** The standing contract retains only this: a
+`lease_epoch IS NULL` row is treated as **unowned/foreign** and is **never conflated with `0`**
+([daemon.md](daemon.md) §5.1 / §11.1). Once rows carry `lease_epoch >= 1`, an old pre-epoch
+binary must not run against the store (it would write non-epoch rows and reset the fence); the
+store schema-version gates a too-old binary closed.
