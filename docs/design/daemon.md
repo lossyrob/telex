@@ -12,7 +12,7 @@ governs the mechanism** and DESIGN.md governs the framing.
 
 It was produced by the `local-daemon / design-foundation` node and is the design-gate
 artifact. The decisions it records are in [DECISIONS.md](DECISIONS.md) as ADRs
-0014–0021. The consolidated resolutions of the eight design-foundation open questions
+0014–0023. The consolidated resolutions of the eight design-foundation open questions
 are in the [Open-question resolutions](#open-question-resolutions) section, and the
 explicit relocate/supersede/defer accounting is in the
 [Relocations, supersessions, deferrals](#relocations-supersessions-deferrals) map.
@@ -506,7 +506,10 @@ data-bearing ops like `Wait → Message` body are otherwise readable):
   file cannot redirect or capture them. **Owner-only cap creation is part of the readiness
   contract** ([§2.3](#23-readiness-ack)): if the cap cannot be created owner-only — `ENOSPC`,
   permission, partial write, symlink — **startup fails** (the daemon never serves without an
-  enforceable cap). These failpoints are acceptance tests.
+  enforceable cap). These failpoints are acceptance tests. *Where* these paths resolve from, and
+  the **portability** of the owner-only requirement (the unattended environments that trip it, a
+  recommended resolution policy, and a single-tenant opt-out), are `daemon-core` policy —
+  [§7.4](#74-path-resolution-and-the-portability-of-fail-closed-startup-deferred-to-daemon-core).
 - **Peer authenticity — server AND client, both MUST, with the *correct directional
   primitive* (R3-7).** Before the server sends `admin_cap` or any data-bearing frame
   (`Message`) it MUST verify the connected peer is the same user; and **the client MUST
@@ -566,6 +569,85 @@ incarnation — identity is the unique, stable `session_id`); the daemon checks 
 `(store_key, session_id)` is in its map, then **releases that session's blocked waiters + marks
 its stations IDLE** — it never destroys a station, and a late/spurious hook self-heals on the
 next `Register` ([§9](#9-liveness-model)).
+
+### 7.4 Path resolution and the portability of fail-closed startup (deferred to `daemon-core`)
+
+[§7.2](#72-os-level-trust-boundary-mr5) freezes a **requirement** (`config_root`/`run_dir`
+owner-private; the cap creatable owner-only) and a **behavior** (startup **fails closed**
+otherwise, as readiness acceptance tests). It deliberately does **not** freeze *where* those
+paths resolve from, nor *what to do on a filesystem that cannot represent owner-only
+permissions* — those are **`daemon-core` policy**. This subsection records why the gap matters
+and the recommended direction, so `daemon-core` starts from it rather than rediscovering it.
+
+**Owner-only is an EFFECTIVE-permission postcondition, not just an explicit `0700`/DACL write.**
+Creating the cap/dir with an explicit owner-only mode is **necessary but not sufficient** as the
+final proof: on Windows DACL + inherited ACEs, POSIX-or-NFSv4 ACLs, SMB/9p, WSL/DrvFs, and other
+translated filesystems, mode bits can round-trip while the **effective** access is broader or
+**unknowable**. The readiness check is therefore an **effective permission / ACL / DACL
+postcondition**: confirm the artifact is owner-only *in effect*, and classify any **ambiguous or
+inconclusive** representation as **cannot-enforce → fail closed** (unless the explicit
+single-tenant opt-out below is set).
+
+**The failure surface is two independent trip-wires** ([§7.2](#72-os-level-trust-boundary-mr5)):
+*(a)* the directory is **not owned by the running uid**, and *(b)* it is **(effectively)
+group/world-accessible**. On a normal interactive install (local disk, `~/.config`/
+`%LOCALAPPDATA%`, telex creating its own owner-only dir) neither fires and fail-closed startup is
+invisible. The concern is that the **environments where an agent runs unattended are exactly the
+ones that trip these**, and there the failure is **total** (telex will not run) and often
+**unwatched** (no human reads the error):
+
+- **Arbitrary-uid / non-root containers** (OpenShift, K8s `runAsNonRoot` random uid, uid-remapped
+  mounts): the mounted dir is not owned by the running uid → trips *(a)*. A mainstream enterprise
+  pattern, not exotic.
+- **Network / remapped filesystems** (NFS root-squash, SMB/CIFS, **9p on WSL2 and Docker
+  Desktop**, some CSI volumes): ownership/permission/ACL bits are not faithfully represented, so
+  owner-only **cannot be set or verified** — distinct from *(a)*/*(b)*: the check is not *false*,
+  it is *unenforceable / inconclusive*.
+- **`$HOME`/`$XDG_RUNTIME_DIR` unset or shared** (cron, systemd units without `User=`, minimal CI
+  shells, distroless): resolution can fall back to a world-writable location (`/tmp`, mode `1777`)
+  → trips *(b)*.
+- **Redirected / roaming profiles on Windows** (`%APPDATA%`/`%LOCALAPPDATA%` redirected to a
+  network home drive): network-FS semantics + non-local DACLs can trip the owner-only check.
+- **The umask footgun (an implementation-correctness item, not exotic).** If `daemon-core`
+  creates its `run_dir` with `0755 & ~umask` rather than an **explicit `0700`**, a *normal* user
+  with `umask 022` gets a world-readable dir that the §7.2 check rejects. Create with an explicit
+  owner-only mode, independent of umask.
+
+**Recommended `daemon-core` policy (direction, not frozen here):**
+
+1. **Deterministic, documented, PLATFORM-SCOPED path resolution with an explicit override.** Do
+   **not** copy a Unix order literally onto Windows (that is what strands redirected-profile
+   users). Unix: an explicit `TELEX_RUN_DIR` / `--run-dir` → `$XDG_RUNTIME_DIR` → a private subtree
+   under `$HOME` (e.g. `$HOME/.local/state/telex`). Windows: an explicit `TELEX_RUN_DIR` /
+   `--run-dir` → a **local** `%LOCALAPPDATA%\telex` (never a redirected/roaming profile path by
+   default). Each created **explicit owner-only** (`0700` / current-SID-only DACL), with a
+   refuse-to-run error that **names the configured override** so the operator has an immediate
+   remedy.
+2. **Distinguish "cannot enforce owner-only" from "permission denied"** with a specific,
+   **actionable** message (e.g. "`run_dir` is on a filesystem that cannot represent owner-only
+   permissions — set `TELEX_RUN_DIR` to a local owner-private path or tmpfs") rather than a
+   generic opaque failure. **Fail-closed actionability is part of the operability contract** even
+   though the message text is `daemon-core`'s.
+3. **Prefer `$XDG_RUNTIME_DIR` / tmpfs (Unix) or local `%LOCALAPPDATA%` (Windows) for the runtime
+   artifacts** (socket, lockfile, cap) where available — owner-private and local by construction —
+   which sidesteps the network-FS class for everything except the durable store.
+4. **The remedy is path-shaped first; the trust opt-out is a narrow last resort.** Steer an
+   operator in a tripped environment to **`TELEX_RUN_DIR` / tmpfs on local owner-private storage
+   FIRST**. Only if that is genuinely impossible, an **explicit, logged single-tenant opt-out**
+   (e.g. `TELEX_TRUST_ENV=single-tenant`) relaxes the owner-only-*file* requirement — but it is
+   **narrowly defined** (it asserts **no shared or host-mounted `run_dir`, socket, lock, or cap**,
+   **not** a blanket "inside a container/VM": sidecars, shared volumes, hostPath/bind mounts, and
+   WSL/Docker-Desktop shares can still expose the bearer-`admin_cap` path to another principal),
+   **opt-in and audited, never a silent fallback**, and it **voids**
+   [§7.0](#70-v1-threat-model-normative)/[§7.2](#72-os-level-trust-boundary-mr5) protections by
+   design — a **builder/operator policy call**, not a default this design takes.
+
+**Acceptance.** The owner-private-rejection failpoint is already gated
+([§17](#17-gating-tests--per-backend-conformance-matrix-daemon-core-acceptance) test 15); the
+**cannot-enforce-owner-only** filesystem case and the **actionable-error** contract join it as
+`daemon-core` acceptance, where the actionable error **names the configured run-dir override**
+(`TELEX_RUN_DIR` is the recommended example, **not** a frozen knob — the resolution order and the
+opt-out are `daemon-core`'s to fix). Recorded as **ADR 0022**.
 
 ## 8. (reserved)
 
@@ -1341,7 +1423,7 @@ isolation precondition for all Postgres concurrency tests is **READ COMMITTED au
 | 12 | **Real legacy holder / non-epoch cutover** (mr4) — start an actual legacy holder + `lease_epoch IS NULL` row | required | required | Phase-1 prove-unbound holds; **no NEW `Frame::Message` is emitted by the non-epoch holder after the daemon binds** (a pre-barrier in-flight frame may still arrive and is **at-least-once duplicate-deduped by `message_id`**, never lost — per [§12](#12-legacy-cutover-oq5-da-1) M9); legacy row advances `NULL → 1` |
 | 13 | **Epoch monotonicity across release/cleanup/re-claim** (mr2) | required | required | after `ReleaseOwnership` at epoch E and a cleanup pass, the next claim is **E+1 (never 1)**; no row deletion of an epoch-bearing address |
 | 14 | **Ordered-handoff crash matrix + successor-readiness** (sf3) — kill after prepare / quiesce / flush / transfer, on **both** P and S | required | required | bounded idempotent recovery; no loss; no duplicate beyond at-least-once; no ownerless hijack window; **S-crash-before-transfer aborts the handoff (P keeps ownership), S-crash-after-transfer recovers via stale-claim**; the transfer writes ownership/fence columns only (no session/attendance column exists to refresh) |
-| 15 | **OS trust boundary negatives** (mr5, R3-7) | required (Unix 0700 socket / symlink) | required | a second OS principal cannot `Hello`/`Register`/`Wait`; symlinked cap/lock rejected; **a pre-bound hostile server is rejected client-side BEFORE any metadata disclosure** (before `Hello`/`store_key`, via `GetNamedPipeServerProcessId`/connected-`SO_PEERCRED`); a **PID-reuse race** does not authenticate the wrong process; **`admin_cap` never appears** in `Status`/`Error`/logs/traces; non-owner-private `config_root`/`run_dir` rejected at startup |
+| 15 | **OS trust boundary negatives** (mr5, R3-7) | required (Unix 0700 socket / symlink) | required | a second OS principal cannot `Hello`/`Register`/`Wait`; symlinked cap/lock rejected; **a pre-bound hostile server is rejected client-side BEFORE any metadata disclosure** (before `Hello`/`store_key`, via `GetNamedPipeServerProcessId`/connected-`SO_PEERCRED`); a **PID-reuse race** does not authenticate the wrong process; **`admin_cap` never appears** in `Status`/`Error`/logs/traces; non-owner-private `config_root`/`run_dir` rejected at startup; a `run_dir` whose **effective** owner-only permission cannot be represented/verified (ACL/DACL inconclusive) **fails closed** with an **actionable** error that **names the configured run-dir override** (e.g. `TELEX_RUN_DIR`), not an opaque failure ([§7.4](#74-path-resolution-and-the-portability-of-fail-closed-startup-deferred-to-daemon-core)) |
 | 16 | **IPC version/capability compatibility** (sf2) — N/N-1 and N+1/N | required | required | security-sensitive `required_capabilities` mismatch fails closed (`Incompatible`/`Unauthorized`); attach/wait-reconnect/Drain/Detach/Ack/Status behave per the **`daemon-core`-owned IPC compatibility table** ([§6.1](#61-version-handshake--capability-negotiation-hello--helloack-sf2)); the **`NeedsAttach` error frame and the `Ack{store_key, session_id, message_id}` frame** are part of that versioned surface — N/N-1 cases assert an N-1 client/daemon either negotiates each or **fails closed**, never silently degrades |
 | 17 | **N / N+1 protocol-major parallel** (mr8) | required | required | two protocol-major-parallel daemons under one config root each authenticate against their own `daemon-<H>.cap`; neither clobbers the other |
 | 18 | **Durable BackendClock + daemon-down TTL fail-closed** (R4-6, R5-Sb) | required (SQLite high-water) | required (PG server clock) | persisted `last_heartbeat` stamped before a restart compares correctly against the respawned daemon's clock; the SQLite high-water never moves backward across restart/suspend/skew; a **slept / backward-wall-clock restart whose real downtime exceeds the TTL** does **not** fail open (no auto-lapse of a live address on an untrustworthy clock); recovery of a wedged lease is via the non-destructive **operator reset** ([§10.2](#102-operator-reset)) — no eviction epoch, no permanent zombie |
@@ -1427,6 +1509,7 @@ existing decision log. Deferred items are explicit so they are not silently drop
   (same-trust user-private threat model in v1).
 - **#27** (`mark_delivered` cap) and **#24** (registry GC) — carry; still relevant.
 - **#12** (embeddable SDK client) — separate solve; reuses this stabilized Layer-1 IPC.
+- **Startup path-resolution + portability policy** (ADR 0022, [§7.4](#74-path-resolution-and-the-portability-of-fail-closed-startup-deferred-to-daemon-core)) — the `run_dir`/`config_root` resolution algorithm, the cannot-enforce-owner-only handling, and the single-tenant opt-out are deferred to `daemon-core`; the owner-only **requirement** + **fail-closed** behavior are frozen.
 
 ### Reopen conditions (carried from the design-foundation council)
 
