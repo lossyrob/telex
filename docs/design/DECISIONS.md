@@ -720,6 +720,15 @@ the epoch-scoped key prevents a stale in-flight identity surviving a fence. #27
 - **Status:** Accepted (design)
 - **Relocates:** 0012 (pid-watch moves from the holder into the exchange).
 - **Narrows:** 0005 (TTL survives only as the daemon-down backstop).
+- **Revised by:** 0023 (minimal model).
+
+> **Revised by ADR 0023 (minimal model, 2026-06-23).** The non-authoritative-hook +
+> `occupied_stale` seq-fenced attendance + epoch-minting takeover model in the Decision below is
+> **superseded**, and the heading's "no idle-TTL teardown" no longer holds. The current liveness
+> model is: an **authoritative, non-destructive** `sessionEnd` hook (release waiters + mark idle,
+> never destroy); the watched **loader pid as a negative-only signal** (pid + start-time guard);
+> and a single **idle-TTL ≥ 1 day** non-destructive backstop. Liveness is a UX/latency dial, not a
+> correctness gate (delivery is agent-acked). The text below is retained for provenance.
 
 **Context.** With the holder gone, the exchange needs a liveness model that keeps
 idle-but-alive sessions instantly wakeable (the operator's explicit requirement) while
@@ -794,6 +803,19 @@ correctness.
   `DeregisterSession`, the `from`-default rule, and crash recovery).
 - **Reshapes:** #23 / PR #31 (drop the filesystem `session_registry` as authority).
 - **Supersedes:** 0010's `from`-default mechanism (the local holder registry).
+- **Revised by:** 0023 (minimal model) — for concern (b), session ownership.
+
+> **Revised by ADR 0023 (minimal model, 2026-06-23).** Concern **(a)** — the daemon-scoped,
+> versioned, capability-authorized IPC and the OS user-private trust boundary — **stands
+> unchanged**. Concern **(b)** — session ownership — is **superseded**: the durable `sessions`
+> incarnation-currency authority, `(session_seq, nonce)`, the prior-seq CAS / `establish_nonce` /
+> `Establish`-`Continue` modes, per-address tombstones, the non-authoritative `SessionEndHint`
+> teardown, `occupied_stale`/seq-fenced attendance, and `Takeover{force}` are all **replaced** by:
+> the unique ambient `session_id` as identity, **explicit-only in-memory membership** with a
+> **`NeedsAttach`** error and no implicit rebuild-from-history (so no resurrection and no
+> tombstones), an **authoritative non-destructive** hook, and **explicit agent-acked at-least-once
+> delivery** + `message_id` dedup. The lease-epoch fence is retained for the multi-writer Postgres
+> backend. The session-ownership text below is retained for provenance.
 
 **Context.** Today `Wait`/`Shutdown` are **unauthenticated** (verified `src/ipc.rs`) and
 the endpoint is address-keyed. One exchange serves multiple sessions/stores for one user,
@@ -986,3 +1008,99 @@ repo root"**: it was builder-directed during shaping and is flagged for orchestr
 reconciliation (updating the workstream brief/issue text is an orchestrator action). The
 `telex skill` embed path is preserved (`SKILL.md` did not move). Full verb/skill detail in
 [daemon.md](daemon.md) §15.
+
+## 0023 — Minimal session/presence/delivery model: supersede the incarnation-currency machinery
+
+- **Date:** 2026-06-23
+- **Status:** Accepted (design)
+- **Revises:** 0017 (liveness) and 0019 (daemon-native session ownership) — supersedes their
+  session-incarnation/currency / `occupied_stale` / force-takeover machinery.
+- **Process:** post-merge builder re-examination + a multi-model advisory **council** (5
+  heterogeneous members across GPT/Claude/Gemini; HIGH-confidence, genuine-sharper convergence),
+  then two builder refinements. The council synthesis is retained out-of-repo for audit.
+
+**Context.** ADRs 0017/0019 (ratified over 11 review rounds + a cross-model spar) built an
+elaborate **session-incarnation currency** machinery — a durable `sessions` table with a
+daemon-assigned `(session_seq, nonce)`, a prior-seq CAS with
+`establish_nonce`/idempotency-horizon/observe-retry/cap-exhaustion, a **non-authoritative**
+`sessionEnd` hook with latched/double-checked/liveness-vetoed teardown, `occupied_stale`
+seq-fenced attendance, `Takeover{force}` nonce rotation, per-address tombstones, and an implicit
+re-register-from-history. Post-merge, the builder (the authority on the actual Copilot CLI
+harness) established that the **premises this machinery rests on are false or were never needed**:
+
+1. **`session_id` is unique and stable** — one session's id, preserved across dismiss/exit/resume,
+   **never reused for a different session**. (The "`session_id` recurs across sequential lives"
+   premise behind the incarnation token is false.)
+2. **The agent runs `telex attach` itself**; there is **no loader/plugin establisher** and **no
+   env-injected per-life token** (the plugin only adds the `sessionEnd` hook). The
+   incarnation-threading the design assumed has no implementer.
+3. **Liveness need not be a correctness gate.** Detached waiters reaped by the exchange (sessionEnd
+   hook OR loader-pid death) with **non-destructive** presence (release waiters + mark idle, never
+   destroy) make imperfect liveness a UX/latency dial.
+4. **Delivery correctness comes from explicit agent ack + at-least-once + `message_id` dedup**, not
+   from a per-EMIT waiter event. The waiter's stdout flush is transport only.
+
+Under these, almost the entire incarnation edifice defends a problem that cannot occur.
+
+**Decision (the minimal model — full contract in [daemon.md](daemon.md) §5–6, §9–11, §14).**
+
+- **Identity = the unique, ambient `session_id`.** No incarnation token, no `(session_seq,
+  nonce)`, no `TELEX_SESSION_INCARNATION`.
+- **Membership is explicit-only and in-memory.** `telex attach` (`Register`) establishes it; the
+  exchange returns a **`NeedsAttach`** error for an unknown session/address and **never implicitly
+  rebuilds membership from history** — so a removed address is **never silently resurrected**, and
+  **tombstones are unnecessary** (the over-correction guard the council required is satisfied by
+  *removing implicit rebuild* rather than by *adding durable tombstones*). Only an explicit
+  re-attach re-establishes a station.
+- **The `sessionEnd` hook is authoritative but NON-DESTRUCTIVE** (release waiters + mark idle).
+  With a unique `session_id` and a non-destructive, self-healing action, the round-6 "the hook
+  cannot identify its life" problem **dissolves**; a late/spurious hook costs at most one waiter
+  re-arm.
+- **The watched LOADER pid is a negative-only liveness signal** (pid + start-time reuse guard);
+  loader-alive is never positive presence.
+- **Delivery = durable at-least-once + explicit `telex ack <message_id>` (immediately on read) +
+  dedup by `message_id`.** The durable consumed-MARK is triggered by the **agent ack** (not the
+  waiter flush) and is **epoch-guarded** on the multi-writer path; unacked → redeliver.
+- **A single idle-TTL ≥ 1 day** is a non-destructive backstop releasing only presumed-dead waiters
+  (the unhooked-dismiss + loader-alive case); it **never caps legitimate idle** — station
+  membership + the durable message buffer persist indefinitely, so a session may idle for days and
+  still wake on a new message. (Replaces `occupied_stale`/`stale_after`/seq-fenced attendance.)
+- **Writer authority:** an **OS-singleton** (Unix flock/fcntl + AF_UNIX bind / Windows
+  named-mutex + named-pipe first-instance) is the single-host writer authority; the **lease-epoch
+  fence is KEPT and active for the multi-writer Postgres backend** (Postgres is in v1 scope — not
+  deferred), arbitrating delivery ownership across per-host exchanges. A simple **operator reset**
+  (mark idle / release waiters) replaces `Takeover{force}` (no epoch-minting-for-eviction, no
+  force-nonce rotation — those existed only to invalidate incarnation tokens).
+
+**DELETE** (from 0017/0019 / daemon.md): the `sessions` incarnation-currency table +
+`(session_seq, nonce)`; prior-seq CAS, `establish_nonce`, idempotency horizon, observe/retry,
+cap-exhaustion; the non-authoritative-hook demotion + latched/double-checked/liveness-vetoed
+teardown; `Takeover{force}` + force-nonce rotation; `occupied_stale` / attendance-staleness /
+`stale_after` / seq-fenced attendance; the waiter `DeliveryAck` / "delivered = stdout flush" /
+`delivery_nonce`-as-delivery; the `Register{Establish/Continue}` modes, `ReRegister` /
+`DeregisterSession` incarnation params, `Stale`/`Conflict`/`NeedsEstablish` errors,
+`TELEX_SESSION_INCARNATION`; per-address tombstones and implicit re-register-from-history.
+**KEEP:** the daemon-scoped capability/version IPC + OS trust boundary of 0019 (unchanged); the
+lease-epoch fence (active for Postgres); durable at-least-once + `message_id` dedup;
+same-user-trust / no-intra-user-isolation.
+
+**Consequences.** A large reduction in accidental complexity, elimination of the opaque
+client-threaded token (and its manual-threading UX wrinkle), and a delivery model that is safe for
+detached waiters. The change reverses a spar-validated decision, but that spar reasoned under
+premises (1) and (4), which were revised; the council re-derived the one genuine residual
+(membership resurrection) and confirmed it is closed by *removing implicit rebuild*. This ADR is a
+**post-merge design revision** to the design-foundation deliverable (Refs #34), flagged for
+orchestrator reconciliation.
+
+**Reopen conditions.**
+
+- A proven mechanism by which `session_id` is reused across distinct sessions → the incarnation
+  fence returns.
+- A proven path where the plugin/loader can inject a per-life token into every verb + the hook →
+  an authoritative seq-gated hook + threading become viable again.
+- A multi-writer / non-self-serializing **single-host** backend, or zero-downtime hot handoff →
+  the OS-singleton alone is insufficient; the epoch's role expands.
+- Evidence that same-session membership mutations can arrive reordered over IPC → add a
+  **server-side** (never client-threaded) monotonic membership op-seq.
+- The `sessionEnd` hook does **not** fire on in-terminal dismiss (to be spiked) → the idle-TTL
+  becomes the primary dismiss bound rather than a backstop.

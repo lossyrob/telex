@@ -192,7 +192,8 @@ The core adapts behavior:
 **poll** delivery and **TTL-heartbeat** liveness for *both* SQLite and
 Postgres — a single code path on each axis. (Under the local exchange, decision 0017
 narrows TTL-heartbeat to the *daemon-down backstop* role; live-session liveness is then
-the hook + watch-pid + stale-attendance model — see [daemon.md](daemon.md).) The exchange
+the **authoritative non-destructive hook + loader-pid (negative-only) + idle-TTL backstop**
+model (decisions 0017, 0023) — see [daemon.md](daemon.md).) The exchange
 polls the **undelivered set** keyed on
 per-recipient delivery state rather than a monotonic id cursor (decision 0013, which superseded the
 original poll-with-cursor mechanism). `LISTEN/NOTIFY` (native push) and
@@ -395,16 +396,18 @@ Leases are exclusive and epoch-fenced. The frozen rules (normative mechanism in
 - shared visibility should use `cc`, `watchers`, or subscriptions, not multiple owners of
   one exclusive address.
 
-Because loader-level liveness is weak (a session can be dismissed without its process
-tree dying), **stale-attendance and operator takeover are a load-bearing recovery path,
-not an edge case**: the exchange marks an unconfirmed address `occupied_stale` (without
-ever tearing down a live session) and allows an informed, epoch-minting operator
-takeover. Takeover **fences, evicts, and tombstones** the stale binding and leaves the
-address for a follow-up `Register` to bind (it does not itself install a new occupant); a
-durable per-session **incarnation-currency authority** keeps a crashed-then-recovered
-session continuous while rejecting a stale or reused-session-id revival. The full state
-algebra is normative in [daemon.md](daemon.md) (stale-attendance, takeover, and session
-ownership).
+Because loader-level liveness is a **negative-only signal** (a session can be dismissed
+without its process tree dying), presence is handled **non-destructively**: the exchange
+releases a station's blocked waiters and marks it **idle** on a definite signal (the
+**authoritative `sessionEnd` hook** or **loader-pid** death), and a single **idle-TTL
+(≥ 1 day)** backstops the rare unhooked-dismiss-with-loader-alive case. None of these ever
+destroy a station or lose a message, so an idle-but-alive session stays instantly wakeable
+**for days**. Identity is the **unique, stable `session_id`**; membership is **explicit-only**
+(a one-off `attach`), and the exchange returns **`NeedsAttach`** for an unknown session rather
+than implicitly rebuilding it — so a removed address is **never silently resurrected** (no
+incarnation token, no tombstones). Delivery is durable **at-least-once + explicit agent ack +
+`message_id` dedup**. The full model is normative in [daemon.md](daemon.md) §9–11, §14, and
+recorded in decision 0023.
 
 ### Default `from` via daemon session ownership
 
