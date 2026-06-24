@@ -637,6 +637,16 @@ framing.
 
 - **Date:** 2026-06-22
 - **Status:** Accepted (design; `fencing-proof` node must prove it executable on both backends)
+- **Revised by:** 0023 (delivery-commit model).
+
+> **Revised by ADR 0023 (minimal model, 2026-06-23).** The lease-epoch fence + ordered handoff +
+> epoch lifecycle in this ADR **stand** (the fence is active for the multi-writer Postgres
+> backend). But the **delivery-commit model** it described — `EMIT → waiter-ACK → MARK` with a
+> waiter `DeliveryAck` / `delivery_nonce` / `AlreadyDelivered` and "delivered = stdout flush" — is
+> **superseded**: the durable consumed-MARK is now triggered by an **explicit agent
+> `Ack{address, message_id}`** (epoch-guarded, idempotent on `(message_id, recipient)`), the
+> waiter stdout flush is transport-only, and outcomes are `Marked` / `AlreadyConsumed` /
+> `NotOwner`. See [daemon.md](daemon.md) §11.3.
 
 **Context.** The lease row is keyed by `address` only with **no owner generation**
 (verified: `src/registry.rs`, the backend `claim_lease`/`heartbeat`/`release_lease`), so
@@ -938,6 +948,15 @@ socket-EOF.
 - **Date:** 2026-06-22
 - **Status:** Accepted (design)
 - **Splits:** #6 (minimal floor here; full platform in `seamless-upgrade`, last).
+- **Revised by:** 0023 (schema/migration).
+
+> **Revised by ADR 0023 (minimal model, 2026-06-23).** The minimal upgrade floor and the two-phase
+> legacy/non-epoch cutover rule **stand**, but the **schema/migration instruction** to create a
+> `sessions` currency table atomically with the lease columns is **superseded**: there is **no
+> `sessions` table** — the durable layer is lease-ownership (epoch) + the
+> `deliveries(message_id, recipient)` message/ack buffer only. The migration creates the lease
+> columns + the per-message consumed-state together under one schema-version bump. See
+> [daemon.md](daemon.md) §5.1, §14.
 
 **Context.** The first daemon-aware install hits the Windows binary-lock (a running
 `telex` process locks the binary during swap — hit live this workstream), and the first
@@ -991,7 +1010,9 @@ mid-workstream, and the design layer needed a home that the Streamliner manifest
 ad-hoc-edited root vision docs.
 
 **Decision.** **Keep the verb names** (`attach`/`detach`/`wait`; now one-shot against the
-exchange); Register/Re-register/DeregisterSession are IPC operations, not CLI renames; the
+exchange); Register/Detach/Ack are IPC operations, not CLI renames (the round-1..6
+`Re-register`/`DeregisterSession` are superseded by ADR 0023's `NeedsAttach`-re-register /
+agent-`Ack` / `Detach` model); the
 held-stream `SessionConnect` is not adopted (preserved dissent). **Hide** the `telex
 daemon` entrypoint from normal help. **Single-source the skill**: root `SKILL.md` stays
 the canonical file (embedded via `include_str!` for `telex skill`, with a `--raw` form);
@@ -1055,8 +1076,10 @@ owner-only-enforcement primitive removes the need for the opt-out.
 
 - **Date:** 2026-06-23
 - **Status:** Accepted (design)
-- **Revises:** 0017 (liveness) and 0019 (daemon-native session ownership) — supersedes their
-  session-incarnation/currency / `occupied_stale` / force-takeover machinery.
+- **Revises:** 0017 (liveness), 0019 (daemon-native session ownership), 0015 (the delivery-commit
+  model — waiter-ACK → agent-ACK), and 0020 (the `sessions`-table migration instruction) —
+  supersedes their session-incarnation/currency / `occupied_stale` / force-takeover / waiter-ACK /
+  `sessions`-schema machinery.
 - **Process:** post-merge builder re-examination + a multi-model advisory **council** (5
   heterogeneous members across GPT/Claude/Gemini; HIGH-confidence, genuine-sharper convergence),
   then two builder refinements. The council synthesis is retained out-of-repo for audit.

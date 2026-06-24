@@ -420,8 +420,10 @@ The local exchange owns the authoritative `(store_key, session_id) -> addresses`
 [daemon.md](daemon.md), daemon-native session ownership), so `from` resolves with
 precedence **`--from` > `$TELEX_ADDRESS`/`--address` > the exchange's
 `ResolveFrom(store_key, session_id)`** against *that session's* registered addresses **for
-that store only**: exactly one inferred succeeds, multiple refuses as `ambiguous-from`, none
-falls back to the existing unrepliable rules. The exchange **never** infers across all of its
+that store only**: exactly one inferred succeeds, multiple refuses as `Ambiguous`, and
+**none/unknown returns `NeedsAttach`** (the agent re-attaches its own address, then retries; if
+still none the send **fails actionably** as `refused-unrepliable` — never a silent `from = None`,
+mirroring [daemon.md](daemon.md) §14.6). The exchange **never** infers across all of its
 addresses (it serves many sessions across many stores), so a multi-session, multi-store
 exchange cannot misattribute a send; the harness propagates `store_key` + `TELEX_SESSION_ID`
 to the `send`/`reply` process. Identity is
@@ -587,9 +589,10 @@ exchange never sends a separate "you should exit" signal; handing the client a m
 named pipe on Windows, a unix socket elsewhere). `telex wait` connects, completes the
 version handshake, sends a request describing what it is waiting for (store, address,
 attention filter), then blocks on a socket read. The exchange emits a matching message
-under an in-memory current-owner check and records the **durable** delivery mark only
-**after** the client acknowledges it (the at-least-once `EMIT → ACK → MARK` fence — see
-[daemon.md](daemon.md)); otherwise it registers the client as a waiter and stays silent.
+under an in-memory current-owner check and records the **durable** consumed mark only
+**after** the **agent explicitly acks** it (`telex ack` — the at-least-once
+`EMIT → print → agent Ack → MARK` fence; the stdout flush is transport-only, see
+[daemon.md](daemon.md) §11.3); otherwise it registers the client as a waiter and stays silent.
 The wakeup is push — the exchange's write releases the client's read — with no local
 polling.
 
@@ -602,8 +605,8 @@ The client contract distinguishes outcomes by exit code: a delivered message (`0
 forever (agent runtimes cap tool-call duration); a daemon-gone error (`3`) **after** the
 reconnect-on-EOF grace; and a daemon-hung error (`4`). Crucially, a daemon **restart or
 ordered handoff is not a turn failure**: `telex wait` reconnects within a short grace
-window and auto-re-registers the session from inherited environment before it would
-return `3` (see [daemon.md](daemon.md)).
+window and, on `NeedsAttach`, **explicitly re-attaches** the session from inherited environment
+before it would return `3` (see [daemon.md](daemon.md)).
 
 The agent's job is therefore to **supervise**, not to **be**, the waiter — but
 supervision is now lighter, because there is no resident holder to launch and babysit. A
@@ -677,7 +680,7 @@ RECEIVE
   Block on the exchange; on delivery print one message as JSON and exit 0. Exit codes:
   0 delivered, 2 idle-timeout, 3 daemon-gone (after the reconnect-on-EOF grace),
   4 daemon-hung. A daemon restart/handoff is not a turn failure — `wait` reconnects and
-  re-registers transparently within the grace window.
+  re-attaches on `NeedsAttach` within the grace window.
 - `telex inbox [--address <addr>] [--all] [--limit N]`
   List actionable (requires-disposition, not yet terminally dispositioned) and recent
   messages for the address.
