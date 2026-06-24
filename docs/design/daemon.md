@@ -1513,7 +1513,10 @@ is not). Because the fence's whole point is **cross-backend single-writer correc
 each is annotated with its **per-backend** requirement; "N/A" is justified inline. The
 isolation precondition for all Postgres concurrency tests is **READ COMMITTED autocommit**
 (ADR 0013). The single clock domain is the backend/db-server clock
-([§11.5](#115-postgres-cross-machine-reclaim-in-epochs-not-timing)).
+([§11.5](#115-postgres-cross-machine-reclaim-in-epochs-not-timing)). This matrix is the
+**standing-design** acceptance; the one-time **legacy-holder cutover** is a migration concern whose
+acceptance test is specified separately in [DECISIONS.md](DECISIONS.md) ADR 0024 and is **not**
+counted in this matrix.
 
 | # | Test | SQLite | Postgres | Key assertion |
 |---|---|---|---|---|

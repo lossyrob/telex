@@ -683,7 +683,7 @@ a waiter-death-after-frame-write loss window (the earlier "mark-before-frame" or
 caught at the design-gate, would have flipped 0011 into at-most-once loss). A distinct
 executable `fencing-proof` gate must prove the emit→ack→mark failpoints, epoch monotonicity
 across release/cleanup/re-claim, and the handoff crash matrix on both backends
-([daemon.md](daemon.md) §17 tests 5/6/7/13/14). Backends gain a rowcount-returning heartbeat, a
+([daemon.md](daemon.md) §17 tests 5/6/7/12/13). Backends gain a rowcount-returning heartbeat, a
 non-deleting release, and the typed delivery method (backend-API changes). **Round-2
 sharpening:** the `DeliveryAck` is correlated to the exact in-flight
 `(connection, store_key, address, message_id, lease_epoch, delivery_nonce)` under a bounded
@@ -991,7 +991,7 @@ per-store exclusive, crash-safe migration that creates **both** the new lease co
 dedicated real-legacy-holder and schema-downgrade gating tests on both backends, including a
 **directly-invoked** (not via the shim) pre-epoch binary. Full rollback/gc/UX and any
 epoch-aware downgrade *framework* are deferred to `seamless-upgrade`. Full contract in
-[daemon.md](daemon.md) §12, §16, §3.4.
+[daemon.md](daemon.md) §16 + §3.4 and ADR 0024 (legacy-holder cutover).
 
 **Consequences.** The binary-lock is handled and the cutover is deterministic and
 *verified*; hard, forward-only cutover of existing sessions is acceptable (ratified).
@@ -1065,7 +1065,7 @@ tmpfs on local owner-private storage), and the **single-tenant opt-out** (e.g.
 silent fallback**, and a builder/operator policy call. Fail-closed **actionability** is part of
 the operability contract even though the message text is `daemon-core`'s.
 
-**Consequences.** The owner-private-rejection failpoint stays gated (§17 test 15), extended with
+**Consequences.** The owner-private-rejection failpoint stays gated (§17 test 14), extended with
 the **cannot-enforce-owner-only** filesystem case and the **actionable-error** requirement (the
 error **names the configured run-dir override** generically; `TELEX_RUN_DIR` is the recommended
 example, not a frozen knob); the resolution order and the single-tenant opt-out get conformance
@@ -1164,7 +1164,7 @@ premises (1) and (4), which were revised; the council re-derived the one genuine
 orchestrator reconciliation.
 
 **Reopen conditions.** *(Summary; the **canonical** reopen register is [daemon.md](daemon.md)
-"Reopen conditions", which this and the PR body link to.)*
+"Design assumptions and revisit conditions", which this and the PR body link to.)*
 
 - A proven mechanism by which `session_id` is reused across distinct sessions → the incarnation
   fence returns.
@@ -1211,7 +1211,8 @@ endpoints emit independently regardless of any post-emit row fence.
 
 **Cutover gating assertion.** *No legacy (non-epoch) holder **emits** a new `Frame::Message`
 after the daemon's waiter binds.* Exercised by a dedicated migration test that starts a real
-legacy holder / non-epoch lease on both backends. Hard cutover of existing sessions is
+legacy holder / non-epoch lease on both backends — a **migration** acceptance test, separate from
+the standing-design [daemon.md](daemon.md) §17 matrix. Hard cutover of existing sessions is
 acceptable (ratified).
 
 **In-flight legacy frame (M9).** Phase-1 prove-unbound proves the legacy *endpoint* is closed,
