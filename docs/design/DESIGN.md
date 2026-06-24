@@ -679,8 +679,9 @@ RECEIVE
 - `telex wait --address <addr> [--timeout-ms N]`
   Block on the exchange; on delivery print one message as JSON and exit 0. Exit codes:
   0 delivered, 2 idle-timeout, 3 daemon-gone (after the reconnect-on-EOF grace),
-  4 daemon-hung. A daemon restart/handoff is not a turn failure — `wait` reconnects and
-  re-attaches on `NeedsAttach` within the grace window.
+  4 daemon-hung, 5 presence-ended (the exchange reaped the waiter — sessionEnd hook /
+  loader-pid death / idle-TTL; the agent re-attaches + re-waits). A daemon restart/handoff is
+  not a turn failure — `wait` reconnects and re-attaches on `NeedsAttach` within the grace window.
 - `telex inbox [--address <addr>] [--all] [--limit N]`
   List actionable (requires-disposition, not yet terminally dispositioned) and recent
   messages for the address.
@@ -697,7 +698,7 @@ SEND
   Reply; threads under the parent (inherits thread_id, sets parent_id).
 
 DISPOSITION (flat verbs; all take `--id <message-id>` and optional `--note <s>`)
-- `telex ack --id <id>`        acknowledged
+- `telex ack --id <id> [--address <addr>]`   acknowledged — the consume-ack carries the **delivered recipient address** (`--address`); the `wait` output's `to` field supplies it (else a flag/env), and a missing address **fails closed** rather than guessing ([daemon.md](daemon.md) §11.3)
 - `telex handle --id <id>`     handled
 - `telex defer --id <id>`      deferred
 - `telex reject --id <id>`     rejected

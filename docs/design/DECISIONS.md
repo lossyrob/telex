@@ -681,7 +681,7 @@ a waiter-death-after-frame-write loss window (the earlier "mark-before-frame" or
 caught at the design-gate, would have flipped 0011 into at-most-once loss). A distinct
 executable `fencing-proof` gate must prove the emit→ack→mark failpoints, epoch monotonicity
 across release/cleanup/re-claim, and the handoff crash matrix on both backends
-([daemon.md](daemon.md) §17 tests 4/6/7/9). Backends gain a rowcount-returning heartbeat, a
+([daemon.md](daemon.md) §17 tests 5/6/7/13/14). Backends gain a rowcount-returning heartbeat, a
 non-deleting release, and the typed delivery method (backend-API changes). **Round-2
 sharpening:** the `DeliveryAck` is correlated to the exact in-flight
 `(connection, store_key, address, message_id, lease_epoch, delivery_nonce)` under a bounded
@@ -1131,9 +1131,12 @@ Under these, almost the entire incarnation edifice defends a problem that cannot
   membership + the durable message buffer persist indefinitely, so a session may idle for days and
   still wake on a new message. (Replaces `occupied_stale`/`stale_after`/seq-fenced attendance.)
 - **Writer authority:** an **OS-singleton** (Unix flock/fcntl + AF_UNIX bind / Windows
-  named-mutex + named-pipe first-instance) is the single-host writer authority; the **lease-epoch
-  fence is KEPT and active for the multi-writer Postgres backend** (Postgres is in v1 scope — not
-  deferred), arbitrating delivery ownership across per-host exchanges. A simple **operator reset**
+  named-mutex + named-pipe first-instance, per config root) **plus a canonical-store advisory
+  lock** (per SQLite store, closing the same-`--db` cross-config-root aliasing hole) are the
+  single-host writer authority; the **lease-epoch fence is KEPT and active for the multi-writer
+  Postgres backend** (Postgres is in v1 scope — not deferred), arbitrating delivery ownership
+  across per-host exchanges. The **live** ordered handoff is the Postgres story; SQLite upgrades
+  use release + next-call respawn (no live two-daemon overlap). A simple **operator reset**
   (mark idle / release waiters) replaces `Takeover{force}` (no epoch-minting-for-eviction, no
   force-nonce rotation — those existed only to invalidate incarnation tokens).
 
@@ -1157,7 +1160,8 @@ premises (1) and (4), which were revised; the council re-derived the one genuine
 **post-merge design revision** to the design-foundation deliverable (Refs #34), flagged for
 orchestrator reconciliation.
 
-**Reopen conditions.**
+**Reopen conditions.** *(Summary; the **canonical** reopen register is [daemon.md](daemon.md)
+"Reopen conditions", which this and the PR body link to.)*
 
 - A proven mechanism by which `session_id` is reused across distinct sessions → the incarnation
   fence returns.
