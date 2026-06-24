@@ -15,7 +15,7 @@ learning order:
 5. **Single-writer correctness** -- how exactly one writer per store is guaranteed across restart,
    upgrade, and multi-host.
 
-The word **epoch** appears by name in diagrams 2-4 and is *defined* in diagram 5.
+The word **epoch** appears by name in diagram 2 and is *defined* in diagram 5.
 
 ---
 
