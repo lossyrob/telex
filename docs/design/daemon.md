@@ -1086,13 +1086,27 @@ lock target is **NOT** placed under `run_dir`: `run_dir` is config-root-dependen
 two config roots that alias the **same physical store** but resolve **different** run_dirs would
 otherwise take two different lock files and **both** advisory locks would succeed → **two**
 exchanges writing one store (the round-2 cross-config-root hole, re-opened at the lock-namespace
-layer). Instead the namespace root is derived from the **OS per-user runtime identity, ignoring the
-telex run-dir override** — an OS session-global named lock keyed by file-id (e.g. Linux abstract
-`AF_UNIX` `@telex/store-<fileid>` or a fixed `$XDG_RUNTIME_DIR/telex/locks/store-<fileid>.lock`;
-Windows a session named-mutex `Local\telex-store-<fileid>`; the concrete mechanism is
-platform-scoped `daemon-core` latitude, the **invariance is frozen**). The per-config-root
-OS-singleton **spawn** lock ([§7.2](#72-os-level-trust-boundary-mr5)) legitimately stays in
-`run_dir`; only this **canonical-store** lock is store-identity-scoped and config-root-invariant. If
+layer). Instead the namespace root is derived from the **stable per-OS-user identity (uid / SID),
+ignoring the telex run-dir override**. **Conformance predicate (frozen):** a mechanism is conforming
+only if it yields **exactly one lock target per (physical store file-id, OS user)** that is
+invariant across **all config roots, `run_dir` overrides, login/logon sessions, and namespaces**,
+and that a **different OS user can neither hold nor squat** (cross-user isolation,
+[§7.0](#70-v1-threat-model-normative)). Any mechanism whose OS scope is **narrower** than this
+per-user invariant — per-logon-session, per-network-namespace, or a world-bindable/squat-able name —
+is **non-conforming** and the daemon **must fail closed** rather than use it. Conforming examples:
+**Unix** — a filesystem advisory lock (`flock`/`fcntl`) on `store-<fileid>.lock` inside a
+**validated owner-private, uid-scoped per-user runtime dir** (e.g. a `$XDG_RUNTIME_DIR` confirmed to
+be the real `0700` per-user runtime dir, else a uid-derived owner-private path such as
+`/run/user/<uid>/telex/locks/` or `$HOME/.local/state/telex/locks/`) — inode-scoped, so it spans
+login sessions and network namespaces and a different uid cannot enter the `0700` dir to squat it.
+**Windows** — a `Global\telex-store-<fileid>` named mutex with a **current-SID-only DACL**, so it
+spans **all of the user's logon sessions** (unlike session-scoped `Local\`) yet a different user
+cannot open or squat it. (Net-namespace-scoped abstract `AF_UNIX` sockets and session-scoped
+`Local\` mutexes are **non-conforming** by the predicate above.) The concrete mechanism is
+platform-scoped `daemon-core` latitude **subject to the predicate**; the invariance is frozen. The
+per-config-root OS-singleton **spawn** lock ([§7.2](#72-os-level-trust-boundary-mr5)) legitimately
+stays in `run_dir`; only this **canonical-store** lock is store-identity-scoped and
+config-root-invariant. If
 the canonical file identity cannot be computed, **or no config-root-invariant per-user lock target
 can be resolved**, **fail closed** (surfaced in `Status`). A **SQLite-concurrent
 acceptance probe** holds the store lock, opens the db, runs a `BEGIN IMMEDIATE` write + checkpoint,
@@ -1560,7 +1574,7 @@ isolation precondition for all Postgres concurrency tests is **READ COMMITTED au
 | # | Test | SQLite | Postgres | Key assertion |
 |---|---|---|---|---|
 | 1 | **Concurrent first-use** (thundering-herd auto-spawn) | required (multi-process) | required | exactly one daemon bound; losers connect; no duplicate/orphan |
-| 2 | **OS-singleton refuses a second instance + single-writer-per-store** (mr5, M4) | required | required | a second exchange process for the same singleton key is refused by the exclusivity primitive (Unix flock/fcntl + AF_UNIX bind / Windows named-mutex + named-pipe first-instance); **and** two **distinct config roots** pointing at the **same physical store** (same physical SQLite file reached via different `--db`/`TELEX_DB` paths **and** resolving **different `run_dir`s** — `TELEX_RUN_DIR`/`--run-dir`) — the second daemon **fails closed for that store** via the canonical-store-scoped advisory lock, whose target is **config-root-invariant** (keyed solely by file-id, **not** under `run_dir`), so exactly one exchange writes a store **even across config roots and run_dirs** (**SQLite**: the canonical-store lock; on **Postgres** per-host exchanges legitimately coexist and the **lease-epoch** arbitrates — no store-lock refusal, see test 6); a **SQLite-concurrent probe** (hold the store lock + open the db + `BEGIN IMMEDIATE` write + checkpoint) proves a second alias-path daemon **fails closed without deadlock** and that the dedicated store lock does **not** collide with SQLite's own file locks ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) |
+| 2 | **OS-singleton refuses a second instance + single-writer-per-store** (mr5, M4) | required | required | a second exchange process for the same singleton key is refused by the exclusivity primitive (Unix flock/fcntl + AF_UNIX bind / Windows named-mutex + named-pipe first-instance); **and** two **distinct config roots** pointing at the **same physical store** (same physical SQLite file reached via different `--db`/`TELEX_DB` paths **and** resolving **different `run_dir`s** — `TELEX_RUN_DIR`/`--run-dir`) — the second daemon **fails closed for that store** via the canonical-store-scoped advisory lock, whose target is **config-root-invariant** (keyed solely by file-id, **not** under `run_dir`), so exactly one exchange writes a store **even across config roots and run_dirs** (**SQLite**: the canonical-store lock; on **Postgres** per-host exchanges legitimately coexist and the **lease-epoch** arbitrates — no store-lock refusal, see test 6); a **SQLite-concurrent probe** (hold the store lock + open the db + `BEGIN IMMEDIATE` write + checkpoint) proves a second alias-path daemon **fails closed without deadlock** and that the dedicated store lock does **not** collide with SQLite's own file locks; a **per-user-invariance subcase** — same OS user (same SID), two **login sessions** (Windows) and/or two **network namespaces** sharing one store (Linux), distinct config roots/run_dirs, one physical SQLite file — proves **exactly one** daemon serves the store and the others **fail closed**, and that any lock mechanism whose OS namespace is **narrower than the frozen per-user invariant** (per-session, per-net-ns, world-squat-able) is **non-conforming** and must fail closed ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) |
 | 3 | **Crash-during-`wait` → `NeedsAttach` → re-attach** | required | required | `wait` against an unknown session/address returns typed **`NeedsAttach`** (no spurious exit 3); after an explicit `Register` + re-`Wait`, the waiter blocks normally; **a previously `Detach`ed address is NOT resurrected** — only addresses the agent explicitly re-attaches come back |
 | 4 | **Daemon restart: no loss, no resurrection** | required | required | messages durably buffered before the crash are delivered **at-least-once** on the next `attach` + `wait` + `ack` (no loss); the respawned exchange has **no in-memory membership** and rebuilds nothing from history; a removed address stays gone (no tombstone, no implicit rebuild); a **consumed** `(message_id, recipient)` is **not redelivered** after restart (the **retained** consumed row keeps it out of `fetch_undelivered` — consumed rows are not pruned in v1, so there is no resurrection-by-compaction) |
 | 5 | **Explicit-ack at-least-once + idempotent dedup + multi-recipient fan-out** (mr1, M1) — crash-after-PRINT/before-ACK, crash-after-ACK/before-MARK, two-waiters-both-print-then-one-ack, ack-after-station-idle, ack-replay, **one `message_id` fanned out to >=2 recipient addresses (to/cc/watcher) the session attends** | required | required | every message reaches a waiter **>=1** time (never 0); the stdout flush is **transport only** (never the consumed mark); the durable MARK fires only on the explicit agent `Ack`; the `Ack` carries the **delivered `address`** and marks **only** `(message_id, recipient = address)` — the **same `message_id`** acked for recipient `A` does **not** consume `(message_id, B)`, and an ack naming an address the session does not attend is **rejected**; the `(message_id, recipient)` consumed mark is **idempotent** (duplicate/late/replayed/post-idle acks converge, never double-consume); an `Ack` for an **attended** address with **no delivery row** returns **`AckNoOp`** and inserts no consumed row (the message stays deliverable + markable afterward); consumers dedupe by `message_id` |
