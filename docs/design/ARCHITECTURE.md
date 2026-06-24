@@ -62,7 +62,7 @@ exchange: a durable lease row plus the in-memory attendance record. The exchange
 of liveness/delivery state for its store.
 
 *Governing spec:* [daemon.md sec.1](daemon.md#1-the-local-exchange) ,
-[sec.2.2 auto-spawn](daemon.md#22-auto-spawn-connect-or-spawn-and-the-spawn-lock) | Last reviewed: 2026-06-24
+[sec.2.2 auto-spawn](daemon.md#22-auto-spawn-connect-or-spawn-and-the-spawn-lock)
 
 ---
 
