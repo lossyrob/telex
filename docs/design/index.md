@@ -18,13 +18,18 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   + Status surface, daemon-native session ownership, the liveness model, the minimal
   upgrade floor, the gating tests, and the consolidated resolutions of the
   design-foundation open questions.
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — the **visual on-ramp** to the daemon design: five
+  mermaid diagrams (component map, message delivery, restart/re-attach, station liveness, the
+  single-writer epoch fence) that teach the local-exchange architecture above the contract.
+  Non-normative; `daemon.md` governs.
 
 ## Reading order
 
 1. `PRODUCT-THESIS.md` (root) — why telex exists and what it promises.
 2. `DESIGN.md` — how the system is shaped.
-3. `daemon.md` — the precise contracts `daemon-core` and downstream nodes implement.
-4. `DECISIONS.md` — why each load-bearing choice was made.
+3. `ARCHITECTURE.md` — the visual on-ramp (5 diagrams) to the local-exchange design.
+4. `daemon.md` — the precise contracts `daemon-core` and downstream nodes implement.
+5. `DECISIONS.md` — why each load-bearing choice was made.
 
 ## Open-question resolutions (design-foundation)
 
