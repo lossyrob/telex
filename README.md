@@ -85,5 +85,6 @@ messages, acting and dispositioning each at its next turn.
 - **[DESIGN.md](docs/design/DESIGN.md)** — the working design
 - **[DECISIONS.md](docs/design/DECISIONS.md)** — the decision log
 - **[DISPATCH.md](DISPATCH.md)** — forward-looking discovery & dispatch (broadcast, Contract-Net)
+- **[EXTENSIONS.md](EXTENSIONS.md)** — proposal: extensions & capability cards (how addresses advertise what they do)
 - **[TELEX.md](TELEX.md)** / **[PRODUCT-THESIS.md](PRODUCT-THESIS.md)** — the name, the metaphor, the thesis
 - **[spike/](spike/)** — the throwaway validation spike that de-risked the design
