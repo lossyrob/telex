@@ -662,7 +662,12 @@ ones that trip these**, and there the failure is **total** (telex will not run) 
    though the message text is `daemon-core`'s.
 3. **Prefer `$XDG_RUNTIME_DIR` / tmpfs (Unix) or local `%LOCALAPPDATA%` (Windows) for the runtime
    artifacts** (socket, lockfile, cap) where available — owner-private and local by construction —
-   which sidesteps the network-FS class for everything except the durable store.
+   which sidesteps the network-FS class for everything except the durable store. (The "lockfile"
+   here is the per-config-root OS-singleton **spawn** lock; the **canonical-store** single-writer
+   lock of [§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving) deliberately does
+   **not** live under the config-root-overridable `run_dir` — it uses a config-root-invariant
+   per-user namespace keyed by the store file-id, so all aliases of one physical store map to one
+   lock target.)
 4. **The remedy is path-shaped first; the trust opt-out is a narrow last resort.** Steer an
    operator in a tripped environment to **`TELEX_RUN_DIR` / tmpfs on local owner-private storage
    FIRST**. Only if that is genuinely impossible, an **explicit, logged single-tenant opt-out**
@@ -1065,15 +1070,31 @@ file can be reached from **two distinct config roots** (two `--db`/`TELEX_DB` pa
 the same file), the daemon acquires a **canonical-store-scoped advisory lock** when it opens a
 SQLite store and **fails closed for that store** (refuses to serve it, surfaced in `Status`) if
 another exchange already holds it — so exactly one exchange writes a given SQLite store, even
-across config roots. **Lock semantics (frozen):** a **kernel/connection-owned OS advisory lock on a DEDICATED lock
-file whose name is keyed by the canonical store file identity** (device+inode on Unix /
-`GetFileInformationByHandle` file-id on Windows — e.g. `<run_dir>/store-<fileid>.lock`). It is a
-**separate file from the SQLite db**, so it can **never collide with, or be released by, SQLite's
-own database-file locking protocol** (`BEGIN IMMEDIATE` etc.) — locking the db file directly would
-interact with SQLite's own lock bytes / fd-ownership lifetime and could **fail open**; and it is
-**not** a path-derived sidecar beside the db (two hardlink paths share one inode → one lock-file
-name → one lock, closing the hardlink hole). If the canonical file identity cannot be computed
-(mapped to a single lock target), **fail closed** (surfaced in `Status`). A **SQLite-concurrent
+across config roots. **Lock semantics (frozen):** a **kernel/connection-owned OS advisory lock
+keyed _solely_ by the canonical store file identity** (device+inode on Unix /
+`GetFileInformationByHandle` file-id on Windows), held in a **per-user, config-root-INVARIANT lock
+namespace** so that **every alias of one physical store — across all config roots — resolves to
+exactly ONE lock target**. Two properties are required, both frozen. **(a) Separate from the SQLite
+db file** — the lock is its own object, never the db file, so it can **never collide with, or be
+released by, SQLite's own database-file locking protocol** (`BEGIN IMMEDIATE` etc.; locking the db
+file directly would interact with SQLite's own lock bytes / fd-ownership lifetime and could **fail
+open**), and it is **not** a path-derived sidecar beside the db (two hardlink paths share one inode
+→ one file-id → one lock, closing the hardlink hole). **(b) Config-root-invariant location** — the
+lock target is **NOT** placed under `run_dir`: `run_dir` is config-root-dependent (`TELEX_RUN_DIR` /
+`--run-dir`,
+[§7.4](#74-path-resolution-and-the-portability-of-fail-closed-startup-deferred-to-daemon-core)), so
+two config roots that alias the **same physical store** but resolve **different** run_dirs would
+otherwise take two different lock files and **both** advisory locks would succeed → **two**
+exchanges writing one store (the round-2 cross-config-root hole, re-opened at the lock-namespace
+layer). Instead the namespace root is derived from the **OS per-user runtime identity, ignoring the
+telex run-dir override** — an OS session-global named lock keyed by file-id (e.g. Linux abstract
+`AF_UNIX` `@telex/store-<fileid>` or a fixed `$XDG_RUNTIME_DIR/telex/locks/store-<fileid>.lock`;
+Windows a session named-mutex `Local\telex-store-<fileid>`; the concrete mechanism is
+platform-scoped `daemon-core` latitude, the **invariance is frozen**). The per-config-root
+OS-singleton **spawn** lock ([§7.2](#72-os-level-trust-boundary-mr5)) legitimately stays in
+`run_dir`; only this **canonical-store** lock is store-identity-scoped and config-root-invariant. If
+the canonical file identity cannot be computed, **or no config-root-invariant per-user lock target
+can be resolved**, **fail closed** (surfaced in `Status`). A **SQLite-concurrent
 acceptance probe** holds the store lock, opens the db, runs a `BEGIN IMMEDIATE` write + checkpoint,
 and proves a second alias-path daemon **fails closed without deadlock** (tests 2/5). Held for the
 **store-serving lifetime**, **auto-released on daemon
@@ -1539,7 +1560,7 @@ isolation precondition for all Postgres concurrency tests is **READ COMMITTED au
 | # | Test | SQLite | Postgres | Key assertion |
 |---|---|---|---|---|
 | 1 | **Concurrent first-use** (thundering-herd auto-spawn) | required (multi-process) | required | exactly one daemon bound; losers connect; no duplicate/orphan |
-| 2 | **OS-singleton refuses a second instance + single-writer-per-store** (mr5, M4) | required | required | a second exchange process for the same singleton key is refused by the exclusivity primitive (Unix flock/fcntl + AF_UNIX bind / Windows named-mutex + named-pipe first-instance); **and** two **distinct config roots** pointing at the **same physical store** (same `--db`/`TELEX_DB`) — the second daemon **fails closed for that store** via the canonical-store-scoped advisory lock, so exactly one exchange writes a store **even across config roots** (**SQLite**: the canonical-store lock; on **Postgres** per-host exchanges legitimately coexist and the **lease-epoch** arbitrates — no store-lock refusal, see test 6); a **SQLite-concurrent probe** (hold the store lock + open the db + `BEGIN IMMEDIATE` write + checkpoint) proves a second alias-path daemon **fails closed without deadlock** and that the dedicated store lock does **not** collide with SQLite's own file locks ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) |
+| 2 | **OS-singleton refuses a second instance + single-writer-per-store** (mr5, M4) | required | required | a second exchange process for the same singleton key is refused by the exclusivity primitive (Unix flock/fcntl + AF_UNIX bind / Windows named-mutex + named-pipe first-instance); **and** two **distinct config roots** pointing at the **same physical store** (same physical SQLite file reached via different `--db`/`TELEX_DB` paths **and** resolving **different `run_dir`s** — `TELEX_RUN_DIR`/`--run-dir`) — the second daemon **fails closed for that store** via the canonical-store-scoped advisory lock, whose target is **config-root-invariant** (keyed solely by file-id, **not** under `run_dir`), so exactly one exchange writes a store **even across config roots and run_dirs** (**SQLite**: the canonical-store lock; on **Postgres** per-host exchanges legitimately coexist and the **lease-epoch** arbitrates — no store-lock refusal, see test 6); a **SQLite-concurrent probe** (hold the store lock + open the db + `BEGIN IMMEDIATE` write + checkpoint) proves a second alias-path daemon **fails closed without deadlock** and that the dedicated store lock does **not** collide with SQLite's own file locks ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) |
 | 3 | **Crash-during-`wait` → `NeedsAttach` → re-attach** | required | required | `wait` against an unknown session/address returns typed **`NeedsAttach`** (no spurious exit 3); after an explicit `Register` + re-`Wait`, the waiter blocks normally; **a previously `Detach`ed address is NOT resurrected** — only addresses the agent explicitly re-attaches come back |
 | 4 | **Daemon restart: no loss, no resurrection** | required | required | messages durably buffered before the crash are delivered **at-least-once** on the next `attach` + `wait` + `ack` (no loss); the respawned exchange has **no in-memory membership** and rebuilds nothing from history; a removed address stays gone (no tombstone, no implicit rebuild); a **consumed** `(message_id, recipient)` is **not redelivered** after restart (the **retained** consumed row keeps it out of `fetch_undelivered` — consumed rows are not pruned in v1, so there is no resurrection-by-compaction) |
 | 5 | **Explicit-ack at-least-once + idempotent dedup + multi-recipient fan-out** (mr1, M1) — crash-after-PRINT/before-ACK, crash-after-ACK/before-MARK, two-waiters-both-print-then-one-ack, ack-after-station-idle, ack-replay, **one `message_id` fanned out to >=2 recipient addresses (to/cc/watcher) the session attends** | required | required | every message reaches a waiter **>=1** time (never 0); the stdout flush is **transport only** (never the consumed mark); the durable MARK fires only on the explicit agent `Ack`; the `Ack` carries the **delivered `address`** and marks **only** `(message_id, recipient = address)` — the **same `message_id`** acked for recipient `A` does **not** consume `(message_id, B)`, and an ack naming an address the session does not attend is **rejected**; the `(message_id, recipient)` consumed mark is **idempotent** (duplicate/late/replayed/post-idle acks converge, never double-consume); an `Ack` for an **attended** address with **no delivery row** returns **`AckNoOp`** and inserts no consumed row (the message stays deliverable + markable afterward); consumers dedupe by `message_id` |

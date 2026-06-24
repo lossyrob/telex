@@ -646,7 +646,9 @@ framing.
 > **superseded**: the durable consumed-MARK is now triggered by an **explicit agent
 > `Ack{address, message_id}`** (epoch-guarded, idempotent on `(message_id, recipient)`), the
 > waiter stdout flush is transport-only, and outcomes are `Marked` / `AlreadyConsumed` / `AckNoOp`
-> (no delivery row to mark — never-delivered or consumed-and-compacted) / `NotOwner`. See [daemon.md](daemon.md) §11.3.
+> (no delivery row because the recipient was **never delivered**; a **consumed** `(message_id, recipient)`
+> row is **retained in v1** and returns `AlreadyConsumed`, **never** `AckNoOp` — any future deletion of
+> consumed rows requires the deferred #24 safe per-recipient id-floor / GC) / `NotOwner`. See [daemon.md](daemon.md) §11.3.
 
 **Context.** The lease row is keyed by `address` only with **no owner generation**
 (verified: `src/registry.rs`, the backend `claim_lease`/`heartbeat`/`release_lease`), so
@@ -1132,7 +1134,8 @@ Under these, almost the entire incarnation edifice defends a problem that cannot
   still wake on a new message. (Replaces `occupied_stale`/`stale_after`/seq-fenced attendance.)
 - **Writer authority:** an **OS-singleton** (Unix flock/fcntl + AF_UNIX bind / Windows
   named-mutex + named-pipe first-instance, per config root) **plus a canonical-store advisory
-  lock** (per SQLite store, closing the same-`--db` cross-config-root aliasing hole) are the
+  lock** (per SQLite store, keyed by a **config-root-invariant** file-id lock namespace — not under
+  `run_dir` — closing the cross-config-root aliasing hole) are the
   single-host writer authority; the **lease-epoch fence is KEPT and active for the multi-writer
   Postgres backend** (Postgres is in v1 scope — not deferred), arbitrating delivery ownership
   across per-host exchanges. The **live** ordered handoff is the Postgres story; SQLite upgrades
