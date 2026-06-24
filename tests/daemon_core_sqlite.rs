@@ -759,6 +759,8 @@ fn section17_16_protocol_major_parallel() {
             admin_cap: "cap-current".to_string(),
             singleton_hash: current.singleton_hash.clone(),
             protocol_major: proto::PROTOCOL_MAJOR,
+            server_pid: Some(101),
+            server_start_time: Some(1001),
         },
     )
     .expect("write current cap");
@@ -769,6 +771,8 @@ fn section17_16_protocol_major_parallel() {
             admin_cap: "cap-next".to_string(),
             singleton_hash: next.singleton_hash.clone(),
             protocol_major: proto::PROTOCOL_MAJOR + 1,
+            server_pid: Some(202),
+            server_start_time: Some(2002),
         },
     )
     .expect("write next cap");

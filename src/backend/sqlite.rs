@@ -419,7 +419,7 @@ fn do_schema(c: &Connection) -> Result<()> {
     } else if !has_column(c, "deliveries", "consumed_at_ms")? {
         // Add consumed_at_ms column, then back-fill: existing rows were delivered under the
         // old semantics so treat them as consumed (preserves do-not-redeliver invariant).
-        c.execute_batch("ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS consumed_at_ms INTEGER;")?;
+        c.execute_batch("ALTER TABLE deliveries ADD COLUMN consumed_at_ms INTEGER;")?;
         c.execute_batch(
             "UPDATE deliveries SET consumed_at_ms = delivered_at_ms WHERE consumed_at_ms IS NULL;",
         )?;

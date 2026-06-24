@@ -1240,6 +1240,42 @@ mod sqlite_epoch_tests {
         assert!(!b.occupancy(addr, 60).await.unwrap().occupied);
     }
 
+    /// A v0 store with an existing `deliveries` table but no `consumed_at_ms` column must migrate
+    /// cleanly. This exercises the guarded ALTER TABLE path.
+    #[tokio::test]
+    async fn legacy_deliveries_table_migrates_consumed_column() {
+        let path = tmp_path("legacy-deliveries");
+        {
+            let conn = rusqlite::Connection::open(&path).expect("open legacy sqlite");
+            conn.execute_batch(
+                "CREATE TABLE deliveries (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id      INTEGER NOT NULL,
+                    recipient       TEXT NOT NULL,
+                    occupant        TEXT,
+                    delivered_at_ms INTEGER NOT NULL,
+                    UNIQUE(message_id, recipient)
+                );
+                INSERT INTO deliveries(message_id, recipient, occupant, delivered_at_ms)
+                VALUES (7, 'addr:a', 'old-holder', 1234);",
+            )
+            .expect("seed legacy deliveries");
+        }
+
+        let b = SqliteBackend::open(&path).expect("open migrated sqlite");
+        b.init_schema().await.expect("migrate schema");
+
+        let conn = rusqlite::Connection::open(&path).expect("reopen migrated sqlite");
+        let consumed_at: i64 = conn
+            .query_row(
+                "SELECT consumed_at_ms FROM deliveries WHERE message_id=7 AND recipient='addr:a'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("consumed_at_ms backfilled");
+        assert_eq!(consumed_at, 1234);
+    }
+
     /// `heartbeat_epoch` returns `true` for current owner/epoch, `false` for stale/wrong.
     #[tokio::test]
     async fn epoch_heartbeat_staleness() {

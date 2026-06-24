@@ -57,6 +57,37 @@ pub enum DaemonError {
     Protocol(String),
 }
 
+fn verify_expected_peer_identity(
+    actual_pid: u32,
+    actual_start_time: Option<u64>,
+    expected_pid: Option<u32>,
+    expected_start_time: Option<u64>,
+) -> Result<()> {
+    if let Some(expected_pid) = expected_pid {
+        if actual_pid != expected_pid {
+            return Err(DaemonError::Unauthorized(format!(
+                "server pid {actual_pid} does not match expected pid {expected_pid}"
+            )));
+        }
+    }
+    if let Some(expected_start_time) = expected_start_time {
+        match actual_start_time {
+            Some(actual_start_time) if actual_start_time == expected_start_time => {}
+            Some(actual_start_time) => {
+                return Err(DaemonError::Unauthorized(format!(
+                    "server start time {actual_start_time} does not match expected start time {expected_start_time}"
+                )));
+            }
+            None => {
+                return Err(DaemonError::Unauthorized(
+                    "server start time could not be verified".into(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 impl fmt::Display for DaemonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -226,6 +257,10 @@ pub struct CapFile {
     pub admin_cap: String,
     pub singleton_hash: String,
     pub protocol_major: u16,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_pid: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_start_time: Option<u64>,
 }
 
 impl CapFile {
@@ -235,6 +270,8 @@ impl CapFile {
             "admin_cap": proto::REDACTED_SECRET,
             "singleton_hash": self.singleton_hash,
             "protocol_major": self.protocol_major,
+            "server_pid": self.server_pid,
+            "server_start_time": self.server_start_time,
         })
     }
 }
@@ -852,9 +889,10 @@ pub fn daemon_version_metadata() -> DaemonVersionMetadata {
 
 pub async fn connect_existing(store_key: &str) -> Result<DaemonClient> {
     let paths = DaemonPaths::current()?;
+    let cap = read_cap_file(&paths.cap_path)?;
     let conn = platform::connect(&paths.endpoint).await?;
     let expected_exe = canonical_current_exe()?;
-    platform::verify_server_peer(&conn, &expected_exe)?;
+    platform::verify_server_peer(&conn, &expected_exe, cap.server_pid, cap.server_start_time)?;
     handshake_connected(conn, paths, store_key).await
 }
 
@@ -1011,6 +1049,8 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         admin_cap: admin_cap.clone(),
         singleton_hash: paths.singleton_hash.clone(),
         protocol_major: paths.singleton.protocol_major,
+        server_pid: Some(std::process::id()),
+        server_start_time: crate::session_watch::capture_process_start_time(std::process::id()),
     };
     write_cap_file(&paths.cap_path, &cap)?;
     Ok(DaemonState {
@@ -3651,7 +3691,12 @@ mod platform {
         Ok(())
     }
 
-    pub fn verify_server_peer(conn: &ClientConn, expected_exe: &Path) -> Result<()> {
+    pub fn verify_server_peer(
+        conn: &ClientConn,
+        expected_exe: &Path,
+        expected_pid: Option<u32>,
+        expected_start_time: Option<u64>,
+    ) -> Result<()> {
         let (pid, uid) = peer_pid_uid(conn)?;
         let current = unsafe { libc::geteuid() };
         if uid != current {
@@ -3672,7 +3717,11 @@ mod platform {
                 expected_exe.display()
             )));
         }
-        let _ = linux_start_time_ticks(pid)?;
+        let start_time = linux_start_time_ticks(pid)?;
+        let pid = u32::try_from(pid).map_err(|_| {
+            DaemonError::Unauthorized(format!("server pid {pid} cannot be represented as u32"))
+        })?;
+        verify_expected_peer_identity(pid, Some(start_time), expected_pid, expected_start_time)?;
         Ok(())
     }
 
@@ -3901,7 +3950,12 @@ mod platform {
         verify_process_owner(pid)
     }
 
-    pub fn verify_server_peer(conn: &ClientConn, expected_exe: &Path) -> Result<()> {
+    pub fn verify_server_peer(
+        conn: &ClientConn,
+        expected_exe: &Path,
+        expected_pid: Option<u32>,
+        expected_start_time: Option<u64>,
+    ) -> Result<()> {
         let mut pid = 0u32;
         let ok = unsafe { GetNamedPipeServerProcessId(conn.as_raw_handle() as HANDLE, &mut pid) };
         if ok == 0 {
@@ -3910,7 +3964,13 @@ mod platform {
                 std::io::Error::last_os_error(),
             ));
         }
-        verify_process_owner_and_exe(pid, expected_exe).map(|_| ())
+        let info = verify_process_owner_and_exe(pid, expected_exe)?;
+        verify_expected_peer_identity(
+            pid,
+            Some(info.start_time_100ns),
+            expected_pid,
+            expected_start_time,
+        )
     }
 
     fn create_pipe(pipe_name: &str, first: bool) -> Result<NamedPipeServer> {
@@ -3999,7 +4059,6 @@ mod platform {
     struct ProcessIdentity {
         sid: String,
         exe: Option<PathBuf>,
-        #[allow(dead_code)]
         start_time_100ns: u64,
     }
 
@@ -4277,7 +4336,12 @@ mod platform {
         })
     }
 
-    pub fn verify_server_peer(_conn: &ClientConn, _expected_exe: &Path) -> Result<()> {
+    pub fn verify_server_peer(
+        _conn: &ClientConn,
+        _expected_exe: &Path,
+        _expected_pid: Option<u32>,
+        _expected_start_time: Option<u64>,
+    ) -> Result<()> {
         Err(DaemonError::Unsupported {
             capability: "client-side server-auth",
             message: "no peer credential primitive for this platform".into(),
@@ -4368,6 +4432,23 @@ mod tests {
             }
             other => panic!("expected error response, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn peer_identity_rejects_pid_or_start_time_mismatch() {
+        verify_expected_peer_identity(10, Some(100), Some(10), Some(100)).unwrap();
+
+        let pid_err = verify_expected_peer_identity(10, Some(100), Some(11), Some(100))
+            .expect_err("pid mismatch should reject");
+        assert!(matches!(pid_err, DaemonError::Unauthorized(_)));
+
+        let start_err = verify_expected_peer_identity(10, Some(101), Some(10), Some(100))
+            .expect_err("start-time mismatch should reject");
+        assert!(matches!(start_err, DaemonError::Unauthorized(_)));
+
+        let missing_start = verify_expected_peer_identity(10, None, Some(10), Some(100))
+            .expect_err("missing start-time should fail closed when expected");
+        assert!(matches!(missing_start, DaemonError::Unauthorized(_)));
     }
 
     #[tokio::test]
