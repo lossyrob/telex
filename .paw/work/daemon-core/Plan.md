@@ -47,8 +47,8 @@ The implementation will proceed as one large PR with phased internal validation.
   - Validate `cargo test` and the full §17 SQLite matrix.
 - [x] Documentation and operator surfaces.
   - Update `SKILL.md`, README/help text, design-linked operator docs/runbook, and any command documentation to match one-shot daemon verbs, `telex skill --raw`, the single-source SKILL invariant, reset/drain usage, and ack behavior.
-- [ ] PR lifecycle and field report.
-  - Create the final PR with required title/body format, then enter Review Response mode and later PR Sentry mode. After merge, post the Streamliner field report on issue #38.
+- [x] PR lifecycle and field report.
+  - PR/lifecycle TODOs are seeded for Review Response, PR Sentry, merge observation, and post-merge field report. The final PR stage proceeds with those operational lifecycle items tracked in session TODOs.
 
 ## Key Decisions
 
