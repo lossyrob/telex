@@ -18,21 +18,29 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   + Status surface, daemon-native session ownership, the liveness model, the minimal
   upgrade floor, the gating tests, and the consolidated resolutions of the
   design-foundation open questions.
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — the **visual on-ramp** to the daemon design: five
+  mermaid diagrams (component map, message delivery, restart/re-attach, station liveness, the
+  single-writer epoch fence) that teach the local-exchange architecture above the contract.
+  Non-normative; `daemon.md` governs.
 
 ## Reading order
 
 1. `PRODUCT-THESIS.md` (root) — why telex exists and what it promises.
 2. `DESIGN.md` — how the system is shaped.
-3. `daemon.md` — the precise contracts `daemon-core` and downstream nodes implement.
-4. `DECISIONS.md` — why each load-bearing choice was made.
+3. `ARCHITECTURE.md` — the visual on-ramp (5 diagrams) to the local-exchange design.
+4. `daemon.md` — the precise contracts `daemon-core` and downstream nodes implement.
+5. `DECISIONS.md` — why each load-bearing choice was made.
 
 ## Open-question resolutions (design-foundation)
 
 The eight open questions carried into the local-daemon `design-foundation` node — epoch
-lifecycle, stale-attendance/takeover, typed watch-pid, per-session PID, legacy cutover,
-DeregisterSession proof, the Status freeze line, and crash durability — are resolved in
-[daemon.md](daemon.md) (see its "Open-question resolutions" section), with the
-decisions recorded as ADRs 0014–0021 in [DECISIONS.md](DECISIONS.md).
+lifecycle, session presence + reaping, typed watch-pid, per-session PID, legacy cutover,
+**sessionEnd removal proof** (no external registry; explicit membership via `Detach`/`Ack`), the Status freeze line, and crash durability — are resolved across
+[daemon.md](daemon.md)'s normative sections (the one-time legacy cutover in
+[DECISIONS.md](DECISIONS.md) ADR 0024), with the decisions recorded as ADRs 0014–0024. The
+session-ownership and liveness model was subsequently revised to a minimal form by **ADR
+0023** (unique `session_id` + explicit-only membership + non-destructive presence +
+agent-acked delivery).
 
 ## Scope note
 

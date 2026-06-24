@@ -192,7 +192,8 @@ The core adapts behavior:
 **poll** delivery and **TTL-heartbeat** liveness for *both* SQLite and
 Postgres — a single code path on each axis. (Under the local exchange, decision 0017
 narrows TTL-heartbeat to the *daemon-down backstop* role; live-session liveness is then
-the hook + watch-pid + stale-attendance model — see [daemon.md](daemon.md).) The exchange
+the **authoritative non-destructive hook + loader-pid (negative-only) + idle-TTL backstop**
+model (decisions 0017, 0023) — see [daemon.md](daemon.md).) The exchange
 polls the **undelivered set** keyed on
 per-recipient delivery state rather than a monotonic id cursor (decision 0013, which superseded the
 original poll-with-cursor mechanism). `LISTEN/NOTIFY` (native push) and
@@ -395,16 +396,18 @@ Leases are exclusive and epoch-fenced. The frozen rules (normative mechanism in
 - shared visibility should use `cc`, `watchers`, or subscriptions, not multiple owners of
   one exclusive address.
 
-Because loader-level liveness is weak (a session can be dismissed without its process
-tree dying), **stale-attendance and operator takeover are a load-bearing recovery path,
-not an edge case**: the exchange marks an unconfirmed address `occupied_stale` (without
-ever tearing down a live session) and allows an informed, epoch-minting operator
-takeover. Takeover **fences, evicts, and tombstones** the stale binding and leaves the
-address for a follow-up `Register` to bind (it does not itself install a new occupant); a
-durable per-session **incarnation-currency authority** keeps a crashed-then-recovered
-session continuous while rejecting a stale or reused-session-id revival. The full state
-algebra is normative in [daemon.md](daemon.md) (stale-attendance, takeover, and session
-ownership).
+Because loader-level liveness is a **negative-only signal** (a session can be dismissed
+without its process tree dying), presence is handled **non-destructively**: the exchange
+releases a station's blocked waiters and marks it **idle** on a definite signal (the
+**authoritative `sessionEnd` hook** or **loader-pid** death), and a single **idle-TTL
+(≥ 1 day)** backstops the rare unhooked-dismiss-with-loader-alive case. None of these ever
+destroy a station or lose a message, so an idle-but-alive session stays instantly wakeable
+**for days**. Identity is the **unique, stable `session_id`**; membership is **explicit-only**
+(a one-off `attach`), and the exchange returns **`NeedsAttach`** for an unknown session rather
+than implicitly rebuilding it — so a removed address is **never silently resurrected** (no
+incarnation token, no tombstones). Delivery is durable **at-least-once + explicit agent ack +
+`message_id` dedup**. The full model is normative in [daemon.md](daemon.md) §9–11, §14, and
+recorded in decision 0023.
 
 ### Default `from` via daemon session ownership
 
@@ -417,8 +420,10 @@ The local exchange owns the authoritative `(store_key, session_id) -> addresses`
 [daemon.md](daemon.md), daemon-native session ownership), so `from` resolves with
 precedence **`--from` > `$TELEX_ADDRESS`/`--address` > the exchange's
 `ResolveFrom(store_key, session_id)`** against *that session's* registered addresses **for
-that store only**: exactly one inferred succeeds, multiple refuses as `ambiguous-from`, none
-falls back to the existing unrepliable rules. The exchange **never** infers across all of its
+that store only**: exactly one inferred succeeds, multiple refuses as `Ambiguous`, and
+**none/unknown returns `NeedsAttach`** (the agent re-attaches its own address, then retries; if
+still none the send **fails actionably** as `refused-unrepliable` — never a silent `from = None`,
+mirroring [daemon.md](daemon.md) §14.6). The exchange **never** infers across all of its
 addresses (it serves many sessions across many stores), so a multi-session, multi-store
 exchange cannot misattribute a send; the harness propagates `store_key` + `TELEX_SESSION_ID`
 to the `send`/`reply` process. Identity is
@@ -584,9 +589,10 @@ exchange never sends a separate "you should exit" signal; handing the client a m
 named pipe on Windows, a unix socket elsewhere). `telex wait` connects, completes the
 version handshake, sends a request describing what it is waiting for (store, address,
 attention filter), then blocks on a socket read. The exchange emits a matching message
-under an in-memory current-owner check and records the **durable** delivery mark only
-**after** the client acknowledges it (the at-least-once `EMIT → ACK → MARK` fence — see
-[daemon.md](daemon.md)); otherwise it registers the client as a waiter and stays silent.
+under an in-memory current-owner check and records the **durable** consumed mark only
+**after** the **agent explicitly acks** it (`telex ack` — the at-least-once
+`EMIT → print → agent Ack → MARK` fence; the stdout flush is transport-only, see
+[daemon.md](daemon.md) §11.3); otherwise it registers the client as a waiter and stays silent.
 The wakeup is push — the exchange's write releases the client's read — with no local
 polling.
 
@@ -597,10 +603,12 @@ backend), never in the ephemeral client, which is a stateless courier. A later
 The client contract distinguishes outcomes by exit code: a delivered message (`0`); a
 `--timeout` expiry with no message (`2`), so a supervisor can refresh without blocking
 forever (agent runtimes cap tool-call duration); a daemon-gone error (`3`) **after** the
-reconnect-on-EOF grace; and a daemon-hung error (`4`). Crucially, a daemon **restart or
+reconnect-on-EOF grace; a daemon-hung error (`4`); and **presence-ended (`5`)** when the exchange
+reaps the waiter (sessionEnd hook / loader-pid death / idle-TTL — the agent re-attaches + re-waits).
+Crucially, a daemon **restart or
 ordered handoff is not a turn failure**: `telex wait` reconnects within a short grace
-window and auto-re-registers the session from inherited environment before it would
-return `3` (see [daemon.md](daemon.md)).
+window and, on `NeedsAttach`, **explicitly re-attaches** the session from inherited environment
+before it would return `3` (see [daemon.md](daemon.md)).
 
 The agent's job is therefore to **supervise**, not to **be**, the waiter — but
 supervision is now lighter, because there is no resident holder to launch and babysit. A
@@ -673,8 +681,9 @@ RECEIVE
 - `telex wait --address <addr> [--timeout-ms N]`
   Block on the exchange; on delivery print one message as JSON and exit 0. Exit codes:
   0 delivered, 2 idle-timeout, 3 daemon-gone (after the reconnect-on-EOF grace),
-  4 daemon-hung. A daemon restart/handoff is not a turn failure — `wait` reconnects and
-  re-registers transparently within the grace window.
+  4 daemon-hung, 5 presence-ended (the exchange reaped the waiter — sessionEnd hook /
+  loader-pid death / idle-TTL; the agent re-attaches + re-waits). A daemon restart/handoff is
+  not a turn failure — `wait` reconnects and re-attaches on `NeedsAttach` within the grace window.
 - `telex inbox [--address <addr>] [--all] [--limit N]`
   List actionable (requires-disposition, not yet terminally dispositioned) and recent
   messages for the address.
@@ -691,7 +700,7 @@ SEND
   Reply; threads under the parent (inherits thread_id, sets parent_id).
 
 DISPOSITION (flat verbs; all take `--id <message-id>` and optional `--note <s>`)
-- `telex ack --id <id>`        acknowledged
+- `telex ack --id <id> [--address <addr>]`   acknowledged — the consume-ack carries the **delivered recipient address** (`--address`); the `wait` output's `to` field supplies it (else a flag/env), and a missing address **fails closed** rather than guessing ([daemon.md](daemon.md) §11.3)
 - `telex handle --id <id>`     handled
 - `telex defer --id <id>`      deferred
 - `telex reject --id <id>`     rejected

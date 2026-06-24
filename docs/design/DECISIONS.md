@@ -637,6 +637,18 @@ framing.
 
 - **Date:** 2026-06-22
 - **Status:** Accepted (design; `fencing-proof` node must prove it executable on both backends)
+- **Revised by:** 0023 (delivery-commit model).
+
+> **Revised by ADR 0023 (minimal model, 2026-06-23).** The lease-epoch fence + ordered handoff +
+> epoch lifecycle in this ADR **stand** (the fence is active for the multi-writer Postgres
+> backend). But the **delivery-commit model** it described — `EMIT → waiter-ACK → MARK` with a
+> waiter `DeliveryAck` / `delivery_nonce` / `AlreadyDelivered` and "delivered = stdout flush" — is
+> **superseded**: the durable consumed-MARK is now triggered by an **explicit agent
+> `Ack{address, message_id}`** (epoch-guarded, idempotent on `(message_id, recipient)`), the
+> waiter stdout flush is transport-only, and outcomes are `Marked` / `AlreadyConsumed` / `AckNoOp`
+> (no delivery row because the recipient was **never delivered**; a **consumed** `(message_id, recipient)`
+> row is **retained in v1** and returns `AlreadyConsumed`, **never** `AckNoOp` — any future deletion of
+> consumed rows requires the deferred #24 safe per-recipient id-floor / GC) / `NotOwner`. See [daemon.md](daemon.md) §11.3.
 
 **Context.** The lease row is keyed by `address` only with **no owner generation**
 (verified: `src/registry.rs`, the backend `claim_lease`/`heartbeat`/`release_lease`), so
@@ -671,7 +683,7 @@ a waiter-death-after-frame-write loss window (the earlier "mark-before-frame" or
 caught at the design-gate, would have flipped 0011 into at-most-once loss). A distinct
 executable `fencing-proof` gate must prove the emit→ack→mark failpoints, epoch monotonicity
 across release/cleanup/re-claim, and the handoff crash matrix on both backends
-([daemon.md](daemon.md) §17 tests 4/6/7/9). Backends gain a rowcount-returning heartbeat, a
+([daemon.md](daemon.md) §17 tests 5/6/7/12/13). Backends gain a rowcount-returning heartbeat, a
 non-deleting release, and the typed delivery method (backend-API changes). **Round-2
 sharpening:** the `DeliveryAck` is correlated to the exact in-flight
 `(connection, store_key, address, message_id, lease_epoch, delivery_nonce)` under a bounded
@@ -720,6 +732,15 @@ the epoch-scoped key prevents a stale in-flight identity surviving a fence. #27
 - **Status:** Accepted (design)
 - **Relocates:** 0012 (pid-watch moves from the holder into the exchange).
 - **Narrows:** 0005 (TTL survives only as the daemon-down backstop).
+- **Revised by:** 0023 (minimal model).
+
+> **Revised by ADR 0023 (minimal model, 2026-06-23).** The non-authoritative-hook +
+> `occupied_stale` seq-fenced attendance + epoch-minting takeover model in the Decision below is
+> **superseded**, and the heading's "no idle-TTL teardown" no longer holds. The current liveness
+> model is: an **authoritative, non-destructive** `sessionEnd` hook (release waiters + mark idle,
+> never destroy); the watched **loader pid as a negative-only signal** (pid + start-time guard);
+> and a single **idle-TTL ≥ 1 day** non-destructive backstop. Liveness is a UX/latency dial, not a
+> correctness gate (delivery is agent-acked). The text below is retained for provenance.
 
 **Context.** With the holder gone, the exchange needs a liveness model that keeps
 idle-but-alive sessions instantly wakeable (the operator's explicit requirement) while
@@ -794,6 +815,19 @@ correctness.
   `DeregisterSession`, the `from`-default rule, and crash recovery).
 - **Reshapes:** #23 / PR #31 (drop the filesystem `session_registry` as authority).
 - **Supersedes:** 0010's `from`-default mechanism (the local holder registry).
+- **Revised by:** 0023 (minimal model) — for concern (b), session ownership.
+
+> **Revised by ADR 0023 (minimal model, 2026-06-23).** Concern **(a)** — the daemon-scoped,
+> versioned, capability-authorized IPC and the OS user-private trust boundary — **stands
+> unchanged**. Concern **(b)** — session ownership — is **superseded**: the durable `sessions`
+> incarnation-currency authority, `(session_seq, nonce)`, the prior-seq CAS / `establish_nonce` /
+> `Establish`-`Continue` modes, per-address tombstones, the non-authoritative `SessionEndHint`
+> teardown, `occupied_stale`/seq-fenced attendance, and `Takeover{force}` are all **replaced** by:
+> the unique ambient `session_id` as identity, **explicit-only in-memory membership** with a
+> **`NeedsAttach`** error and no implicit rebuild-from-history (so no resurrection and no
+> tombstones), an **authoritative non-destructive** hook, and **explicit agent-acked at-least-once
+> delivery** + `message_id` dedup. The lease-epoch fence is retained for the multi-writer Postgres
+> backend. The session-ownership text below is retained for provenance.
 
 **Context.** Today `Wait`/`Shutdown` are **unauthenticated** (verified `src/ipc.rs`) and
 the endpoint is address-keyed. One exchange serves multiple sessions/stores for one user,
@@ -916,6 +950,15 @@ socket-EOF.
 - **Date:** 2026-06-22
 - **Status:** Accepted (design)
 - **Splits:** #6 (minimal floor here; full platform in `seamless-upgrade`, last).
+- **Revised by:** 0023 (schema/migration).
+
+> **Revised by ADR 0023 (minimal model, 2026-06-23).** The minimal upgrade floor and the two-phase
+> legacy/non-epoch cutover rule **stand**, but the **schema/migration instruction** to create a
+> `sessions` currency table atomically with the lease columns is **superseded**: there is **no
+> `sessions` table** — the durable layer is lease-ownership (epoch) + the
+> `deliveries(message_id, recipient)` message/ack buffer only. The migration creates the lease
+> columns + the per-message consumed-state together under one schema-version bump. See
+> [daemon.md](daemon.md) §5.1, §14.
 
 **Context.** The first daemon-aware install hits the Windows binary-lock (a running
 `telex` process locks the binary during swap — hit live this workstream), and the first
@@ -948,7 +991,7 @@ per-store exclusive, crash-safe migration that creates **both** the new lease co
 dedicated real-legacy-holder and schema-downgrade gating tests on both backends, including a
 **directly-invoked** (not via the shim) pre-epoch binary. Full rollback/gc/UX and any
 epoch-aware downgrade *framework* are deferred to `seamless-upgrade`. Full contract in
-[daemon.md](daemon.md) §12, §16, §3.4.
+[daemon.md](daemon.md) §16 + §3.4 and ADR 0024 (legacy-holder cutover).
 
 **Consequences.** The binary-lock is handled and the cutover is deterministic and
 *verified*; hard, forward-only cutover of existing sessions is acceptable (ratified).
@@ -969,7 +1012,9 @@ mid-workstream, and the design layer needed a home that the Streamliner manifest
 ad-hoc-edited root vision docs.
 
 **Decision.** **Keep the verb names** (`attach`/`detach`/`wait`; now one-shot against the
-exchange); Register/Re-register/DeregisterSession are IPC operations, not CLI renames; the
+exchange); Register/Detach/Ack are IPC operations, not CLI renames (the round-1..6
+`Re-register`/`DeregisterSession` are superseded by ADR 0023's `NeedsAttach`-re-register /
+agent-`Ack` / `Detach` model); the
 held-stream `SessionConnect` is not adopted (preserved dissent). **Hide** the `telex
 daemon` entrypoint from normal help. **Single-source the skill**: root `SKILL.md` stays
 the canonical file (embedded via `include_str!` for `telex skill`, with a `--raw` form);
@@ -986,3 +1031,206 @@ repo root"**: it was builder-directed during shaping and is flagged for orchestr
 reconciliation (updating the workstream brief/issue text is an orchestrator action). The
 `telex skill` embed path is preserved (`SKILL.md` did not move). Full verb/skill detail in
 [daemon.md](daemon.md) §15.
+
+## 0022 — Fail-closed startup portability and path-resolution policy (deferred to `daemon-core`)
+
+- **Date:** 2026-06-23
+- **Status:** Accepted (design)
+- **Refines:** 0018 (singleton identity / startup).
+
+**Context.** [daemon.md](daemon.md) §7.2 makes startup **fail closed** when `config_root`/
+`run_dir` are not owner-private or the `daemon-<H>.cap` cannot be created owner-only. That
+requirement and its fail-closed behavior are correct and frozen — but the design never pinned
+*where* those paths resolve from, nor what to do on a filesystem that **cannot represent**
+owner-only permissions. On a normal laptop install this never fires; the post-merge review
+surfaced that the **unattended environments where agents increasingly run** — arbitrary-uid
+containers, NFS/SMB/9p mounts (WSL2, Docker Desktop), unset `$HOME`/`$XDG_RUNTIME_DIR`, redirected
+Windows profiles — are exactly the ones that trip it, where the failure is **total and
+unwatched**.
+
+**Decision.** Keep the **requirement** (owner-private paths, owner-only cap) and the
+**fail-closed** behavior frozen (§7.2/§2.3), with owner-only framed as an **effective
+permission / ACL / DACL postcondition** (explicit `0700`/DACL is necessary but not sufficient;
+ambiguous/inconclusive representations classify as cannot-enforce → fail closed). **Defer the
+path-resolution algorithm and the filesystem-portability policy to `daemon-core`**, with a
+recorded recommended direction ([daemon.md](daemon.md) §7.4): (1) **platform-scoped**
+deterministic resolution with an explicit override and explicit owner-only creation — Unix
+`TELEX_RUN_DIR` → `$XDG_RUNTIME_DIR` → `$HOME/.local/state`, Windows `TELEX_RUN_DIR` → local
+`%LOCALAPPDATA%` (never a redirected profile by default); (2) a distinct, **actionable** error
+for "cannot enforce owner-only" vs "permission denied"; (3) prefer `$XDG_RUNTIME_DIR`/tmpfs or
+local `%LOCALAPPDATA%` for runtime artifacts; (4) the remedy is **path-first** (`TELEX_RUN_DIR`/
+tmpfs on local owner-private storage), and the **single-tenant opt-out** (e.g.
+`TELEX_TRUST_ENV=single-tenant`) is a **narrow last resort** — asserting no shared/host-mounted
+`run_dir`/socket/lock/cap (not a blanket container/VM relaxation), **opt-in and audited, never a
+silent fallback**, and a builder/operator policy call. Fail-closed **actionability** is part of
+the operability contract even though the message text is `daemon-core`'s.
+
+**Consequences.** The owner-private-rejection failpoint stays gated (§17 test 14), extended with
+the **cannot-enforce-owner-only** filesystem case and the **actionable-error** requirement (the
+error **names the configured run-dir override** generically; `TELEX_RUN_DIR` is the recommended
+example, not a frozen knob); the resolution order and the single-tenant opt-out get conformance
+points when `daemon-core` fixes them. The single-tenant opt-out is a **new trust-model surface**
+flagged for builder/operator sign-off (this ADR recommends, it does not freeze the knob). Reopen
+if a target deployment needs owner-only relaxation by default, or if a portable
+owner-only-enforcement primitive removes the need for the opt-out.
+
+## 0023 — Minimal session/presence/delivery model: supersede the incarnation-currency machinery
+
+- **Date:** 2026-06-23
+- **Status:** Accepted (design)
+- **Revises:** 0017 (liveness), 0019 (daemon-native session ownership), 0015 (the delivery-commit
+  model — waiter-ACK → agent-ACK), and 0020 (the `sessions`-table migration instruction) —
+  supersedes their session-incarnation/currency / `occupied_stale` / force-takeover / waiter-ACK /
+  `sessions`-schema machinery.
+- **Process:** post-merge builder re-examination + a multi-model advisory **council** (5
+  heterogeneous members across GPT/Claude/Gemini; HIGH-confidence, genuine-sharper convergence),
+  then two builder refinements. The council synthesis is retained out-of-repo for audit.
+
+**Context.** ADRs 0017/0019 (ratified over 11 review rounds + a cross-model spar) built an
+elaborate **session-incarnation currency** machinery — a durable `sessions` table with a
+daemon-assigned `(session_seq, nonce)`, a prior-seq CAS with
+`establish_nonce`/idempotency-horizon/observe-retry/cap-exhaustion, a **non-authoritative**
+`sessionEnd` hook with latched/double-checked/liveness-vetoed teardown, `occupied_stale`
+seq-fenced attendance, `Takeover{force}` nonce rotation, per-address tombstones, and an implicit
+re-register-from-history. Post-merge, the builder (the authority on the actual Copilot CLI
+harness) established that the **premises this machinery rests on are false or were never needed**:
+
+1. **`session_id` is unique and stable** — one session's id, preserved across dismiss/exit/resume,
+   **never reused for a different session**. (The "`session_id` recurs across sequential lives"
+   premise behind the incarnation token is false.)
+2. **The agent runs `telex attach` itself**; there is **no loader/plugin establisher** and **no
+   env-injected per-life token** (the plugin only adds the `sessionEnd` hook). The
+   incarnation-threading the design assumed has no implementer.
+3. **Liveness need not be a correctness gate.** Detached waiters reaped by the exchange (sessionEnd
+   hook OR loader-pid death) with **non-destructive** presence (release waiters + mark idle, never
+   destroy) make imperfect liveness a UX/latency dial.
+4. **Delivery correctness comes from explicit agent ack + at-least-once + `message_id` dedup**, not
+   from a per-EMIT waiter event. The waiter's stdout flush is transport only.
+
+Under these, almost the entire incarnation edifice defends a problem that cannot occur.
+
+**Decision (the minimal model — full contract in [daemon.md](daemon.md) §5–6, §9–11, §14).**
+
+- **Identity = the unique, ambient `session_id`.** No incarnation token, no `(session_seq,
+  nonce)`, no `TELEX_SESSION_INCARNATION`.
+- **Membership is explicit-only and in-memory.** `telex attach` (`Register`) establishes it; the
+  exchange returns a **`NeedsAttach`** error for an unknown session/address and **never implicitly
+  rebuilds membership from history** — so a removed address is **never silently resurrected**, and
+  **tombstones are unnecessary** (the over-correction guard the council required is satisfied by
+  *removing implicit rebuild* rather than by *adding durable tombstones*). Only an explicit
+  re-attach re-establishes a station.
+- **The `sessionEnd` hook is authoritative but NON-DESTRUCTIVE** (release waiters + mark idle).
+  With a unique `session_id` and a non-destructive, self-healing action, the round-6 "the hook
+  cannot identify its life" problem **dissolves**; a late/spurious hook costs at most one waiter
+  re-arm.
+- **The watched LOADER pid is a negative-only liveness signal** (pid + start-time reuse guard);
+  loader-alive is never positive presence.
+- **Delivery = durable at-least-once + explicit `telex ack <message_id>` (immediately on read) +
+  dedup by `message_id`.** The durable consumed-MARK is triggered by the **agent ack** (not the
+  waiter flush) and is **epoch-guarded** on the multi-writer path; unacked → redeliver.
+- **A single idle-TTL ≥ 1 day** is a non-destructive backstop releasing only presumed-dead waiters
+  (the unhooked-dismiss + loader-alive case); it **never caps legitimate idle** — station
+  membership + the durable message buffer persist indefinitely, so a session may idle for days and
+  still wake on a new message. (Replaces `occupied_stale`/`stale_after`/seq-fenced attendance.)
+- **Writer authority:** an **OS-singleton** (Unix flock/fcntl + AF_UNIX bind / Windows
+  named-mutex + named-pipe first-instance, per config root) **plus a canonical-store advisory
+  lock** (per SQLite store, keyed by a **config-root-invariant** file-id lock namespace — not under
+  `run_dir` — closing the cross-config-root aliasing hole) are the
+  single-host writer authority; the **lease-epoch fence is KEPT and active for the multi-writer
+  Postgres backend** (Postgres is in v1 scope — not deferred), arbitrating delivery ownership
+  across per-host exchanges. The **live** ordered handoff is the Postgres story; SQLite upgrades
+  use release + next-call respawn (no live two-daemon overlap). A simple **operator reset**
+  (mark idle / release waiters) replaces `Takeover{force}` (no epoch-minting-for-eviction, no
+  force-nonce rotation — those existed only to invalidate incarnation tokens).
+
+**DELETE** (from 0017/0019 / daemon.md): the `sessions` incarnation-currency table +
+`(session_seq, nonce)`; prior-seq CAS, `establish_nonce`, idempotency horizon, observe/retry,
+cap-exhaustion; the non-authoritative-hook demotion + latched/double-checked/liveness-vetoed
+teardown; `Takeover{force}` + force-nonce rotation; `occupied_stale` / attendance-staleness /
+`stale_after` / seq-fenced attendance; the waiter `DeliveryAck` / "delivered = stdout flush" /
+`delivery_nonce`-as-delivery; the `Register{Establish/Continue}` modes, `ReRegister` /
+`DeregisterSession` incarnation params, `Stale`/`Conflict`/`NeedsEstablish` errors,
+`TELEX_SESSION_INCARNATION`; per-address tombstones and implicit re-register-from-history.
+**KEEP:** the daemon-scoped capability/version IPC + OS trust boundary of 0019 (unchanged); the
+lease-epoch fence (active for Postgres); durable at-least-once + `message_id` dedup;
+same-user-trust / no-intra-user-isolation.
+
+**Consequences.** A large reduction in accidental complexity, elimination of the opaque
+client-threaded token (and its manual-threading UX wrinkle), and a delivery model that is safe for
+detached waiters. The change reverses a spar-validated decision, but that spar reasoned under
+premises (1) and (4), which were revised; the council re-derived the one genuine residual
+(membership resurrection) and confirmed it is closed by *removing implicit rebuild*. This ADR is a
+**post-merge design revision** to the design-foundation deliverable (Refs #34), flagged for
+orchestrator reconciliation.
+
+**Reopen conditions.** *(Summary; the **canonical** reopen register is [daemon.md](daemon.md)
+"Design assumptions and revisit conditions", which this and the PR body link to.)*
+
+- A proven mechanism by which `session_id` is reused across distinct sessions → the incarnation
+  fence returns.
+- A proven path where the plugin/loader can inject a per-life token into every verb + the hook →
+  an authoritative seq-gated hook + threading become viable again.
+- A multi-writer / non-self-serializing **single-host** backend, or zero-downtime hot handoff →
+  the OS-singleton alone is insufficient; the epoch's role expands.
+- Evidence that same-session membership mutations can arrive reordered over IPC → add a
+  **server-side** (never client-threaded) monotonic membership op-seq.
+- The `sessionEnd` hook does **not** fire on in-terminal dismiss (to be spiked) → the idle-TTL
+  becomes the primary dismiss bound rather than a backstop.
+
+## 0024 — Legacy-holder cutover (one-time migration off the resident holder)
+
+- **Date:** 2026-06-24
+- **Status:** Accepted (migration; `daemon-core` acceptance)
+
+This is a **one-time migration** concern, not part of the standing daemon design (which owns
+lease epochs from `1`). It is recorded here so the durable contract in [daemon.md](daemon.md)
+stays free of transitional framing while the cutover mechanism is preserved.
+
+**Context.** The first daemon-aware rollout meets **legacy holders** (resident `attach`
+processes) and **non-epoch lease rows** (`lease_epoch IS NULL`). Occupant-rotation alone is
+insufficient: a legacy holder ships `Frame::Message` (`attach.rs:~477`) before its post-emit
+`mark_delivered` (`~485`), and its `heartbeat` returns `Result<()>` with no rowcount so it
+cannot observe self-demotion; if the daemon rebinds the address's waiter endpoint, two
+endpoints emit independently regardless of any post-emit row fence.
+
+**Decision — two-phase, prove-unbound:**
+
+- **Phase 1 — prove-unbound (drain).** Before binding its own waiter, the daemon-aware claimant
+  MUST establish that **no legacy waiter endpoint is bound** for the address, by one of: (1) an
+  **address-keyed IPC probe** to the legacy endpoint carrying a quit/handover signal, observing
+  the endpoint gone/closed; or (2) **terminating/quiescing** the legacy holder process (same
+  user). A bounded **stale-window wait alone is NOT sufficient** — a `SIGSTOP`/paused process,
+  partitioned backend, long GC, host sleep, or clock skew can age the heartbeat out while the
+  endpoint stays bound and later resumes emitting. A stale-window MAY be used only as a
+  *secondary* timeout after a probe has already shown the endpoint gone.
+- **Phase 2 — claim.** Only after Phase 1 proves unbound, claim via the explicit legacy CAS
+  `UPDATE ... SET lease_epoch=1, owner_instance_id=:me WHERE address=:addr AND lease_epoch IS
+  NULL` (ownership/fence columns only). `NULL` is never treated as `0` in the normal claim
+  predicate; the row gets its first epoch (`1`) exactly once, after which the rowcount-returning
+  epoch-guarded heartbeat/release apply.
+
+**Cutover gating assertion.** *No legacy (non-epoch) holder **emits** a new `Frame::Message`
+after the daemon's waiter binds.* Exercised by a dedicated migration test that starts a real
+legacy holder / non-epoch lease on both backends — a **migration** acceptance test, separate from
+the standing-design [daemon.md](daemon.md) §17 matrix. Hard cutover of existing sessions is
+acceptable (ratified).
+
+**In-flight legacy frame (M9).** Phase-1 prove-unbound proves the legacy *endpoint* is closed,
+not that zero frames are in flight: a legacy holder may have already written a frame to its own
+wait client before the endpoint closed, and that client can flush to the recipient after the
+daemon binds. The assertion is therefore "no legacy holder **emits** after the barrier," not "no
+frame reaches a recipient": an already-in-flight legacy frame is bounded by **at-least-once +
+`message_id` dedupe** (the recipient dedupes it against the daemon's redelivery of the same
+`message_id`), so it is a deduped duplicate, never loss.
+
+**Stronger alternative (reopen).** A real drain barrier (quiesced + zero in-flight legacy `Wait`
+handlers + endpoint closed) would let the assertion be "no frame reaches a recipient," but needs
+a **new legacy IPC verb** (the legacy IPC exposes only `Shutdown`). `daemon-core` / the builder
+may adopt it; this decision takes the in-place at-least-once-dedupe resolution and flags the
+stronger option.
+
+**Forward-compatibility note (durable).** The standing contract retains only this: a
+`lease_epoch IS NULL` row is treated as **unowned/foreign** and is **never conflated with `0`**
+([daemon.md](daemon.md) §5.1 / §11.1). Once rows carry `lease_epoch >= 1`, an old pre-epoch
+binary must not run against the store (it would write non-epoch rows and reset the fence); the
+store schema-version gates a too-old binary closed.
