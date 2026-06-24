@@ -17,6 +17,8 @@ learning order:
 5. **Station liveness** -- how a station is deemed idle, and why that is never destructive.
 6. **Single-writer correctness** -- how exactly one writer per store is guaranteed across restart,
    upgrade, and multi-host.
+7. **Deployment topology** -- where exchanges live: SQLite single-host vs Postgres multi-host.
+8. **Authorization & the OS trust boundary** -- who may talk to the exchange, and what needs a capability.
 
 The word **epoch** appears by name in diagrams 2-3 and is *defined* in diagram 6 (the single-writer
 fence).
@@ -231,3 +233,70 @@ lock** (per SQLite store), and the **lease-epoch fence** (the multi-writer Postg
 
 *Governing spec:* [daemon.md sec.11 lease-epoch fence](daemon.md#11-lease-epoch-fence-the-spine) ,
 [sec.11.4 ordered handoff](daemon.md#114-ordered-handoff--owner-directed-atomic-transfer-sf3)
+
+---
+
+## 7. Deployment topology (SQLite single-host vs Postgres multi-host)
+
+**Answers:** Where do exchanges live, and how does the backend choice change the picture across hosts?
+
+```mermaid
+flowchart TB
+    subgraph SQLITE["SQLite mode -- single host"]
+        direction TB
+        S1["User sessions"] --> EXS["Local exchange<br/>(one per user, per config root)"]
+        EXS --> DBS[("SQLite file<br/>(this host only)")]
+    end
+
+    subgraph PGMODE["Postgres mode -- multi-host"]
+        direction TB
+        H1["Host 1: user sessions"] --> EXA["Exchange A (host 1)"]
+        H2["Host 2: user sessions"] --> EXB["Exchange B (host 2)"]
+        EXA --> PGDB[("Shared Postgres")]
+        EXB --> PGDB
+    end
+```
+
+SQLite is **single-host**: one exchange, one file, no cross-host path. Postgres is the **multi-host
+substrate**: one exchange per `(user, host)`, all sharing one Postgres. The OS-singleton +
+canonical-store lock keep exactly one exchange per config root; the **lease-epoch fence** arbitrates
+the multi-writer Postgres, and cross-host delivery flows through it (diagrams 3 and 6).
+
+*Governing spec:* [daemon.md sec.2.1 singleton identity](daemon.md#21-singleton-identity) ,
+[sec.11 lease-epoch fence](daemon.md#11-lease-epoch-fence-the-spine)
+
+---
+
+## 8. Authorization & the OS trust boundary
+
+**Answers:** Who is allowed to talk to the exchange, and which operations need a capability?
+
+```mermaid
+sequenceDiagram
+    actor V as Different-user client
+    actor U as Same-user client
+    participant EP as Exchange endpoint (owner-only socket / named pipe)
+    participant CAP as admin_cap (owner-only file)
+
+    V->>EP: connect
+    EP-->>V: REJECTED by OS owner-only perms + peer-credential check (no metadata disclosed)
+    Note over V,EP: cross-user isolation is mandatory and OS-enforced
+
+    U->>EP: connect
+    EP->>EP: verify peer credentials (owner SID matches)
+    EP-->>U: accepted (same user)
+    U->>EP: Register / Wait / Send / Reply / Ack / Detach
+    Note over U,EP: unprivileged ops are same-user trusted (NO intra-user isolation in v1)
+    U->>CAP: read admin_cap (owner-only file)
+    U->>EP: Status(detail) / Reset / Drain (with admin_cap)
+    EP-->>U: privileged op authorized
+    Note over EP,CAP: per_session_cap is reserved for future intra-user isolation
+```
+
+v1 trust is **same-user, user-private**: a different OS user cannot connect, read the capability, or
+wait on an address (OS-enforced). Within the user, every process is trusted -- unprivileged verbs
+need no capability, while the privileged verbs (`Status{detail}`, `Reset`, `Drain`) require the
+owner-only `admin_cap`. Intra-user isolation (`per_session_cap`) is reserved, not in v1.
+
+*Governing spec:* [daemon.md sec.7 authorization](daemon.md#7-authorization-and-the-trust-boundary) ,
+[sec.7.2 OS trust boundary](daemon.md#72-os-level-trust-boundary-mr5)
