@@ -5,17 +5,21 @@
 > `daemon.md` wins.** Each diagram below names the `daemon.md` section(s) it is drawn from.
 
 This is the **visual on-ramp** to the daemon design: read it before the normative contract to build
-a mental model, then drop into [`daemon.md`](daemon.md) for the precise rules. Five diagrams, in
+a mental model, then drop into [`daemon.md`](daemon.md) for the precise rules. The diagrams, in
 learning order:
 
 1. **Component map** -- what the pieces are and how the daemon comes to exist.
-2. **Message delivery** -- how a message reaches a recipient at-least-once, and when it is "consumed".
-3. **Restart & re-attach** -- what a daemon restart loses vs. retains, and how a station recovers.
-4. **Station liveness** -- how a station is deemed idle, and why that is never destructive.
-5. **Single-writer correctness** -- how exactly one writer per store is guaranteed across restart,
+2. **Message delivery (one exchange)** -- how a message reaches a recipient at-least-once, and when
+   it is "consumed".
+3. **Cross-exchange delivery (remote Postgres)** -- the same fence when sender and recipient are on
+   different hosts, with Postgres as the shared transport.
+4. **Restart & re-attach** -- what a daemon restart loses vs. retains, and how a station recovers.
+5. **Station liveness** -- how a station is deemed idle, and why that is never destructive.
+6. **Single-writer correctness** -- how exactly one writer per store is guaranteed across restart,
    upgrade, and multi-host.
 
-The word **epoch** appears by name in diagram 2 and is *defined* in diagram 5.
+The word **epoch** appears by name in diagrams 2-3 and is *defined* in diagram 6 (the single-writer
+fence).
 
 ---
 
@@ -62,7 +66,7 @@ of liveness/delivery state for its store.
 
 ## 2. Message delivery & the at-least-once fence
 
-**Answers:** How does a message reach a recipient at-least-once, and when is it "consumed"?
+**Answers:** When a sender and recipient share one local exchange, how does a message reach the recipient at-least-once, and when is it "consumed"? (The cross-host case is diagram 3.)
 
 ```mermaid
 sequenceDiagram
@@ -90,11 +94,50 @@ the **agent's explicit `ack` is the durable fence** (a single ack -- there is no
 `DeliveryAck`). "Consumed" is decided by the agent, epoch-guarded so a superseded daemon cannot mark.
 
 *Governing spec:* [daemon.md sec.11.3 delivery fence](daemon.md#113-server-side-delivery-fence-mr1--at-least-once-preserving) ,
-[sec.13 dedup](daemon.md#13-delivery-and-seen-dedup) | Last reviewed: 2026-06-24
+[sec.13 dedup](daemon.md#13-delivery-and-seen-dedup)
 
 ---
 
-## 3. Restart & re-attach recovery
+## 3. Cross-exchange delivery via remote Postgres
+
+**Answers:** When the sender and recipient are on different hosts (each with its own local exchange)
+sharing one Postgres, how does a message cross between them, and which exchange marks it consumed?
+
+```mermaid
+sequenceDiagram
+    actor S as Sender agent (host 1)
+    participant XA as Exchange A (host 1)
+    participant PG as Postgres (shared, remote)
+    participant XB as Exchange B (host 2)
+    participant WB as Recipient wait (host 2)
+    actor R as Recipient agent (host 2)
+
+    Note over XB,WB: Exchange B holds the recipient address lease (epoch E) and has a wait blocked
+    S->>XA: send / reply (message)
+    XA->>PG: INSERT deliveries(message_id, recipient) -- durable, shared
+    Note over XA: the sender exchange only INSERTS. It does not deliver or mark for a remote recipient
+    PG-->>XB: LISTEN/NOTIFY wakes B (or B's poll finds the undelivered row)
+    XB-->>WB: EMIT (one delivery)
+    WB-->>R: PRINT to stdout (transport only)
+    R->>XB: ack (message_id, address)
+    XB->>PG: epoch-guarded MARK consumed (B owns epoch E)
+    Note over PG,XB: delivery ownership follows the recipient's lease epoch (arbitrated in epochs, not timing). A superseded exchange's mark gets NotOwner
+    alt no exchange currently attends the recipient
+        Note over PG: the durable row waits in Postgres and is delivered when an exchange next attends and waits (at-least-once)
+    end
+```
+
+Postgres is the **shared transport** between per-host exchanges. The **sender's** exchange only
+writes the durable delivery row; the **recipient's** exchange (whichever holds that recipient's
+lease) is the one that EMITs and -- epoch-guarded -- marks it consumed. The same at-least-once +
+explicit-ack fence as diagram 2 holds end-to-end; only the delivering/marking exchange differs.
+
+*Governing spec:* [daemon.md sec.11.3 delivery fence](daemon.md#113-server-side-delivery-fence-mr1--at-least-once-preserving) ,
+[sec.11.5 cross-machine reclaim](daemon.md#115-postgres-cross-machine-reclaim-in-epochs-not-timing)
+
+---
+
+## 4. Restart & re-attach recovery
 
 **Answers:** After a daemon restart, what is lost vs. retained, and how does a station regain
 membership?
@@ -121,11 +164,11 @@ durable rows into membership. The agent is told (`NeedsAttach`) and re-establish
 addresses it wants.
 
 *Governing spec:* [daemon.md sec.14.3 crash recovery](daemon.md#143-crash-recovery-and-re-attach) ,
-[sec.14.4 NeedsAttach](daemon.md#144-wait-and-re-attach-on-needsattach) | Last reviewed: 2026-06-24
+[sec.14.4 NeedsAttach](daemon.md#144-wait-and-re-attach-on-needsattach)
 
 ---
 
-## 4. Station liveness states (non-destructive reaping)
+## 5. Station liveness states (non-destructive reaping)
 
 **Answers:** How is a station deemed idle, and why is that never destructive?
 
@@ -150,11 +193,11 @@ Liveness is a **non-destructive UX dial, not a correctness gate**. There is deli
 Destroyed state**: a station can idle for days and wake on the next message.
 
 *Governing spec:* [daemon.md sec.9 liveness](daemon.md#9-liveness-model) ,
-[sec.10 reaping + idle-TTL](daemon.md#10-reaping-and-the-idle-ttl-backstop) | Last reviewed: 2026-06-24
+[sec.10 reaping + idle-TTL](daemon.md#10-reaping-and-the-idle-ttl-backstop)
 
 ---
 
-## 5. Single-writer correctness: the epoch fence + ownership handoff
+## 6. Single-writer correctness: the epoch fence + ownership handoff
 
 **Answers:** How does telex guarantee exactly one writer per store across restart, upgrade, and
 multi-host?
@@ -187,20 +230,4 @@ Three layers enforce single-writer: the **OS-singleton** (per config root), a **
 lock** (per SQLite store), and the **lease-epoch fence** (the multi-writer Postgres authority).
 
 *Governing spec:* [daemon.md sec.11 lease-epoch fence](daemon.md#11-lease-epoch-fence-the-spine) ,
-[sec.11.4 ordered handoff](daemon.md#114-ordered-handoff--owner-directed-atomic-transfer-sf3) | Last reviewed: 2026-06-24
-
----
-
-## Keeping these honest (drift policy)
-
-These diagrams are explanatory companions, capped at **5** to stay maintainable:
-
-- **One question per diagram**; a diagram may not introduce states or terms not justified by its
-  `Governing spec` footer anchors.
-- **Update trigger.** A PR that changes daemon semantics, the referenced `daemon.md` anchors, or the
-  code implementing delivery, attach/re-attach, liveness/reaping, or lease/single-writer behavior
-  must update this file (or state why no diagram changed).
-- **Restamp.** Refresh each `Last reviewed` date when a diagram is re-verified against its anchors;
-  a sweep restamps or removes stale diagrams.
-- `daemon.md` remains the single source of truth; these never encode a contract that is not already
-  in it.
+[sec.11.4 ordered handoff](daemon.md#114-ordered-handoff--owner-directed-atomic-transfer-sf3)
