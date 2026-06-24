@@ -3,11 +3,11 @@
   "id": "local-daemon",
   "projectKey": "telex",
   "title": "Local presence/transport daemon (eliminate the per-session holder)",
-  "summary": "Design foundation in progress: replace the per-session holder with an auto-spawned per-user daemon (presence + transport), plus the Copilot plugin (sessionEnd hook + skill) and seamless upgrade, so idle long-lived sessions stay wakeable and stations stop going stale.",
+  "summary": "Design foundation merged (the local-exchange model, ADRs 0014-0024 in docs/design/). Building the per-user local exchange (daemon) for SQLite + Postgres, the Copilot plugin (sessionEnd hook + skill), seamless upgrade, and a validation-loop hardening wave (chaos + Entra-PG multi-host + AKS scale), so idle long-lived sessions stay wakeable and stations stop going stale.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-06-22T21:15:11.719Z",
+  "updatedAt": "2026-06-24T20:20:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -24,11 +24,19 @@
   "designRefs": [
     {
       "repoId": "telex",
-      "path": "DESIGN.md"
+      "path": "docs/design/index.md"
     },
     {
       "repoId": "telex",
-      "path": "DECISIONS.md"
+      "path": "docs/design/daemon.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/DESIGN.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/DECISIONS.md"
     },
     {
       "repoId": "telex",
@@ -45,7 +53,7 @@
       "type": "research",
       "title": "Design foundation: daemon architecture, liveness model, protocol, upgrade",
       "summary": "Make the daemon architecture explicit and validated: DECISIONS ADR(s), DESIGN.md station->daemon update, PRODUCT-THESIS.md no-server->local-daemon update, the IPC/attendance protocol, the liveness model (hook healthy-path + a generic, typed --watch-pid pid-watch backstop, no idle-TTL teardown) plus minimal stale-attendance (last-confirmed + occupied_stale + takeover, no teardown), the lease-epoch fencing token (epoch-guarded heartbeat/release; self-demote on a 0-row heartbeat), the daemon singleton identity (user SID + config root + protocol-major), durable-buffer reuse of 0011/0013, and the epoch-based upgrade/handoff design, the server-side epoch fence on delivery emission + ordered handoff, the seen-dedup redesign for a long-lived daemon, the daemon lifecycle contract + Status surface, the daemon-scoped capability/version-handshake IPC, daemon-native session RPCs (Register/Re-register/DeregisterSession), the takeover state algebra, and the verb/docs cutover. Resolves the open implementation-design questions.",
-      "status": "ready",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -63,7 +71,7 @@
       "type": "gate",
       "title": "Design accepted",
       "summary": "Builder validates the daemon architecture, liveness model, protocol, and upgrade design before any implementation proceeds. Spar + council critique resolved.",
-      "status": "planned",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -76,12 +84,18 @@
       "id": "daemon-core",
       "type": "task",
       "title": "Daemon core + one-shot verbs (SQLite)",
-      "summary": "Auto-spawned per-user single-instance daemon (singleton keyed by user SID + config root + protocol-major) owning the SQLite poll loop, durable buffer (reuse 0011/0013 deliveries), daemon-scoped IPC (Register/Re-register/Deregister/DeregisterSession/Wait/Status; frames carry the lease epoch), attendance registry (in-memory session->addresses + attendance_last_confirmed_at staleness), daemon-written epoch-guarded lease heartbeat (self-demote on a 0-row heartbeat), server-side epoch-gated delivery emission (mark_delivered_if_current_owner; no Message frame unless the daemon owns the epoch), the redesigned bounded/durable dedup (the seen invariant no longer relies on holder restart), and a generic typed --watch-pid pid-watch backstop (v1 floor: loader anchor + start-time; harness-agnostic). Refactor attach/detach into one-shot register/deregister and wait into a daemon client, so a session runs zero persistent telex processes. Includes the minimal upgrade floor (versioned shim + daemon stop --drain + next-call respawn + legacy-holder/non-epoch-lease cutover rule) and the daemon lifecycle contract (OS spawn-lock, connect-or-spawn, readiness ACK, wait reconnect-on-EOF grace, exit codes, Status surface); acceptance includes the four lifecycle tests (concurrent first-use, crash-during-wait, competing daemons, handoff duplicates). With the Copilot plugin this is the first operator-unblocking slice: holder/waiter race + orphans + turn-loop starvation gone on SQLite.",
-      "status": "planned",
+      "summary": "Auto-spawned per-user single-instance daemon (singleton keyed by user SID + config root + protocol-major) owning the SQLite poll loop, durable buffer (reuse 0011/0013 deliveries), daemon-scoped IPC (attach/wait/ack/detach/send/reply/status; explicit-only membership; frames carry the lease epoch), in-memory explicit-only membership + NeedsAttach re-attach, daemon-written epoch-guarded lease heartbeat (self-demote on a 0-row heartbeat), server-side epoch-gated delivery emission (mark_delivered_if_current_owner; no Message frame unless the daemon owns the epoch), the redesigned bounded/durable dedup (the seen invariant no longer relies on holder restart), and a generic typed --watch-pid pid-watch backstop (v1 floor: loader anchor + start-time; harness-agnostic). Refactor attach/detach into one-shot register/deregister and wait into a daemon client, so a session runs zero persistent telex processes. Includes the minimal upgrade floor (versioned shim + daemon stop --drain + next-call respawn + legacy-holder/non-epoch-lease cutover rule) and the daemon lifecycle contract (OS spawn-lock, connect-or-spawn, readiness ACK, wait reconnect-on-EOF grace, exit codes, Status surface); acceptance includes the four lifecycle tests (concurrent first-use, crash-during-wait, competing daemons, handoff duplicates). Implements the normative contract docs/design/daemon.md; acceptance = daemon.md sec.17 gating tests + per-backend conformance. Design for testability: keep epoch / delivery-records / membership / lease state inspectable (the Status surface is the seam) so the validation harness can assert invariants. With the Copilot plugin this is the first operator-unblocking slice: holder/waiter race + orphans + turn-loop starvation gone on SQLite.",
+      "status": "ready",
       "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 38
+      },
       "dependsOn": [
         "design-gate"
       ]
@@ -90,7 +104,7 @@
       "id": "fencing-proof",
       "type": "gate",
       "title": "Fencing proof (epoch-guarded emission + ordered handoff)",
-      "summary": "Executable proof that delivery emission is epoch-gated server-side and that graceful handoff/crash cannot double-deliver or flip ownership, on SQLite first. Distinct gate that postgres-parity, copilot-plugin, and seamless-upgrade depend on; downstream branches must not proceed until it passes.",
+      "summary": "Executable proof that delivery emission is epoch-gated server-side and that graceful handoff/crash cannot double-deliver or flip ownership, on SQLite first. Proves daemon.md sec.11.3-11.4 (server-side delivery fence + ordered handoff) via the sec.17 gating tests. Distinct gate that postgres-parity, copilot-plugin, and seamless-upgrade depend on; downstream branches must not proceed until it passes.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
@@ -118,7 +132,7 @@
       "id": "copilot-plugin",
       "type": "task",
       "title": "Copilot plugin: sessionEnd hook + skill",
-      "summary": "sessionEnd hook calls a daemon-native DeregisterSession(session_id, proof) RPC (healthy disconnect, quit + dismiss) - the daemon's in-memory session->addresses map is the authority, NOT PR #31's filesystem registry (its hook plumbing is reused, the registry storage is dropped). The hook is a thin mapper of the Copilot env/payload (COPILOT_AGENT_SESSION_ID -> TELEX_SESSION_ID; COPILOT_LOADER_PID -> --watch-pid) onto generic inputs; the core COPILOT_* fallback is removed so Copilot JSON parsing is not a core protocol dependency. Move telex skill into a real Copilot plugin skill with one source serving both the CLI command and the plugin skill. Sketch; may split hook vs skill at promotion.",
+      "summary": "sessionEnd hook removes the session's addresses via explicit Detach (daemon.md sec.14.2; healthy disconnect on quit + dismiss) - membership is explicit-only and daemon-native, NOT PR #31's filesystem registry (its hook plumbing is reused, the registry storage is dropped). The hook is a thin mapper of the Copilot env/payload (COPILOT_AGENT_SESSION_ID -> TELEX_SESSION_ID; COPILOT_LOADER_PID -> --watch-pid) onto generic inputs; the core COPILOT_* fallback is removed so Copilot JSON parsing is not a core protocol dependency. Move telex skill into a real Copilot plugin skill with one source serving both the CLI command and the plugin skill. Sketch; may split hook vs skill at promotion.",
       "status": "planned",
       "attention": "watch",
       "repoIds": [
@@ -144,6 +158,63 @@
       ]
     },
     {
+      "id": "validation-harness",
+      "type": "task",
+      "title": "Validation harness + Tier 1/2 loop (chaos + Entra-PG multi-host)",
+      "summary": "Derive the machine-checkable invariant suite from the merged design (no-dup / no-loss / single-writer / non-destructive-reaping / idle-wakeable / upgrade-transparent) and build a portable harness + synthetic session driver + fault injector. Run the Tier 1 (SQLite chaos: many sessions, daemon kill/restart mid-delivery, competing daemons, handoff under load) and Tier 2 (real Entra-PG, multi-host via containers: cross-machine lease/reclaim/fence under daemon deaths/partitions) validation loop; file/repair/rerun. Invariants + observability hooks are derived against the implemented reality (Status surface is the seam); missing observability is a bounded repair issue back to daemon-core.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "seamless-upgrade"
+      ]
+    },
+    {
+      "id": "aks-scale-spike",
+      "type": "research",
+      "title": "AKS large-network harness spike",
+      "summary": "Prove the approach for a large network of telex hosts on AKS: N daemon pods (one local exchange per pod = a host) + M synthetic sessions driving attach/wait/ack/send against the shared Entra PG, with fault injection. Validate feasibility, orchestration, cost, and the metrics/oracle pipeline. Runs in parallel with validation-harness; its output shapes scale-rig-and-loop.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "seamless-upgrade"
+      ]
+    },
+    {
+      "id": "scale-rig-and-loop",
+      "type": "task",
+      "title": "AKS scale rig + scale/stress loop (last)",
+      "summary": "Build the full AKS large-network scale rig (reusing the synthetic driver from validation-harness, informed by aks-scale-spike) and run the scale/stress validation loop against the Entra PG: large attendee counts, churn, contention, throughput, and partition/upgrade-under-load. Measures and closes the carried perf issues (#26 per-tick scan index, #27 mark_delivered cap, #24 registry GC). Produces the scale evidence for the hardening gate.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "validation-harness",
+        "aks-scale-spike"
+      ]
+    },
+    {
+      "id": "hardening-gate",
+      "type": "gate",
+      "title": "Hardening gate (validation report)",
+      "summary": "Demonstration gate: builder consumes the full validation report (Tier 1/2 chaos + Entra-PG multi-host + AKS scale) - scenario exercised, evidence, gaps found, repairs + reruns, remaining accepted risk - and judges whether the system has earned rollout confidence. Blocks closure-gate.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "scale-rig-and-loop"
+      ]
+    },
+    {
       "id": "closure-gate",
       "type": "gate",
       "title": "End-to-end unblock + closure",
@@ -154,9 +225,7 @@
         "telex"
       ],
       "dependsOn": [
-        "postgres-parity",
-        "copilot-plugin",
-        "seamless-upgrade"
+        "hardening-gate"
       ]
     }
   ],
@@ -184,7 +253,7 @@
     {
       "id": "backends-and-plugin",
       "title": "Both backends + Copilot plugin landed",
-      "summary": "Postgres parity and the Copilot plugin (daemon-native DeregisterSession + skill) landed; with the plugin on SQLite the first operator-unblock slice is shippable.",
+      "summary": "Postgres parity and the Copilot plugin (explicit Detach hook + single-source skill) landed; with the plugin on SQLite the first operator-unblock slice is shippable.",
       "status": "planned",
       "nodeIds": [
         "postgres-parity",
@@ -198,6 +267,18 @@
       "status": "planned",
       "nodeIds": [
         "seamless-upgrade"
+      ]
+    },
+    {
+      "id": "hardened",
+      "title": "System hardened (validation loop)",
+      "summary": "The validation-loop wave earned rollout confidence: Tier 1/2 chaos + Entra-PG multi-host + AKS scale exercised, gaps repaired and reruns passed, perf issues #26/#27/#24 closed, remaining risk explicitly accepted.",
+      "status": "planned",
+      "nodeIds": [
+        "validation-harness",
+        "aks-scale-spike",
+        "scale-rig-and-loop",
+        "hardening-gate"
       ]
     },
     {

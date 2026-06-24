@@ -34,7 +34,10 @@ operator (reached when the plugin lands on SQLite). A distinct **fencing-proof**
 work. **Postgres parity** extends the core under that proof and adds the cross-machine
 reclaim (competing daemons); **seamless upgrade** (#6) lands
 **last**, after Postgres and the plugin, so the full upgrade platform never blocks
-the unblock. A final **closure gate** validates the real-world unblock and retires
+the unblock. A **validation-loop hardening wave** then exercises the complete system -
+Tier 1/2 chaos + Entra-PG multi-host (parallel with an **AKS large-network spike**),
+then the **AKS scale rig + stress loop** last - and a **hardening gate** must pass
+before the final **closure gate** validates the real-world unblock and retires
 superseded mechanisms. Nodes are coarse and PAW-sized; the completeness split is
 justified by distinct expertise, independent validation, and parallelism.
 
@@ -44,14 +47,19 @@ distilled.
 
 ## Design References
 
-- `telex:DESIGN.md` - the station/holder/waiter model this workstream restructures
-  (see "Station" and "Architecture overview").
-- `telex:DECISIONS.md` - decision records; 0004 (holder/waiter split) is the
-  decision being revisited, 0005 (TTL heartbeat), 0011/0013 (durable per-recipient
-  delivery, reused as the daemon buffer).
-- `telex:PRODUCT-THESIS.md` - the "no server at all" framing this workstream
-  intentionally shifts to "auto-spawned local daemon".
-- `telex:SKILL.md` - the holder/waiter re-arm guidance that the daemon supersedes.
+The authoritative design layer (merged from `design-foundation`) lives under
+`docs/design/`:
+
+- `telex:docs/design/daemon.md` - the **normative daemon contract** the implementation
+  nodes build against (17 sections + the sec.17 gating tests).
+- `telex:docs/design/DESIGN.md` - the local-exchange architecture.
+- `telex:docs/design/DECISIONS.md` - the ADR log; **0014-0024** are this workstream's
+  decisions (0023 = the minimal session/presence/delivery model; 0021 = the
+  `docs/design/` relocation).
+- `telex:docs/design/index.md` / `docs/design/ARCHITECTURE.md` - the entry point and the
+  5-diagram visual on-ramp.
+- `telex:PRODUCT-THESIS.md` (root) - the "no server" -> "auto-spawned local exchange"
+  framing.
 
 ## Boundaries
 
@@ -67,7 +75,7 @@ distilled.
   healthy-path + a **typed** `--watch-pid` backstop, v1 floor loader anchor +
   start-time; no idle-TTL teardown, but **stale-attendance/takeover** as a
   load-bearing recovery path - last-confirmed + `occupied_stale` + takeover); the
-  Copilot CLI plugin (sessionEnd hook -> daemon-native **`DeregisterSession`**, not
+  Copilot CLI plugin (sessionEnd hook -> explicit **`Detach`** per daemon.md sec.14.2, not
   PR #31's filesystem registry) and moving `telex skill` into a real plugin skill with
   one shared source; the **minimal upgrade floor** (versioned shim + `daemon stop
   --drain` + next-call respawn + legacy/non-epoch cutover rule) in `daemon-core` with
@@ -87,23 +95,21 @@ distilled.
 
 ## Current State
 
-Formed from a design conversation (captured in `docs/initial-shaping.md`), then
-pressure-tested in two arm's-length review rounds, both folded in: a different-model
-**spar** (lease-epoch fencing, minimal stale-attendance, typed watch-pid, singleton
-identity, fencing-first sequencing) and a two-panel **council review** (server-side
-epoch fence + a distinct `fencing-proof` gate, `seen`-dedup redesign, daemon
-lifecycle contract + Status, capability/version-handshake IPC, daemon-native
-`DeregisterSession`, a minimal upgrade floor early, takeover as a load-bearing
-recovery path, and docs cutover with `daemon-core`) - see initial-shaping `Spar round
-1 outcomes` and `Council review outcomes`. The strategic decisions are bottomed out;
-the Postgres reclaim race and the upgrade handoff are resolved **by approach** (epoch
-fencing), with the exact epoch lifecycle owned by `design-foundation`. **Wave 1
-(`design-foundation`) is launched** as issue #34 (worker on the
-`feature/design-foundation` worktree), producing the design layer toward the
-`design-gate` (a PR review). Workstream artifacts are edited in a dedicated
-`telex-streamliner` worktree (branch `streamliner`) that pushes to `main`, keeping the
-primary checkout clear. Later-wave nodes (`daemon-core` onward) are sketches the
-orchestrator may split, merge, or replace at promotion.
+**design-foundation is merged** (issue #34; PRs #35 + #37) after a 10-round
+`design-gate` review, so the **design-gate has passed**. The authoritative design now
+lives under `docs/design/` (`daemon.md` is the normative contract), relocated there by
+ADR 0021; the eight open questions are resolved as **ADRs 0014-0024**. The
+session/presence/delivery model was revised to a **minimal form** by **ADR 0023**
+(unique `session_id` + explicit-only membership via `Detach` + non-destructive presence
++ agent-acked delivery), superseding the earlier "incarnation" machinery - so some
+council/spar specifics (e.g. a `DeregisterSession` RPC, `attendance_last_confirmed_at`)
+are realized differently; **`daemon.md` governs** where the shaping differs.
+
+**`daemon-core` is the next ready node** - implement `docs/design/daemon.md` on SQLite
+(acceptance = its sec.17 gating tests). The graph also adds a **validation-loop
+hardening wave** (harness + Entra-PG multi-host + AKS scale) before closure. Workstream
+artifacts are edited in the dedicated `telex-streamliner` worktree (branch
+`streamliner`) that pushes to `main`, keeping the primary checkout clear.
 
 ## Decisions
 
@@ -149,27 +155,16 @@ orchestrator may split, merge, or replace at promotion.
 
 ## Open Questions
 
-- **Epoch lifecycle details** (owned by `design-foundation`): exactly when the lease
-  epoch increments, how the new daemon claims a higher epoch on handoff/respawn, and
-  how Postgres cross-machine reclaim is specified in epochs. The reclaim race and
-  handoff window are resolved in approach (epoch fencing); these are the remaining
-  specifics.
-- **Stale-attendance threshold + takeover flow**: how `attendance_last_confirmed_at`
-  is updated, the `occupied_stale` threshold, and the operator takeover path - all
-  without idle-TTL teardown.
-- **Typed watch-pid final shape:** v1 floor is loader **anchor** + start-time guard;
-  expose **required** vs **anchor** flags only where a real consumer/test exists. Plus
-  whether Copilot exposes a distinct per-session PID beyond the loader - owned by
-  `design-foundation` / `copilot-plugin`.
-- **Cutover rule (council):** the deterministic rule for legacy holders / non-epoch
-  lease rows during the first daemon-aware rollout - owned by `design-foundation`.
-- **`DeregisterSession` proof (council):** how the sessionEnd hook obtains/presents
-  proof without an external registry (an instance/session capability in plugin env).
-- **Status freeze line (council):** how much diagnostic/Status surface freezes in
-  `design-foundation` vs `daemon-core` acceptance.
-- **Attendance durability across a daemon crash (council):** what is durable vs
-  intentionally rebuilt by client re-register (a session that ends while the daemon is
-  down).
+All eight design-foundation open questions are **resolved** as ADRs 0014-0024 (see
+`docs/design/DECISIONS.md` and `daemon.md`): epoch lifecycle (0015), session
+presence/reaping + crash durability (0017/0023), typed watch-pid + per-session PID
+(0017), legacy cutover (0020/0024), `Detach`/`Ack` removal proof (0019/0023), and the
+Status freeze line (0018). Remaining open items are deliberately deferred to execution:
+
+- The validation-loop **invariant suite + observability hooks** are derived during
+  `validation-harness` against the implemented reality, not pre-specified.
+- The **AKS large-network approach** (orchestration, cost, oracle pipeline) is proven
+  in `aks-scale-spike`.
 
 ## Imports and Exports
 
@@ -177,8 +172,8 @@ orchestrator may split, merge, or replace at promotion.
 
 - **PR #31 / issue #23 (sessionEnd hook plumbing):** the hook wiring the plugin
   reuses. Its filesystem `session_registry` is **not** the attendance authority
-  (council G) - the daemon owns `session_id->addresses` in memory and exposes
-  `DeregisterSession`; the hook becomes a thin mapper. Provider: branch
+  (council G) - the daemon owns `session_id->addresses` in memory and the hook calls
+  explicit `Detach` (ADR 0019/0023, daemon.md sec.14.2); the hook is a thin mapper. Provider: branch
   `feature/copilot-session-end-plugin`. Available now.
 - **Decisions 0011/0013 durable delivery (`deliveries` table, `fetch_undelivered`):**
   reused as the daemon's durable buffer. Available in `main`.

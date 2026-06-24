@@ -4,7 +4,7 @@
   "repos": {
     "telex": {
       "path": "..",
-      "designDocsPath": "."
+      "designDocsPath": "docs/design"
     }
   }
 }

@@ -6,6 +6,17 @@
 > project design, promote it into the telex design layer (`DESIGN.md` /
 > `DECISIONS.md` / `PRODUCT-THESIS.md`).
 
+> **Reconciliation (2026-06-24): superseded by the merged design.** `design-foundation`
+> is merged (issue #34; PRs #35 + #37). The authoritative design now lives under
+> **`docs/design/`** (`daemon.md` is the normative contract), relocated there by **ADR
+> 0021**; the eight open questions are resolved as **ADRs 0014-0024**. The
+> session/presence/delivery model was revised to a **minimal form** by **ADR 0023**
+> (unique `session_id` + explicit-only membership via `Detach` + non-destructive
+> presence + agent-acked delivery), superseding the "incarnation" machinery. This
+> document is retained as **pre-implementation shaping history**; where its specifics
+> differ from the ADRs (e.g. a `DeregisterSession` RPC, `attendance_last_confirmed_at`,
+> the root-level design layout), **the ADRs in `docs/design/` win.**
+
 ## Origin
 
 No prior Streamliner shaping candidate existed - this is telex's first workstream.
