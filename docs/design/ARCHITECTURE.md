@@ -76,12 +76,12 @@ sequenceDiagram
     S->>X: send / reply (message)
     X->>DB: INSERT (message_id, recipient) -- durable
     X-->>W: EMIT (one delivery)
-    W-->>R: PRINT to stdout  (TRANSPORT ONLY -- this is NOT "consumed")
+    W-->>R: PRINT to stdout (TRANSPORT ONLY, not the consumed mark)
     R->>X: ack (message_id, address)
     X->>DB: epoch-guarded MARK consumed
-    Note over DB: the consumed row is RETAINED -> a consumed message is never resurrected;<br/>recipients dedup by message_id
+    Note over DB: the consumed row is RETAINED, so a consumed message is never resurrected, and recipients dedup by message_id
     alt crash before the ack
-        Note over X,R: nothing was marked -> the message is redelivered (at-least-once)
+        Note over X,R: nothing was marked, so the message is redelivered (at-least-once)
     end
 ```
 
@@ -105,15 +105,15 @@ sequenceDiagram
     participant X as Local exchange
     participant DB as Durable store (lease rows + deliveries)
 
-    Note over R,X: agent is attached -- membership is IN-MEMORY; messages are buffered durably in the store
+    Note over R,X: agent is attached, membership is IN-MEMORY, and messages are buffered durably in the store
     Note over X: crash / restart
-    Note over X,DB: restart loses ONLY the in-memory membership.<br/>Lease rows + the durable buffer PERSIST; nothing is rebuilt from history.
+    Note over X,DB: restart loses ONLY the in-memory membership. Lease rows and the durable buffer PERSIST, and nothing is rebuilt from history.
     R->>X: wait (or any op)
     X-->>R: NeedsAttach  (unknown session)
     R->>X: attach / Register  (explicit re-attach)
     R->>X: wait
     X-->>R: delivers the durably-buffered messages (at-least-once, no loss)
-    Note over R,X: a previously Detached address is NOT resurrected --<br/>only the addresses the agent explicitly re-attaches come back
+    Note over R,X: a previously Detached address is NOT resurrected. Only the addresses the agent explicitly re-attaches come back
 ```
 
 Recovery is an **ordered handshake**, not an automatic rebuild: the exchange never reverse-indexes
@@ -169,17 +169,17 @@ sequenceDiagram
     participant DB as Lease row (lease_epoch, owner_instance_id)
     participant B as Daemon B (successor)
 
-    A->>DB: heartbeat @ epoch E  (rowcount = 1: still owner)
+    A->>DB: heartbeat @ epoch E (rowcount = 1, still owner)
     Note over A,B: a handoff / upgrade / reclaim brings B
-    B->>DB: claim -- CAS lease_epoch E -> E+1, owner = B
+    B->>DB: claim (CAS lease_epoch E to E+1, owner = B)
     A->>DB: next heartbeat / mark @ epoch E
-    DB-->>A: 0 rows  ->  NotOwner
-    Note over A: A self-demotes -- stops emitting AND stops heartbeating
-    Note over A,B: exactly one writer -> no double-delivery, no ownership flip-flop
+    DB-->>A: 0 rows, NotOwner
+    Note over A: A self-demotes, stopping emitting AND heartbeating
+    Note over A,B: exactly one writer, so no double-delivery and no ownership flip-flop
     alt SQLite (single host)
-        Note over A,DB: OS-singleton + canonical-store lock allow only one daemon at a time;<br/>an upgrade is release + next-call respawn (no live two-daemon overlap)
+        Note over A,DB: OS-singleton + canonical-store lock allow only one daemon at a time. An upgrade is release + next-call respawn (no live two-daemon overlap)
     else Postgres (multi-host)
-        Note over A,B: a live ordered handoff (owner-directed transfer);<br/>cross-host reclaim is arbitrated in epochs, not timing
+        Note over A,B: a live ordered handoff (owner-directed transfer). Cross-host reclaim is arbitrated in epochs, not timing
     end
 ```
 
