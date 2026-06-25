@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-06-24T20:20:00Z",
+  "updatedAt": "2026-06-24T21:22:25.883Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -299,7 +299,7 @@
     "requiredTracker": "github-issue"
   },
   "launchDefaults": {
-    "promptProfileId": "paw-lite-loop-v7",
+    "promptProfileId": "paw-lite-loop-v8",
     "terminal": {
       "titleTemplate": "TLX-D {githubIssue}"
     },
