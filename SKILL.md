@@ -57,8 +57,9 @@ It fails closed rather than guessing.
    shell stdout, and the detached task's reported exit code may describe only the
    launcher/wrapper. Trust the artifact `exit.code`, not the shell task exit code.
    The detached completion notification is the wake signal; after it arrives, read
-   `exit.code` (then `message.json` if it is `0`), re-arm a fresh detached `wait`,
-   then act. Do not hide `wait` inside an infinite shell loop.
+   `exit.code` (then `message.json` if it is `0`), `ack` the delivered message and
+   dedupe by id, then re-arm a fresh detached `wait` before longer processing.
+   Do not hide `wait` inside an infinite shell loop.
    `wait` does **not** spawn the daemon. If the daemon is gone, `wait` exits 3 so
    the agent can run `telex attach` (the spawning/recovery verb) and then re-arm.
    If a replacement daemon already exists, `wait` can reconnect/re-register during
@@ -66,7 +67,7 @@ It fails closed rather than guessing.
 
    | Exit | Meaning | What you do |
    |---:|---|---|
-   | 0 | delivered | Read `message.json` (or stdout JSON), immediately re-arm a fresh `wait`, then act. |
+   | 0 | delivered | Read `message.json` (or stdout JSON), `ack` + dedupe by id, then re-arm a fresh `wait` before longer processing. |
    | 2 | idle-timeout | Nothing arrived before `--timeout-ms`; re-arm if still attending. |
    | 3 | daemon gone / not running | Run `telex attach` and re-arm. |
    | 4 | daemon hung / no response after a finite wait's `--timeout-ms + --hang-ms` watchdog | Re-arm or restart the daemon if repeated. |
@@ -95,7 +96,7 @@ then repeat:
      `telex wait --address <addr> --out-dir <dir>` (writes message.json/status.json/exit.code)
   2. it blocks until one message, exits, and the runtime completion wakes you
   3. read `<dir>\exit.code` (not the shell task exit code):
-     0 -> parse `message.json`, start a fresh wait, then `telex ack` and act/disposition
+     0 -> parse `message.json`, run `telex ack`, dedupe by id, then start a fresh wait before longer processing
      5 -> attach/wait again if the session is still live
      2/3/4 -> re-arm or restart as indicated above (see `status.json` for detail)
 ```
@@ -131,8 +132,8 @@ On the detached completion notification:
 
 1. Read `<dir>\exit.code` (the completion marker); do not trust the Copilot detached task's exit code.
 2. If it is `0`, parse `<dir>\message.json`. Otherwise read `<dir>\status.json` and the exit-code table.
-3. Immediately arm the next detached wait before longer processing.
-4. Run `telex ack --address <addr> --id <message-id>`, then disposition the work.
+3. Run `telex ack --address <addr> --id <message-id>` and dedupe by `message_id`.
+4. Immediately arm the next detached wait before longer processing, then disposition the work.
 
 `wait` also writes `<dir>\wait.pid` at startup. If you need to tear down the
 station before a message arrives, prefer `telex station stop --address <addr>`:
@@ -448,11 +449,11 @@ telex resolve --match "waiting for coordination" --scope project:telex
 telex send --to session:a --subject "Status request" --body "Please send your current status." --attention interrupt --requires-disposition
 ```
 
-A's `wait` command completes (exit 0) with the delivered message as JSON, which notifies A. A saves the JSON and **immediately re-arms** a fresh background `wait`, then acks the delivered message, handles the work, dispositions it, and replies in the same thread.
+A's `wait` command completes (exit 0) with the delivered message as JSON, which notifies A. A saves the JSON, **acks + dedupes by message id**, immediately re-arms a fresh background `wait` before longer processing, then handles the work, dispositions it, and replies in the same thread.
 
 ```sh
-telex wait --address session:a   # start this as a fresh background wait immediately
 telex ack --address session:a --id <message-id-from-wait-json>
+telex wait --address session:a   # start this as a fresh background wait after ack/dedupe
 telex handle --id <message-id-from-wait-json> --note "status prepared"
 telex reply --to-message <message-id-from-wait-json> --body "Status: holder is live; continuing work." --attention next-checkpoint
 ```

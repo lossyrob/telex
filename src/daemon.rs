@@ -837,6 +837,14 @@ impl DaemonState {
             .collect()
     }
 
+    fn has_live_waiter_for(&self, store_key: &str, session_id: &str, address: &str) -> bool {
+        self.waiters.lock().unwrap().values().any(|waiter| {
+            waiter.store_key == store_key
+                && waiter.session_id == session_id
+                && waiter.address == address
+        })
+    }
+
     fn add_waiter(&self, mut waiter: WaiterRecord) -> u64 {
         let waiter_id = self.next_waiter_id.fetch_add(1, Ordering::SeqCst);
         waiter.waiter_id = waiter_id;
@@ -2423,6 +2431,15 @@ async fn wait_for_message_with_idle_ttl(
     };
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let idle_deadline = Instant::now() + idle_ttl;
+    if state.has_live_waiter_for(&store_key, &session_id, &address) {
+        state.push_recent_error(
+            "ConcurrentWaiter",
+            format!(
+                "rejected concurrent wait store={store_key} session={session_id} address={address}: one live waiter is already armed"
+            ),
+        );
+        return Response::PresenceEnded;
+    }
     let _waiter = WaiterGuard::new(
         state.clone(),
         &store_key,
@@ -4215,6 +4232,74 @@ mod p3_tests {
             delivered,
             Response::Message { body, .. } if body == "after stop"
         ));
+    }
+
+    #[tokio::test]
+    async fn concurrent_second_waiter_is_rejected_without_duplicate_delivery() {
+        let state = test_state("concurrent-waiter-dedupe");
+        let store = store_key("concurrent-waiter-dedupe");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let first_req = wait_req(&store, "s1", "addr:a", 5_000);
+        let first_state = state.clone();
+        let first = tokio::spawn(async move { request(first_state, first_req).await });
+        tokio::time::sleep(Duration::from_millis(75)).await;
+
+        let status = state.status().await;
+        assert_eq!(status.live_waiters.len(), 1);
+
+        let second = request(state.clone(), wait_req(&store, "s1", "addr:a", 5_000)).await;
+        assert!(matches!(second, Response::PresenceEnded));
+        assert!(state
+            .status()
+            .await
+            .recent_errors
+            .iter()
+            .any(|e| e.kind == "ConcurrentWaiter"));
+
+        registered_epoch(state.clone(), &store, "sender", "addr:sender").await;
+        let sent = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "sender".to_string(),
+                from_addr: Some("addr:sender".to_string()),
+                to_addr: "addr:a".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: Some("dedupe".to_string()),
+                body: "only one delivery".to_string(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            sent,
+            Response::Sent {
+                receipt: SentReceipt { id: message_id, .. },
+            } if message_id > 0
+        ));
+        let delivered = first.await.unwrap();
+        let id = match delivered {
+            Response::Message { id, body, .. } => {
+                assert_eq!(body, "only one delivery");
+                id
+            }
+            other => panic!("first waiter should receive the message, got {other:?}"),
+        };
+        let ack = request(state.clone(), ack_req(&store, "s1", "addr:a", id)).await;
+        assert!(matches!(
+            ack,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
+
+        let after_ack = request(state, wait_req(&store, "s1", "addr:a", 1)).await;
+        assert!(matches!(after_ack, Response::Timeout));
     }
 
     #[tokio::test]

@@ -1318,14 +1318,15 @@ delivered into an unread detached process.
 
 **Decision.** Add first-class station teardown and waiter observability. `Wait` IPC now carries the
 client waiter's pid/start-time, and the daemon records live waiters in an independent registry keyed by
-`(store_key, session_id, address, pid)`. Detailed status exposes the top-level `live_waiters` list and
-per-member `live_waiters`, and `telex daemon status` requests that detailed projection using the local
-admin cap. `telex status --address`, `telex address show`, and `telex address list` overlay live daemon
-membership on durable lease occupancy so those operator views agree. Add `telex station stop --address
-<addr>` as the symmetric teardown command: mark the station idle so blocked waiters return
-`PresenceEnded`, wait for tracked waiters to drain for a short grace window, then perform the durable
-detach/tombstone. The command returns a typed `StationStopped` summary with waiter counts and any
-remaining live waiter records.
+a daemon-assigned `waiter_id` (not pid, so pidless/protocol-valid waiters and same-pid edge cases are
+still tracked). Detailed status exposes the top-level `live_waiters` list and per-member
+`live_waiters`, and `telex daemon status` requests that detailed projection using the local admin cap.
+`telex status --address`, `telex address show`, and `telex address list` overlay live daemon membership
+on durable lease occupancy so those operator views agree. Add `telex station stop --address <addr>` as
+the symmetric teardown command: mark the station idle so blocked waiters return `PresenceEnded`, wait
+for tracked waiters to drain for a short grace window, then perform the durable detach/tombstone. The
+command returns a typed `StationStopped` summary with waiter counts and any remaining live waiter
+records.
 
 **Consequences.** Normal teardown no longer requires OS process hunting, and a stopped station is
 provably unoccupied: a message sent after `station stop` remains queued until a future attach/wait
@@ -1355,3 +1356,23 @@ effect.
 side-effect. This slightly reduces transparent restart recovery for non-attach verbs, but prevents the
 worse failure mode where a detached waiter silently creates or talks to the wrong singleton/profile.
 Real-process tests assert that `wait` and `send` without a daemon do not spawn one.
+
+## 0029 — One live waiter per station
+
+- **Date:** 2026-06-25
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Dogfooding found that the natural "arm next waiter before ack" loop could create multiple
+concurrent waiters for the same `(store_key, session_id, address)`. Because the durable delivery row is
+not consumed until explicit `ack`, each concurrently armed waiter could be handed the same
+`message_id`, which looked like a consumed message redelivering indefinitely.
+
+**Decision.** The daemon accepts at most one live waiter per station. A concurrent second `Wait` for
+the same `(store_key, session_id, address)` returns `PresenceEnded` and records a `ConcurrentWaiter`
+status/audit entry; it is not allowed to fetch or emit a message. Skill guidance now says to read the
+message, `ack`, dedupe by id, then re-arm before longer processing.
+
+**Consequences.** The documented detached waiter loop is duplicate-free without relying solely on
+operator discipline. Telex remains at-least-once across crashes and unacked delivery, but it no longer
+fans one unacked `(message_id, recipient)` to sibling live waiters for the same station. Multi-recipient
+fan-out is unchanged: acking recipient A does not consume recipient B.
