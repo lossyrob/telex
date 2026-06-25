@@ -157,7 +157,7 @@ pub struct WaitArgs {
     /// Resume delivery strictly after this message id.
     #[arg(long, default_value_t = 0)]
     pub since: i64,
-    /// Treat the holder as hung if no frame arrives within this window (ms).
+    /// Deprecated idle-wait compatibility watchdog. For daemon waits, only applies after timeout-ms.
     #[arg(long, default_value_t = 8_000)]
     pub hang_ms: u64,
     /// Retry daemon reconnect/re-register for this long after EOF/restart (ms).

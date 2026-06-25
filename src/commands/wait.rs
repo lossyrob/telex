@@ -24,6 +24,11 @@ pub async fn run(ctx: &Ctx, args: WaitArgs) -> Result<i32> {
             "[wait] warning: --stale-heartbeat-ms is deprecated for daemon-core waits and is currently ignored"
         );
     }
+    if args.hang_ms != 8_000 {
+        eprintln!(
+            "[wait] warning: --hang-ms is a finite-timeout watchdog in daemon-core waits and is ignored for unbounded idle waits"
+        );
+    }
 
     let cfg = WaitLoopConfig {
         store_key,
@@ -140,14 +145,30 @@ async fn wait_loop<C: WaitConnector>(
         };
 
         let request = wait_request(cfg, timeout_ms);
-        let response = match tokio::time::timeout(
-            Duration::from_millis(cfg.hang_ms.max(1)),
-            client.request(request),
-        )
-        .await
-        {
-            Ok(Ok(response)) => response,
-            Ok(Err(e)) => {
+        let response_result = match timeout_ms {
+            Some(wait_ms) => {
+                let watchdog_ms = wait_ms.saturating_add(cfg.hang_ms.max(1));
+                match tokio::time::timeout(
+                    Duration::from_millis(watchdog_ms),
+                    client.request(request),
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(_) => {
+                        return Ok(WaitTerminal::DaemonHung(format!(
+                            "no daemon frame within timeout-ms + hang-ms ({} + {}) ms",
+                            wait_ms, cfg.hang_ms
+                        )));
+                    }
+                }
+            }
+            None => client.request(request).await,
+        };
+
+        let response = match response_result {
+            Ok(response) => response,
+            Err(e) => {
                 last_reconnect_error = Some(format!("request failed: {e}"));
                 begin_reconnect(
                     cfg,
@@ -156,12 +177,6 @@ async fn wait_loop<C: WaitConnector>(
                     &mut retried_after_attach,
                 );
                 continue;
-            }
-            Err(_) => {
-                return Ok(WaitTerminal::DaemonHung(format!(
-                    "no daemon frame within {} ms",
-                    cfg.hang_ms
-                )));
             }
         };
 
@@ -411,6 +426,7 @@ mod tests {
     enum ScriptAction {
         Response(Response),
         Error(DaemonError),
+        DelayResponse(Duration, Response),
     }
 
     #[async_trait(?Send)]
@@ -424,6 +440,10 @@ mod tests {
             match action {
                 ScriptAction::Response(response) => Ok(response),
                 ScriptAction::Error(error) => Err(error),
+                ScriptAction::DelayResponse(delay, response) => {
+                    tokio::time::sleep(delay).await;
+                    Ok(response)
+                }
             }
         }
     }
@@ -519,8 +539,47 @@ mod tests {
             WaitTerminal::Response(Response::Message { id, .. }) => assert_eq!(id, 7),
             other => panic!("expected message after reconnect, got {other:?}"),
         }
+
         assert_eq!(connector.connects, 2);
         assert_eq!(connector.request_ops(), vec!["wait", "wait"]);
+    }
+
+    #[tokio::test]
+    async fn unbounded_idle_wait_can_outlive_hang_ms_without_hung_exit() {
+        let mut cfg = cfg();
+        cfg.timeout_ms = None;
+        cfg.hang_ms = 1;
+        let mut connector = ScriptConnector::new().client(vec![ScriptAction::DelayResponse(
+            Duration::from_millis(20),
+            message_response(),
+        )]);
+
+        let outcome = wait_loop(&mut connector, &cfg).await.unwrap();
+        match outcome {
+            WaitTerminal::Response(Response::Message { id, .. }) => assert_eq!(id, 7),
+            other => panic!("expected delayed message, got {other:?}"),
+        }
+        assert_eq!(connector.request_ops(), vec!["wait"]);
+    }
+
+    #[tokio::test]
+    async fn finite_wait_watchdog_fires_after_timeout_plus_hang_ms() {
+        let mut cfg = cfg();
+        cfg.timeout_ms = Some(5);
+        cfg.hang_ms = 5;
+        let mut connector = ScriptConnector::new().client(vec![ScriptAction::DelayResponse(
+            Duration::from_millis(50),
+            Response::Timeout,
+        )]);
+
+        let outcome = wait_loop(&mut connector, &cfg).await.unwrap();
+        match outcome {
+            WaitTerminal::DaemonHung(message) => {
+                assert!(message.contains("timeout-ms + hang-ms"));
+            }
+            other => panic!("expected hung watchdog, got {other:?}"),
+        }
+        assert_eq!(connector.request_ops(), vec!["wait"]);
     }
 
     #[tokio::test]

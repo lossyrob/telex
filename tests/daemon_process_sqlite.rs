@@ -683,6 +683,43 @@ fn real_process_14_os_trust_same_user_and_prebound() {
     }
 }
 
+#[test]
+fn real_process_idle_wait_timeout_is_not_hung() {
+    let env = ProcessEnv::new("real-idle-wait");
+    let session = "real-idle-wait-session";
+    let address = "addr:real-idle-wait";
+    env.attach(session, address);
+
+    let idle = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "wait",
+            "--session",
+            session,
+            "--timeout-ms",
+            "250",
+            "--hang-ms",
+            "25",
+        ],
+        Duration::from_secs(3),
+    );
+    assert_eq!(
+        idle.code,
+        Some(2),
+        "idle wait should timeout, not report daemon HUNG: stdout={} stderr={}",
+        idle.stdout,
+        idle.stderr
+    );
+    assert!(
+        idle.stderr.contains("idle-timeout"),
+        "timeout stderr should be explicit: {}",
+        idle.stderr
+    );
+}
+
 #[cfg(target_os = "linux")]
 fn assert_hostile_prebound_endpoint_rejected_before_hello(env: &ProcessEnv) {
     use std::io::Read;
