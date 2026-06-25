@@ -4778,10 +4778,10 @@ mod platform {
     use windows_sys::Win32::Security::Authorization::{
         ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
         ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW,
-        SDDL_REVISION_1, SE_FILE_OBJECT,
+        SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
     };
     use windows_sys::Win32::Security::{
-        GetTokenInformation, SetFileSecurityW, TokenUser, DACL_SECURITY_INFORMATION,
+        GetSecurityDescriptorDacl, GetTokenInformation, TokenUser, DACL_SECURITY_INFORMATION,
         OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES,
         TOKEN_QUERY, TOKEN_USER,
     };
@@ -5006,21 +5006,44 @@ mod platform {
 
     fn set_owner_only_dir_security(path: &Path) -> Result<()> {
         let sa = owner_only_security_attributes()?;
-        let wide = wide_null(path.as_os_str());
+        let mut dacl_present = 0;
+        let mut dacl_defaulted = 0;
+        let mut dacl = std::ptr::null_mut();
         let ok = unsafe {
-            SetFileSecurityW(
-                wide.as_ptr(),
-                OWNER_SECURITY_INFORMATION
-                    | DACL_SECURITY_INFORMATION
-                    | PROTECTED_DACL_SECURITY_INFORMATION,
+            GetSecurityDescriptorDacl(
                 sa.descriptor,
+                &mut dacl_present,
+                &mut dacl,
+                &mut dacl_defaulted,
             )
         };
-        if ok == 0 {
+        if ok == 0 || dacl_present == 0 || dacl.is_null() {
             return Err(io_err(
-                "setting owner-private daemon directory security",
+                "reading owner-private daemon directory DACL",
                 std::io::Error::last_os_error(),
             ));
+        }
+        let wide = wide_null(path.as_os_str());
+        let rc = unsafe {
+            SetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                dacl,
+                std::ptr::null_mut(),
+            )
+        };
+        if rc != 0 {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!(
+                    "setting DACL for {} failed: {}",
+                    path.display(),
+                    std::io::Error::from_raw_os_error(rc as i32)
+                ),
+            });
         }
         Ok(())
     }
