@@ -23,6 +23,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::io::BufReader;
+use tokio::sync::Mutex as AsyncMutex;
 
 pub const READINESS_TIMEOUT: Duration = Duration::from_secs(5);
 pub const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_millis(500);
@@ -134,6 +135,10 @@ impl From<HandshakeError> for DaemonError {
                 source: e,
             },
             HandshakeError::Json(e) => DaemonError::Json(e),
+            HandshakeError::FrameTooLarge { max_bytes } => {
+                DaemonError::Protocol(format!("daemon IPC frame exceeded {max_bytes} bytes"))
+            }
+            HandshakeError::MalformedFrame(e) => DaemonError::Protocol(e),
             HandshakeError::Eof => {
                 DaemonError::Protocol("daemon closed the connection".to_string())
             }
@@ -276,11 +281,22 @@ impl CapFile {
     }
 }
 
+fn cap_required_peer_identity(cap: &CapFile) -> Result<(u32, u64)> {
+    let pid = cap.server_pid.ok_or_else(|| {
+        DaemonError::Unauthorized("daemon capability file is missing server_pid".to_string())
+    })?;
+    let start_time = cap.server_start_time.ok_or_else(|| {
+        DaemonError::Unauthorized("daemon capability file is missing server_start_time".to_string())
+    })?;
+    Ok((pid, start_time))
+}
+
 pub struct DaemonState {
     paths: DaemonPaths,
     instance_id: String,
     admin_cap: String,
     stores: Mutex<HashMap<String, StoreEntry>>,
+    store_open_guard: AsyncMutex<()>,
     members: Mutex<BTreeMap<MemberKey, MemberRecord>>,
     recent_errors: Mutex<VecDeque<RecentErrorStatus>>,
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
@@ -322,6 +338,7 @@ struct MemberRecord {
     lease_epoch: i64,
     owner_instance_id: String,
     idle: bool,
+    idle_rearmable: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -343,6 +360,22 @@ impl DaemonState {
     async fn status(&self) -> DaemonStatus {
         self.status_with_thresholds(retention_warn_threshold(), idle_station_warn_threshold())
             .await
+    }
+
+    fn status_minimal(&self) -> DaemonStatus {
+        DaemonStatus {
+            protocol_version: current_protocol_version(),
+            daemon_version: proto::DAEMON_VERSION.to_string(),
+            instance_id: self.instance_id.clone(),
+            singleton_key: self.paths.singleton.redacted_material(),
+            stores: Vec::new(),
+            backoff: vec!["n/a: crashloop backoff is not persisted by the daemon".to_string()],
+            recent_errors: Vec::new(),
+            epoch_by_address: Vec::new(),
+            members: Vec::new(),
+            retention: Vec::new(),
+            idle_stations: IdleStationStatus::default(),
+        }
     }
 
     async fn status_with_thresholds(
@@ -400,7 +433,7 @@ impl DaemonState {
             instance_id: self.instance_id.clone(),
             singleton_key: self.paths.singleton.redacted_material(),
             stores,
-            backoff: Vec::new(),
+            backoff: vec!["n/a: crashloop backoff is not persisted by the daemon".to_string()],
             recent_errors: self.recent_errors(),
             epoch_by_address,
             members,
@@ -428,6 +461,11 @@ impl DaemonState {
         &self,
         store_key: &str,
     ) -> std::result::Result<Arc<dyn Backend>, Response> {
+        if let Some(entry) = self.stores.lock().unwrap().get(store_key).cloned() {
+            return Ok(entry.backend);
+        }
+
+        let _open_guard = self.store_open_guard.lock().await;
         if let Some(entry) = self.stores.lock().unwrap().get(store_key).cloned() {
             return Ok(entry.backend);
         }
@@ -508,6 +546,7 @@ impl DaemonState {
             {
                 let prior = member.clone();
                 member.idle = true;
+                member.idle_rearmable = false;
                 member.waiters = 0;
                 affected.push(prior);
             }
@@ -543,6 +582,7 @@ impl DaemonState {
             {
                 let prior = member.clone();
                 member.idle = true;
+                member.idle_rearmable = false;
                 member.waiters = 0;
                 affected.push(prior);
             }
@@ -577,6 +617,7 @@ impl DaemonState {
                     } else {
                         let prior = member.clone();
                         member.idle = true;
+                        member.idle_rearmable = kind == "IdleTtlReap";
                         member.waiters = 0;
                         Some(prior)
                     }
@@ -614,40 +655,57 @@ impl DaemonState {
         );
     }
 
-    fn check_session_id_reuse_tripwire(&self, record: &MemberRecord) {
-        let ended = self
-            .ended_sessions
+    fn session_definite_end(
+        &self,
+        store_key: &str,
+        session_id: &str,
+    ) -> Option<EndedSessionRecord> {
+        self.ended_sessions
             .lock()
             .unwrap()
-            .get(&Self::session_key(&record.store_key, &record.session_id))
-            .cloned();
+            .get(&Self::session_key(store_key, session_id))
+            .cloned()
+    }
+
+    fn check_session_id_reuse_tripwire(&self, record: &MemberRecord) {
+        let ended = self.session_definite_end(&record.store_key, &record.session_id);
         let Some(ended) = ended else {
             return;
         };
-        let same_address = ended.addresses.contains(&record.address);
-        let same_occupant = ended
-            .occupant
-            .as_deref()
-            .map_or(true, |prior| prior == record.occupant);
-        if !same_address || !same_occupant {
-            // Dismiss/session_id spike tripwire: automated tests cannot prove Copilot dismiss
-            // behavior.  If a definitely-ended session id later appears in an inconsistent shape,
-            // surface it loudly while relying on non-destructive idle TTL as the safe fallback.
-            self.push_recent_error(
-                "SessionIdReuse",
-                format!(
-                    "SESSION_ID_REUSE_TRIPWIRE store={} session={} re-registered address={} occupant={} after definite_end reason={} at_ms={} prior_addresses={:?} prior_occupant={:?}",
-                    record.store_key,
-                    record.session_id,
-                    record.address,
-                    record.occupant,
-                    ended.reason,
-                    ended.at_ms,
-                    ended.addresses,
-                    ended.occupant
-                ),
-            );
+        self.push_recent_error(
+            "SessionIdReuse",
+            format!(
+                "SESSION_ID_REUSE_TRIPWIRE store={} session={} re-registered address={} occupant={} after definite_end reason={} at_ms={} prior_addresses={:?} prior_occupant={:?}",
+                record.store_key,
+                record.session_id,
+                record.address,
+                record.occupant,
+                ended.reason,
+                ended.at_ms,
+                ended.addresses,
+                ended.occupant
+            ),
+        );
+    }
+
+    fn rearm_idle_member_if_allowed(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+    ) -> Option<MemberRecord> {
+        let key = Self::member_key(store_key, session_id, address);
+        let mut members = self.members.lock().unwrap();
+        let member = members.get_mut(&key)?;
+        if !member.idle {
+            return Some(member.clone());
         }
+        if !member.idle_rearmable {
+            return None;
+        }
+        member.idle = false;
+        member.idle_rearmable = false;
+        Some(member.clone())
     }
 
     fn remove_member(
@@ -764,6 +822,32 @@ impl WatchPidRecord {
             alive: crate::session_watch::process_alive_with_start_time(self.pid, self.start_time),
             start_time: self.start_time,
         }
+    }
+}
+
+struct WaiterGuard {
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+    address: String,
+}
+
+impl WaiterGuard {
+    fn new(state: Arc<DaemonState>, store_key: &str, session_id: &str, address: &str) -> Self {
+        state.add_waiter(store_key, session_id, address);
+        Self {
+            state,
+            store_key: store_key.to_string(),
+            session_id: session_id.to_string(),
+            address: address.to_string(),
+        }
+    }
+}
+
+impl Drop for WaiterGuard {
+    fn drop(&mut self) {
+        self.state
+            .remove_waiter(&self.store_key, &self.session_id, &self.address);
     }
 }
 
@@ -890,9 +974,15 @@ pub fn daemon_version_metadata() -> DaemonVersionMetadata {
 pub async fn connect_existing(store_key: &str) -> Result<DaemonClient> {
     let paths = DaemonPaths::current()?;
     let cap = read_cap_file(&paths.cap_path)?;
+    let (server_pid, server_start_time) = cap_required_peer_identity(&cap)?;
     let conn = platform::connect(&paths.endpoint).await?;
     let expected_exe = canonical_current_exe()?;
-    platform::verify_server_peer(&conn, &expected_exe, cap.server_pid, cap.server_start_time)?;
+    platform::verify_server_peer(
+        &conn,
+        &expected_exe,
+        Some(server_pid),
+        Some(server_start_time),
+    )?;
     handshake_connected(conn, paths, store_key).await
 }
 
@@ -1044,13 +1134,14 @@ pub async fn serve() -> Result<()> {
 fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
     let instance_id = random_token("inst")?;
     let admin_cap = random_token("cap")?;
+    let server_start_time = current_process_start_time_for_cap()?;
     let cap = CapFile {
         instance_id: instance_id.clone(),
         admin_cap: admin_cap.clone(),
         singleton_hash: paths.singleton_hash.clone(),
         protocol_major: paths.singleton.protocol_major,
         server_pid: Some(std::process::id()),
-        server_start_time: crate::session_watch::capture_process_start_time(std::process::id()),
+        server_start_time: server_start_time,
     };
     write_cap_file(&paths.cap_path, &cap)?;
     Ok(DaemonState {
@@ -1058,11 +1149,23 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         instance_id,
         admin_cap,
         stores: Mutex::new(HashMap::new()),
+        store_open_guard: AsyncMutex::new(()),
         members: Mutex::new(BTreeMap::new()),
         recent_errors: Mutex::new(VecDeque::new()),
         ended_sessions: Mutex::new(BTreeMap::new()),
         draining: AtomicBool::new(false),
     })
+}
+
+fn current_process_start_time_for_cap() -> Result<Option<u64>> {
+    let start_time = crate::session_watch::capture_process_start_time(std::process::id());
+    if cfg!(any(target_os = "linux", windows)) && start_time.is_none() {
+        return Err(DaemonError::Unsupported {
+            capability: "daemon cap server_start_time",
+            message: "current process start time could not be captured".to_string(),
+        });
+    }
+    Ok(start_time)
 }
 
 async fn open_store_backend(store_key: &str) -> std::result::Result<Arc<dyn Backend>, Response> {
@@ -1373,9 +1476,13 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 if let Err(response) = state.check_admin_cap(proof.as_deref()) {
                     return (response, ClientAction::Continue);
                 }
-            }
-            Response::StatusReport {
-                status: state.status().await,
+                Response::StatusReport {
+                    status: state.status().await,
+                }
+            } else {
+                Response::StatusReport {
+                    status: state.status_minimal(),
+                }
             }
         }
         Request::SessionEnd {
@@ -1558,6 +1665,7 @@ async fn register_member(
                 refreshed.tags = tags;
                 refreshed.watch_pids = watch_pids;
                 refreshed.idle = false;
+                refreshed.idle_rearmable = false;
                 state.check_session_id_reuse_tripwire(&refreshed);
                 state.insert_member(refreshed.clone());
                 return Response::Registered {
@@ -1614,9 +1722,8 @@ async fn register_member(
         return proto::internal(format!("ensuring address {address}: {e:#}"));
     }
 
-    let cutoff = now_ms() - liveness_window_secs() * 1000;
     let claimed = match backend
-        .claim_epoch_lease(&address, &state.instance_id, cutoff)
+        .claim_epoch_lease(&address, &state.instance_id, liveness_window_secs())
         .await
     {
         Ok(EpochClaimResult::Claimed(claimed)) => claimed,
@@ -1660,6 +1767,7 @@ async fn register_member(
         lease_epoch: claimed.lease_epoch,
         owner_instance_id: claimed.owner_instance_id.clone(),
         idle: false,
+        idle_rearmable: false,
     };
     state.check_session_id_reuse_tripwire(&record);
     state.insert_member(record);
@@ -1693,6 +1801,18 @@ async fn session_end(state: Arc<DaemonState>, store_key: String, session_id: Str
 }
 
 async fn reset_station(state: Arc<DaemonState>, store_key: String, address: String) -> Response {
+    let backend = match state.backend_for(&store_key).await {
+        Ok(backend) => backend,
+        Err(response) => return response,
+    };
+    let durable_epoch = match backend.reset_epoch_lease(&address).await {
+        Ok(epoch) => epoch,
+        Err(e) => {
+            return proto::internal(format!(
+                "resetting durable epoch lease for {address} in {store_key}: {e:#}"
+            ))
+        }
+    };
     let affected =
         state.mark_address_idle(&store_key, &address, "Reset", "operator reset requested");
     if affected.is_empty() {
@@ -1706,7 +1826,7 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
         delivery_outcome: None,
         address: Some(address),
         message_id: None,
-        lease_epoch: affected.first().map(|m| m.lease_epoch),
+        lease_epoch: affected.first().map(|m| m.lease_epoch).or(durable_epoch),
     }
 }
 
@@ -1716,12 +1836,49 @@ async fn detach_member(
     session_id: String,
     address: String,
 ) -> Response {
-    let removed = state.remove_member(&store_key, &session_id, &address);
-    if let Some(member) = removed {
-        if let Ok(backend) = state.backend_for(&store_key).await {
-            let _ = backend
-                .release_epoch_lease(&address, &member.owner_instance_id, member.lease_epoch)
-                .await;
+    let member = state.get_member(&store_key, &session_id, &address);
+    if let Some(member) = member {
+        let backend = match state.backend_for(&store_key).await {
+            Ok(backend) => backend,
+            Err(response) => return response,
+        };
+        match backend
+            .release_epoch_lease(&address, &member.owner_instance_id, member.lease_epoch)
+            .await
+        {
+            Ok(true) => {
+                state.remove_member(&store_key, &session_id, &address);
+                state.record_definite_session_end(
+                    &store_key,
+                    &session_id,
+                    "Detach",
+                    &[member.clone()],
+                );
+            }
+            Ok(false) => {
+                self_demote_member(
+                    &state,
+                    &member,
+                    "detach release_epoch_lease returned 0 rows",
+                );
+                return proto::error_response(
+                    proto::ERROR_NOT_OWNER,
+                    format!("session {session_id} no longer owns {address} in {store_key}"),
+                );
+            }
+            Err(e) => {
+                state.push_recent_error(
+                    "BackendDisconnect",
+                    format!(
+                        "detach release failed for {store_key} {address} epoch {}: {e:#}",
+                        member.lease_epoch
+                    ),
+                );
+                return proto::internal(format!(
+                    "detaching {address} at epoch {}: durable release failed: {e:#}",
+                    member.lease_epoch
+                ));
+            }
         }
         Response::Ack {
             message: Some("detached".to_string()),
@@ -1778,6 +1935,16 @@ async fn wait_for_message_with_idle_ttl(
         .get_member(&store_key, &session_id, &address)
         .is_none()
     {
+        if let Some(ended) = state.session_definite_end(&store_key, &session_id) {
+            state.push_recent_error(
+                "PresenceEnded",
+                format!(
+                    "Wait terminal store={store_key} session={session_id} address={address}: definite_end reason={} at_ms={}",
+                    ended.reason, ended.at_ms
+                ),
+            );
+            return Response::PresenceEnded;
+        }
         state.push_recent_error(
             "NeedsAttach",
             format!("Wait NeedsAttach store={store_key} session={session_id} address={address}"),
@@ -1792,35 +1959,31 @@ async fn wait_for_message_with_idle_ttl(
     };
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let idle_deadline = Instant::now() + idle_ttl;
-    state.add_waiter(&store_key, &session_id, &address);
+    let _waiter = WaiterGuard::new(state.clone(), &store_key, &session_id, &address);
     loop {
         if state.is_draining() {
-            state.remove_waiter(&store_key, &session_id, &address);
             return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
         }
-        let current = match state.get_member(&store_key, &session_id, &address) {
+        let current = match state.rearm_idle_member_if_allowed(&store_key, &session_id, &address) {
             Some(member) => member,
             None => {
-                state.remove_waiter(&store_key, &session_id, &address);
+                if state
+                    .get_member(&store_key, &session_id, &address)
+                    .is_some_and(|member| member.idle)
+                {
+                    return Response::PresenceEnded;
+                }
                 return proto::needs_attach(format!(
                     "session {session_id} is no longer attached to {address} in {store_key}"
                 ));
             }
         };
         if current.idle {
-            state.remove_waiter(&store_key, &session_id, &address);
             return Response::PresenceEnded;
-        }
-        if let Err(response) =
-            prove_current_owner(&state, &backend, &current, "wait ownership proof").await
-        {
-            state.remove_waiter(&store_key, &session_id, &address);
-            return response;
         }
         let rows = match backend.fetch_undelivered(&address).await {
             Ok(rows) => rows,
             Err(e) => {
-                state.remove_waiter(&store_key, &session_id, &address);
                 return proto::internal(format!("fetching undelivered for {address}: {e:#}"));
             }
         };
@@ -1832,23 +1995,19 @@ async fn wait_for_message_with_idle_ttl(
             let current = match state.get_member(&store_key, &session_id, &address) {
                 Some(member) => member,
                 None => {
-                    state.remove_waiter(&store_key, &session_id, &address);
                     return proto::needs_attach(format!(
                         "session {session_id} is no longer attached to {address} in {store_key}"
                     ));
                 }
             };
             if current.idle {
-                state.remove_waiter(&store_key, &session_id, &address);
                 return Response::PresenceEnded;
             }
             if let Err(response) =
                 prove_current_owner(&state, &backend, &current, "wait delivery proof").await
             {
-                state.remove_waiter(&store_key, &session_id, &address);
                 return response;
             }
-            state.remove_waiter(&store_key, &session_id, &address);
             return Response::Message {
                 id: row.id,
                 thread_id: row.thread_id,
@@ -1868,7 +2027,6 @@ async fn wait_for_message_with_idle_ttl(
         if let Some(deadline) = deadline {
             let now = Instant::now();
             if now >= deadline {
-                state.remove_waiter(&store_key, &session_id, &address);
                 return Response::Timeout;
             }
             if now >= idle_deadline {
@@ -1879,7 +2037,6 @@ async fn wait_for_message_with_idle_ttl(
                     "IdleTtlReap",
                     "blocked wait exceeded idle TTL",
                 );
-                state.remove_waiter(&store_key, &session_id, &address);
                 return Response::PresenceEnded;
             }
             let remaining = deadline.saturating_duration_since(now);
@@ -1895,7 +2052,6 @@ async fn wait_for_message_with_idle_ttl(
                     "IdleTtlReap",
                     "blocked wait exceeded idle TTL",
                 );
-                state.remove_waiter(&store_key, &session_id, &address);
                 return Response::PresenceEnded;
             }
             tokio::time::sleep(
@@ -1922,6 +2078,12 @@ async fn ack_message(
     let member = match state.get_member(&store_key, &session_id, &address) {
         Some(member) => member,
         None => {
+            if let Some(ended) = state.session_definite_end(&store_key, &session_id) {
+                return proto::needs_attach(format!(
+                    "session {session_id} was definitely ended by {} at {}; deliberate re-attach required for {address} in {store_key}",
+                    ended.reason, ended.at_ms
+                ));
+            }
             state.push_recent_error(
                 "NeedsAttach",
                 format!("Ack NeedsAttach store={store_key} session={session_id} address={address} message_id={message_id}"),
@@ -2184,11 +2346,23 @@ fn liveness_window_secs() -> i64 {
 }
 
 fn idle_ttl_duration() -> Duration {
+    idle_ttl_duration_from_env(false)
+}
+
+fn idle_ttl_duration_from_env(allow_subday: bool) -> Duration {
     std::env::var("TELEX_IDLE_TTL_MS")
         .ok()
         .and_then(|s| s.parse::<u64>().ok())
-        .map(Duration::from_millis)
+        .map(|ms| clamp_idle_ttl(Duration::from_millis(ms), allow_subday))
         .unwrap_or(DEFAULT_IDLE_TTL)
+}
+
+fn clamp_idle_ttl(duration: Duration, allow_subday: bool) -> Duration {
+    if allow_subday || duration >= DEFAULT_IDLE_TTL {
+        duration
+    } else {
+        DEFAULT_IDLE_TTL
+    }
 }
 
 fn retention_warn_threshold() -> i64 {
@@ -2228,6 +2402,7 @@ mod p3_tests {
             instance_id: format!("inst-{label}-{seq}"),
             admin_cap: format!("cap-{label}-{seq}"),
             stores: Mutex::new(HashMap::new()),
+            store_open_guard: AsyncMutex::new(()),
             members: Mutex::new(BTreeMap::new()),
             recent_errors: Mutex::new(VecDeque::new()),
             ended_sessions: Mutex::new(BTreeMap::new()),
@@ -2396,10 +2571,7 @@ mod p3_tests {
         assert!(state.status().await.members.is_empty());
 
         let wait_after_detach = request(state.clone(), wait_req(&store, "s1", "addr:a", 1)).await;
-        assert!(matches!(
-            wait_after_detach,
-            Response::Error { ref code, .. } if code == proto::ERROR_NEEDS_ATTACH
-        ));
+        assert!(matches!(wait_after_detach, Response::PresenceEnded));
 
         let ack_after_detach = request(
             state.clone(),
@@ -2640,7 +2812,7 @@ mod p3_tests {
             "predecessor should release current epoch before successor claim"
         );
         match backend
-            .claim_epoch_lease(address, successor, now_ms() - 1)
+            .claim_epoch_lease(address, successor, 15)
             .await
             .unwrap()
         {
@@ -2944,10 +3116,7 @@ mod p3_tests {
             .any(|e| { e.kind == "Reset" && e.message.contains("prior_occupant=occupant-s1") }));
         let lease = backend.get_lease("addr:a").await.unwrap().unwrap();
         assert_eq!(lease.lease_epoch, Some(epoch));
-        assert_eq!(
-            lease.owner_instance_id.as_deref(),
-            Some(state.instance_id.as_str())
-        );
+        assert_eq!(lease.owner_instance_id, None);
     }
 
     #[tokio::test]
@@ -3019,10 +3188,6 @@ mod p3_tests {
         let backend = state.backend_for(&store).await.unwrap();
         let message_id = insert_test_message(&backend, "addr:a", None).await;
         assert!(backend.delivery_retention_count().await.unwrap() >= 1);
-        assert!(matches!(
-            request(state.clone(), register_req(&store, "s1", "addr:a")).await,
-            Response::Registered { .. }
-        ));
         let wait = request(state, wait_req(&store, "s1", "addr:a", 1_000)).await;
         assert!(matches!(wait, Response::Message { id, .. } if id == message_id));
     }
@@ -3073,6 +3238,75 @@ mod p3_tests {
         let json = serde_json::to_string(&status).unwrap();
         assert!(!json.contains(&state.admin_cap));
         assert!(!json.contains("proof"));
+    }
+
+    #[tokio::test]
+    async fn status_detail_requires_proof_and_minimal_status_is_unprivileged() {
+        let state = test_state("status-detail");
+        let store = store_key("status-detail");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let minimal = request(
+            state.clone(),
+            Request::Status {
+                store_key: Some(store.clone()),
+                detail: false,
+                proof: None,
+            },
+        )
+        .await;
+        match minimal {
+            Response::StatusReport { status } => {
+                assert!(status.members.is_empty());
+                assert!(status.recent_errors.is_empty());
+                assert!(status.backoff.iter().any(|b| b.contains("n/a")));
+            }
+            other => panic!("expected minimal status, got {other:?}"),
+        }
+
+        let denied = request(
+            state.clone(),
+            Request::Status {
+                store_key: Some(store.clone()),
+                detail: true,
+                proof: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            denied,
+            Response::Error { ref code, .. } if code == proto::ERROR_UNAUTHORIZED
+        ));
+
+        let detailed = request(
+            state.clone(),
+            Request::Status {
+                store_key: Some(store),
+                detail: true,
+                proof: Some(state.admin_cap.clone()),
+            },
+        )
+        .await;
+        match detailed {
+            Response::StatusReport { status } => assert_eq!(status.members.len(), 1),
+            other => panic!("expected detailed status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn idle_ttl_env_values_are_clamped_outside_test_helpers() {
+        assert_eq!(
+            clamp_idle_ttl(Duration::from_millis(1), false),
+            DEFAULT_IDLE_TTL
+        );
+        assert_eq!(
+            clamp_idle_ttl(Duration::from_millis(1), true),
+            Duration::from_millis(1)
+        );
+        assert_eq!(
+            clamp_idle_ttl(DEFAULT_IDLE_TTL + Duration::from_millis(1), false),
+            DEFAULT_IDLE_TTL + Duration::from_millis(1)
+        );
     }
 
     #[tokio::test]
@@ -3138,6 +3372,27 @@ mod p3_tests {
             e.kind == "SessionIdReuse" && e.message.contains("SESSION_ID_REUSE_TRIPWIRE")
         }));
     }
+
+    #[tokio::test]
+    async fn session_id_reuse_tripwire_warns_on_same_shape_after_definite_end() {
+        let state = test_state("session-reuse-same");
+        let store = store_key("session-reuse-same");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        assert!(matches!(
+            request(state.clone(), session_end_req(&state, &store, "s1")).await,
+            Response::Ack { .. }
+        ));
+        assert!(matches!(
+            request(state.clone(), register_req(&store, "s1", "addr:a")).await,
+            Response::Registered { .. }
+        ));
+        let status = state.status().await;
+        assert!(status.recent_errors.iter().any(|e| {
+            e.kind == "SessionIdReuse"
+                && e.message.contains("SESSION_ID_REUSE_TRIPWIRE")
+                && e.message.contains("addr:a")
+        }));
+    }
 }
 
 #[cfg(feature = "sqlite")]
@@ -3193,6 +3448,7 @@ pub mod test_support {
                 instance_id: format!("inst-{label}-{seq}"),
                 admin_cap: format!("cap-{label}-{seq}"),
                 stores: Mutex::new(HashMap::new()),
+                store_open_guard: AsyncMutex::new(()),
                 members: Mutex::new(BTreeMap::new()),
                 recent_errors: Mutex::new(VecDeque::new()),
                 ended_sessions: Mutex::new(BTreeMap::new()),
@@ -3638,6 +3894,14 @@ mod platform {
                 .create(path)
                 .map_err(|e| io_err("creating owner-private daemon directory", e))?;
         }
+        let link_meta = std::fs::symlink_metadata(path)
+            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
+        if link_meta.file_type().is_symlink() {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is a symlink", path.display()),
+            });
+        }
         std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
             .map_err(|e| io_err("setting owner-private daemon directory permissions", e))?;
         let meta = std::fs::metadata(path)
@@ -3801,20 +4065,22 @@ mod platform {
     use std::os::windows::io::{AsRawHandle, FromRawHandle};
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer};
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, LocalFree, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY, FILETIME,
-        HANDLE, INVALID_HANDLE_VALUE,
+        CloseHandle, GetLastError, LocalFree, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS,
+        ERROR_PIPE_BUSY, FILETIME, HANDLE, INVALID_HANDLE_VALUE,
     };
     use windows_sys::Win32::Security::Authorization::{
-        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-        SDDL_REVISION_1,
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
     };
     use windows_sys::Win32::Security::{
-        GetTokenInformation, TokenUser, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+        GetTokenInformation, TokenUser, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
+        SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateDirectoryW, CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
-        FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED, FILE_GENERIC_WRITE, FILE_SHARE_READ,
-        FILE_SHARE_WRITE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
+        FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
     };
     use windows_sys::Win32::System::Pipes::{
         CreateNamedPipeW, GetNamedPipeClientProcessId, GetNamedPipeServerProcessId,
@@ -3905,6 +4171,7 @@ mod platform {
         }
         let canonical = std::fs::canonicalize(path)
             .map_err(|e| io_err("canonicalizing daemon directory", e))?;
+        validate_owner_private_dir(&canonical)?;
         Ok(canonical)
     }
 
@@ -3987,7 +4254,7 @@ mod platform {
                 wide.as_ptr(),
                 open_mode,
                 pipe_mode,
-                1,
+                255,
                 8192,
                 8192,
                 0,
@@ -3996,7 +4263,9 @@ mod platform {
         };
         if handle == INVALID_HANDLE_VALUE {
             let err = std::io::Error::last_os_error();
-            if err.raw_os_error() == Some(ERROR_ALREADY_EXISTS as i32) {
+            if err.raw_os_error() == Some(ERROR_ALREADY_EXISTS as i32)
+                || (first && err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32))
+            {
                 return Err(DaemonError::AlreadyRunning(format!(
                     "named pipe {pipe_name} already has a first instance"
                 )));
@@ -4022,6 +4291,109 @@ mod platform {
             ));
         }
         Ok(())
+    }
+
+    fn validate_owner_private_dir(path: &Path) -> Result<()> {
+        use std::os::windows::fs::MetadataExt;
+        use std::path::{Component, Prefix};
+
+        if path.components().any(|component| {
+            matches!(
+                component,
+                Component::Prefix(prefix)
+                    if matches!(prefix.kind(), Prefix::UNC(_, _) | Prefix::VerbatimUNC(_, _))
+            )
+        }) {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is not a local path", path.display()),
+            });
+        }
+        let meta = std::fs::symlink_metadata(path)
+            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
+        if !meta.is_dir() {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is not a directory", path.display()),
+            });
+        }
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is a reparse point", path.display()),
+            });
+        }
+        let sid = current_user_identity()?;
+        let sddl = dir_security_sddl(path)?;
+        if !owner_private_sddl_is_strict(&sddl, &sid) {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is not private to current SID", path.display()),
+            });
+        }
+        Ok(())
+    }
+
+    fn dir_security_sddl(path: &Path) -> Result<String> {
+        let wide = wide_null(path.as_os_str());
+        let mut sd: *mut c_void = std::ptr::null_mut();
+        let rc = unsafe {
+            GetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut sd,
+            )
+        };
+        if rc != 0 {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!(
+                    "cannot read security descriptor for {}: {}",
+                    path.display(),
+                    std::io::Error::from_raw_os_error(rc as i32)
+                ),
+            });
+        }
+        let mut sddl_ptr: *mut u16 = std::ptr::null_mut();
+        let ok = unsafe {
+            ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                sd,
+                SDDL_REVISION_1,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut sddl_ptr,
+                std::ptr::null_mut(),
+            )
+        };
+        unsafe {
+            LocalFree(sd);
+        }
+        if ok == 0 {
+            return Err(io_err(
+                "converting daemon directory security descriptor",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let sddl = unsafe { wide_ptr_to_string(sddl_ptr) };
+        unsafe {
+            LocalFree(sddl_ptr as *mut c_void);
+        }
+        Ok(sddl)
+    }
+
+    pub(super) fn owner_private_sddl_is_strict(sddl: &str, sid: &str) -> bool {
+        let owner = format!("O:{sid}");
+        let owner_ace = format!(";;;{sid})");
+        let broad = [
+            ";;;WD)", ";;;AU)", ";;;BU)", ";;;BG)", ";;;AN)", ";;;IU)", ";;;SU)",
+        ];
+        sddl.contains(&owner)
+            && sddl.contains(&owner_ace)
+            && !broad.iter().any(|ace| sddl.contains(ace))
     }
 
     fn verify_process_owner(pid: u32) -> Result<()> {
@@ -4451,6 +4823,43 @@ mod tests {
         assert!(matches!(missing_start, DaemonError::Unauthorized(_)));
     }
 
+    #[test]
+    fn cap_identity_requires_pid_and_start_time() {
+        let missing_pid = CapFile {
+            instance_id: "inst".to_string(),
+            admin_cap: "cap".to_string(),
+            singleton_hash: "hash".to_string(),
+            protocol_major: proto::PROTOCOL_MAJOR,
+            server_pid: None,
+            server_start_time: Some(1),
+        };
+        assert!(matches!(
+            cap_required_peer_identity(&missing_pid),
+            Err(DaemonError::Unauthorized(_))
+        ));
+
+        let missing_start = CapFile {
+            server_pid: Some(1),
+            server_start_time: None,
+            ..missing_pid
+        };
+        assert!(matches!(
+            cap_required_peer_identity(&missing_start),
+            Err(DaemonError::Unauthorized(_))
+        ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_owner_private_sddl_rejects_broad_aces() {
+        let sid = platform::current_user_identity().expect("current SID");
+        let private = format!("O:{sid}G:{sid}D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;{sid})");
+        assert!(platform::owner_private_sddl_is_strict(&private, &sid));
+
+        let broad = format!("O:{sid}G:{sid}D:(A;;GA;;;{sid})(A;;GR;;;WD)");
+        assert!(!platform::owner_private_sddl_is_strict(&broad, &sid));
+    }
+
     #[tokio::test]
     async fn endpoint_bind_exclusivity_rejects_second_listener() {
         let run_dir = repo_test_dir("bind-exclusive");
@@ -4468,5 +4877,39 @@ mod tests {
             second,
             Err(DaemonError::AlreadyRunning(_)) | Err(DaemonError::Io { .. })
         ));
+    }
+
+    #[cfg(windows)]
+    #[tokio::test]
+    async fn windows_pipe_listener_rearms_while_client_is_connected() {
+        let run_dir = repo_test_dir("pipe-rearm");
+        let paths = DaemonPaths::for_key(
+            SingletonKey::from_parts(
+                format!("user-{}", std::process::id()),
+                &run_dir,
+                proto::PROTOCOL_MAJOR,
+            ),
+            &run_dir,
+        );
+        let mut listener = platform::Listener::bind(&paths.endpoint).expect("bind listener");
+        let endpoint = paths.endpoint.clone();
+        let first_client = tokio::spawn(async move { platform::connect(&endpoint).await });
+        let first_server = listener.accept().await.expect("accept first client");
+        let first_client = first_client
+            .await
+            .expect("first connect")
+            .expect("first client");
+
+        listener
+            .ready_for_next()
+            .expect("rearm while first client is still connected");
+        let endpoint = paths.endpoint.clone();
+        let second_client = tokio::spawn(async move { platform::connect(&endpoint).await });
+        let second_server = listener.accept().await.expect("accept second client");
+        let second_client = second_client
+            .await
+            .expect("second connect")
+            .expect("second client");
+        drop((first_server, first_client, second_server, second_client));
     }
 }

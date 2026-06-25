@@ -12,6 +12,7 @@ pub const PROTOCOL_MAJOR: u16 = 1;
 pub const PROTOCOL_MINOR: u16 = 0;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
+pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
 
 pub const CAP_JSONL: &str = "jsonl_v1";
 pub const CAP_ADMIN_CAP: &str = "admin_cap_v1";
@@ -426,6 +427,8 @@ pub enum HandshakeError {
     Verify(String),
     Io(std::io::Error),
     Json(serde_json::Error),
+    FrameTooLarge { max_bytes: usize },
+    MalformedFrame(String),
     Eof,
     Rejected(String),
 }
@@ -436,6 +439,10 @@ impl fmt::Display for HandshakeError {
             HandshakeError::Verify(e) => write!(f, "server authentication failed: {e}"),
             HandshakeError::Io(e) => write!(f, "IPC I/O failed: {e}"),
             HandshakeError::Json(e) => write!(f, "IPC JSON framing failed: {e}"),
+            HandshakeError::FrameTooLarge { max_bytes } => {
+                write!(f, "IPC JSONL frame exceeded {max_bytes} bytes")
+            }
+            HandshakeError::MalformedFrame(e) => write!(f, "IPC JSONL frame malformed: {e}"),
             HandshakeError::Eof => write!(f, "IPC peer closed the connection"),
             HandshakeError::Rejected(reason) => write!(f, "daemon rejected handshake: {reason}"),
         }
@@ -584,11 +591,45 @@ where
     R: AsyncBufRead + Unpin,
     T: for<'de> Deserialize<'de>,
 {
-    let mut line = String::new();
-    if reader.read_line(&mut line).await? == 0 {
-        return Err(HandshakeError::Eof);
+    let mut line = Vec::new();
+    loop {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            return if line.is_empty() {
+                Err(HandshakeError::Eof)
+            } else {
+                Err(HandshakeError::MalformedFrame(
+                    "EOF before newline terminator".to_string(),
+                ))
+            };
+        }
+        let take = available
+            .iter()
+            .position(|b| *b == b'\n')
+            .map_or(available.len(), |pos| pos + 1);
+        if line.len().saturating_add(take) > MAX_JSONL_FRAME_BYTES {
+            return Err(HandshakeError::FrameTooLarge {
+                max_bytes: MAX_JSONL_FRAME_BYTES,
+            });
+        }
+        line.extend_from_slice(&available[..take]);
+        reader.consume(take);
+        if line.ends_with(b"\n") {
+            break;
+        }
     }
-    Ok(serde_json::from_str(line.trim_end())?)
+    if line.ends_with(b"\n") {
+        line.pop();
+    }
+    if line.ends_with(b"\r") {
+        line.pop();
+    }
+    if line.is_empty() {
+        return Err(HandshakeError::MalformedFrame(
+            "empty JSONL frame".to_string(),
+        ));
+    }
+    Ok(serde_json::from_slice(&line)?)
 }
 
 pub async fn send_hello_after_verifier<W, F>(
@@ -635,7 +676,7 @@ mod tests {
         Arc,
     };
     use std::task::{Context, Poll};
-    use tokio::io::AsyncWrite;
+    use tokio::io::{AsyncWrite, BufReader};
 
     #[test]
     fn compatibility_table_explicitly_names_current_major_and_required_caps() {
@@ -755,6 +796,7 @@ mod tests {
             inner: client,
             verified: verified.clone(),
         };
+
         let hello = client_hello("store");
 
         send_hello_after_verifier(&mut writer, &hello, || {
@@ -765,5 +807,44 @@ mod tests {
         .unwrap();
 
         assert!(verified.load(Ordering::SeqCst));
+    }
+
+    #[tokio::test]
+    async fn jsonl_frame_size_and_malformed_edges_are_typed() {
+        let at_limit_payload = format!(
+            "\"{}\"\n",
+            "a".repeat(MAX_JSONL_FRAME_BYTES.saturating_sub(3))
+        );
+        let mut at_limit = BufReader::new(at_limit_payload.as_bytes());
+        let parsed: String = read_json_line(&mut at_limit).await.unwrap();
+        assert_eq!(parsed.len(), MAX_JSONL_FRAME_BYTES - 3);
+
+        let over_limit_payload = format!(
+            "\"{}\"\n",
+            "a".repeat(MAX_JSONL_FRAME_BYTES.saturating_sub(2))
+        );
+        let mut over_limit = BufReader::new(over_limit_payload.as_bytes());
+        assert!(matches!(
+            read_json_line::<_, String>(&mut over_limit).await,
+            Err(HandshakeError::FrameTooLarge { .. })
+        ));
+
+        let mut malformed = BufReader::new(b"{not-json}\n".as_slice());
+        assert!(matches!(
+            read_json_line::<_, serde_json::Value>(&mut malformed).await,
+            Err(HandshakeError::Json(_))
+        ));
+
+        let mut empty = BufReader::new(b"\n".as_slice());
+        assert!(matches!(
+            read_json_line::<_, serde_json::Value>(&mut empty).await,
+            Err(HandshakeError::MalformedFrame(_))
+        ));
+
+        let mut eof_without_newline = BufReader::new(b"{\"ok\":true}".as_slice());
+        assert!(matches!(
+            read_json_line::<_, serde_json::Value>(&mut eof_without_newline).await,
+            Err(HandshakeError::MalformedFrame(_))
+        ));
     }
 }

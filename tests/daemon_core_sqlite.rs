@@ -85,7 +85,7 @@ async fn rotate_owner(
         "predecessor should release before successor claim"
     );
     match backend
-        .claim_epoch_lease(address, successor, now_ms() - 1)
+        .claim_epoch_lease(address, successor, 15)
         .await
         .expect("successor claim")
     {
@@ -151,6 +151,33 @@ async fn section17_01_concurrent_first_use() {
         }),
         "unexpected exclusivity errors: {failures:?}"
     );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn section17_01_concurrent_register_fresh_same_store_shares_backend() {
+    let daemon = TestDaemon::new("section17-01-register");
+    let store = daemon.store_key("fresh-shared");
+    let barrier = Arc::new(Barrier::new(8));
+    let tasks = (0..8)
+        .map(|i| {
+            let worker = daemon.clone();
+            let worker_store = store.clone();
+            let barrier = barrier.clone();
+            tokio::spawn(async move {
+                barrier.wait().await;
+                worker
+                    .register(&worker_store, &format!("s{i}"), &format!("addr:{i}"))
+                    .await
+            })
+        })
+        .collect::<Vec<_>>();
+
+    for task in tasks {
+        assert_registered(task.await.expect("register task"));
+    }
+    let status = daemon.status().await;
+    assert_eq!(status.stores.len(), 1);
+    assert_eq!(status.members.len(), 8);
 }
 
 #[tokio::test]
@@ -260,6 +287,7 @@ async fn section17_05_explicit_ack_fanout_dedup() {
             Response::Message { id, .. } if id == message_id
         ));
     }
+
     assert_ack_outcome(
         daemon.ack(&store, "s1", "addr:a", message_id).await,
         DeliveryOutcome::Marked,
@@ -309,6 +337,51 @@ async fn section17_05_explicit_ack_fanout_dedup() {
         daemon.ack(&store, "s1", "addr:b", message_id).await,
         DeliveryOutcome::Marked,
     );
+}
+
+#[tokio::test]
+async fn section17_05_legacy_no_delivery_row_wait_ack_no_redelivery() {
+    let daemon = TestDaemon::new("section17-05-legacy");
+    let store = daemon.store_key("legacy-no-delivery");
+    let path = sqlite_path(&store);
+    {
+        let conn = rusqlite::Connection::open(&path).expect("seed legacy sqlite");
+        conn.execute_batch(
+            "CREATE TABLE messages (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                thread_id     INTEGER,
+                parent_id     INTEGER,
+                from_addr     TEXT,
+                to_addr       TEXT NOT NULL,
+                cc            TEXT,
+                kind          TEXT NOT NULL DEFAULT 'note',
+                attention     TEXT NOT NULL DEFAULT 'background',
+                requires_disposition INTEGER NOT NULL DEFAULT 0,
+                subject       TEXT,
+                body          TEXT NOT NULL,
+                metadata      TEXT,
+                sent_at_ms    INTEGER NOT NULL,
+                created_at_ms INTEGER NOT NULL
+            );
+            INSERT INTO messages(id, thread_id, from_addr, to_addr, kind, attention, body, sent_at_ms, created_at_ms)
+            VALUES (1, 1, 'sender', 'addr:legacy', 'note', 'background', 'legacy', 10, 10);",
+        )
+        .expect("seed old message");
+    }
+
+    assert_registered(daemon.register(&store, "s1", "addr:legacy").await);
+    assert!(matches!(
+        daemon.wait(&store, "s1", "addr:legacy", 1_000).await,
+        Response::Message { id: 1, .. }
+    ));
+    assert_ack_outcome(
+        daemon.ack(&store, "s1", "addr:legacy", 1).await,
+        DeliveryOutcome::Marked,
+    );
+    assert!(matches!(
+        daemon.wait(&store, "s1", "addr:legacy", 1).await,
+        Response::Timeout
+    ));
 }
 
 #[tokio::test]
@@ -794,6 +867,7 @@ async fn section17_17_durable_backend_clock() {
         let second = backend.durable_clock_now_ms().await.expect("clock second");
         assert!(second >= first);
     }
+
     let future_hwm = now_ms() + 60_000;
     {
         let conn = rusqlite::Connection::open(&db).expect("open raw clock db");
@@ -818,6 +892,33 @@ async fn section17_17_durable_backend_clock() {
             "SQLite BackendClock high-water must not move backward across reopen"
         );
     }
+}
+
+#[tokio::test]
+async fn section17_17_reset_after_restart_clears_wedged_durable_owner() {
+    let store;
+    let epoch;
+    {
+        let daemon = TestDaemon::new("section17-17-reset-one");
+        store = daemon.store_key("wedged-reset");
+        (epoch, _) = registered_epoch(&daemon, &store, "s1", "addr:a").await;
+    }
+
+    let restarted = TestDaemon::new("section17-17-reset-two");
+    match restarted.reset(&store, "addr:a").await {
+        Response::Ack { lease_epoch, .. } => assert_eq!(lease_epoch, Some(epoch)),
+        other => panic!("expected reset ack, got {other:?}"),
+    }
+    let backend = restarted.backend(&store).await.expect("backend");
+    let lease = backend
+        .get_lease("addr:a")
+        .await
+        .expect("lease")
+        .expect("lease row");
+    assert_eq!(lease.lease_epoch, Some(epoch));
+    assert_eq!(lease.owner_instance_id, None);
+    let (next_epoch, _) = registered_epoch(&restarted, &store, "s2", "addr:a").await;
+    assert_eq!(next_epoch, epoch + 1);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

@@ -14,6 +14,16 @@ pub async fn run(ctx: &Ctx, args: WaitArgs) -> Result<i32> {
     let address = ctx.cfg.require_address(&ctx.address)?;
     let store_key = ctx.store_key()?;
     let session_id = resolve_session_id(args.session.as_deref())?;
+    if args.since != 0 {
+        eprintln!(
+            "[wait] warning: --since is deprecated for daemon-core waits and is currently ignored"
+        );
+    }
+    if args.stale_heartbeat_ms != 15_000 {
+        eprintln!(
+            "[wait] warning: --stale-heartbeat-ms is deprecated for daemon-core waits and is currently ignored"
+        );
+    }
 
     let cfg = WaitLoopConfig {
         store_key,
@@ -241,10 +251,14 @@ async fn connect_within_grace<C: WaitConnector>(
         let remaining = deadline.duration_since(now);
         match tokio::time::timeout(remaining, connector.connect_or_spawn(store_key)).await {
             Ok(Ok(client)) => return Ok(Some(client)),
-            Ok(Err(
-                e @ (crate::daemon::DaemonError::Unauthorized(_)
-                | crate::daemon::DaemonError::Incompatible(_)),
-            )) => return Err(e.into()),
+            Ok(Err(e @ crate::daemon::DaemonError::Incompatible(_))) => return Err(e.into()),
+            Ok(Err(crate::daemon::DaemonError::Unauthorized(_))) => {
+                tokio::time::sleep(
+                    Duration::from_millis(RECONNECT_RETRY_SLEEP_MS)
+                        .min(deadline.saturating_duration_since(tokio::time::Instant::now())),
+                )
+                .await;
+            }
             Ok(Err(_)) | Err(_) => {
                 tokio::time::sleep(
                     Duration::from_millis(RECONNECT_RETRY_SLEEP_MS)

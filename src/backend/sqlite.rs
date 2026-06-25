@@ -18,6 +18,8 @@ use std::sync::{Arc, Mutex};
 use super::{Backend, Capabilities};
 use crate::model::*;
 
+const CURRENT_SCHEMA_VERSION: i64 = 2;
+
 // ---------------------------------------------------------------------------
 // Store advisory lock
 // ---------------------------------------------------------------------------
@@ -52,42 +54,364 @@ fn store_lock_dir() -> Result<std::path::PathBuf> {
         .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("state")))
         .ok_or_else(|| anyhow!("cannot resolve state dir for store lock directory"))?;
 
-    let dir = base.join("telex").join("locks");
-    std::fs::create_dir_all(&dir)
-        .map_err(|e| anyhow!("cannot create store lock dir {:?}: {}", dir, e))?;
+    let telex_dir = base.join("telex");
+    std::fs::create_dir_all(&telex_dir)
+        .with_context(|| format!("creating store lock parent {:?}", telex_dir))?;
+    let dir = telex_dir.join("locks");
+    ensure_private_local_dir(&dir)
+        .with_context(|| format!("validating store lock dir {:?}", dir))?;
     Ok(dir)
 }
 
+#[cfg(unix)]
+fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+
+    if path.exists() {
+        let link_meta = std::fs::symlink_metadata(path)
+            .with_context(|| format!("checking store lock directory {:?}", path))?;
+        if link_meta.file_type().is_symlink() {
+            bail!("store lock directory {:?} is a symlink", path);
+        }
+        if !link_meta.is_dir() {
+            bail!("store lock directory {:?} is not a directory", path);
+        }
+    } else {
+        let mut builder = std::fs::DirBuilder::new();
+        builder.mode(0o700);
+        builder
+            .create(path)
+            .with_context(|| format!("creating owner-private store lock directory {:?}", path))?;
+    }
+
+    let meta = std::fs::metadata(path)
+        .with_context(|| format!("checking store lock directory {:?}", path))?;
+    let uid = unsafe { libc::geteuid() };
+    if meta.uid() != uid {
+        bail!(
+            "store lock directory {:?} is owned by uid {}, expected current uid {}",
+            path,
+            meta.uid(),
+            uid
+        );
+    }
+    if meta.mode() & 0o077 != 0 {
+        bail!("store lock directory {:?} is group/world accessible", path);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
+    use std::os::windows::fs::MetadataExt;
+    use std::path::{Component, Prefix};
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    if path.components().any(|component| {
+        matches!(
+            component,
+            Component::Prefix(prefix)
+                if matches!(prefix.kind(), Prefix::UNC(_, _) | Prefix::VerbatimUNC(_, _))
+        )
+    }) {
+        bail!("store lock directory {:?} is not a local path", path);
+    }
+
+    if path.exists() {
+        let meta = std::fs::symlink_metadata(path)
+            .with_context(|| format!("checking store lock directory {:?}", path))?;
+        if !meta.is_dir() {
+            bail!("store lock directory {:?} is not a directory", path);
+        }
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            bail!("store lock directory {:?} is a reparse point", path);
+        }
+    } else {
+        create_windows_owner_only_dir(path)
+            .with_context(|| format!("creating owner-private store lock directory {:?}", path))?;
+    }
+
+    let sid = windows_current_user_sid()?;
+    let sddl = windows_dir_security_sddl(path)?;
+    if !windows_owner_private_sddl_is_strict(&sddl, &sid) {
+        bail!(
+            "store lock directory {:?} is not owner-private for current SID",
+            path
+        );
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn ensure_private_local_dir(_path: &std::path::Path) -> Result<()> {
+    bail!("owner-private local store lock directories are not supported on this platform")
+}
+
+#[cfg(unix)]
+fn validate_store_path_not_reparse(path: &std::path::Path) -> Result<()> {
+    let meta = std::fs::symlink_metadata(path)
+        .with_context(|| format!("checking SQLite store path {:?}", path))?;
+    if meta.file_type().is_symlink() {
+        bail!("SQLite store path {:?} is a symlink", path);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn validate_store_path_not_reparse(path: &std::path::Path) -> Result<()> {
+    use std::os::windows::fs::MetadataExt;
+    use windows_sys::Win32::Storage::FileSystem::FILE_ATTRIBUTE_REPARSE_POINT;
+
+    let meta = std::fs::symlink_metadata(path)
+        .with_context(|| format!("checking SQLite store path {:?}", path))?;
+    if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        bail!("SQLite store path {:?} is a reparse point", path);
+    }
+    Ok(())
+}
+
+#[cfg(not(any(unix, windows)))]
+fn validate_store_path_not_reparse(_path: &std::path::Path) -> Result<()> {
+    bail!("SQLite store path validation is not supported on this platform")
+}
+
+#[cfg(windows)]
+fn create_windows_owner_only_dir(path: &std::path::Path) -> Result<()> {
+    use std::ffi::{c_void, OsStr};
+    use windows_sys::Win32::Foundation::{GetLastError, LocalFree, ERROR_ALREADY_EXISTS};
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertStringSecurityDescriptorToSecurityDescriptorW, SDDL_REVISION_1,
+    };
+    use windows_sys::Win32::Security::SECURITY_ATTRIBUTES;
+    use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
+
+    let sid = windows_current_user_sid()?;
+    let sddl = format!("O:{sid}G:{sid}D:P(A;;GA;;;{sid})");
+    let wide_sddl = wide_null(OsStr::new(&sddl));
+    let mut descriptor: *mut c_void = std::ptr::null_mut();
+    let ok = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            wide_sddl.as_ptr(),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            std::ptr::null_mut(),
+        )
+    };
+    if ok == 0 {
+        bail!(
+            "building owner-only store lock directory security descriptor: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let mut attrs = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor,
+        bInheritHandle: 0,
+    };
+    let wide_path = wide_null(path.as_os_str());
+    let ok = unsafe { CreateDirectoryW(wide_path.as_ptr(), &mut attrs) };
+    unsafe {
+        LocalFree(descriptor);
+    }
+    if ok == 0 {
+        let err = unsafe { GetLastError() };
+        if err != ERROR_ALREADY_EXISTS {
+            bail!(
+                "creating owner-private store lock directory {:?}: {}",
+                path,
+                std::io::Error::last_os_error()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn windows_dir_security_sddl(path: &std::path::Path) -> Result<String> {
+    use std::ffi::c_void;
+    use windows_sys::Win32::Foundation::LocalFree;
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSecurityDescriptorToStringSecurityDescriptorW, GetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows_sys::Win32::Security::{DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION};
+
+    let wide_path = wide_null(path.as_os_str());
+    let mut sd: *mut c_void = std::ptr::null_mut();
+    let rc = unsafe {
+        GetNamedSecurityInfoW(
+            wide_path.as_ptr(),
+            SE_FILE_OBJECT,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            &mut sd,
+        )
+    };
+    if rc != 0 {
+        bail!(
+            "reading store lock directory security descriptor {:?}: {}",
+            path,
+            std::io::Error::from_raw_os_error(rc as i32)
+        );
+    }
+    let mut sddl_ptr: *mut u16 = std::ptr::null_mut();
+    let ok = unsafe {
+        ConvertSecurityDescriptorToStringSecurityDescriptorW(
+            sd,
+            SDDL_REVISION_1,
+            OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+            &mut sddl_ptr,
+            std::ptr::null_mut(),
+        )
+    };
+    unsafe {
+        LocalFree(sd);
+    }
+    if ok == 0 {
+        bail!(
+            "converting store lock directory security descriptor {:?}: {}",
+            path,
+            std::io::Error::last_os_error()
+        );
+    }
+    let sddl = unsafe { wide_ptr_to_string(sddl_ptr) };
+    unsafe {
+        LocalFree(sddl_ptr as *mut c_void);
+    }
+    Ok(sddl)
+}
+
+#[cfg(windows)]
+fn windows_owner_private_sddl_is_strict(sddl: &str, sid: &str) -> bool {
+    let owner = format!("O:{sid}");
+    let owner_ace = format!(";;;{sid})");
+    let broad = [
+        ";;;WD)", // Everyone
+        ";;;AU)", // Authenticated Users
+        ";;;BU)", // Builtin Users
+        ";;;BG)", // Builtin Guests
+        ";;;AN)", // Anonymous
+        ";;;IU)", // Interactive Users
+        ";;;SU)", // Service logon users
+    ];
+    sddl.contains(&owner)
+        && sddl.contains(&owner_ace)
+        && !broad.iter().any(|ace| sddl.contains(ace))
+}
+
+#[cfg(windows)]
+fn windows_current_user_sid() -> Result<String> {
+    use std::ffi::c_void;
+    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
+    use windows_sys::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut token: HANDLE = 0;
+    let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+    if ok == 0 {
+        bail!(
+            "opening current process token: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    struct TokenHandle(HANDLE);
+    impl Drop for TokenHandle {
+        fn drop(&mut self) {
+            if self.0 != 0 && self.0 != INVALID_HANDLE_VALUE {
+                unsafe {
+                    CloseHandle(self.0);
+                }
+            }
+        }
+    }
+    let token = TokenHandle(token);
+
+    let mut needed = 0u32;
+    unsafe {
+        GetTokenInformation(token.0, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+    }
+    if needed == 0 {
+        bail!(
+            "sizing current token user information: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let mut buf = vec![0u8; needed as usize];
+    let ok = unsafe {
+        GetTokenInformation(
+            token.0,
+            TokenUser,
+            buf.as_mut_ptr() as *mut c_void,
+            needed,
+            &mut needed,
+        )
+    };
+    if ok == 0 {
+        bail!(
+            "reading current token user information: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+    let mut sid_ptr: *mut u16 = std::ptr::null_mut();
+    let ok = unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_ptr) };
+    if ok == 0 {
+        bail!(
+            "converting current SID: {}",
+            std::io::Error::last_os_error()
+        );
+    }
+    let sid = unsafe { wide_ptr_to_string(sid_ptr) };
+    unsafe {
+        LocalFree(sid_ptr as *mut c_void);
+    }
+    Ok(sid)
+}
+
+#[cfg(windows)]
+fn wide_null(s: &std::ffi::OsStr) -> Vec<u16> {
+    use std::os::windows::ffi::OsStrExt;
+    s.encode_wide().chain(std::iter::once(0)).collect()
+}
+
+#[cfg(windows)]
+unsafe fn wide_ptr_to_string(ptr: *const u16) -> String {
+    let mut len = 0usize;
+    while *ptr.add(len) != 0 {
+        len += 1;
+    }
+    String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
+}
+
 /// Return a stable, per-OS-user-invariant string that identifies the physical store file.
-/// Falls back to a hash of the canonical path when the inode/file-id is unavailable
-/// (e.g. the file does not yet exist at open time).
-fn store_file_id(path: &std::path::Path) -> String {
+fn store_file_id(path: &std::path::Path) -> Result<String> {
     // Best-effort canonicalise first (resolves symlinks/hardlinks).
-    let canonical = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let canonical = std::fs::canonicalize(path)
+        .with_context(|| format!("canonicalizing SQLite store for lock identity {:?}", path))?;
 
     #[cfg(unix)]
     {
         use std::os::unix::fs::MetadataExt;
         if let Ok(m) = std::fs::metadata(&canonical) {
-            return format!("{}-{}", m.dev(), m.ino());
+            return Ok(format!("{}-{}", m.dev(), m.ino()));
         }
     }
 
     #[cfg(windows)]
     {
         if let Ok(id) = windows_file_id(&canonical) {
-            return id;
+            return Ok(id);
         }
     }
 
-    // Fallback: stable hash of the canonical path string.
-    let path_str = canonical.to_string_lossy();
-    let mut h: u64 = 0xcbf29ce484222325; // FNV-1a offset basis
-    for b in path_str.as_bytes() {
-        h ^= *b as u64;
-        h = h.wrapping_mul(0x100000001b3);
-    }
-    format!("path-{h:016x}")
+    bail!(
+        "cannot determine stable physical file identity for SQLite store {:?}; refusing path-hash lock fallback",
+        canonical
+    )
 }
 
 #[cfg(windows)]
@@ -135,9 +459,10 @@ fn acquire_store_lock(db_path: &str) -> Result<StoreLock> {
         .append(true)
         .open(db)
         .with_context(|| format!("creating SQLite store before locking {:?}", db))?;
+    validate_store_path_not_reparse(db)?;
 
     let lock_dir = store_lock_dir()?;
-    let file_id = store_file_id(db);
+    let file_id = store_file_id(db)?;
     let lock_path = lock_dir.join(format!("store-{}.lock", file_id));
 
     let lock_file = std::fs::OpenOptions::new()
@@ -318,11 +643,12 @@ fn advance_clock_hwm(c: &Connection) -> Result<i64> {
     }
 }
 
-/// Run the full schema initialisation / migration inside a single BEGIN IMMEDIATE transaction
-/// so it is crash-safe (re-runnable; a partially-applied migration is rolled back and retried).
-fn init_schema_inner(c: &Connection) -> Result<()> {
+fn with_immediate_transaction<T, F>(c: &Connection, f: F) -> Result<T>
+where
+    F: FnOnce(&Connection) -> Result<T>,
+{
     c.execute_batch("BEGIN IMMEDIATE;")?;
-    let result = do_schema(c);
+    let result = f(c);
     match &result {
         Ok(_) => c.execute_batch("COMMIT;")?,
         Err(_) => {
@@ -330,6 +656,12 @@ fn init_schema_inner(c: &Connection) -> Result<()> {
         }
     }
     result
+}
+
+/// Run the full schema initialisation / migration inside a single BEGIN IMMEDIATE transaction
+/// so it is crash-safe (re-runnable; a partially-applied migration is rolled back and retried).
+fn init_schema_inner(c: &Connection) -> Result<()> {
+    with_immediate_transaction(c, do_schema)
 }
 
 fn do_schema(c: &Connection) -> Result<()> {
@@ -347,8 +679,16 @@ fn do_schema(c: &Connection) -> Result<()> {
         0
     };
 
-    // Already up to date.
-    if current_version >= 2 {
+    if current_version > CURRENT_SCHEMA_VERSION {
+        bail!(
+            "SQLite schema version {current_version} is newer than supported version {CURRENT_SCHEMA_VERSION}"
+        );
+    }
+
+    // Already up to date; still verify/add idempotent v2 invariants that older
+    // builds may have missed before they wrote the same schema version.
+    if current_version == CURRENT_SCHEMA_VERSION {
+        ensure_v2_invariants(c)?;
         return Ok(());
     }
 
@@ -503,12 +843,118 @@ fn do_schema(c: &Connection) -> Result<()> {
             version   INTEGER NOT NULL
         );",
     )?;
+    ensure_v2_invariants(c)?;
     c.execute(
-        "INSERT INTO telex_schema_version (singleton, version) VALUES (1, 2)
-         ON CONFLICT(singleton) DO UPDATE SET version = MAX(version, 2)",
-        [],
+        "INSERT INTO telex_schema_version (singleton, version) VALUES (1, ?1)
+         ON CONFLICT(singleton) DO UPDATE SET version = MAX(version, ?1)",
+        params![CURRENT_SCHEMA_VERSION],
     )?;
 
+    Ok(())
+}
+
+fn ensure_v2_invariants(c: &Connection) -> Result<()> {
+    c.execute_batch(
+        "CREATE INDEX IF NOT EXISTS deliveries_recipient_pending_idx
+             ON deliveries(recipient, consumed_at_ms, message_id);
+         CREATE TABLE IF NOT EXISTS legacy_cutover_claims (
+             address       TEXT PRIMARY KEY,
+             claimed_at_ms INTEGER NOT NULL
+         );",
+    )?;
+    backfill_delivery_rows(c)?;
+    Ok(())
+}
+
+fn backfill_delivery_rows(c: &Connection) -> Result<()> {
+    let mut stmt = c.prepare("SELECT id, to_addr, cc, created_at_ms FROM messages ORDER BY id")?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (message_id, to_addr, cc, created_at_ms) in rows {
+        for recipient in fanout_recipients(&to_addr, cc.as_deref()) {
+            c.execute(
+                "INSERT OR IGNORE INTO deliveries
+                 (message_id, recipient, delivered_at_ms, consumed_at_ms)
+                 VALUES (?1, ?2, ?3, NULL)",
+                params![message_id, recipient, created_at_ms],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn materialize_pending_delivery_rows_for_recipient(c: &Connection, recipient: &str) -> Result<()> {
+    let mut stmt = c.prepare(
+        "SELECT id, to_addr, cc, created_at_ms
+         FROM messages
+         WHERE (to_addr=?1 OR cc LIKE '%' || ?1 || '%')
+           AND NOT EXISTS (
+               SELECT 1 FROM deliveries d
+               WHERE d.message_id=messages.id AND d.recipient=?1
+           )
+         ORDER BY id",
+    )?;
+    let rows = stmt
+        .query_map(params![recipient], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, Option<String>>(2)?,
+                r.get::<_, i64>(3)?,
+            ))
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    for (message_id, to_addr, cc, created_at_ms) in rows {
+        if fanout_recipients(&to_addr, cc.as_deref())
+            .iter()
+            .any(|addr| addr == recipient)
+        {
+            c.execute(
+                "INSERT OR IGNORE INTO deliveries
+                 (message_id, recipient, delivered_at_ms, consumed_at_ms)
+                 VALUES (?1, ?2, ?3, NULL)",
+                params![message_id, recipient, created_at_ms],
+            )?;
+        }
+    }
+    Ok(())
+}
+
+fn legacy_cutover_pending(c: &Connection, addr: &str) -> Result<bool> {
+    let already: bool = c.query_row(
+        "SELECT EXISTS(SELECT 1 FROM legacy_cutover_claims WHERE address=?1)",
+        params![addr],
+        |r| r.get(0),
+    )?;
+    if already {
+        return Ok(false);
+    }
+    if table_exists(c, "leases_v0")? {
+        let migrated: bool = c.query_row(
+            "SELECT EXISTS(SELECT 1 FROM leases_v0 WHERE address=?1)",
+            params![addr],
+            |r| r.get(0),
+        )?;
+        if migrated {
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
+fn record_legacy_cutover_claim(c: &Connection, addr: &str, now: i64) -> Result<()> {
+    c.execute(
+        "INSERT OR IGNORE INTO legacy_cutover_claims(address, claimed_at_ms) VALUES (?1, ?2)",
+        params![addr, now],
+    )?;
     Ok(())
 }
 
@@ -519,6 +965,9 @@ fn do_schema(c: &Connection) -> Result<()> {
 /// Column list used by every message SELECT so row mapping stays positional and stable.
 const MSG_COLS: &str = "id, thread_id, parent_id, from_addr, to_addr, cc, kind, attention, \
     requires_disposition, subject, body, metadata, sent_at_ms, created_at_ms";
+const MSG_COLS_M: &str = "m.id, m.thread_id, m.parent_id, m.from_addr, m.to_addr, m.cc, m.kind, \
+    m.attention, m.requires_disposition, m.subject, m.body, m.metadata, m.sent_at_ms, \
+    m.created_at_ms";
 
 fn map_message(r: &rusqlite::Row) -> rusqlite::Result<MessageRow> {
     let id: i64 = r.get(0)?;
@@ -612,9 +1061,10 @@ fn claim_epoch_inner(
     c: &Connection,
     addr: &str,
     owner: &str,
-    stale_cutoff_ms: i64,
+    liveness_window_secs: i64,
 ) -> Result<EpochClaimResult> {
     let now = advance_clock_hwm(c)?;
+    let stale_cutoff_ms = now.saturating_sub(liveness_window_secs.max(0).saturating_mul(1000));
 
     // Try INSERT for first-ever row (creates at epoch=1, atomically claims ownership).
     let inserted = c.execute(
@@ -638,6 +1088,7 @@ fn claim_epoch_inner(
     )?;
 
     if cur_epoch.is_none() {
+        let legacy_cutover = true;
         let updated = c.execute(
             "UPDATE leases
                 SET owner_instance_id = ?1,
@@ -648,10 +1099,11 @@ fn claim_epoch_inner(
             params![owner, now, addr],
         )?;
         if updated > 0 {
+            record_legacy_cutover_claim(c, addr, now)?;
             return Ok(EpochClaimResult::Claimed(EpochClaimed {
                 lease_epoch: 1,
                 owner_instance_id: owner.to_string(),
-                legacy_cutover: true,
+                legacy_cutover,
             }));
         }
         let row = read_lease(c, addr)?.ok_or_else(|| anyhow!("lease row vanished during claim"))?;
@@ -663,6 +1115,7 @@ fn claim_epoch_inner(
     }
     let cur_epoch = cur_epoch.unwrap();
 
+    let legacy_cutover = legacy_cutover_pending(c, addr)?;
     let can_claim = cur_owner.is_none() || cur_hb < stale_cutoff_ms;
     if !can_claim {
         let row =
@@ -688,10 +1141,13 @@ fn claim_epoch_inner(
     )?;
 
     if updated > 0 {
+        if legacy_cutover {
+            record_legacy_cutover_claim(c, addr, now)?;
+        }
         Ok(EpochClaimResult::Claimed(EpochClaimed {
             lease_epoch: cur_epoch + 1,
             owner_instance_id: owner.to_string(),
-            legacy_cutover: false,
+            legacy_cutover,
         }))
     } else {
         // Lost the race — re-read and return AlreadyOwned.
@@ -837,8 +1293,7 @@ impl Backend for SqliteBackend {
     async fn claim_lease(&self, claim: &LeaseClaim, window_secs: i64) -> Result<LeaseOutcome> {
         let claim = claim.clone();
         self.run(move |c| {
-            c.execute_batch("BEGIN IMMEDIATE;")?;
-            let result = (|| -> Result<LeaseOutcome> {
+            with_immediate_transaction(c, |c| {
                 let now = now_ms();
                 let stale_cutoff = now - window_secs * 1000;
 
@@ -907,14 +1362,7 @@ impl Backend for SqliteBackend {
                     ],
                 )?;
                 Ok(LeaseOutcome::Claimed)
-            })();
-            match &result {
-                Ok(_) => c.execute_batch("COMMIT;")?,
-                Err(_) => {
-                    let _ = c.execute_batch("ROLLBACK;");
-                }
-            }
-            result
+            })
         })
         .await
     }
@@ -999,23 +1447,15 @@ impl Backend for SqliteBackend {
         &self,
         address: &str,
         owner_instance_id: &str,
-        stale_cutoff_ms: i64,
+        liveness_window_secs: i64,
     ) -> Result<EpochClaimResult> {
-        let (addr, owner, cutoff) = (
+        let (addr, owner, window) = (
             address.to_owned(),
             owner_instance_id.to_owned(),
-            stale_cutoff_ms,
+            liveness_window_secs,
         );
         self.run(move |c| {
-            c.execute_batch("BEGIN IMMEDIATE;")?;
-            let result = claim_epoch_inner(c, &addr, &owner, cutoff);
-            match &result {
-                Ok(_) => c.execute_batch("COMMIT;")?,
-                Err(_) => {
-                    let _ = c.execute_batch("ROLLBACK;");
-                }
-            }
-            result
+            with_immediate_transaction(c, |c| claim_epoch_inner(c, &addr, &owner, window))
         })
         .await
     }
@@ -1032,15 +1472,15 @@ impl Backend for SqliteBackend {
             lease_epoch,
         );
         self.run(move |c| {
-            c.execute_batch("BEGIN IMMEDIATE;")?;
-            let now = advance_clock_hwm(c)?;
-            let n = c.execute(
-                "UPDATE leases SET heartbeat_at_ms=?1 \
-                 WHERE address=?2 AND lease_epoch=?3 AND owner_instance_id=?4",
-                params![now, addr, epoch, owner],
-            )?;
-            c.execute_batch("COMMIT;")?;
-            Ok(n > 0)
+            with_immediate_transaction(c, |c| {
+                let now = advance_clock_hwm(c)?;
+                let n = c.execute(
+                    "UPDATE leases SET heartbeat_at_ms=?1 \
+                     WHERE address=?2 AND lease_epoch=?3 AND owner_instance_id=?4",
+                    params![now, addr, epoch, owner],
+                )?;
+                Ok(n > 0)
+            })
         })
         .await
     }
@@ -1067,6 +1507,32 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn reset_epoch_lease(&self, address: &str) -> Result<Option<i64>> {
+        let addr = address.to_owned();
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let epoch: Option<i64> = c
+                    .query_row(
+                        "SELECT lease_epoch FROM leases WHERE address=?1",
+                        params![addr],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+                if let Some(epoch) = epoch {
+                    c.execute(
+                        "UPDATE leases SET owner_instance_id = NULL, heartbeat_at_ms = 0 \
+                         WHERE address=?1",
+                        params![addr],
+                    )?;
+                    Ok(Some(epoch))
+                } else {
+                    Ok(None)
+                }
+            })
+        })
+        .await
+    }
+
     async fn mark_consumed_if_current_owner(
         &self,
         recipient: &str,
@@ -1081,8 +1547,7 @@ impl Backend for SqliteBackend {
             message_id,
         );
         self.run(move |c| {
-            c.execute_batch("BEGIN IMMEDIATE;")?;
-            let result = (|| -> Result<DeliveryOutcome> {
+            with_immediate_transaction(c, |c| {
                 // Step 1: Check ownership (NotOwner has strict precedence over all other outcomes).
                 let lease_state: Option<(i64, Option<String>)> = c
                     .query_row(
@@ -1100,7 +1565,9 @@ impl Backend for SqliteBackend {
                     return Ok(DeliveryOutcome::NotOwner);
                 }
 
-                // Step 2: Check delivery row.
+                // Step 2: Ensure legacy/pre-v2 messages have explicit pending delivery rows,
+                // then check the row.
+                materialize_pending_delivery_rows_for_recipient(c, &rec)?;
                 let consumed: Option<Option<i64>> = c
                     .query_row(
                         "SELECT consumed_at_ms FROM deliveries WHERE message_id=?1 AND recipient=?2",
@@ -1110,10 +1577,7 @@ impl Backend for SqliteBackend {
                     .optional()?;
 
                 match consumed {
-                    None => {
-                        // No delivery row — AckNoOp (do not insert; message stays deliverable).
-                        Ok(DeliveryOutcome::AckNoOp)
-                    }
+                    None => Ok(DeliveryOutcome::AckNoOp),
                     Some(Some(_)) => {
                         // Row exists and already consumed — idempotent success.
                         Ok(DeliveryOutcome::AlreadyConsumed)
@@ -1129,31 +1593,14 @@ impl Backend for SqliteBackend {
                         Ok(DeliveryOutcome::Marked)
                     }
                 }
-            })();
-            match &result {
-                Ok(_) => c.execute_batch("COMMIT;")?,
-                Err(_) => {
-                    let _ = c.execute_batch("ROLLBACK;");
-                }
-            }
-            result
+            })
         })
         .await
     }
 
     async fn durable_clock_now_ms(&self) -> Result<i64> {
-        self.run(|c| {
-            c.execute_batch("BEGIN IMMEDIATE;")?;
-            let result = advance_clock_hwm(c);
-            match &result {
-                Ok(_) => c.execute_batch("COMMIT;")?,
-                Err(_) => {
-                    let _ = c.execute_batch("ROLLBACK;");
-                }
-            }
-            result
-        })
-        .await
+        self.run(|c| with_immediate_transaction(c, advance_clock_hwm))
+            .await
     }
 
     async fn delivery_retention_count(&self) -> Result<i64> {
@@ -1192,26 +1639,18 @@ impl Backend for SqliteBackend {
     async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>> {
         let a = address.to_string();
         self.run(move |c| {
-            // A message is "undelivered" to this recipient if there is no delivery row for
-            // (message_id, recipient) with consumed_at_ms IS NOT NULL.  This handles:
-            //   • old rows (no row at all — no consumed mark)
-            //   • new fan-out rows with consumed_at_ms=NULL (pending ack)
-            // Exclude messages with a terminal disposition (out-of-band recovery path).
+            materialize_pending_delivery_rows_for_recipient(c, &a)?;
+            // Recipient-first: pending delivery rows are the source of delivery work. Legacy
+            // no-row messages are materialized above before any emission.
             let sql = format!(
-                "SELECT {MSG_COLS} FROM messages m \
-                 WHERE (m.to_addr=?1 OR EXISTS ( \
-                       SELECT 1 FROM deliveries fanout \
-                       WHERE fanout.message_id=m.id AND fanout.recipient=?1 \
-                 )) \
-                   AND NOT EXISTS ( \
-                       SELECT 1 FROM deliveries d \
-                       WHERE d.message_id=m.id AND d.recipient=?1 \
-                         AND d.consumed_at_ms IS NOT NULL \
-                   ) \
-                   AND COALESCE((SELECT disp.state FROM dispositions disp \
+                "SELECT {MSG_COLS_M} FROM deliveries d \
+                 JOIN messages m ON m.id=d.message_id \
+                 WHERE d.recipient=?1 \
+                  AND d.consumed_at_ms IS NULL \
+                  AND COALESCE((SELECT disp.state FROM dispositions disp \
                                  WHERE disp.message_id=m.id AND disp.recipient=?1 \
                                  ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({}) \
-                 ORDER BY m.id",
+                 ORDER BY d.message_id",
                 terminal_dispositions_sql_list()
             );
             let mut stmt = c.prepare(&sql)?;
@@ -1226,8 +1665,7 @@ impl Backend for SqliteBackend {
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow> {
         let m = m.clone();
         self.run(move |c| {
-            c.execute_batch("BEGIN IMMEDIATE;")?;
-            let result = (|| -> Result<MessageRow> {
+            with_immediate_transaction(c, |c| {
                 let now = now_ms();
                 c.execute(
                     "INSERT INTO messages(thread_id, parent_id, from_addr, to_addr, cc, kind, \
@@ -1285,14 +1723,7 @@ impl Backend for SqliteBackend {
                     map_message,
                 )?;
                 Ok(row)
-            })();
-            match &result {
-                Ok(_) => c.execute_batch("COMMIT;")?,
-                Err(_) => {
-                    let _ = c.execute_batch("ROLLBACK;");
-                }
-            }
-            result
+            })
         })
         .await
     }
@@ -1513,15 +1944,29 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(old_rows, 1, "migration must not delete the legacy row copy");
+        let old_writer = backend
+            .run(|c| {
+                Ok(c.execute(
+                    "INSERT INTO leases(address, occupant, since_ms, heartbeat_at_ms)
+                     VALUES ('addr:old-writer', 'old', 1, 1)",
+                    [],
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(
+            old_writer.is_err(),
+            "non-epoch legacy writes must fail after migration"
+        );
 
         let claimed = backend
-            .claim_epoch_lease("addr:legacy", "daemon-new", now_ms() - 1)
+            .claim_epoch_lease("addr:legacy", "daemon-new", 15)
             .await
             .unwrap();
         match claimed {
             EpochClaimResult::Claimed(claimed) => {
                 assert_eq!(claimed.lease_epoch, 2);
-                assert!(!claimed.legacy_cutover);
+                assert!(claimed.legacy_cutover);
             }
             other => panic!("expected claim, got {other:?}"),
         }
@@ -1556,7 +2001,7 @@ mod tests {
         let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
         backend.init_schema().await.unwrap();
         let claimed = backend
-            .claim_epoch_lease("addr:null", "daemon-new", now_ms() - 1)
+            .claim_epoch_lease("addr:null", "daemon-new", 15)
             .await
             .unwrap();
         match claimed {
@@ -1586,7 +2031,7 @@ mod tests {
             .await
             .unwrap());
         let next = backend
-            .claim_epoch_lease("addr:null", "daemon-next", now_ms() - 1)
+            .claim_epoch_lease("addr:null", "daemon-next", 15)
             .await
             .unwrap();
         match next {
@@ -1596,5 +2041,133 @@ mod tests {
             }
             other => panic!("expected monotonic next claim, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn missing_store_file_id_rejects_path_hash_fallback() {
+        let path = test_db_path("missing-file-id");
+        let err = store_file_id(&path).expect_err("missing file must not hash the path");
+        assert!(
+            err.to_string().contains("canonicalizing")
+                || err.to_string().contains("physical file identity"),
+            "unexpected error: {err:#}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_store_lock_sddl_rejects_broad_aces() {
+        let sid = windows_current_user_sid().expect("current SID");
+        let private = format!("O:{sid}G:{sid}D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;{sid})");
+        assert!(windows_owner_private_sddl_is_strict(&private, &sid));
+        let broad = format!("O:{sid}G:{sid}D:(A;;GA;;;{sid})(A;;GR;;;WD)");
+        assert!(!windows_owner_private_sddl_is_strict(&broad, &sid));
+    }
+
+    #[tokio::test]
+    async fn future_schema_version_fails_closed_before_mutation() {
+        let path = test_db_path("future-schema");
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE telex_schema_version (
+                    singleton INTEGER NOT NULL DEFAULT 1 UNIQUE,
+                    version   INTEGER NOT NULL
+                );
+                INSERT INTO telex_schema_version(singleton, version) VALUES (1, 999);",
+            )
+            .unwrap();
+        }
+        let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        let err = backend
+            .init_schema()
+            .await
+            .expect_err("future schema must be rejected");
+        assert!(err.to_string().contains("newer than supported"));
+    }
+
+    #[tokio::test]
+    async fn claim_uses_durable_clock_for_stale_cutoff_after_wall_clock_skew() {
+        let path = test_db_path("durable-cutoff");
+        let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        backend.init_schema().await.unwrap();
+        let future_hwm = now_ms() + 120_000;
+        backend
+            .run(move |c| {
+                c.execute("UPDATE clock_hwm SET hwm_ms=?1 WHERE id=1", params![future_hwm])?;
+                c.execute(
+                    "INSERT INTO leases(address, occupant, since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id)
+                     VALUES ('addr:skew', 'old', ?1, ?2, 4, 'old-owner')",
+                    params![future_hwm - 30_000, future_hwm - 20_000],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        let claimed = backend
+            .claim_epoch_lease("addr:skew", "new-owner", 15)
+            .await
+            .unwrap();
+        match claimed {
+            EpochClaimResult::Claimed(claimed) => {
+                assert_eq!(claimed.lease_epoch, 5);
+                assert_eq!(claimed.owner_instance_id, "new-owner");
+            }
+            other => panic!("durable clock cutoff should reclaim stale owner, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn legacy_message_without_delivery_row_materializes_and_acks_consumed() {
+        let path = test_db_path("legacy-no-delivery");
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(
+                "CREATE TABLE messages (
+                    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                    thread_id     INTEGER,
+                    parent_id     INTEGER,
+                    from_addr     TEXT,
+                    to_addr       TEXT NOT NULL,
+                    cc            TEXT,
+                    kind          TEXT NOT NULL DEFAULT 'note',
+                    attention     TEXT NOT NULL DEFAULT 'background',
+                    requires_disposition INTEGER NOT NULL DEFAULT 0,
+                    subject       TEXT,
+                    body          TEXT NOT NULL,
+                    metadata      TEXT,
+                    sent_at_ms    INTEGER NOT NULL,
+                    created_at_ms INTEGER NOT NULL
+                );
+                INSERT INTO messages(id, thread_id, from_addr, to_addr, kind, attention, body, sent_at_ms, created_at_ms)
+                VALUES (1, 1, 'sender', 'addr:legacy-msg', 'note', 'background', 'body', 10, 10);",
+            )
+            .unwrap();
+        }
+        let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        backend.init_schema().await.unwrap();
+        match backend
+            .claim_epoch_lease("addr:legacy-msg", "owner", 15)
+            .await
+            .unwrap()
+        {
+            EpochClaimResult::Claimed(_) => {}
+            other => panic!("expected claim, got {other:?}"),
+        }
+        let rows = backend.fetch_undelivered("addr:legacy-msg").await.unwrap();
+        assert_eq!(rows.iter().map(|m| m.id).collect::<Vec<_>>(), vec![1]);
+        assert_eq!(
+            backend
+                .mark_consumed_if_current_owner("addr:legacy-msg", "owner", 1, 1)
+                .await
+                .unwrap(),
+            DeliveryOutcome::Marked
+        );
+        assert!(backend
+            .fetch_undelivered("addr:legacy-msg")
+            .await
+            .unwrap()
+            .is_empty());
     }
 }

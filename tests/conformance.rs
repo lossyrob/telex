@@ -1284,11 +1284,7 @@ mod sqlite_epoch_tests {
         let owner = "owner-hb";
 
         // Set up via claim_epoch_lease.
-        let stale_cutoff = now_ms() - 5_000; // already stale
-        let result = b
-            .claim_epoch_lease(addr, owner, stale_cutoff)
-            .await
-            .unwrap();
+        let result = b.claim_epoch_lease(addr, owner, 15).await.unwrap();
         let epoch = match result {
             EpochClaimResult::Claimed(ref e) => e.lease_epoch,
             other => panic!("expected Claimed, got {:?}", other),
@@ -1323,11 +1319,7 @@ mod sqlite_epoch_tests {
         let owner = "owner-consume";
 
         // Claim lease.
-        let stale_cutoff = now_ms() - 5_000;
-        let claim_result = b
-            .claim_epoch_lease(addr, owner, stale_cutoff)
-            .await
-            .unwrap();
+        let claim_result = b.claim_epoch_lease(addr, owner, 15).await.unwrap();
         let epoch = match claim_result {
             EpochClaimResult::Claimed(ref e) => e.lease_epoch,
             other => panic!("expected Claimed, got {:?}", other),
@@ -1414,12 +1406,11 @@ mod sqlite_epoch_tests {
         let owner_to = "owner-to";
         let owner_cc = "owner-cc";
 
-        let cutoff = now_ms() - 5_000;
-        let to_epoch = match b.claim_epoch_lease(to, owner_to, cutoff).await.unwrap() {
+        let to_epoch = match b.claim_epoch_lease(to, owner_to, 15).await.unwrap() {
             EpochClaimResult::Claimed(e) => e.lease_epoch,
             other => panic!("expected to claim, got {:?}", other),
         };
-        let cc_epoch = match b.claim_epoch_lease(cc, owner_cc, cutoff).await.unwrap() {
+        let cc_epoch = match b.claim_epoch_lease(cc, owner_cc, 15).await.unwrap() {
             EpochClaimResult::Claimed(e) => e.lease_epoch,
             other => panic!("expected cc claim, got {:?}", other),
         };

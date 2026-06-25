@@ -57,15 +57,16 @@ pub trait Backend: Send + Sync {
     // ---- epoch-aware lease / delivery fence (P1 — SQLite only in this release) ----
 
     /// Claim delivery ownership at the next epoch using a compare-and-set.
-    /// `stale_cutoff_ms` is the backend-clock threshold below which a live owner is
-    /// considered stale and the lease can be taken.  Returns `Claimed` or `AlreadyOwned`.
+    /// `liveness_window_secs` is a duration, not a caller-computed timestamp: durable
+    /// backends compute the stale cutoff from their own clock inside the claim transaction.
+    /// Returns `Claimed` or `AlreadyOwned`.
     /// Default implementation returns an unsupported error so non-SQLite backends
     /// compile without behavioral parity.
     async fn claim_epoch_lease(
         &self,
         _address: &str,
         _owner_instance_id: &str,
-        _stale_cutoff_ms: i64,
+        _liveness_window_secs: i64,
     ) -> Result<EpochClaimResult> {
         bail!("claim_epoch_lease: not supported by this backend")
     }
@@ -91,6 +92,12 @@ pub trait Backend: Send + Sync {
         _lease_epoch: i64,
     ) -> Result<bool> {
         bail!("release_epoch_lease: not supported by this backend")
+    }
+
+    /// Admin reset: clear durable epoch ownership for one address while preserving the
+    /// `lease_epoch` high-water. Returns the preserved epoch when a row existed.
+    async fn reset_epoch_lease(&self, _address: &str) -> Result<Option<i64>> {
+        bail!("reset_epoch_lease: not supported by this backend")
     }
 
     /// Atomically check ownership and mark `(message_id, recipient)` as consumed.
