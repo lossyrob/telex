@@ -3,6 +3,7 @@
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::backend::Backend;
@@ -166,6 +167,12 @@ pub struct WaitArgs {
     /// Holder DB-heartbeat age beyond which it is considered degraded (ms).
     #[arg(long, default_value_t = 15_000)]
     pub stale_heartbeat_ms: i64,
+    /// Write outcome artifacts into this directory so a detached, variable-free
+    /// invocation can deliver results without relying on captured stdout. Writes
+    /// `message.json` (on delivery), `status.json` (always), and `exit.code`
+    /// (always, written last as the completion marker).
+    #[arg(long)]
+    pub out_dir: Option<PathBuf>,
 }
 
 #[derive(Args)]

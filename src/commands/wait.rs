@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use std::path::Path;
 use std::time::Duration;
 
 use crate::cli::{Ctx, WaitArgs};
@@ -33,23 +34,18 @@ pub async fn run(ctx: &Ctx, args: WaitArgs) -> Result<i32> {
     let cfg = WaitLoopConfig {
         store_key,
         session_id,
-        address,
+        address: address.clone(),
         timeout_ms: args.timeout_ms,
         hang_ms: args.hang_ms,
         reconnect_grace_ms: reconnect_grace_ms(args.reconnect_grace_ms),
     };
     let mut connector = RealWaitConnector;
-    match wait_loop(&mut connector, &cfg).await? {
-        WaitTerminal::DaemonGone(message) => {
-            eprintln!("[wait] daemon-gone: {message}");
-            Ok(3)
-        }
-        WaitTerminal::DaemonHung(message) => {
-            eprintln!("[wait] HUNG: {message}");
-            Ok(4)
-        }
-        WaitTerminal::Response(response) => emit_response(response),
-    }
+    let outcome = match wait_loop(&mut connector, &cfg).await? {
+        WaitTerminal::DaemonGone(message) => WaitOutcome::daemon_gone(message),
+        WaitTerminal::DaemonHung(message) => WaitOutcome::daemon_hung(message),
+        WaitTerminal::Response(response) => WaitOutcome::from_response(response)?,
+    };
+    emit_outcome(outcome, args.out_dir.as_deref(), &address)
 }
 
 #[derive(Debug, Clone)]
@@ -350,27 +346,53 @@ fn reconnect_grace_ms(arg: Option<u64>) -> u64 {
     .unwrap_or(DEFAULT_RECONNECT_GRACE_MS)
 }
 
-fn emit_response(response: Response) -> Result<i32> {
-    match response {
-        Response::Message {
-            id,
-            thread_id,
-            parent_id,
-            from_addr,
-            to_addr,
-            kind,
-            attention,
-            requires_disposition,
-            subject,
-            body,
-            sent_at_ms,
-            buffered_at_ms,
-            lease_epoch,
-        } => {
-            let waiter_exit_ms = now_ms();
-            println!(
-                "{}",
-                serde_json::json!({
+/// The terminal result of a `wait`, decoupled from how it is reported so the same outcome can
+/// be both printed (stdout/stderr) and persisted to `--out-dir` artifacts.
+struct WaitOutcome {
+    exit_code: i32,
+    outcome: &'static str,
+    detail: Option<String>,
+    message: Option<serde_json::Value>,
+}
+
+impl WaitOutcome {
+    fn daemon_gone(detail: String) -> Self {
+        WaitOutcome {
+            exit_code: 3,
+            outcome: "daemon-gone",
+            detail: Some(detail),
+            message: None,
+        }
+    }
+
+    fn daemon_hung(detail: String) -> Self {
+        WaitOutcome {
+            exit_code: 4,
+            outcome: "daemon-hung",
+            detail: Some(detail),
+            message: None,
+        }
+    }
+
+    fn from_response(response: Response) -> Result<Self> {
+        match response {
+            Response::Message {
+                id,
+                thread_id,
+                parent_id,
+                from_addr,
+                to_addr,
+                kind,
+                attention,
+                requires_disposition,
+                subject,
+                body,
+                sent_at_ms,
+                buffered_at_ms,
+                lease_epoch,
+            } => {
+                let waiter_exit_ms = now_ms();
+                let message = serde_json::json!({
                     "id": id,
                     "thread_id": thread_id,
                     "parent_id": parent_id,
@@ -387,20 +409,91 @@ fn emit_response(response: Response) -> Result<i32> {
                     "waiter_exit_ms": waiter_exit_ms,
                     "backend_ms": buffered_at_ms - sent_at_ms,
                     "send_to_exit_ms": waiter_exit_ms - sent_at_ms,
+                });
+                Ok(WaitOutcome {
+                    exit_code: 0,
+                    outcome: "message",
+                    detail: None,
+                    message: Some(message),
                 })
-            );
-            Ok(0)
+            }
+            Response::Timeout => Ok(WaitOutcome {
+                exit_code: 2,
+                outcome: "idle-timeout",
+                detail: None,
+                message: None,
+            }),
+            Response::PresenceEnded => Ok(WaitOutcome {
+                exit_code: 5,
+                outcome: "presence-ended",
+                detail: None,
+                message: None,
+            }),
+            other => Err(anyhow!("unexpected daemon wait response: {other:?}")),
         }
-        Response::Timeout => {
-            eprintln!("[wait] idle-timeout (no message)");
-            Ok(2)
-        }
-        Response::PresenceEnded => {
-            eprintln!("[wait] presence-ended");
-            Ok(5)
-        }
-        other => Err(anyhow!("unexpected daemon wait response: {other:?}")),
     }
+}
+
+fn emit_outcome(outcome: WaitOutcome, out_dir: Option<&Path>, address: &str) -> Result<i32> {
+    match &outcome.message {
+        Some(message) => println!("{message}"),
+        None => match outcome.outcome {
+            "idle-timeout" => eprintln!("[wait] idle-timeout (no message)"),
+            "presence-ended" => eprintln!("[wait] presence-ended"),
+            "daemon-gone" => {
+                eprintln!(
+                    "[wait] daemon-gone: {}",
+                    outcome.detail.as_deref().unwrap_or("")
+                )
+            }
+            "daemon-hung" => eprintln!("[wait] HUNG: {}", outcome.detail.as_deref().unwrap_or("")),
+            _ => {}
+        },
+    }
+    if let Some(dir) = out_dir {
+        if let Err(e) = write_wait_artifacts(dir, &outcome, address) {
+            eprintln!(
+                "[wait] warning: could not write --out-dir artifacts to {}: {e}",
+                dir.display()
+            );
+        }
+    }
+    Ok(outcome.exit_code)
+}
+
+/// Persist the wait outcome so a detached, variable-free `telex wait --out-dir <DIR>` can deliver
+/// both the message and the terminal outcome to a woken agent that cannot capture the detached
+/// process's stdout or real exit code. `message.json` is written only on delivery; `status.json`
+/// is always written; `exit.code` is written **last** as the completion marker, so a reader can
+/// treat its presence as "the wait finished and all artifacts are present".
+fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std::io::Result<()> {
+    std::fs::create_dir_all(dir)?;
+    if let Some(message) = &outcome.message {
+        let body = serde_json::to_string_pretty(message).unwrap_or_else(|_| message.to_string());
+        atomic_write(&dir.join("message.json"), body.as_bytes())?;
+    }
+    let status = serde_json::json!({
+        "outcome": outcome.outcome,
+        "exit_code": outcome.exit_code,
+        "detail": outcome.detail,
+        "address": address,
+        "written_at_ms": now_ms(),
+    });
+    let status_body = serde_json::to_string_pretty(&status).unwrap_or_else(|_| status.to_string());
+    atomic_write(&dir.join("status.json"), status_body.as_bytes())?;
+    atomic_write(
+        &dir.join("exit.code"),
+        format!("{}\n", outcome.exit_code).as_bytes(),
+    )?;
+    Ok(())
+}
+
+/// Write `bytes` to `path` via a sibling temp file + rename so a reader never observes a
+/// partially written artifact.
+fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, bytes)?;
+    std::fs::rename(&tmp, path)
 }
 
 #[cfg(test)]
@@ -683,5 +776,108 @@ mod tests {
         let outcome = wait_loop(&mut connector, &cfg).await.unwrap();
         assert!(matches!(outcome, WaitTerminal::DaemonGone(_)));
         assert_eq!(connector.request_ops(), vec!["wait"]);
+    }
+
+    fn artifact_dir(label: &str) -> std::path::PathBuf {
+        let n = now_ms();
+        std::env::temp_dir().join(format!(
+            "telex-wait-artifacts-{}-{label}-{n}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn out_dir_message_writes_message_status_and_exit_code() {
+        let dir = artifact_dir("msg");
+        let outcome = WaitOutcome::from_response(message_response()).unwrap();
+        let code = emit_outcome(outcome, Some(dir.as_path()), "addr:a").unwrap();
+        assert_eq!(code, 0);
+
+        let message: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("message.json")).unwrap())
+                .unwrap();
+        assert_eq!(message.get("id").and_then(|v| v.as_i64()), Some(7));
+        assert_eq!(message.get("body").and_then(|v| v.as_str()), Some("hello"));
+
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("status.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            status.get("outcome").and_then(|v| v.as_str()),
+            Some("message")
+        );
+        assert_eq!(status.get("exit_code").and_then(|v| v.as_i64()), Some(0));
+        assert_eq!(
+            status.get("address").and_then(|v| v.as_str()),
+            Some("addr:a")
+        );
+
+        assert_eq!(
+            std::fs::read_to_string(dir.join("exit.code"))
+                .unwrap()
+                .trim(),
+            "0"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn out_dir_timeout_writes_status_and_exit_code_without_message() {
+        let dir = artifact_dir("timeout");
+        let outcome = WaitOutcome::from_response(Response::Timeout).unwrap();
+        let code = emit_outcome(outcome, Some(dir.as_path()), "addr:a").unwrap();
+        assert_eq!(code, 2);
+
+        assert!(!dir.join("message.json").exists());
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("status.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            status.get("outcome").and_then(|v| v.as_str()),
+            Some("idle-timeout")
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("exit.code"))
+                .unwrap()
+                .trim(),
+            "2"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn out_dir_daemon_gone_records_detail_in_status() {
+        let dir = artifact_dir("gone");
+        let outcome = WaitOutcome::daemon_gone("reconnect grace expired".to_string());
+        let code = emit_outcome(outcome, Some(dir.as_path()), "addr:a").unwrap();
+        assert_eq!(code, 3);
+
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("status.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            status.get("outcome").and_then(|v| v.as_str()),
+            Some("daemon-gone")
+        );
+        assert_eq!(
+            status.get("detail").and_then(|v| v.as_str()),
+            Some("reconnect grace expired")
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("exit.code"))
+                .unwrap()
+                .trim(),
+            "3"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn out_dir_is_created_when_missing() {
+        let dir = artifact_dir("nested").join("a").join("b");
+        let outcome = WaitOutcome::from_response(Response::Timeout).unwrap();
+        emit_outcome(outcome, Some(dir.as_path()), "addr:a").unwrap();
+        assert!(dir.join("exit.code").exists());
+        std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).ok();
     }
 }

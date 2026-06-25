@@ -40,26 +40,32 @@ It fails closed rather than guessing.
    `anchor` pid with a start-time reuse guard; when it dies, blocked waits return
    `PresenceEnded` but the station and durable message buffer remain.
 
-2. Wait for one message with a single-shot detached background `telex wait`:
+2. Wait for one message with a single-shot detached background `telex wait`. Pass
+   `--out-dir <dir>` so the waiter writes its result to files; the woken agent
+   reads those instead of relying on captured stdout:
 
    ```sh
-   telex wait --address <addr>
+   telex wait --address <addr> --out-dir <dir>
    ```
 
-   The command completes on delivery and prints JSON. In Copilot CLI, detached
-   shell stdout is not returned through `read_powershell`, and the detached task
-   exit code may describe only the launcher/wrapper. Detached waiters MUST write
-   stdout/stderr/exit-code to known files and trust the artifact `exit.code`,
-   not the shell task exit code. The detached shell completion notification is
-   the wake signal; after it arrives, read those files, re-arm a fresh detached
-   `wait`, then act. Do not hide `wait` inside an infinite shell loop.
+   On exit, `telex wait --out-dir` writes into `<dir>`:
+   - `message.json` — the delivered message (only on exit `0`);
+   - `status.json` — `{ outcome, exit_code, detail, address, written_at_ms }`, always;
+   - `exit.code` — the integer exit code, written **last** as the completion marker.
+
+   This matters because some runtimes (e.g. Copilot CLI) do not return detached
+   shell stdout, and the detached task's reported exit code may describe only the
+   launcher/wrapper. Trust the artifact `exit.code`, not the shell task exit code.
+   The detached completion notification is the wake signal; after it arrives, read
+   `exit.code` (then `message.json` if it is `0`), re-arm a fresh detached `wait`,
+   then act. Do not hide `wait` inside an infinite shell loop.
    `wait` reconnects across daemon restarts, re-registers on `NeedsAttach` when it
    can name `(store_key, session_id, address)`, and returns exit 3 only after its
    reconnect grace expires.
 
    | Exit | Meaning | What you do |
    |---:|---|---|
-   | 0 | delivered | Read the JSON artifact, immediately re-arm a fresh `wait`, then act. |
+   | 0 | delivered | Read `message.json` (or stdout JSON), immediately re-arm a fresh `wait`, then act. |
    | 2 | idle-timeout | Nothing arrived before `--timeout-ms`; re-arm if still attending. |
    | 3 | daemon gone after reconnect grace | Run `telex attach` and re-arm. |
    | 4 | daemon hung / no response after a finite wait's `--timeout-ms + --hang-ms` watchdog | Re-arm or restart the daemon if repeated. |
@@ -84,11 +90,13 @@ Drive the loop from your own turn cycle:
 ```text
 once:   telex attach --address <addr> --description "<s>"
 then repeat:
-  1. start one detached background command named `TELEX MESSAGE WAITER` that writes wait output to known files
+  1. start one detached background command named `TELEX MESSAGE WAITER`:
+     `telex wait --address <addr> --out-dir <dir>` (writes message.json/status.json/exit.code)
   2. it blocks until one message, exits, and the runtime completion wakes you
-  3. exit 0 -> read JSON artifact, start a fresh wait, then `telex ack` and act/disposition
-     exit 5 -> attach/wait again if the session is still live
-     exit 2/3/4 -> re-arm or restart as indicated above
+  3. read `<dir>\exit.code` (not the shell task exit code):
+     0 -> parse `message.json`, start a fresh wait, then `telex ack` and act/disposition
+     5 -> attach/wait again if the session is still live
+     2/3/4 -> re-arm or restart as indicated above (see `status.json` for detail)
 ```
 
 > **Gotcha — the invisible-loop trap.** Do **not** wrap `telex wait` in an
@@ -100,29 +108,35 @@ then repeat:
 
 Use a detached shell task for the waiter UX, but do **not** rely on detached
 stdout or the detached task's reported exit code being returned by the shell
-tool. Write the wait result to files you can read after the detached task
-completion notification. Name the background task **`TELEX MESSAGE WAITER`** (or
-`TELEX MESSAGE WAITER <addr>` if your runtime supports descriptions) so it is
-obvious in `/tasks`.
+tool. Let `telex wait --out-dir <dir>` write the result to files you read after
+the detached completion notification. Name the background task
+**`TELEX MESSAGE WAITER`** so it is obvious in `/tasks`.
 
-PowerShell pattern:
+Run the waiter as a single **variable-free** detached command. On Windows the
+Copilot CLI detached PowerShell wrapper string-interpolates the command before the
+child runs, so any `$var` (`$run`, `$out`, `$LASTEXITCODE`, ...) is stripped and the
+waiter writes nothing. `--out-dir` removes the need for shell variables entirely —
+substitute a concrete, unique directory path:
 
 ```powershell
-$run = Join-Path $env:TEMP ("telex-wait-" + [guid]::NewGuid().ToString("N"))
-New-Item -ItemType Directory -Force -Path $run | Out-Null
-$out = Join-Path $run "message.json"
-$err = Join-Path $run "wait.err"
-$code = Join-Path $run "exit.code"
-telex wait --address <addr> > $out 2> $err
-$LASTEXITCODE | Set-Content -Path $code -Encoding ascii
+telex wait --address <addr> --out-dir "C:\path\to\telex-wait-<unique>"
 ```
 
-Start that script as a detached background command. On completion:
+(No PowerShell variables in the detached command. If you genuinely need scripting,
+put it in a `.ps1` file and detach `pwsh -File <script>.ps1 ...`; file contents are
+not subject to the wrapper's interpolation.)
 
-1. Read `exit.code` from the artifact; do not trust the Copilot detached task's exit code.
-2. If it is `0`, parse `message.json`.
-3. Immediately arm the next detached wait before doing longer processing.
+On the detached completion notification:
+
+1. Read `<dir>\exit.code` (the completion marker); do not trust the Copilot detached task's exit code.
+2. If it is `0`, parse `<dir>\message.json`. Otherwise read `<dir>\status.json` and the exit-code table.
+3. Immediately arm the next detached wait before longer processing.
 4. Run `telex ack --address <addr> --id <message-id>`, then disposition the work.
+
+Do **not** use `list_powershell` (or any task-list status) as the source of truth
+for whether the waiter is armed or finished — a detached command can show as
+`completed` while its child is still alive. The runtime completion notification
+plus the `exit.code` artifact are the wake signal.
 
 If the session resumes without an armed waiter, recovery is durable: inspect
 `telex inbox --address <addr>` and `telex read --id <id>`, then arm a fresh

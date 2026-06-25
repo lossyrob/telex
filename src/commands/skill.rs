@@ -36,16 +36,20 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
             "one-shot `telex attach`; the auto-spawned per-user local exchange owns the lease,"
         );
         println!("delivery buffer, and liveness. Then loop one delivery at a time: run a SINGLE");
-        println!("detached background `telex wait` task named TELEX MESSAGE WAITER that writes");
-        println!("stdout/stderr/exit-code to known files. When the detached task completes, read");
-        println!("the artifact exit.code (not the shell task exit code), immediately re-arm a");
         println!(
-            "fresh detached `wait`, then `telex ack` and act/disposition the delivered message."
+            "detached background `telex wait --out-dir <dir>` task named TELEX MESSAGE WAITER."
         );
+        println!("It writes message.json/status.json/exit.code into <dir>. When the detached task");
+        println!(
+            "completes, read the artifact exit.code (not the shell task exit code); on 0 parse"
+        );
+        println!("message.json, immediately re-arm a fresh detached `wait`, then `telex ack` and");
+        println!("act/disposition the delivered message. Use a variable-free command (a literal");
+        println!("<dir> path) — detached shell wrappers may strip $variables.");
         println!("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");
         println!("```sh");
         println!("telex attach --address {addr} --description \"<what you are working on>\"");
-        println!("telex wait --address {addr}");
+        println!("telex wait --address {addr} --out-dir <dir>");
         println!("```\n");
     }
 

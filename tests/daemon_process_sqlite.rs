@@ -720,6 +720,152 @@ fn real_process_idle_wait_timeout_is_not_hung() {
     );
 }
 
+#[test]
+fn real_process_wait_out_dir_writes_artifacts() {
+    let env = ProcessEnv::new("real-out-dir");
+    let session = "real-out-dir-session";
+    let address = "addr:real-out-dir";
+    env.attach(session, address);
+
+    let out_dir = env.root.join("wait-out");
+    let idle = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "wait",
+            "--session",
+            session,
+            "--timeout-ms",
+            "250",
+            "--hang-ms",
+            "25",
+            "--out-dir",
+            out_dir.to_str().expect("out dir is utf8"),
+        ],
+        Duration::from_secs(3),
+    );
+    assert_eq!(
+        idle.code,
+        Some(2),
+        "idle wait should timeout: stdout={} stderr={}",
+        idle.stdout,
+        idle.stderr
+    );
+
+    let exit_code =
+        std::fs::read_to_string(out_dir.join("exit.code")).expect("exit.code artifact written");
+    assert_eq!(
+        exit_code.trim(),
+        "2",
+        "artifact exit.code reflects the real wait exit, not the launcher"
+    );
+
+    let status: Value = serde_json::from_str(
+        &std::fs::read_to_string(out_dir.join("status.json"))
+            .expect("status.json artifact written"),
+    )
+    .expect("status.json parses");
+    assert_eq!(
+        status.get("outcome").and_then(Value::as_str),
+        Some("idle-timeout")
+    );
+    assert_eq!(status.get("exit_code").and_then(Value::as_i64), Some(2));
+    assert!(
+        !out_dir.join("message.json").exists(),
+        "no message.json on idle timeout"
+    );
+}
+
+#[test]
+fn real_process_wait_out_dir_delivers_message_artifact() {
+    let env = ProcessEnv::new("real-out-dir-msg");
+    let receiver = "real-out-dir-msg-receiver";
+    let sender = "real-out-dir-msg-sender";
+    let receiver_addr = "addr:real-out-dir-msg-receiver";
+    let sender_addr = "addr:real-out-dir-msg-sender";
+    let body = "delivered through --out-dir artifacts";
+
+    env.attach(receiver, receiver_addr);
+    env.attach(sender, sender_addr);
+    let sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            receiver_addr,
+            "--subject",
+            "out-dir delivery",
+            "--body",
+            body,
+        ],
+        Duration::from_secs(5),
+    );
+    sent.assert_success("send before out-dir wait");
+
+    let out_dir = env.root.join("wait-out-msg");
+    let delivered = env.run_with_session(
+        receiver,
+        [
+            "--json",
+            "--address",
+            receiver_addr,
+            "wait",
+            "--session",
+            receiver,
+            "--timeout-ms",
+            "4000",
+            "--hang-ms",
+            "1000",
+            "--out-dir",
+            out_dir.to_str().expect("out dir is utf8"),
+        ],
+        Duration::from_secs(6),
+    );
+    assert_eq!(
+        delivered.code,
+        Some(0),
+        "buffered message should deliver: stdout={} stderr={}",
+        delivered.stdout,
+        delivered.stderr
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(out_dir.join("exit.code"))
+            .expect("exit.code artifact written")
+            .trim(),
+        "0"
+    );
+    let message: Value = serde_json::from_str(
+        &std::fs::read_to_string(out_dir.join("message.json"))
+            .expect("message.json artifact written"),
+    )
+    .expect("message.json parses");
+    assert_eq!(message.get("body").and_then(Value::as_str), Some(body));
+    assert_eq!(
+        message.get("to").and_then(Value::as_str),
+        Some(receiver_addr)
+    );
+
+    let status: Value = serde_json::from_str(
+        &std::fs::read_to_string(out_dir.join("status.json"))
+            .expect("status.json artifact written"),
+    )
+    .expect("status.json parses");
+    assert_eq!(
+        status.get("outcome").and_then(Value::as_str),
+        Some("message")
+    );
+}
+
 #[cfg(target_os = "linux")]
 fn assert_hostile_prebound_endpoint_rejected_before_hello(env: &ProcessEnv) {
     use std::io::Read;

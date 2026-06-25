@@ -172,6 +172,30 @@ One-shot verbs (`attach`/`detach`/`send`/`reply`/`status`) return `0` on success
 documented non-zero on a daemon-down or protocol error; the exact non-zero set is frozen
 in `daemon-core` acceptance.
 
+#### 3.2.1 `--out-dir` outcome artifacts (detached delivery)
+
+`telex wait --out-dir <DIR>` additionally persists the outcome to files in `<DIR>`, so a
+**detached, variable-free** invocation can deliver both the message and the terminal outcome
+to an agent that cannot capture the detached process's stdout or real exit code (e.g. Copilot
+CLI on Windows, where the detached shell wrapper string-interpolates the command — stripping
+`$variables` — and reports only the launcher/wrapper exit code). stdout/stderr behaviour is
+unchanged; the files are purely additive:
+
+| File | When | Contents |
+|---|---|---|
+| `message.json` | exit `0` only | the delivered message (same object printed to stdout) |
+| `status.json` | always | `{ outcome, exit_code, detail, address, written_at_ms }` |
+| `exit.code` | always | the integer exit code, written **last** as the completion marker |
+
+`exit.code` is written after the other files (each via a sibling temp-file + rename), so a
+reader that observes `exit.code` can treat all artifacts as fully written. The agent waits for
+the detached completion notification, reads `exit.code` (then `message.json` on `0`), and
+re-arms a fresh wait — it never trusts the runtime's reported detached exit code. This keeps
+the stdout flush as pure transport: the file artifacts are likewise transport-only and are
+**not** the consumed mark, which still fires only on the explicit agent `ack`
+([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)). See `SKILL.md`
+("Copilot CLI detached waiter pattern") and ADR 0026.
+
 ### 3.3 `wait` reconnect-on-EOF grace
 
 A daemon **restart or handoff is not a turn failure.** When `wait` is blocked and the

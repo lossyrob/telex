@@ -1264,3 +1264,37 @@ owner-private + fail-closed. Existing pre-upgrade Windows cap/runtime files unde
 default become stale/inert; the named-pipe singleton and canonical-store lock still preserve
 correctness, and upgrade guidance should prefer `daemon stop --drain` before replacing a running
 binary.
+
+## 0026 — `telex wait --out-dir` outcome artifacts for detached delivery
+
+- **Date:** 2026-06-25
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** The local-daemon waiter UX runs `telex wait` as a single-shot **detached** background
+task: the host runtime wakes the agent on the waiter's completion, and the agent reads the delivered
+message and re-arms. Dogfooding on Copilot CLI (Windows) showed two host-runtime facts that break a
+naive "capture stdout / read the shell exit code" approach: (1) the detached shell does **not** return
+the child's stdout, and (2) the detached PowerShell wrapper string-interpolates the command before the
+child runs, so any `$variable` (e.g. `$run`, `$LASTEXITCODE`) is stripped and an inline "redirect
+stdout to a file, capture `$LASTEXITCODE`" waiter silently writes nothing. The previous skill guidance
+recommended exactly that inline-variable pattern, so it failed in practice. A `.ps1 -File` wrapper
+works, but pushes shell-specific scaffolding onto every agent and runtime.
+
+**Decision.** Make robust detached delivery a first-class telex feature instead of a shell recipe. Add
+`telex wait --out-dir <DIR>`, which writes the outcome to files in `<DIR>`: `message.json` (on delivery
+only), `status.json` (always: `outcome`, `exit_code`, `detail`, `address`, `written_at_ms`), and
+`exit.code` (always, the integer code, written **last** as the completion marker via temp-file +
+rename). stdout/stderr behaviour and exit codes are unchanged; the artifacts are additive. The skill
+now arms the waiter with a single **variable-free** command — `telex wait --address <addr> --out-dir
+<literal-dir>` — so there is nothing for a detached wrapper to mangle, and instructs agents to trust
+the artifact `exit.code` over the runtime-reported detached exit code, and never to use task-list
+status (`list_powershell`) as the armed/done signal.
+
+**Consequences.** Detached delivery no longer depends on host stdout capture or shell-variable
+survival, which makes the waiter portable beyond Copilot CLI. The file artifacts are **transport
+only**, exactly like the stdout flush ([daemon.md §3.2.1](daemon.md), §11.3): they are not the consumed
+mark, which still fires only on the explicit agent `ack`, so an at-least-once redelivery after a crash
+is preserved. `exit.code` ordering is the documented "fully written" contract; readers that observe it
+can read the sibling files without a partial-write race (the host only wakes the agent after the child
+exits, so there is no concurrent reader/writer). The legacy stdout JSON path is retained for attached
+and `--file`-based callers, so this is purely additive and back-compatible.
