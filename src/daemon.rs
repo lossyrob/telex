@@ -4774,16 +4774,19 @@ mod platform {
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer};
     use windows_sys::Win32::Foundation::{
         CloseHandle, GetLastError, LocalFree, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS,
-        ERROR_PIPE_BUSY, FILETIME, HANDLE, INVALID_HANDLE_VALUE,
+        ERROR_PIPE_BUSY, FILETIME, HANDLE, INVALID_HANDLE_VALUE, PSID,
     };
     use windows_sys::Win32::Security::Authorization::{
         ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-        SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
+        ConvertStringSidToSidW, GetNamedSecurityInfoW, SetNamedSecurityInfoW, SDDL_REVISION_1,
+        SE_FILE_OBJECT,
     };
     use windows_sys::Win32::Security::{
+        AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
         GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation, TokenUser,
+        ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE, ACL, ACL_SIZE_INFORMATION,
         DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-        SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+        SECURITY_ATTRIBUTES, SE_DACL_PRESENT, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateDirectoryW, CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
@@ -4883,6 +4886,7 @@ mod platform {
             .map_err(|e| io_err("canonicalizing daemon directory", e))?;
         validate_owner_private_dir_shape(&canonical)?;
         set_owner_only_dir_security(&canonical)?;
+        validate_owner_private_dir_security(&canonical)?;
         Ok(canonical)
     }
 
@@ -5093,6 +5097,135 @@ mod platform {
         Ok(())
     }
 
+    fn validate_owner_private_dir_security(path: &Path) -> Result<()> {
+        const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+        const ACCESS_DENIED_ACE_TYPE: u8 = 1;
+
+        let mut sd: *mut c_void = std::ptr::null_mut();
+        let mut owner: PSID = std::ptr::null_mut();
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let wide = wide_null(path.as_os_str());
+        let rc = unsafe {
+            GetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut sd,
+            )
+        };
+        if rc != 0 {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!(
+                    "cannot read security descriptor for {}: {}",
+                    path.display(),
+                    std::io::Error::from_raw_os_error(rc as i32)
+                ),
+            });
+        }
+        let _sd_guard = LocalAllocGuard(sd);
+
+        let current_sid = sid_from_string(&current_user_identity()?)?;
+        let system_sid = sid_from_string("S-1-5-18")?;
+        let admins_sid = sid_from_string("S-1-5-32-544")?;
+
+        if owner.is_null() || unsafe { EqualSid(owner, current_sid.0) } == 0 {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is not owned by the current SID", path.display()),
+            });
+        }
+
+        let mut control = 0u16;
+        let mut revision = 0u32;
+        let ok = unsafe { GetSecurityDescriptorControl(sd, &mut control, &mut revision) };
+        if ok == 0 || control & SE_DACL_PRESENT == 0 || control & SE_DACL_PROTECTED == 0 {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} does not have a protected explicit DACL", path.display()),
+            });
+        }
+        if dacl.is_null() {
+            return Err(DaemonError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is missing a DACL", path.display()),
+            });
+        }
+
+        let mut info = ACL_SIZE_INFORMATION {
+            AceCount: 0,
+            AclBytesInUse: 0,
+            AclBytesFree: 0,
+        };
+        let ok = unsafe {
+            GetAclInformation(
+                dacl,
+                &mut info as *mut _ as *mut c_void,
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+        };
+        if ok == 0 || info.AceCount == 0 {
+            return Err(io_err(
+                "reading daemon directory ACL",
+                std::io::Error::last_os_error(),
+            ));
+        }
+
+        for idx in 0..info.AceCount {
+            let mut ace_ptr: *mut c_void = std::ptr::null_mut();
+            let ok = unsafe { GetAce(dacl, idx, &mut ace_ptr) };
+            if ok == 0 || ace_ptr.is_null() {
+                return Err(io_err(
+                    "reading daemon directory ACE",
+                    std::io::Error::last_os_error(),
+                ));
+            }
+
+            let header = unsafe { &*(ace_ptr as *const windows_sys::Win32::Security::ACE_HEADER) };
+            match header.AceType {
+                ACCESS_ALLOWED_ACE_TYPE => {
+                    let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
+                    let sid = (&ace.SidStart as *const u32).cast::<c_void>() as PSID;
+                    let allowed = unsafe {
+                        EqualSid(sid, current_sid.0) != 0
+                            || EqualSid(sid, system_sid.0) != 0
+                            || EqualSid(sid, admins_sid.0) != 0
+                    };
+                    if !allowed {
+                        return Err(DaemonError::Unsupported {
+                            capability: "owner-private daemon directory",
+                            message: format!("{} grants access to a non-owner SID", path.display()),
+                        });
+                    }
+                }
+                ACCESS_DENIED_ACE_TYPE => {
+                    let _ace = unsafe { &*(ace_ptr as *const ACCESS_DENIED_ACE) };
+                    return Err(DaemonError::Unsupported {
+                        capability: "owner-private daemon directory",
+                        message: format!("{} contains a deny ACE", path.display()),
+                    });
+                }
+                _ => {
+                    return Err(DaemonError::Unsupported {
+                        capability: "owner-private daemon directory",
+                        message: format!(
+                            "{} contains unsupported ACE type {}",
+                            path.display(),
+                            header.AceType
+                        ),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     #[cfg(test)]
     pub(super) fn owner_private_sddl_is_strict(sddl: &str, sid: &str) -> bool {
         if !sddl_section(sddl, "O:").is_some_and(|owner| {
@@ -5282,6 +5415,43 @@ mod platform {
             ));
         }
         Ok(Handle(token))
+    }
+
+    struct LocalAllocGuard(*mut c_void);
+
+    impl Drop for LocalAllocGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    LocalFree(self.0);
+                }
+            }
+        }
+    }
+
+    struct OwnedSid(PSID);
+
+    impl Drop for OwnedSid {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    LocalFree(self.0);
+                }
+            }
+        }
+    }
+
+    fn sid_from_string(sid: &str) -> Result<OwnedSid> {
+        let wide = wide_null(OsStr::new(sid));
+        let mut raw: PSID = std::ptr::null_mut();
+        let ok = unsafe { ConvertStringSidToSidW(wide.as_ptr(), &mut raw) };
+        if ok == 0 || raw.is_null() {
+            return Err(io_err(
+                "converting SID string",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        Ok(OwnedSid(raw))
     }
 
     fn sid_string_from_token(token: HANDLE) -> Result<String> {
