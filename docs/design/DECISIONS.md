@@ -1282,10 +1282,11 @@ works, but pushes shell-specific scaffolding onto every agent and runtime.
 
 **Decision.** Make robust detached delivery a first-class telex feature instead of a shell recipe. Add
 `telex wait --out-dir <DIR>`, which writes the outcome to files in `<DIR>`: `message.json` (on delivery
-only), `status.json` (always: `outcome`, `exit_code`, `detail`, `address`, `written_at_ms`), and
+only), `status.json` (always: `outcome`, `exit_code`, `detail`, `address`, `written_at_ms`),
 `exit.code` (always, the integer code, written **last** as the completion marker via temp-file +
-rename). stdout/stderr behaviour and exit codes are unchanged; the artifacts are additive. The skill
-now arms the waiter with a single **variable-free** command — `telex wait --address <addr> --out-dir
+rename), and `wait.pid` (at startup, before blocking). stdout/stderr behaviour and exit codes are
+unchanged; the artifacts are additive. The skill now arms the waiter with a single **variable-free**
+command — `telex wait --address <addr> --out-dir
 <literal-dir>` — so there is nothing for a detached wrapper to mangle, and instructs agents to trust
 the artifact `exit.code` over the runtime-reported detached exit code, and never to use task-list
 status (`list_powershell`) as the armed/done signal.
@@ -1301,3 +1302,35 @@ artifacts are owner-only on Unix (dir `0700`, files `0600`), and a reused `--out
 `message.json` on a non-delivery outcome; Windows local app data / `%TEMP%` are already per-user. The
 legacy stdout JSON path is retained for attached and `--file`-based callers, so this is purely additive
 and back-compatible.
+
+## 0027 — Station stop, live waiter registry, and status reconciliation
+
+- **Date:** 2026-06-25
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Dogfooding the detached waiter UX exposed teardown friction: `detach` releases durable
+membership, but the launching agent does not get a usable process handle for its detached waiter from
+Copilot CLI (`pid: unknown`). Operators had to enumerate OS processes and match command lines to stop
+a waiter, and `telex daemon status` was misleading because the CLI requested the daemon's intentionally
+minimal projection (`members: []`, `stores: []`) even while a one-shot attached station was live.
+There was also a correctness concern: if a waiter survived teardown, the next message might be
+delivered into an unread detached process.
+
+**Decision.** Add first-class station teardown and waiter observability. `Wait` IPC now carries the
+client waiter's pid/start-time, and the daemon records live waiters in an independent registry keyed by
+`(store_key, session_id, address, pid)`. Detailed status exposes the top-level `live_waiters` list and
+per-member `live_waiters`, and `telex daemon status` requests that detailed projection using the local
+admin cap. `telex status --address`, `telex address show`, and `telex address list` overlay live daemon
+membership on durable lease occupancy so those operator views agree. Add `telex station stop --address
+<addr>` as the symmetric teardown command: mark the station idle so blocked waiters return
+`PresenceEnded`, wait for tracked waiters to drain for a short grace window, then perform the durable
+detach/tombstone. The command returns a typed `StationStopped` summary with waiter counts and any
+remaining live waiter records.
+
+**Consequences.** Normal teardown no longer requires OS process hunting, and a stopped station is
+provably unoccupied: a message sent after `station stop` remains queued until a future attach/wait
+rather than being consumed by an orphan waiter. Plain `detach` remains available and remains terminal;
+tests now prove it does not consume a later message either, but `station stop` is the recommended
+operator flow because it waits for the live waiter to exit and reports any leftover waiter. This is a
+minor IPC bump (`1.1`) with a required `station_lifecycle_p8` capability, so new clients fail closed
+against older daemons instead of sending unknown teardown requests.

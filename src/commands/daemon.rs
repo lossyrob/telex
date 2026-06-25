@@ -101,11 +101,12 @@ async fn status(ctx: &Ctx) -> Result<i32> {
     let store_key = ctx.store_key()?;
     match crate::daemon::connect_existing(&store_key).await {
         Ok(mut client) => {
+            let cap = crate::daemon::read_cap_file(&paths.cap_path)?;
             let response = client
                 .request(&Request::Status {
                     store_key: Some(store_key),
-                    detail: false,
-                    proof: None,
+                    detail: true,
+                    proof: Some(cap.admin_cap),
                 })
                 .await?;
             match response {

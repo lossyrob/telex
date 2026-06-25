@@ -133,10 +133,34 @@ On the detached completion notification:
 3. Immediately arm the next detached wait before longer processing.
 4. Run `telex ack --address <addr> --id <message-id>`, then disposition the work.
 
+`wait` also writes `<dir>\wait.pid` at startup. If you need to tear down the
+station before a message arrives, prefer `telex station stop --address <addr>`:
+it releases the station and waits for the live waiter to exit. The PID file is a
+diagnostic fallback only; do not hunt OS process lists unless `station stop`
+reports a still-live waiter after its grace window.
+
 Do **not** use `list_powershell` (or any task-list status) as the source of truth
 for whether the waiter is armed or finished — a detached command can show as
 `completed` while its child is still alive. The runtime completion notification
 plus the `exit.code` artifact are the wake signal.
+
+### Teardown and upgrade
+
+Use `telex station stop --address <addr>` as the symmetric inverse of the
+`attach` + detached-wait loop. It marks the station non-attending, releases
+membership durably, and waits for tracked live waiters to exit. After it returns
+with `waiters_after: 0`, a later message to the address remains queued until a
+future attach/wait; it is not consumed by an orphan waiter.
+
+For a local binary upgrade on Windows, use this order:
+
+```sh
+telex station stop --address <addr>
+telex daemon stop --drain
+# replace telex.exe
+telex attach --address <addr> --description "<s>"
+telex wait --address <addr> --out-dir <dir>
+```
 
 If the session resumes without an armed waiter, recovery is durable: inspect
 `telex inbox --address <addr>` and `telex read --id <id>`, then arm a fresh

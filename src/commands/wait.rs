@@ -38,12 +38,35 @@ pub async fn run(ctx: &Ctx, args: WaitArgs) -> Result<i32> {
         timeout_ms: args.timeout_ms,
         hang_ms: args.hang_ms,
         reconnect_grace_ms: reconnect_grace_ms(args.reconnect_grace_ms),
+        waiter_pid: std::process::id(),
+        waiter_start_time: crate::session_watch::capture_process_start_time(std::process::id()),
     };
+    if let Some(dir) = args.out_dir.as_deref() {
+        if let Err(e) = write_wait_start_artifacts(dir, cfg.waiter_pid) {
+            eprintln!(
+                "[wait] warning: could not write --out-dir startup artifacts to {}: {e}",
+                dir.display()
+            );
+        }
+    }
     let mut connector = RealWaitConnector;
-    let outcome = match wait_loop(&mut connector, &cfg).await? {
-        WaitTerminal::DaemonGone(message) => WaitOutcome::daemon_gone(message),
-        WaitTerminal::DaemonHung(message) => WaitOutcome::daemon_hung(message),
-        WaitTerminal::Response(response) => WaitOutcome::from_response(response)?,
+    let outcome = match wait_loop(&mut connector, &cfg).await {
+        Ok(WaitTerminal::DaemonGone(message)) => WaitOutcome::daemon_gone(message),
+        Ok(WaitTerminal::DaemonHung(message)) => WaitOutcome::daemon_hung(message),
+        Ok(WaitTerminal::Response(response)) => WaitOutcome::from_response(response)?,
+        Err(e) => {
+            if let Some(dir) = args.out_dir.as_deref() {
+                if let Err(write_err) =
+                    write_wait_artifacts(dir, &WaitOutcome::error(e.to_string()), &address)
+                {
+                    eprintln!(
+                        "[wait] warning: could not write --out-dir error artifacts to {}: {write_err}",
+                        dir.display()
+                    );
+                }
+            }
+            return Err(e);
+        }
     };
     emit_outcome(outcome, args.out_dir.as_deref(), &address)
 }
@@ -56,6 +79,8 @@ struct WaitLoopConfig {
     timeout_ms: Option<u64>,
     hang_ms: u64,
     reconnect_grace_ms: u64,
+    waiter_pid: u32,
+    waiter_start_time: Option<u64>,
 }
 
 #[derive(Debug)]
@@ -227,6 +252,8 @@ fn wait_request(cfg: &WaitLoopConfig, timeout_ms: Option<u64>) -> Request {
         address: cfg.address.clone(),
         attention: None,
         timeout_ms,
+        waiter_pid: Some(cfg.waiter_pid),
+        waiter_start_time: cfg.waiter_start_time,
     }
 }
 
@@ -374,6 +401,15 @@ impl WaitOutcome {
         }
     }
 
+    fn error(detail: String) -> Self {
+        WaitOutcome {
+            exit_code: 1,
+            outcome: "error",
+            detail: Some(detail),
+            message: None,
+        }
+    }
+
     fn from_response(response: Response) -> Result<Self> {
         match response {
             Response::Message {
@@ -491,6 +527,14 @@ fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std
         format!("{}\n", outcome.exit_code).as_bytes(),
     )?;
     Ok(())
+}
+
+/// Publish the waiter process identity as soon as `wait` starts blocking. This gives runtimes that
+/// hide detached-process handles (notably Copilot CLI) a first-class, non-command-line-hunting way to
+/// find the waiter during teardown.
+fn write_wait_start_artifacts(dir: &Path, waiter_pid: u32) -> std::io::Result<()> {
+    ensure_out_dir(dir)?;
+    atomic_write(&dir.join("wait.pid"), format!("{waiter_pid}\n").as_bytes())
 }
 
 /// Create the artifact directory owner-only. The message body is operational content, so on Unix
@@ -627,6 +671,8 @@ mod tests {
             timeout_ms: Some(1_000),
             hang_ms: 1_000,
             reconnect_grace_ms: 500,
+            waiter_pid: std::process::id(),
+            waiter_start_time: crate::session_watch::capture_process_start_time(std::process::id()),
         }
     }
 
@@ -851,6 +897,19 @@ mod tests {
     }
 
     #[test]
+    fn out_dir_startup_writes_wait_pid() {
+        let dir = artifact_dir("pid");
+        write_wait_start_artifacts(&dir, 12_345).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("wait.pid"))
+                .unwrap()
+                .trim(),
+            "12345"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
     fn out_dir_timeout_writes_status_and_exit_code_without_message() {
         let dir = artifact_dir("timeout");
         let outcome = WaitOutcome::from_response(Response::Timeout).unwrap();
@@ -897,6 +956,36 @@ mod tests {
                 .unwrap()
                 .trim(),
             "3"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn out_dir_error_records_exit_one_and_detail() {
+        let dir = artifact_dir("error");
+        write_wait_artifacts(
+            &dir,
+            &WaitOutcome::error("Incompatible: stale daemon".to_string()),
+            "addr:a",
+        )
+        .unwrap();
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("status.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            status.get("outcome").and_then(|v| v.as_str()),
+            Some("error")
+        );
+        assert_eq!(status.get("exit_code").and_then(|v| v.as_i64()), Some(1));
+        assert_eq!(
+            status.get("detail").and_then(|v| v.as_str()),
+            Some("Incompatible: stale daemon")
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("exit.code"))
+                .unwrap()
+                .trim(),
+            "1"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

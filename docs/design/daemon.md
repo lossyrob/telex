@@ -186,6 +186,7 @@ unchanged; the files are purely additive:
 | `message.json` | exit `0` only | the delivered message (same object printed to stdout) |
 | `status.json` | always | `{ outcome, exit_code, detail, address, written_at_ms }` |
 | `exit.code` | always | the integer exit code, written **last** as the completion marker |
+| `wait.pid` | startup | the waiter process id, written before blocking |
 
 `exit.code` is written after the other files (each via a sibling temp-file + rename), so a
 reader that observes `exit.code` can treat all artifacts as fully written. On reuse of a `<DIR>`
@@ -282,11 +283,15 @@ Frozen Status fields:
 - **`epoch_by_address`** — for each owned address: `lease_epoch`, `owner_instance_id`,
   `idle` (bool — no waiter currently attended/blocked).
 - **`members`** — for each in-memory membership record: `address`, `session_id` (opaque),
-  `occupant`, `waiters` (count of blocked waiters) + `watch_pids` (pid + role + **alive**)
-  so a live-but-quiet station is distinguishable from an idle one,
+  `occupant`, `waiters` (count of blocked waiters), `live_waiters` (pid/start-time/alive,
+  attention, timeout), and `watch_pids` (pid + role + **alive**) so a live-but-quiet station
+  is distinguishable from an idle one,
   `backend`/`store_key`, `host`. (Membership is in-memory and explicit-only — see
   [§14.1](#141-identity-and-in-memory-membership) — so this set is empty for sessions that
   have not (re-)attached since the last daemon start.)
+- **`live_waiters`** — the top-level live waiter registry, keyed by
+  `(store_key, session_id, address, pid)`, including waiters that are in the small teardown
+  interval between membership release and process exit.
 - **`backoff`** — current backend reconnect/backoff/crashloop state.
 - **`recent_errors`** — a bounded ring of recent actionable errors (e.g. `NeedsAttach`
   responses, operator-reset audit events with prior occupant, `NotOwner` self-demotions,
@@ -465,6 +470,7 @@ Responses:
 | `PresenceEnded` | the waiter-completion status the exchange writes when it reaps a blocked `Wait` (sessionEnd hook, loader-pid death, **or the idle-TTL backstop** — [§9](#9-liveness-model)/[§10](#10-reaping-and-the-idle-ttl-backstop)); non-destructive (the station survives and wakes on a new message) |
 | `StatusReport` | the [§4](#4-status-surface-the-frozen-contract-shape) fields |
 | `Ack` | generic success for `Register`/`Detach`/`Reset`/`Drain`; the **consume-`Ack`** carries the typed `DeliveryOutcome` (`Marked` / `AlreadyConsumed` / `AckNoOp` / `NotOwner`, [§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) — a daemon that collapses the attended-but-never-delivered case to generic success fails tests 5/16 |
+| `StationStopped` | station teardown summary: `store_key`, `session_id`, `address`, `detached`, `waiters_before`, `waiters_after`, remaining `live_waiters`, optional `message`/`lease_epoch` |
 | `Error` | `{ code, message, … }` — incl. **`NeedsAttach`** (the exchange does not know this session/address — the agent must explicitly `Register` then retry; never an implicit rebuild), `NotOwner`, `Unauthorized`, `Incompatible`, `Ambiguous` |
 
 The `Message` frame carries `lease_epoch` (the delivery-ownership fence —

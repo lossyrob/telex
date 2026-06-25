@@ -46,6 +46,8 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
         println!("message.json, immediately re-arm a fresh detached `wait`, then `telex ack` and");
         println!("act/disposition the delivered message. Use a variable-free command (a literal");
         println!("<dir> path) — detached shell wrappers may strip $variables.");
+        println!("For teardown or upgrade, run `telex station stop --address {addr}` first; it");
+        println!("releases the station and waits for tracked live waiters to exit.");
         println!("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");
         println!("```sh");
         println!("telex attach --address {addr} --description \"<what you are working on>\"");

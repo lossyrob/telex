@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::json;
 
 use crate::cli::{AddressCmd, AddressListArgs, Ctx, ResolveArgs};
+use crate::daemon_ipc::{DaemonStatus, Request, Response};
 use crate::model::{AddressRow, STATUS_RETIRED};
 use crate::output::emit;
 
@@ -38,6 +39,8 @@ fn matches(a: &AddressRow, m: &Option<String>, tag: &Option<String>) -> bool {
 
 async fn list(ctx: &Ctx, args: AddressListArgs) -> Result<i32> {
     let backend = ctx.backend().await?;
+    let store_key = ctx.store_key()?;
+    let daemon_status = daemon_detail(ctx).await?;
     let rows = backend
         .list_addresses(args.scope.as_deref(), args.all)
         .await?;
@@ -50,14 +53,19 @@ async fn list(ctx: &Ctx, args: AddressListArgs) -> Result<i32> {
         let occ = backend
             .occupancy(&a.address, ctx.cfg.liveness_window_secs)
             .await?;
+        let daemon_member = daemon_status.as_ref().and_then(|status| {
+            status.members.iter().find(|member| {
+                member.store_key == store_key && member.address == a.address && !member.idle
+            })
+        });
         entries.push(json!({
             "address": a.address,
             "description": a.description,
             "scope": a.scope,
             "tags": a.tags,
             "status": a.status,
-            "occupied": occ.occupied,
-            "occupant": occ.occupant,
+            "occupied": daemon_member.is_some() || occ.occupied,
+            "occupant": daemon_member.map(|m| m.occupant.clone()).or(occ.occupant),
             "age_secs": occ.age_secs,
         }));
     }
@@ -93,10 +101,30 @@ async fn show(ctx: &Ctx) -> Result<i32> {
     let occ = backend
         .occupancy(&address, ctx.cfg.liveness_window_secs)
         .await?;
+    let store_key = ctx.store_key()?;
+    let daemon_status = daemon_detail(ctx).await?;
+    let daemon_members: Vec<_> = daemon_status
+        .as_ref()
+        .map(|status| {
+            status
+                .members
+                .iter()
+                .filter(|member| {
+                    member.store_key == store_key && member.address == address && !member.idle
+                })
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
     let out = json!({
         "address": addr,
         "lease": lease,
-        "occupancy": occ,
+        "occupancy": {
+            "occupied": !daemon_members.is_empty() || occ.occupied,
+            "occupant": daemon_members.first().map(|m| m.occupant.clone()).or(occ.occupant),
+            "age_secs": occ.age_secs,
+        },
+        "daemon_members": daemon_members,
     });
     emit(ctx.fmt, &out, || {
         println!("address      {}", addr.address);
@@ -111,6 +139,33 @@ async fn show(ctx: &Ctx) -> Result<i32> {
         }
     });
     Ok(0)
+}
+
+async fn daemon_detail(ctx: &Ctx) -> Result<Option<DaemonStatus>> {
+    let paths = crate::daemon::DaemonPaths::current()?;
+    let cap = match crate::daemon::read_cap_file(&paths.cap_path) {
+        Ok(cap) => cap,
+        Err(_) => return Ok(None),
+    };
+    let store_key = ctx.store_key()?;
+    match crate::daemon::connect_existing(&store_key).await {
+        Ok(mut client) => {
+            let response = client
+                .request(&Request::Status {
+                    store_key: Some(store_key),
+                    detail: true,
+                    proof: Some(cap.admin_cap),
+                })
+                .await?;
+            match response {
+                Response::StatusReport { status } => Ok(Some(status)),
+                Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
+                other => Err(anyhow!("unexpected daemon status response: {other:?}")),
+            }
+        }
+        Err(crate::daemon::DaemonError::NotRunning(_)) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
 }
 
 async fn retire(ctx: &Ctx) -> Result<i32> {

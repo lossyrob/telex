@@ -439,6 +439,17 @@ fn read_capture(file: &mut std::fs::File, path: &Path) -> String {
     text
 }
 
+fn wait_until_path_exists(path: &Path, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if path.exists() {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("timed out waiting for {}", path.display());
+}
+
 fn wait_status_with_timeout(
     mut child: std::process::Child,
     timeout: Duration,
@@ -863,6 +874,187 @@ fn real_process_wait_out_dir_delivers_message_artifact() {
     assert_eq!(
         status.get("outcome").and_then(Value::as_str),
         Some("message")
+    );
+}
+
+#[test]
+fn real_process_station_stop_drains_waiter_and_preserves_next_message() {
+    let env = ProcessEnv::new("real-station-stop");
+    let receiver = "real-station-stop-receiver";
+    let sender = "real-station-stop-sender";
+    let next_receiver = "real-station-stop-next";
+    let receiver_addr = "addr:real-station-stop-receiver";
+    let sender_addr = "addr:real-station-stop-sender";
+    env.attach(receiver, receiver_addr);
+    env.attach(sender, sender_addr);
+
+    let out_dir = env.root.join("station-stop-wait");
+    let mut wait_cmd = env.command_with_session(receiver);
+    wait_cmd
+        .args([
+            "--json",
+            "--address",
+            receiver_addr,
+            "wait",
+            "--session",
+            receiver,
+            "--timeout-ms",
+            "10000",
+            "--out-dir",
+            out_dir.to_str().expect("out dir is utf8"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let waiter = wait_cmd.spawn().expect("spawn waiter");
+    wait_until_path_exists(&out_dir.join("wait.pid"), Duration::from_secs(3));
+    let waiter_pid: u32 = std::fs::read_to_string(out_dir.join("wait.pid"))
+        .expect("wait.pid written")
+        .trim()
+        .parse()
+        .expect("wait.pid parses");
+    assert!(waiter_pid > 0);
+
+    let status = env.daemon_status().json("daemon status with waiter");
+    assert!(
+        status
+            .get("live_waiters")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .any(|w| w.get("pid").and_then(Value::as_u64) == Some(waiter_pid as u64)),
+        "daemon status should list waiter pid {waiter_pid}: {status}"
+    );
+
+    let stopped = env.run_with_session(
+        receiver,
+        [
+            "--json",
+            "--address",
+            receiver_addr,
+            "station",
+            "stop",
+            "--session",
+            receiver,
+            "--wait-grace-ms",
+            "3000",
+        ],
+        Duration::from_secs(6),
+    );
+    stopped.assert_success("station stop");
+    let stopped_json = stopped.json("station stop");
+    assert_eq!(
+        stopped_json.get("waiters_after").and_then(Value::as_u64),
+        Some(0)
+    );
+
+    let (wait_code, wait_timed_out) = wait_status_with_timeout(waiter, Duration::from_secs(3));
+    assert_eq!(wait_code, Some(5), "waiter should exit presence-ended");
+    assert!(
+        !wait_timed_out,
+        "station stop should not leave waiter running"
+    );
+
+    let body = "message after station stop";
+    let sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            receiver_addr,
+            "--subject",
+            "after station stop",
+            "--body",
+            body,
+        ],
+        Duration::from_secs(5),
+    );
+    sent.assert_success("send after station stop");
+    let sent_json = sent.json("send after station stop");
+    assert_eq!(
+        sent_json.get("occupied").and_then(Value::as_bool),
+        Some(false),
+        "stopped station should be unoccupied: {sent_json}"
+    );
+
+    env.attach(next_receiver, receiver_addr);
+    let delivered = wait_for_message(&env, next_receiver, receiver_addr, body);
+    assert_eq!(delivered.get("body").and_then(Value::as_str), Some(body));
+}
+
+#[test]
+fn real_process_status_and_address_list_agree_after_attach() {
+    let env = ProcessEnv::new("real-status");
+    let session = "real-status-session";
+    let address = "addr:real-status";
+    env.attach(session, address);
+
+    let daemon_status = env.daemon_status().json("daemon status");
+    assert!(
+        !daemon_status
+            .get("stores")
+            .and_then(Value::as_array)
+            .unwrap()
+            .is_empty(),
+        "daemon status should include stores: {daemon_status}"
+    );
+    assert!(
+        daemon_status
+            .get("members")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .any(|m| m.get("address").and_then(Value::as_str) == Some(address)),
+        "daemon status should include attached member: {daemon_status}"
+    );
+
+    let status = env.run_with_session(
+        session,
+        ["--json", "--address", address, "status"],
+        Duration::from_secs(5),
+    );
+    status.assert_success("status --address");
+    let status_json = status.json("status --address");
+    assert_eq!(
+        status_json
+            .get("occupancy")
+            .and_then(|o| o.get("occupied"))
+            .and_then(Value::as_bool),
+        Some(true),
+        "status --address should report occupied: {status_json}"
+    );
+    assert!(
+        !status_json
+            .get("daemon_members")
+            .and_then(Value::as_array)
+            .unwrap()
+            .is_empty(),
+        "status --address should include daemon members: {status_json}"
+    );
+
+    let list = env.run(
+        ["--json", "address", "list", "--match", "real-status"],
+        Duration::from_secs(5),
+    );
+    list.assert_success("address list");
+    let list_json = list.json("address list");
+    let listed = list_json
+        .get("addresses")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|entry| entry.get("address").and_then(Value::as_str) == Some(address))
+        .expect("address listed");
+    assert_eq!(
+        listed.get("occupied").and_then(Value::as_bool),
+        Some(true),
+        "address list should agree with status --address: {list_json}"
     );
 }
 

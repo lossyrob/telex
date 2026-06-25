@@ -9,7 +9,7 @@ use std::fmt;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_MAJOR: u16 = 1;
-pub const PROTOCOL_MINOR: u16 = 0;
+pub const PROTOCOL_MINOR: u16 = 1;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
@@ -23,6 +23,7 @@ pub const CAP_DRAIN_P2: &str = "drain_p2";
 pub const CAP_MEMBERSHIP_P3: &str = "membership_p3";
 pub const CAP_LIVENESS_P5: &str = "liveness_p5";
 pub const CAP_STATUS_P5: &str = "status_p5";
+pub const CAP_STATION_LIFECYCLE_P8: &str = "station_lifecycle_p8";
 
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
@@ -33,6 +34,7 @@ pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_MEMBERSHIP_P3,
     CAP_LIVENESS_P5,
     CAP_STATUS_P5,
+    CAP_STATION_LIFECYCLE_P8,
 ];
 
 pub const ERROR_INCOMPATIBLE: &str = "Incompatible";
@@ -167,6 +169,13 @@ pub enum Request {
         session_id: String,
         address: String,
     },
+    StationStop {
+        store_key: String,
+        session_id: String,
+        address: String,
+        #[serde(default)]
+        wait_grace_ms: u64,
+    },
     Wait {
         store_key: String,
         session_id: String,
@@ -175,6 +184,10 @@ pub enum Request {
         attention: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waiter_pid: Option<u32>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        waiter_start_time: Option<u64>,
     },
     Ack {
         store_key: String,
@@ -297,6 +310,20 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lease_epoch: Option<i64>,
     },
+    StationStopped {
+        store_key: String,
+        session_id: String,
+        address: String,
+        detached: bool,
+        waiters_before: usize,
+        waiters_after: usize,
+        #[serde(default)]
+        live_waiters: Vec<LiveWaiterStatus>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        message: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        lease_epoch: Option<i64>,
+    },
     Error {
         code: String,
         message: String,
@@ -340,6 +367,8 @@ pub struct DaemonStatus {
     #[serde(default)]
     pub members: Vec<MemberStatus>,
     #[serde(default)]
+    pub live_waiters: Vec<LiveWaiterStatus>,
+    #[serde(default)]
     pub retention: Vec<RetentionStatus>,
     #[serde(default)]
     pub idle_stations: IdleStationStatus,
@@ -370,6 +399,8 @@ pub struct MemberStatus {
     pub host: String,
     pub waiters: usize,
     #[serde(default)]
+    pub live_waiters: Vec<LiveWaiterStatus>,
+    #[serde(default)]
     pub watch_pids: Vec<WatchPidStatus>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
@@ -380,6 +411,22 @@ pub struct MemberStatus {
     pub lease_epoch: i64,
     pub owner_instance_id: String,
     pub idle: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LiveWaiterStatus {
+    pub store_key: String,
+    pub session_id: String,
+    pub address: String,
+    pub pid: u32,
+    pub alive: bool,
+    pub started_at_ms: i64,
+    #[serde(default)]
+    pub start_time: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub attention: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timeout_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

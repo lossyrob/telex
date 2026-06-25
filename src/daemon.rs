@@ -6,9 +6,9 @@ use crate::backend::sqlite::SqliteBackend;
 use crate::backend::Backend;
 use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
-    EpochStatus, HandshakeError, HelloAck, IdleStationStatus, MemberStatus, NeedsAttachReason,
-    RecentErrorStatus, Request, Response, RetentionStatus, SentReceipt, StoreStatus, WatchPidRole,
-    WatchPidSpec, WatchPidStatus,
+    EpochStatus, HandshakeError, HelloAck, IdleStationStatus, LiveWaiterStatus, MemberStatus,
+    NeedsAttachReason, RecentErrorStatus, Request, Response, RetentionStatus, SentReceipt,
+    StoreStatus, WatchPidRole, WatchPidSpec, WatchPidStatus,
 };
 use crate::model::{
     now_ms, Attention, DeliveryOutcome, EpochClaimResult, NewMessage, STATUS_RETIRED,
@@ -298,6 +298,7 @@ pub struct DaemonState {
     stores: Mutex<HashMap<String, StoreEntry>>,
     store_open_guard: AsyncMutex<()>,
     members: Mutex<BTreeMap<MemberKey, MemberRecord>>,
+    waiters: Mutex<BTreeMap<WaiterKey, WaiterRecord>>,
     recent_errors: Mutex<VecDeque<RecentErrorStatus>>,
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
     draining: AtomicBool,
@@ -320,6 +321,14 @@ struct MemberKey {
 struct SessionKey {
     store_key: String,
     session_id: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+struct WaiterKey {
+    store_key: String,
+    session_id: String,
+    address: String,
+    pid: u32,
 }
 
 #[derive(Clone, Debug)]
@@ -349,6 +358,18 @@ struct WatchPidRecord {
 }
 
 #[derive(Clone, Debug)]
+struct WaiterRecord {
+    store_key: String,
+    session_id: String,
+    address: String,
+    pid: u32,
+    start_time: Option<u64>,
+    started_at_ms: i64,
+    attention: Option<String>,
+    timeout_ms: Option<u64>,
+}
+
+#[derive(Clone, Debug)]
 struct EndedSessionRecord {
     at_ms: i64,
     reason: String,
@@ -373,6 +394,7 @@ impl DaemonState {
             recent_errors: Vec::new(),
             epoch_by_address: Vec::new(),
             members: Vec::new(),
+            live_waiters: Vec::new(),
             retention: Vec::new(),
             idle_stations: IdleStationStatus::default(),
         }
@@ -415,7 +437,11 @@ impl DaemonState {
 
         let member_records: Vec<MemberRecord> =
             self.members.lock().unwrap().values().cloned().collect();
-        let members: Vec<MemberStatus> = member_records.iter().map(MemberRecord::status).collect();
+        let live_waiters = self.live_waiter_statuses();
+        let members: Vec<MemberStatus> = member_records
+            .iter()
+            .map(|member| member.status(&live_waiters))
+            .collect();
         let epoch_by_address = members
             .iter()
             .map(|m| EpochStatus {
@@ -437,6 +463,7 @@ impl DaemonState {
             recent_errors: self.recent_errors(),
             epoch_by_address,
             members,
+            live_waiters,
             retention,
             idle_stations: IdleStationStatus {
                 count: idle_count,
@@ -493,6 +520,15 @@ impl DaemonState {
         SessionKey {
             store_key: store_key.to_string(),
             session_id: session_id.to_string(),
+        }
+    }
+
+    fn waiter_key(store_key: &str, session_id: &str, address: &str, pid: u32) -> WaiterKey {
+        WaiterKey {
+            store_key: store_key.to_string(),
+            session_id: session_id.to_string(),
+            address: address.to_string(),
+            pid,
         }
     }
 
@@ -746,6 +782,7 @@ impl DaemonState {
 
     fn clear_members(&self) {
         self.members.lock().unwrap().clear();
+        self.waiters.lock().unwrap().clear();
     }
 
     fn push_recent_error(&self, kind: impl Into<String>, message: impl Into<String>) {
@@ -777,18 +814,60 @@ impl DaemonState {
         self.draining.load(Ordering::SeqCst)
     }
 
-    fn add_waiter(&self, store_key: &str, session_id: &str, address: &str) {
-        if let Some(member) = self
-            .members
+    fn live_waiter_statuses(&self) -> Vec<LiveWaiterStatus> {
+        self.waiters
             .lock()
             .unwrap()
-            .get_mut(&Self::member_key(store_key, session_id, address))
-        {
+            .values()
+            .map(WaiterRecord::status)
+            .collect()
+    }
+
+    fn live_waiter_statuses_for(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+    ) -> Vec<LiveWaiterStatus> {
+        self.waiters
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|waiter| {
+                waiter.store_key == store_key
+                    && waiter.session_id == session_id
+                    && waiter.address == address
+            })
+            .map(WaiterRecord::status)
+            .collect()
+    }
+
+    fn add_waiter(&self, waiter: WaiterRecord) {
+        let store_key = waiter.store_key.clone();
+        let session_id = waiter.session_id.clone();
+        let address = waiter.address.clone();
+        if waiter.pid != 0 {
+            self.waiters.lock().unwrap().insert(
+                Self::waiter_key(&store_key, &session_id, &address, waiter.pid),
+                waiter,
+            );
+        }
+        if let Some(member) = self.members.lock().unwrap().get_mut(&Self::member_key(
+            &store_key,
+            &session_id,
+            &address,
+        )) {
             member.waiters = member.waiters.saturating_add(1);
         }
     }
 
-    fn remove_waiter(&self, store_key: &str, session_id: &str, address: &str) {
+    fn remove_waiter(&self, store_key: &str, session_id: &str, address: &str, pid: u32) {
+        if pid != 0 {
+            self.waiters
+                .lock()
+                .unwrap()
+                .remove(&Self::waiter_key(store_key, session_id, address, pid));
+        }
         if let Some(member) = self
             .members
             .lock()
@@ -801,7 +880,7 @@ impl DaemonState {
 }
 
 impl MemberRecord {
-    fn status(&self) -> MemberStatus {
+    fn status(&self, live_waiters: &[LiveWaiterStatus]) -> MemberStatus {
         MemberStatus {
             store_key: self.store_key.clone(),
             backend: self.backend.clone(),
@@ -810,6 +889,15 @@ impl MemberRecord {
             occupant: self.occupant.clone(),
             host: self.host.clone(),
             waiters: self.waiters,
+            live_waiters: live_waiters
+                .iter()
+                .filter(|waiter| {
+                    waiter.store_key == self.store_key
+                        && waiter.session_id == self.session_id
+                        && waiter.address == self.address
+                })
+                .cloned()
+                .collect(),
             watch_pids: self.watch_pids.iter().map(WatchPidRecord::status).collect(),
             description: self.description.clone(),
             scope: self.scope.clone(),
@@ -832,21 +920,58 @@ impl WatchPidRecord {
     }
 }
 
+impl WaiterRecord {
+    fn status(&self) -> LiveWaiterStatus {
+        LiveWaiterStatus {
+            store_key: self.store_key.clone(),
+            session_id: self.session_id.clone(),
+            address: self.address.clone(),
+            pid: self.pid,
+            alive: crate::session_watch::process_alive_with_start_time(self.pid, self.start_time),
+            started_at_ms: self.started_at_ms,
+            start_time: self.start_time,
+            attention: self.attention.clone(),
+            timeout_ms: self.timeout_ms,
+        }
+    }
+}
+
 struct WaiterGuard {
     state: Arc<DaemonState>,
     store_key: String,
     session_id: String,
     address: String,
+    pid: u32,
 }
 
 impl WaiterGuard {
-    fn new(state: Arc<DaemonState>, store_key: &str, session_id: &str, address: &str) -> Self {
-        state.add_waiter(store_key, session_id, address);
+    fn new(
+        state: Arc<DaemonState>,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+        pid: Option<u32>,
+        start_time: Option<u64>,
+        attention: Option<String>,
+        timeout_ms: Option<u64>,
+    ) -> Self {
+        let pid = pid.unwrap_or(0);
+        state.add_waiter(WaiterRecord {
+            store_key: store_key.to_string(),
+            session_id: session_id.to_string(),
+            address: address.to_string(),
+            pid,
+            start_time,
+            started_at_ms: now_ms(),
+            attention,
+            timeout_ms,
+        });
         Self {
             state,
             store_key: store_key.to_string(),
             session_id: session_id.to_string(),
             address: address.to_string(),
+            pid,
         }
     }
 }
@@ -854,7 +979,7 @@ impl WaiterGuard {
 impl Drop for WaiterGuard {
     fn drop(&mut self) {
         self.state
-            .remove_waiter(&self.store_key, &self.session_id, &self.address);
+            .remove_waiter(&self.store_key, &self.session_id, &self.address, self.pid);
     }
 }
 
@@ -1158,6 +1283,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         stores: Mutex::new(HashMap::new()),
         store_open_guard: AsyncMutex::new(()),
         members: Mutex::new(BTreeMap::new()),
+        waiters: Mutex::new(BTreeMap::new()),
         recent_errors: Mutex::new(VecDeque::new()),
         ended_sessions: Mutex::new(BTreeMap::new()),
         draining: AtomicBool::new(false),
@@ -1609,12 +1735,20 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             session_id,
             address,
         } => detach_member(state.clone(), store_key, session_id, address).await,
+        Request::StationStop {
+            store_key,
+            session_id,
+            address,
+            wait_grace_ms,
+        } => station_stop(state.clone(), store_key, session_id, address, wait_grace_ms).await,
         Request::Wait {
             store_key,
             session_id,
             address,
             attention,
             timeout_ms,
+            waiter_pid,
+            waiter_start_time,
         } => {
             wait_for_message(
                 state.clone(),
@@ -1623,6 +1757,8 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 address,
                 attention,
                 timeout_ms,
+                waiter_pid,
+                waiter_start_time,
             )
             .await
         }
@@ -1951,6 +2087,90 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
     }
 }
 
+async fn station_stop(
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+    address: String,
+    wait_grace_ms: u64,
+) -> Response {
+    let waiters_before = state
+        .live_waiter_statuses_for(&store_key, &session_id, &address)
+        .len();
+
+    // Let any blocked wait request return PresenceEnded instead of an error. Once the waiter
+    // guard drops, we can remove membership durably via detach without racing an orphan waiter
+    // that might receive nobody-read output.
+    let _ = state.mark_member_idle(
+        &store_key,
+        &session_id,
+        &address,
+        "StationStop",
+        "station stop requested",
+    );
+
+    wait_for_waiters_to_drain(&state, &store_key, &session_id, &address, wait_grace_ms).await;
+
+    let detached = detach_member(
+        state.clone(),
+        store_key.clone(),
+        session_id.clone(),
+        address.clone(),
+    )
+    .await;
+    let waiters_after_status = state.live_waiter_statuses_for(&store_key, &session_id, &address);
+    let waiters_after = waiters_after_status.len();
+    match detached {
+        Response::Ack {
+            message,
+            lease_epoch,
+            ..
+        } => Response::StationStopped {
+            store_key,
+            session_id,
+            address,
+            detached: true,
+            waiters_before,
+            waiters_after,
+            live_waiters: waiters_after_status,
+            message,
+            lease_epoch,
+        },
+        Response::Error { .. } => detached,
+        other => proto::internal(format!(
+            "unexpected station-stop detach response: {other:?}"
+        )),
+    }
+}
+
+async fn wait_for_waiters_to_drain(
+    state: &DaemonState,
+    store_key: &str,
+    session_id: &str,
+    address: &str,
+    wait_grace_ms: u64,
+) {
+    let deadline = Instant::now() + Duration::from_millis(wait_grace_ms);
+    loop {
+        if state
+            .live_waiter_statuses_for(store_key, session_id, address)
+            .is_empty()
+        {
+            return;
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return;
+        }
+        tokio::time::sleep(
+            deadline
+                .saturating_duration_since(now)
+                .min(Duration::from_millis(25)),
+        )
+        .await;
+    }
+}
+
 async fn detach_member(
     state: Arc<DaemonState>,
     store_key: String,
@@ -2050,6 +2270,8 @@ async fn wait_for_message(
     address: String,
     attention: Option<String>,
     timeout_ms: Option<u64>,
+    waiter_pid: Option<u32>,
+    waiter_start_time: Option<u64>,
 ) -> Response {
     wait_for_message_with_idle_ttl(
         state,
@@ -2058,6 +2280,8 @@ async fn wait_for_message(
         address,
         attention,
         timeout_ms,
+        waiter_pid,
+        waiter_start_time,
         idle_ttl_duration(),
     )
     .await
@@ -2070,6 +2294,8 @@ async fn wait_for_message_with_idle_ttl(
     address: String,
     attention: Option<String>,
     timeout_ms: Option<u64>,
+    waiter_pid: Option<u32>,
+    waiter_start_time: Option<u64>,
     idle_ttl: Duration,
 ) -> Response {
     if state.is_draining() {
@@ -2100,7 +2326,16 @@ async fn wait_for_message_with_idle_ttl(
     };
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let idle_deadline = Instant::now() + idle_ttl;
-    let _waiter = WaiterGuard::new(state.clone(), &store_key, &session_id, &address);
+    let _waiter = WaiterGuard::new(
+        state.clone(),
+        &store_key,
+        &session_id,
+        &address,
+        waiter_pid,
+        waiter_start_time,
+        attention.clone(),
+        timeout_ms,
+    );
     loop {
         if state.is_draining() {
             return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
@@ -2653,6 +2888,7 @@ mod p3_tests {
             stores: Mutex::new(HashMap::new()),
             store_open_guard: AsyncMutex::new(()),
             members: Mutex::new(BTreeMap::new()),
+            waiters: Mutex::new(BTreeMap::new()),
             recent_errors: Mutex::new(VecDeque::new()),
             ended_sessions: Mutex::new(BTreeMap::new()),
             draining: AtomicBool::new(false),
@@ -2724,6 +2960,8 @@ mod p3_tests {
             address: address.to_string(),
             attention: None,
             timeout_ms: Some(timeout_ms),
+            waiter_pid: Some(std::process::id()),
+            waiter_start_time: crate::session_watch::capture_process_start_time(std::process::id()),
         }
     }
 
@@ -3720,6 +3958,188 @@ mod p3_tests {
     }
 
     #[tokio::test]
+    async fn station_stop_drains_live_waiter_and_status_lists_pid() {
+        let state = test_state("station-stop");
+        let store = store_key("station-stop");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let waiter_req = wait_req(&store, "s1", "addr:a", 5_000);
+        let waiter_state = state.clone();
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_req).await });
+        tokio::time::sleep(Duration::from_millis(75)).await;
+
+        let status = state.status().await;
+        assert_eq!(status.live_waiters.len(), 1);
+        assert_eq!(status.members.len(), 1);
+        assert_eq!(status.members[0].waiters, 1);
+        assert_eq!(status.members[0].live_waiters.len(), 1);
+        assert_eq!(status.members[0].live_waiters[0].address, "addr:a");
+        assert!(status.members[0].live_waiters[0].pid > 0);
+
+        let stopped = request(
+            state.clone(),
+            Request::StationStop {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                wait_grace_ms: 1_000,
+            },
+        )
+        .await;
+        match stopped {
+            Response::StationStopped {
+                detached,
+                waiters_before,
+                waiters_after,
+                live_waiters,
+                ..
+            } => {
+                assert!(detached);
+                assert_eq!(waiters_before, 1);
+                assert_eq!(waiters_after, 0);
+                assert!(live_waiters.is_empty());
+            }
+            other => panic!("expected station stopped, got {other:?}"),
+        }
+        assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
+        let status = state.status().await;
+        assert!(status.members.is_empty());
+        assert!(status.live_waiters.is_empty());
+    }
+
+    #[tokio::test]
+    async fn station_stop_prevents_orphan_waiter_from_consuming_next_message() {
+        let state = test_state("station-stop-no-orphan");
+        let store = store_key("station-stop-no-orphan");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let waiter_req = wait_req(&store, "s1", "addr:a", 5_000);
+        let waiter_state = state.clone();
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_req).await });
+        tokio::time::sleep(Duration::from_millis(75)).await;
+
+        let stopped = request(
+            state.clone(),
+            Request::StationStop {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                wait_grace_ms: 1_000,
+            },
+        )
+        .await;
+        assert!(matches!(
+            stopped,
+            Response::StationStopped {
+                waiters_after: 0,
+                ..
+            }
+        ));
+        assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
+
+        registered_epoch(state.clone(), &store, "sender", "addr:sender").await;
+        let sent = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "sender".to_string(),
+                from_addr: Some("addr:sender".to_string()),
+                to_addr: "addr:a".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: "after stop".to_string(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            sent,
+            Response::Sent {
+                receipt: SentReceipt {
+                    receipt,
+                    occupied: Some(false),
+                    ..
+                }
+            } if receipt == "queued-unoccupied"
+        ));
+
+        registered_epoch(state.clone(), &store, "s2", "addr:a").await;
+        let delivered = request(state, wait_req(&store, "s2", "addr:a", 1_000)).await;
+        assert!(matches!(
+            delivered,
+            Response::Message { body, .. } if body == "after stop"
+        ));
+    }
+
+    #[tokio::test]
+    async fn detach_releases_waiter_without_consuming_later_message() {
+        let state = test_state("detach-no-orphan");
+        let store = store_key("detach-no-orphan");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let waiter_req = wait_req(&store, "s1", "addr:a", 5_000);
+        let waiter_state = state.clone();
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_req).await });
+        tokio::time::sleep(Duration::from_millis(75)).await;
+
+        let detached = request(
+            state.clone(),
+            Request::Detach {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+            },
+        )
+        .await;
+        assert!(matches!(detached, Response::Ack { .. }));
+        assert!(matches!(
+            waiter.await.unwrap(),
+            Response::Error {
+                needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            }
+        ));
+
+        registered_epoch(state.clone(), &store, "sender", "addr:sender").await;
+        let sent = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "sender".to_string(),
+                from_addr: Some("addr:sender".to_string()),
+                to_addr: "addr:a".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: "after detach".to_string(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            sent,
+            Response::Sent {
+                receipt: SentReceipt {
+                    receipt,
+                    occupied: Some(false),
+                    ..
+                }
+            } if receipt == "queued-unoccupied"
+        ));
+        registered_epoch(state.clone(), &store, "s2", "addr:a").await;
+        let delivered = request(state, wait_req(&store, "s2", "addr:a", 1_000)).await;
+        assert!(matches!(
+            delivered,
+            Response::Message { body, .. } if body == "after detach"
+        ));
+    }
+
+    #[tokio::test]
     async fn reset_marks_idle_non_destructively_and_audits_prior_occupant() {
         let state = test_state("reset");
         let store = store_key("reset");
@@ -3804,6 +4224,8 @@ mod p3_tests {
             "addr:a".to_string(),
             None,
             Some(5_000),
+            Some(std::process::id()),
+            crate::session_watch::capture_process_start_time(std::process::id()),
             Duration::from_millis(20),
         )
         .await;
@@ -4074,6 +4496,7 @@ pub mod test_support {
                 stores: Mutex::new(HashMap::new()),
                 store_open_guard: AsyncMutex::new(()),
                 members: Mutex::new(BTreeMap::new()),
+                waiters: Mutex::new(BTreeMap::new()),
                 recent_errors: Mutex::new(VecDeque::new()),
                 ended_sessions: Mutex::new(BTreeMap::new()),
                 draining: AtomicBool::new(false),
@@ -4176,6 +4599,8 @@ pub mod test_support {
                 address.to_string(),
                 None,
                 Some(timeout_ms),
+                Some(std::process::id()),
+                crate::session_watch::capture_process_start_time(std::process::id()),
                 idle_ttl,
             )
             .await
@@ -4314,6 +4739,8 @@ pub mod test_support {
             address: address.to_string(),
             attention: None,
             timeout_ms: Some(timeout_ms),
+            waiter_pid: Some(std::process::id()),
+            waiter_start_time: crate::session_watch::capture_process_start_time(std::process::id()),
         }
     }
 

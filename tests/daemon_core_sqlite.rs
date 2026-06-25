@@ -560,6 +560,10 @@ async fn section17_11_reset_non_destructive_audit() {
                 address: "addr:a".to_string(),
                 attention: Some("interrupt".to_string()),
                 timeout_ms: Some(5_000),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: telex::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
             })
             .await
     });

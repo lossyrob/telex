@@ -59,6 +59,9 @@ pub enum Command {
     Attach(AttachArgs),
     /// Detach this session's address membership.
     Detach(DetachArgs),
+    /// Station lifecycle operations.
+    #[command(subcommand)]
+    Station(StationCmd),
 
     /// Block until an actionable message arrives, print it as JSON, and exit.
     Wait(WaitArgs),
@@ -180,6 +183,22 @@ pub struct DetachArgs {
     /// Stable session identity for daemon membership.
     #[arg(long, env = "TELEX_SESSION_ID")]
     pub session: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum StationCmd {
+    /// Stop this session's station: release membership and drain its live waiters.
+    Stop(StationStopArgs),
+}
+
+#[derive(Args)]
+pub struct StationStopArgs {
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
+    /// How long to wait for live waiter processes to exit after teardown is signaled (ms).
+    #[arg(long, default_value_t = 3_000)]
+    pub wait_grace_ms: u64,
 }
 
 #[derive(Args)]
@@ -543,6 +562,7 @@ pub async fn run() -> i32 {
         Command::Skill(a) => crate::commands::skill::run(&ctx, a).await,
         Command::Attach(a) => crate::commands::attach::run(&ctx, a).await,
         Command::Detach(a) => crate::commands::detach::run(&ctx, a).await,
+        Command::Station(cmd) => crate::commands::station::run(&ctx, cmd).await,
         Command::Wait(a) => crate::commands::wait::run(&ctx, a).await,
         Command::Inbox(a) => crate::commands::inbox::run(&ctx, a).await,
         Command::Read(a) => crate::commands::read::run(&ctx, a).await,
