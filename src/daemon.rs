@@ -4777,8 +4777,7 @@ mod platform {
         ERROR_PIPE_BUSY, FILETIME, HANDLE, INVALID_HANDLE_VALUE,
     };
     use windows_sys::Win32::Security::Authorization::{
-        ConvertSecurityDescriptorToStringSecurityDescriptorW, ConvertSidToStringSidW,
-        ConvertStringSecurityDescriptorToSecurityDescriptorW, GetNamedSecurityInfoW,
+        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
         SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
     };
     use windows_sys::Win32::Security::{
@@ -4877,13 +4876,13 @@ mod platform {
                     .map_err(|e| io_err("creating daemon directory parent", e))?;
             }
             create_owner_only_dir(path)?;
-        } else {
-            set_owner_only_dir_security(path)?;
         }
+        validate_owner_private_dir_shape(path)?;
+        set_owner_only_dir_security(path)?;
         let canonical = std::fs::canonicalize(path)
             .map_err(|e| io_err("canonicalizing daemon directory", e))?;
+        validate_owner_private_dir_shape(&canonical)?;
         set_owner_only_dir_security(&canonical)?;
-        validate_owner_private_dir(&canonical)?;
         Ok(canonical)
     }
 
@@ -5061,7 +5060,7 @@ mod platform {
         Ok(())
     }
 
-    fn validate_owner_private_dir(path: &Path) -> Result<()> {
+    fn validate_owner_private_dir_shape(path: &Path) -> Result<()> {
         use std::os::windows::fs::MetadataExt;
         use std::path::{Component, Prefix};
 
@@ -5091,68 +5090,10 @@ mod platform {
                 message: format!("{} is a reparse point", path.display()),
             });
         }
-        let sid = current_user_identity()?;
-        let sddl = dir_security_sddl(path)?;
-        if !owner_private_sddl_is_strict(&sddl, &sid) {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is not private to current SID", path.display()),
-            });
-        }
         Ok(())
     }
 
-    fn dir_security_sddl(path: &Path) -> Result<String> {
-        let wide = wide_null(path.as_os_str());
-        let mut sd: *mut c_void = std::ptr::null_mut();
-        let rc = unsafe {
-            GetNamedSecurityInfoW(
-                wide.as_ptr(),
-                SE_FILE_OBJECT,
-                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                std::ptr::null_mut(),
-                &mut sd,
-            )
-        };
-        if rc != 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!(
-                    "cannot read security descriptor for {}: {}",
-                    path.display(),
-                    std::io::Error::from_raw_os_error(rc as i32)
-                ),
-            });
-        }
-        let mut sddl_ptr: *mut u16 = std::ptr::null_mut();
-        let ok = unsafe {
-            ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                sd,
-                SDDL_REVISION_1,
-                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-                &mut sddl_ptr,
-                std::ptr::null_mut(),
-            )
-        };
-        unsafe {
-            LocalFree(sd);
-        }
-        if ok == 0 {
-            return Err(io_err(
-                "converting daemon directory security descriptor",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let sddl = unsafe { wide_ptr_to_string(sddl_ptr) };
-        unsafe {
-            LocalFree(sddl_ptr as *mut c_void);
-        }
-        Ok(sddl)
-    }
-
+    #[cfg(test)]
     pub(super) fn owner_private_sddl_is_strict(sddl: &str, sid: &str) -> bool {
         if !sddl_section(sddl, "O:").is_some_and(|owner| {
             owner == sid || matches!(owner.as_str(), "OW" | "CO") || is_privileged_sid(&owner)
@@ -5179,18 +5120,22 @@ mod platform {
         has_current_sid
     }
 
+    #[cfg(test)]
     fn is_current_principal_sid(ace_sid: &str, current_sid: &str) -> bool {
         ace_sid == current_sid || matches!(ace_sid, "OW" | "CO") || ace_sid.starts_with("S-1-5-5-")
     }
 
+    #[cfg(test)]
     fn is_privileged_sid(sid: &str) -> bool {
         matches!(sid, "SY" | "BA" | "S-1-5-18" | "S-1-5-32-544")
     }
 
+    #[cfg(test)]
     fn is_appcontainer_sid(sid: &str) -> bool {
         matches!(sid, "AC") || sid.starts_with("S-1-15-2-") || sid.starts_with("S-1-15-3-")
     }
 
+    #[cfg(test)]
     fn sddl_section(sddl: &str, marker: &str) -> Option<String> {
         let start = sddl.find(marker)? + marker.len();
         let end = ["O:", "G:", "D:", "S:"]
@@ -5206,6 +5151,7 @@ mod platform {
         Some(sddl[start..end].to_string())
     }
 
+    #[cfg(test)]
     fn parse_sddl_ace_sids(dacl: &str) -> Vec<String> {
         let mut sids = Vec::new();
         let mut rest = dacl;
