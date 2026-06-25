@@ -4781,8 +4781,9 @@ mod platform {
         SDDL_REVISION_1, SE_FILE_OBJECT,
     };
     use windows_sys::Win32::Security::{
-        GetTokenInformation, TokenUser, DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION,
-        SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+        GetTokenInformation, SetFileSecurityW, TokenUser, DACL_SECURITY_INFORMATION,
+        OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES,
+        TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateDirectoryW, CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
@@ -4875,9 +4876,12 @@ mod platform {
                     .map_err(|e| io_err("creating daemon directory parent", e))?;
             }
             create_owner_only_dir(path)?;
+        } else {
+            set_owner_only_dir_security(path)?;
         }
         let canonical = std::fs::canonicalize(path)
             .map_err(|e| io_err("canonicalizing daemon directory", e))?;
+        set_owner_only_dir_security(&canonical)?;
         validate_owner_private_dir(&canonical)?;
         Ok(canonical)
     }
@@ -4994,6 +4998,27 @@ mod platform {
             }
             return Err(io_err(
                 "creating owner-private daemon directory",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn set_owner_only_dir_security(path: &Path) -> Result<()> {
+        let sa = owner_only_security_attributes()?;
+        let wide = wide_null(path.as_os_str());
+        let ok = unsafe {
+            SetFileSecurityW(
+                wide.as_ptr(),
+                OWNER_SECURITY_INFORMATION
+                    | DACL_SECURITY_INFORMATION
+                    | PROTECTED_DACL_SECURITY_INFORMATION,
+                sa.descriptor,
+            )
+        };
+        if ok == 0 {
+            return Err(io_err(
+                "setting owner-private daemon directory security",
                 std::io::Error::last_os_error(),
             ));
         }
