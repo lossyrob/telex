@@ -1296,5 +1296,8 @@ only**, exactly like the stdout flush ([daemon.md §3.2.1](daemon.md), §11.3): 
 mark, which still fires only on the explicit agent `ack`, so an at-least-once redelivery after a crash
 is preserved. `exit.code` ordering is the documented "fully written" contract; readers that observe it
 can read the sibling files without a partial-write race (the host only wakes the agent after the child
-exits, so there is no concurrent reader/writer). The legacy stdout JSON path is retained for attached
-and `--file`-based callers, so this is purely additive and back-compatible.
+exits, so there is no concurrent reader/writer). Because `message.json` may contain the message body,
+artifacts are owner-only on Unix (dir `0700`, files `0600`), and a reused `--out-dir` clears any stale
+`message.json` on a non-delivery outcome; Windows local app data / `%TEMP%` are already per-user. The
+legacy stdout JSON path is retained for attached and `--file`-based callers, so this is purely additive
+and back-compatible.

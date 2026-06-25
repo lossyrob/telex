@@ -467,10 +467,15 @@ fn emit_outcome(outcome: WaitOutcome, out_dir: Option<&Path>, address: &str) -> 
 /// is always written; `exit.code` is written **last** as the completion marker, so a reader can
 /// treat its presence as "the wait finished and all artifacts are present".
 fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std::io::Result<()> {
-    std::fs::create_dir_all(dir)?;
+    ensure_out_dir(dir)?;
+    let message_path = dir.join("message.json");
     if let Some(message) = &outcome.message {
         let body = serde_json::to_string_pretty(message).unwrap_or_else(|_| message.to_string());
-        atomic_write(&dir.join("message.json"), body.as_bytes())?;
+        atomic_write(&message_path, body.as_bytes())?;
+    } else if message_path.exists() {
+        // The out-dir may be reused across re-arms; drop any prior payload so a non-delivery
+        // outcome can never leave a stale message.json that a naive reader might re-consume.
+        let _ = std::fs::remove_file(&message_path);
     }
     let status = serde_json::json!({
         "outcome": outcome.outcome,
@@ -488,11 +493,35 @@ fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std
     Ok(())
 }
 
+/// Create the artifact directory owner-only. The message body is operational content, so on Unix
+/// the directory is created `0700` (Windows local app data / `%TEMP%` are already per-user, and the
+/// daemon's owner-private machinery is reserved for authority-bearing paths — see ADR 0025/0026).
+fn ensure_out_dir(dir: &Path) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        std::fs::DirBuilder::new()
+            .recursive(true)
+            .mode(0o700)
+            .create(dir)
+    }
+    #[cfg(not(unix))]
+    {
+        std::fs::create_dir_all(dir)
+    }
+}
+
 /// Write `bytes` to `path` via a sibling temp file + rename so a reader never observes a
-/// partially written artifact.
+/// partially written artifact. On Unix the file is owner-only (`0600`) since `message.json` may
+/// contain the message body.
 fn atomic_write(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, bytes)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    }
     std::fs::rename(&tmp, path)
 }
 
@@ -879,5 +908,57 @@ mod tests {
         emit_outcome(outcome, Some(dir.as_path()), "addr:a").unwrap();
         assert!(dir.join("exit.code").exists());
         std::fs::remove_dir_all(dir.parent().unwrap().parent().unwrap()).ok();
+    }
+
+    #[test]
+    fn out_dir_reuse_clears_stale_message_on_non_delivery() {
+        let dir = artifact_dir("reuse");
+        emit_outcome(
+            WaitOutcome::from_response(message_response()).unwrap(),
+            Some(dir.as_path()),
+            "addr:a",
+        )
+        .unwrap();
+        assert!(dir.join("message.json").exists());
+
+        // Re-arm into the same dir, this time with no delivery: the stale payload must be gone.
+        emit_outcome(
+            WaitOutcome::from_response(Response::Timeout).unwrap(),
+            Some(dir.as_path()),
+            "addr:a",
+        )
+        .unwrap();
+        assert!(!dir.join("message.json").exists());
+        assert_eq!(
+            std::fs::read_to_string(dir.join("exit.code"))
+                .unwrap()
+                .trim(),
+            "2"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn out_dir_artifacts_are_owner_only() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = artifact_dir("perms");
+        emit_outcome(
+            WaitOutcome::from_response(message_response()).unwrap(),
+            Some(dir.as_path()),
+            "addr:a",
+        )
+        .unwrap();
+        let dir_mode = std::fs::metadata(&dir).unwrap().permissions().mode() & 0o777;
+        assert_eq!(dir_mode, 0o700, "out-dir should be owner-only");
+        for name in ["message.json", "status.json", "exit.code"] {
+            let mode = std::fs::metadata(dir.join(name))
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600, "{name} should be owner-only");
+        }
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

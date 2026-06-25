@@ -188,7 +188,11 @@ unchanged; the files are purely additive:
 | `exit.code` | always | the integer exit code, written **last** as the completion marker |
 
 `exit.code` is written after the other files (each via a sibling temp-file + rename), so a
-reader that observes `exit.code` can treat all artifacts as fully written. The agent waits for
+reader that observes `exit.code` can treat all artifacts as fully written. On reuse of a `<DIR>`
+across re-arms, a non-delivery outcome removes any prior `message.json` so a stale payload cannot
+linger. Because `message.json` may contain the message body, artifacts are owner-only on Unix
+(directory `0700`, files `0600`); Windows local app data / `%TEMP%` are already per-user. The
+agent waits for
 the detached completion notification, reads `exit.code` (then `message.json` on `0`), and
 re-arms a fresh wait — it never trusts the runtime's reported detached exit code. This keeps
 the stdout flush as pure transport: the file artifacts are likewise transport-only and are
