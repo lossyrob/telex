@@ -5028,9 +5028,9 @@ mod platform {
     }
 
     pub(super) fn owner_private_sddl_is_strict(sddl: &str, sid: &str) -> bool {
-        if !sddl_section(sddl, "O:")
-            .is_some_and(|owner| owner == sid || owner == "OW" || owner == "CO")
-        {
+        if !sddl_section(sddl, "O:").is_some_and(|owner| {
+            owner == sid || matches!(owner.as_str(), "OW" | "CO" | "BA" | "SY")
+        }) {
             return false;
         }
         let Some(dacl) = sddl_section(sddl, "D:") else {
@@ -5042,11 +5042,11 @@ mod platform {
         }
         let mut has_current_sid = false;
         for ace_sid in aces {
-            if ace_sid == sid {
+            if ace_sid == sid || matches!(ace_sid.as_str(), "OW" | "CO") {
                 has_current_sid = true;
                 continue;
             }
-            if !matches!(ace_sid.as_str(), "SY" | "BA" | "OW" | "CO") {
+            if !matches!(ace_sid.as_str(), "SY" | "BA" | "AC" | "S-1-15-2-1") {
                 return false;
             }
         }
