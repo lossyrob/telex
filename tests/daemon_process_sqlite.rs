@@ -64,11 +64,7 @@ struct ProcessEnv {
 impl ProcessEnv {
     fn new(name: &str) -> Self {
         let id = NEXT_ENV.fetch_add(1, Ordering::SeqCst);
-        let root = std::env::current_dir()
-            .expect("current dir")
-            .join("target")
-            .join("t")
-            .join(format!("tx{}-{}", std::process::id(), id));
+        let root = process_test_root(id);
         let db = root.join("db.sqlite");
         let state_dir = root.join("state");
         Self::with_paths(name, root, db, state_dir)
@@ -76,11 +72,7 @@ impl ProcessEnv {
 
     fn with_shared_store(name: &str, db: PathBuf, state_dir: PathBuf) -> Self {
         let id = NEXT_ENV.fetch_add(1, Ordering::SeqCst);
-        let root = std::env::current_dir()
-            .expect("current dir")
-            .join("target")
-            .join("t")
-            .join(format!("tx{}-{}", std::process::id(), id));
+        let root = process_test_root(id);
         Self::with_paths(name, root, db, state_dir)
     }
 
@@ -251,6 +243,24 @@ fn telex_bin() -> PathBuf {
         dir
     };
     target_dir.join(format!("telex{}", std::env::consts::EXE_SUFFIX))
+}
+
+#[cfg(windows)]
+fn process_test_root(id: usize) -> PathBuf {
+    std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir)
+        .join("telex-process-tests")
+        .join(format!("tx{}-{}", std::process::id(), id))
+}
+
+#[cfg(not(windows))]
+fn process_test_root(id: usize) -> PathBuf {
+    std::env::current_dir()
+        .expect("current dir")
+        .join("target")
+        .join("t")
+        .join(format!("tx{}-{}", std::process::id(), id))
 }
 
 #[cfg(windows)]
