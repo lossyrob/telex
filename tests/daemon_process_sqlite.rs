@@ -790,6 +790,33 @@ fn real_process_wait_out_dir_writes_artifacts() {
 }
 
 #[test]
+fn real_process_attach_with_redirected_output_returns_after_daemon_spawn() {
+    let env = ProcessEnv::new("real-attach-redirect");
+    let session = "real-attach-redirect-session";
+    let address = "addr:real-attach-redirect";
+    let out = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "attach",
+            "--session",
+            session,
+            "--description",
+            "redirected attach should return",
+        ],
+        Duration::from_secs(8),
+    );
+    out.assert_success("redirected attach");
+    let attached = out.json("redirected attach");
+    assert_eq!(
+        attached.get("address").and_then(Value::as_str),
+        Some(address)
+    );
+}
+
+#[test]
 fn real_process_wait_out_dir_delivers_message_artifact() {
     let env = ProcessEnv::new("real-out-dir-msg");
     let receiver = "real-out-dir-msg-receiver";

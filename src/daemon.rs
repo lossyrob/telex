@@ -17,6 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
+#[cfg(not(windows))]
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -1119,16 +1120,26 @@ pub async fn connect_existing(store_key: &str) -> Result<DaemonClient> {
 }
 
 pub async fn connect_or_spawn(store_key: &str) -> Result<DaemonClient> {
-    match connect_existing(store_key).await {
-        Ok(client) => return Ok(client),
-        Err(e @ (DaemonError::Unauthorized(_) | DaemonError::Incompatible(_))) => return Err(e),
-        Err(_) => {}
-    }
-
     let deadline = Instant::now() + READINESS_TIMEOUT;
     let mut launches: Vec<Instant> = Vec::new();
     let mut backoff = BACKOFF_INITIAL;
-    let mut last_err: Option<DaemonError> = None;
+    let mut last_err: Option<DaemonError>;
+    let existing_probe_deadline = Instant::now() + Duration::from_millis(250);
+
+    loop {
+        match tokio::time::timeout(CONNECT_ATTEMPT_TIMEOUT, connect_existing(store_key)).await {
+            Ok(Ok(client)) => return Ok(client),
+            Ok(Err(e @ (DaemonError::Unauthorized(_) | DaemonError::Incompatible(_)))) => {
+                return Err(e)
+            }
+            Ok(Err(e)) => last_err = Some(e),
+            Err(_) => last_err = Some(DaemonError::Timeout("connect attempt timed out".into())),
+        }
+        if Instant::now() >= existing_probe_deadline {
+            break;
+        }
+        tokio::time::sleep(BACKOFF_INITIAL).await;
+    }
 
     while Instant::now() < deadline {
         launches.retain(|t| t.elapsed() < CRASHLOOP_WINDOW);
@@ -1193,18 +1204,106 @@ pub async fn request_connect_or_spawn(store_key: &str, request: &Request) -> Res
 
 fn spawn_daemon() -> Result<()> {
     let exe = canonical_current_exe()?;
-    let mut command = tokio::process::Command::new(exe);
+    spawn_daemon_process(&exe)
+}
+
+#[cfg(not(windows))]
+fn spawn_daemon_process(exe: &Path) -> Result<()> {
+    let mut command = std::process::Command::new(exe);
     command
         .arg("daemon")
         .arg("serve")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .kill_on_drop(false);
+        .stderr(Stdio::null());
+    configure_daemon_spawn(&mut command);
     command
         .spawn()
         .map(|_| ())
         .map_err(|e| io_err("spawning daemon", e))
+}
+
+#[cfg(not(windows))]
+fn configure_daemon_spawn(_command: &mut std::process::Command) {}
+
+#[cfg(windows)]
+fn spawn_daemon_process(exe: &Path) -> Result<()> {
+    use std::mem::zeroed;
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
+    use windows_sys::Win32::System::Threading::{
+        CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+    };
+
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    let command_line = format!("{} daemon serve", quote_windows_arg(&exe.to_string_lossy()));
+    let mut command_line_wide: Vec<u16> = std::ffi::OsStr::new(&command_line)
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let mut startup: STARTUPINFOW = unsafe { zeroed() };
+    startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let mut process_info: PROCESS_INFORMATION = unsafe { zeroed() };
+
+    // SAFETY: `command_line_wide` is a mutable, null-terminated buffer as required by
+    // CreateProcessW. `inherit_handles=FALSE` is the critical bit: daemon auto-spawn must not keep
+    // a caller's redirected stdout/stderr pipes or job wait alive after the one-shot client exits.
+    let ok = unsafe {
+        CreateProcessW(
+            std::ptr::null(),
+            command_line_wide.as_mut_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            FALSE,
+            DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
+            std::ptr::null(),
+            std::ptr::null(),
+            &mut startup,
+            &mut process_info,
+        )
+    };
+    if ok == 0 {
+        return Err(io_err(
+            "spawning daemon",
+            std::io::Error::last_os_error(),
+        ));
+    }
+    unsafe {
+        CloseHandle(process_info.hThread);
+        CloseHandle(process_info.hProcess);
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn quote_windows_arg(arg: &str) -> String {
+    let mut quoted = String::from("\"");
+    let mut backslashes = 0;
+    for ch in arg.chars() {
+        match ch {
+            '\\' => backslashes += 1,
+            '"' => {
+                quoted.push_str(&"\\".repeat(backslashes * 2 + 1));
+                quoted.push('"');
+                backslashes = 0;
+            }
+            _ => {
+                if backslashes > 0 {
+                    quoted.push_str(&"\\".repeat(backslashes));
+                    backslashes = 0;
+                }
+                quoted.push(ch);
+            }
+        }
+    }
+    if backslashes > 0 {
+        quoted.push_str(&"\\".repeat(backslashes * 2));
+    }
+    quoted.push('"');
+    quoted
 }
 
 async fn handshake_connected(
