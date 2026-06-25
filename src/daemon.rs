@@ -1726,6 +1726,9 @@ async fn register_member(
                 refreshed.idle = false;
                 refreshed.idle_rearmable = false;
                 state.check_session_id_reuse_tripwire(&refreshed);
+                if !recovery {
+                    state.clear_definite_session_end(&store_key, &session_id);
+                }
                 state.insert_member(refreshed.clone());
                 return Response::Registered {
                     lease_epoch: refreshed.lease_epoch,
@@ -1829,7 +1832,31 @@ async fn register_member(
             ),
         );
     }
-    if let Err(e) = backend.clear_detach_tombstone(&session_id, &address).await {
+    if recovery {
+        match backend.detach_tombstone(&session_id, &address).await {
+            Ok(Some(tombstone)) => {
+                let _ = backend
+                    .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                    .await;
+                return proto::needs_attach_with_reason(
+                    format!(
+                        "session {session_id} deliberately detached from {address} in {store_key} by {} at {}; explicit attach required",
+                        tombstone.reason, tombstone.at_ms
+                    ),
+                    NeedsAttachReason::DeliberatelyDetached,
+                );
+            }
+            Ok(None) => {}
+            Err(e) => {
+                let _ = backend
+                    .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                    .await;
+                return proto::internal(format!(
+                    "checking detach tombstone after recovery claim {session_id}/{address}: {e:#}"
+                ));
+            }
+        }
+    } else if let Err(e) = backend.clear_detach_tombstone(&session_id, &address).await {
         let _ = backend
             .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
             .await;
