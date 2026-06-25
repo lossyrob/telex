@@ -4782,9 +4782,9 @@ mod platform {
         SetNamedSecurityInfoW, SDDL_REVISION_1, SE_FILE_OBJECT,
     };
     use windows_sys::Win32::Security::{
-        GetSecurityDescriptorDacl, GetTokenInformation, TokenUser, DACL_SECURITY_INFORMATION,
-        OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES,
-        TOKEN_QUERY, TOKEN_USER,
+        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation, TokenUser,
+        DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateDirectoryW, CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
@@ -5024,13 +5024,25 @@ mod platform {
                 std::io::Error::last_os_error(),
             ));
         }
+        let mut owner_defaulted = 0;
+        let mut owner = std::ptr::null_mut();
+        let ok =
+            unsafe { GetSecurityDescriptorOwner(sa.descriptor, &mut owner, &mut owner_defaulted) };
+        if ok == 0 || owner.is_null() {
+            return Err(io_err(
+                "reading owner-private daemon directory owner",
+                std::io::Error::last_os_error(),
+            ));
+        }
         let wide = wide_null(path.as_os_str());
         let rc = unsafe {
             SetNamedSecurityInfoW(
                 wide.as_ptr(),
                 SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-                std::ptr::null_mut(),
+                OWNER_SECURITY_INFORMATION
+                    | DACL_SECURITY_INFORMATION
+                    | PROTECTED_DACL_SECURITY_INFORMATION,
+                owner,
                 std::ptr::null_mut(),
                 dacl,
                 std::ptr::null_mut(),
