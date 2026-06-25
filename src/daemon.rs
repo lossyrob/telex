@@ -4421,6 +4421,8 @@ fn canonical_current_exe() -> Result<PathBuf> {
 fn prepare_config_root() -> Result<PathBuf> {
     let home = crate::config::telex_home()
         .map_err(|e| DaemonError::Protocol(format!("resolving TELEX_HOME: {e:#}")))?;
+    // config_root is singleton identity material only. Authority-bearing runtime artifacts
+    // (cap files, locks, sockets) live under run_dir and keep the fail-closed owner-private check.
     std::fs::create_dir_all(&home).map_err(|e| io_err("creating daemon config root", e))?;
     std::fs::canonicalize(&home).map_err(|e| io_err("canonicalizing daemon config root", e))
 }

@@ -845,7 +845,8 @@ written to the **singleton-scoped** user-private file `<run_dir>/daemon-<H>.cap`
 protocol-major-parallel daemons don't clobber one cap) — authorizes privileged RPCs;
 `Register`/`ReRegister`/`Wait` are unprivileged. The **OS enforces the user-private trust
 boundary** (Windows pipe DACL current-SID-only / Unix `0700` run dir; canonical
-owner-private `config_root`/`run_dir`; `O_NOFOLLOW`+atomic cap/lock; **peer-credential
+owner-private runtime directory; `config_root`'s identity-only role is later clarified by
+0025; `O_NOFOLLOW`+atomic cap/lock; **peer-credential
 check** before `admin_cap`/data frames; spawn only the canonical executable). v1 is
 **same-user trust with NO intra-user isolation** (documented as a deliberate choice;
 `per_session_cap` reserved as the path to it). Session ownership is **daemon-native** and
@@ -1234,3 +1235,32 @@ stronger option.
 ([daemon.md](daemon.md) §5.1 / §11.1). Once rows carry `lease_epoch >= 1`, an old pre-epoch
 binary must not run against the store (it would write non-epoch rows and reset the fence); the
 store schema-version gates a too-old binary closed.
+
+## 0025 — Directory role taxonomy and Windows local runtime state
+
+- **Date:** 2026-06-25
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Owner-private validation on Windows exposed two different concerns during
+`daemon-core`: the security-critical runtime directory (`run_dir`) contains the daemon capability
+file and singleton runtime artifacts, while `config_root` currently contributes only canonicalized
+identity material to the singleton key. Treating both paths as one frozen owner-private invariant
+made ordinary same-user Windows profile ACL inheritance look like a runtime security failure and
+encouraged relaxing the wrong surface. At the same time, Windows home/profile locations can be
+redirected or roaming, while runtime secrets and lock state should be local-only.
+
+**Decision.** Keep `run_dir` and cap files strict: repair owner/protected DACL and then fail closed
+with binary owner/DACL/ACE read-back. On Windows, resolve the default `run_dir` under local app data
+(`%LOCALAPPDATA%\telex\run`) instead of under `TELEX_HOME`; an explicit `TELEX_RUN_DIR` override
+still wins. Treat `config_root` as identity-only: create and canonicalize it, but do not require
+owner-private validation unless a future change stores authority material there.
+
+**Consequences.** This is a security improvement, not a weakening: the authority-bearing cap leaves
+roaming/profile-managed home by default, while the identity-only path no longer trips strict runtime
+validation. Unix is intentionally unchanged because its daemon socket lives under `run_dir` and the
+path is part of rendezvous compatibility. If `config_root` later stores caps, tokens, locks, private
+keys, or other authority material, this decision must be revisited and `config_root` must become
+owner-private + fail-closed. Existing pre-upgrade Windows cap/runtime files under the old home-based
+default become stale/inert; the named-pipe singleton and canonical-store lock still preserve
+correctness, and upgrade guidance should prefer `daemon stop --drain` before replacing a running
+binary.
