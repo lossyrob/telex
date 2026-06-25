@@ -5119,7 +5119,7 @@ mod platform {
 
     pub(super) fn owner_private_sddl_is_strict(sddl: &str, sid: &str) -> bool {
         if !sddl_section(sddl, "O:").is_some_and(|owner| {
-            owner == sid || matches!(owner.as_str(), "OW" | "CO" | "BA" | "SY")
+            owner == sid || matches!(owner.as_str(), "OW" | "CO") || is_privileged_sid(&owner)
         }) {
             return false;
         }
@@ -5136,11 +5136,19 @@ mod platform {
                 has_current_sid = true;
                 continue;
             }
-            if !matches!(ace_sid.as_str(), "SY" | "BA" | "AC" | "S-1-15-2-1") {
+            if !is_privileged_sid(&ace_sid) && !is_appcontainer_sid(&ace_sid) {
                 return false;
             }
         }
         has_current_sid
+    }
+
+    fn is_privileged_sid(sid: &str) -> bool {
+        matches!(sid, "SY" | "BA" | "S-1-5-18" | "S-1-5-32-544")
+    }
+
+    fn is_appcontainer_sid(sid: &str) -> bool {
+        matches!(sid, "AC" | "S-1-15-2-1")
     }
 
     fn sddl_section(sddl: &str, marker: &str) -> Option<String> {
@@ -5636,6 +5644,14 @@ mod tests {
         let sid = platform::current_user_identity().expect("current SID");
         let private = format!("O:{sid}G:{sid}D:(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;{sid})");
         assert!(platform::owner_private_sddl_is_strict(&private, &sid));
+
+        let private_full_well_known = format!(
+            "O:S-1-5-32-544G:{sid}D:P(A;;GA;;;S-1-5-18)(A;;GA;;;S-1-5-32-544)(A;;GA;;;{sid})"
+        );
+        assert!(platform::owner_private_sddl_is_strict(
+            &private_full_well_known,
+            &sid
+        ));
 
         let broad = format!("O:{sid}G:{sid}D:(A;;GA;;;{sid})(A;;GR;;;WD)");
         assert!(!platform::owner_private_sddl_is_strict(&broad, &sid));
