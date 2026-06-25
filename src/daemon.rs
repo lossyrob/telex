@@ -4063,11 +4063,7 @@ pub mod test_support {
 
         pub fn with_protocol(label: &str, protocol_major: u16) -> Self {
             let seq = TEST_SEQ.fetch_add(1, Ordering::SeqCst);
-            let root = std::env::current_dir()
-                .expect("current dir")
-                .join("target")
-                .join("daemon-core-sqlite-tests")
-                .join(format!("{label}-{}-{seq}", std::process::id()));
+            let root = Self::test_root(label, seq);
             std::fs::create_dir_all(root.join("stores")).expect("create test root");
             let singleton =
                 SingletonKey::from_parts("test-user", root.join("config"), protocol_major);
@@ -4087,6 +4083,21 @@ pub mod test_support {
 
         pub fn root(&self) -> &Path {
             &self.root
+        }
+
+        fn test_root(_label: &str, seq: u64) -> PathBuf {
+            #[cfg(unix)]
+            {
+                std::env::temp_dir().join(format!("td{}-{seq}", std::process::id()))
+            }
+            #[cfg(not(unix))]
+            {
+                std::env::current_dir()
+                    .expect("current dir")
+                    .join("target")
+                    .join("daemon-core-sqlite-tests")
+                    .join(format!("{}-{}-{seq}", _label, std::process::id()))
+            }
         }
 
         pub fn paths(&self) -> &DaemonPaths {

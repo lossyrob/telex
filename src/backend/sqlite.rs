@@ -55,10 +55,15 @@ fn store_lock_dir() -> Result<std::path::PathBuf> {
         .or_else(|| dirs::home_dir().map(|h| h.join(".local").join("state")))
         .ok_or_else(|| anyhow!("cannot resolve state dir for store lock directory"))?;
 
-    let telex_dir = base.join("telex");
-    std::fs::create_dir_all(&telex_dir)
-        .with_context(|| format!("creating store lock parent {:?}", telex_dir))?;
-    let dir = telex_dir.join("locks");
+    #[cfg(windows)]
+    let dir = base.join("telex-locks");
+    #[cfg(not(windows))]
+    let dir = {
+        let telex_dir = base.join("telex");
+        std::fs::create_dir_all(&telex_dir)
+            .with_context(|| format!("creating store lock parent {:?}", telex_dir))?;
+        telex_dir.join("locks")
+    };
     ensure_private_local_dir(&dir)
         .with_context(|| format!("validating store lock dir {:?}", dir))?;
     Ok(dir)
