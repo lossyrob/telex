@@ -5132,7 +5132,7 @@ mod platform {
         }
         let mut has_current_sid = false;
         for ace_sid in aces {
-            if ace_sid == sid || matches!(ace_sid.as_str(), "OW" | "CO") {
+            if is_current_principal_sid(&ace_sid, sid) {
                 has_current_sid = true;
                 continue;
             }
@@ -5143,12 +5143,16 @@ mod platform {
         has_current_sid
     }
 
+    fn is_current_principal_sid(ace_sid: &str, current_sid: &str) -> bool {
+        ace_sid == current_sid || matches!(ace_sid, "OW" | "CO") || ace_sid.starts_with("S-1-5-5-")
+    }
+
     fn is_privileged_sid(sid: &str) -> bool {
         matches!(sid, "SY" | "BA" | "S-1-5-18" | "S-1-5-32-544")
     }
 
     fn is_appcontainer_sid(sid: &str) -> bool {
-        matches!(sid, "AC" | "S-1-15-2-1")
+        matches!(sid, "AC") || sid.starts_with("S-1-15-2-") || sid.starts_with("S-1-15-3-")
     }
 
     fn sddl_section(sddl: &str, marker: &str) -> Option<String> {
@@ -5653,8 +5657,22 @@ mod tests {
             &sid
         ));
 
+        let private_logon_and_packages = format!(
+            "O:{sid}G:{sid}D:PAI(A;;GA;;;S-1-5-5-123-456)(A;;GR;;;S-1-15-2-2)(A;;GR;;;S-1-15-3-1024-1)"
+        );
+        assert!(platform::owner_private_sddl_is_strict(
+            &private_logon_and_packages,
+            &sid
+        ));
+
         let broad = format!("O:{sid}G:{sid}D:(A;;GA;;;{sid})(A;;GR;;;WD)");
         assert!(!platform::owner_private_sddl_is_strict(&broad, &sid));
+
+        let authenticated_users = format!("O:{sid}G:{sid}D:(A;;GA;;;S-1-5-11)");
+        assert!(!platform::owner_private_sddl_is_strict(
+            &authenticated_users,
+            &sid
+        ));
     }
 
     #[tokio::test]
