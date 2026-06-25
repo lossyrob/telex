@@ -36,9 +36,10 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
             "one-shot `telex attach`; the auto-spawned per-user local exchange owns the lease,"
         );
         println!("delivery buffer, and liveness. Then loop one delivery at a time: run a SINGLE");
-        println!("`telex wait` in the background; when it completes, immediately re-arm a fresh");
-        println!("background `wait`, then `telex ack` and act/disposition the delivered message.");
-        println!("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");
+        println!("detached background `telex wait` that writes stdout/stderr/exit-code to known");
+        println!("files. When the detached task completes, read those files, immediately re-arm");
+        println!("a fresh detached `wait`, then `telex ack` and act/disposition the delivered");
+        println!("message. Don't wrap wait in an infinite shell loop (it hides deliveries).\n");
         println!("```sh");
         println!("telex attach --address {addr} --description \"<what you are working on>\"");
         println!("telex wait --address {addr}");

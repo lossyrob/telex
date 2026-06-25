@@ -40,24 +40,28 @@ It fails closed rather than guessing.
    `anchor` pid with a start-time reuse guard; when it dies, blocked waits return
    `PresenceEnded` but the station and durable message buffer remain.
 
-2. Wait for one message with a single-shot background `telex wait`:
+2. Wait for one message with a single-shot detached background `telex wait`:
 
    ```sh
    telex wait --address <addr>
    ```
 
-   The command completes on delivery and prints JSON. Re-arm a fresh background
-   `wait` after each completion; do not hide it inside an infinite shell loop.
+   The command completes on delivery and prints JSON. In Copilot CLI, detached
+   shell stdout is not returned through `read_powershell`, so detached waiters
+   MUST write stdout/stderr/exit-code to known files. The detached shell
+   completion notification is the wake signal; after it arrives, read those
+   files, re-arm a fresh detached `wait`, then act. Do not hide `wait` inside an
+   infinite shell loop.
    `wait` reconnects across daemon restarts, re-registers on `NeedsAttach` when it
    can name `(store_key, session_id, address)`, and returns exit 3 only after its
    reconnect grace expires.
 
    | Exit | Meaning | What you do |
    |---:|---|---|
-   | 0 | delivered | Save the JSON, immediately re-arm a fresh `wait`, then act. |
+   | 0 | delivered | Read the JSON artifact, immediately re-arm a fresh `wait`, then act. |
    | 2 | idle-timeout | Nothing arrived before `--timeout-ms`; re-arm if still attending. |
    | 3 | daemon gone after reconnect grace | Run `telex attach` and re-arm. |
-   | 4 | daemon hung / no frame within `--hang-ms` | Re-arm or restart the daemon if repeated. |
+   | 4 | daemon hung / no response after a finite wait's `--timeout-ms + --hang-ms` watchdog | Re-arm or restart the daemon if repeated. |
    | 5 | presence ended | Non-destructive reap; live sessions should `attach`/`wait` again. |
 
 3. After reading the delivered JSON, explicitly ack it, then apply the workflow
@@ -79,9 +83,9 @@ Drive the loop from your own turn cycle:
 ```text
 once:   telex attach --address <addr> --description "<s>"
 then repeat:
-  1. start one background command:  telex wait --address <addr>
-  2. it blocks until one message, prints JSON, and completes -> your runtime wakes you
-  3. exit 0 -> save JSON, start a fresh wait, then `telex ack` and act/disposition
+  1. start one detached background command that writes wait output to known files
+  2. it blocks until one message, exits, and the runtime completion wakes you
+  3. exit 0 -> read JSON artifact, start a fresh wait, then `telex ack` and act/disposition
      exit 5 -> attach/wait again if the session is still live
      exit 2/3/4 -> re-arm or restart as indicated above
 ```
@@ -90,6 +94,35 @@ then repeat:
 > infinite background loop (`while true; do telex wait; done`). Many agent
 > runtimes surface output only when the command completes; an internal loop hides
 > delivered messages in a background buffer.
+
+### Copilot CLI detached waiter pattern
+
+Use a detached shell task for the waiter UX, but do **not** rely on detached
+stdout being returned by the shell tool. Write the wait result to files you can
+read after the detached task completion notification.
+
+PowerShell pattern:
+
+```powershell
+$run = Join-Path $env:TEMP ("telex-wait-" + [guid]::NewGuid().ToString("N"))
+New-Item -ItemType Directory -Force -Path $run | Out-Null
+$out = Join-Path $run "message.json"
+$err = Join-Path $run "wait.err"
+$code = Join-Path $run "exit.code"
+telex wait --address <addr> > $out 2> $err
+$LASTEXITCODE | Set-Content -Path $code -Encoding ascii
+```
+
+Start that script as a detached background command. On completion:
+
+1. Read `exit.code`.
+2. If it is `0`, parse `message.json`.
+3. Immediately arm the next detached wait before doing longer processing.
+4. Run `telex ack --address <addr> --id <message-id>`, then disposition the work.
+
+If the session resumes without an armed waiter, recovery is durable: inspect
+`telex inbox --address <addr>` and `telex read --id <id>`, then arm a fresh
+detached wait.
 
 ## Sending and finding other sessions
 
