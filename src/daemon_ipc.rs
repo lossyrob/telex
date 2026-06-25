@@ -13,6 +13,7 @@ pub const PROTOCOL_MINOR: u16 = 0;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
+pub const MAX_MESSAGE_BODY_METADATA_BYTES: usize = MAX_JSONL_FRAME_BYTES - (64 * 1024);
 
 pub const CAP_JSONL: &str = "jsonl_v1";
 pub const CAP_ADMIN_CAP: &str = "admin_cap_v1";
@@ -236,6 +237,13 @@ pub enum Request {
     Ping,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NeedsAttachReason {
+    RestartLost,
+    DeliberatelyDetached,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Response {
@@ -290,6 +298,8 @@ pub enum Response {
     Error {
         code: String,
         message: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        needs_attach_reason: Option<NeedsAttachReason>,
     },
 }
 
@@ -537,6 +547,7 @@ pub fn error_response(code: &str, message: impl Into<String>) -> Response {
     Response::Error {
         code: code.to_string(),
         message: message.into(),
+        needs_attach_reason: None,
     }
 }
 
@@ -550,6 +561,14 @@ pub fn incompatible(message: impl Into<String>) -> Response {
 
 pub fn needs_attach(message: impl Into<String>) -> Response {
     error_response(ERROR_NEEDS_ATTACH, message.into())
+}
+
+pub fn needs_attach_with_reason(message: impl Into<String>, reason: NeedsAttachReason) -> Response {
+    Response::Error {
+        code: ERROR_NEEDS_ATTACH.to_string(),
+        message: message.into(),
+        needs_attach_reason: Some(reason),
+    }
 }
 
 pub fn ambiguous(message: impl Into<String>) -> Response {
@@ -579,11 +598,24 @@ where
     W: AsyncWrite + Unpin,
     T: Serialize,
 {
-    let mut line = serde_json::to_string(value)?;
-    line.push('\n');
-    writer.write_all(line.as_bytes()).await?;
+    let mut line = serde_json::to_vec(value)?;
+    line.push(b'\n');
+    if line.len() > MAX_JSONL_FRAME_BYTES {
+        return Err(HandshakeError::FrameTooLarge {
+            max_bytes: MAX_JSONL_FRAME_BYTES,
+        });
+    }
+    writer.write_all(&line).await?;
     writer.flush().await?;
     Ok(())
+}
+
+pub fn json_line_frame_len<T>(value: &T) -> Result<usize, HandshakeError>
+where
+    T: Serialize,
+{
+    let len = serde_json::to_vec(value)?.len().saturating_add(1);
+    Ok(len)
 }
 
 pub async fn read_json_line<R, T>(reader: &mut R) -> Result<T, HandshakeError>

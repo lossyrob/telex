@@ -5,7 +5,9 @@ use crate::cli::{Ctx, DispArgs};
 use crate::config;
 use std::time::Duration;
 
-use crate::daemon_ipc::{Request, Response, ERROR_NEEDS_ATTACH, ERROR_NOT_RUNNING};
+use crate::daemon_ipc::{
+    NeedsAttachReason, Request, Response, ERROR_NEEDS_ATTACH, ERROR_NOT_RUNNING,
+};
 use crate::identity::{default_occupant, resolve_session_id};
 use crate::model::Disposition;
 use crate::output::emit;
@@ -45,7 +47,7 @@ pub async fn ack(ctx: &Ctx, args: DispArgs) -> Result<i32> {
             });
             Ok(0)
         }
-        Response::Error { code, message } => Err(anyhow!("{code}: {message}")),
+        Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
         other => Err(anyhow!("unexpected daemon ack response: {other:?}")),
     }
 }
@@ -132,25 +134,43 @@ async fn ack_loop<C: AckConnector>(connector: &mut C, cfg: &AckLoopConfig) -> Re
         let response = match response {
             Ok(Ok(response)) => response,
             Ok(Err(_)) | Err(_) => {
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                sleep_until_deadline(deadline).await?;
                 continue;
             }
         };
         match &response {
-            Response::Error { code, message }
-                if code == ERROR_NEEDS_ATTACH
-                    && !retried_after_attach
-                    && !message.contains("definitely ended") =>
+            Response::Error {
+                code,
+                needs_attach_reason,
+                ..
+            } if code == ERROR_NEEDS_ATTACH
+                && !retried_after_attach
+                && *needs_attach_reason == Some(NeedsAttachReason::RestartLost) =>
             {
                 register_for_retry(connector, cfg, deadline).await?;
                 retried_after_attach = true;
             }
             Response::Error { code, .. } if code == ERROR_NOT_RUNNING => {
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                sleep_until_deadline(deadline).await?;
             }
             _ => return Ok(response),
         }
     }
+}
+
+fn remaining_before(deadline: tokio::time::Instant, context: &str) -> Result<Duration> {
+    let now = tokio::time::Instant::now();
+    if now >= deadline {
+        Err(anyhow!("reconnect grace expired before {context}"))
+    } else {
+        Ok(deadline.duration_since(now))
+    }
+}
+
+async fn sleep_until_deadline(deadline: tokio::time::Instant) -> Result<()> {
+    let remaining = remaining_before(deadline, "ack retry sleep")?;
+    tokio::time::sleep(Duration::from_millis(50).min(remaining)).await;
+    Ok(())
 }
 
 async fn connect_for_retry<C: AckConnector>(
@@ -159,15 +179,13 @@ async fn connect_for_retry<C: AckConnector>(
     deadline: tokio::time::Instant,
 ) -> Result<Box<dyn AckClient>> {
     loop {
-        if tokio::time::Instant::now() >= deadline {
-            return Err(anyhow!("reconnect grace expired before ack connected"));
-        }
-        match connector.connect_or_spawn(store_key).await {
-            Ok(client) => return Ok(client),
-            Err(crate::daemon::DaemonError::Incompatible(e)) => {
+        let remaining = remaining_before(deadline, "ack connected")?;
+        match tokio::time::timeout(remaining, connector.connect_or_spawn(store_key)).await {
+            Ok(Ok(client)) => return Ok(client),
+            Ok(Err(crate::daemon::DaemonError::Incompatible(e))) => {
                 return Err(anyhow!("Incompatible: {e}"));
             }
-            Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+            Ok(Err(_)) | Err(_) => sleep_until_deadline(deadline).await?,
         }
     }
 }
@@ -178,14 +196,12 @@ async fn register_for_retry<C: AckConnector>(
     deadline: tokio::time::Instant,
 ) -> Result<()> {
     loop {
-        if tokio::time::Instant::now() >= deadline {
-            return Err(anyhow!(
-                "reconnect grace expired before ack re-attach completed"
-            ));
-        }
+        remaining_before(deadline, "ack re-attach completed")?;
         let mut client = connect_for_retry(connector, &cfg.store_key, deadline).await?;
-        let response = client
-            .request(Request::Register {
+        let remaining = remaining_before(deadline, "ack register response")?;
+        let response = tokio::time::timeout(
+            remaining,
+            client.request(Request::Register {
                 store_key: cfg.store_key.clone(),
                 address: cfg.address.clone(),
                 session_id: cfg.session_id.clone(),
@@ -194,16 +210,19 @@ async fn register_for_retry<C: AckConnector>(
                 scope: None,
                 tags: None,
                 watch_pids: Vec::new(),
-            })
-            .await;
+            }),
+        )
+        .await;
         match response {
-            Ok(Response::Registered { .. }) => return Ok(()),
-            Ok(Response::Error { code, .. }) if code == ERROR_NOT_RUNNING => {
-                tokio::time::sleep(Duration::from_millis(50)).await;
+            Ok(Ok(Response::Registered { .. })) => return Ok(()),
+            Ok(Ok(Response::Error { code, .. })) if code == ERROR_NOT_RUNNING => {
+                sleep_until_deadline(deadline).await?;
             }
-            Ok(Response::Error { code, message }) => return Err(anyhow!("{code}: {message}")),
-            Ok(other) => return Err(anyhow!("unexpected daemon register response: {other:?}")),
-            Err(_) => tokio::time::sleep(Duration::from_millis(50)).await,
+            Ok(Ok(Response::Error { code, message, .. })) => {
+                return Err(anyhow!("{code}: {message}"))
+            }
+            Ok(Ok(other)) => return Err(anyhow!("unexpected daemon register response: {other:?}")),
+            Ok(Err(_)) | Err(_) => sleep_until_deadline(deadline).await?,
         }
     }
 }
@@ -262,6 +281,7 @@ mod tests {
     struct ScriptConnector {
         clients: VecDeque<ScriptClient>,
         connect_errors: VecDeque<DaemonError>,
+        connect_delays: VecDeque<Duration>,
         connects: usize,
         requests: Arc<Mutex<Vec<Request>>>,
     }
@@ -274,6 +294,7 @@ mod tests {
     enum ScriptAction {
         Response(Response),
         Error(DaemonError),
+        DelayThenResponse(Duration, Response),
     }
 
     #[async_trait(?Send)]
@@ -283,6 +304,10 @@ mod tests {
             match self.actions.pop_front().expect("script action") {
                 ScriptAction::Response(response) => Ok(response),
                 ScriptAction::Error(error) => Err(error),
+                ScriptAction::DelayThenResponse(delay, response) => {
+                    tokio::time::sleep(delay).await;
+                    Ok(response)
+                }
             }
         }
     }
@@ -294,6 +319,9 @@ mod tests {
             _store_key: &str,
         ) -> crate::daemon::Result<Box<dyn AckClient>> {
             self.connects += 1;
+            if let Some(delay) = self.connect_delays.pop_front() {
+                tokio::time::sleep(delay).await;
+            }
             if let Some(error) = self.connect_errors.pop_front() {
                 return Err(error);
             }
@@ -308,6 +336,7 @@ mod tests {
             Self {
                 clients: VecDeque::new(),
                 connect_errors: VecDeque::new(),
+                connect_delays: VecDeque::new(),
                 connects: 0,
                 requests: Arc::new(Mutex::new(Vec::new())),
             }
@@ -323,6 +352,11 @@ mod tests {
 
         fn connect_error(mut self, error: DaemonError) -> Self {
             self.connect_errors.push_back(error);
+            self
+        }
+
+        fn connect_delay(mut self, delay: Duration) -> Self {
+            self.connect_delays.push_back(delay);
             self
         }
 
@@ -350,6 +384,13 @@ mod tests {
         }
     }
 
+    fn short_grace_cfg(ms: u64) -> AckLoopConfig {
+        AckLoopConfig {
+            reconnect_grace_ms: ms,
+            ..cfg()
+        }
+    }
+
     fn ack_marked() -> Response {
         Response::Ack {
             message: Some("ack".to_string()),
@@ -367,7 +408,10 @@ mod tests {
                 "daemon closed the connection".to_string(),
             ))])
             .client(vec![ScriptAction::Response(
-                crate::daemon_ipc::needs_attach("membership lost on restart"),
+                crate::daemon_ipc::needs_attach_with_reason(
+                    "membership lost on restart",
+                    NeedsAttachReason::RestartLost,
+                ),
             )])
             .client(vec![ScriptAction::Response(Response::Registered {
                 lease_epoch: 2,
@@ -392,7 +436,10 @@ mod tests {
     #[tokio::test]
     async fn ack_does_not_reattach_after_definite_detach() {
         let mut connector = ScriptConnector::new().client(vec![ScriptAction::Response(
-            crate::daemon_ipc::needs_attach("session s1 was definitely ended by Detach"),
+            crate::daemon_ipc::needs_attach_with_reason(
+                "session s1 was definitely ended by Detach",
+                NeedsAttachReason::DeliberatelyDetached,
+            ),
         )]);
 
         let response = ack_loop(&mut connector, &cfg()).await.unwrap();
@@ -401,6 +448,49 @@ mod tests {
             Response::Error { ref code, .. } if code == ERROR_NEEDS_ATTACH
         ));
         assert_eq!(connector.request_ops(), vec!["ack"]);
+    }
+
+    #[tokio::test]
+    async fn ack_connect_or_spawn_is_bounded_by_reconnect_grace() {
+        let mut connector = ScriptConnector::new()
+            .connect_delay(Duration::from_millis(25))
+            .client(vec![ScriptAction::Response(ack_marked())]);
+
+        let err = ack_loop(&mut connector, &short_grace_cfg(5))
+            .await
+            .expect_err("connect delay should exhaust the ack grace");
+        assert!(
+            err.to_string().contains("ack retry sleep")
+                || err.to_string().contains("ack connected")
+        );
+        assert!(connector.request_ops().is_empty());
+    }
+
+    #[tokio::test]
+    async fn ack_register_request_is_bounded_by_reconnect_grace() {
+        let mut connector = ScriptConnector::new()
+            .client(vec![ScriptAction::Response(
+                crate::daemon_ipc::needs_attach_with_reason(
+                    "membership lost on restart",
+                    NeedsAttachReason::RestartLost,
+                ),
+            )])
+            .client(vec![ScriptAction::DelayThenResponse(
+                Duration::from_millis(25),
+                Response::Registered {
+                    lease_epoch: 2,
+                    owner_instance_id: "new-daemon".to_string(),
+                },
+            )]);
+
+        let err = ack_loop(&mut connector, &short_grace_cfg(5))
+            .await
+            .expect_err("register delay should exhaust the ack grace");
+        assert!(
+            err.to_string().contains("ack retry sleep")
+                || err.to_string().contains("ack register response")
+        );
+        assert_eq!(connector.request_ops(), vec!["ack", "register"]);
     }
 
     #[tokio::test]

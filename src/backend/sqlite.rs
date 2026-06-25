@@ -5,7 +5,8 @@
 //! Schema version history:
 //!   v0 — original schema (no epoch columns, no telex_schema_version table)
 //!   v2 — epoch-aware leases (`lease_epoch INTEGER NOT NULL`, `owner_instance_id TEXT`),
-//!         durable `clock_hwm`, `consumed_at_ms` on deliveries, `telex_schema_version` table.
+//!         durable `clock_hwm`, `consumed_at_ms` on deliveries, detach tombstones,
+//!         `telex_schema_version` table.
 //!         The `NOT NULL` constraint on `lease_epoch` is the store-level hard-fail barrier that
 //!         prevents old (non-epoch) binaries from writing to a migrated store (§3.4).
 
@@ -286,20 +287,67 @@ fn windows_dir_security_sddl(path: &std::path::Path) -> Result<String> {
 
 #[cfg(windows)]
 fn windows_owner_private_sddl_is_strict(sddl: &str, sid: &str) -> bool {
-    let owner = format!("O:{sid}");
-    let owner_ace = format!(";;;{sid})");
-    let broad = [
-        ";;;WD)", // Everyone
-        ";;;AU)", // Authenticated Users
-        ";;;BU)", // Builtin Users
-        ";;;BG)", // Builtin Guests
-        ";;;AN)", // Anonymous
-        ";;;IU)", // Interactive Users
-        ";;;SU)", // Service logon users
-    ];
-    sddl.contains(&owner)
-        && sddl.contains(&owner_ace)
-        && !broad.iter().any(|ace| sddl.contains(ace))
+    if sddl_section(sddl, "O:").as_deref() != Some(sid) {
+        return false;
+    }
+    let Some(dacl) = sddl_section(sddl, "D:") else {
+        return false;
+    };
+    let aces = parse_sddl_ace_sids(&dacl);
+    if aces.is_empty() {
+        return false;
+    }
+    let mut has_current_sid = false;
+    for ace_sid in aces {
+        if ace_sid == sid {
+            has_current_sid = true;
+            continue;
+        }
+        if !matches!(ace_sid.as_str(), "SY" | "BA") {
+            return false;
+        }
+    }
+    has_current_sid
+}
+
+#[cfg(windows)]
+fn sddl_section(sddl: &str, marker: &str) -> Option<String> {
+    let start = sddl.find(marker)? + marker.len();
+    let end = ["O:", "G:", "D:", "S:"]
+        .iter()
+        .filter_map(|candidate| {
+            sddl[start..]
+                .find(candidate)
+                .map(|offset| start + offset)
+                .filter(|idx| *idx > start)
+        })
+        .min()
+        .unwrap_or(sddl.len());
+    Some(sddl[start..end].to_string())
+}
+
+#[cfg(windows)]
+fn parse_sddl_ace_sids(dacl: &str) -> Vec<String> {
+    let mut sids = Vec::new();
+    let mut rest = dacl;
+    while let Some(start) = rest.find('(') {
+        rest = &rest[start + 1..];
+        let Some(end) = rest.find(')') else {
+            return Vec::new();
+        };
+        let ace = &rest[..end];
+        let fields: Vec<&str> = ace.split(';').collect();
+        if fields.len() < 6 {
+            return Vec::new();
+        }
+        let ace_sid = fields[5].trim();
+        if ace_sid.is_empty() {
+            return Vec::new();
+        }
+        sids.push(ace_sid.to_string());
+        rest = &rest[end + 1..];
+    }
+    sids
 }
 
 #[cfg(windows)]
@@ -626,21 +674,34 @@ fn has_column(c: &Connection, table: &str, col: &str) -> rusqlite::Result<bool> 
 /// Must be called within a write transaction (BEGIN IMMEDIATE) so the update is atomic
 /// with any timestamp written to lease/delivery columns.
 fn advance_clock_hwm(c: &Connection) -> Result<i64> {
+    let new_hwm = next_clock_hwm(c)?;
+    persist_clock_hwm(c, new_hwm)?;
+    Ok(new_hwm)
+}
+
+fn durable_clock_read(c: &Connection) -> Result<i64> {
     let now_wall = now_ms();
     let hwm: Option<i64> = c
         .query_row("SELECT hwm_ms FROM clock_hwm WHERE id=1", [], |r| r.get(0))
         .optional()?;
-    match hwm {
-        None => Ok(now_wall), // clock_hwm not created yet; fallback to wall clock
-        Some(h) => {
-            let new_hwm = std::cmp::max(now_wall, h + 1);
-            c.execute(
-                "UPDATE clock_hwm SET hwm_ms=?1 WHERE id=1",
-                params![new_hwm],
-            )?;
-            Ok(new_hwm)
-        }
-    }
+    Ok(hwm.map_or(now_wall, |h| std::cmp::max(now_wall, h)))
+}
+
+fn next_clock_hwm(c: &Connection) -> Result<i64> {
+    let now_wall = now_ms();
+    let hwm: Option<i64> = c
+        .query_row("SELECT hwm_ms FROM clock_hwm WHERE id=1", [], |r| r.get(0))
+        .optional()?;
+    Ok(hwm.map_or(now_wall, |h| std::cmp::max(now_wall, h + 1)))
+}
+
+fn persist_clock_hwm(c: &Connection, hwm_ms: i64) -> Result<()> {
+    c.execute(
+        "INSERT INTO clock_hwm (id, hwm_ms) VALUES (1, ?1)
+         ON CONFLICT(id) DO UPDATE SET hwm_ms = MAX(clock_hwm.hwm_ms, excluded.hwm_ms)",
+        params![hwm_ms],
+    )?;
+    Ok(())
 }
 
 fn with_immediate_transaction<T, F>(c: &Connection, f: F) -> Result<T>
@@ -785,7 +846,8 @@ fn do_schema(c: &Connection) -> Result<()> {
                 since_ms          INTEGER NOT NULL,
                 heartbeat_at_ms   INTEGER NOT NULL,
                 lease_epoch       INTEGER NOT NULL,
-                owner_instance_id TEXT
+                owner_instance_id TEXT,
+                daemon_fence_token INTEGER NOT NULL DEFAULT 0
             );",
         )?;
     } else if !has_column(c, "leases", "lease_epoch")? {
@@ -808,16 +870,17 @@ fn do_schema(c: &Connection) -> Result<()> {
                 since_ms          INTEGER NOT NULL,
                 heartbeat_at_ms   INTEGER NOT NULL,
                 lease_epoch       INTEGER NOT NULL,
-                owner_instance_id TEXT
+                owner_instance_id TEXT,
+                daemon_fence_token INTEGER NOT NULL DEFAULT 0
             );",
         )?;
         // Migrate v0 rows: seed epoch=1, owner=NULL (unowned; must re-claim under new model).
         c.execute_batch(
             "INSERT OR IGNORE INTO leases \
              (address, occupant, host, principal, description, tags, scope, pid, \
-              since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id) \
+              since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id, daemon_fence_token) \
              SELECT address, occupant, host, principal, description, tags, scope, pid, \
-                    since_ms, heartbeat_at_ms, 1, NULL \
+                    since_ms, heartbeat_at_ms, 1, NULL, 0 \
              FROM leases_v0;",
         )?;
     }
@@ -854,15 +917,62 @@ fn do_schema(c: &Connection) -> Result<()> {
 }
 
 fn ensure_v2_invariants(c: &Connection) -> Result<()> {
+    if table_exists(c, "leases")? && !has_column(c, "leases", "daemon_fence_token")? {
+        c.execute_batch(
+            "ALTER TABLE leases ADD COLUMN daemon_fence_token INTEGER NOT NULL DEFAULT 0;",
+        )?;
+    }
     c.execute_batch(
         "CREATE INDEX IF NOT EXISTS deliveries_recipient_pending_idx
              ON deliveries(recipient, consumed_at_ms, message_id);
          CREATE TABLE IF NOT EXISTS legacy_cutover_claims (
              address       TEXT PRIMARY KEY,
              claimed_at_ms INTEGER NOT NULL
-         );",
+         );
+         CREATE TABLE IF NOT EXISTS telex_schema_meta (
+             key   TEXT PRIMARY KEY,
+             value TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS detach_tombstones (
+             session_id TEXT NOT NULL,
+             address    TEXT NOT NULL,
+             reason     TEXT NOT NULL,
+             at_ms      INTEGER NOT NULL,
+             PRIMARY KEY(session_id, address)
+         );
+         CREATE INDEX IF NOT EXISTS detach_tombstones_session_idx
+             ON detach_tombstones(session_id);
+         CREATE TRIGGER IF NOT EXISTS leases_reject_unfenced_update
+         BEFORE UPDATE ON leases
+         FOR EACH ROW
+         WHEN NEW.daemon_fence_token <= OLD.daemon_fence_token
+         BEGIN
+             SELECT RAISE(ABORT, 'legacy lease update rejected: missing daemon fence token');
+         END;",
     )?;
+    backfill_delivery_rows_once(c)?;
+    Ok(())
+}
+
+fn backfill_delivery_rows_once(c: &Connection) -> Result<()> {
+    let complete: bool = c
+        .query_row(
+            "SELECT value='1' FROM telex_schema_meta WHERE key='delivery_backfill_v2_complete'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if complete {
+        return Ok(());
+    }
     backfill_delivery_rows(c)?;
+    c.execute(
+        "INSERT INTO telex_schema_meta(key, value)
+         VALUES ('delivery_backfill_v2_complete', '1')
+         ON CONFLICT(key) DO UPDATE SET value='1'",
+        [],
+    )?;
     Ok(())
 }
 
@@ -1063,42 +1173,60 @@ fn claim_epoch_inner(
     owner: &str,
     liveness_window_secs: i64,
 ) -> Result<EpochClaimResult> {
-    let now = advance_clock_hwm(c)?;
-    let stale_cutoff_ms = now.saturating_sub(liveness_window_secs.max(0).saturating_mul(1000));
+    let durable_now = durable_clock_read(c)?;
+    let stale_cutoff_ms =
+        durable_now.saturating_sub(liveness_window_secs.max(0).saturating_mul(1000));
 
-    // Try INSERT for first-ever row (creates at epoch=1, atomically claims ownership).
-    let inserted = c.execute(
-        "INSERT INTO leases (address, since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id)
-         VALUES (?1, ?2, ?2, 1, ?3) ON CONFLICT(address) DO NOTHING",
-        params![addr, now, owner],
-    )?;
-    if inserted > 0 {
+    // Row existence is decided inside BEGIN IMMEDIATE, so no other writer can race between this
+    // read and a first-row insert. Avoid advancing the durable clock on blocked claims.
+    let existing: Option<(Option<i64>, Option<String>, i64)> = c
+        .query_row(
+            "SELECT lease_epoch, owner_instance_id, heartbeat_at_ms FROM leases WHERE address=?1",
+            params![addr],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .optional()?;
+
+    let Some((cur_epoch, cur_owner, cur_hb)) = existing else {
+        let now = next_clock_hwm(c)?;
+        let inserted = c.execute(
+            "INSERT INTO leases \
+             (address, since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id, daemon_fence_token)
+             VALUES (?1, ?2, ?2, 1, ?3, 1)",
+            params![addr, now, owner],
+        )?;
+        if inserted == 0 {
+            let row =
+                read_lease(c, addr)?.ok_or_else(|| anyhow!("lease row vanished during claim"))?;
+            return Ok(EpochClaimResult::AlreadyOwned {
+                lease_epoch: row.lease_epoch.unwrap_or(0),
+                owner_instance_id: row.owner_instance_id.clone().unwrap_or_default(),
+                lease_row: row,
+            });
+        }
+        persist_clock_hwm(c, now)?;
         return Ok(EpochClaimResult::Claimed(EpochClaimed {
             lease_epoch: 1,
             owner_instance_id: owner.to_string(),
             legacy_cutover: false,
         }));
-    }
-
-    // Row exists — read the current state.
-    let (cur_epoch, cur_owner, cur_hb): (Option<i64>, Option<String>, i64) = c.query_row(
-        "SELECT lease_epoch, owner_instance_id, heartbeat_at_ms FROM leases WHERE address=?1",
-        params![addr],
-        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-    )?;
+    };
 
     if cur_epoch.is_none() {
         let legacy_cutover = true;
+        let now = next_clock_hwm(c)?;
         let updated = c.execute(
             "UPDATE leases
                 SET owner_instance_id = ?1,
                     lease_epoch       = 1,
-                    heartbeat_at_ms   = ?2
+                    heartbeat_at_ms   = ?2,
+                    daemon_fence_token = daemon_fence_token + 1
               WHERE address = ?3
                 AND lease_epoch IS NULL",
             params![owner, now, addr],
         )?;
         if updated > 0 {
+            persist_clock_hwm(c, now)?;
             record_legacy_cutover_claim(c, addr, now)?;
             return Ok(EpochClaimResult::Claimed(EpochClaimed {
                 lease_epoch: 1,
@@ -1128,11 +1256,13 @@ fn claim_epoch_inner(
     }
 
     // CAS update: increment epoch atomically inside the backend.
+    let now = next_clock_hwm(c)?;
     let updated = c.execute(
         "UPDATE leases
             SET owner_instance_id = ?1,
                 lease_epoch        = lease_epoch + 1,
-                heartbeat_at_ms    = ?2
+                heartbeat_at_ms    = ?2,
+                daemon_fence_token = daemon_fence_token + 1
           WHERE address = ?3
             AND lease_epoch = ?4
             AND owner_instance_id IS NOT DISTINCT FROM ?5
@@ -1141,6 +1271,7 @@ fn claim_epoch_inner(
     )?;
 
     if updated > 0 {
+        persist_clock_hwm(c, now)?;
         if legacy_cutover {
             record_legacy_cutover_claim(c, addr, now)?;
         }
@@ -1346,15 +1477,16 @@ impl Backend for SqliteBackend {
 
                 c.execute(
                     "INSERT INTO leases(address, occupant, host, principal, description, tags, \
-                     scope, pid, since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id) \
-                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12) \
+                     scope, pid, since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id, daemon_fence_token) \
+                     VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,1) \
                      ON CONFLICT(address) DO UPDATE SET \
                        occupant=excluded.occupant, host=excluded.host, \
                        principal=excluded.principal, description=excluded.description, \
                        tags=excluded.tags, scope=excluded.scope, pid=excluded.pid, \
                        since_ms=excluded.since_ms, heartbeat_at_ms=excluded.heartbeat_at_ms, \
                        lease_epoch=excluded.lease_epoch, \
-                       owner_instance_id=excluded.owner_instance_id",
+                       owner_instance_id=excluded.owner_instance_id, \
+                       daemon_fence_token=leases.daemon_fence_token + 1",
                     params![
                         claim.address, claim.occupant, claim.host, claim.principal,
                         claim.description, claim.tags, claim.scope, claim.pid,
@@ -1372,7 +1504,10 @@ impl Backend for SqliteBackend {
         let now = now_ms();
         self.run(move |c| {
             c.execute(
-                "UPDATE leases SET heartbeat_at_ms=?2 WHERE address=?1",
+                "UPDATE leases
+                    SET heartbeat_at_ms=?2,
+                        daemon_fence_token=daemon_fence_token + 1
+                  WHERE address=?1",
                 params![a, now],
             )?;
             Ok(())
@@ -1388,7 +1523,8 @@ impl Backend for SqliteBackend {
         self.run(move |c| {
             let n = c.execute(
                 "UPDATE leases \
-                 SET owner_instance_id = NULL, occupant = NULL, heartbeat_at_ms = 0 \
+                 SET owner_instance_id = NULL, occupant = NULL, heartbeat_at_ms = 0, \
+                     daemon_fence_token = daemon_fence_token + 1 \
                  WHERE address = ?1 AND occupant = ?2",
                 params![a, o],
             )?;
@@ -1473,12 +1609,17 @@ impl Backend for SqliteBackend {
         );
         self.run(move |c| {
             with_immediate_transaction(c, |c| {
-                let now = advance_clock_hwm(c)?;
+                let now = next_clock_hwm(c)?;
                 let n = c.execute(
-                    "UPDATE leases SET heartbeat_at_ms=?1 \
+                    "UPDATE leases
+                        SET heartbeat_at_ms=?1,
+                            daemon_fence_token=daemon_fence_token + 1 \
                      WHERE address=?2 AND lease_epoch=?3 AND owner_instance_id=?4",
                     params![now, addr, epoch, owner],
                 )?;
+                if n > 0 {
+                    persist_clock_hwm(c, now)?;
+                }
                 Ok(n > 0)
             })
         })
@@ -1498,11 +1639,54 @@ impl Backend for SqliteBackend {
         );
         self.run(move |c| {
             let n = c.execute(
-                "UPDATE leases SET owner_instance_id = NULL \
+                "UPDATE leases
+                    SET owner_instance_id = NULL,
+                        daemon_fence_token = daemon_fence_token + 1 \
                  WHERE address=?1 AND lease_epoch=?2 AND owner_instance_id=?3",
                 params![addr, epoch, owner],
             )?;
             Ok(n > 0)
+        })
+        .await
+    }
+
+    async fn release_epoch_lease_for_detach(
+        &self,
+        address: &str,
+        owner_instance_id: &str,
+        lease_epoch: i64,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<bool> {
+        let (addr, owner, session, reason) = (
+            address.to_owned(),
+            owner_instance_id.to_owned(),
+            session_id.to_owned(),
+            reason.to_owned(),
+        );
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let n = c.execute(
+                    "UPDATE leases
+                        SET owner_instance_id = NULL,
+                            daemon_fence_token = daemon_fence_token + 1
+                      WHERE address=?1 AND lease_epoch=?2 AND owner_instance_id=?3",
+                    params![addr, lease_epoch, owner],
+                )?;
+                if n > 0 {
+                    let at_ms = next_clock_hwm(c)?;
+                    c.execute(
+                        "INSERT INTO detach_tombstones(session_id, address, reason, at_ms)
+                         VALUES (?1, ?2, ?3, ?4)
+                         ON CONFLICT(session_id, address) DO UPDATE SET
+                            reason=excluded.reason,
+                            at_ms=excluded.at_ms",
+                        params![session, addr, reason, at_ms],
+                    )?;
+                    persist_clock_hwm(c, at_ms)?;
+                }
+                Ok(n > 0)
+            })
         })
         .await
     }
@@ -1520,7 +1704,10 @@ impl Backend for SqliteBackend {
                     .optional()?;
                 if let Some(epoch) = epoch {
                     c.execute(
-                        "UPDATE leases SET owner_instance_id = NULL, heartbeat_at_ms = 0 \
+                        "UPDATE leases
+                            SET owner_instance_id = NULL,
+                                heartbeat_at_ms = 0,
+                                daemon_fence_token = daemon_fence_token + 1 \
                          WHERE address=?1",
                         params![addr],
                     )?;
@@ -1584,13 +1771,18 @@ impl Backend for SqliteBackend {
                     }
                     Some(None) => {
                         // Row exists but not yet consumed — mark it.
-                        let now = advance_clock_hwm(c)?;
-                        c.execute(
+                        let now = next_clock_hwm(c)?;
+                        let updated = c.execute(
                             "UPDATE deliveries SET consumed_at_ms=?1 \
                              WHERE message_id=?2 AND recipient=?3 AND consumed_at_ms IS NULL",
                             params![now, mid, rec],
                         )?;
-                        Ok(DeliveryOutcome::Marked)
+                        if updated > 0 {
+                            persist_clock_hwm(c, now)?;
+                            Ok(DeliveryOutcome::Marked)
+                        } else {
+                            Ok(DeliveryOutcome::AlreadyConsumed)
+                        }
                     }
                 }
             })
@@ -1607,6 +1799,71 @@ impl Backend for SqliteBackend {
         self.run(|c| {
             let n = c.query_row("SELECT COUNT(*) FROM deliveries", [], |r| r.get(0))?;
             Ok(n)
+        })
+        .await
+    }
+
+    async fn record_detach_tombstone(
+        &self,
+        session_id: &str,
+        address: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let (session, addr, reason) =
+            (session_id.to_owned(), address.to_owned(), reason.to_owned());
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let at_ms = advance_clock_hwm(c)?;
+                c.execute(
+                    "INSERT INTO detach_tombstones(session_id, address, reason, at_ms)
+                     VALUES (?1, ?2, ?3, ?4)
+                     ON CONFLICT(session_id, address) DO UPDATE SET
+                        reason=excluded.reason,
+                        at_ms=excluded.at_ms",
+                    params![session, addr, reason, at_ms],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    async fn clear_detach_tombstone(&self, session_id: &str, address: &str) -> Result<()> {
+        let (session, addr) = (session_id.to_owned(), address.to_owned());
+        self.run(move |c| {
+            c.execute(
+                "DELETE FROM detach_tombstones WHERE session_id=?1 AND address=?2",
+                params![session, addr],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn detach_tombstone(
+        &self,
+        session_id: &str,
+        address: &str,
+    ) -> Result<Option<DetachTombstone>> {
+        let (session, addr) = (session_id.to_owned(), address.to_owned());
+        self.run(move |c| {
+            let row = c
+                .query_row(
+                    "SELECT session_id, address, reason, at_ms
+                     FROM detach_tombstones
+                     WHERE session_id=?1 AND address=?2",
+                    params![session, addr],
+                    |r| {
+                        Ok(DetachTombstone {
+                            session_id: r.get(0)?,
+                            address: r.get(1)?,
+                            reason: r.get(2)?,
+                            at_ms: r.get(3)?,
+                        })
+                    },
+                )
+                .optional()?;
+            Ok(row)
         })
         .await
     }
@@ -1658,6 +1915,22 @@ impl Backend for SqliteBackend {
                 .query_map(params![a], map_message)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
+        })
+        .await
+    }
+
+    async fn has_delivery_for_recipient(&self, message_id: i64, recipient: &str) -> Result<bool> {
+        let r = recipient.to_string();
+        self.run(move |c| {
+            materialize_pending_delivery_rows_for_recipient(c, &r)?;
+            let exists: Option<i64> = c
+                .query_row(
+                    "SELECT 1 FROM deliveries WHERE message_id=?1 AND recipient=?2 LIMIT 1",
+                    params![message_id, r],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            Ok(exists.is_some())
         })
         .await
     }
@@ -1958,6 +2231,25 @@ mod tests {
             old_writer.is_err(),
             "non-epoch legacy writes must fail after migration"
         );
+        // Raw SQL simulates the stale binary's non-epoch heartbeat path; a separate old-binary
+        // process harness is still the remaining end-to-end cutover axis.
+        let old_update = backend
+            .run(|c| {
+                Ok(c.execute(
+                    "UPDATE leases SET heartbeat_at_ms=999 WHERE address='addr:legacy'",
+                    [],
+                ))
+            })
+            .await
+            .unwrap();
+        assert!(
+            old_update.is_err(),
+            "non-epoch legacy UPDATE heartbeat must fail after migration"
+        );
+        assert!(backend
+            .heartbeat_epoch("addr:legacy", "missing-owner", 1)
+            .await
+            .is_ok());
 
         let claimed = backend
             .claim_epoch_lease("addr:legacy", "daemon-new", 15)
@@ -1970,6 +2262,14 @@ mod tests {
             }
             other => panic!("expected claim, got {other:?}"),
         }
+        assert!(backend
+            .heartbeat_epoch("addr:legacy", "daemon-new", 2)
+            .await
+            .unwrap());
+        assert!(backend
+            .release_epoch_lease("addr:legacy", "daemon-new", 2)
+            .await
+            .unwrap());
     }
 
     #[tokio::test]
@@ -2062,6 +2362,11 @@ mod tests {
         assert!(windows_owner_private_sddl_is_strict(&private, &sid));
         let broad = format!("O:{sid}G:{sid}D:(A;;GA;;;{sid})(A;;GR;;;WD)");
         assert!(!windows_owner_private_sddl_is_strict(&broad, &sid));
+        // Deterministic parser coverage for the foreign-SID ACE; a true different-principal
+        // directory pre-create still needs a two-token Windows integration harness.
+        let foreign =
+            format!("O:{sid}G:{sid}D:(A;;GA;;;SY)(A;;GA;;;{sid})(A;;GR;;;S-1-5-21-1-2-3-444)");
+        assert!(!windows_owner_private_sddl_is_strict(&foreign, &sid));
     }
 
     #[tokio::test]
@@ -2116,6 +2421,111 @@ mod tests {
             }
             other => panic!("durable clock cutoff should reclaim stale owner, got {other:?}"),
         }
+    }
+
+    #[tokio::test]
+    async fn failed_claims_do_not_advance_durable_clock_or_make_fresh_owner_stale() {
+        let path = test_db_path("failed-claim-clock");
+        let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        backend.init_schema().await.unwrap();
+        let future_hwm = now_ms() + 120_000;
+        backend
+            .run(move |c| {
+                c.execute("UPDATE clock_hwm SET hwm_ms=?1 WHERE id=1", params![future_hwm])?;
+                c.execute(
+                    "INSERT INTO leases(address, occupant, since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id, daemon_fence_token)
+                     VALUES ('addr:fresh', 'fresh', ?1, ?1, 7, 'fresh-owner', 1)",
+                    params![future_hwm],
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        for _ in 0..10 {
+            match backend
+                .claim_epoch_lease("addr:fresh", "blocked-owner", 1)
+                .await
+                .unwrap()
+            {
+                EpochClaimResult::AlreadyOwned {
+                    lease_epoch,
+                    owner_instance_id,
+                    ..
+                } => {
+                    assert_eq!(lease_epoch, 7);
+                    assert_eq!(owner_instance_id, "fresh-owner");
+                }
+                other => panic!("fresh owner must not become stale, got {other:?}"),
+            }
+        }
+        let hwm_after: i64 = backend
+            .run(|c| Ok(c.query_row("SELECT hwm_ms FROM clock_hwm WHERE id=1", [], |r| r.get(0))?))
+            .await
+            .unwrap();
+        assert_eq!(hwm_after, future_hwm);
+    }
+
+    #[tokio::test]
+    async fn delivery_backfill_marker_prevents_repeat_on_already_v2_reopen() {
+        let path = test_db_path("backfill-once");
+        let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        backend.init_schema().await.unwrap();
+        backend
+            .run(|c| {
+                c.execute_batch(
+                    "INSERT INTO messages(id, thread_id, from_addr, to_addr, kind, attention, body, sent_at_ms, created_at_ms)
+                     VALUES (10, 10, 'sender', 'addr:once', 'note', 'background', 'body', 10, 10);
+                     DELETE FROM telex_schema_meta WHERE key='delivery_backfill_v2_complete';",
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        backend.init_schema().await.unwrap();
+        let first_count: i64 = backend
+            .run(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM deliveries WHERE message_id=10 AND recipient='addr:once'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(first_count, 1);
+        let marker: String = backend
+            .run(|c| {
+                Ok(c.query_row(
+                    "SELECT value FROM telex_schema_meta WHERE key='delivery_backfill_v2_complete'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(marker, "1");
+
+        backend
+            .run(|c| {
+                c.execute("DELETE FROM deliveries WHERE message_id=10", [])?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+        backend.init_schema().await.unwrap();
+        let second_count: i64 = backend
+            .run(|c| {
+                Ok(c.query_row(
+                    "SELECT COUNT(*) FROM deliveries WHERE message_id=10 AND recipient='addr:once'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(second_count, 0, "marker should skip repeated full backfill");
     }
 
     #[tokio::test]

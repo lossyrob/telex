@@ -206,10 +206,10 @@ pub struct SendArgs {
     /// Subject line.
     #[arg(long)]
     pub subject: Option<String>,
-    /// Message body (inline). Mutually exclusive with --body-file; exactly one is required.
+    /// Message body (inline). Body/subject/metadata are capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body: Option<String>,
-    /// Read the message body from a UTF-8 file (`-` reads stdin). Mutually exclusive with --body.
+    /// Read the message body from UTF-8 (`-` stdin); capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body_file: Option<String>,
     /// Comma-separated cc addresses (visible, not interrupting).
@@ -227,7 +227,7 @@ pub struct SendArgs {
     /// Sender address (defaults to the global --address if set).
     #[arg(long)]
     pub from: Option<String>,
-    /// Arbitrary JSON metadata.
+    /// Arbitrary JSON metadata; counted with body/subject against the IPC payload cap.
     #[arg(long)]
     pub metadata: Option<String>,
     /// Stable session identity for daemon membership.
@@ -240,10 +240,10 @@ pub struct ReplyArgs {
     /// The message id being replied to.
     #[arg(long)]
     pub to_message: i64,
-    /// Reply body (inline). Mutually exclusive with --body-file; exactly one is required.
+    /// Reply body (inline). Body/subject are capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body: Option<String>,
-    /// Read the reply body from a UTF-8 file (`-` reads stdin). Mutually exclusive with --body.
+    /// Read the reply body from UTF-8 (`-` stdin); capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body_file: Option<String>,
     /// Subject (defaults to "Re: <parent subject>").

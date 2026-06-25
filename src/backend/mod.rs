@@ -94,6 +94,27 @@ pub trait Backend: Send + Sync {
         bail!("release_epoch_lease: not supported by this backend")
     }
 
+    /// Detach-specific release path. Durable backends should atomically release the epoch lease
+    /// and record a terminal session/address tombstone so ack recovery can distinguish an
+    /// intentional detach from membership lost during daemon restart.
+    async fn release_epoch_lease_for_detach(
+        &self,
+        address: &str,
+        owner_instance_id: &str,
+        lease_epoch: i64,
+        session_id: &str,
+        reason: &str,
+    ) -> Result<bool> {
+        let released = self
+            .release_epoch_lease(address, owner_instance_id, lease_epoch)
+            .await?;
+        if released {
+            self.record_detach_tombstone(session_id, address, reason)
+                .await?;
+        }
+        Ok(released)
+    }
+
     /// Admin reset: clear durable epoch ownership for one address while preserving the
     /// `lease_epoch` high-water. Returns the preserved epoch when a row existed.
     async fn reset_epoch_lease(&self, _address: &str) -> Result<Option<i64>> {
@@ -126,6 +147,27 @@ pub trait Backend: Send + Sync {
         bail!("delivery_retention_count: not supported by this backend")
     }
 
+    async fn record_detach_tombstone(
+        &self,
+        _session_id: &str,
+        _address: &str,
+        _reason: &str,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn clear_detach_tombstone(&self, _session_id: &str, _address: &str) -> Result<()> {
+        Ok(())
+    }
+
+    async fn detach_tombstone(
+        &self,
+        _session_id: &str,
+        _address: &str,
+    ) -> Result<Option<DetachTombstone>> {
+        Ok(None)
+    }
+
     // ---- messages ----
     /// Record that `message_id` was handed to a waiter for `recipient` (the served address), so no
     /// holder redelivers it. Durable: this is the per-recipient delivery fact that makes delivery
@@ -145,6 +187,9 @@ pub trait Backend: Send + Sync {
     /// The two do-not-deliver signals are a consumed delivery record (primary) and a terminal
     /// disposition (secondary, for messages recovered out-of-band via `telex inbox`); see DECISIONS 0013.
     async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>>;
+    async fn has_delivery_for_recipient(&self, _message_id: i64, _recipient: &str) -> Result<bool> {
+        Ok(false)
+    }
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow>;
     async fn get_message(&self, id: i64) -> Result<Option<MessageRow>>;
     async fn thread_messages(&self, thread_id: i64) -> Result<Vec<MessageRow>>;

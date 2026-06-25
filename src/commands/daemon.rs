@@ -62,7 +62,7 @@ async fn reset(ctx: &Ctx, args: DaemonResetArgs) -> Result<i32> {
             );
             Ok(0)
         }
-        Response::Error { code, message } => Err(anyhow!("{code}: {message}")),
+        Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
         other => Err(anyhow!("unexpected daemon reset response: {other:?}")),
     }
 }
@@ -91,7 +91,7 @@ async fn session_end(ctx: &Ctx, args: DaemonSessionEndArgs) -> Result<i32> {
             );
             Ok(0)
         }
-        Response::Error { code, message } => Err(anyhow!("{code}: {message}")),
+        Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
         other => Err(anyhow!("unexpected daemon session-end response: {other:?}")),
     }
 }
@@ -118,7 +118,7 @@ async fn status(ctx: &Ctx) -> Result<i32> {
                     });
                     Ok(0)
                 }
-                Response::Error { code, message } => Err(anyhow!("{code}: {message}")),
+                Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
                 other => Err(anyhow!("unexpected daemon status response: {other:?}")),
             }
         }
@@ -152,7 +152,7 @@ async fn stop_drain(ctx: &Ctx) -> Result<i32> {
             });
             Ok(0)
         }
-        Response::Error { code, message } => Err(anyhow!("{code}: {message}")),
+        Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
         other => Err(anyhow!("unexpected daemon drain response: {other:?}")),
     }
 }

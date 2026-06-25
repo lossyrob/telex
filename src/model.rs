@@ -155,6 +155,14 @@ pub struct LeaseRow {
     pub owner_instance_id: Option<String>,
 }
 
+#[derive(Clone, Debug, Serialize)]
+pub struct DetachTombstone {
+    pub session_id: String,
+    pub address: String,
+    pub reason: String,
+    pub at_ms: i64,
+}
+
 /// A request to claim/refresh a lease on an address.
 #[derive(Clone, Debug, Default)]
 pub struct LeaseClaim {

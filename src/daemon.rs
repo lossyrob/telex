@@ -6,9 +6,9 @@ use crate::backend::sqlite::SqliteBackend;
 use crate::backend::Backend;
 use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
-    EpochStatus, HandshakeError, HelloAck, IdleStationStatus, MemberStatus, RecentErrorStatus,
-    Request, Response, RetentionStatus, SentReceipt, StoreStatus, WatchPidRole, WatchPidSpec,
-    WatchPidStatus,
+    EpochStatus, HandshakeError, HelloAck, IdleStationStatus, MemberStatus, NeedsAttachReason,
+    RecentErrorStatus, Request, Response, RetentionStatus, SentReceipt, StoreStatus, WatchPidRole,
+    WatchPidSpec, WatchPidStatus,
 };
 use crate::model::{
     now_ms, Attention, DeliveryOutcome, EpochClaimResult, NewMessage, STATUS_RETIRED,
@@ -1046,7 +1046,7 @@ pub async fn request_connect_or_spawn(store_key: &str, request: &Request) -> Res
             }
         };
         match &response {
-            Response::Error { code, message }
+            Response::Error { code, message, .. }
                 if code == proto::ERROR_NOT_RUNNING && message.contains("draining") =>
             {
                 if Instant::now() >= deadline {
@@ -1235,7 +1235,7 @@ async fn heartbeat_members_once(state: Arc<DaemonState>) {
         }
         let backend = match state.backend_for(&member.store_key).await {
             Ok(backend) => backend,
-            Err(Response::Error { code, message }) => {
+            Err(Response::Error { code, message, .. }) => {
                 state.push_recent_error(
                     "BackendDisconnect",
                     format!(
@@ -1751,6 +1751,14 @@ async fn register_member(
             ),
         );
     }
+    if let Err(e) = backend.clear_detach_tombstone(&session_id, &address).await {
+        state.push_recent_error(
+            "DetachTombstone",
+            format!(
+                "failed to clear detach tombstone store={store_key} session={session_id} address={address}: {e:#}"
+            ),
+        );
+    }
 
     let record = MemberRecord {
         address: address.clone(),
@@ -1843,7 +1851,13 @@ async fn detach_member(
             Err(response) => return response,
         };
         match backend
-            .release_epoch_lease(&address, &member.owner_instance_id, member.lease_epoch)
+            .release_epoch_lease_for_detach(
+                &address,
+                &member.owner_instance_id,
+                member.lease_epoch,
+                &session_id,
+                "Detach",
+            )
             .await
         {
             Ok(true) => {
@@ -2008,7 +2022,7 @@ async fn wait_for_message_with_idle_ttl(
             {
                 return response;
             }
-            return Response::Message {
+            let response = Response::Message {
                 id: row.id,
                 thread_id: row.thread_id,
                 parent_id: row.parent_id,
@@ -2022,6 +2036,18 @@ async fn wait_for_message_with_idle_ttl(
                 sent_at_ms: row.sent_at_ms,
                 buffered_at_ms: now_ms(),
                 lease_epoch: Some(current.lease_epoch),
+            };
+            return match proto::json_line_frame_len(&response) {
+                Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => response,
+                Ok(len) => proto::error_response(
+                    proto::ERROR_INCOMPATIBLE,
+                    format!(
+                        "message {} serializes to {len} bytes, exceeding IPC frame limit {}",
+                        row.id,
+                        proto::MAX_JSONL_FRAME_BYTES
+                    ),
+                ),
+                Err(e) => proto::internal(format!("sizing message {} IPC frame: {e}", row.id)),
             };
         }
         if let Some(deadline) = deadline {
@@ -2075,27 +2101,64 @@ async fn ack_message(
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
     }
 
+    let backend = match state.backend_for(&store_key).await {
+        Ok(backend) => backend,
+        Err(response) => return response,
+    };
     let member = match state.get_member(&store_key, &session_id, &address) {
         Some(member) => member,
         None => {
+            match backend.detach_tombstone(&session_id, &address).await {
+                Ok(Some(tombstone)) => {
+                    return proto::needs_attach_with_reason(
+                        format!(
+                            "session {session_id} deliberately detached from {address} in {store_key} by {} at {}; explicit attach required",
+                            tombstone.reason, tombstone.at_ms
+                        ),
+                        NeedsAttachReason::DeliberatelyDetached,
+                    );
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    return proto::internal(format!(
+                        "checking detach tombstone for {session_id}/{address}: {e:#}"
+                    ))
+                }
+            }
             if let Some(ended) = state.session_definite_end(&store_key, &session_id) {
-                return proto::needs_attach(format!(
-                    "session {session_id} was definitely ended by {} at {}; deliberate re-attach required for {address} in {store_key}",
-                    ended.reason, ended.at_ms
-                ));
+                return proto::needs_attach_with_reason(
+                    format!(
+                        "session {session_id} was definitely ended by {} at {}; deliberate re-attach required for {address} in {store_key}",
+                        ended.reason, ended.at_ms
+                    ),
+                    NeedsAttachReason::DeliberatelyDetached,
+                );
             }
             state.push_recent_error(
                 "NeedsAttach",
                 format!("Ack NeedsAttach store={store_key} session={session_id} address={address} message_id={message_id}"),
             );
-            return proto::needs_attach(format!(
-                "session {session_id} is not attached to {address} in {store_key}"
-            ));
+            match backend.has_delivery_for_recipient(message_id, &address).await {
+                Ok(true) => {
+                    return proto::needs_attach_with_reason(
+                        format!(
+                            "session {session_id} lost membership for pending message {message_id} to {address} in {store_key}; restart re-attach may recover"
+                        ),
+                        NeedsAttachReason::RestartLost,
+                    )
+                }
+                Ok(false) => {
+                    return proto::needs_attach(format!(
+                        "session {session_id} is not attached to {address} in {store_key}"
+                    ))
+                }
+                Err(e) => {
+                    return proto::internal(format!(
+                        "checking delivery recovery eligibility for {message_id}/{address}: {e:#}"
+                    ))
+                }
+            }
         }
-    };
-    let backend = match state.backend_for(&store_key).await {
-        Ok(backend) => backend,
-        Err(response) => return response,
     };
     match backend
         .mark_consumed_if_current_owner(
@@ -2126,6 +2189,27 @@ async fn ack_message(
     }
 }
 
+fn validate_message_payload_size(
+    body: &str,
+    subject: Option<&str>,
+    metadata: Option<&str>,
+) -> std::result::Result<(), Response> {
+    let bytes = body
+        .len()
+        .saturating_add(subject.map(str::len).unwrap_or(0))
+        .saturating_add(metadata.map(str::len).unwrap_or(0));
+    if bytes > proto::MAX_MESSAGE_BODY_METADATA_BYTES {
+        return Err(proto::error_response(
+            proto::ERROR_INCOMPATIBLE,
+            format!(
+                "message body/subject/metadata is {bytes} bytes; limit is {} bytes",
+                proto::MAX_MESSAGE_BODY_METADATA_BYTES
+            ),
+        ));
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn send_message(
     state: Arc<DaemonState>,
@@ -2149,6 +2233,11 @@ async fn send_message(
         Ok(attention) => attention,
         Err(e) => return proto::incompatible(e.to_string()),
     };
+    if let Err(response) =
+        validate_message_payload_size(&body, subject.as_deref(), metadata.as_deref())
+    {
+        return response;
+    }
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
         Err(response) => return response,
@@ -2227,6 +2316,9 @@ async fn reply_message(
         Ok(attention) => attention,
         Err(e) => return proto::incompatible(e.to_string()),
     };
+    if let Err(response) = validate_message_payload_size(&body, subject.as_deref(), None) {
+        return response;
+    }
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
         Err(response) => return response,
@@ -2591,6 +2683,112 @@ mod p3_tests {
     }
 
     #[tokio::test]
+    async fn ack_after_restart_lost_membership_can_reattach_and_mark() {
+        // In-process state replacement models daemon restart deterministically; full IPC
+        // multi-process restart coverage remains an integration harness axis.
+        let store = store_key("ack-restart-lost");
+        let message_id;
+        {
+            let state = test_state("ack-restart-lost-one");
+            registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+            let backend = state.backend_for(&store).await.unwrap();
+            message_id = insert_test_message(&backend, "addr:a", None).await;
+            let (drain, action) = handle_request(
+                state.clone(),
+                Request::Drain {
+                    proof: Some(state.admin_cap.clone()),
+                },
+            )
+            .await;
+            assert!(matches!(drain, Response::Ack { .. }));
+            assert!(matches!(action, ClientAction::Drain));
+        }
+
+        let restarted = test_state("ack-restart-lost-two");
+        let first_ack = request(
+            restarted.clone(),
+            Request::Ack {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                message_id,
+            },
+        )
+        .await;
+        assert!(matches!(
+            first_ack,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::RestartLost),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
+        ));
+
+        registered_epoch(restarted.clone(), &store, "s1", "addr:a").await;
+        let second_ack = request(restarted, ack_req(&store, "s1", "addr:a", message_id)).await;
+        assert!(matches!(
+            second_ack,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn ack_after_durable_detach_tombstone_stays_terminal_across_restart() {
+        // The durable tombstone is asserted across a fresh DaemonState; a real daemon process
+        // restart exercises the same SQLite marker through the IPC harness.
+        let store = store_key("ack-detach-tombstone");
+        let message_id;
+        {
+            let state = test_state("ack-detach-tombstone-one");
+            registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+            let backend = state.backend_for(&store).await.unwrap();
+            message_id = insert_test_message(&backend, "addr:a", None).await;
+            assert!(matches!(
+                request(
+                    state,
+                    Request::Detach {
+                        store_key: store.clone(),
+                        session_id: "s1".to_string(),
+                        address: "addr:a".to_string(),
+                    },
+                )
+                .await,
+                Response::Ack { .. }
+            ));
+        }
+
+        let restarted = test_state("ack-detach-tombstone-two");
+        let ack = request(
+            restarted.clone(),
+            ack_req(&store, "s1", "addr:a", message_id),
+        )
+        .await;
+        assert!(matches!(
+            ack,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
+        ));
+        assert!(restarted.status().await.members.is_empty());
+
+        registered_epoch(restarted.clone(), &store, "s1", "addr:a").await;
+        let ack_after_explicit_register =
+            request(restarted, ack_req(&store, "s1", "addr:a", message_id)).await;
+        assert!(matches!(
+            ack_after_explicit_register,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
     async fn same_session_id_in_two_store_keys_is_isolated() {
         let state = test_state("multi-store");
         let store_a = store_key("multi-a");
@@ -2672,6 +2870,64 @@ mod p3_tests {
         assert!(matches!(
             ambiguous,
             Response::Error { ref code, .. } if code == proto::ERROR_AMBIGUOUS
+        ));
+    }
+
+    #[tokio::test]
+    async fn send_and_reply_reject_payloads_above_body_metadata_cap_before_insert() {
+        let state = test_state("payload-cap");
+        let store = store_key("payload-cap");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        registered_epoch(state.clone(), &store, "s2", "dest").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let before = backend.inbox("dest", true, 100).await.unwrap().len();
+        let too_large = "x".repeat(proto::MAX_MESSAGE_BODY_METADATA_BYTES + 1);
+
+        let send = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                from_addr: Some("addr:a".to_string()),
+                to_addr: "dest".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: too_large.clone(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            send,
+            Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
+        ));
+        assert_eq!(
+            backend.inbox("dest", true, 100).await.unwrap().len(),
+            before
+        );
+
+        let parent_id = insert_test_message(&backend, "addr:a", None).await;
+        let reply = request(
+            state,
+            Request::Reply {
+                store_key: store,
+                session_id: "s1".to_string(),
+                from_addr: Some("addr:a".to_string()),
+                message_id: parent_id,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: too_large,
+            },
+        )
+        .await;
+        assert!(matches!(
+            reply,
+            Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
         ));
     }
 
@@ -3005,6 +3261,42 @@ mod p3_tests {
             .await
             .unwrap()
             .is_empty());
+    }
+
+    #[tokio::test]
+    async fn wait_returns_small_error_for_oversized_historical_message_frame() {
+        let state = test_state("oversized-frame");
+        let store = store_key("oversized-frame");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let oversized = "x".repeat(proto::MAX_JSONL_FRAME_BYTES + 1);
+        let message_id = backend
+            .insert_message(&NewMessage {
+                parent_id: None,
+                from_addr: Some("sender".to_string()),
+                to_addr: "addr:a".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: Attention::Background,
+                requires_disposition: false,
+                subject: None,
+                body: oversized,
+                metadata: None,
+                sent_at_ms: now_ms(),
+            })
+            .await
+            .unwrap()
+            .id;
+
+        let wait = request(state, wait_req(&store, "s1", "addr:a", 1_000)).await;
+        match wait {
+            Response::Error { code, message, .. } => {
+                assert_eq!(code, proto::ERROR_INCOMPATIBLE);
+                assert!(message.contains(&message_id.to_string()));
+                assert!(message.contains("IPC frame"));
+            }
+            other => panic!("expected oversized-frame error, got {other:?}"),
+        }
     }
 
     #[tokio::test]
@@ -4796,7 +5088,7 @@ mod tests {
         let wrong = "wrong-secret-value";
         let response = verify_admin_proof(expected, Some(wrong)).unwrap_err();
         match response {
-            Response::Error { code, message } => {
+            Response::Error { code, message, .. } => {
                 assert_eq!(code, ERROR_UNAUTHORIZED);
                 assert!(!message.contains(expected));
                 assert!(!message.contains(wrong));

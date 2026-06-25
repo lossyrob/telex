@@ -50,7 +50,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
             });
             Ok(0)
         }
-        Response::Error { code, message } => Err(anyhow!("{code}: {message}")),
+        Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
         other => Err(anyhow!("unexpected daemon register response: {other:?}")),
     }
 }

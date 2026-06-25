@@ -28,7 +28,7 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
                 emit_receipt(ctx, &receipt);
                 return Ok(0);
             }
-            Response::Error { code, message } if code == ERROR_NEEDS_ATTACH => {
+            Response::Error { code, message, .. } if code == ERROR_NEEDS_ATTACH => {
                 if retried_after_attach {
                     return Err(anyhow!("{code}: {message}"));
                 }
@@ -40,7 +40,7 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
                 register_for_retry(&store_key, &session_id, &attach_addr).await?;
                 retried_after_attach = true;
             }
-            Response::Error { code, message } => return Err(anyhow!("{code}: {message}")),
+            Response::Error { code, message, .. } => return Err(anyhow!("{code}: {message}")),
             other => return Err(anyhow!("unexpected daemon send response: {other:?}")),
         }
     }
@@ -87,7 +87,7 @@ async fn register_for_retry(store_key: &str, session_id: &str, address: &str) ->
         .await?;
     match response {
         Response::Registered { .. } => Ok(()),
-        Response::Error { code, message } => Err(anyhow!("{code}: {message}")),
+        Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
         other => Err(anyhow!("unexpected daemon register response: {other:?}")),
     }
 }

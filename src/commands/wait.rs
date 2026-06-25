@@ -166,7 +166,9 @@ async fn wait_loop<C: WaitConnector>(
         };
 
         match response {
-            Response::Error { code, message } if code == crate::daemon_ipc::ERROR_NOT_RUNNING => {
+            Response::Error { code, message, .. }
+                if code == crate::daemon_ipc::ERROR_NOT_RUNNING =>
+            {
                 last_reconnect_error = Some(format!("{code}: {message}"));
                 begin_reconnect(
                     cfg,
@@ -175,7 +177,7 @@ async fn wait_loop<C: WaitConnector>(
                     &mut retried_after_attach,
                 );
             }
-            Response::Error { code, message } if code == ERROR_NEEDS_ATTACH => {
+            Response::Error { code, message, .. } if code == ERROR_NEEDS_ATTACH => {
                 if !allow_reattach || retried_after_attach {
                     return Err(anyhow!("{code}: {message}"));
                 }
@@ -194,7 +196,7 @@ async fn wait_loop<C: WaitConnector>(
             Response::Message { .. } | Response::Timeout | Response::PresenceEnded => {
                 return Ok(WaitTerminal::Response(response));
             }
-            Response::Error { code, message } => return Err(anyhow!("{code}: {message}")),
+            Response::Error { code, message, .. } => return Err(anyhow!("{code}: {message}")),
             other => return Err(anyhow!("unexpected daemon wait response: {other:?}")),
         }
     }
@@ -305,7 +307,7 @@ async fn register_for_retry<C: WaitConnector>(
             {
                 tokio::time::sleep(Duration::from_millis(RECONNECT_RETRY_SLEEP_MS)).await;
             }
-            Ok(Ok(Response::Error { code, message })) => {
+            Ok(Ok(Response::Error { code, message, .. })) => {
                 return Err(anyhow!("{code}: {message}"));
             }
             Ok(Ok(other)) => return Err(anyhow!("unexpected daemon register response: {other:?}")),
