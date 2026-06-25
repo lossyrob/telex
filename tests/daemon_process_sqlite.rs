@@ -88,6 +88,11 @@ impl ProcessEnv {
         let home = root.join("h");
         let run_dir = root.join("r");
         std::fs::create_dir_all(&root).expect("create test root");
+        #[cfg(windows)]
+        {
+            create_owner_private_daemon_fixture_dir(&home);
+            create_owner_private_daemon_fixture_dir(&run_dir);
+        }
         std::fs::create_dir_all(&state_dir).expect("create lock state dir");
         Self {
             bin: telex_bin(),
@@ -246,6 +251,128 @@ fn telex_bin() -> PathBuf {
         dir
     };
     target_dir.join(format!("telex{}", std::env::consts::EXE_SUFFIX))
+}
+
+#[cfg(windows)]
+fn create_owner_private_daemon_fixture_dir(path: &Path) {
+    use std::ffi::{c_void, OsStr};
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GetLastError, LocalFree, ERROR_ALREADY_EXISTS,
+    };
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        SDDL_REVISION_1,
+    };
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, TokenUser, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::Storage::FileSystem::CreateDirectoryW;
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let sid = current_user_sid_string();
+    let sddl = format!("O:{sid}G:{sid}D:P(A;;GA;;;{sid})");
+    let mut descriptor: *mut c_void = std::ptr::null_mut();
+    let sddl_wide = wide_null(OsStr::new(&sddl));
+    let ok = unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl_wide.as_ptr(),
+            SDDL_REVISION_1,
+            &mut descriptor,
+            std::ptr::null_mut(),
+        )
+    };
+    assert_ne!(
+        ok,
+        0,
+        "building owner-only test directory security descriptor: {}",
+        std::io::Error::last_os_error()
+    );
+
+    let mut attrs = SECURITY_ATTRIBUTES {
+        nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+        lpSecurityDescriptor: descriptor,
+        bInheritHandle: 0,
+    };
+    let path_wide = wide_null(path.as_os_str());
+    let ok = unsafe { CreateDirectoryW(path_wide.as_ptr(), &mut attrs) };
+    unsafe {
+        LocalFree(descriptor);
+    }
+    if ok == 0 {
+        let err = unsafe { GetLastError() };
+        assert_eq!(
+            err,
+            ERROR_ALREADY_EXISTS,
+            "creating owner-only test daemon directory {}: {}",
+            path.display(),
+            std::io::Error::last_os_error()
+        );
+    }
+
+    fn current_user_sid_string() -> String {
+        let mut token = 0;
+        let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+        assert_ne!(
+            ok,
+            0,
+            "opening current process token: {}",
+            std::io::Error::last_os_error()
+        );
+        let mut needed = 0u32;
+        unsafe {
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+        }
+        assert!(needed > 0, "querying token user buffer length");
+        let mut buf = vec![0u8; needed as usize];
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                buf.as_mut_ptr() as *mut c_void,
+                needed,
+                &mut needed,
+            )
+        };
+        if ok == 0 {
+            unsafe {
+                CloseHandle(token);
+            }
+            panic!(
+                "reading current token user: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+        let mut sid_ptr: *mut u16 = std::ptr::null_mut();
+        let ok = unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_ptr) };
+        unsafe {
+            CloseHandle(token);
+        }
+        assert_ne!(
+            ok,
+            0,
+            "converting current SID to string: {}",
+            std::io::Error::last_os_error()
+        );
+        let sid = unsafe { wide_ptr_to_string(sid_ptr) };
+        unsafe {
+            LocalFree(sid_ptr as *mut c_void);
+        }
+        sid
+    }
+
+    fn wide_null(value: &OsStr) -> Vec<u16> {
+        value.encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    unsafe fn wide_ptr_to_string(ptr: *const u16) -> String {
+        let mut len = 0usize;
+        while *ptr.add(len) != 0 {
+            len += 1;
+        }
+        String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
+    }
 }
 
 fn run_command_with_capture(mut cmd: Command, root: &Path, timeout: Duration) -> CmdOutput {
