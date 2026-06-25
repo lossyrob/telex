@@ -2,7 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::json;
 
 use crate::cli::{AddressCmd, AddressListArgs, Ctx, ResolveArgs};
-use crate::daemon_ipc::{DaemonStatus, Request, Response};
+use crate::daemon_ipc::{DaemonStatus, Request, Response, ERROR_UNAUTHORIZED};
 use crate::model::{AddressRow, STATUS_RETIRED};
 use crate::output::emit;
 
@@ -143,29 +143,38 @@ async fn show(ctx: &Ctx) -> Result<i32> {
 
 async fn daemon_detail(ctx: &Ctx) -> Result<Option<DaemonStatus>> {
     let paths = crate::daemon::DaemonPaths::current()?;
-    let cap = match crate::daemon::read_cap_file(&paths.cap_path) {
-        Ok(cap) => cap,
-        Err(_) => return Ok(None),
-    };
     let store_key = ctx.store_key()?;
-    match crate::daemon::connect_existing(&store_key).await {
-        Ok(mut client) => {
-            let response = client
-                .request(&Request::Status {
-                    store_key: Some(store_key),
-                    detail: true,
-                    proof: Some(cap.admin_cap),
-                })
-                .await?;
-            match response {
-                Response::StatusReport { status } => Ok(Some(status)),
-                Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
-                other => Err(anyhow!("unexpected daemon status response: {other:?}")),
+    for attempt in 0..2 {
+        let cap = match crate::daemon::read_cap_file(&paths.cap_path) {
+            Ok(cap) => cap,
+            Err(_) => return Ok(None),
+        };
+        match crate::daemon::connect_existing(&store_key).await {
+            Ok(mut client) => {
+                let response = client
+                    .request(&Request::Status {
+                        store_key: Some(store_key.clone()),
+                        detail: true,
+                        proof: Some(cap.admin_cap),
+                    })
+                    .await?;
+                match response {
+                    Response::StatusReport { status } => return Ok(Some(status)),
+                    Response::Error { code, .. } if code == ERROR_UNAUTHORIZED && attempt == 0 => {
+                        continue;
+                    }
+                    Response::Error { code, message, .. } => {
+                        return Err(anyhow!("{code}: {message}"))
+                    }
+                    other => return Err(anyhow!("unexpected daemon status response: {other:?}")),
+                }
             }
+            Err(crate::daemon::DaemonError::NotRunning(_)) => return Ok(None),
+            Err(crate::daemon::DaemonError::Unauthorized(_)) if attempt == 0 => continue,
+            Err(e) => return Err(e.into()),
         }
-        Err(crate::daemon::DaemonError::NotRunning(_)) => Ok(None),
-        Err(e) => Err(e.into()),
     }
+    Ok(None)
 }
 
 async fn retire(ctx: &Ctx) -> Result<i32> {

@@ -534,7 +534,20 @@ fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std
 /// find the waiter during teardown.
 fn write_wait_start_artifacts(dir: &Path, waiter_pid: u32) -> std::io::Result<()> {
     ensure_out_dir(dir)?;
+    remove_stale_wait_completion_artifacts(dir)?;
     atomic_write(&dir.join("wait.pid"), format!("{waiter_pid}\n").as_bytes())
+}
+
+fn remove_stale_wait_completion_artifacts(dir: &Path) -> std::io::Result<()> {
+    for name in ["exit.code", "status.json", "message.json"] {
+        let path = dir.join(name);
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(())
 }
 
 /// Create the artifact directory owner-only. The message body is operational content, so on Unix
@@ -899,6 +912,10 @@ mod tests {
     #[test]
     fn out_dir_startup_writes_wait_pid() {
         let dir = artifact_dir("pid");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("exit.code"), b"0\n").unwrap();
+        std::fs::write(dir.join("status.json"), b"stale").unwrap();
+        std::fs::write(dir.join("message.json"), b"stale").unwrap();
         write_wait_start_artifacts(&dir, 12_345).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.join("wait.pid"))
@@ -906,6 +923,12 @@ mod tests {
                 .trim(),
             "12345"
         );
+        assert!(
+            !dir.join("exit.code").exists(),
+            "startup must clear stale completion marker"
+        );
+        assert!(!dir.join("status.json").exists());
+        assert!(!dir.join("message.json").exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 

@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 
 use crate::cli::{Ctx, DaemonCmd, DaemonResetArgs, DaemonSessionEndArgs};
-use crate::daemon_ipc::{Request, Response};
+use crate::daemon_ipc::{Request, Response, ERROR_UNAUTHORIZED};
 use crate::identity::resolve_session_id;
 use crate::output::emit;
 
@@ -99,41 +99,50 @@ async fn session_end(ctx: &Ctx, args: DaemonSessionEndArgs) -> Result<i32> {
 async fn status(ctx: &Ctx) -> Result<i32> {
     let paths = crate::daemon::DaemonPaths::current()?;
     let store_key = ctx.store_key()?;
-    match crate::daemon::connect_existing(&store_key).await {
-        Ok(mut client) => {
-            let cap = crate::daemon::read_cap_file(&paths.cap_path)?;
-            let response = client
-                .request(&Request::Status {
-                    store_key: Some(store_key),
-                    detail: true,
-                    proof: Some(cap.admin_cap),
-                })
-                .await?;
-            match response {
-                Response::StatusReport { status } => {
-                    emit(ctx.fmt, &status, || {
-                        println!("daemon  running");
-                        println!("version {}", status.daemon_version);
-                        println!("instance {}", status.instance_id);
-                        println!("singleton {}", status.singleton_key);
-                    });
-                    Ok(0)
+    for attempt in 0..2 {
+        match crate::daemon::connect_existing(&store_key).await {
+            Ok(mut client) => {
+                let cap = crate::daemon::read_cap_file(&paths.cap_path)?;
+                let response = client
+                    .request(&Request::Status {
+                        store_key: Some(store_key.clone()),
+                        detail: true,
+                        proof: Some(cap.admin_cap),
+                    })
+                    .await?;
+                match response {
+                    Response::StatusReport { status } => {
+                        emit(ctx.fmt, &status, || {
+                            println!("daemon  running");
+                            println!("version {}", status.daemon_version);
+                            println!("instance {}", status.instance_id);
+                            println!("singleton {}", status.singleton_key);
+                        });
+                        return Ok(0);
+                    }
+                    Response::Error { code, .. } if code == ERROR_UNAUTHORIZED && attempt == 0 => {
+                        continue;
+                    }
+                    Response::Error { code, message, .. } => {
+                        return Err(anyhow!("{code}: {message}"))
+                    }
+                    other => return Err(anyhow!("unexpected daemon status response: {other:?}")),
                 }
-                Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
-                other => Err(anyhow!("unexpected daemon status response: {other:?}")),
             }
+            Err(crate::daemon::DaemonError::NotRunning(_)) => {
+                let info = crate::daemon::local_status_metadata(&paths);
+                emit(ctx.fmt, &info, || {
+                    println!("daemon  not running");
+                    println!("endpoint {}", paths.endpoint.display());
+                    println!("cap      {}", paths.cap_path.display());
+                });
+                return Ok(0);
+            }
+            Err(crate::daemon::DaemonError::Unauthorized(_)) if attempt == 0 => continue,
+            Err(e) => return Err(e.into()),
         }
-        Err(crate::daemon::DaemonError::NotRunning(_)) => {
-            let info = crate::daemon::local_status_metadata(&paths);
-            emit(ctx.fmt, &info, || {
-                println!("daemon  not running");
-                println!("endpoint {}", paths.endpoint.display());
-                println!("cap      {}", paths.cap_path.display());
-            });
-            Ok(0)
-        }
-        Err(e) => Err(e.into()),
     }
+    Err(anyhow!("daemon status failed after retry"))
 }
 
 async fn stop_drain(ctx: &Ctx) -> Result<i32> {

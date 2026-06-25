@@ -415,6 +415,7 @@ pub struct MemberStatus {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LiveWaiterStatus {
+    pub waiter_id: u64,
     pub store_key: String,
     pub session_id: String,
     pub address: String,

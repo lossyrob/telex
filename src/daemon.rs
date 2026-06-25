@@ -18,7 +18,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -299,6 +299,7 @@ pub struct DaemonState {
     store_open_guard: AsyncMutex<()>,
     members: Mutex<BTreeMap<MemberKey, MemberRecord>>,
     waiters: Mutex<BTreeMap<WaiterKey, WaiterRecord>>,
+    next_waiter_id: AtomicU64,
     recent_errors: Mutex<VecDeque<RecentErrorStatus>>,
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
     draining: AtomicBool,
@@ -325,10 +326,7 @@ struct SessionKey {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct WaiterKey {
-    store_key: String,
-    session_id: String,
-    address: String,
-    pid: u32,
+    waiter_id: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -359,6 +357,7 @@ struct WatchPidRecord {
 
 #[derive(Clone, Debug)]
 struct WaiterRecord {
+    waiter_id: u64,
     store_key: String,
     session_id: String,
     address: String,
@@ -523,13 +522,8 @@ impl DaemonState {
         }
     }
 
-    fn waiter_key(store_key: &str, session_id: &str, address: &str, pid: u32) -> WaiterKey {
-        WaiterKey {
-            store_key: store_key.to_string(),
-            session_id: session_id.to_string(),
-            address: address.to_string(),
-            pid,
-        }
+    fn waiter_key(waiter_id: u64) -> WaiterKey {
+        WaiterKey { waiter_id }
     }
 
     fn get_member(&self, store_key: &str, session_id: &str, address: &str) -> Option<MemberRecord> {
@@ -842,16 +836,16 @@ impl DaemonState {
             .collect()
     }
 
-    fn add_waiter(&self, waiter: WaiterRecord) {
+    fn add_waiter(&self, mut waiter: WaiterRecord) -> u64 {
+        let waiter_id = self.next_waiter_id.fetch_add(1, Ordering::SeqCst);
+        waiter.waiter_id = waiter_id;
         let store_key = waiter.store_key.clone();
         let session_id = waiter.session_id.clone();
         let address = waiter.address.clone();
-        if waiter.pid != 0 {
-            self.waiters.lock().unwrap().insert(
-                Self::waiter_key(&store_key, &session_id, &address, waiter.pid),
-                waiter,
-            );
-        }
+        self.waiters
+            .lock()
+            .unwrap()
+            .insert(Self::waiter_key(waiter_id), waiter);
         if let Some(member) = self.members.lock().unwrap().get_mut(&Self::member_key(
             &store_key,
             &session_id,
@@ -859,15 +853,14 @@ impl DaemonState {
         )) {
             member.waiters = member.waiters.saturating_add(1);
         }
+        waiter_id
     }
 
-    fn remove_waiter(&self, store_key: &str, session_id: &str, address: &str, pid: u32) {
-        if pid != 0 {
-            self.waiters
-                .lock()
-                .unwrap()
-                .remove(&Self::waiter_key(store_key, session_id, address, pid));
-        }
+    fn remove_waiter(&self, store_key: &str, session_id: &str, address: &str, waiter_id: u64) {
+        self.waiters
+            .lock()
+            .unwrap()
+            .remove(&Self::waiter_key(waiter_id));
         if let Some(member) = self
             .members
             .lock()
@@ -923,11 +916,13 @@ impl WatchPidRecord {
 impl WaiterRecord {
     fn status(&self) -> LiveWaiterStatus {
         LiveWaiterStatus {
+            waiter_id: self.waiter_id,
             store_key: self.store_key.clone(),
             session_id: self.session_id.clone(),
             address: self.address.clone(),
             pid: self.pid,
-            alive: crate::session_watch::process_alive_with_start_time(self.pid, self.start_time),
+            alive: self.pid == 0
+                || crate::session_watch::process_alive_with_start_time(self.pid, self.start_time),
             started_at_ms: self.started_at_ms,
             start_time: self.start_time,
             attention: self.attention.clone(),
@@ -941,7 +936,7 @@ struct WaiterGuard {
     store_key: String,
     session_id: String,
     address: String,
-    pid: u32,
+    waiter_id: u64,
 }
 
 impl WaiterGuard {
@@ -956,7 +951,8 @@ impl WaiterGuard {
         timeout_ms: Option<u64>,
     ) -> Self {
         let pid = pid.unwrap_or(0);
-        state.add_waiter(WaiterRecord {
+        let waiter_id = state.add_waiter(WaiterRecord {
+            waiter_id: 0,
             store_key: store_key.to_string(),
             session_id: session_id.to_string(),
             address: address.to_string(),
@@ -971,15 +967,19 @@ impl WaiterGuard {
             store_key: store_key.to_string(),
             session_id: session_id.to_string(),
             address: address.to_string(),
-            pid,
+            waiter_id,
         }
     }
 }
 
 impl Drop for WaiterGuard {
     fn drop(&mut self) {
-        self.state
-            .remove_waiter(&self.store_key, &self.session_id, &self.address, self.pid);
+        self.state.remove_waiter(
+            &self.store_key,
+            &self.session_id,
+            &self.address,
+            self.waiter_id,
+        );
     }
 }
 
@@ -1284,6 +1284,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         store_open_guard: AsyncMutex::new(()),
         members: Mutex::new(BTreeMap::new()),
         waiters: Mutex::new(BTreeMap::new()),
+        next_waiter_id: AtomicU64::new(1),
         recent_errors: Mutex::new(VecDeque::new()),
         ended_sessions: Mutex::new(BTreeMap::new()),
         draining: AtomicBool::new(false),
@@ -2889,6 +2890,7 @@ mod p3_tests {
             store_open_guard: AsyncMutex::new(()),
             members: Mutex::new(BTreeMap::new()),
             waiters: Mutex::new(BTreeMap::new()),
+            next_waiter_id: AtomicU64::new(1),
             recent_errors: Mutex::new(VecDeque::new()),
             ended_sessions: Mutex::new(BTreeMap::new()),
             draining: AtomicBool::new(false),
@@ -4008,6 +4010,51 @@ mod p3_tests {
     }
 
     #[tokio::test]
+    async fn station_stop_drains_pidless_protocol_waiter() {
+        let state = test_state("station-stop-pidless");
+        let store = store_key("station-stop-pidless");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let waiter_req = Request::Wait {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+            attention: None,
+            timeout_ms: Some(5_000),
+            waiter_pid: None,
+            waiter_start_time: None,
+        };
+        let waiter_state = state.clone();
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_req).await });
+        tokio::time::sleep(Duration::from_millis(75)).await;
+
+        let status = state.status().await;
+        assert_eq!(status.live_waiters.len(), 1);
+        assert_eq!(status.live_waiters[0].pid, 0);
+        assert!(status.live_waiters[0].alive);
+
+        let stopped = request(
+            state.clone(),
+            Request::StationStop {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                wait_grace_ms: 1_000,
+            },
+        )
+        .await;
+        assert!(matches!(
+            stopped,
+            Response::StationStopped {
+                waiters_before: 1,
+                waiters_after: 0,
+                ..
+            }
+        ));
+        assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
+    }
+
+    #[tokio::test]
     async fn station_stop_prevents_orphan_waiter_from_consuming_next_message() {
         let state = test_state("station-stop-no-orphan");
         let store = store_key("station-stop-no-orphan");
@@ -4497,6 +4544,7 @@ pub mod test_support {
                 store_open_guard: AsyncMutex::new(()),
                 members: Mutex::new(BTreeMap::new()),
                 waiters: Mutex::new(BTreeMap::new()),
+                next_waiter_id: AtomicU64::new(1),
                 recent_errors: Mutex::new(VecDeque::new()),
                 ended_sessions: Mutex::new(BTreeMap::new()),
                 draining: AtomicBool::new(false),
