@@ -4452,6 +4452,7 @@ mod platform {
     pub struct Listener {
         inner: UnixListener,
         path: PathBuf,
+        _lock: std::fs::File,
     }
 
     impl Listener {
@@ -4462,6 +4463,7 @@ mod platform {
             if let Some(parent) = path.parent() {
                 ensure_owner_private_dir(parent)?;
             }
+            let lock = acquire_endpoint_lock(path)?;
             if path.exists() {
                 match std::os::unix::net::UnixStream::connect(path) {
                     Ok(_) => {
@@ -4479,8 +4481,15 @@ mod platform {
                                 path.display()
                             )));
                         }
-                        std::fs::remove_file(path)
-                            .map_err(|e| io_err("removing stale daemon socket", e))?;
+                        if stale_socket_owner_is_dead(path) {
+                            std::fs::remove_file(path)
+                                .map_err(|e| io_err("removing stale daemon socket", e))?;
+                        } else {
+                            return Err(DaemonError::AlreadyRunning(format!(
+                                "endpoint socket {} exists and daemon liveness was not disproven",
+                                path.display()
+                            )));
+                        }
                     }
                 }
             }
@@ -4488,6 +4497,7 @@ mod platform {
             Ok(Self {
                 inner,
                 path: path.clone(),
+                _lock: lock,
             })
         }
 
@@ -4509,6 +4519,61 @@ mod platform {
         fn drop(&mut self) {
             let _ = std::fs::remove_file(&self.path);
         }
+    }
+
+    fn acquire_endpoint_lock(endpoint: &Path) -> Result<std::fs::File> {
+        let lock_path = endpoint.with_extension("lock");
+        let lock = std::fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .mode(0o600)
+            .open(&lock_path)
+            .map_err(|e| io_err("opening daemon endpoint lock", e))?;
+        let rc = unsafe { libc::flock(lock.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if rc == 0 {
+            return Ok(lock);
+        }
+        let err = std::io::Error::last_os_error();
+        if matches!(err.raw_os_error(), Some(e) if e == libc::EWOULDBLOCK || e == libc::EAGAIN) {
+            return Err(DaemonError::AlreadyRunning(format!(
+                "endpoint lock {} is already held",
+                lock_path.display()
+            )));
+        }
+        Err(io_err("locking daemon endpoint", err))
+    }
+
+    fn stale_socket_owner_is_dead(endpoint: &Path) -> bool {
+        let Some(cap_path) = inferred_cap_path(endpoint) else {
+            return false;
+        };
+        let Ok(cap) = read_cap_file(&cap_path) else {
+            return false;
+        };
+        let Some(endpoint_hash) = endpoint_hash(endpoint) else {
+            return false;
+        };
+        if cap.singleton_hash != endpoint_hash {
+            return false;
+        }
+        let Ok((pid, start_time)) = cap_required_peer_identity(&cap) else {
+            return false;
+        };
+        !crate::session_watch::process_alive_with_start_time(pid, Some(start_time))
+    }
+
+    fn inferred_cap_path(endpoint: &Path) -> Option<PathBuf> {
+        let hash = endpoint_hash(endpoint)?;
+        Some(endpoint.parent()?.join(format!("daemon-{hash}.cap")))
+    }
+
+    fn endpoint_hash(endpoint: &Path) -> Option<String> {
+        let file_name = endpoint.file_name()?.to_str()?;
+        let hash = file_name
+            .strip_prefix("telex-daemon-")?
+            .strip_suffix(".sock")?;
+        Some(hash.to_string())
     }
 
     pub async fn connect(endpoint: &Endpoint) -> Result<ClientConn> {
