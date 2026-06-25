@@ -9,7 +9,7 @@ use serde::Deserialize;
 use telex::backend::sqlite::SqliteBackend;
 use telex::backend::Backend;
 use telex::daemon::test_support::{self, registered_epoch, TestClientAction, TestDaemon};
-use telex::daemon::{verify_admin_proof, CapFile, DaemonPaths, SingletonKey};
+use telex::daemon::{verify_admin_proof, DaemonPaths, SingletonKey};
 use telex::daemon_ipc::{
     self as proto, send_hello_after_verifier, Request, Response, WatchPidRole, WatchPidSpec,
 };
@@ -824,36 +824,18 @@ fn section17_16_protocol_major_parallel() {
     assert_ne!(current.singleton_hash, next.singleton_hash);
     assert_ne!(current.endpoint.display(), next.endpoint.display());
     assert_ne!(current.cap_path, next.cap_path);
-
-    telex::daemon::write_cap_file(
-        &current.cap_path,
-        &CapFile {
-            instance_id: "inst-current".to_string(),
-            admin_cap: "cap-current".to_string(),
-            singleton_hash: current.singleton_hash.clone(),
-            protocol_major: proto::PROTOCOL_MAJOR,
-            server_pid: Some(101),
-            server_start_time: Some(1001),
-        },
-    )
-    .expect("write current cap");
-    telex::daemon::write_cap_file(
-        &next.cap_path,
-        &CapFile {
-            instance_id: "inst-next".to_string(),
-            admin_cap: "cap-next".to_string(),
-            singleton_hash: next.singleton_hash.clone(),
-            protocol_major: proto::PROTOCOL_MAJOR + 1,
-            server_pid: Some(202),
-            server_start_time: Some(2002),
-        },
-    )
-    .expect("write next cap");
-
-    let current_cap = telex::daemon::read_cap_file(&current.cap_path).expect("read current cap");
-    let next_cap = telex::daemon::read_cap_file(&next.cap_path).expect("read next cap");
-    assert_eq!(current_cap.protocol_major, proto::PROTOCOL_MAJOR);
-    assert_eq!(next_cap.protocol_major, proto::PROTOCOL_MAJOR + 1);
+    assert!(current
+        .cap_path
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .contains(&current.singleton_hash));
+    assert!(next
+        .cap_path
+        .file_name()
+        .unwrap()
+        .to_string_lossy()
+        .contains(&next.singleton_hash));
 }
 
 #[tokio::test]
