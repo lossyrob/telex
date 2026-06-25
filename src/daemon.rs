@@ -4429,7 +4429,9 @@ fn prepare_runtime_dir() -> Result<PathBuf> {
 #[cfg(unix)]
 mod platform {
     use super::*;
-    use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+    use std::os::unix::fs::{
+        DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt,
+    };
     use std::os::unix::io::AsRawFd;
     use tokio::net::{UnixListener, UnixStream};
 
@@ -5015,14 +5017,63 @@ mod platform {
     }
 
     pub(super) fn owner_private_sddl_is_strict(sddl: &str, sid: &str) -> bool {
-        let owner = format!("O:{sid}");
-        let owner_ace = format!(";;;{sid})");
-        let broad = [
-            ";;;WD)", ";;;AU)", ";;;BU)", ";;;BG)", ";;;AN)", ";;;IU)", ";;;SU)",
-        ];
-        sddl.contains(&owner)
-            && sddl.contains(&owner_ace)
-            && !broad.iter().any(|ace| sddl.contains(ace))
+        if !sddl_section(sddl, "O:")
+            .is_some_and(|owner| owner == sid || owner == "OW" || owner == "CO")
+        {
+            return false;
+        }
+        let Some(dacl) = sddl_section(sddl, "D:") else {
+            return false;
+        };
+        let aces = parse_sddl_ace_sids(&dacl);
+        if aces.is_empty() {
+            return false;
+        }
+        let mut has_current_sid = false;
+        for ace_sid in aces {
+            if ace_sid == sid {
+                has_current_sid = true;
+                continue;
+            }
+            if !matches!(ace_sid.as_str(), "SY" | "BA" | "OW" | "CO") {
+                return false;
+            }
+        }
+        has_current_sid
+    }
+
+    fn sddl_section(sddl: &str, marker: &str) -> Option<String> {
+        let start = sddl.find(marker)? + marker.len();
+        let end = ["O:", "G:", "D:", "S:"]
+            .iter()
+            .filter_map(|candidate| {
+                sddl[start..]
+                    .find(candidate)
+                    .map(|offset| start + offset)
+                    .filter(|idx| *idx > start)
+            })
+            .min()
+            .unwrap_or(sddl.len());
+        Some(sddl[start..end].to_string())
+    }
+
+    fn parse_sddl_ace_sids(dacl: &str) -> Vec<String> {
+        let mut sids = Vec::new();
+        let mut rest = dacl;
+        while let Some(start) = rest.find('(') {
+            rest = &rest[start + 1..];
+            let Some(end) = rest.find(')') else {
+                return Vec::new();
+            };
+            let ace = &rest[..end];
+            let fields: Vec<&str> = ace.split(';').collect();
+            if fields.len() < 6 {
+                return Vec::new();
+            }
+            sids.push(fields[5].to_string());
+            rest = &rest[end + 1..];
+        }
+        sids
     }
 
     fn verify_process_owner(pid: u32) -> Result<()> {

@@ -66,7 +66,7 @@ fn store_lock_dir() -> Result<std::path::PathBuf> {
 
 #[cfg(unix)]
 fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
-    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 
     if path.exists() {
         let link_meta = std::fs::symlink_metadata(path)
@@ -287,7 +287,8 @@ fn windows_dir_security_sddl(path: &std::path::Path) -> Result<String> {
 
 #[cfg(windows)]
 fn windows_owner_private_sddl_is_strict(sddl: &str, sid: &str) -> bool {
-    if sddl_section(sddl, "O:").as_deref() != Some(sid) {
+    if !sddl_section(sddl, "O:").is_some_and(|owner| owner == sid || owner == "OW" || owner == "CO")
+    {
         return false;
     }
     let Some(dacl) = sddl_section(sddl, "D:") else {
@@ -303,7 +304,7 @@ fn windows_owner_private_sddl_is_strict(sddl: &str, sid: &str) -> bool {
             has_current_sid = true;
             continue;
         }
-        if !matches!(ace_sid.as_str(), "SY" | "BA") {
+        if !matches!(ace_sid.as_str(), "SY" | "BA" | "OW" | "CO") {
             return false;
         }
     }
