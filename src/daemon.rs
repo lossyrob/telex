@@ -4421,7 +4421,8 @@ fn canonical_current_exe() -> Result<PathBuf> {
 fn prepare_config_root() -> Result<PathBuf> {
     let home = crate::config::telex_home()
         .map_err(|e| DaemonError::Protocol(format!("resolving TELEX_HOME: {e:#}")))?;
-    platform::ensure_owner_private_dir(&home)
+    std::fs::create_dir_all(&home).map_err(|e| io_err("creating daemon config root", e))?;
+    std::fs::canonicalize(&home).map_err(|e| io_err("canonicalizing daemon config root", e))
 }
 
 pub fn resolved_runtime_dir() -> Result<PathBuf> {
