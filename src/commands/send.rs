@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 
 use crate::cli::{Ctx, SendArgs};
-use crate::daemon_ipc::{Request, Response, SentReceipt, ERROR_NEEDS_ATTACH};
+use crate::daemon_ipc::{NeedsAttachReason, Request, Response, SentReceipt, ERROR_NEEDS_ATTACH};
 use crate::identity::{default_occupant, resolve_session_id};
 use crate::model::Attention;
 use crate::output::emit;
@@ -28,7 +28,14 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
                 emit_receipt(ctx, &receipt);
                 return Ok(0);
             }
-            Response::Error { code, message, .. } if code == ERROR_NEEDS_ATTACH => {
+            Response::Error {
+                code,
+                message,
+                needs_attach_reason,
+            } if code == ERROR_NEEDS_ATTACH => {
+                if needs_attach_reason == Some(NeedsAttachReason::DeliberatelyDetached) {
+                    return Err(anyhow!("{code}: {message}"));
+                }
                 if retried_after_attach {
                     return Err(anyhow!("{code}: {message}"));
                 }

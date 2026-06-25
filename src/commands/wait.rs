@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use std::time::Duration;
 
 use crate::cli::{Ctx, WaitArgs};
-use crate::daemon_ipc::{Request, Response, ERROR_NEEDS_ATTACH};
+use crate::daemon_ipc::{NeedsAttachReason, Request, Response, ERROR_NEEDS_ATTACH};
 use crate::identity::{default_occupant, resolve_session_id};
 use crate::model::now_ms;
 
@@ -177,7 +177,14 @@ async fn wait_loop<C: WaitConnector>(
                     &mut retried_after_attach,
                 );
             }
-            Response::Error { code, message, .. } if code == ERROR_NEEDS_ATTACH => {
+            Response::Error {
+                code,
+                message,
+                needs_attach_reason,
+            } if code == ERROR_NEEDS_ATTACH => {
+                if needs_attach_reason == Some(NeedsAttachReason::DeliberatelyDetached) {
+                    return Err(anyhow!("{code}: {message}"));
+                }
                 if !allow_reattach || retried_after_attach {
                     return Err(anyhow!("{code}: {message}"));
                 }
@@ -560,6 +567,20 @@ mod tests {
             WaitTerminal::Response(Response::Message { id: 7, .. })
         ));
         assert_eq!(connector.request_ops(), vec!["wait", "register", "wait"]);
+    }
+
+    #[tokio::test]
+    async fn deliberate_detach_needs_attach_is_terminal() {
+        let mut connector = ScriptConnector::new().client(vec![ScriptAction::Response(
+            crate::daemon_ipc::needs_attach_with_reason(
+                "deliberately detached",
+                NeedsAttachReason::DeliberatelyDetached,
+            ),
+        )]);
+
+        let err = wait_loop(&mut connector, &cfg()).await.unwrap_err();
+        assert!(err.to_string().contains(ERROR_NEEDS_ATTACH));
+        assert_eq!(connector.request_ops(), vec!["wait"]);
     }
 
     #[tokio::test]

@@ -1752,12 +1752,18 @@ async fn register_member(
         );
     }
     if let Err(e) = backend.clear_detach_tombstone(&session_id, &address).await {
+        let _ = backend
+            .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+            .await;
         state.push_recent_error(
             "DetachTombstone",
             format!(
                 "failed to clear detach tombstone store={store_key} session={session_id} address={address}: {e:#}"
             ),
         );
+        return proto::internal(format!(
+            "registering {address}: failed to clear durable detach tombstone for session {session_id}: {e:#}"
+        ));
     }
 
     let record = MemberRecord {
@@ -1902,6 +1908,24 @@ async fn detach_member(
             lease_epoch: Some(member.lease_epoch),
         }
     } else {
+        let backend = match state.backend_for(&store_key).await {
+            Ok(backend) => backend,
+            Err(response) => return response,
+        };
+        if let Err(e) = backend
+            .record_detach_tombstone(&session_id, &address, "Detach")
+            .await
+        {
+            return proto::internal(format!(
+                "recording durable detach tombstone for {session_id}/{address}: {e:#}"
+            ));
+        }
+        state.push_recent_error(
+            "Detach",
+            format!(
+                "Detach recorded terminal tombstone store={store_key} session={session_id} address={address}: no active in-memory member"
+            ),
+        );
         Response::Ack {
             message: Some("not-attached".to_string()),
             delivery_outcome: None,
@@ -1949,6 +1973,27 @@ async fn wait_for_message_with_idle_ttl(
         .get_member(&store_key, &session_id, &address)
         .is_none()
     {
+        let backend = match state.backend_for(&store_key).await {
+            Ok(backend) => backend,
+            Err(response) => return response,
+        };
+        match backend.detach_tombstone(&session_id, &address).await {
+            Ok(Some(tombstone)) => {
+                return proto::needs_attach_with_reason(
+                    format!(
+                        "session {session_id} deliberately detached from {address} in {store_key} by {} at {}; explicit attach required",
+                        tombstone.reason, tombstone.at_ms
+                    ),
+                    NeedsAttachReason::DeliberatelyDetached,
+                )
+            }
+            Ok(None) => {}
+            Err(e) => {
+                return proto::internal(format!(
+                    "checking detach tombstone for wait {session_id}/{address}: {e:#}"
+                ))
+            }
+        }
         if let Some(ended) = state.session_definite_end(&store_key, &session_id) {
             state.push_recent_error(
                 "PresenceEnded",
@@ -1963,9 +2008,10 @@ async fn wait_for_message_with_idle_ttl(
             "NeedsAttach",
             format!("Wait NeedsAttach store={store_key} session={session_id} address={address}"),
         );
-        return proto::needs_attach(format!(
-            "session {session_id} is not attached to {address} in {store_key}"
-        ));
+        return proto::needs_attach_with_reason(
+            format!("session {session_id} is not attached to {address} in {store_key}"),
+            NeedsAttachReason::RestartLost,
+        );
     }
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
@@ -1987,9 +2033,29 @@ async fn wait_for_message_with_idle_ttl(
                 {
                     return Response::PresenceEnded;
                 }
-                return proto::needs_attach(format!(
-                    "session {session_id} is no longer attached to {address} in {store_key}"
-                ));
+                match backend.detach_tombstone(&session_id, &address).await {
+                    Ok(Some(tombstone)) => {
+                        return proto::needs_attach_with_reason(
+                            format!(
+                                "session {session_id} deliberately detached from {address} in {store_key} by {} at {}; explicit attach required",
+                                tombstone.reason, tombstone.at_ms
+                            ),
+                            NeedsAttachReason::DeliberatelyDetached,
+                        )
+                    }
+                    Ok(None) => {}
+                    Err(e) => {
+                        return proto::internal(format!(
+                            "checking detach tombstone for wait {session_id}/{address}: {e:#}"
+                        ))
+                    }
+                }
+                return proto::needs_attach_with_reason(
+                    format!(
+                        "session {session_id} is no longer attached to {address} in {store_key}"
+                    ),
+                    NeedsAttachReason::RestartLost,
+                );
             }
         };
         if current.idle {
@@ -2009,9 +2075,12 @@ async fn wait_for_message_with_idle_ttl(
             let current = match state.get_member(&store_key, &session_id, &address) {
                 Some(member) => member,
                 None => {
-                    return proto::needs_attach(format!(
-                        "session {session_id} is no longer attached to {address} in {store_key}"
-                    ));
+                    return proto::needs_attach_with_reason(
+                        format!(
+                            "session {session_id} is no longer attached to {address} in {store_key}"
+                        ),
+                        NeedsAttachReason::RestartLost,
+                    );
                 }
             };
             if current.idle {
@@ -2663,7 +2732,14 @@ mod p3_tests {
         assert!(state.status().await.members.is_empty());
 
         let wait_after_detach = request(state.clone(), wait_req(&store, "s1", "addr:a", 1)).await;
-        assert!(matches!(wait_after_detach, Response::PresenceEnded));
+        assert!(matches!(
+            wait_after_detach,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
+        ));
 
         let ack_after_detach = request(
             state.clone(),
@@ -2785,6 +2861,49 @@ mod p3_tests {
                 delivery_outcome: Some(DeliveryOutcome::Marked),
                 ..
             }
+        ));
+    }
+
+    #[tokio::test]
+    async fn detach_after_restart_records_tombstone_and_wait_does_not_resurrect() {
+        let store = store_key("detach-after-restart");
+        {
+            let state = test_state("detach-after-restart-one");
+            registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+            let backend = state.backend_for(&store).await.unwrap();
+            insert_test_message(&backend, "addr:a", None).await;
+        }
+
+        let restarted = test_state("detach-after-restart-two");
+        let detach = request(
+            restarted.clone(),
+            Request::Detach {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+            },
+        )
+        .await;
+        assert!(matches!(detach, Response::Ack { .. }));
+
+        let wait = request(restarted.clone(), wait_req(&store, "s1", "addr:a", 1)).await;
+        assert!(matches!(
+            wait,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
+        ));
+
+        let ack = request(restarted, ack_req(&store, "s1", "addr:a", 1)).await;
+        assert!(matches!(
+            ack,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
         ));
     }
 
