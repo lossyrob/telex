@@ -29,6 +29,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         scope: args.scope.clone(),
         tags: args.tags.clone(),
         watch_pids,
+        recovery: false,
     };
     let response = crate::daemon::request_connect_or_spawn(&store_key, &register).await?;
 

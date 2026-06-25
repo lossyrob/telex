@@ -88,6 +88,7 @@ async fn register_for_retry(store_key: &str, session_id: &str, address: &str) ->
             scope: None,
             tags: None,
             watch_pids: Vec::new(),
+            recovery: true,
         })
         .await?;
     match response {

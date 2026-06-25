@@ -688,6 +688,13 @@ impl DaemonState {
         );
     }
 
+    fn clear_definite_session_end(&self, store_key: &str, session_id: &str) {
+        self.ended_sessions
+            .lock()
+            .unwrap()
+            .remove(&Self::session_key(store_key, session_id));
+    }
+
     fn rearm_idle_member_if_allowed(
         &self,
         store_key: &str,
@@ -1581,6 +1588,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             scope,
             tags,
             watch_pids,
+            recovery,
         } => {
             register_member(
                 state.clone(),
@@ -1592,6 +1600,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 scope,
                 tags,
                 watch_pids,
+                recovery,
             )
             .await
         }
@@ -1691,6 +1700,7 @@ async fn register_member(
     scope: Option<String>,
     tags: Option<String>,
     watch_pids: Vec<WatchPidSpec>,
+    recovery: bool,
 ) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
@@ -1759,6 +1769,25 @@ async fn register_member(
         Ok(backend) => backend,
         Err(response) => return response,
     };
+    if recovery {
+        match backend.detach_tombstone(&session_id, &address).await {
+            Ok(Some(tombstone)) => {
+                return proto::needs_attach_with_reason(
+                    format!(
+                        "session {session_id} deliberately detached from {address} in {store_key} by {} at {}; explicit attach required",
+                        tombstone.reason, tombstone.at_ms
+                    ),
+                    NeedsAttachReason::DeliberatelyDetached,
+                )
+            }
+            Ok(None) => {}
+            Err(e) => {
+                return proto::internal(format!(
+                    "checking detach tombstone before recovery register {session_id}/{address}: {e:#}"
+                ))
+            }
+        }
+    }
     if let Err(e) = backend
         .ensure_address(
             &address,
@@ -1814,7 +1843,6 @@ async fn register_member(
             "registering {address}: failed to clear durable detach tombstone for session {session_id}: {e:#}"
         ));
     }
-
     let record = MemberRecord {
         address: address.clone(),
         store_key: store_key.clone(),
@@ -1833,6 +1861,9 @@ async fn register_member(
         idle_rearmable: false,
     };
     state.check_session_id_reuse_tripwire(&record);
+    if !recovery {
+        state.clear_definite_session_end(&store_key, &session_id);
+    }
     state.insert_member(record);
     Response::Registered {
         lease_epoch: claimed.lease_epoch,
@@ -2655,6 +2686,7 @@ mod p3_tests {
             scope: Some("scope:test".to_string()),
             tags: Some("p3".to_string()),
             watch_pids: vec![WatchPidSpec::anchor(42)],
+            recovery: false,
         }
     }
 
@@ -2932,6 +2964,78 @@ mod p3_tests {
             Response::Error {
                 ref code,
                 needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
+        ));
+    }
+
+    #[tokio::test]
+    async fn recovery_register_refuses_tombstone_created_after_restart_lost() {
+        let state = test_state("recovery-register-tombstone");
+        let store = store_key("recovery-register-tombstone");
+        {
+            let first = test_state("recovery-register-tombstone-first");
+            registered_epoch(first.clone(), &store, "s1", "addr:a").await;
+            let backend = first.backend_for(&store).await.unwrap();
+            insert_test_message(&backend, "addr:a", None).await;
+        }
+
+        let backend = state.backend_for(&store).await.unwrap();
+        assert!(matches!(
+            needs_attach_for_missing_member(&state, &backend, &store, "s1", "addr:a", "test").await,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::RestartLost),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
+        ));
+        backend
+            .record_detach_tombstone("s1", "addr:a", "Detach")
+            .await
+            .unwrap();
+        let mut recovery = register_req(&store, "s1", "addr:a");
+        if let Request::Register { recovery, .. } = &mut recovery {
+            *recovery = true;
+        }
+        let response = request(state.clone(), recovery).await;
+        assert!(matches!(
+            response,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
+        ));
+        assert!(state.status().await.members.is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_register_clears_in_memory_definite_end() {
+        let state = test_state("clear-definite-end");
+        let store = store_key("clear-definite-end");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        assert!(matches!(
+            request(
+                state.clone(),
+                Request::Detach {
+                    store_key: store.clone(),
+                    session_id: "s1".to_string(),
+                    address: "addr:a".to_string(),
+                },
+            )
+            .await,
+            Response::Ack { .. }
+        ));
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        state.remove_member(&store, "s1", "addr:a");
+        let backend = state.backend_for(&store).await.unwrap();
+        let response =
+            needs_attach_for_missing_member(&state, &backend, &store, "s1", "addr:a", "test").await;
+        assert!(matches!(
+            response,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::RestartLost),
                 ..
             } if code == proto::ERROR_NEEDS_ATTACH
         ));
@@ -4156,6 +4260,7 @@ pub mod test_support {
             scope: Some("scope:test".to_string()),
             tags: Some("section17".to_string()),
             watch_pids,
+            recovery: false,
         }
     }
 

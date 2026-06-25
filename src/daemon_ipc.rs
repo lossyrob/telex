@@ -159,6 +159,8 @@ pub enum Request {
         tags: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         watch_pids: Vec<WatchPidSpec>,
+        #[serde(default)]
+        recovery: bool,
     },
     Detach {
         store_key: String,
