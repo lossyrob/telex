@@ -1361,16 +1361,65 @@ async fn prove_current_owner(
                 member,
                 format!("{context}: epoch heartbeat returned 0 rows"),
             );
-            Err(proto::needs_attach(format!(
-                "session {} lost ownership of {} in {}; re-attach required",
-                member.session_id, member.address, member.store_key
-            )))
+            Err(needs_attach_for_missing_member(
+                state,
+                backend,
+                &member.store_key,
+                &member.session_id,
+                &member.address,
+                context,
+            )
+            .await)
         }
         Err(e) => Err(proto::internal(format!(
             "{context}: heartbeating {} at epoch {}: {e:#}",
             member.address, member.lease_epoch
         ))),
     }
+}
+
+async fn needs_attach_for_missing_member(
+    state: &DaemonState,
+    backend: &Arc<dyn Backend>,
+    store_key: &str,
+    session_id: &str,
+    address: &str,
+    operation: &str,
+) -> Response {
+    match backend.detach_tombstone(session_id, address).await {
+        Ok(Some(tombstone)) => {
+            return proto::needs_attach_with_reason(
+                format!(
+                    "session {session_id} deliberately detached from {address} in {store_key} by {} at {}; explicit attach required",
+                    tombstone.reason, tombstone.at_ms
+                ),
+                NeedsAttachReason::DeliberatelyDetached,
+            )
+        }
+        Ok(None) => {}
+        Err(e) => {
+            return proto::internal(format!(
+                "checking detach tombstone for {operation} {session_id}/{address}: {e:#}"
+            ))
+        }
+    }
+    if let Some(ended) = state.session_definite_end(store_key, session_id) {
+        return proto::needs_attach_with_reason(
+            format!(
+                "session {session_id} was definitely ended by {} at {}; deliberate re-attach required for {address} in {store_key}",
+                ended.reason, ended.at_ms
+            ),
+            NeedsAttachReason::DeliberatelyDetached,
+        );
+    }
+    state.push_recent_error(
+        "NeedsAttach",
+        format!("NeedsAttach operation={operation} store={store_key} session={session_id} address={address}"),
+    );
+    proto::needs_attach_with_reason(
+        format!("session {session_id} is not attached to {address} in {store_key}"),
+        NeedsAttachReason::RestartLost,
+    )
 }
 
 async fn drain_members(state: Arc<DaemonState>) -> std::result::Result<(), Response> {
@@ -1977,41 +2026,15 @@ async fn wait_for_message_with_idle_ttl(
             Ok(backend) => backend,
             Err(response) => return response,
         };
-        match backend.detach_tombstone(&session_id, &address).await {
-            Ok(Some(tombstone)) => {
-                return proto::needs_attach_with_reason(
-                    format!(
-                        "session {session_id} deliberately detached from {address} in {store_key} by {} at {}; explicit attach required",
-                        tombstone.reason, tombstone.at_ms
-                    ),
-                    NeedsAttachReason::DeliberatelyDetached,
-                )
-            }
-            Ok(None) => {}
-            Err(e) => {
-                return proto::internal(format!(
-                    "checking detach tombstone for wait {session_id}/{address}: {e:#}"
-                ))
-            }
-        }
-        if let Some(ended) = state.session_definite_end(&store_key, &session_id) {
-            state.push_recent_error(
-                "PresenceEnded",
-                format!(
-                    "Wait terminal store={store_key} session={session_id} address={address}: definite_end reason={} at_ms={}",
-                    ended.reason, ended.at_ms
-                ),
-            );
-            return Response::PresenceEnded;
-        }
-        state.push_recent_error(
-            "NeedsAttach",
-            format!("Wait NeedsAttach store={store_key} session={session_id} address={address}"),
-        );
-        return proto::needs_attach_with_reason(
-            format!("session {session_id} is not attached to {address} in {store_key}"),
-            NeedsAttachReason::RestartLost,
-        );
+        return needs_attach_for_missing_member(
+            &state,
+            &backend,
+            &store_key,
+            &session_id,
+            &address,
+            "wait",
+        )
+        .await;
     }
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
@@ -2033,29 +2056,15 @@ async fn wait_for_message_with_idle_ttl(
                 {
                     return Response::PresenceEnded;
                 }
-                match backend.detach_tombstone(&session_id, &address).await {
-                    Ok(Some(tombstone)) => {
-                        return proto::needs_attach_with_reason(
-                            format!(
-                                "session {session_id} deliberately detached from {address} in {store_key} by {} at {}; explicit attach required",
-                                tombstone.reason, tombstone.at_ms
-                            ),
-                            NeedsAttachReason::DeliberatelyDetached,
-                        )
-                    }
-                    Ok(None) => {}
-                    Err(e) => {
-                        return proto::internal(format!(
-                            "checking detach tombstone for wait {session_id}/{address}: {e:#}"
-                        ))
-                    }
-                }
-                return proto::needs_attach_with_reason(
-                    format!(
-                        "session {session_id} is no longer attached to {address} in {store_key}"
-                    ),
-                    NeedsAttachReason::RestartLost,
-                );
+                return needs_attach_for_missing_member(
+                    &state,
+                    &backend,
+                    &store_key,
+                    &session_id,
+                    &address,
+                    "wait",
+                )
+                .await;
             }
         };
         if current.idle {
@@ -2075,12 +2084,15 @@ async fn wait_for_message_with_idle_ttl(
             let current = match state.get_member(&store_key, &session_id, &address) {
                 Some(member) => member,
                 None => {
-                    return proto::needs_attach_with_reason(
-                        format!(
-                            "session {session_id} is no longer attached to {address} in {store_key}"
-                        ),
-                        NeedsAttachReason::RestartLost,
-                    );
+                    return needs_attach_for_missing_member(
+                        &state,
+                        &backend,
+                        &store_key,
+                        &session_id,
+                        &address,
+                        "wait-delivery",
+                    )
+                    .await;
                 }
             };
             if current.idle {
@@ -2294,10 +2306,6 @@ async fn send_message(
     body: String,
     metadata: Option<String>,
 ) -> Response {
-    let from = match resolve_sender(&state, &store_key, &session_id, from_addr.as_deref()) {
-        Ok(from) => from,
-        Err(response) => return response,
-    };
     let attention = match Attention::parse(&attention) {
         Ok(attention) => attention,
         Err(e) => return proto::incompatible(e.to_string()),
@@ -2309,6 +2317,18 @@ async fn send_message(
     }
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
+        Err(response) => return response,
+    };
+    let from = match resolve_sender(
+        &state,
+        &backend,
+        &store_key,
+        &session_id,
+        from_addr.as_deref(),
+    )
+    .await
+    {
+        Ok(from) => from,
         Err(response) => return response,
     };
     match backend.get_address(&to_addr).await {
@@ -2377,10 +2397,6 @@ async fn reply_message(
     subject: Option<String>,
     body: String,
 ) -> Response {
-    let from = match resolve_sender(&state, &store_key, &session_id, from_addr.as_deref()) {
-        Ok(from) => from,
-        Err(response) => return response,
-    };
     let attention = match Attention::parse(&attention) {
         Ok(attention) => attention,
         Err(e) => return proto::incompatible(e.to_string()),
@@ -2390,6 +2406,18 @@ async fn reply_message(
     }
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
+        Err(response) => return response,
+    };
+    let from = match resolve_sender(
+        &state,
+        &backend,
+        &store_key,
+        &session_id,
+        from_addr.as_deref(),
+    )
+    .await
+    {
+        Ok(from) => from,
         Err(response) => return response,
     };
     let parent = match backend.get_message(message_id).await {
@@ -2453,29 +2481,30 @@ async fn reply_message(
     }
 }
 
-fn resolve_sender(
+async fn resolve_sender(
     state: &DaemonState,
+    backend: &Arc<dyn Backend>,
     store_key: &str,
     session_id: &str,
     from_addr: Option<&str>,
 ) -> std::result::Result<String, Response> {
     let from_addr = from_addr.filter(|addr| !addr.trim().is_empty());
     if let Some(addr) = from_addr {
-        return state
+        if let Some(member) = state
             .get_member(store_key, session_id, addr)
             .filter(|m| !m.idle)
-            .map(|m| m.address)
-            .ok_or_else(|| {
-                state.push_recent_error(
-                    "NeedsAttach",
-                    format!(
-                        "Send/Reply NeedsAttach store={store_key} session={session_id} explicit_from={addr}"
-                    ),
-                );
-                proto::needs_attach(format!(
-                    "session {session_id} is not attached to explicit from address {addr} in {store_key}"
-                ))
-            });
+        {
+            return Ok(member.address);
+        }
+        return Err(needs_attach_for_missing_member(
+            state,
+            backend,
+            store_key,
+            session_id,
+            addr,
+            "send-reply-explicit-from",
+        )
+        .await);
     }
     let members = state.session_members(store_key, session_id);
     match members.as_slice() {
@@ -2484,9 +2513,10 @@ fn resolve_sender(
                 "NeedsAttach",
                 format!("Send/Reply NeedsAttach store={store_key} session={session_id}"),
             );
-            Err(proto::needs_attach(format!(
-                "session {session_id} has no attached address in {store_key}"
-            )))
+            Err(proto::needs_attach_with_reason(
+                format!("session {session_id} has no attached address in {store_key}"),
+                NeedsAttachReason::RestartLost,
+            ))
         }
         [one] => Ok(one.address.clone()),
         many => Err(proto::ambiguous(format!(
@@ -2989,6 +3019,62 @@ mod p3_tests {
         assert!(matches!(
             ambiguous,
             Response::Error { ref code, .. } if code == proto::ERROR_AMBIGUOUS
+        ));
+    }
+
+    #[tokio::test]
+    async fn send_reply_explicit_from_respects_durable_detach_tombstone() {
+        let state = test_state("send-reply-tombstone");
+        let store = store_key("send-reply-tombstone");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let parent_id = insert_test_message(&backend, "addr:a", None).await;
+
+        assert!(matches!(
+            request(
+                state.clone(),
+                Request::Detach {
+                    store_key: store.clone(),
+                    session_id: "s1".to_string(),
+                    address: "addr:a".to_string(),
+                },
+            )
+            .await,
+            Response::Ack { .. }
+        ));
+
+        let send = request(state.clone(), send_req(&store, "s1", Some("addr:a"))).await;
+        assert!(matches!(
+            send,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
+        ));
+
+        let reply = request(
+            state,
+            Request::Reply {
+                store_key: store,
+                session_id: "s1".to_string(),
+                from_addr: Some("addr:a".to_string()),
+                message_id: parent_id,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: "reply".to_string(),
+            },
+        )
+        .await;
+        assert!(matches!(
+            reply,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
         ));
     }
 
