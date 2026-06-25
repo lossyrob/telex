@@ -91,7 +91,11 @@ compatibility and is intentionally not "aligned" with the Windows local-app-data
 
 ### 2.2 Auto-spawn (connect-or-spawn) and the spawn-lock
 
-A client performs **connect-or-spawn**:
+`attach` performs **connect-or-spawn**. Other one-shot verbs (`wait`, `send`, `reply`, `ack`,
+`detach`, `station stop`) connect to an existing daemon and fail clearly if it is not running; the
+agent then re-runs `attach`, which is the only normal respawn/recovery verb. This prevents a
+detached waiter launched with the wrong environment/profile from silently creating a parallel
+singleton. The attach path is:
 
 0. **Authenticate the server first.** On the connected endpoint handle, verify the server's
    process identity (client-side server-auth, [§7.2](#72-os-level-trust-boundary-mr5):
@@ -203,26 +207,17 @@ the stdout flush as pure transport: the file artifacts are likewise transport-on
 
 ### 3.3 `wait` reconnect-on-EOF grace
 
-A daemon **restart or handoff is not a turn failure.** When `wait` is blocked and the
-connection drops (EOF / broken pipe), `wait` MUST, within a short **reconnect grace
-window**, (a) connect-or-spawn the (possibly new) daemon, (b) re-issue its `Wait`; if the
-exchange has no in-memory membership for the session/address (a restart cleared it), the
-`Wait` returns **`NeedsAttach`** and `wait` **explicitly re-attaches** (`Register`) the
-address it was waiting on from inherited env (see
-[§14.4](#144-wait-and-re-attach-on-needsattach)), then (c) resumes blocking — returning
-exit `3` only if the grace window expires without a healthy reconnect. Any message that
-arrived while the daemon was down was durably buffered and is delivered at-least-once once
-the session re-attaches and waits. This makes ordered handoff and crash-respawn invisible
-to the agent's turn loop. **Scope of transparency (action-triggered, not universal):** this
-covers a session that is *taking a telex action* across the restart — a blocked `wait`, or a
-`send`/`reply`/`ack` that re-attaches on `NeedsAttach` (for `ack`, **only** to recover
-restart/respawn-lost membership — **never** after a deliberate `Detach`, which is terminal,
-[§6.2](#62-request--response-frames)/[§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving))
-([§14.6](#146-from-resolution-and-re-attach)). A fully **idle** session (no wait, no send)
-between a restart and its next action simply has **no in-memory membership** until it next
-acts (and re-attaches); that is acceptable (it is not actively transacting) and is the
-precise qualification of the "occupied while handling"
-claim in DESIGN.md.
+A daemon **restart or handoff is not a turn failure when a replacement daemon already exists**.
+When `wait` is blocked and the connection drops (EOF / broken pipe), `wait` MUST, within a short
+**reconnect grace window**, (a) connect to an **existing** daemon (it does not spawn), (b) re-issue
+its `Wait`; if the exchange has no in-memory membership for the session/address (a restart cleared
+it), the `Wait` returns **`NeedsAttach`** and `wait` **explicitly re-attaches** (`Register`) the
+address it was waiting on from inherited env (see [§14.4](#144-wait-and-re-attach-on-needsattach)),
+then (c) resumes blocking. If no daemon is running, `wait` returns exit `3`; the agent runs
+`attach` (the spawning verb) and then re-arms `wait`. Any message that arrived while the daemon was
+down was durably buffered and is delivered at-least-once once the session re-attaches and waits.
+This keeps detached waiters from creating a daemon in the wrong environment/profile while preserving
+transparent handoff when another action has already spawned the replacement daemon.
 
 ### 3.4 Per-store isolation and schema-version (sf5)
 

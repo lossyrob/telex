@@ -1334,3 +1334,24 @@ tests now prove it does not consume a later message either, but `station stop` i
 operator flow because it waits for the live waiter to exit and reports any leftover waiter. This is a
 minor IPC bump (`1.1`) with a required `station_lifecycle_p8` capability, so new clients fail closed
 against older daemons instead of sending unknown teardown requests.
+
+## 0028 — Only `attach` auto-spawns the local daemon
+
+- **Date:** 2026-06-25
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Detached-wait dogfood showed that allowing `wait` to auto-spawn is too permissive: if a
+waiter is launched from the wrong environment/profile (or from an old hardcoded binary path), it can
+create a parallel daemon and station instead of failing loudly. The intended recovery loop already has
+a clear spawning verb: `attach`.
+
+**Decision.** Restrict normal auto-spawn to `attach` / `request_connect_or_spawn`. Other verbs connect
+to an existing daemon only. `wait` may reconnect/re-register during its grace window if a replacement
+daemon already exists, but if no daemon is running it exits 3; the agent must run `telex attach` and
+then re-arm. `send`/`reply`/`ack`/`detach`/`station stop` likewise do not create a daemon as a side
+effect.
+
+**Consequences.** A missing daemon is now an explicit station-recovery event instead of a hidden
+side-effect. This slightly reduces transparent restart recovery for non-attach verbs, but prevents the
+worse failure mode where a detached waiter silently creates or talks to the wrong singleton/profile.
+Real-process tests assert that `wait` and `send` without a daemon do not spawn one.

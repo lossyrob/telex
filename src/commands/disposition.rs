@@ -105,7 +105,7 @@ impl AckConnector for RealAckConnector {
         &mut self,
         store_key: &str,
     ) -> crate::daemon::Result<Box<dyn AckClient>> {
-        crate::daemon::connect_or_spawn(store_key)
+        crate::daemon::connect_existing(store_key)
             .await
             .map(|client| Box::new(client) as Box<dyn AckClient>)
     }

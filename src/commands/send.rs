@@ -60,7 +60,7 @@ async fn send_once(
     args: &SendArgs,
     body: String,
 ) -> Result<Response> {
-    let mut client = crate::daemon::connect_or_spawn(store_key).await?;
+    let mut client = crate::daemon::connect_existing(store_key).await?;
     Ok(client
         .request(&Request::Send {
             store_key: store_key.to_string(),
@@ -79,7 +79,7 @@ async fn send_once(
 }
 
 async fn register_for_retry(store_key: &str, session_id: &str, address: &str) -> Result<()> {
-    let mut client = crate::daemon::connect_or_spawn(store_key).await?;
+    let mut client = crate::daemon::connect_existing(store_key).await?;
     let response = client
         .request(&Request::Register {
             store_key: store_key.to_string(),

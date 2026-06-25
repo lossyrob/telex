@@ -1266,10 +1266,7 @@ fn spawn_daemon_process(exe: &Path) -> Result<()> {
         )
     };
     if ok == 0 {
-        return Err(io_err(
-            "spawning daemon",
-            std::io::Error::last_os_error(),
-        ));
+        return Err(io_err("spawning daemon", std::io::Error::last_os_error()));
     }
     unsafe {
         CloseHandle(process_info.hThread);

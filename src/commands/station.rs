@@ -17,7 +17,7 @@ async fn stop(ctx: &Ctx, args: StationStopArgs) -> Result<i32> {
     let store_key = ctx.store_key()?;
     let session_id = resolve_session_id(args.session.as_deref())?;
 
-    let mut client = crate::daemon::connect_or_spawn(&store_key).await?;
+    let mut client = crate::daemon::connect_existing(&store_key).await?;
     let response = client
         .request(&Request::StationStop {
             store_key: store_key.clone(),

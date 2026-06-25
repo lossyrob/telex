@@ -817,6 +817,81 @@ fn real_process_attach_with_redirected_output_returns_after_daemon_spawn() {
 }
 
 #[test]
+fn real_process_wait_without_daemon_does_not_spawn() {
+    let env = ProcessEnv::new("real-wait-no-spawn");
+    let session = "real-wait-no-spawn-session";
+    let address = "addr:real-wait-no-spawn";
+    let out_dir = env.root.join("wait-no-spawn");
+
+    let wait = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "wait",
+            "--session",
+            session,
+            "--timeout-ms",
+            "250",
+            "--out-dir",
+            out_dir.to_str().expect("out dir is utf8"),
+        ],
+        Duration::from_secs(5),
+    );
+    assert_eq!(
+        wait.code,
+        Some(3),
+        "wait should report daemon-gone rather than spawning a daemon: stdout={} stderr={}",
+        wait.stdout,
+        wait.stderr
+    );
+    assert!(
+        wait.stderr.contains("daemon-gone"),
+        "stderr should tell the agent to re-attach/recover: {}",
+        wait.stderr
+    );
+    assert!(
+        env.wait_until_not_running(Duration::from_millis(500)),
+        "wait without a daemon must not auto-spawn one"
+    );
+}
+
+#[test]
+fn real_process_send_without_daemon_does_not_spawn() {
+    let env = ProcessEnv::new("real-send-no-spawn");
+    let sender = "real-send-no-spawn-session";
+    let sender_addr = "addr:real-send-no-spawn-sender";
+    let receiver_addr = "addr:real-send-no-spawn-receiver";
+
+    let sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            receiver_addr,
+            "--subject",
+            "no daemon",
+            "--body",
+            "should not spawn",
+        ],
+        Duration::from_secs(5),
+    );
+    sent.assert_failure("send without daemon");
+    assert!(
+        env.wait_until_not_running(Duration::from_millis(500)),
+        "send without a daemon must not auto-spawn one"
+    );
+}
+
+#[test]
 fn real_process_wait_out_dir_delivers_message_artifact() {
     let env = ProcessEnv::new("real-out-dir-msg");
     let receiver = "real-out-dir-msg-receiver";
@@ -1229,6 +1304,29 @@ fn real_process_crash_recovery_wait_needsattach_no_loss() {
     terminate_pid(old_pid);
     std::thread::sleep(Duration::from_millis(120));
 
+    let no_spawn_wait = env.run_with_session(
+        receiver,
+        [
+            "--json",
+            "--address",
+            receiver_addr,
+            "wait",
+            "--session",
+            receiver,
+            "--timeout-ms",
+            "250",
+        ],
+        Duration::from_secs(3),
+    );
+    assert_eq!(
+        no_spawn_wait.code,
+        Some(3),
+        "wait should not respawn after crash; attach owns daemon recovery: stdout={} stderr={}",
+        no_spawn_wait.stdout,
+        no_spawn_wait.stderr
+    );
+
+    env.attach(receiver, receiver_addr);
     let delivered = wait_for_message(&env, receiver, receiver_addr, body);
     let id = message_id(&delivered);
     let ack = env.run_with_session(

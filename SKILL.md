@@ -59,15 +59,16 @@ It fails closed rather than guessing.
    The detached completion notification is the wake signal; after it arrives, read
    `exit.code` (then `message.json` if it is `0`), re-arm a fresh detached `wait`,
    then act. Do not hide `wait` inside an infinite shell loop.
-   `wait` reconnects across daemon restarts, re-registers on `NeedsAttach` when it
-   can name `(store_key, session_id, address)`, and returns exit 3 only after its
-   reconnect grace expires.
+   `wait` does **not** spawn the daemon. If the daemon is gone, `wait` exits 3 so
+   the agent can run `telex attach` (the spawning/recovery verb) and then re-arm.
+   If a replacement daemon already exists, `wait` can reconnect/re-register during
+   its bounded reconnect grace.
 
    | Exit | Meaning | What you do |
    |---:|---|---|
    | 0 | delivered | Read `message.json` (or stdout JSON), immediately re-arm a fresh `wait`, then act. |
    | 2 | idle-timeout | Nothing arrived before `--timeout-ms`; re-arm if still attending. |
-   | 3 | daemon gone after reconnect grace | Run `telex attach` and re-arm. |
+   | 3 | daemon gone / not running | Run `telex attach` and re-arm. |
    | 4 | daemon hung / no response after a finite wait's `--timeout-ms + --hang-ms` watchdog | Re-arm or restart the daemon if repeated. |
    | 5 | presence ended | Non-destructive reap; live sessions should `attach`/`wait` again. |
 
@@ -287,7 +288,7 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex wait` | Block on the local exchange; on delivery print one message as JSON and exit. Reconnects/re-registers across daemon restarts. | `--address <addr>`, `--session <id>`, `--timeout-ms N`, `--reconnect-grace-ms N` |
+| `telex wait` | Block on the local exchange; on delivery print one message as JSON and exit. Does not spawn a missing daemon; run `attach` first or after exit 3. | `--address <addr>`, `--session <id>`, `--timeout-ms N`, `--reconnect-grace-ms N` |
 | `telex inbox` | List actionable messages requiring disposition and recent messages for the address. | `--address <addr>`, `--all`, `--limit N` |
 | `telex read` | Read a message. `--thread` shows compact thread context; `--full` shows full history. | `--id <message-id>`, `--thread`, `--full` |
 
