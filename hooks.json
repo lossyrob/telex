@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "hooks": {
+    "sessionEnd": [
+      {
+        "type": "command",
+        "powershell": "telex --json copilot session-end",
+        "bash": "telex --json copilot session-end",
+        "timeoutSec": 10
+      }
+    ],
+    "agentStop": [
+      {
+        "type": "command",
+        "powershell": "telex --json copilot turn-guard",
+        "bash": "telex --json copilot turn-guard",
+        "timeoutSec": 10
+      }
+    ]
+  }
+}

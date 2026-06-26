@@ -9,6 +9,10 @@ zero-config) or Postgres (networked, with or without Microsoft Entra auth).
 One small binary, `telex`. It even carries its own usage instructions: run
 `telex skill` (or `telex skill --raw` for the exact embedded skill file).
 
+The repository also ships a Copilot CLI plugin manifest (`plugin.json` +
+`hooks.json`). The plugin maps Copilot session env into generic telex session
+inputs, handles non-destructive `sessionEnd`, and guards turn-end re-arming.
+
 ## Install
 
 **macOS / Linux:**
@@ -52,6 +56,20 @@ message peers. To hand an agent a specific assignment in one command:
 ```sh
 telex skill --address workstream:proj/node:issue-215
 ```
+
+In Copilot CLI, install/use the telex plugin and attach with:
+
+```sh
+telex --address workstream:proj/node:issue-215 copilot attach --description "<work>"
+```
+
+The adapter maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id and
+`$COPILOT_LOADER_PID` to a loader watch-pid. Generic telex commands intentionally
+do not read Copilot-specific env variables directly.
+
+The plugin shape is validated against GitHub Copilot CLI 1.0.66-1; see
+[`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)
+for the acceptance matrix and live hook smoke evidence.
 
 ## Networked backends
 
