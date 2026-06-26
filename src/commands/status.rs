@@ -1,4 +1,5 @@
 use anyhow::Result;
+use std::collections::BTreeMap;
 
 use crate::cli::Ctx;
 use crate::daemon_ipc::{DaemonStatus, Request, Response, ERROR_UNAUTHORIZED};
@@ -52,6 +53,10 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
+        let also_active_on = daemon_status
+            .as_ref()
+            .map(|status| alternate_backend_activity(status, &store_key, &addr))
+            .unwrap_or_default();
         info["address"] = serde_json::json!(addr);
         info["occupancy"] = serde_json::to_value(&occ)?;
         if !daemon_members.is_empty() {
@@ -66,6 +71,12 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
         info["lease"] = serde_json::to_value(&lease)?;
         info["daemon_members"] = serde_json::to_value(&daemon_members)?;
         info["live_waiters"] = serde_json::to_value(&live_waiters)?;
+        info["also_active_on"] = serde_json::to_value(&also_active_on)?;
+        if daemon_members.is_empty() && !also_active_on.is_empty() {
+            info["backend_warning"] = serde_json::json!(
+                "address has live station activity on another backend/store; current backend may be wrong"
+            );
+        }
     }
 
     emit(ctx.fmt, &info, || {
@@ -87,8 +98,49 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
         if let Some(waiters) = info.get("live_waiters").and_then(|v| v.as_array()) {
             println!("live_waiters {}", waiters.len());
         }
+        if let Some(warning) = info.get("backend_warning").and_then(|v| v.as_str()) {
+            println!("warning  {warning}");
+        }
     });
     Ok(0)
+}
+
+fn alternate_backend_activity(
+    status: &DaemonStatus,
+    selected_store_key: &str,
+    address: &str,
+) -> Vec<serde_json::Value> {
+    let names = store_key_backend_names();
+    status
+        .members
+        .iter()
+        .filter(|member| {
+            member.address == address && !member.idle && member.store_key != selected_store_key
+        })
+        .map(|member| {
+            serde_json::json!({
+                "store_key": member.store_key,
+                "backend": names.get(&member.store_key).cloned(),
+                "session_id": member.session_id,
+                "station_health": member.station_health,
+                "pending_unconsumed_count": member.pending_unconsumed_count,
+                "live_waiters_count": member.live_waiters_count,
+            })
+        })
+        .collect()
+}
+
+fn store_key_backend_names() -> BTreeMap<String, String> {
+    let mut out = BTreeMap::new();
+    if let Ok(cfg) = crate::profiles::load() {
+        for (name, profile) in cfg.backends {
+            out.insert(crate::profiles::store_key(&profile, None), name);
+        }
+    }
+    let implicit = crate::profiles::implicit_sqlite(None);
+    out.entry(crate::profiles::store_key(&implicit, None))
+        .or_insert_with(|| "default".to_string());
+    out
 }
 
 async fn daemon_detail(ctx: &Ctx) -> Result<Option<DaemonStatus>> {

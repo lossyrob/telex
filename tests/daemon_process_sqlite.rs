@@ -1720,6 +1720,50 @@ fn real_process_status_reports_unattended_with_backlog() {
     );
 }
 
+#[test]
+fn real_process_status_hints_when_address_active_on_other_store() {
+    let env = ProcessEnv::new("real-backend-hint");
+    let session = "real-backend-hint-session";
+    let address = "addr:real-backend-hint";
+    env.attach(session, address);
+
+    let wrong_db = env.root.join("wrong-store.sqlite");
+    let status = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--db",
+            wrong_db.to_str().expect("wrong db is utf8"),
+            "--address",
+            address,
+            "status",
+        ],
+        Duration::from_secs(5),
+    );
+    status.assert_success("wrong-store status");
+    let status_json = status.json("wrong-store status");
+    assert_eq!(
+        status_json
+            .get("occupancy")
+            .and_then(|o| o.get("occupied"))
+            .and_then(Value::as_bool),
+        Some(false),
+        "wrong selected store should not report direct occupancy: {status_json}"
+    );
+    assert!(
+        !status_json
+            .get("also_active_on")
+            .and_then(Value::as_array)
+            .unwrap()
+            .is_empty(),
+        "status should hint active station on another store: {status_json}"
+    );
+    assert!(
+        status_json.get("backend_warning").and_then(Value::as_str).is_some(),
+        "status should include backend warning: {status_json}"
+    );
+}
+
 #[cfg(target_os = "linux")]
 fn assert_hostile_prebound_endpoint_rejected_before_hello(env: &ProcessEnv) {
     use std::io::Read;

@@ -1493,3 +1493,21 @@ CC visibility semantics apply.
 
 **Consequences.** Threaded conversations can include observers without losing history. CC recipients of
 replies remain visibility-only under ADR 0033.
+
+## 0036 — Status hints at activity on another store
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** With multiple configured backends, a user can run `status --address <addr>` against the
+wrong selected backend and see an empty/unoccupied projection while the same daemon has live membership
+for that address on another store. Dogfooding showed this is easy to miss when the default backend is
+not the local SQLite store used by active stations.
+
+**Decision.** When `status --address` has no live member for the selected store, inspect the daemon's
+detailed member set for the same address on other store keys. Report `also_active_on` plus a
+`backend_warning` instead of silently presenting the selected backend as the whole truth.
+
+**Consequences.** Wrong-backend calls become self-diagnosing without changing command routing or
+failing if no alternate activity exists. This is best-effort observability; it does not scan arbitrary
+offline backends.
