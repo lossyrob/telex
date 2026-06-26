@@ -2121,7 +2121,7 @@ impl Backend for SqliteBackend {
                 "SELECT {MSG_COLS}, \
                     (SELECT d.state FROM dispositions d WHERE d.message_id=messages.id \
                        AND d.recipient=?1 ORDER BY d.id DESC LIMIT 1) AS latest_disp \
-                 FROM messages WHERE to_addr=?1 ORDER BY id DESC LIMIT ?2"
+                 FROM messages WHERE to_addr=?1 OR cc LIKE '%' || ?1 || '%' ORDER BY id DESC LIMIT ?2"
             );
             let mut stmt = c.prepare(&sql)?;
             let rows = stmt
@@ -2134,13 +2134,27 @@ impl Backend for SqliteBackend {
             let items: Vec<InboxItem> = rows
                 .into_iter()
                 .map(|(message, latest)| {
+                    let delivered_to = a.clone();
+                    let primary_to = message.to_addr.clone();
+                    let cc = cc_recipients(message.cc.as_deref());
+                    let role = delivery_role(&delivered_to, &primary_to, message.cc.as_deref());
+                    let requires_for_recipient = requires_disposition_for_recipient(
+                        message.requires_disposition,
+                        &delivered_to,
+                        &primary_to,
+                    );
                     let terminal = latest
                         .as_deref()
                         .map(Disposition::is_terminal_str)
                         .unwrap_or(false);
-                    let actionable = message.requires_disposition && !terminal;
+                    let actionable = requires_for_recipient && !terminal;
                     InboxItem {
                         message,
+                        delivered_to,
+                        primary_to,
+                        cc_recipients: cc,
+                        delivery_role: role.to_string(),
+                        requires_disposition_for_current_recipient: requires_for_recipient,
                         latest_disposition: latest,
                         actionable,
                     }

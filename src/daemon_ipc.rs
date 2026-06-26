@@ -278,9 +278,15 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         from_addr: Option<String>,
         to_addr: String,
+        delivered_to: String,
+        primary_to: String,
+        #[serde(default)]
+        cc: Vec<String>,
+        delivery_role: String,
         kind: String,
         attention: String,
         requires_disposition: bool,
+        requires_disposition_for_current_recipient: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subject: Option<String>,
         body: String,

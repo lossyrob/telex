@@ -1094,6 +1094,144 @@ fn real_process_wait_min_attention_delivers_interrupt_and_leaves_background() {
 }
 
 #[test]
+fn real_process_delivery_role_metadata_for_primary_and_cc() {
+    let env = ProcessEnv::new("real-delivery-role");
+    let sender = "real-delivery-role-sender";
+    let primary = "real-delivery-role-primary";
+    let cc = "real-delivery-role-cc";
+    let sender_addr = "addr:real-delivery-role-sender";
+    let primary_addr = "addr:real-delivery-role-primary";
+    let cc_addr = "addr:real-delivery-role-cc";
+
+    env.attach(sender, sender_addr);
+    env.attach(primary, primary_addr);
+    env.attach(cc, cc_addr);
+    let sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            primary_addr,
+            "--cc",
+            cc_addr,
+            "--subject",
+            "role metadata",
+            "--body",
+            "role body",
+            "--requires-disposition",
+        ],
+        Duration::from_secs(5),
+    );
+    sent.assert_success("send role metadata");
+    let sent_json = sent.json("send role metadata");
+    let id = message_id(&sent_json);
+
+    let cc_inbox = env.run_with_session(
+        cc,
+        ["--json", "--address", cc_addr, "inbox", "--all"],
+        Duration::from_secs(5),
+    );
+    cc_inbox.assert_success("cc inbox");
+    let cc_inbox_json = cc_inbox.json("cc inbox");
+    let cc_item = cc_inbox_json
+        .get("items")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|item| item.get("id").and_then(Value::as_i64) == Some(id))
+        .expect("cc inbox item");
+    assert_eq!(
+        cc_item.get("delivery_role").and_then(Value::as_str),
+        Some("cc")
+    );
+    assert_eq!(
+        cc_item
+            .get("requires_disposition_for_current_recipient")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+
+    let cc_read = env.run_with_session(
+        cc,
+        [
+            "--json",
+            "--address",
+            cc_addr,
+            "read",
+            "--id",
+            &id.to_string(),
+        ],
+        Duration::from_secs(5),
+    );
+    cc_read.assert_success("cc read");
+    let cc_read_json = cc_read.json("cc read");
+    assert_eq!(
+        cc_read_json
+            .get("delivery")
+            .and_then(|d| d.get("delivery_role"))
+            .and_then(Value::as_str),
+        Some("cc")
+    );
+
+    let cc_wait = wait_for_message(&env, cc, cc_addr, "role body");
+    assert_eq!(cc_wait.get("delivery_role").and_then(Value::as_str), Some("cc"));
+    assert_eq!(
+        cc_wait
+            .get("delivered_to")
+            .and_then(Value::as_str),
+        Some(cc_addr)
+    );
+    assert_eq!(
+        cc_wait
+            .get("primary_to")
+            .and_then(Value::as_str),
+        Some(primary_addr)
+    );
+    assert_eq!(
+        cc_wait
+            .get("requires_disposition_for_current_recipient")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+    let cc_ack = env.run_with_session(
+        cc,
+        [
+            "--json",
+            "--address",
+            cc_addr,
+            "ack",
+            "--session",
+            cc,
+            "--id",
+            &id.to_string(),
+        ],
+        Duration::from_secs(5),
+    );
+    cc_ack.assert_success("cc ack");
+
+    let primary_wait = wait_for_message(&env, primary, primary_addr, "role body");
+    assert_eq!(
+        primary_wait
+            .get("delivery_role")
+            .and_then(Value::as_str),
+        Some("to")
+    );
+    assert_eq!(
+        primary_wait
+            .get("requires_disposition_for_current_recipient")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
 fn real_process_station_stop_drains_waiter_and_preserves_next_message() {
     let env = ProcessEnv::new("real-station-stop");
     let receiver = "real-station-stop-receiver";

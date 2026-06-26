@@ -478,7 +478,7 @@ Responses:
 |---|---|
 | `HelloAck` | protocol/daemon version, `auth_policy_version`, `required_capabilities`, accepted |
 | `Registered` | `lease_epoch`, `owner_instance_id` (the attach succeeded; membership established) |
-| `Message` | `id, thread_id, parent_id, from_addr, to_addr, kind, attention, requires_disposition, subject, body, sent_at_ms, buffered_at_ms, lease_epoch` |
+| `Message` | `id, thread_id, parent_id, from_addr, to_addr, delivered_to, primary_to, cc, delivery_role, kind, attention, requires_disposition, requires_disposition_for_current_recipient, subject, body, sent_at_ms, buffered_at_ms, lease_epoch` |
 | `Keepalive` | `heartbeat_age_ms` |
 | `Timeout` | — (idle-timeout) |
 | `PresenceEnded` | the waiter-completion status the exchange writes when it reaps a blocked `Wait` (sessionEnd hook, loader-pid death, **or the idle-TTL backstop** — [§9](#9-liveness-model)/[§10](#10-reaping-and-the-idle-ttl-backstop)); non-destructive (the station survives and wakes on a new message) |

@@ -1418,3 +1418,24 @@ warning is `unattended_with_backlog`: no live waiter and at least one pending un
 **Consequences.** Operators and orchestrators can detect a stalled station without querying SQLite
 tables directly. The daemon does not auto-deliver or auto-rearm; it surfaces the condition so an agent
 can run `attach`, drain/ack the backlog, and arm a waiter.
+
+## 0032 — Delivery role metadata for primary vs CC recipients
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** In multi-party coordination, `--to` is the primary actor and `--cc` recipients are often
+visibility-only observers. A waiter woken for a CC delivery previously saw `to` as another address and
+`requires_disposition` as a message-level flag, with no cheap way to tell whether the current station
+was the primary recipient or a CC observer.
+
+**Decision.** Add delivery context to wait/read/inbox surfaces: `delivered_to`, `primary_to`, parsed
+`cc`, `delivery_role` (`to` / `cc` / `unknown`), and
+`requires_disposition_for_current_recipient`. Wait's flat `message.json` preserves existing fields and
+adds these context fields; `read --address` exposes a `delivery` object; inbox items include the same
+context inline.
+
+**Consequences.** Agents can branch correctly before ack/disposition: primary recipients can act on
+required dispositions, while CC recipients can observe without mistaking message-level `to`/required
+flags as their own workflow obligation. Later CC auto-seen/disposition-safety changes build on this
+metadata.

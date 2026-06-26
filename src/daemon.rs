@@ -11,7 +11,8 @@ use crate::daemon_ipc::{
     StationHealth, StoreStatus, WatchPidRole, WatchPidSpec, WatchPidStatus,
 };
 use crate::model::{
-    now_ms, Attention, DeliveryOutcome, EpochClaimResult, NewMessage, STATUS_RETIRED,
+    cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient, Attention,
+    DeliveryOutcome, EpochClaimResult, NewMessage, STATUS_RETIRED,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
@@ -2675,15 +2676,24 @@ async fn wait_for_message_with_idle_ttl(
                 return response;
             }
             state.record_waiter_message_exit(&store_key, &session_id, &address, row.id);
+            let cc = cc_recipients(row.cc.as_deref());
+            let delivery_role = delivery_role(&address, &row.to_addr, row.cc.as_deref()).to_string();
+            let requires_disposition_for_current_recipient =
+                requires_disposition_for_recipient(row.requires_disposition, &address, &row.to_addr);
             let response = Response::Message {
                 id: row.id,
                 thread_id: row.thread_id,
                 parent_id: row.parent_id,
                 from_addr: row.from_addr,
-                to_addr: row.to_addr,
+                to_addr: row.to_addr.clone(),
+                delivered_to: address.clone(),
+                primary_to: row.to_addr,
+                cc,
+                delivery_role,
                 kind: row.kind,
                 attention: row.attention,
                 requires_disposition: row.requires_disposition,
+                requires_disposition_for_current_recipient,
                 subject: row.subject,
                 body: row.body,
                 sent_at_ms: row.sent_at_ms,

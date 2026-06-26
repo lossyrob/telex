@@ -135,6 +135,33 @@ pub fn terminal_dispositions_sql_list() -> String {
         .join(",")
 }
 
+pub fn cc_recipients(cc: Option<&str>) -> Vec<String> {
+    cc.unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+pub fn delivery_role(delivered_to: &str, primary_to: &str, cc: Option<&str>) -> &'static str {
+    if delivered_to == primary_to {
+        "to"
+    } else if cc_recipients(cc).iter().any(|addr| addr == delivered_to) {
+        "cc"
+    } else {
+        "unknown"
+    }
+}
+
+pub fn requires_disposition_for_recipient(
+    requires_disposition: bool,
+    delivered_to: &str,
+    primary_to: &str,
+) -> bool {
+    requires_disposition && delivered_to == primary_to
+}
+
 pub const STATUS_ACTIVE: &str = "active";
 pub const STATUS_RETIRED: &str = "retired";
 
@@ -295,6 +322,11 @@ pub struct DispositionRow {
 pub struct InboxItem {
     #[serde(flatten)]
     pub message: MessageRow,
+    pub delivered_to: String,
+    pub primary_to: String,
+    pub cc_recipients: Vec<String>,
+    pub delivery_role: String,
+    pub requires_disposition_for_current_recipient: bool,
     pub latest_disposition: Option<String>,
     pub actionable: bool,
 }
