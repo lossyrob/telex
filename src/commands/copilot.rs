@@ -357,6 +357,12 @@ impl GuardSettings {
             }
             _ => true,
         };
+        if !enabled {
+            return Ok(Self {
+                enabled,
+                max_nudges: DEFAULT_TURN_GUARD_MAX_NUDGES,
+            });
+        }
         let max_nudges = match env_nonempty("TELEX_TURN_GUARD_MAX_NUDGES") {
             Some(value) => value.parse::<u32>().map_err(|_| {
                 format!("invalid TELEX_TURN_GUARD_MAX_NUDGES={value:?}; expected unsigned integer")
@@ -599,6 +605,10 @@ fn cleanup_turn_guard_state_best_effort(session: &str) {
         for entry in store_dirs.flatten() {
             let path = entry.path().join(&file_name);
             let _ = std::fs::remove_file(path);
+            let lock_path = entry
+                .path()
+                .join(format!("{}.lock", path_token(session)));
+            let _ = std::fs::remove_file(lock_path);
         }
     }
 }
@@ -679,6 +689,9 @@ fn print_json(value: &serde_json::Value) {
 mod tests {
     use super::*;
     use crate::daemon_ipc::{ProtocolVersion, StationHealth};
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn member(address: &str, live_waiters_count: usize, pending: i64) -> MemberStatus {
         MemberStatus {
@@ -708,6 +721,13 @@ mod tests {
             lease_epoch: 1,
             owner_instance_id: "owner".to_string(),
             idle: false,
+        }
+    }
+
+    fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
+        match value {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
         }
     }
 
@@ -778,6 +798,20 @@ mod tests {
         );
         assert_eq!(eval.reason_code, "unarmed_attended_station");
         assert_eq!(eval.next_state.unwrap().nudges, 1);
+    }
+
+    #[test]
+    fn turn_guard_opt_out_wins_over_invalid_cap() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_guard = std::env::var_os("TELEX_TURN_GUARD");
+        let prior_cap = std::env::var_os("TELEX_TURN_GUARD_MAX_NUDGES");
+        std::env::set_var("TELEX_TURN_GUARD", "off");
+        std::env::set_var("TELEX_TURN_GUARD_MAX_NUDGES", "not-a-number");
+        let settings = GuardSettings::from_env().expect("opt-out should ignore invalid cap");
+        restore_env("TELEX_TURN_GUARD", prior_guard);
+        restore_env("TELEX_TURN_GUARD_MAX_NUDGES", prior_cap);
+        assert!(!settings.enabled);
+        assert_eq!(settings.max_nudges, DEFAULT_TURN_GUARD_MAX_NUDGES);
     }
 
     #[test]
