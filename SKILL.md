@@ -85,12 +85,14 @@ It fails closed rather than guessing.
 
    ```sh
    telex ack --address <addr> --id <message-id>
-   telex handle --id <message-id> --note "completed"
+   telex handle --address <addr> --id <message-id> --note "completed"
    ```
 
    `ack` is transport consumption for `(message_id, recipient-address)`. Terminal
    workflow disposition is still `handle`, `reject`, or `close`; `defer` and
-   `escalate` are non-terminal.
+   `escalate` are non-terminal. Dispositions default to the current `--address`
+   recipient; pass `--recipient` only when intentionally recording for another
+   recipient.
 
 ### The re-arm pattern (one wait per delivery, not a shell loop)
 

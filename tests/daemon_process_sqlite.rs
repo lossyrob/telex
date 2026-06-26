@@ -1220,6 +1220,110 @@ fn real_process_delivery_role_metadata_for_primary_and_cc() {
 }
 
 #[test]
+fn real_process_disposition_defaults_to_current_recipient_not_primary() {
+    let env = ProcessEnv::new("real-disposition-recipient");
+    let sender = "real-disposition-recipient-sender";
+    let primary = "real-disposition-recipient-primary";
+    let cc = "real-disposition-recipient-cc";
+    let sender_addr = "addr:real-disposition-recipient-sender";
+    let primary_addr = "addr:real-disposition-recipient-primary";
+    let cc_addr = "addr:real-disposition-recipient-cc";
+
+    env.attach(sender, sender_addr);
+    env.attach(primary, primary_addr);
+    env.attach(cc, cc_addr);
+    let sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            primary_addr,
+            "--cc",
+            cc_addr,
+            "--subject",
+            "recipient safety",
+            "--body",
+            "recipient body",
+            "--requires-disposition",
+        ],
+        Duration::from_secs(5),
+    );
+    sent.assert_success("send recipient safety");
+    let id = message_id(&sent.json("send recipient safety"));
+
+    let no_address = env.run_with_session(
+        cc,
+        ["--json", "handle", "--id", &id.to_string()],
+        Duration::from_secs(5),
+    );
+    no_address.assert_failure("handle without address should fail");
+    assert!(
+        no_address.stderr.contains("--address") || no_address.stderr.contains("--recipient"),
+        "failure should tell caller how to disambiguate: {}",
+        no_address.stderr
+    );
+
+    let cc_handle = env.run_with_session(
+        cc,
+        [
+            "--json",
+            "--address",
+            cc_addr,
+            "handle",
+            "--id",
+            &id.to_string(),
+        ],
+        Duration::from_secs(5),
+    );
+    cc_handle.assert_success("cc handle");
+    let cc_handle_json = cc_handle.json("cc handle");
+    assert_eq!(
+        cc_handle_json.get("recipient").and_then(Value::as_str),
+        Some(cc_addr),
+        "cc handle should not default to primary recipient"
+    );
+
+    let primary_inbox = env.run_with_session(
+        primary,
+        ["--json", "--address", primary_addr, "inbox", "--all"],
+        Duration::from_secs(5),
+    );
+    primary_inbox.assert_success("primary inbox after cc handle");
+    let primary_inbox_json = primary_inbox.json("primary inbox after cc handle");
+    let primary_item = primary_inbox_json
+        .get("items")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|item| item.get("id").and_then(Value::as_i64) == Some(id))
+        .expect("primary inbox item");
+    assert_eq!(
+        primary_item
+            .get("delivery_role")
+            .and_then(Value::as_str),
+        Some("to")
+    );
+    assert_eq!(
+        primary_item
+            .get("requires_disposition_for_current_recipient")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        primary_item.get("latest_disposition"),
+        Some(&Value::Null),
+        "cc disposition must not clobber primary disposition"
+    );
+}
+
+#[test]
 fn real_process_station_stop_drains_waiter_and_preserves_next_message() {
     let env = ProcessEnv::new("real-station-stop");
     let receiver = "real-station-stop-receiver";

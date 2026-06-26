@@ -1458,3 +1458,22 @@ multi-recipient visibility is still durable/auditable via the message row and in
 This preserves the intended convention: the `--to` recipient acts/dispositions, CC recipients observe.
 It also reduces the chance of CC recipients accidentally treating message-level `requires_disposition`
 as their own workflow obligation.
+
+## 0034 — Workflow dispositions default to the current recipient
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** `ack` is per-recipient, but terminal workflow dispositions previously defaulted to the
+message's primary `--to` address. A CC observer running `telex handle --id <id>` could therefore mark
+the primary recipient's work handled. This violated the dogfood convention that CC recipients observe
+while the `--to` recipient owns action/disposition.
+
+**Decision.** Disposition commands (`handle`, `reject`, `close`, `defer`, `escalate`) default to the
+current global `--address` when it is a recipient of the message (`to` or `cc`). If no current address
+is provided, or the current address is not a recipient, the command fails and asks for explicit
+`--recipient`. Explicit `--recipient` remains available for intentional cross-recipient recording.
+
+**Consequences.** A CC observer can no longer accidentally clobber the primary recipient's disposition.
+Primary actors keep the natural `--address <me> handle --id <id>` flow, and scripts without any address
+must be explicit about whose workflow state they are changing.

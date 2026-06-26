@@ -9,7 +9,7 @@ use crate::daemon_ipc::{
     NeedsAttachReason, Request, Response, ERROR_NEEDS_ATTACH, ERROR_NOT_RUNNING,
 };
 use crate::identity::{default_occupant, resolve_session_id};
-use crate::model::Disposition;
+use crate::model::{cc_recipients, Disposition, MessageRow};
 use crate::output::emit;
 
 pub async fn ack(ctx: &Ctx, args: DispArgs) -> Result<i32> {
@@ -246,10 +246,7 @@ pub async fn run(ctx: &Ctx, state: &str, args: DispArgs) -> Result<i32> {
         .await?
         .ok_or_else(|| anyhow!("message {} not found", args.id))?;
 
-    let recipient = args
-        .recipient
-        .clone()
-        .unwrap_or_else(|| msg.to_addr.clone());
+    let recipient = resolve_disposition_recipient(ctx, &args, &msg)?;
     let by = config::principal();
     let row = backend
         .insert_disposition(args.id, &recipient, state, args.note.as_deref(), Some(&by))
@@ -269,6 +266,23 @@ pub async fn run(ctx: &Ctx, state: &str, args: DispArgs) -> Result<i32> {
         );
     });
     Ok(0)
+}
+
+fn resolve_disposition_recipient(ctx: &Ctx, args: &DispArgs, msg: &MessageRow) -> Result<String> {
+    if let Some(recipient) = &args.recipient {
+        return Ok(recipient.clone());
+    }
+    let address = ctx.address.as_deref().ok_or_else(|| {
+        anyhow!("disposition requires --address for the current recipient or explicit --recipient")
+    })?;
+    if address == msg.to_addr || cc_recipients(msg.cc.as_deref()).iter().any(|cc| cc == address) {
+        Ok(address.to_string())
+    } else {
+        Err(anyhow!(
+            "address {address} is not a recipient of message {}; pass --recipient explicitly",
+            msg.id
+        ))
+    }
 }
 
 #[cfg(test)]
