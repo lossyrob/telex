@@ -2051,6 +2051,7 @@ dependencies = [
  "clap",
  "dirs",
  "futures-util",
+ "getrandom 0.2.17",
  "libc",
  "native-tls",
  "openssl",

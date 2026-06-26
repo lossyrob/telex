@@ -16,6 +16,8 @@
 //! The policy lives in the pure `plan_from` (unit-tested against every acceptance branch); the async
 //! `resolve_from` only gathers the live-holder facts (registry + `ipc::ping`) and delegates.
 
+use anyhow::{anyhow, Result};
+
 use crate::model::Attention;
 use crate::registry;
 
@@ -23,6 +25,36 @@ use crate::registry;
 pub const RECEIPT_UNREPLIABLE: &str = "refused-unrepliable";
 /// Receipt label for a refused send that couldn't pick among multiple live local stations.
 pub const RECEIPT_AMBIGUOUS: &str = "refused-ambiguous-from";
+
+/// Resolve the stable Telex session identity for one-shot daemon verbs.
+///
+/// Precedence is explicit `--session`, then `TELEX_SESSION_ID`, then the Copilot
+/// harness's `COPILOT_AGENT_SESSION_ID`. The helper deliberately fails closed
+/// instead of minting a random identity, because `NeedsAttach` recovery must
+/// name the same session that originally attached.
+pub fn resolve_session_id(explicit: Option<&str>) -> Result<String> {
+    explicit
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| nonempty_env("TELEX_SESSION_ID"))
+        .or_else(|| nonempty_env("COPILOT_AGENT_SESSION_ID"))
+        .ok_or_else(|| {
+            anyhow!(
+                "no session id available; pass --session, set TELEX_SESSION_ID, or set COPILOT_AGENT_SESSION_ID"
+            )
+        })
+}
+
+fn nonempty_env(name: &str) -> Option<String> {
+    std::env::var(name)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+pub fn default_occupant() -> String {
+    format!("{}:{}", crate::config::hostname(), std::process::id())
+}
 
 /// The outcome of resolving `from` for a `send`/`reply`.
 #[derive(Clone, Debug, PartialEq, Eq)]

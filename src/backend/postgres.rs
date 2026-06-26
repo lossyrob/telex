@@ -149,6 +149,8 @@ fn map_lease(r: &Row) -> LeaseRow {
         pid: r.get("pid"),
         since_ms: r.get("since_ms"),
         heartbeat_at_ms: r.get("heartbeat_at_ms"),
+        lease_epoch: None,
+        owner_instance_id: None,
     }
 }
 
@@ -477,7 +479,7 @@ impl Backend for PgBackend {
             "SELECT {MSG_COLS}, \
                 (SELECT d.state FROM dispositions d WHERE d.message_id=messages.id \
                    AND d.recipient=$1 ORDER BY d.id DESC LIMIT 1) AS latest_disp \
-             FROM messages WHERE to_addr=$1 ORDER BY id DESC LIMIT $2"
+             FROM messages WHERE to_addr=$1 OR cc LIKE '%' || $1 || '%' ORDER BY id DESC LIMIT $2"
         );
         let rows = self.client.query(&sql, &[&address, &limit]).await?;
         let items: Vec<InboxItem> = rows
@@ -485,13 +487,27 @@ impl Backend for PgBackend {
             .map(|r| {
                 let message = map_message(r);
                 let latest: Option<String> = r.get("latest_disp");
+                let delivered_to = address.to_string();
+                let primary_to = message.to_addr.clone();
+                let cc = cc_recipients(message.cc.as_deref());
+                let role = delivery_role(&delivered_to, &primary_to, message.cc.as_deref());
+                let requires_for_recipient = requires_disposition_for_recipient(
+                    message.requires_disposition,
+                    &delivered_to,
+                    &primary_to,
+                );
                 let terminal = latest
                     .as_deref()
                     .map(Disposition::is_terminal_str)
                     .unwrap_or(false);
-                let actionable = message.requires_disposition && !terminal;
+                let actionable = requires_for_recipient && !terminal;
                 InboxItem {
                     message,
+                    delivered_to,
+                    primary_to,
+                    cc_recipients: cc,
+                    delivery_role: role.to_string(),
+                    requires_disposition_for_current_recipient: requires_for_recipient,
                     latest_disposition: latest,
                     actionable,
                 }

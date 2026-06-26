@@ -6,15 +6,11 @@
 //! path. This is defense-in-depth: even a mis-launched *detached* holder cannot outlive the
 //! session that spawned it (Decision 0004 made enforceable rather than advisory; Decision 0011).
 //!
-//! [`process_alive`] is intentionally conservative: if it cannot positively determine that a
-//! process is gone (e.g. it exists but we lack the rights to query it), it reports the process as
-//! **alive** so the holder never releases a lease prematurely. Only a definite "no such process"
-//! reports dead.
-//!
-//! Caveat — pid reuse: a raw pid can be recycled by the OS after the original process exits, so a
-//! freshly-allocated unrelated process reusing the pid would read as "still alive." The window is
-//! small at a few-second poll cadence; a reuse-immune inherited-fd path is a documented future
-//! upgrade (issue #5, deferred).
+//! [`process_alive_with_start_time`] is intentionally conservative: if it cannot positively
+//! determine that a process is gone (e.g. it exists but we lack the rights to query it), it reports
+//! the process as **alive** so the daemon never reaps a station prematurely.  The exception is the
+//! P5 reuse guard: when both the captured and current process start-time are known and they differ,
+//! the pid is treated as dead because the original process identity has been disproven.
 
 /// Why the holder is running unbound (persistent). Carried so the holder can log a clear,
 /// always-visible reason rather than silently running with no session binding.
@@ -38,6 +34,12 @@ pub enum SessionBinding {
     Bound(u32),
     /// Run a persistent holder (no binding), for the given reason.
     Unbound(UnboundReason),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ProcessProbe {
+    pub alive: bool,
+    pub start_time: Option<u64>,
 }
 
 /// Resolve whether and to which pid the holder should bind its lifetime, from the parsed flags and
@@ -86,45 +88,98 @@ fn bind_or_sentinel(pid: u32) -> SessionBinding {
 /// ambiguous probe error also counts as alive, so the holder never releases a lease unless it can
 /// positively confirm the watched session is gone.
 pub fn process_alive(pid: u32) -> bool {
-    // pid 0 is never a valid session/launcher pid to bind to (it is the kernel idle/swapper
-    // "process"); treat it as not-a-session so a bogus `--session-pid 0` self-releases promptly.
+    process_alive_with_start_time(pid, None)
+}
+
+/// Capture the platform process start-time for a watch pid at registration time.
+///
+/// `None` means the process identity could not be captured.  Subsequent liveness checks stay
+/// conservative in that case: they still require the pid to exist, but cannot disprove reuse.
+pub fn capture_process_start_time(pid: u32) -> Option<u64> {
+    if pid == 0 {
+        return None;
+    }
+    platform::process_probe(pid).start_time
+}
+
+/// Returns `true` only when the pid exists and, if both sides know a start-time, it matches the
+/// registration-time identity.  A start-time mismatch is a definite dead/reused-pid signal.
+pub fn process_alive_with_start_time(pid: u32, expected_start_time: Option<u64>) -> bool {
     if pid == 0 {
         return false;
     }
-    platform::process_alive(pid)
+    let probe = platform::process_probe(pid);
+    if !probe.alive {
+        return false;
+    }
+    match (expected_start_time, probe.start_time) {
+        (Some(expected), Some(actual)) => expected == actual,
+        _ => true,
+    }
 }
 
 #[cfg(unix)]
 mod platform {
+    use super::ProcessProbe;
+
     /// Probe via `kill(pid, 0)`, which sends no signal but performs the same
     /// permission/existence checks as a real signal.
     ///
     /// - returns 0            → the process exists and we may signal it → alive.
     /// - `errno == EPERM`     → the process exists but we may not signal it → alive.
     /// - `errno == ESRCH`     → no such process → dead.
-    pub fn process_alive(pid: u32) -> bool {
+    pub fn process_probe(pid: u32) -> ProcessProbe {
         // Guard against pid values that would become negative as `pid_t` (i32): a negative pid
         // makes `kill` address a process group / broadcast, which is never what we want here.
         if pid > i32::MAX as u32 {
-            return false;
+            return ProcessProbe {
+                alive: false,
+                start_time: None,
+            };
         }
         // SAFETY: `kill` with signal 0 performs only existence/permission checks and delivers no
         // signal; it has no memory effects.
         let rc = unsafe { libc::kill(pid as libc::pid_t, 0) };
-        if rc == 0 {
-            return true;
+        if rc != 0 {
+            match std::io::Error::last_os_error().raw_os_error() {
+                Some(e) if e == libc::ESRCH => {
+                    return ProcessProbe {
+                        alive: false,
+                        start_time: None,
+                    }
+                }
+                _ => {}
+            }
         }
-        match std::io::Error::last_os_error().raw_os_error() {
-            Some(e) if e == libc::ESRCH => false, // no such process → gone
-            _ => true,                            // EPERM (exists) or any ambiguous error → alive
+        ProcessProbe {
+            alive: true,
+            start_time: process_start_time(pid),
         }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn process_start_time(pid: u32) -> Option<u64> {
+        let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+        let after_name = stat.rsplit_once(") ")?;
+        let fields: Vec<&str> = after_name.1.split_whitespace().collect();
+        fields.get(19)?.parse::<u64>().ok()
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn process_start_time(_pid: u32) -> Option<u64> {
+        None
     }
 }
 
 #[cfg(windows)]
 mod platform {
-    use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_INVALID_PARAMETER};
-    use windows_sys::Win32::System::Threading::{OpenProcess, WaitForSingleObject};
+    use super::ProcessProbe;
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GetLastError, ERROR_INVALID_PARAMETER, FILETIME,
+    };
+    use windows_sys::Win32::System::Threading::{
+        GetProcessTimes, OpenProcess, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
+    };
 
     // Stable Win32 ABI constants, defined locally so this code does not depend on which module a
     // given `windows-sys` version exposes them from.
@@ -140,28 +195,58 @@ mod platform {
     ///   - `ERROR_INVALID_PARAMETER` → no process with that pid → dead.
     ///   - any other error (e.g. `ERROR_ACCESS_DENIED`, transient failures) → conservatively
     ///     treated as alive, so we never release a lease on an ambiguous probe error.
-    pub fn process_alive(pid: u32) -> bool {
+    pub fn process_probe(pid: u32) -> ProcessProbe {
         // SAFETY: FFI to Win32. `OpenProcess` returns a process handle or null; we only pass the
         // handle to `WaitForSingleObject`/`CloseHandle` and never dereference it.
         unsafe {
-            let handle = OpenProcess(SYNCHRONIZE, 0, pid);
+            let handle = OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
             if handle == 0 {
                 // Only a definitively-unknown pid is "dead"; everything else stays alive.
-                return GetLastError() != ERROR_INVALID_PARAMETER;
+                return ProcessProbe {
+                    alive: GetLastError() != ERROR_INVALID_PARAMETER,
+                    start_time: None,
+                };
             }
             let wait = WaitForSingleObject(handle, 0);
-            CloseHandle(handle);
             // WAIT_OBJECT_0 means the object is signaled → the process has exited. Anything else
             // (notably WAIT_TIMEOUT, or an ambiguous WAIT_FAILED) means it has not confirmed exit
             // → still running.
-            wait != WAIT_OBJECT_0
+            if wait == WAIT_OBJECT_0 {
+                CloseHandle(handle);
+                return ProcessProbe {
+                    alive: false,
+                    start_time: None,
+                };
+            }
+            let start_time = process_start_time(handle);
+            CloseHandle(handle);
+            ProcessProbe {
+                alive: true,
+                start_time,
+            }
+        }
+    }
+
+    unsafe fn process_start_time(handle: isize) -> Option<u64> {
+        let mut creation: FILETIME = std::mem::zeroed();
+        let mut exit: FILETIME = std::mem::zeroed();
+        let mut kernel: FILETIME = std::mem::zeroed();
+        let mut user: FILETIME = std::mem::zeroed();
+        let ok = GetProcessTimes(handle, &mut creation, &mut exit, &mut kernel, &mut user);
+        if ok == 0 {
+            None
+        } else {
+            Some(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{process_alive, resolve_session_pid, SessionBinding, UnboundReason};
+    use super::{
+        capture_process_start_time, process_alive, process_alive_with_start_time,
+        resolve_session_pid, SessionBinding, UnboundReason,
+    };
 
     #[test]
     fn resolve_no_bind_wins_over_pid_and_env() {
@@ -239,6 +324,24 @@ mod tests {
     #[test]
     fn self_is_alive() {
         assert!(process_alive(std::process::id()));
+    }
+
+    #[test]
+    fn self_with_captured_start_time_is_alive() {
+        let pid = std::process::id();
+        let start_time = capture_process_start_time(pid);
+        assert!(process_alive_with_start_time(pid, start_time));
+    }
+
+    #[test]
+    fn start_time_mismatch_is_dead_when_identity_is_known() {
+        let pid = std::process::id();
+        if let Some(start_time) = capture_process_start_time(pid) {
+            assert!(!process_alive_with_start_time(
+                pid,
+                Some(start_time.saturating_add(1))
+            ));
+        }
     }
 
     #[test]

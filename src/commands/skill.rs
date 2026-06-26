@@ -30,19 +30,37 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
     if let Some(addr) = &args.address {
         println!("## Your assignment\n");
         println!(
-            "You are assigned the telex address `{addr}`. Serve it by starting a **station** — a"
+            "You are assigned the telex address `{addr}`. Serve it by registering a station with"
         );
         println!(
-            "background, session-bound `telex attach` holds the lease (terminated when this session ends,"
+            "one-shot `telex attach`; the auto-spawned per-user local exchange owns the lease,"
         );
-        println!("never daemonized to outlive it).");
-        println!("Then loop one delivery at a time: run a SINGLE `telex wait` in the background; when that");
-        println!("command completes you are notified — immediately re-arm a fresh background `wait`, then");
-        println!("act and disposition the delivered message. Don't wrap wait in an infinite loop (it hides");
-        println!("deliveries). attach/detach start and stop the station (the lease), not the OS process lifecycle.\n");
+        println!("delivery buffer, and liveness. Then loop one delivery at a time: run a SINGLE");
+        println!(
+            "fully detached background `telex wait --out-dir <dir>` task named TELEX MESSAGE WAITER."
+        );
+        println!(
+            "Use Copilot CLI `detach: true`: detached tasks do wake the session on completion"
+        );
+        println!("without keeping the terminal in foreground/spinner-like waiter UX.");
+        println!("It writes message.json/status.json/exit.code into <dir>. When the detached task");
+        println!(
+            "completes, read the artifact exit.code (not the shell task exit code); on 0 parse"
+        );
+        println!("message.json, `telex ack`, dedupe by id, then re-arm a fresh detached `wait`");
+        println!("before longer processing. In Copilot CLI on Windows, prefer detaching a");
+        println!("variable-free `pwsh -File <wait-once.ps1> ...` wrapper; bare external");
+        println!("`telex wait ...` detached launches may silently no-op in some harnesses.");
+        println!(
+            "While focused, arm with `--min-attention interrupt`; at checkpoints drain inbox,"
+        );
+        println!("then re-arm interrupt-only or unfiltered depending on whether you are idle.");
+        println!("For teardown or upgrade, run `telex station stop --address {addr}` first; it");
+        println!("releases the station and waits for tracked live waiters to exit.");
+        println!("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");
         println!("```sh");
         println!("telex attach --address {addr} --description \"<what you are working on>\"");
-        println!("telex wait --address {addr}");
+        println!("telex wait --address {addr} --out-dir <dir>");
         println!("```\n");
     }
 

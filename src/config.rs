@@ -1,5 +1,5 @@
 //! Process-level settings (backend selector, db override, default address, liveness
-//! window) and `~/.telex/` locations. The actual backend configuration lives in
+//! window) and local Telex locations. The actual backend configuration lives in
 //! `profiles` (config.toml); this module only carries the per-invocation selection.
 
 use anyhow::{anyhow, Result};
@@ -15,7 +15,7 @@ pub struct Config {
     pub liveness_window_secs: i64,
 }
 
-/// The `~/.telex` directory, created on demand.
+/// The config root, created on demand.
 pub fn telex_home() -> Result<PathBuf> {
     if let Ok(dir) = std::env::var("TELEX_HOME") {
         return Ok(PathBuf::from(dir));
@@ -24,15 +24,27 @@ pub fn telex_home() -> Result<PathBuf> {
     Ok(home.join(".telex"))
 }
 
-/// Directory for runtime artifacts (unix IPC sockets, etc.).
+/// Directory for runtime authority artifacts (IPC sockets on Unix, cap files, etc.).
 pub fn run_dir() -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        let base = std::env::var_os("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .or_else(dirs::data_local_dir)
+            .ok_or_else(|| anyhow!("cannot resolve LOCALAPPDATA for runtime directory"))?;
+        return Ok(base.join("telex").join("run"));
+    }
+
+    // On Unix the socket path is under run_dir, so this default is part of daemon rendezvous
+    // compatibility and must not be "aligned" with the Windows LOCALAPPDATA default.
+    #[cfg(not(windows))]
     Ok(telex_home()?.join("run"))
 }
 
 pub fn ensure_home() -> Result<PathBuf> {
     let home = telex_home()?;
     std::fs::create_dir_all(&home)?;
-    std::fs::create_dir_all(home.join("run"))?;
+    std::fs::create_dir_all(run_dir()?)?;
     Ok(home)
 }
 
@@ -76,4 +88,54 @@ pub fn principal() -> String {
         .or_else(|_| std::env::var("USERNAME"))
         .or_else(|_| std::env::var("USER"))
         .unwrap_or_else(|_| "unknown".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_run_dir_defaults_to_local_app_data_not_telex_home() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_home = std::env::var_os("TELEX_HOME");
+        let prior_local = std::env::var_os("LOCALAPPDATA");
+        let local = std::env::temp_dir().join(format!("telex-local-{}", std::process::id()));
+        let home = std::env::temp_dir().join(format!("telex-home-{}", std::process::id()));
+
+        std::env::set_var("TELEX_HOME", &home);
+        std::env::set_var("LOCALAPPDATA", &local);
+        let resolved = run_dir().expect("resolve run dir");
+
+        restore_env("TELEX_HOME", prior_home);
+        restore_env("LOCALAPPDATA", prior_local);
+
+        assert_eq!(resolved, local.join("telex").join("run"));
+        assert_ne!(resolved, home.join("run"));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_run_dir_stays_under_telex_home_for_socket_rendezvous() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_home = std::env::var_os("TELEX_HOME");
+        let home = std::env::temp_dir().join(format!("telex-home-{}", std::process::id()));
+
+        std::env::set_var("TELEX_HOME", &home);
+        let resolved = run_dir().expect("resolve run dir");
+
+        restore_env("TELEX_HOME", prior_home);
+
+        assert_eq!(resolved, home.join("run"));
+    }
+
+    fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
+        match value {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
+    }
 }

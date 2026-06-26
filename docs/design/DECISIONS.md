@@ -845,7 +845,8 @@ written to the **singleton-scoped** user-private file `<run_dir>/daemon-<H>.cap`
 protocol-major-parallel daemons don't clobber one cap) — authorizes privileged RPCs;
 `Register`/`ReRegister`/`Wait` are unprivileged. The **OS enforces the user-private trust
 boundary** (Windows pipe DACL current-SID-only / Unix `0700` run dir; canonical
-owner-private `config_root`/`run_dir`; `O_NOFOLLOW`+atomic cap/lock; **peer-credential
+owner-private runtime directory; `config_root`'s identity-only role is later clarified by
+0025; `O_NOFOLLOW`+atomic cap/lock; **peer-credential
 check** before `admin_cap`/data frames; spawn only the canonical executable). v1 is
 **same-user trust with NO intra-user isolation** (documented as a deliberate choice;
 `per_session_cap` reserved as the path to it). Session ownership is **daemon-native** and
@@ -1234,3 +1235,314 @@ stronger option.
 ([daemon.md](daemon.md) §5.1 / §11.1). Once rows carry `lease_epoch >= 1`, an old pre-epoch
 binary must not run against the store (it would write non-epoch rows and reset the fence); the
 store schema-version gates a too-old binary closed.
+
+## 0025 — Directory role taxonomy and Windows local runtime state
+
+- **Date:** 2026-06-25
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Owner-private validation on Windows exposed two different concerns during
+`daemon-core`: the security-critical runtime directory (`run_dir`) contains the daemon capability
+file and singleton runtime artifacts, while `config_root` currently contributes only canonicalized
+identity material to the singleton key. Treating both paths as one frozen owner-private invariant
+made ordinary same-user Windows profile ACL inheritance look like a runtime security failure and
+encouraged relaxing the wrong surface. At the same time, Windows home/profile locations can be
+redirected or roaming, while runtime secrets and lock state should be local-only.
+
+**Decision.** Keep `run_dir` and cap files strict: repair owner/protected DACL and then fail closed
+with binary owner/DACL/ACE read-back. On Windows, resolve the default `run_dir` under local app data
+(`%LOCALAPPDATA%\telex\run`) instead of under `TELEX_HOME`; an explicit `TELEX_RUN_DIR` override
+still wins. Treat `config_root` as identity-only: create and canonicalize it, but do not require
+owner-private validation unless a future change stores authority material there.
+
+**Consequences.** This is a security improvement, not a weakening: the authority-bearing cap leaves
+roaming/profile-managed home by default, while the identity-only path no longer trips strict runtime
+validation. Unix is intentionally unchanged because its daemon socket lives under `run_dir` and the
+path is part of rendezvous compatibility. If `config_root` later stores caps, tokens, locks, private
+keys, or other authority material, this decision must be revisited and `config_root` must become
+owner-private + fail-closed. Existing pre-upgrade Windows cap/runtime files under the old home-based
+default become stale/inert; the named-pipe singleton and canonical-store lock still preserve
+correctness, and upgrade guidance should prefer `daemon stop --drain` before replacing a running
+binary.
+
+## 0026 — `telex wait --out-dir` outcome artifacts for detached delivery
+
+- **Date:** 2026-06-25
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** The local-daemon waiter UX runs `telex wait` as a single-shot **detached** background
+task: the host runtime wakes the agent on the waiter's completion, and the agent reads the delivered
+message and re-arms. Dogfooding on Copilot CLI (Windows) showed two host-runtime facts that break a
+naive "capture stdout / read the shell exit code" approach: (1) the detached shell does **not** return
+the child's stdout, and (2) the detached PowerShell wrapper string-interpolates the command before the
+child runs, so any `$variable` (e.g. `$run`, `$LASTEXITCODE`) is stripped and an inline "redirect
+stdout to a file, capture `$LASTEXITCODE`" waiter silently writes nothing. The previous skill guidance
+recommended exactly that inline-variable pattern, so it failed in practice. A `.ps1 -File` wrapper
+works, but pushes shell-specific scaffolding onto every agent and runtime.
+
+**Decision.** Make robust detached delivery a first-class telex feature instead of a shell recipe. Add
+`telex wait --out-dir <DIR>`, which writes the outcome to files in `<DIR>`: `message.json` (on delivery
+only), `status.json` (always: `outcome`, `exit_code`, `detail`, `address`, `written_at_ms`),
+`exit.code` (always, the integer code, written **last** as the completion marker via temp-file +
+rename), and `wait.pid` (at startup, before blocking). stdout/stderr behaviour and exit codes are
+unchanged; the artifacts are additive. The skill now arms the waiter with a single **variable-free**
+command — `telex wait --address <addr> --out-dir
+<literal-dir>` — so there is nothing for a detached wrapper to mangle, and instructs agents to trust
+the artifact `exit.code` over the runtime-reported detached exit code, and never to use task-list
+status (`list_powershell`) as the armed/done signal.
+
+**Consequences.** Detached delivery no longer depends on host stdout capture or shell-variable
+survival, which makes the waiter portable beyond Copilot CLI. The file artifacts are **transport
+only**, exactly like the stdout flush ([daemon.md §3.2.1](daemon.md), §11.3): they are not the consumed
+mark, which still fires only on the explicit agent `ack`, so an at-least-once redelivery after a crash
+is preserved. `exit.code` ordering is the documented "fully written" contract; readers that observe it
+can read the sibling files without a partial-write race (the host only wakes the agent after the child
+exits, so there is no concurrent reader/writer). Because `message.json` may contain the message body,
+artifacts are owner-only on Unix (dir `0700`, files `0600`), and a reused `--out-dir` clears any stale
+`message.json` on a non-delivery outcome; Windows local app data / `%TEMP%` are already per-user. The
+legacy stdout JSON path is retained for attached and `--file`-based callers, so this is purely additive
+and back-compatible.
+
+## 0027 — Station stop, live waiter registry, and status reconciliation
+
+- **Date:** 2026-06-25
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Dogfooding the detached waiter UX exposed teardown friction: `detach` releases durable
+membership, but the launching agent does not get a usable process handle for its detached waiter from
+Copilot CLI (`pid: unknown`). Operators had to enumerate OS processes and match command lines to stop
+a waiter, and `telex daemon status` was misleading because the CLI requested the daemon's intentionally
+minimal projection (`members: []`, `stores: []`) even while a one-shot attached station was live.
+There was also a correctness concern: if a waiter survived teardown, the next message might be
+delivered into an unread detached process.
+
+**Decision.** Add first-class station teardown and waiter observability. `Wait` IPC now carries the
+client waiter's pid/start-time, and the daemon records live waiters in an independent registry keyed by
+a daemon-assigned `waiter_id` (not pid, so pidless/protocol-valid waiters and same-pid edge cases are
+still tracked). Detailed status exposes the top-level `live_waiters` list and per-member
+`live_waiters`, and `telex daemon status` requests that detailed projection using the local admin cap.
+`telex status --address`, `telex address show`, and `telex address list` overlay live daemon membership
+on durable lease occupancy so those operator views agree. Add `telex station stop --address <addr>` as
+the symmetric teardown command: mark the station idle so blocked waiters return `PresenceEnded`, wait
+for tracked waiters to drain for a short grace window, then perform the durable detach/tombstone. The
+command returns a typed `StationStopped` summary with waiter counts and any remaining live waiter
+records.
+
+**Consequences.** Normal teardown no longer requires OS process hunting, and a stopped station is
+provably unoccupied: a message sent after `station stop` remains queued until a future attach/wait
+rather than being consumed by an orphan waiter. Plain `detach` remains available and remains terminal;
+tests now prove it does not consume a later message either, but `station stop` is the recommended
+operator flow because it waits for the live waiter to exit and reports any leftover waiter. This is a
+minor IPC bump (`1.1`) with a required `station_lifecycle_p8` capability, so new clients fail closed
+against older daemons instead of sending unknown teardown requests.
+
+## 0028 — Only `attach` auto-spawns the local daemon
+
+- **Date:** 2026-06-25
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Detached-wait dogfood showed that allowing `wait` to auto-spawn is too permissive: if a
+waiter is launched from the wrong environment/profile (or from an old hardcoded binary path), it can
+create a parallel daemon and station instead of failing loudly. The intended recovery loop already has
+a clear spawning verb: `attach`.
+
+**Decision.** Restrict normal auto-spawn to `attach` / `request_connect_or_spawn`. Other verbs connect
+to an existing daemon only. `wait` may reconnect/re-register during its grace window if a replacement
+daemon already exists, but if no daemon is running it exits 3; the agent must run `telex attach` and
+then re-arm. `send`/`reply`/`ack`/`detach`/`station stop` likewise do not create a daemon as a side
+effect.
+
+**Consequences.** A missing daemon is now an explicit station-recovery event instead of a hidden
+side-effect. This slightly reduces transparent restart recovery for non-attach verbs, but prevents the
+worse failure mode where a detached waiter silently creates or talks to the wrong singleton/profile.
+Real-process tests assert that `wait` and `send` without a daemon do not spawn one.
+
+## 0029 — One live waiter per station
+
+- **Date:** 2026-06-25
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Dogfooding found that the natural "arm next waiter before ack" loop could create multiple
+concurrent waiters for the same `(store_key, session_id, address)`. Because the durable delivery row is
+not consumed until explicit `ack`, each concurrently armed waiter could be handed the same
+`message_id`, which looked like a consumed message redelivering indefinitely.
+
+**Decision.** The daemon accepts at most one live waiter per station. A concurrent second `Wait` for
+the same `(store_key, session_id, address)` returns `PresenceEnded` and records a `ConcurrentWaiter`
+status/audit entry; it is not allowed to fetch or emit a message. Skill guidance now says to read the
+message, `ack`, dedupe by id, then re-arm before longer processing.
+
+**Consequences.** The documented detached waiter loop is duplicate-free without relying solely on
+operator discipline. Telex remains at-least-once across crashes and unacked delivery, but it no longer
+fans one unacked `(message_id, recipient)` to sibling live waiters for the same station. Multi-recipient
+fan-out is unchanged: acking recipient A does not consume recipient B.
+
+## 0030 — Attention-gated waits for focused work
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** The detached waiter loop should not make every background/fyi message feel urgent while
+an agent is already doing foreground work. At the same time, truly urgent messages still need a wake at
+the next turn boundary. The daemon already carries message attention levels and a `Wait` attention
+field, but the CLI had no way to request a threshold filter.
+
+**Decision.** Add `telex wait --min-attention <interrupt|next-checkpoint|background|fyi>` as an
+inclusive priority threshold. Priority order is `interrupt` > `next-checkpoint` > `background` > `fyi`.
+Bare `telex wait` remains unfiltered. Filtering is eligibility-only and preserves oldest-first order
+among eligible messages; lower-priority skipped messages remain pending in the durable buffer. The
+focused-work skill pattern is: arm `--min-attention interrupt`, do the current work, then at a
+checkpoint drain/ack/disposition buffered lower-priority messages and re-arm in the appropriate mode.
+
+**Consequences.** Agents get a first-class "urgent-only while busy" phase without multiple concurrent
+waiters. Because older daemons would ignore unknown Wait fields, this is protocol/capability gated with
+minor `1.2` and `wait_min_attention_p9`. New clients fail closed against older daemons rather than
+silently treating an interrupt-only wait as unfiltered.
+
+## 0031 — Station health exposes unattended backlog
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** A station can hold membership and an epoch lease while having no live waiter. That is a
+normal short-lived state immediately after a waiter delivers and the agent is handling the message, but
+it becomes operationally dangerous when unconsumed messages are queued and no waiter is armed. In the
+poll-based local daemon this looks "occupied" to senders but no one is attending the queue.
+
+**Decision.** Derive station health in status from live waiter count, recent waiter delivery, idle
+state, and pending unconsumed delivery count. The status values are `armed`, `recently_delivered`,
+`unattended`, `unattended_with_backlog`, and `idle`. `recently_delivered` is a short grace state after
+a waiter emits a message, so normal handling before re-arm does not look unhealthy. The high-signal
+warning is `unattended_with_backlog`: no live waiter and at least one pending unconsumed delivery.
+
+**Consequences.** Operators and orchestrators can detect a stalled station without querying SQLite
+tables directly. The daemon does not auto-deliver or auto-rearm; it surfaces the condition so an agent
+can run `attach`, drain/ack the backlog, and arm a waiter.
+
+## 0032 — Delivery role metadata for primary vs CC recipients
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** In multi-party coordination, `--to` is the primary actor and `--cc` recipients are often
+visibility-only observers. A waiter woken for a CC delivery previously saw `to` as another address and
+`requires_disposition` as a message-level flag, with no cheap way to tell whether the current station
+was the primary recipient or a CC observer.
+
+**Decision.** Add delivery context to wait/read/inbox surfaces: `delivered_to`, `primary_to`, parsed
+`cc`, `delivery_role` (`to` / `cc` / `unknown`), and
+`requires_disposition_for_current_recipient`. Wait's flat `message.json` preserves existing fields and
+adds these context fields; `read --address` exposes a `delivery` object; inbox items include the same
+context inline.
+
+**Consequences.** Agents can branch correctly before ack/disposition: primary recipients can act on
+required dispositions, while CC recipients can observe without mistaking message-level `to`/required
+flags as their own workflow obligation. Later CC auto-seen/disposition-safety changes build on this
+metadata.
+
+## 0033 — CC deliveries are visibility-only and auto-seen
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Dogfooding used CC as visibility-only fan-out. Under the transport ack model, CC delivery
+rows were pending like primary rows, so a CC recipient that did not manually `ack` would receive the
+same observer copy on every `wait`, wedging its waiter behind traffic it was not expected to act on.
+
+**Decision.** Treat CC delivery rows as auto-consumed/seen for transport. They remain visible through
+`inbox --all` and `read` with `delivery_role: "cc"`, but they are not eligible for `wait` delivery and
+do not require manual `ack`. Primary `--to` deliveries remain pending until explicit ack, and
+multi-recipient visibility is still durable/auditable via the message row and inbox/read views.
+
+**Consequences.** CC observers no longer need to run transport `ack` just to advance their waiter.
+This preserves the intended convention: the `--to` recipient acts/dispositions, CC recipients observe.
+It also reduces the chance of CC recipients accidentally treating message-level `requires_disposition`
+as their own workflow obligation.
+
+## 0034 — Workflow dispositions default to the current recipient
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** `ack` is per-recipient, but terminal workflow dispositions previously defaulted to the
+message's primary `--to` address. A CC observer running `telex handle --id <id>` could therefore mark
+the primary recipient's work handled. This violated the dogfood convention that CC recipients observe
+while the `--to` recipient owns action/disposition.
+
+**Decision.** Disposition commands (`handle`, `reject`, `close`, `defer`, `escalate`) default to the
+current global `--address` when it is a recipient of the message (`to` or `cc`). If no current address
+is provided, or the current address is not a recipient, the command fails and asks for explicit
+`--recipient`. Explicit `--recipient` remains available for intentional cross-recipient recording.
+
+**Consequences.** A CC observer can no longer accidentally clobber the primary recipient's disposition.
+Primary actors keep the natural `--address <me> handle --id <id>` flow, and scripts without any address
+must be explicit about whose workflow state they are changing.
+
+## 0035 — Replies support CC visibility
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Before this change, `send` supported CC visibility recipients but `reply` did not. Agents
+had to choose between preserving thread context (`reply`) and notifying observers (`send --cc`), which
+was a poor fit for multi-party coordination.
+
+**Decision.** Add `reply --cc` with the same repeated/comma-separated parsing as `send --cc`. The reply
+keeps its parent/thread linkage and stores CC recipients on the reply message, so the same fan-out and
+CC visibility semantics apply.
+
+**Consequences.** Threaded conversations can include observers without losing history. CC recipients of
+replies remain visibility-only under ADR 0033.
+
+## 0036 — Status hints at activity on another store
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** With multiple configured backends, a user can run `status --address <addr>` against the
+wrong selected backend and see an empty/unoccupied projection while the same daemon has live membership
+for that address on another store. Dogfooding showed this is easy to miss when the default backend is
+not the local SQLite store used by active stations.
+
+**Decision.** When `status --address` has no live member for the selected store, inspect the daemon's
+detailed member set for the same address on other store keys. Report `also_active_on` plus a
+`backend_warning` instead of silently presenting the selected backend as the whole truth.
+
+**Consequences.** Wrong-backend calls become self-diagnosing without changing command routing or
+failing if no alternate activity exists. This is best-effort observability; it does not scan arbitrary
+offline backends.
+
+## 0037 — Wait out-dir has both flat and enveloped delivery artifacts
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** `wait --out-dir/message.json` is a flat message object while `read --id` returns an
+envelope (`message`, `dispositions`, optional thread context). Consumers that assumed one shape for the
+other saw null fields. Changing `message.json` would break existing wait consumers.
+
+**Decision.** Preserve flat `message.json` and add `delivery.json` on wait delivery. The new artifact is
+an envelope `{ message, delivery, status }`, where `delivery` contains the role/context metadata and
+`status` mirrors the wait status object. Non-delivery outcomes remove stale `delivery.json` alongside
+`message.json`.
+
+**Consequences.** Existing consumers keep working, and new consumers can use the more explicit envelope
+shape without special-casing wait artifacts versus read responses.
+
+## 0038 — Session-filtered station status projection
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** A downstream Copilot plugin turn-end guard needs a cheap, stable JSON signal for the
+current session: which addresses it attends, whether each has an armed waiter, and whether backlog is
+pending. Parsing full daemon status or human text on every turn end is brittle and noisy.
+
+**Decision.** Add `telex station status --session <id>` as a compact machine-readable projection over
+the daemon's detailed status. It returns only the selected session's stations for the current store,
+including address, health, waiter counts, pending unconsumed count, last waiter delivery metadata, and
+live waiter details.
+
+**Consequences.** The plugin can implement an agent-stop/re-arm guard without new daemon state or a
+separate lifecycle protocol. The projection is read-only and requires the same same-user/admin-cap
+access as detailed daemon status.

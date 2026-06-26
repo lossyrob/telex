@@ -243,18 +243,27 @@ mod tests {
         );
     }
 
-    // Integration: real registry file + real IPC ping. Mutates $TELEX_HOME (Unix endpoint paths),
-    // so it holds the shared ENV_LOCK and restores the var afterward. The lock is intentionally held
-    // across awaits to serialize all $TELEX_HOME access for the duration of the test.
+    // Integration: real registry file + real IPC ping. Mutates runtime path env (TELEX_HOME on
+    // Unix, LOCALAPPDATA on Windows), so it holds the shared ENV_LOCK and restores vars afterward.
+    // The lock is intentionally held across awaits to serialize process-global env access.
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
     async fn live_local_holders_includes_live_and_skips_stale() {
         let _guard = env_guard();
         let home =
             std::env::temp_dir().join(format!("telex-home-{}-{}", std::process::id(), now_ms()));
+        let local_app_data = std::env::temp_dir().join(format!(
+            "telex-local-app-data-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
         std::fs::create_dir_all(&home).unwrap();
-        let prev = std::env::var_os("TELEX_HOME");
+        std::fs::create_dir_all(&local_app_data).unwrap();
+        let prev_home = std::env::var_os("TELEX_HOME");
+        let prev_local_app_data = std::env::var_os("LOCALAPPDATA");
         std::env::set_var("TELEX_HOME", &home);
+        #[cfg(windows)]
+        std::env::set_var("LOCALAPPDATA", &local_app_data);
 
         let backend = "store-1";
         let host = config::hostname();
@@ -289,10 +298,15 @@ mod tests {
         );
 
         holder.abort();
-        match prev {
+        match prev_home {
             Some(v) => std::env::set_var("TELEX_HOME", v),
             None => std::env::remove_var("TELEX_HOME"),
         }
+        match prev_local_app_data {
+            Some(v) => std::env::set_var("LOCALAPPDATA", v),
+            None => std::env::remove_var("LOCALAPPDATA"),
+        }
         let _ = std::fs::remove_dir_all(&home);
+        let _ = std::fs::remove_dir_all(&local_app_data);
     }
 }
