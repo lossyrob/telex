@@ -980,6 +980,120 @@ fn real_process_wait_out_dir_delivers_message_artifact() {
 }
 
 #[test]
+fn real_process_wait_min_attention_delivers_interrupt_and_leaves_background() {
+    let env = ProcessEnv::new("real-min-attention");
+    let receiver = "real-min-attention-receiver";
+    let sender = "real-min-attention-sender";
+    let receiver_addr = "addr:real-min-attention-receiver";
+    let sender_addr = "addr:real-min-attention-sender";
+
+    env.attach(receiver, receiver_addr);
+    env.attach(sender, sender_addr);
+    let background = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            receiver_addr,
+            "--subject",
+            "background",
+            "--body",
+            "background body",
+        ],
+        Duration::from_secs(5),
+    );
+    background.assert_success("send background");
+    let interrupt = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            receiver_addr,
+            "--subject",
+            "interrupt",
+            "--body",
+            "interrupt body",
+            "--attention",
+            "interrupt",
+        ],
+        Duration::from_secs(5),
+    );
+    interrupt.assert_success("send interrupt");
+
+    let out_dir = env.root.join("wait-min-attention");
+    let filtered = env.run_with_session(
+        receiver,
+        [
+            "--json",
+            "--address",
+            receiver_addr,
+            "wait",
+            "--session",
+            receiver,
+            "--min-attention",
+            "interrupt",
+            "--timeout-ms",
+            "4000",
+            "--out-dir",
+            out_dir.to_str().expect("out dir is utf8"),
+        ],
+        Duration::from_secs(6),
+    );
+    assert_eq!(
+        filtered.code,
+        Some(0),
+        "interrupt-eligible message should deliver: stdout={} stderr={}",
+        filtered.stdout,
+        filtered.stderr
+    );
+    let delivered: Value = serde_json::from_str(
+        &std::fs::read_to_string(out_dir.join("message.json"))
+            .expect("message.json artifact written"),
+    )
+    .expect("message.json parses");
+    assert_eq!(
+        delivered.get("subject").and_then(Value::as_str),
+        Some("interrupt")
+    );
+    let id = message_id(&delivered);
+    let ack = env.run_with_session(
+        receiver,
+        [
+            "--json",
+            "--address",
+            receiver_addr,
+            "ack",
+            "--session",
+            receiver,
+            "--id",
+            &id.to_string(),
+        ],
+        Duration::from_secs(5),
+    );
+    ack.assert_success("ack interrupt");
+
+    let background_delivered = wait_for_message(&env, receiver, receiver_addr, "background body");
+    assert_eq!(
+        background_delivered.get("subject").and_then(Value::as_str),
+        Some("background")
+    );
+}
+
+#[test]
 fn real_process_station_stop_drains_waiter_and_preserves_next_message() {
     let env = ProcessEnv::new("real-station-stop");
     let receiver = "real-station-stop-receiver";

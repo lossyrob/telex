@@ -9,6 +9,7 @@ use std::sync::Arc;
 use crate::backend::Backend;
 use crate::config::Config;
 use crate::daemon_ipc::{WatchPidRole, WatchPidSpec};
+use crate::model::Attention;
 use crate::output::Format;
 use crate::profiles::BackendProfile;
 
@@ -158,6 +159,9 @@ pub struct WaitArgs {
     /// Give up waiting after this many milliseconds (exit code 2); default is no idle timeout.
     #[arg(long)]
     pub timeout_ms: Option<u64>,
+    /// Only wake for messages at this attention or higher priority.
+    #[arg(long, value_parser = parse_attention_arg)]
+    pub min_attention: Option<Attention>,
     /// Resume delivery strictly after this message id.
     #[arg(long, default_value_t = 0)]
     pub since: i64,
@@ -507,6 +511,10 @@ fn parse_watch_pid(raw: &str) -> std::result::Result<WatchPidSpec, String> {
     Ok(WatchPidSpec::anchor(parse_pid(raw)?))
 }
 
+fn parse_attention_arg(raw: &str) -> std::result::Result<Attention, String> {
+    Attention::parse(raw).map_err(|e| e.to_string())
+}
+
 /// Shared command context.
 pub struct Ctx {
     pub cfg: Config,
@@ -647,6 +655,33 @@ mod tests {
             panic!("expected wait command");
         };
         assert_eq!(args.reconnect_grace_ms, Some(250));
+    }
+
+    #[test]
+    fn wait_min_attention_flag_parses_and_validates() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:a",
+            "wait",
+            "--min-attention",
+            "next-checkpoint",
+        ])
+        .unwrap();
+        let Command::Wait(args) = cli.command else {
+            panic!("expected wait command");
+        };
+        assert_eq!(args.min_attention, Some(Attention::NextCheckpoint));
+
+        assert!(Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:a",
+            "wait",
+            "--min-attention",
+            "urgent",
+        ])
+        .is_err());
     }
 
     #[test]

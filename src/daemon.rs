@@ -366,6 +366,7 @@ struct WaiterRecord {
     start_time: Option<u64>,
     started_at_ms: i64,
     attention: Option<String>,
+    min_attention: Option<String>,
     timeout_ms: Option<u64>,
 }
 
@@ -971,6 +972,7 @@ impl WaiterRecord {
             started_at_ms: self.started_at_ms,
             start_time: self.start_time,
             attention: self.attention.clone(),
+            min_attention: self.min_attention.clone(),
             timeout_ms: self.timeout_ms,
         }
     }
@@ -993,6 +995,7 @@ impl WaiterGuard {
         pid: Option<u32>,
         start_time: Option<u64>,
         attention: Option<String>,
+        min_attention: Option<String>,
         timeout_ms: Option<u64>,
     ) -> Self {
         let pid = pid.unwrap_or(0);
@@ -1005,6 +1008,7 @@ impl WaiterGuard {
             start_time,
             started_at_ms: now_ms(),
             attention,
+            min_attention,
             timeout_ms,
         });
         Self {
@@ -1887,6 +1891,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             session_id,
             address,
             attention,
+            min_attention,
             timeout_ms,
             waiter_pid,
             waiter_start_time,
@@ -1897,6 +1902,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 session_id,
                 address,
                 attention,
+                min_attention,
                 timeout_ms,
                 waiter_pid,
                 waiter_start_time,
@@ -2410,6 +2416,7 @@ async fn wait_for_message(
     session_id: String,
     address: String,
     attention: Option<String>,
+    min_attention: Option<String>,
     timeout_ms: Option<u64>,
     waiter_pid: Option<u32>,
     waiter_start_time: Option<u64>,
@@ -2420,6 +2427,7 @@ async fn wait_for_message(
         session_id,
         address,
         attention,
+        min_attention,
         timeout_ms,
         waiter_pid,
         waiter_start_time,
@@ -2434,6 +2442,7 @@ async fn wait_for_message_with_idle_ttl(
     session_id: String,
     address: String,
     attention: Option<String>,
+    min_attention: Option<String>,
     timeout_ms: Option<u64>,
     waiter_pid: Option<u32>,
     waiter_start_time: Option<u64>,
@@ -2484,8 +2493,13 @@ async fn wait_for_message_with_idle_ttl(
         waiter_pid,
         waiter_start_time,
         attention.clone(),
+        min_attention.clone(),
         timeout_ms,
     );
+    let parsed_min_attention = match min_attention.as_deref().map(Attention::parse).transpose() {
+        Ok(value) => value,
+        Err(e) => return proto::error_response(proto::ERROR_INCOMPATIBLE, e.to_string()),
+    };
     loop {
         if state.is_draining() {
             return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
@@ -2520,9 +2534,11 @@ async fn wait_for_message_with_idle_ttl(
             }
         };
         if let Some(row) = rows.into_iter().find(|row| {
-            attention
-                .as_deref()
-                .map_or(true, |want| row.attention == want)
+            wait_attention_matches(
+                row.attention.as_str(),
+                attention.as_deref(),
+                parsed_min_attention,
+            )
         }) {
             let current = match state.get_member(&store_key, &session_id, &address) {
                 Some(member) => member,
@@ -2612,6 +2628,24 @@ async fn wait_for_message_with_idle_ttl(
             .await;
         }
     }
+}
+
+fn wait_attention_matches(
+    row_attention: &str,
+    exact_attention: Option<&str>,
+    min_attention: Option<Attention>,
+) -> bool {
+    if let Some(want) = exact_attention {
+        if row_attention != want {
+            return false;
+        }
+    }
+    let Some(minimum) = min_attention else {
+        return true;
+    };
+    Attention::parse(row_attention)
+        .map(|actual| actual.meets_minimum(minimum))
+        .unwrap_or(false)
 }
 
 async fn ack_message(
@@ -3110,6 +3144,7 @@ mod p3_tests {
             session_id: session.to_string(),
             address: address.to_string(),
             attention: None,
+            min_attention: None,
             timeout_ms: Some(timeout_ms),
             waiter_pid: Some(std::process::id()),
             waiter_start_time: crate::session_watch::capture_process_start_time(std::process::id()),
@@ -4169,6 +4204,7 @@ mod p3_tests {
             session_id: "s1".to_string(),
             address: "addr:a".to_string(),
             attention: None,
+            min_attention: None,
             timeout_ms: Some(5_000),
             waiter_pid: None,
             waiter_start_time: None,
@@ -4226,6 +4262,7 @@ mod p3_tests {
                 start_time: None,
                 started_at_ms: now_ms(),
                 attention: None,
+                min_attention: None,
                 timeout_ms: Some(5_000),
             },
         );
@@ -4370,6 +4407,107 @@ mod p3_tests {
 
         let after_ack = request(state, wait_req(&store, "s1", "addr:a", 1)).await;
         assert!(matches!(after_ack, Response::Timeout));
+    }
+
+    #[tokio::test]
+    async fn wait_min_attention_delivers_oldest_eligible_and_preserves_skipped_lower() {
+        let state = test_state("wait-min-attention");
+        let store = store_key("wait-min-attention");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let background = backend
+            .insert_message(&NewMessage {
+                parent_id: None,
+                from_addr: Some("sender".to_string()),
+                to_addr: "addr:a".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: Attention::Background,
+                requires_disposition: false,
+                subject: Some("background".to_string()),
+                body: "background body".to_string(),
+                metadata: None,
+                sent_at_ms: now_ms(),
+            })
+            .await
+            .unwrap()
+            .id;
+        let interrupt = backend
+            .insert_message(&NewMessage {
+                parent_id: None,
+                from_addr: Some("sender".to_string()),
+                to_addr: "addr:a".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: Attention::Interrupt,
+                requires_disposition: false,
+                subject: Some("interrupt".to_string()),
+                body: "interrupt body".to_string(),
+                metadata: None,
+                sent_at_ms: now_ms(),
+            })
+            .await
+            .unwrap()
+            .id;
+
+        let filtered = request(
+            state.clone(),
+            Request::Wait {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                attention: None,
+                min_attention: Some("interrupt".to_string()),
+                timeout_ms: Some(1_000),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: crate::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
+            },
+        )
+        .await;
+        assert!(matches!(filtered, Response::Message { id, .. } if id == interrupt));
+        let ack = request(state.clone(), ack_req(&store, "s1", "addr:a", interrupt)).await;
+        assert!(matches!(
+            ack,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
+
+        let bare = request(state, wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(bare, Response::Message { id, .. } if id == background));
+    }
+
+    #[tokio::test]
+    async fn wait_min_attention_times_out_when_only_lower_priority_exists() {
+        let state = test_state("wait-min-attention-timeout");
+        let store = store_key("wait-min-attention-timeout");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let background = insert_test_message(&backend, "addr:a", None).await;
+
+        let filtered = request(
+            state.clone(),
+            Request::Wait {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                attention: None,
+                min_attention: Some("interrupt".to_string()),
+                timeout_ms: Some(1),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: crate::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
+            },
+        )
+        .await;
+        assert!(matches!(filtered, Response::Timeout));
+
+        let bare = request(state, wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(bare, Response::Message { id, .. } if id == background));
     }
 
     #[tokio::test]
@@ -4520,6 +4658,7 @@ mod p3_tests {
             store.clone(),
             "s1".to_string(),
             "addr:a".to_string(),
+            None,
             None,
             Some(5_000),
             Some(std::process::id()),
@@ -4897,6 +5036,7 @@ pub mod test_support {
                 session_id.to_string(),
                 address.to_string(),
                 None,
+                None,
                 Some(timeout_ms),
                 Some(std::process::id()),
                 crate::session_watch::capture_process_start_time(std::process::id()),
@@ -5037,6 +5177,7 @@ pub mod test_support {
             session_id: session_id.to_string(),
             address: address.to_string(),
             attention: None,
+            min_attention: None,
             timeout_ms: Some(timeout_ms),
             waiter_pid: Some(std::process::id()),
             waiter_start_time: crate::session_watch::capture_process_start_time(std::process::id()),

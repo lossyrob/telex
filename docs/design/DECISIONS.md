@@ -1376,3 +1376,25 @@ message, `ack`, dedupe by id, then re-arm before longer processing.
 operator discipline. Telex remains at-least-once across crashes and unacked delivery, but it no longer
 fans one unacked `(message_id, recipient)` to sibling live waiters for the same station. Multi-recipient
 fan-out is unchanged: acking recipient A does not consume recipient B.
+
+## 0030 — Attention-gated waits for focused work
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** The detached waiter loop should not make every background/fyi message feel urgent while
+an agent is already doing foreground work. At the same time, truly urgent messages still need a wake at
+the next turn boundary. The daemon already carries message attention levels and a `Wait` attention
+field, but the CLI had no way to request a threshold filter.
+
+**Decision.** Add `telex wait --min-attention <interrupt|next-checkpoint|background|fyi>` as an
+inclusive priority threshold. Priority order is `interrupt` > `next-checkpoint` > `background` > `fyi`.
+Bare `telex wait` remains unfiltered. Filtering is eligibility-only and preserves oldest-first order
+among eligible messages; lower-priority skipped messages remain pending in the durable buffer. The
+focused-work skill pattern is: arm `--min-attention interrupt`, do the current work, then at a
+checkpoint drain/ack/disposition buffered lower-priority messages and re-arm in the appropriate mode.
+
+**Consequences.** Agents get a first-class "urgent-only while busy" phase without multiple concurrent
+waiters. Because older daemons would ignore unknown Wait fields, this is protocol/capability gated with
+minor `1.2` and `wait_min_attention_p9`. New clients fail closed against older daemons rather than
+silently treating an interrupt-only wait as unfiltered.

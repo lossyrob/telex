@@ -9,7 +9,7 @@ use std::fmt;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_MAJOR: u16 = 1;
-pub const PROTOCOL_MINOR: u16 = 1;
+pub const PROTOCOL_MINOR: u16 = 2;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
@@ -24,6 +24,7 @@ pub const CAP_MEMBERSHIP_P3: &str = "membership_p3";
 pub const CAP_LIVENESS_P5: &str = "liveness_p5";
 pub const CAP_STATUS_P5: &str = "status_p5";
 pub const CAP_STATION_LIFECYCLE_P8: &str = "station_lifecycle_p8";
+pub const CAP_WAIT_MIN_ATTENTION_P9: &str = "wait_min_attention_p9";
 
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
@@ -35,6 +36,7 @@ pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_LIVENESS_P5,
     CAP_STATUS_P5,
     CAP_STATION_LIFECYCLE_P8,
+    CAP_WAIT_MIN_ATTENTION_P9,
 ];
 
 pub const ERROR_INCOMPATIBLE: &str = "Incompatible";
@@ -182,6 +184,8 @@ pub enum Request {
         address: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         attention: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        min_attention: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -426,6 +430,8 @@ pub struct LiveWaiterStatus {
     pub start_time: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attention: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub min_attention: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
 }

@@ -47,6 +47,10 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
         println!("before longer processing. In Copilot CLI on Windows, prefer detaching a");
         println!("variable-free `pwsh -File <wait-once.ps1> ...` wrapper; bare external");
         println!("`telex wait ...` detached launches may silently no-op in some harnesses.");
+        println!(
+            "While focused, arm with `--min-attention interrupt`; at checkpoints drain inbox,"
+        );
+        println!("then re-arm interrupt-only or unfiltered depending on whether you are idle.");
         println!("For teardown or upgrade, run `telex station stop --address {addr}` first; it");
         println!("releases the station and waits for tracked live waiters to exit.");
         println!("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");

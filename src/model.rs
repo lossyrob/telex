@@ -36,6 +36,19 @@ impl Attention {
         }
     }
 
+    pub fn priority(self) -> u8 {
+        match self {
+            Attention::Interrupt => 3,
+            Attention::NextCheckpoint => 2,
+            Attention::Background => 1,
+            Attention::Fyi => 0,
+        }
+    }
+
+    pub fn meets_minimum(self, minimum: Attention) -> bool {
+        self.priority() >= minimum.priority()
+    }
+
     pub fn parse(s: &str) -> Result<Self> {
         Ok(match s.trim().to_ascii_lowercase().as_str() {
             "interrupt" => Attention::Interrupt,

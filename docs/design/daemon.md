@@ -205,6 +205,21 @@ the stdout flush as pure transport: the file artifacts are likewise transport-on
 ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)). See `SKILL.md`
 ("Copilot CLI detached waiter pattern") and ADR 0026.
 
+#### 3.2.2 `--min-attention` threshold waits (two-phase attention loop)
+
+`telex wait --min-attention <LEVEL>` delivers only messages whose attention is at least that
+priority. Priority order is `interrupt` > `next-checkpoint` > `background` > `fyi`; the threshold is
+inclusive (`next-checkpoint` wakes for `interrupt` and `next-checkpoint`). Bare `telex wait` remains
+back-compatible and wakes on any pending message. Filtering changes eligibility only: among eligible
+messages, delivery remains oldest-first by message id, and skipped lower-priority messages stay
+durably buffered until a later checkpoint drain or a lower-threshold/bare wait.
+
+The intended focused-work pattern is two-phase: arm a single detached wait with
+`--min-attention interrupt` while doing foreground work, then at a safe checkpoint inspect and
+ack/disposition the buffered lower-priority messages via `inbox`/`read`. Because only one live waiter
+is accepted per station, an agent switches modes by letting the current waiter complete or using
+`station stop` + `attach`, then arming either another interrupt-only waiter or a bare wait if idle.
+
 ### 3.3 `wait` reconnect-on-EOF grace
 
 A daemon **restart or handoff is not a turn failure when a replacement daemon already exists**.

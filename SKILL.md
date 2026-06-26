@@ -93,13 +93,29 @@ Drive the loop from your own turn cycle:
 once:   telex attach --address <addr> --description "<s>"
 then repeat:
   1. start one detached background command named `TELEX MESSAGE WAITER`:
-     `telex wait --address <addr> --out-dir <dir>` (writes message.json/status.json/exit.code)
+     while focused on other work: `telex wait --address <addr> --min-attention interrupt --out-dir <dir>`
+     while idle/ready for anything: `telex wait --address <addr> --out-dir <dir>`
   2. it blocks until one message, exits, and the runtime completion wakes you
   3. read `<dir>\exit.code` (not the shell task exit code):
      0 -> parse `message.json`, run `telex ack`, dedupe by id, then start a fresh wait before longer processing
      5 -> attach/wait again if the session is still live
      2/3/4 -> re-arm or restart as indicated above (see `status.json` for detail)
 ```
+
+### Two-phase attention loop
+
+When you are actively working, arm a phase-1 waiter with
+`--min-attention interrupt`. It wakes only for urgent messages; `next-checkpoint`,
+`background`, and `fyi` messages stay durably buffered for your next checkpoint.
+When you finish the current unit of work or reach a natural checkpoint, do phase
+2: inspect `telex inbox --all --address <addr>`, read/ack/disposition the
+pending messages you are ready to handle, then either continue with an
+interrupt-only waiter or, if you are idle, arm an unfiltered waiter.
+
+Do not run an interrupt-only waiter and an unfiltered waiter at the same time:
+the daemon permits only one live waiter per station. To switch modes, let the
+current waiter complete, or stop the station (`telex station stop`), re-attach,
+and arm the new mode.
 
 > **Gotcha — the invisible-loop trap.** Do **not** wrap `telex wait` in an
 > infinite background loop (`while true; do telex wait; done`). Many agent
@@ -136,9 +152,14 @@ param(
   [Parameter(Mandatory)] [string]$Telex,
   [Parameter(Mandatory)] [string]$Address,
   [Parameter(Mandatory)] [string]$Session,
-  [Parameter(Mandatory)] [string]$OutDir
+  [Parameter(Mandatory)] [string]$OutDir,
+  [string]$MinAttention
 )
-& $Telex --json --address $Address wait --session $Session --out-dir $OutDir
+if ([string]::IsNullOrWhiteSpace($MinAttention)) {
+  & $Telex --json --address $Address wait --session $Session --out-dir $OutDir
+} else {
+  & $Telex --json --address $Address wait --session $Session --min-attention $MinAttention --out-dir $OutDir
+}
 exit $LASTEXITCODE
 ```
 
@@ -152,7 +173,7 @@ On the detached completion notification:
 1. Read `<dir>\exit.code` (the completion marker); do not trust the Copilot detached task's exit code.
 2. If it is `0`, parse `<dir>\message.json`. Otherwise read `<dir>\status.json` and the exit-code table.
 3. Run `telex ack --address <addr> --id <message-id>` and dedupe by `message_id`.
-4. Immediately arm the next detached wait before longer processing, then disposition the work.
+4. Arm the next detached wait in the right mode: interrupt-only if resuming focused work, unfiltered if idle/ready for anything.
 
 `wait` also writes `<dir>\wait.pid` at startup. If you need to tear down the
 station before a message arrives, prefer `telex station stop --address <addr>`:
@@ -308,7 +329,7 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex wait` | Block on the local exchange; on delivery print one message as JSON and exit. Does not spawn a missing daemon; run `attach` first or after exit 3. | `--address <addr>`, `--session <id>`, `--timeout-ms N`, `--reconnect-grace-ms N` |
+| `telex wait` | Block on the local exchange; on delivery print one message as JSON and exit. Does not spawn a missing daemon; run `attach` first or after exit 3. Use `--min-attention interrupt` while focused. | `--address <addr>`, `--session <id>`, `--timeout-ms N`, `--min-attention <level>`, `--reconnect-grace-ms N` |
 | `telex inbox` | List actionable messages requiring disposition and recent messages for the address. | `--address <addr>`, `--all`, `--limit N` |
 | `telex read` | Read a message. `--thread` shows compact thread context; `--full` shows full history. | `--id <message-id>`, `--thread`, `--full` |
 
