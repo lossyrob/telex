@@ -67,7 +67,7 @@ async fn send_once(
             session_id: session_id.to_string(),
             from_addr,
             to_addr: args.to.clone(),
-            cc: args.cc.clone(),
+            cc: normalize_cc(&args.cc),
             kind: args.kind.clone(),
             attention: args.attention.clone(),
             requires_disposition: args.requires_disposition,
@@ -76,6 +76,27 @@ async fn send_once(
             metadata: args.metadata.clone(),
         })
         .await?)
+}
+
+fn normalize_cc(values: &[String]) -> Option<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for value in values {
+        for part in value.split(',') {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if seen.insert(trimmed.to_string()) {
+                out.push(trimmed.to_string());
+            }
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out.join(","))
+    }
 }
 
 async fn register_for_retry(store_key: &str, session_id: &str, address: &str) -> Result<()> {

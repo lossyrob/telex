@@ -1220,6 +1220,72 @@ fn real_process_delivery_role_metadata_for_primary_and_cc() {
 }
 
 #[test]
+fn real_process_send_accepts_repeated_cc_flags() {
+    let env = ProcessEnv::new("real-repeat-cc");
+    let sender = "real-repeat-cc-sender";
+    let primary = "real-repeat-cc-primary";
+    let cc_one = "real-repeat-cc-one";
+    let cc_two = "real-repeat-cc-two";
+    let sender_addr = "addr:real-repeat-cc-sender";
+    let primary_addr = "addr:real-repeat-cc-primary";
+    let cc_one_addr = "addr:real-repeat-cc-one";
+    let cc_two_addr = "addr:real-repeat-cc-two";
+
+    env.attach(sender, sender_addr);
+    env.attach(primary, primary_addr);
+    env.attach(cc_one, cc_one_addr);
+    env.attach(cc_two, cc_two_addr);
+    let sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            primary_addr,
+            "--cc",
+            cc_one_addr,
+            "--cc",
+            cc_two_addr,
+            "--subject",
+            "repeat cc",
+            "--body",
+            "repeat cc body",
+        ],
+        Duration::from_secs(5),
+    );
+    sent.assert_success("send repeated cc");
+    let id = message_id(&sent.json("send repeated cc"));
+
+    for (session, address) in [(cc_one, cc_one_addr), (cc_two, cc_two_addr)] {
+        let inbox = env.run_with_session(
+            session,
+            ["--json", "--address", address, "inbox", "--all"],
+            Duration::from_secs(5),
+        );
+        inbox.assert_success("cc inbox repeated");
+        let inbox_json = inbox.json("cc inbox repeated");
+        assert!(
+            inbox_json
+                .get("items")
+                .and_then(Value::as_array)
+                .unwrap()
+                .iter()
+                .any(|item| {
+                    item.get("id").and_then(Value::as_i64) == Some(id)
+                        && item.get("delivery_role").and_then(Value::as_str) == Some("cc")
+                }),
+            "cc recipient {address} should see repeated-cc message: {inbox_json}"
+        );
+    }
+}
+
+#[test]
 fn real_process_disposition_defaults_to_current_recipient_not_primary() {
     let env = ProcessEnv::new("real-disposition-recipient");
     let sender = "real-disposition-recipient-sender";

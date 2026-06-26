@@ -261,7 +261,7 @@ telex send --to <addr> --subject "<subject>" --body-file <path>   # body from a 
 Useful send flags:
 
 ```sh
-telex send --to <addr> --from <your-addr> --subject "<s>" --body "<s>" --cc <a,b> --kind <s> --attention interrupt|next-checkpoint|background|fyi --requires-disposition --metadata <json>
+telex send --to <addr> --from <your-addr> --subject "<s>" --body "<s>" --cc <a,b> --cc <c> --kind <s> --attention interrupt|next-checkpoint|background|fyi --requires-disposition --metadata <json>
 ```
 
 `--body` and `--body-file` are mutually exclusive and exactly one is required. Prefer
@@ -349,7 +349,7 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex send` | Send through the local exchange and print a delivery/queue/reject receipt plus message id. `from` must be an attended address for the session (or unambiguous from membership). | `--session <id>`, `--to <addr>`, `--from <addr>`, `--subject <s>`, `--body <s>`, `--body-file <path>`, `--cc <a,b>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition`, `--metadata <json>` |
+| `telex send` | Send through the local exchange and print a delivery/queue/reject receipt plus message id. `from` must be an attended address for the session (or unambiguous from membership). `--cc` accepts repeated flags and comma-separated values. | `--session <id>`, `--to <addr>`, `--from <addr>`, `--subject <s>`, `--body <s>`, `--body-file <path>`, `--cc <a,b>`, `--cc <c>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition`, `--metadata <json>` |
 | `telex reply` | Reply under a parent message thread through the local exchange. | `--session <id>`, `--to-message <id>`, `--body <s>`, `--body-file <path>`, `--from <addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition` |
 
 ### DISPOSITION

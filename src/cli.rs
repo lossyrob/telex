@@ -242,9 +242,9 @@ pub struct SendArgs {
     /// Read the message body from UTF-8 (`-` stdin); capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body_file: Option<String>,
-    /// Comma-separated cc addresses (visible, not interrupting).
-    #[arg(long)]
-    pub cc: Option<String>,
+    /// CC addresses (visible observers). May be repeated and/or comma-separated.
+    #[arg(long, value_delimiter = ',')]
+    pub cc: Vec<String>,
     /// Message kind/profile label.
     #[arg(long, default_value = "note")]
     pub kind: String,
@@ -682,6 +682,29 @@ mod tests {
             "urgent",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn send_cc_accepts_repeated_and_comma_separated_values() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:sender",
+            "send",
+            "--to",
+            "addr:to",
+            "--body",
+            "hello",
+            "--cc",
+            "addr:a,addr:b",
+            "--cc",
+            "addr:c",
+        ])
+        .unwrap();
+        let Command::Send(args) = cli.command else {
+            panic!("expected send command");
+        };
+        assert_eq!(args.cc, vec!["addr:a", "addr:b", "addr:c"]);
     }
 
     #[test]
