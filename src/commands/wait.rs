@@ -161,7 +161,15 @@ async fn wait_loop<C: WaitConnector>(
                 Err(crate::daemon::DaemonError::NotRunning(e)) => {
                     return Ok(WaitTerminal::DaemonGone(e));
                 }
-                Err(e) => return Err(e.into()),
+                Err(crate::daemon::DaemonError::Unauthorized(e)) => {
+                    return Err(crate::daemon::DaemonError::Unauthorized(e).into());
+                }
+                Err(crate::daemon::DaemonError::Incompatible(e)) => {
+                    return Err(crate::daemon::DaemonError::Incompatible(e).into());
+                }
+                Err(e) => {
+                    return Ok(WaitTerminal::DaemonGone(e.to_string()));
+                }
             },
         };
 
