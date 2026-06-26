@@ -1740,6 +1740,90 @@ fn real_process_status_reports_unattended_with_backlog() {
 }
 
 #[test]
+fn real_process_station_status_filters_by_session_and_reports_waiter_state() {
+    let env = ProcessEnv::new("real-station-status");
+    let session = "real-station-status-session";
+    let address = "addr:real-station-status";
+    env.attach(session, address);
+
+    let initial = env.run_with_session(
+        session,
+        ["--json", "station", "status", "--session", session],
+        Duration::from_secs(5),
+    );
+    initial.assert_success("station status initial");
+    let initial_json = initial.json("station status initial");
+    assert_eq!(initial_json.get("count").and_then(Value::as_u64), Some(1));
+    assert_eq!(
+        initial_json
+            .get("stations")
+            .and_then(Value::as_array)
+            .unwrap()[0]
+            .get("station_health")
+            .and_then(Value::as_str),
+        Some("unattended")
+    );
+
+    let out_dir = env.root.join("station-status-wait");
+    let mut wait_cmd = env.command_with_session(session);
+    wait_cmd
+        .args([
+            "--json",
+            "--address",
+            address,
+            "wait",
+            "--session",
+            session,
+            "--timeout-ms",
+            "10000",
+            "--out-dir",
+            out_dir.to_str().expect("out dir is utf8"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let waiter = wait_cmd.spawn().expect("spawn station status waiter");
+    wait_until_path_exists(&out_dir.join("wait.pid"), Duration::from_secs(3));
+
+    let armed = env.run_with_session(
+        session,
+        ["--json", "station", "status", "--session", session],
+        Duration::from_secs(5),
+    );
+    armed.assert_success("station status armed");
+    let armed_json = armed.json("station status armed");
+    let station = &armed_json
+        .get("stations")
+        .and_then(Value::as_array)
+        .unwrap()[0];
+    assert_eq!(
+        station.get("station_health").and_then(Value::as_str),
+        Some("armed")
+    );
+    assert_eq!(
+        station.get("live_waiters_count").and_then(Value::as_u64),
+        Some(1)
+    );
+
+    let stopped = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "station",
+            "stop",
+            "--session",
+            session,
+            "--wait-grace-ms",
+            "3000",
+        ],
+        Duration::from_secs(5),
+    );
+    stopped.assert_success("station stop after status");
+    let _ = wait_status_with_timeout(waiter, Duration::from_secs(3));
+}
+
+#[test]
 fn real_process_status_hints_when_address_active_on_other_store() {
     let env = ProcessEnv::new("real-backend-hint");
     let session = "real-backend-hint-session";

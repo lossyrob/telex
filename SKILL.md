@@ -212,6 +212,11 @@ membership durably, and waits for tracked live waiters to exit. After it returns
 with `waiters_after: 0`, a later message to the address remains queued until a
 future attach/wait; it is not consumed by an orphan waiter.
 
+For turn-end guards or resume reconciliation, use
+`telex station status --session <id>` to get a compact JSON projection of the
+current session's attended addresses, waiter counts, station health, and pending
+unconsumed counts.
+
 For a local binary upgrade on Windows, use this order:
 
 ```sh
@@ -342,6 +347,8 @@ Postgres connections are configured once as named backends with `telex backend a
 |---|---|---|
 | `telex attach` | One-shot register: attach this session to the address through the local exchange, claim the epoch lease, and register directory metadata. Exits immediately. | `--address <addr>`, `--session <id>` (or `$TELEX_SESSION_ID` / `$COPILOT_AGENT_SESSION_ID`), `--description <s>`, `--scope <s>`, `--tags <a,b>`, `--watch-pid anchor:<pid>` |
 | `telex detach` | One-shot detach: drop this session's in-memory membership and release epoch ownership non-destructively. | `--address <addr>`, `--session <id>` |
+| `telex station status` | Machine-readable projection of one session's attended addresses and waiter health. | `--session <id>` |
+| `telex station stop` | Stop a station and drain tracked waiters before detach. | `--address <addr>`, `--session <id>`, `--wait-grace-ms N` |
 
 ### RECEIVE
 

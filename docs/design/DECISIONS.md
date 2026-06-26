@@ -1528,3 +1528,21 @@ an envelope `{ message, delivery, status }`, where `delivery` contains the role/
 
 **Consequences.** Existing consumers keep working, and new consumers can use the more explicit envelope
 shape without special-casing wait artifacts versus read responses.
+
+## 0038 — Session-filtered station status projection
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** A downstream Copilot plugin turn-end guard needs a cheap, stable JSON signal for the
+current session: which addresses it attends, whether each has an armed waiter, and whether backlog is
+pending. Parsing full daemon status or human text on every turn end is brittle and noisy.
+
+**Decision.** Add `telex station status --session <id>` as a compact machine-readable projection over
+the daemon's detailed status. It returns only the selected session's stations for the current store,
+including address, health, waiter counts, pending unconsumed count, last waiter delivery metadata, and
+live waiter details.
+
+**Consequences.** The plugin can implement an agent-stop/re-arm guard without new daemon state or a
+separate lifecycle protocol. The projection is read-only and requires the same same-user/admin-cap
+access as detailed daemon status.

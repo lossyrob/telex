@@ -191,8 +191,17 @@ pub struct DetachArgs {
 
 #[derive(Subcommand)]
 pub enum StationCmd {
+    /// Show this session's attended addresses and waiter state.
+    Status(StationStatusArgs),
     /// Stop this session's station: release membership and drain its live waiters.
     Stop(StationStopArgs),
+}
+
+#[derive(Args)]
+pub struct StationStatusArgs {
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Args)]
@@ -640,6 +649,17 @@ mod tests {
                 .unwrap()
                 .command,
             Command::Daemon(DaemonCmd::Stop(DaemonStopArgs { drain: true }))
+        ));
+    }
+
+    #[test]
+    fn station_status_subcommand_parses() {
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "station", "status", "--session", "s1"])
+                .unwrap()
+                .command,
+            Command::Station(StationCmd::Status(StationStatusArgs { session: Some(s) }))
+                if s == "s1"
         ));
     }
 
