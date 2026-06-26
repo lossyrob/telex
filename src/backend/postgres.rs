@@ -10,10 +10,29 @@ use tokio_postgres::{Row, Transaction};
 use super::{Backend, Capabilities};
 use crate::model::*;
 
-pub const NOTIFY_CHANNEL: &str = "telex_messages";
-
 pub struct PgBackend {
     client: AsyncMutex<tokio_postgres::Client>,
+    notify_channel: String,
+}
+
+pub fn notify_channel_for_schema(schema: Option<&str>) -> Result<String> {
+    let schema = schema.unwrap_or("public");
+    if schema != "public" {
+        sanitize_ident(schema)?;
+    }
+    Ok(format!(
+        "telex_messages_{:016x}",
+        fnv1a64(schema.as_bytes())
+    ))
+}
+
+fn fnv1a64(bytes: &[u8]) -> u64 {
+    let mut hash = 0xcbf29ce484222325u64;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
 }
 
 pub fn make_tls() -> Result<postgres_native_tls::MakeTlsConnector> {
@@ -316,8 +335,10 @@ impl PgBackend {
                 .await
                 .context("setting schema search_path")?;
         }
+        let notify_channel = notify_channel_for_schema(schema)?;
         Ok(Self {
             client: AsyncMutex::new(client),
+            notify_channel,
         })
     }
 }
@@ -808,6 +829,7 @@ impl Backend for PgBackend {
                 && current_owner.as_deref() == Some(owner_instance_id)
         });
         if !is_owner {
+            tx.rollback().await?;
             return Ok(DeliveryOutcome::NotOwner);
         }
 
@@ -1183,7 +1205,7 @@ impl Backend for PgBackend {
             serde_json::json!({"address": address, "id": id, "sent_at_ms": sent_at_ms}).to_string();
         let client = self.client.lock().await;
         client
-            .execute("SELECT pg_notify($1,$2)", &[&NOTIFY_CHANNEL, &payload])
+            .execute("SELECT pg_notify($1,$2)", &[&self.notify_channel, &payload])
             .await?;
         Ok(())
     }

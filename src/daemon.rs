@@ -2,7 +2,9 @@
 //! file handling, connect-or-spawn, and a P2 JSONL server loop.
 
 #[cfg(feature = "postgres")]
-use crate::backend::postgres::{make_tls as make_postgres_tls, sanitize_ident, NOTIFY_CHANNEL};
+use crate::backend::postgres::{
+    make_tls as make_postgres_tls, notify_channel_for_schema, sanitize_ident,
+};
 #[cfg(feature = "sqlite")]
 use crate::backend::sqlite::SqliteBackend;
 use crate::backend::Backend;
@@ -29,7 +31,7 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::io::BufReader;
-use tokio::sync::{Mutex as AsyncMutex, Notify};
+use tokio::sync::{mpsc, Mutex as AsyncMutex, Notify};
 #[cfg(feature = "postgres")]
 use tokio_postgres::AsyncMessage;
 
@@ -309,7 +311,7 @@ pub struct DaemonState {
     members: Mutex<BTreeMap<MemberKey, MemberRecord>>,
     waiters: Mutex<BTreeMap<WaiterKey, WaiterRecord>>,
     next_waiter_id: AtomicU64,
-    recent_errors: Mutex<VecDeque<RecentErrorStatus>>,
+    recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
     draining: AtomicBool,
 }
@@ -545,7 +547,7 @@ impl DaemonState {
             return Ok(entry.backend);
         }
 
-        let entry = open_store_entry(store_key).await?;
+        let entry = open_store_entry(store_key, self.recent_errors.clone()).await?;
         let backend = entry.backend.clone();
         self.stores
             .lock()
@@ -1559,7 +1561,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         members: Mutex::new(BTreeMap::new()),
         waiters: Mutex::new(BTreeMap::new()),
         next_waiter_id: AtomicU64::new(1),
-        recent_errors: Mutex::new(VecDeque::new()),
+        recent_errors: Arc::new(Mutex::new(VecDeque::new())),
         ended_sessions: Mutex::new(BTreeMap::new()),
         draining: AtomicBool::new(false),
     })
@@ -1576,7 +1578,10 @@ fn current_process_start_time_for_cap() -> Result<Option<u64>> {
     Ok(start_time)
 }
 
-async fn open_store_entry(store_key: &str) -> std::result::Result<StoreEntry, Response> {
+async fn open_store_entry(
+    store_key: &str,
+    recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
+) -> std::result::Result<StoreEntry, Response> {
     if let Some(path) = store_key.strip_prefix("sqlite:") {
         let path = Path::new(path);
         if !path.is_absolute() {
@@ -1630,7 +1635,13 @@ async fn open_store_entry(store_key: &str) -> std::result::Result<StoreEntry, Re
                 .await
                 .map_err(|e| proto::unsupported(format!("initializing Postgres store: {e:#}")))?;
             let notify = Arc::new(Notify::new());
-            spawn_postgres_notify_listener(store_key.to_string(), cfg, schema, notify.clone());
+            spawn_postgres_notify_listener(
+                store_key.to_string(),
+                cfg,
+                schema,
+                notify.clone(),
+                recent_errors,
+            );
             return Ok(StoreEntry {
                 kind: backend.kind().to_string(),
                 backend: Arc::new(backend),
@@ -1686,22 +1697,54 @@ fn spawn_postgres_notify_listener(
     cfg: tokio_postgres::Config,
     schema: Option<String>,
     notify: Arc<Notify>,
+    recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
 ) {
     tokio::spawn(async move {
         let mut backoff = BACKOFF_INITIAL;
         loop {
             match run_postgres_notify_listener(&cfg, schema.as_deref(), notify.clone()).await {
                 Ok(()) => {
-                    eprintln!("[telex] postgres LISTEN loop ended for {store_key}; reconnecting")
+                    push_recent_error_to_queue(
+                        &recent_errors,
+                        "NotifyDegraded",
+                        format!("postgres LISTEN loop ended for {store_key}; reconnecting"),
+                    );
                 }
-                Err(e) => eprintln!(
-                    "[telex] postgres LISTEN loop failed for {store_key}: {e:#}; reconnecting"
-                ),
+                Err(e) => {
+                    push_recent_error_to_queue(
+                        &recent_errors,
+                        "NotifyDegraded",
+                        format!("postgres LISTEN loop failed for {store_key}: {e:#}; reconnecting"),
+                    );
+                }
             }
             tokio::time::sleep(backoff).await;
             backoff = (backoff * 2).min(BACKOFF_MAX);
         }
     });
+}
+
+#[cfg(feature = "postgres")]
+enum PgListenEvent {
+    Message(AsyncMessage),
+    Error(tokio_postgres::Error),
+    Closed,
+}
+
+fn push_recent_error_to_queue(
+    recent_errors: &Arc<Mutex<VecDeque<RecentErrorStatus>>>,
+    kind: impl Into<String>,
+    message: impl Into<String>,
+) {
+    let mut errors = recent_errors.lock().unwrap();
+    errors.push_back(RecentErrorStatus {
+        at_ms: now_ms(),
+        kind: kind.into(),
+        message: message.into(),
+    });
+    while errors.len() > RECENT_ERROR_LIMIT {
+        errors.pop_front();
+    }
 }
 
 #[cfg(feature = "postgres")]
@@ -1714,6 +1757,21 @@ async fn run_postgres_notify_listener(
         .connect(make_postgres_tls()?)
         .await
         .context("connecting postgres LISTEN client")?;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        loop {
+            let event = match std::future::poll_fn(|cx| connection.poll_message(cx)).await {
+                Some(Ok(message)) => PgListenEvent::Message(message),
+                Some(Err(e)) => PgListenEvent::Error(e),
+                None => PgListenEvent::Closed,
+            };
+            let terminal = matches!(event, PgListenEvent::Error(_) | PgListenEvent::Closed);
+            if tx.send(event).is_err() || terminal {
+                break;
+            }
+        }
+    });
+
     client
         .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED")
         .await
@@ -1725,20 +1783,21 @@ async fn run_postgres_notify_listener(
             .await
             .context("setting LISTEN client search_path")?;
     }
+    let notify_channel = notify_channel_for_schema(schema)?;
     client
-        .batch_execute(&format!("LISTEN {NOTIFY_CHANNEL};"))
+        .batch_execute(&format!("LISTEN {notify_channel};"))
         .await
         .context("subscribing postgres LISTEN channel")?;
     loop {
-        match std::future::poll_fn(|cx| connection.poll_message(cx)).await {
-            Some(Ok(AsyncMessage::Notification(notification)))
-                if notification.channel() == NOTIFY_CHANNEL =>
+        match rx.recv().await {
+            Some(PgListenEvent::Message(AsyncMessage::Notification(notification)))
+                if notification.channel() == notify_channel =>
             {
                 notify.notify_waiters();
             }
-            Some(Ok(_)) => {}
-            Some(Err(e)) => return Err(e.into()),
-            None => return Ok(()),
+            Some(PgListenEvent::Message(_)) => {}
+            Some(PgListenEvent::Error(e)) => return Err(e.into()),
+            Some(PgListenEvent::Closed) | None => return Ok(()),
         }
     }
 }
@@ -3410,7 +3469,7 @@ mod p3_tests {
             members: Mutex::new(BTreeMap::new()),
             waiters: Mutex::new(BTreeMap::new()),
             next_waiter_id: AtomicU64::new(1),
-            recent_errors: Mutex::new(VecDeque::new()),
+            recent_errors: Arc::new(Mutex::new(VecDeque::new())),
             ended_sessions: Mutex::new(BTreeMap::new()),
             draining: AtomicBool::new(false),
         })
@@ -5382,7 +5441,7 @@ pub mod test_support {
                 members: Mutex::new(BTreeMap::new()),
                 waiters: Mutex::new(BTreeMap::new()),
                 next_waiter_id: AtomicU64::new(1),
-                recent_errors: Mutex::new(VecDeque::new()),
+                recent_errors: Arc::new(Mutex::new(VecDeque::new())),
                 ended_sessions: Mutex::new(BTreeMap::new()),
                 draining: AtomicBool::new(false),
             });

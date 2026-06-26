@@ -2,11 +2,11 @@
 
 use std::collections::BTreeMap;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use telex::backend::postgres::{make_tls, sanitize_ident};
 use telex::backend::Backend;
-use telex::daemon::test_support::{registered_epoch, TestDaemon};
+use telex::daemon::test_support::{registered_epoch, send_request, TestDaemon};
 use telex::daemon_ipc::{self as proto, Response};
 use telex::model::{now_ms, Attention, DeliveryOutcome, NewMessage};
 use telex::profiles::{self, BackendProfile, ConfigFile};
@@ -184,4 +184,106 @@ async fn postgres_competing_daemon_epoch_self_demotes_without_double_delivery() 
     let _ = std::fs::remove_dir_all(&root);
     restore_env("TELEX_CONFIG", prior_config);
     restore_env("TELEX_LIVENESS_WINDOW_SECS", prior_liveness);
+}
+
+#[tokio::test]
+async fn postgres_listen_notify_wakes_blocked_waiter() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_listen_notify_wakes_blocked_waiter") else {
+        return;
+    };
+
+    let prior_config = std::env::var_os("TELEX_CONFIG");
+    let schema = sanitize_ident(&format!(
+        "telex_daemon_pg_notify_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .expect("derived schema");
+    let cfg = pg_config(&url);
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("pre-test schema cleanup");
+
+    let profile = BackendProfile {
+        kind: "postgres".to_string(),
+        path: None,
+        url: Some(url.clone()),
+        auth: Some("password".to_string()),
+        password_env: std::env::var("TELEX_PG_PASSWORD")
+            .ok()
+            .filter(|pw| !pw.is_empty())
+            .map(|_| "TELEX_PG_PASSWORD".to_string()),
+        password_command: None,
+        schema: Some(schema.clone()),
+        entra_cred: None,
+        entra_scope: None,
+    };
+    let store_key = profiles::store_key(&profile, None);
+    let mut backends = BTreeMap::new();
+    backends.insert("pg-notify-test".to_string(), profile);
+    let config = ConfigFile {
+        default: Some("pg-notify-test".to_string()),
+        backends,
+    };
+    let root = std::env::temp_dir().join(format!(
+        "telex-daemon-pg-notify-config-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
+    std::fs::create_dir_all(&root).expect("create temp config dir");
+    let config_path = root.join("config.toml");
+    std::fs::write(
+        &config_path,
+        toml::to_string_pretty(&config).expect("serialize config"),
+    )
+    .expect("write temp config");
+    std::env::set_var("TELEX_CONFIG", &config_path);
+
+    let daemon = TestDaemon::new("pg-notify");
+    registered_epoch(&daemon, &store_key, "receiver", "addr:receiver").await;
+    registered_epoch(&daemon, &store_key, "sender", "addr:sender").await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    let waiter = {
+        let daemon = daemon.clone();
+        let store_key = store_key.clone();
+        tokio::spawn(async move {
+            let start = Instant::now();
+            let response = daemon
+                .wait(&store_key, "receiver", "addr:receiver", 1_000)
+                .await;
+            (start.elapsed(), response)
+        })
+    };
+    tokio::time::sleep(Duration::from_millis(25)).await;
+    let sent = daemon
+        .request(send_request(
+            &store_key,
+            "sender",
+            Some("addr:sender"),
+            "addr:receiver",
+            None,
+            "notify wake",
+        ))
+        .await;
+    assert!(
+        matches!(sent, Response::Sent { .. }),
+        "send failed: {sent:?}"
+    );
+    let (elapsed, response) = waiter.await.expect("waiter task");
+    assert!(
+        matches!(response, Response::Message { ref body, .. } if body == "notify wake"),
+        "waiter should receive message, got {response:?}"
+    );
+    assert!(
+        elapsed < Duration::from_millis(90),
+        "LISTEN/NOTIFY should wake before the 100ms polling fallback; elapsed={elapsed:?}"
+    );
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("post-test schema cleanup");
+    let _ = std::fs::remove_dir_all(&root);
+    restore_env("TELEX_CONFIG", prior_config);
 }
