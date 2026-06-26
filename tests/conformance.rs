@@ -1395,8 +1395,9 @@ mod sqlite_epoch_tests {
         );
     }
 
-    /// Fan-out creates independent per-recipient delivery rows: acking the primary `to`
-    /// recipient does not consume the same message for a cc recipient.
+    /// Fan-out creates a pending primary delivery and a visibility-only CC delivery. The CC
+    /// recipient can observe the message in inbox/read surfaces, but it is auto-seen for transport
+    /// and does not wedge `wait`.
     #[tokio::test]
     async fn epoch_fanout_is_per_recipient() {
         let (b, _path) = fresh("epoch-fanout").await;
@@ -1433,9 +1434,15 @@ mod sqlite_epoch_tests {
         );
         assert_eq!(
             b.fetch_undelivered(cc).await.unwrap().len(),
-            1,
-            "cc recipient has an independent pending delivery"
+            0,
+            "cc recipient is visible but not wait-deliverable"
         );
+        let cc_inbox = b.inbox(cc, true, 10).await.unwrap();
+        assert!(cc_inbox.iter().any(|item| {
+            item.message.id == msg.id
+                && item.delivery_role == "cc"
+                && !item.requires_disposition_for_current_recipient
+        }));
 
         assert_eq!(
             b.mark_consumed_if_current_owner(to, owner_to, to_epoch, msg.id)
@@ -1450,16 +1457,16 @@ mod sqlite_epoch_tests {
         );
         assert_eq!(
             b.fetch_undelivered(cc).await.unwrap().len(),
-            1,
-            "cc recipient is not cross-consumed by to ack"
+            0,
+            "cc recipient remains auto-seen after primary ack"
         );
 
         assert_eq!(
             b.mark_consumed_if_current_owner(cc, owner_cc, cc_epoch, msg.id)
                 .await
                 .unwrap(),
-            DeliveryOutcome::Marked,
-            "cc recipient can still mark its own delivery"
+            DeliveryOutcome::AlreadyConsumed,
+            "cc recipient transport row is already seen"
         );
     }
 

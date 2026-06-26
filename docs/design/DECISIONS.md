@@ -1439,3 +1439,22 @@ context inline.
 required dispositions, while CC recipients can observe without mistaking message-level `to`/required
 flags as their own workflow obligation. Later CC auto-seen/disposition-safety changes build on this
 metadata.
+
+## 0033 — CC deliveries are visibility-only and auto-seen
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Dogfooding used CC as visibility-only fan-out. Under the transport ack model, CC delivery
+rows were pending like primary rows, so a CC recipient that did not manually `ack` would receive the
+same observer copy on every `wait`, wedging its waiter behind traffic it was not expected to act on.
+
+**Decision.** Treat CC delivery rows as auto-consumed/seen for transport. They remain visible through
+`inbox --all` and `read` with `delivery_role: "cc"`, but they are not eligible for `wait` delivery and
+do not require manual `ack`. Primary `--to` deliveries remain pending until explicit ack, and
+multi-recipient visibility is still durable/auditable via the message row and inbox/read views.
+
+**Consequences.** CC observers no longer need to run transport `ack` just to advance their waiter.
+This preserves the intended convention: the `--to` recipient acts/dispositions, CC recipients observe.
+It also reduces the chance of CC recipients accidentally treating message-level `requires_disposition`
+as their own workflow obligation.

@@ -496,6 +496,11 @@ unacked message redelivers; consumers dedupe by `message_id`. There is **no** wa
 `DeliveryAck`, **no** per-emit `delivery_nonce`, and "delivered" is **not** the stdout flush —
 the consumed commit is the explicit agent ack, decoupled from any EMIT-time connection.
 
+CC recipients are visibility-only: their delivery rows are materialized as already seen/consumed for
+transport, so they remain visible in `inbox --all` / `read` with `delivery_role: "cc"` but do not wake
+`wait` and do not require manual `ack`. The primary `--to` recipient remains the actionable,
+ack-required delivery.
+
 ## 7. Authorization and the trust boundary
 
 ### 7.0 v1 threat model (normative)

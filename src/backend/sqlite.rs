@@ -1012,11 +1012,16 @@ fn backfill_delivery_rows(c: &Connection) -> Result<()> {
         .collect::<rusqlite::Result<Vec<_>>>()?;
     for (message_id, to_addr, cc, created_at_ms) in rows {
         for recipient in fanout_recipients(&to_addr, cc.as_deref()) {
+            let consumed_at_ms = if recipient == to_addr {
+                None
+            } else {
+                Some(created_at_ms)
+            };
             c.execute(
                 "INSERT OR IGNORE INTO deliveries
                  (message_id, recipient, delivered_at_ms, consumed_at_ms)
-                 VALUES (?1, ?2, ?3, NULL)",
-                params![message_id, recipient, created_at_ms],
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![message_id, recipient, created_at_ms, consumed_at_ms],
             )?;
         }
     }
@@ -1094,11 +1099,16 @@ fn materialize_pending_delivery_rows_for_recipient(c: &Connection, recipient: &s
             .iter()
             .any(|addr| addr == recipient)
         {
+            let consumed_at_ms = if recipient == to_addr {
+                None
+            } else {
+                Some(created_at_ms)
+            };
             c.execute(
                 "INSERT OR IGNORE INTO deliveries
                  (message_id, recipient, delivered_at_ms, consumed_at_ms)
-                 VALUES (?1, ?2, ?3, NULL)",
-                params![message_id, recipient, created_at_ms],
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![message_id, recipient, created_at_ms, consumed_at_ms],
             )?;
         }
     }
@@ -2068,11 +2078,16 @@ impl Backend for SqliteBackend {
                 // Fan-out: create a pending delivery row for each addressed recipient so
                 // `fetch_undelivered` and `mark_consumed_if_current_owner` are per-recipient.
                 for recipient in fanout_recipients(&m.to_addr, m.cc.as_deref()) {
+                    let consumed_at_ms = if recipient == m.to_addr {
+                        None
+                    } else {
+                        Some(now)
+                    };
                     c.execute(
                         "INSERT OR IGNORE INTO deliveries \
                          (message_id, recipient, delivered_at_ms, consumed_at_ms) \
-                         VALUES (?1, ?2, ?3, NULL)",
-                        params![id, recipient, now],
+                         VALUES (?1, ?2, ?3, ?4)",
+                        params![id, recipient, now, consumed_at_ms],
                     )?;
                 }
 

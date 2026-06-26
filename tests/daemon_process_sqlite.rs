@@ -1180,41 +1180,29 @@ fn real_process_delivery_role_metadata_for_primary_and_cc() {
         Some("cc")
     );
 
-    let cc_wait = wait_for_message(&env, cc, cc_addr, "role body");
-    assert_eq!(cc_wait.get("delivery_role").and_then(Value::as_str), Some("cc"));
-    assert_eq!(
-        cc_wait
-            .get("delivered_to")
-            .and_then(Value::as_str),
-        Some(cc_addr)
-    );
-    assert_eq!(
-        cc_wait
-            .get("primary_to")
-            .and_then(Value::as_str),
-        Some(primary_addr)
-    );
-    assert_eq!(
-        cc_wait
-            .get("requires_disposition_for_current_recipient")
-            .and_then(Value::as_bool),
-        Some(false)
-    );
-    let cc_ack = env.run_with_session(
+    let cc_wait = env.run_with_session(
         cc,
         [
             "--json",
             "--address",
             cc_addr,
-            "ack",
+            "wait",
             "--session",
             cc,
-            "--id",
-            &id.to_string(),
+            "--timeout-ms",
+            "250",
+            "--hang-ms",
+            "1000",
         ],
-        Duration::from_secs(5),
+        Duration::from_secs(3),
     );
-    cc_ack.assert_success("cc ack");
+    assert_eq!(
+        cc_wait.code,
+        Some(2),
+        "CC observer should not be woken/wedged by visibility-only delivery: stdout={} stderr={}",
+        cc_wait.stdout,
+        cc_wait.stderr
+    );
 
     let primary_wait = wait_for_message(&env, primary, primary_addr, "role body");
     assert_eq!(

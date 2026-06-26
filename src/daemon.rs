@@ -4183,7 +4183,7 @@ mod p3_tests {
     }
 
     #[tokio::test]
-    async fn acking_one_fanout_recipient_does_not_consume_the_other() {
+    async fn cc_fanout_is_visible_but_not_wait_deliverable() {
         let state = test_state("fanout");
         let store = store_key("fanout");
         registered_epoch(state.clone(), &store, "s1", "addr:a").await;
@@ -4206,24 +4206,23 @@ mod p3_tests {
             .await
             .unwrap()
             .is_empty());
-        assert_eq!(
-            backend
-                .fetch_undelivered("addr:b")
-                .await
-                .unwrap()
-                .iter()
-                .map(|m| m.id)
-                .collect::<Vec<_>>(),
-            vec![message_id]
-        );
+        assert!(backend
+            .fetch_undelivered("addr:b")
+            .await
+            .unwrap()
+            .is_empty());
+        let inbox_b = backend.inbox("addr:b", true, 10).await.unwrap();
+        assert!(inbox_b.iter().any(|item| {
+            item.message.id == message_id && item.delivery_role == "cc" && !item.actionable
+        }));
 
-        let wait_b = request(state.clone(), wait_req(&store, "s1", "addr:b", 1000)).await;
-        assert!(matches!(wait_b, Response::Message { id, .. } if id == message_id));
+        let wait_b = request(state.clone(), wait_req(&store, "s1", "addr:b", 1)).await;
+        assert!(matches!(wait_b, Response::Timeout));
         let ack_b = request(state, ack_req(&store, "s1", "addr:b", message_id)).await;
         assert!(matches!(
             ack_b,
             Response::Ack {
-                delivery_outcome: Some(DeliveryOutcome::Marked),
+                delivery_outcome: Some(DeliveryOutcome::AlreadyConsumed),
                 ..
             }
         ));

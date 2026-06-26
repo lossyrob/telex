@@ -312,9 +312,13 @@ async fn section17_05_explicit_ack_fanout_dedup() {
             .iter()
             .map(|m| m.id)
             .collect::<Vec<_>>(),
-        vec![message_id],
-        "same message remains deliverable to fan-out recipient"
+        Vec::<i64>::new(),
+        "cc fan-out recipient is visible but not wait-deliverable"
     );
+    let inbox_b = backend.inbox("addr:b", true, 10).await.expect("inbox b");
+    assert!(inbox_b.iter().any(|item| {
+        item.message.id == message_id && item.delivery_role == "cc" && !item.actionable
+    }));
     assert_needs_attach(daemon.ack(&store, "s1", "addr:c", message_id).await);
 
     let before_noop = backend.delivery_retention_count().await.expect("retention");
@@ -331,11 +335,11 @@ async fn section17_05_explicit_ack_fanout_dedup() {
     );
     assert!(matches!(
         daemon.wait(&store, "s1", "addr:b", 1_000).await,
-        Response::Message { id, .. } if id == message_id
+        Response::Timeout
     ));
     assert_ack_outcome(
         daemon.ack(&store, "s1", "addr:b", message_id).await,
-        DeliveryOutcome::Marked,
+        DeliveryOutcome::AlreadyConsumed,
     );
 }
 
