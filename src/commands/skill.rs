@@ -43,9 +43,10 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
         println!(
             "completes, read the artifact exit.code (not the shell task exit code); on 0 parse"
         );
-        println!("message.json, immediately re-arm a fresh detached `wait`, then `telex ack` and");
-        println!("act/disposition the delivered message. Use a variable-free command (a literal");
-        println!("<dir> path) — detached shell wrappers may strip $variables.");
+        println!("message.json, `telex ack`, dedupe by id, then re-arm a fresh detached `wait`");
+        println!("before longer processing. In Copilot CLI on Windows, prefer detaching a");
+        println!("variable-free `pwsh -File <wait-once.ps1> ...` wrapper; bare external");
+        println!("`telex wait ...` detached launches may silently no-op in some harnesses.");
         println!("For teardown or upgrade, run `telex station stop --address {addr}` first; it");
         println!("releases the station and waits for tracked live waiters to exit.");
         println!("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");

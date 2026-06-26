@@ -972,6 +972,7 @@ fn ensure_v2_invariants(c: &Connection) -> Result<()> {
          END;",
     )?;
     backfill_delivery_rows_once(c)?;
+    backfill_terminal_disposition_consumption_once(c)?;
     Ok(())
 }
 
@@ -1019,6 +1020,51 @@ fn backfill_delivery_rows(c: &Connection) -> Result<()> {
             )?;
         }
     }
+    Ok(())
+}
+
+fn backfill_terminal_disposition_consumption_once(c: &Connection) -> Result<()> {
+    let complete: bool = c
+        .query_row(
+            "SELECT value='1' FROM telex_schema_meta WHERE key='terminal_disposition_consumption_v1_complete'",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if complete {
+        return Ok(());
+    }
+    backfill_terminal_disposition_consumption(c)?;
+    c.execute(
+        "INSERT INTO telex_schema_meta(key, value)
+         VALUES ('terminal_disposition_consumption_v1_complete', '1')
+         ON CONFLICT(key) DO UPDATE SET value='1'",
+        [],
+    )?;
+    Ok(())
+}
+
+fn backfill_terminal_disposition_consumption(c: &Connection) -> Result<()> {
+    let terminal = terminal_dispositions_sql_list();
+    let sql = format!(
+        "UPDATE deliveries
+         SET consumed_at_ms = COALESCE(
+             (SELECT MAX(disp.at_ms)
+              FROM dispositions disp
+              WHERE disp.message_id = deliveries.message_id
+                AND disp.recipient = deliveries.recipient
+                AND disp.state IN ({terminal})),
+             delivered_at_ms)
+         WHERE consumed_at_ms IS NULL
+           AND EXISTS (
+             SELECT 1 FROM dispositions disp
+             WHERE disp.message_id = deliveries.message_id
+               AND disp.recipient = deliveries.recipient
+               AND disp.state IN ({terminal})
+           )"
+    );
+    c.execute(&sql, [])?;
     Ok(())
 }
 
@@ -2131,21 +2177,32 @@ impl Backend for SqliteBackend {
             by.map(str::to_string),
         );
         self.run(move |c| {
-            let now = now_ms();
-            c.execute(
-                "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms) \
-                 VALUES (?1,?2,?3,?4,?5,?6)",
-                params![message_id, r, s, n, b, now],
-            )?;
-            let id = c.last_insert_rowid();
-            Ok(DispositionRow {
-                id,
-                message_id,
-                recipient: r,
-                state: s,
-                note: n,
-                by_principal: b,
-                at_ms: now,
+            with_immediate_transaction(c, |c| {
+                let now = advance_clock_hwm(c)?;
+                c.execute(
+                    "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms) \
+                     VALUES (?1,?2,?3,?4,?5,?6)",
+                    params![message_id, r, s, n, b, now],
+                )?;
+                let id = c.last_insert_rowid();
+                if Disposition::is_terminal_str(&s) {
+                    materialize_pending_delivery_rows_for_recipient(c, &r)?;
+                    c.execute(
+                        "UPDATE deliveries SET consumed_at_ms=?1 \
+                         WHERE message_id=?2 AND recipient=?3 AND consumed_at_ms IS NULL",
+                        params![now, message_id, r],
+                    )?;
+                    persist_clock_hwm(c, now)?;
+                }
+                Ok(DispositionRow {
+                    id,
+                    message_id,
+                    recipient: r,
+                    state: s,
+                    note: n,
+                    by_principal: b,
+                    at_ms: now,
+                })
             })
         })
         .await
@@ -2547,6 +2604,106 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(second_count, 0, "marker should skip repeated full backfill");
+    }
+
+    #[tokio::test]
+    async fn terminal_disposition_migration_marks_delivery_consumed() {
+        let path = test_db_path("terminal-disposition-migration");
+        let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        backend.init_schema().await.unwrap();
+        backend
+            .run(|c| {
+                c.execute_batch(
+                    "INSERT INTO messages(id, thread_id, from_addr, to_addr, kind, attention, body, sent_at_ms, created_at_ms)
+                     VALUES (20, 20, 'sender', 'addr:terminal-migration', 'note', 'background', 'done already', 20, 20);
+                     INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms)
+                     VALUES (20, 'addr:terminal-migration', 'handled', 'legacy handled', 'tester', 25);
+                     INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
+                     VALUES (20, 'addr:terminal-migration', 20, NULL)
+                     ON CONFLICT(message_id, recipient) DO UPDATE SET consumed_at_ms=NULL;
+                     DELETE FROM telex_schema_meta WHERE key='terminal_disposition_consumption_v1_complete';",
+                )?;
+                Ok(())
+            })
+            .await
+            .unwrap();
+
+        backend.init_schema().await.unwrap();
+        let consumed: Option<i64> = backend
+            .run(|c| {
+                Ok(c.query_row(
+                    "SELECT consumed_at_ms FROM deliveries WHERE message_id=20 AND recipient='addr:terminal-migration'",
+                    [],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert_eq!(consumed, Some(25));
+        assert!(backend
+            .fetch_undelivered("addr:terminal-migration")
+            .await
+            .unwrap()
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn terminal_disposition_marks_transport_consumed() {
+        let path = test_db_path("terminal-disposition-consumes");
+        let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        backend.init_schema().await.unwrap();
+        let row = backend
+            .insert_message(&NewMessage {
+                parent_id: None,
+                from_addr: Some("sender".to_string()),
+                to_addr: "addr:terminal-live".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: Attention::Background,
+                requires_disposition: false,
+                subject: None,
+                body: "terminal live".to_string(),
+                metadata: None,
+                sent_at_ms: 30,
+            })
+            .await
+            .unwrap();
+        assert_eq!(
+            backend
+                .fetch_undelivered("addr:terminal-live")
+                .await
+                .unwrap()
+                .iter()
+                .map(|m| m.id)
+                .collect::<Vec<_>>(),
+            vec![row.id]
+        );
+        backend
+            .insert_disposition(
+                row.id,
+                "addr:terminal-live",
+                "handled",
+                None,
+                Some("tester"),
+            )
+            .await
+            .unwrap();
+        let consumed: Option<i64> = backend
+            .run(move |c| {
+                Ok(c.query_row(
+                    "SELECT consumed_at_ms FROM deliveries WHERE message_id=?1 AND recipient='addr:terminal-live'",
+                    params![row.id],
+                    |r| r.get(0),
+                )?)
+            })
+            .await
+            .unwrap();
+        assert!(consumed.is_some());
+        assert!(backend
+            .fetch_undelivered("addr:terminal-live")
+            .await
+            .unwrap()
+            .is_empty());
     }
 
     #[tokio::test]

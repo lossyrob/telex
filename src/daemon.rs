@@ -405,6 +405,7 @@ impl DaemonState {
         retention_warn_threshold: i64,
         idle_station_warn_threshold: usize,
     ) -> DaemonStatus {
+        self.prune_dead_waiters();
         let store_entries: Vec<(String, StoreEntry)> = self
             .stores
             .lock()
@@ -824,6 +825,7 @@ impl DaemonState {
         session_id: &str,
         address: &str,
     ) -> Vec<LiveWaiterStatus> {
+        self.prune_dead_waiters();
         self.waiters
             .lock()
             .unwrap()
@@ -838,11 +840,45 @@ impl DaemonState {
     }
 
     fn has_live_waiter_for(&self, store_key: &str, session_id: &str, address: &str) -> bool {
+        self.prune_dead_waiters();
         self.waiters.lock().unwrap().values().any(|waiter| {
             waiter.store_key == store_key
                 && waiter.session_id == session_id
                 && waiter.address == address
         })
+    }
+
+    fn prune_dead_waiters(&self) {
+        let mut removed = Vec::new();
+        {
+            let mut waiters = self.waiters.lock().unwrap();
+            waiters.retain(|_, waiter| {
+                let alive = waiter.pid == 0
+                    || crate::session_watch::process_alive_with_start_time(
+                        waiter.pid,
+                        waiter.start_time,
+                    );
+                if !alive {
+                    removed.push((
+                        waiter.store_key.clone(),
+                        waiter.session_id.clone(),
+                        waiter.address.clone(),
+                    ));
+                }
+                alive
+            });
+        }
+        if removed.is_empty() {
+            return;
+        }
+        let mut members = self.members.lock().unwrap();
+        for (store_key, session_id, address) in removed {
+            if let Some(member) =
+                members.get_mut(&Self::member_key(&store_key, &session_id, &address))
+            {
+                member.waiters = member.waiters.saturating_sub(1);
+            }
+        }
     }
 
     fn add_waiter(&self, mut waiter: WaiterRecord) -> u64 {
@@ -4165,6 +4201,40 @@ mod p3_tests {
             }
         ));
         assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
+    }
+
+    #[tokio::test]
+    async fn status_prunes_dead_pid_backed_waiter_records() {
+        let state = test_state("dead-waiter-status");
+        let store = store_key("dead-waiter-status");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        {
+            let mut members = state.members.lock().unwrap();
+            members
+                .get_mut(&DaemonState::member_key(&store, "s1", "addr:a"))
+                .unwrap()
+                .waiters = 1;
+        }
+        state.waiters.lock().unwrap().insert(
+            WaiterKey { waiter_id: 99 },
+            WaiterRecord {
+                waiter_id: 99,
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                pid: 2_000_000_000,
+                start_time: None,
+                started_at_ms: now_ms(),
+                attention: None,
+                timeout_ms: Some(5_000),
+            },
+        );
+
+        let status = state.status().await;
+        assert!(status.live_waiters.is_empty());
+        assert_eq!(status.members.len(), 1);
+        assert_eq!(status.members[0].waiters, 0);
+        assert!(status.members[0].live_waiters.is_empty());
     }
 
     #[tokio::test]

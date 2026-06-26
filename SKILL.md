@@ -114,19 +114,38 @@ tool. Let `telex wait --out-dir <dir>` write the result to files you read after
 the detached completion notification. Name the background task
 **`TELEX MESSAGE WAITER`** so it is obvious in `/tasks`.
 
-Run the waiter as a single **variable-free** detached command. On Windows the
-Copilot CLI detached PowerShell wrapper string-interpolates the command before the
-child runs, so any `$var` (`$run`, `$out`, `$LASTEXITCODE`, ...) is stripped and the
-waiter writes nothing. `--out-dir` removes the need for shell variables entirely —
-substitute a concrete, unique directory path:
+On Windows/Copilot CLI, use a small `.ps1` file and detach `pwsh -File ...` as
+the primary reliable pattern. Some Copilot CLI versions silently no-op when a
+detached task is a bare external executable (`telex wait ...`) even though the
+same command works attached; wrapping the same call in `pwsh -File` preserves
+PATH/environment and reliably runs the child. Keep the detached command itself
+variable-free: pass concrete literal paths/addresses as script arguments.
 
 ```powershell
-telex wait --address <addr> --out-dir "C:\path\to\telex-wait-<unique>"
+pwsh -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\telex-wait-once.ps1" `
+  -Telex "telex" `
+  -Address "<addr>" `
+  -Session "<session-id>" `
+  -OutDir "C:\path\to\telex-wait-<unique>"
 ```
 
-(No PowerShell variables in the detached command. If you genuinely need scripting,
-put it in a `.ps1` file and detach `pwsh -File <script>.ps1 ...`; file contents are
-not subject to the wrapper's interpolation.)
+The script body can be minimal:
+
+```powershell
+param(
+  [Parameter(Mandatory)] [string]$Telex,
+  [Parameter(Mandatory)] [string]$Address,
+  [Parameter(Mandatory)] [string]$Session,
+  [Parameter(Mandatory)] [string]$OutDir
+)
+& $Telex --json --address $Address wait --session $Session --out-dir $OutDir
+exit $LASTEXITCODE
+```
+
+If you see a detached completion notification but `<dir>\exit.code` is missing,
+the waiter process did not actually run (or the harness failed before launching
+it); do not infer a Telex idle timeout. Re-arm using the `.ps1 -File` wrapper and
+inspect the task/stdout log if your runtime exposes one.
 
 On the detached completion notification:
 
