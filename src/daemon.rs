@@ -2063,6 +2063,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             attention,
             requires_disposition,
             subject,
+            cc,
             body,
         } => {
             reply_message(
@@ -2075,6 +2076,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 attention,
                 requires_disposition,
                 subject,
+                cc,
                 body,
             )
             .await
@@ -2995,6 +2997,7 @@ async fn reply_message(
     attention: String,
     requires_disposition: bool,
     subject: Option<String>,
+    cc: Option<String>,
     body: String,
 ) -> Response {
     let attention = match Attention::parse(&attention) {
@@ -3047,7 +3050,7 @@ async fn reply_message(
         parent_id: Some(parent.id),
         from_addr: Some(from.clone()),
         to_addr: to.clone(),
-        cc: None,
+        cc,
         kind,
         attention,
         requires_disposition,
@@ -3742,6 +3745,7 @@ mod p3_tests {
                 attention: "background".to_string(),
                 requires_disposition: false,
                 subject: None,
+                cc: None,
                 body: "reply".to_string(),
             },
         )
@@ -3804,6 +3808,7 @@ mod p3_tests {
                 attention: "background".to_string(),
                 requires_disposition: false,
                 subject: None,
+                cc: None,
                 body: too_large,
             },
         )

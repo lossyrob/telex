@@ -292,7 +292,7 @@ telex reply --to-message <message-id> --body "<body>"
 telex reply --to-message <message-id> --body-file <path>   # reply body from a UTF-8 file (`-` = stdin)
 ```
 
-Optional reply flags are `--body-file <path>` (UTF-8 file body, `-` for stdin; mutually exclusive with `--body`, exactly one of the two required), `--from <your-addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, and `--requires-disposition`. As with `send`, `--from` defaults to `$TELEX_ADDRESS` / `--address`; the reply's destination is taken from the parent message's sender (so the parent must itself have had a `from`).
+Optional reply flags are `--body-file <path>` (UTF-8 file body, `-` for stdin; mutually exclusive with `--body`, exactly one of the two required), `--from <your-addr>`, `--subject <s>`, `--cc <a,b>` / repeated `--cc <c>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, and `--requires-disposition`. As with `send`, `--from` defaults to `$TELEX_ADDRESS` / `--address`; the reply's destination is taken from the parent message's sender (so the parent must itself have had a `from`).
 
 ## Reading
 
@@ -350,7 +350,7 @@ Postgres connections are configured once as named backends with `telex backend a
 | Command | Purpose | Key flags |
 |---|---|---|
 | `telex send` | Send through the local exchange and print a delivery/queue/reject receipt plus message id. `from` must be an attended address for the session (or unambiguous from membership). `--cc` accepts repeated flags and comma-separated values. | `--session <id>`, `--to <addr>`, `--from <addr>`, `--subject <s>`, `--body <s>`, `--body-file <path>`, `--cc <a,b>`, `--cc <c>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition`, `--metadata <json>` |
-| `telex reply` | Reply under a parent message thread through the local exchange. | `--session <id>`, `--to-message <id>`, `--body <s>`, `--body-file <path>`, `--from <addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition` |
+| `telex reply` | Reply under a parent message thread through the local exchange, optionally with CC visibility recipients. | `--session <id>`, `--to-message <id>`, `--body <s>`, `--body-file <path>`, `--from <addr>`, `--subject <s>`, `--cc <a,b>`, `--cc <c>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition` |
 
 ### DISPOSITION
 

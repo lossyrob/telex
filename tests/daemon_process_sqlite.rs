@@ -1286,6 +1286,100 @@ fn real_process_send_accepts_repeated_cc_flags() {
 }
 
 #[test]
+fn real_process_reply_accepts_cc_and_preserves_thread() {
+    let env = ProcessEnv::new("real-reply-cc");
+    let origin = "real-reply-cc-origin";
+    let replier = "real-reply-cc-replier";
+    let observer = "real-reply-cc-observer";
+    let origin_addr = "addr:real-reply-cc-origin";
+    let replier_addr = "addr:real-reply-cc-replier";
+    let observer_addr = "addr:real-reply-cc-observer";
+
+    env.attach(origin, origin_addr);
+    env.attach(replier, replier_addr);
+    env.attach(observer, observer_addr);
+    let sent = env.run_with_session(
+        origin,
+        [
+            "--json",
+            "--address",
+            origin_addr,
+            "send",
+            "--session",
+            origin,
+            "--from",
+            origin_addr,
+            "--to",
+            replier_addr,
+            "--subject",
+            "root",
+            "--body",
+            "root body",
+        ],
+        Duration::from_secs(5),
+    );
+    sent.assert_success("send root for reply");
+    let root = sent.json("send root for reply");
+    let root_id = message_id(&root);
+    let root_thread = root
+        .get("thread_id")
+        .and_then(Value::as_i64)
+        .expect("root thread id");
+
+    let reply = env.run_with_session(
+        replier,
+        [
+            "--json",
+            "--address",
+            replier_addr,
+            "reply",
+            "--session",
+            replier,
+            "--from",
+            replier_addr,
+            "--to-message",
+            &root_id.to_string(),
+            "--body",
+            "reply body",
+            "--cc",
+            observer_addr,
+        ],
+        Duration::from_secs(5),
+    );
+    reply.assert_success("reply with cc");
+    let reply_json = reply.json("reply with cc");
+    let reply_id = message_id(&reply_json);
+    assert_eq!(
+        reply_json.get("parent_id").and_then(Value::as_i64),
+        Some(root_id)
+    );
+    assert_eq!(
+        reply_json.get("thread_id").and_then(Value::as_i64),
+        Some(root_thread)
+    );
+
+    let observer_inbox = env.run_with_session(
+        observer,
+        ["--json", "--address", observer_addr, "inbox", "--all"],
+        Duration::from_secs(5),
+    );
+    observer_inbox.assert_success("observer inbox for reply cc");
+    let observer_json = observer_inbox.json("observer inbox for reply cc");
+    assert!(
+        observer_json
+            .get("items")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .any(|item| {
+                item.get("id").and_then(Value::as_i64) == Some(reply_id)
+                    && item.get("delivery_role").and_then(Value::as_str) == Some("cc")
+            }),
+        "observer should see cc reply in thread: {observer_json}"
+    );
+}
+
+#[test]
 fn real_process_disposition_defaults_to_current_recipient_not_primary() {
     let env = ProcessEnv::new("real-disposition-recipient");
     let sender = "real-disposition-recipient-sender";

@@ -71,9 +71,31 @@ async fn reply_once(
             attention: args.attention.clone(),
             requires_disposition: args.requires_disposition,
             subject: args.subject.clone(),
+            cc: normalize_cc(&args.cc),
             body,
         })
         .await?)
+}
+
+fn normalize_cc(values: &[String]) -> Option<String> {
+    let mut seen = std::collections::BTreeSet::new();
+    let mut out = Vec::new();
+    for value in values {
+        for part in value.split(',') {
+            let trimmed = part.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            if seen.insert(trimmed.to_string()) {
+                out.push(trimmed.to_string());
+            }
+        }
+    }
+    if out.is_empty() {
+        None
+    } else {
+        Some(out.join(","))
+    }
 }
 
 async fn register_for_retry(store_key: &str, session_id: &str, address: &str) -> Result<()> {

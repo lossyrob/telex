@@ -1477,3 +1477,19 @@ is provided, or the current address is not a recipient, the command fails and as
 **Consequences.** A CC observer can no longer accidentally clobber the primary recipient's disposition.
 Primary actors keep the natural `--address <me> handle --id <id>` flow, and scripts without any address
 must be explicit about whose workflow state they are changing.
+
+## 0035 — Replies support CC visibility
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** Before this change, `send` supported CC visibility recipients but `reply` did not. Agents
+had to choose between preserving thread context (`reply`) and notifying observers (`send --cc`), which
+was a poor fit for multi-party coordination.
+
+**Decision.** Add `reply --cc` with the same repeated/comma-separated parsing as `send --cc`. The reply
+keeps its parent/thread linkage and stores CC recipients on the reply message, so the same fan-out and
+CC visibility semantics apply.
+
+**Consequences.** Threaded conversations can include observers without losing history. CC recipients of
+replies remain visibility-only under ADR 0033.

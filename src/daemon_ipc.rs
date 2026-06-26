@@ -227,6 +227,8 @@ pub enum Request {
         requires_disposition: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subject: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cc: Option<String>,
         body: String,
     },
     Status {

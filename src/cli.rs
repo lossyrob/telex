@@ -279,6 +279,9 @@ pub struct ReplyArgs {
     /// Subject (defaults to "Re: <parent subject>").
     #[arg(long)]
     pub subject: Option<String>,
+    /// CC addresses (visible observers). May be repeated and/or comma-separated.
+    #[arg(long, value_delimiter = ',')]
+    pub cc: Vec<String>,
     /// Attention level.
     #[arg(long, default_value = "background")]
     pub attention: String,
@@ -703,6 +706,29 @@ mod tests {
         .unwrap();
         let Command::Send(args) = cli.command else {
             panic!("expected send command");
+        };
+        assert_eq!(args.cc, vec!["addr:a", "addr:b", "addr:c"]);
+    }
+
+    #[test]
+    fn reply_cc_accepts_repeated_and_comma_separated_values() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:sender",
+            "reply",
+            "--to-message",
+            "42",
+            "--body",
+            "hello",
+            "--cc",
+            "addr:a,addr:b",
+            "--cc",
+            "addr:c",
+        ])
+        .unwrap();
+        let Command::Reply(args) = cli.command else {
+            panic!("expected reply command");
         };
         assert_eq!(args.cc, vec!["addr:a", "addr:b", "addr:c"]);
     }
