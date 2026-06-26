@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-06-26T21:25:00.000Z",
+  "updatedAt": "2026-06-26T21:55:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -124,6 +124,12 @@
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 42
+      },
       "dependsOn": [
         "fencing-proof"
       ]
@@ -138,6 +144,12 @@
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 41
+      },
       "dependsOn": [
         "fencing-proof"
       ]
