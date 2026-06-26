@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-06-26T20:40:00.000Z",
+  "updatedAt": "2026-06-26T21:25:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -105,7 +105,7 @@
       "type": "gate",
       "title": "Fencing proof (epoch-guarded emission + ordered handoff)",
       "summary": "Executable proof that delivery emission is epoch-gated server-side and that graceful handoff/crash cannot double-deliver or flip ownership, on SQLite first. Proves daemon.md sec.11.3-11.4 (server-side delivery fence + ordered handoff) via the sec.17 gating tests. Distinct gate that postgres-parity, copilot-plugin, and seamless-upgrade depend on; downstream branches must not proceed until it passes.",
-      "status": "ready",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -119,7 +119,7 @@
       "type": "task",
       "title": "Postgres parity",
       "summary": "One LISTEN/NOTIFY connection in the daemon; daemon heartbeats local attendees' backend leases; per-machine presence with the backend lease as cross-machine source of truth. The daemon-respawn reclaim race is handled by epoch fencing; this node must prove epoch behavior under competing daemons/machines before it lands. Sketch; detailed at promotion.",
-      "status": "planned",
+      "status": "ready",
       "attention": "watch",
       "repoIds": [
         "telex"
@@ -133,7 +133,7 @@
       "type": "task",
       "title": "Copilot plugin: sessionEnd hook + skill",
       "summary": "sessionEnd hook removes the session's addresses via explicit Detach (daemon.md sec.14.2; healthy disconnect on quit + dismiss) - membership is explicit-only and daemon-native, NOT PR #31's filesystem registry (its hook plumbing is reused, the registry storage is dropped). The hook is a thin mapper of the Copilot env/payload (COPILOT_AGENT_SESSION_ID -> TELEX_SESSION_ID; COPILOT_LOADER_PID -> --watch-pid) onto generic inputs; the core COPILOT_* fallback is removed so Copilot JSON parsing is not a core protocol dependency. Move telex skill into a real Copilot plugin skill with one source serving both the CLI command and the plugin skill. Sketch; may split hook vs skill at promotion.",
-      "status": "planned",
+      "status": "ready",
       "attention": "watch",
       "repoIds": [
         "telex"
@@ -244,7 +244,7 @@
       "id": "daemon-core-usable",
       "title": "Daemon core usable + fencing proven (SQLite)",
       "summary": "Daemon core on SQLite with server-side epoch-fenced delivery proven (fencing-proof); a session attends and receives with zero per-session telex processes. The SQLite operator-unblock slice is in reach, needing the plugin.",
-      "status": "planned",
+      "status": "completed",
       "nodeIds": [
         "daemon-core",
         "fencing-proof"
