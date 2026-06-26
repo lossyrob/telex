@@ -10,6 +10,7 @@ use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use crate::cli::{
     AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotSessionEndArgs, CopilotSkillArgs,
@@ -21,6 +22,8 @@ use crate::model::now_ms;
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
 const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
 const HOOK_LOG_FILE: &str = "hook-events.ndjson";
+const HOOK_LOG_ROTATE_BYTES: u64 = 1_048_576;
+const LOCK_STALE_AFTER: Duration = Duration::from_secs(5 * 60);
 
 pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
     match cmd {
@@ -68,9 +71,14 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
     let session = match resolve_copilot_session(args.session.as_deref(), payload.as_deref()) {
         Some(session) => session,
         None => {
-            let event = HookLogEvent::session_end("missing_session", None, None);
+            let reason_code = if payload.is_some() {
+                "payload_unknown_shape"
+            } else {
+                "missing_session"
+            };
+            let event = HookLogEvent::session_end(reason_code, None, None);
             write_hook_log_best_effort(&event);
-            print_json(&serde_json::json!({"session_end": false, "outcome": "missing_session"}));
+            print_json(&serde_json::json!({"session_end": false, "outcome": reason_code}));
             return Ok(0);
         }
     };
@@ -155,8 +163,8 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
     } else {
         "partial_session_end"
     };
-    let event =
-        HookLogEvent::session_end(outcome, Some(&session), failed.first().map(String::as_str));
+    let failure_detail = (!failed.is_empty()).then(|| failed.join("; "));
+    let event = HookLogEvent::session_end(outcome, Some(&session), failure_detail.as_deref());
     write_hook_log_best_effort(&event);
     print_json(&serde_json::json!({
         "session_end": failed.is_empty(),
@@ -173,9 +181,14 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
     let session = match resolve_copilot_session(args.session.as_deref(), payload.as_deref()) {
         Some(session) => session,
         None => {
+            let reason_code = if payload.is_some() {
+                "payload_unknown_shape"
+            } else {
+                "missing_session"
+            };
             return allow_with_log(
                 None,
-                "missing_session",
+                reason_code,
                 "No Copilot session id was available.",
             )
         }
@@ -207,8 +220,7 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
     };
 
     let active_members = active_session_members(&status, &session);
-    let scope_key = guard_scope_key(&store_key, &active_members);
-    let state_path = turn_guard_state_path(&scope_key, &session)?;
+    let state_path = turn_guard_state_path(&session)?;
     let _lock = match StateLock::acquire(&state_path) {
         Ok(lock) => lock,
         Err(e) => {
@@ -254,11 +266,8 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
 }
 
 fn skill(args: CopilotSkillArgs) -> Result<i32> {
-    if args.raw {
-        print!("{}", crate::commands::skill::raw_skill());
-    } else {
-        print!("{}", crate::commands::skill::raw_skill());
-    }
+    let _ = args.raw;
+    print!("{}", crate::commands::skill::raw_skill());
     Ok(0)
 }
 
@@ -501,25 +510,12 @@ fn allow_with_log(session: Option<&str>, reason_code: &'static str, detail: &str
     Ok(0)
 }
 
-fn guard_scope_key(default_store_key: &str, members: &[MemberStatus]) -> String {
-    let stores = members
-        .iter()
-        .map(|member| member.store_key.clone())
-        .collect::<BTreeSet<_>>();
-    if stores.is_empty() {
-        default_store_key.to_string()
-    } else {
-        stores.into_iter().collect::<Vec<_>>().join("\n")
-    }
-}
-
-fn turn_guard_state_path(store_key: &str, session: &str) -> Result<PathBuf> {
+fn turn_guard_state_path(session: &str) -> Result<PathBuf> {
     let paths = crate::daemon::DaemonPaths::current()?;
     Ok(paths
         .run_dir
         .join("copilot")
         .join("turn-guard")
-        .join(crate::daemon::short_hash(store_key.as_bytes()))
         .join(format!("{}.json", path_token(session))))
 }
 
@@ -578,14 +574,33 @@ impl StateLock {
         if let Some(parent) = lock_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let file = OpenOptions::new()
+        let file = match OpenOptions::new()
             .write(true)
             .create_new(true)
-            .open(&lock_path)?;
+            .open(&lock_path)
+        {
+            Ok(file) => file,
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && Self::stale_lock(&lock_path) => {
+                let _ = std::fs::remove_file(&lock_path);
+                OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&lock_path)?
+            }
+            Err(e) => return Err(e.into()),
+        };
         Ok(Self {
             path: lock_path,
             _file: file,
         })
+    }
+
+    fn stale_lock(path: &Path) -> bool {
+        std::fs::metadata(path)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .is_some_and(|elapsed| elapsed > LOCK_STALE_AFTER)
     }
 }
 
@@ -600,17 +615,9 @@ fn cleanup_turn_guard_state_best_effort(session: &str) {
         return;
     };
     let root = paths.run_dir.join("copilot").join("turn-guard");
-    let file_name = format!("{}.json", path_token(session));
-    if let Ok(store_dirs) = std::fs::read_dir(&root) {
-        for entry in store_dirs.flatten() {
-            let path = entry.path().join(&file_name);
-            let _ = std::fs::remove_file(path);
-            let lock_path = entry
-                .path()
-                .join(format!("{}.lock", path_token(session)));
-            let _ = std::fs::remove_file(lock_path);
-        }
-    }
+    let file_stem = path_token(session);
+    let _ = std::fs::remove_file(root.join(format!("{file_stem}.json")));
+    let _ = std::fs::remove_file(root.join(format!("{file_stem}.lock")));
 }
 
 #[derive(Debug, Serialize)]
@@ -671,11 +678,24 @@ fn write_hook_log_best_effort(event: &HookLogEvent<'_>) {
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
     }
+    rotate_hook_log_best_effort(&path);
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(&path) {
         if let Ok(line) = serde_json::to_string(event) {
             let _ = writeln!(file, "{line}");
         }
     }
+}
+
+fn rotate_hook_log_best_effort(path: &Path) {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return;
+    };
+    if metadata.len() < HOOK_LOG_ROTATE_BYTES {
+        return;
+    }
+    let rotated = path.with_extension("ndjson.1");
+    let _ = std::fs::remove_file(&rotated);
+    let _ = std::fs::rename(path, rotated);
 }
 
 fn print_json(value: &serde_json::Value) {

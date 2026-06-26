@@ -6,7 +6,7 @@
         "type": "command",
         "powershell": "telex --json copilot session-end",
         "bash": "telex --json copilot session-end",
-        "timeoutSec": 10
+        "timeoutSec": 30
       }
     ],
     "agentStop": [
@@ -14,7 +14,7 @@
         "type": "command",
         "powershell": "telex --json copilot turn-guard",
         "bash": "telex --json copilot turn-guard",
-        "timeoutSec": 10
+        "timeoutSec": 30
       }
     ]
   }
