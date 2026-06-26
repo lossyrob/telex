@@ -526,14 +526,6 @@ fn emit_outcome(outcome: WaitOutcome, out_dir: Option<&Path>, address: &str) -> 
 fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std::io::Result<()> {
     ensure_out_dir(dir)?;
     let message_path = dir.join("message.json");
-    if let Some(message) = &outcome.message {
-        let body = serde_json::to_string_pretty(message).unwrap_or_else(|_| message.to_string());
-        atomic_write(&message_path, body.as_bytes())?;
-    } else if message_path.exists() {
-        // The out-dir may be reused across re-arms; drop any prior payload so a non-delivery
-        // outcome can never leave a stale message.json that a naive reader might re-consume.
-        let _ = std::fs::remove_file(&message_path);
-    }
     let status = serde_json::json!({
         "outcome": outcome.outcome,
         "exit_code": outcome.exit_code,
@@ -541,6 +533,30 @@ fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std
         "address": address,
         "written_at_ms": now_ms(),
     });
+    if let Some(message) = &outcome.message {
+        let body = serde_json::to_string_pretty(message).unwrap_or_else(|_| message.to_string());
+        atomic_write(&message_path, body.as_bytes())?;
+        let delivery = serde_json::json!({
+            "delivered_to": message.get("delivered_to"),
+            "primary_to": message.get("primary_to"),
+            "cc": message.get("cc"),
+            "delivery_role": message.get("delivery_role"),
+            "requires_disposition_for_current_recipient": message.get("requires_disposition_for_current_recipient"),
+        });
+        let envelope = serde_json::json!({
+            "message": message,
+            "delivery": delivery,
+            "status": status,
+        });
+        let envelope_body =
+            serde_json::to_string_pretty(&envelope).unwrap_or_else(|_| envelope.to_string());
+        atomic_write(&dir.join("delivery.json"), envelope_body.as_bytes())?;
+    } else if message_path.exists() {
+        // The out-dir may be reused across re-arms; drop any prior payload so a non-delivery
+        // outcome can never leave a stale message.json that a naive reader might re-consume.
+        let _ = std::fs::remove_file(&message_path);
+        let _ = std::fs::remove_file(dir.join("delivery.json"));
+    }
     let status_body = serde_json::to_string_pretty(&status).unwrap_or_else(|_| status.to_string());
     atomic_write(&dir.join("status.json"), status_body.as_bytes())?;
     atomic_write(
@@ -560,7 +576,7 @@ fn write_wait_start_artifacts(dir: &Path, waiter_pid: u32) -> std::io::Result<()
 }
 
 fn remove_stale_wait_completion_artifacts(dir: &Path) -> std::io::Result<()> {
-    for name in ["exit.code", "status.json", "message.json"] {
+    for name in ["exit.code", "status.json", "message.json", "delivery.json"] {
         let path = dir.join(name);
         match std::fs::remove_file(&path) {
             Ok(()) => {}
@@ -926,6 +942,30 @@ mod tests {
             status.get("address").and_then(|v| v.as_str()),
             Some("addr:a")
         );
+        let delivery: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("delivery.json")).unwrap())
+                .unwrap();
+        assert_eq!(
+            delivery
+                .get("message")
+                .and_then(|m| m.get("id"))
+                .and_then(|v| v.as_i64()),
+            Some(7)
+        );
+        assert_eq!(
+            delivery
+                .get("delivery")
+                .and_then(|d| d.get("delivery_role"))
+                .and_then(|v| v.as_str()),
+            Some("to")
+        );
+        assert_eq!(
+            delivery
+                .get("status")
+                .and_then(|s| s.get("outcome"))
+                .and_then(|v| v.as_str()),
+            Some("message")
+        );
 
         assert_eq!(
             std::fs::read_to_string(dir.join("exit.code"))
@@ -943,6 +983,7 @@ mod tests {
         std::fs::write(dir.join("exit.code"), b"0\n").unwrap();
         std::fs::write(dir.join("status.json"), b"stale").unwrap();
         std::fs::write(dir.join("message.json"), b"stale").unwrap();
+        std::fs::write(dir.join("delivery.json"), b"stale").unwrap();
         write_wait_start_artifacts(&dir, 12_345).unwrap();
         assert_eq!(
             std::fs::read_to_string(dir.join("wait.pid"))
@@ -956,6 +997,7 @@ mod tests {
         );
         assert!(!dir.join("status.json").exists());
         assert!(!dir.join("message.json").exists());
+        assert!(!dir.join("delivery.json").exists());
         std::fs::remove_dir_all(&dir).ok();
     }
 
@@ -1059,6 +1101,7 @@ mod tests {
         )
         .unwrap();
         assert!(dir.join("message.json").exists());
+        assert!(dir.join("delivery.json").exists());
 
         // Re-arm into the same dir, this time with no delivery: the stale payload must be gone.
         emit_outcome(
@@ -1068,6 +1111,7 @@ mod tests {
         )
         .unwrap();
         assert!(!dir.join("message.json").exists());
+        assert!(!dir.join("delivery.json").exists());
         assert_eq!(
             std::fs::read_to_string(dir.join("exit.code"))
                 .unwrap()

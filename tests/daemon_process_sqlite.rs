@@ -977,6 +977,25 @@ fn real_process_wait_out_dir_delivers_message_artifact() {
         status.get("outcome").and_then(Value::as_str),
         Some("message")
     );
+    let delivery: Value = serde_json::from_str(
+        &std::fs::read_to_string(out_dir.join("delivery.json"))
+            .expect("delivery.json artifact written"),
+    )
+    .expect("delivery.json parses");
+    assert_eq!(
+        delivery
+            .get("message")
+            .and_then(|m| m.get("body"))
+            .and_then(Value::as_str),
+        Some(body)
+    );
+    assert_eq!(
+        delivery
+            .get("delivery")
+            .and_then(|d| d.get("delivery_role"))
+            .and_then(Value::as_str),
+        Some("to")
+    );
 }
 
 #[test]

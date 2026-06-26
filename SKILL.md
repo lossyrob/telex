@@ -55,6 +55,7 @@ It fails closed rather than guessing.
 
    On exit, `telex wait --out-dir` writes into `<dir>`:
    - `message.json` — the delivered message (only on exit `0`);
+   - `delivery.json` — envelope `{ message, delivery, status }` (only on exit `0`);
    - `status.json` — `{ outcome, exit_code, detail, address, written_at_ms }`, always;
    - `exit.code` — the integer exit code, written **last** as the completion marker.
 
@@ -64,7 +65,7 @@ It fails closed rather than guessing.
    stdout; that regresses the waiter into foreground-ish UX. Trust the artifact
    `exit.code`, not the shell task exit code. The detached completion notification
    is the wake signal; after it arrives, read
-   `exit.code` (then `message.json` if it is `0`), `ack` the delivered message and
+   `exit.code` (then `delivery.json` or `message.json` if it is `0`), `ack` the delivered message and
    dedupe by id, then re-arm a fresh detached `wait` before longer processing.
    Do not hide `wait` inside an infinite shell loop.
    `wait` does **not** spawn the daemon. If the daemon is gone, `wait` exits 3 so
@@ -74,7 +75,7 @@ It fails closed rather than guessing.
 
    | Exit | Meaning | What you do |
    |---:|---|---|
-   | 0 | delivered | Read `message.json` (or stdout JSON), `ack` + dedupe by id, then re-arm a fresh `wait` before longer processing. |
+   | 0 | delivered | Read `delivery.json` (or `message.json`/stdout JSON), `ack` + dedupe by id, then re-arm a fresh `wait` before longer processing. |
    | 2 | idle-timeout | Nothing arrived before `--timeout-ms`; re-arm if still attending. |
    | 3 | daemon gone / not running | Run `telex attach` and re-arm. |
    | 4 | daemon hung / no response after a finite wait's `--timeout-ms + --hang-ms` watchdog | Re-arm or restart the daemon if repeated. |
@@ -106,7 +107,7 @@ then repeat:
      while idle/ready for anything: `telex wait --address <addr> --out-dir <dir>`
   2. it blocks until one message, exits, and the runtime completion wakes you
   3. read `<dir>\exit.code` (not the shell task exit code):
-     0 -> parse `message.json`, run `telex ack`, dedupe by id, then start a fresh wait before longer processing
+     0 -> parse `delivery.json` (or `message.json`), run `telex ack`, dedupe by id, then start a fresh wait before longer processing
      5 -> attach/wait again if the session is still live
      2/3/4 -> re-arm or restart as indicated above (see `status.json` for detail)
 ```
@@ -183,7 +184,7 @@ inspect the task/stdout log if your runtime exposes one.
 On the detached completion notification:
 
 1. Read `<dir>\exit.code` (the completion marker); do not trust the Copilot detached task's exit code.
-2. If it is `0`, parse `<dir>\message.json`. Otherwise read `<dir>\status.json` and the exit-code table.
+2. If it is `0`, parse `<dir>\delivery.json` (or `<dir>\message.json` for the flat legacy shape). Otherwise read `<dir>\status.json` and the exit-code table.
 3. Run `telex ack --address <addr> --id <message-id>` and dedupe by `message_id`.
 4. Arm the next detached wait in the right mode: interrupt-only if resuming focused work, unfiltered if idle/ready for anything.
 
@@ -192,6 +193,11 @@ station before a message arrives, prefer `telex station stop --address <addr>`:
 it releases the station and waits for the live waiter to exit. The PID file is a
 diagnostic fallback only; do not hunt OS process lists unless `station stop`
 reports a still-live waiter after its grace window.
+
+Shape note: `wait --out-dir/message.json` is the flat delivery message for
+back-compat. `delivery.json` is the envelope form (`message`, `delivery`,
+`status`) and is closer to `read --id`, which returns an enveloped
+`{ message, dispositions, ... }` shape.
 
 Do **not** use `list_powershell` (or any task-list status) as the source of truth
 for whether the waiter is armed or finished — a detached command can show as

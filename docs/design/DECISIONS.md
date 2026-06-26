@@ -1511,3 +1511,20 @@ detailed member set for the same address on other store keys. Report `also_activ
 **Consequences.** Wrong-backend calls become self-diagnosing without changing command routing or
 failing if no alternate activity exists. This is best-effort observability; it does not scan arbitrary
 offline backends.
+
+## 0037 — Wait out-dir has both flat and enveloped delivery artifacts
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** `wait --out-dir/message.json` is a flat message object while `read --id` returns an
+envelope (`message`, `dispositions`, optional thread context). Consumers that assumed one shape for the
+other saw null fields. Changing `message.json` would break existing wait consumers.
+
+**Decision.** Preserve flat `message.json` and add `delivery.json` on wait delivery. The new artifact is
+an envelope `{ message, delivery, status }`, where `delivery` contains the role/context metadata and
+`status` mirrors the wait status object. Non-delivery outcomes remove stale `delivery.json` alongside
+`message.json`.
+
+**Consequences.** Existing consumers keep working, and new consumers can use the more explicit envelope
+shape without special-casing wait artifacts versus read responses.

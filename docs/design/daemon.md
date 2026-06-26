@@ -188,14 +188,15 @@ unchanged; the files are purely additive:
 | File | When | Contents |
 |---|---|---|
 | `message.json` | exit `0` only | the delivered message (same object printed to stdout) |
+| `delivery.json` | exit `0` only | envelope `{ message, delivery, status }` |
 | `status.json` | always | `{ outcome, exit_code, detail, address, written_at_ms }` |
 | `exit.code` | always | the integer exit code, written **last** as the completion marker |
 | `wait.pid` | startup | the waiter process id, written before blocking |
 
 `exit.code` is written after the other files (each via a sibling temp-file + rename), so a
 reader that observes `exit.code` can treat all artifacts as fully written. On reuse of a `<DIR>`
-across re-arms, a non-delivery outcome removes any prior `message.json` so a stale payload cannot
-linger. Because `message.json` may contain the message body, artifacts are owner-only on Unix
+across re-arms, a non-delivery outcome removes any prior `message.json`/`delivery.json` so a stale
+payload cannot linger. Because `message.json`/`delivery.json` may contain the message body, artifacts are owner-only on Unix
 (directory `0700`, files `0600`); Windows local app data / `%TEMP%` are already per-user. The
 agent waits for
 the detached completion notification, reads `exit.code` (then `message.json` on `0`), and
@@ -204,6 +205,10 @@ the stdout flush as pure transport: the file artifacts are likewise transport-on
 **not** the consumed mark, which still fires only on the explicit agent `ack`
 ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)). See `SKILL.md`
 ("Copilot CLI detached waiter pattern") and ADR 0026.
+
+`message.json` intentionally stays flat for back-compat. `delivery.json` is the envelope shape for
+new consumers that want message, delivery-role context, and status in one document; `read --id`
+continues to return its own envelope with message/dispositions.
 
 #### 3.2.2 `--min-attention` threshold waits (two-phase attention loop)
 
