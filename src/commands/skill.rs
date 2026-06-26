@@ -37,8 +37,12 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
         );
         println!("delivery buffer, and liveness. Then loop one delivery at a time: run a SINGLE");
         println!(
-            "detached background `telex wait --out-dir <dir>` task named TELEX MESSAGE WAITER."
+            "fully detached background `telex wait --out-dir <dir>` task named TELEX MESSAGE WAITER."
         );
+        println!(
+            "Use Copilot CLI `detach: true`: detached tasks do wake the session on completion"
+        );
+        println!("without keeping the terminal in foreground/spinner-like waiter UX.");
         println!("It writes message.json/status.json/exit.code into <dir>. When the detached task");
         println!(
             "completes, read the artifact exit.code (not the shell task exit code); on 0 parse"

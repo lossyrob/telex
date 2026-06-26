@@ -40,9 +40,14 @@ It fails closed rather than guessing.
    `anchor` pid with a start-time reuse guard; when it dies, blocked waits return
    `PresenceEnded` but the station and durable message buffer remain.
 
-2. Wait for one message with a single-shot detached background `telex wait`. Pass
-   `--out-dir <dir>` so the waiter writes its result to files; the woken agent
-   reads those instead of relying on captured stdout:
+2. Wait for one message with a single-shot **fully detached** background
+   `telex wait` (`detach: true` in Copilot CLI). This is for **UX**, not just
+   shutdown survival: a session-attached async waiter keeps the terminal busy /
+   spinner-like and competes with normal user-agent interaction. A fully detached
+   background task still wakes the session when it completes; that completion
+   notification is the waiter loop's wake signal. Pass `--out-dir <dir>` so the
+   waiter writes its result to files; the woken agent reads those instead of
+   relying on captured stdout:
 
    ```sh
    telex wait --address <addr> --out-dir <dir>
@@ -53,10 +58,12 @@ It fails closed rather than guessing.
    - `status.json` — `{ outcome, exit_code, detail, address, written_at_ms }`, always;
    - `exit.code` — the integer exit code, written **last** as the completion marker.
 
-   This matters because some runtimes (e.g. Copilot CLI) do not return detached
-   shell stdout, and the detached task's reported exit code may describe only the
-   launcher/wrapper. Trust the artifact `exit.code`, not the shell task exit code.
-   The detached completion notification is the wake signal; after it arrives, read
+   This matters because some runtimes (e.g. Copilot CLI) do not return fully
+   detached shell stdout, and the detached task's reported exit code may describe
+   only the launcher/wrapper. Do not fall back to `detach:false` just to recover
+   stdout; that regresses the waiter into foreground-ish UX. Trust the artifact
+   `exit.code`, not the shell task exit code. The detached completion notification
+   is the wake signal; after it arrives, read
    `exit.code` (then `message.json` if it is `0`), `ack` the delivered message and
    dedupe by id, then re-arm a fresh detached `wait` before longer processing.
    Do not hide `wait` inside an infinite shell loop.
@@ -124,11 +131,14 @@ and arm the new mode.
 
 ### Copilot CLI detached waiter pattern
 
-Use a detached shell task for the waiter UX, but do **not** rely on detached
-stdout or the detached task's reported exit code being returned by the shell
-tool. Let `telex wait --out-dir <dir>` write the result to files you read after
-the detached completion notification. Name the background task
-**`TELEX MESSAGE WAITER`** so it is obvious in `/tasks`.
+Use a fully detached shell task (`detach: true`) for the waiter UX. This is the
+standard pattern: it does **not** spin the terminal like foreground work, and the
+Copilot CLI session is still notified when the detached task exits. Do **not** use
+session-attached async (`detach:false`) as the normal waiter mode just because it
+returns stdout; use `--out-dir` artifacts instead. Let `telex wait --out-dir
+<dir>` write the result to files you read after the detached completion
+notification. Name the background task **`TELEX MESSAGE WAITER`** so it is
+obvious in `/tasks`.
 
 On Windows/Copilot CLI, use a small `.ps1` file and detach `pwsh -File ...` as
 the primary reliable pattern. Some Copilot CLI versions silently no-op when a
