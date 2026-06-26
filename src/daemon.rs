@@ -2648,6 +2648,19 @@ async fn wait_for_message_with_idle_ttl(
                 return proto::internal(format!("fetching undelivered for {address}: {e:#}"));
             }
         };
+        if let Some(last_id) = current.last_delivered_message_id {
+            if current.last_waiter_outcome.as_deref() == Some("message")
+                && rows.iter().any(|row| row.id == last_id)
+            {
+                state.push_recent_error(
+                    "UnackedDelivery",
+                    format!(
+                        "rejected wait re-arm store={store_key} session={session_id} address={address}: previously delivered message {last_id} is still unacked"
+                    ),
+                );
+                return Response::PresenceEnded;
+            }
+        }
         if let Some(row) = rows.into_iter().find(|row| {
             wait_attention_matches(
                 row.attention.as_str(),
@@ -4119,23 +4132,27 @@ mod p3_tests {
         let backend = state.backend_for(&store).await.unwrap();
         let message_id = insert_test_message(&backend, "addr:a", None).await;
 
-        for _ in 0..2 {
-            let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1000)).await;
-            match wait {
-                Response::Message {
-                    id, lease_epoch, ..
-                } => {
-                    assert_eq!(id, message_id);
-                    assert_eq!(lease_epoch, Some(epoch));
-                }
-                other => panic!("expected message response, got {other:?}"),
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1000)).await;
+        match wait {
+            Response::Message {
+                id, lease_epoch, ..
+            } => {
+                assert_eq!(id, message_id);
+                assert_eq!(lease_epoch, Some(epoch));
             }
-            let undelivered = backend.fetch_undelivered("addr:a").await.unwrap();
-            assert_eq!(
-                undelivered.iter().map(|m| m.id).collect::<Vec<_>>(),
-                vec![message_id]
-            );
+            other => panic!("expected message response, got {other:?}"),
         }
+        let undelivered = backend.fetch_undelivered("addr:a").await.unwrap();
+        assert_eq!(
+            undelivered.iter().map(|m| m.id).collect::<Vec<_>>(),
+            vec![message_id]
+        );
+
+        let rearm_before_ack = request(state.clone(), wait_req(&store, "s1", "addr:a", 1000)).await;
+        assert!(
+            matches!(rearm_before_ack, Response::PresenceEnded),
+            "same unacked message should not be handed to a freshly re-armed waiter"
+        );
 
         let ack = request(state, ack_req(&store, "s1", "addr:a", message_id)).await;
         match ack {
@@ -4595,6 +4612,38 @@ mod p3_tests {
             }
         ));
 
+        let after_ack = request(state, wait_req(&store, "s1", "addr:a", 1)).await;
+        assert!(matches!(after_ack, Response::Timeout));
+    }
+
+    #[tokio::test]
+    async fn sequential_rearm_before_ack_is_rejected_without_duplicate_delivery() {
+        let state = test_state("sequential-rearm-before-ack");
+        let store = store_key("sequential-rearm-before-ack");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let message_id = insert_test_message(&backend, "addr:a", None).await;
+
+        let first = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(first, Response::Message { id, .. } if id == message_id));
+
+        let rearm_before_ack = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(rearm_before_ack, Response::PresenceEnded));
+        assert!(state
+            .status()
+            .await
+            .recent_errors
+            .iter()
+            .any(|e| e.kind == "UnackedDelivery" && e.message.contains(&message_id.to_string())));
+
+        let ack = request(state.clone(), ack_req(&store, "s1", "addr:a", message_id)).await;
+        assert!(matches!(
+            ack,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
         let after_ack = request(state, wait_req(&store, "s1", "addr:a", 1)).await;
         assert!(matches!(after_ack, Response::Timeout));
     }

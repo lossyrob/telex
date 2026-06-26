@@ -572,11 +572,19 @@ fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std
 fn write_wait_start_artifacts(dir: &Path, waiter_pid: u32) -> std::io::Result<()> {
     ensure_out_dir(dir)?;
     remove_stale_wait_completion_artifacts(dir)?;
+    let status = serde_json::json!({
+        "outcome": "armed",
+        "exit_code": null,
+        "detail": null,
+        "written_at_ms": now_ms(),
+    });
+    let status_body = serde_json::to_string_pretty(&status).unwrap_or_else(|_| status.to_string());
+    atomic_write(&dir.join("status.json"), status_body.as_bytes())?;
     atomic_write(&dir.join("wait.pid"), format!("{waiter_pid}\n").as_bytes())
 }
 
 fn remove_stale_wait_completion_artifacts(dir: &Path) -> std::io::Result<()> {
-    for name in ["exit.code", "status.json", "message.json", "delivery.json"] {
+    for name in ["exit.code", "message.json", "delivery.json"] {
         let path = dir.join(name);
         match std::fs::remove_file(&path) {
             Ok(()) => {}
@@ -995,7 +1003,11 @@ mod tests {
             !dir.join("exit.code").exists(),
             "startup must clear stale completion marker"
         );
-        assert!(!dir.join("status.json").exists());
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("status.json")).unwrap())
+                .unwrap();
+        assert_eq!(status.get("outcome").and_then(|v| v.as_str()), Some("armed"));
+        assert!(status.get("exit_code").unwrap().is_null());
         assert!(!dir.join("message.json").exists());
         assert!(!dir.join("delivery.json").exists());
         std::fs::remove_dir_all(&dir).ok();

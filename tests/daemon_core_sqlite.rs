@@ -281,12 +281,14 @@ async fn section17_05_explicit_ack_fanout_dedup() {
     let backend = daemon.backend(&store).await.expect("backend");
     let message_id = insert_message(&backend, "addr:a", Some("addr:b")).await;
 
-    for _ in 0..2 {
-        assert!(matches!(
-            daemon.wait(&store, "s1", "addr:a", 1_000).await,
-            Response::Message { id, .. } if id == message_id
-        ));
-    }
+    assert!(matches!(
+        daemon.wait(&store, "s1", "addr:a", 1_000).await,
+        Response::Message { id, .. } if id == message_id
+    ));
+    assert!(matches!(
+        daemon.wait(&store, "s1", "addr:a", 1_000).await,
+        Response::PresenceEnded
+    ));
 
     assert_ack_outcome(
         daemon.ack(&store, "s1", "addr:a", message_id).await,
