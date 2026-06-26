@@ -1274,6 +1274,62 @@ fn real_process_status_and_address_list_agree_after_attach() {
     );
 }
 
+#[test]
+fn real_process_status_reports_unattended_with_backlog() {
+    let env = ProcessEnv::new("real-health-backlog");
+    let receiver = "real-health-backlog-receiver";
+    let sender = "real-health-backlog-sender";
+    let receiver_addr = "addr:real-health-backlog-receiver";
+    let sender_addr = "addr:real-health-backlog-sender";
+    env.attach(receiver, receiver_addr);
+    env.attach(sender, sender_addr);
+
+    let sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            receiver_addr,
+            "--subject",
+            "health backlog",
+            "--body",
+            "queued without waiter",
+        ],
+        Duration::from_secs(5),
+    );
+    sent.assert_success("send backlog message");
+
+    let status = env.run_with_session(
+        receiver,
+        ["--json", "--address", receiver_addr, "status"],
+        Duration::from_secs(5),
+    );
+    status.assert_success("status --address backlog");
+    let status_json = status.json("status --address backlog");
+    assert_eq!(
+        status_json.get("station_health").and_then(Value::as_str),
+        Some("unattended_with_backlog"),
+        "status should flag unattended backlog: {status_json}"
+    );
+    assert_eq!(
+        status_json
+            .get("pending_unconsumed_count")
+            .and_then(Value::as_i64),
+        Some(1)
+    );
+    assert_eq!(
+        status_json.get("live_waiters_count").and_then(Value::as_u64),
+        Some(0)
+    );
+}
+
 #[cfg(target_os = "linux")]
 fn assert_hostile_prebound_endpoint_rejected_before_hello(env: &ProcessEnv) {
     use std::io::Read;

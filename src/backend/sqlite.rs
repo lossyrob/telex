@@ -1870,6 +1870,25 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn pending_unconsumed_count(&self, address: &str) -> Result<i64> {
+        let a = address.to_string();
+        self.run(move |c| {
+            materialize_pending_delivery_rows_for_recipient(c, &a)?;
+            let sql = format!(
+                "SELECT COUNT(*) FROM deliveries d \
+                 JOIN messages m ON m.id=d.message_id \
+                 WHERE d.recipient=?1 \
+                   AND d.consumed_at_ms IS NULL \
+                   AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                  WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                  ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({})",
+                terminal_dispositions_sql_list()
+            );
+            Ok(c.query_row(&sql, params![a], |r| r.get(0))?)
+        })
+        .await
+    }
+
     async fn record_detach_tombstone(
         &self,
         session_id: &str,

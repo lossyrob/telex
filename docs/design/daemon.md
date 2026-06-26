@@ -294,8 +294,10 @@ Frozen Status fields:
   `idle` (bool — no waiter currently attended/blocked).
 - **`members`** — for each in-memory membership record: `address`, `session_id` (opaque),
   `occupant`, `waiters` (count of blocked waiters), `live_waiters` (pid/start-time/alive,
-  attention, timeout), and `watch_pids` (pid + role + **alive**) so a live-but-quiet station
-  is distinguishable from an idle one,
+  attention, timeout), `pending_unconsumed_count`, `station_health`
+  (`armed` / `recently_delivered` / `unattended` / `unattended_with_backlog` / `idle`), and
+  `watch_pids` (pid + role + **alive**) so a live-but-quiet station is distinguishable from an
+  unattended one with queued work,
   `backend`/`store_key`, `host`. (Membership is in-memory and explicit-only — see
   [§14.1](#141-identity-and-in-memory-membership) — so this set is empty for sessions that
   have not (re-)attached since the last daemon start.)

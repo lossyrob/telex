@@ -403,6 +403,20 @@ pub struct MemberStatus {
     pub host: String,
     pub waiters: usize,
     #[serde(default)]
+    pub live_waiters_count: usize,
+    #[serde(default)]
+    pub pending_unconsumed_count: i64,
+    #[serde(default)]
+    pub station_health: StationHealth,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub health_detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_waiter_exit_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_waiter_outcome: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_delivered_message_id: Option<i64>,
+    #[serde(default)]
     pub live_waiters: Vec<LiveWaiterStatus>,
     #[serde(default)]
     pub watch_pids: Vec<WatchPidStatus>,
@@ -415,6 +429,17 @@ pub struct MemberStatus {
     pub lease_epoch: i64,
     pub owner_instance_id: String,
     pub idle: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StationHealth {
+    Armed,
+    RecentlyDelivered,
+    #[default]
+    Unattended,
+    UnattendedWithBacklog,
+    Idle,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

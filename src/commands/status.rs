@@ -57,6 +57,11 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
         if !daemon_members.is_empty() {
             info["occupancy"]["occupied"] = serde_json::json!(true);
             info["occupancy"]["occupant"] = serde_json::json!(daemon_members[0].occupant);
+            info["station_health"] = serde_json::json!(daemon_members[0].station_health);
+            info["health_detail"] = serde_json::json!(daemon_members[0].health_detail);
+            info["pending_unconsumed_count"] =
+                serde_json::json!(daemon_members[0].pending_unconsumed_count);
+            info["live_waiters_count"] = serde_json::json!(daemon_members[0].live_waiters_count);
         }
         info["lease"] = serde_json::to_value(&lease)?;
         info["daemon_members"] = serde_json::to_value(&daemon_members)?;

@@ -1398,3 +1398,23 @@ checkpoint drain/ack/disposition buffered lower-priority messages and re-arm in 
 waiters. Because older daemons would ignore unknown Wait fields, this is protocol/capability gated with
 minor `1.2` and `wait_min_attention_p9`. New clients fail closed against older daemons rather than
 silently treating an interrupt-only wait as unfiltered.
+
+## 0031 — Station health exposes unattended backlog
+
+- **Date:** 2026-06-26
+- **Status:** Accepted (`daemon-core` acceptance)
+
+**Context.** A station can hold membership and an epoch lease while having no live waiter. That is a
+normal short-lived state immediately after a waiter delivers and the agent is handling the message, but
+it becomes operationally dangerous when unconsumed messages are queued and no waiter is armed. In the
+poll-based local daemon this looks "occupied" to senders but no one is attending the queue.
+
+**Decision.** Derive station health in status from live waiter count, recent waiter delivery, idle
+state, and pending unconsumed delivery count. The status values are `armed`, `recently_delivered`,
+`unattended`, `unattended_with_backlog`, and `idle`. `recently_delivered` is a short grace state after
+a waiter emits a message, so normal handling before re-arm does not look unhealthy. The high-signal
+warning is `unattended_with_backlog`: no live waiter and at least one pending unconsumed delivery.
+
+**Consequences.** Operators and orchestrators can detect a stalled station without querying SQLite
+tables directly. The daemon does not auto-deliver or auto-rearm; it surfaces the condition so an agent
+can run `attach`, drain/ack the backlog, and arm a waiter.

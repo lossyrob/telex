@@ -67,6 +67,10 @@ async fn list(ctx: &Ctx, args: AddressListArgs) -> Result<i32> {
             "occupied": daemon_member.is_some() || occ.occupied,
             "occupant": daemon_member.map(|m| m.occupant.clone()).or(occ.occupant),
             "age_secs": occ.age_secs,
+            "station_health": daemon_member.map(|m| serde_json::json!(m.station_health)),
+            "health_detail": daemon_member.and_then(|m| m.health_detail.clone()),
+            "pending_unconsumed_count": daemon_member.map(|m| m.pending_unconsumed_count),
+            "live_waiters_count": daemon_member.map(|m| m.live_waiters_count),
         }));
     }
 
@@ -124,6 +128,10 @@ async fn show(ctx: &Ctx) -> Result<i32> {
             "occupant": daemon_members.first().map(|m| m.occupant.clone()).or(occ.occupant),
             "age_secs": occ.age_secs,
         },
+        "station_health": daemon_members.first().map(|m| m.station_health),
+        "health_detail": daemon_members.first().and_then(|m| m.health_detail.clone()),
+        "pending_unconsumed_count": daemon_members.first().map(|m| m.pending_unconsumed_count),
+        "live_waiters_count": daemon_members.first().map(|m| m.live_waiters_count),
         "daemon_members": daemon_members,
     });
     emit(ctx.fmt, &out, || {

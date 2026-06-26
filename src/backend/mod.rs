@@ -147,6 +147,12 @@ pub trait Backend: Send + Sync {
         bail!("delivery_retention_count: not supported by this backend")
     }
 
+    /// Count pending, unconsumed deliveries for one recipient. Used only for health/status
+    /// observability; command semantics still use `fetch_undelivered`.
+    async fn pending_unconsumed_count(&self, _address: &str) -> Result<i64> {
+        bail!("pending_unconsumed_count: not supported by this backend")
+    }
+
     async fn record_detach_tombstone(
         &self,
         _session_id: &str,

@@ -8,7 +8,7 @@ use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
     EpochStatus, HandshakeError, HelloAck, IdleStationStatus, LiveWaiterStatus, MemberStatus,
     NeedsAttachReason, RecentErrorStatus, Request, Response, RetentionStatus, SentReceipt,
-    StoreStatus, WatchPidRole, WatchPidSpec, WatchPidStatus,
+    StationHealth, StoreStatus, WatchPidRole, WatchPidSpec, WatchPidStatus,
 };
 use crate::model::{
     now_ms, Attention, DeliveryOutcome, EpochClaimResult, NewMessage, STATUS_RETIRED,
@@ -35,6 +35,7 @@ pub const CRASHLOOP_WINDOW: Duration = Duration::from_secs(10);
 const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 const RECENT_ERROR_LIMIT: usize = 32;
 const DEFAULT_IDLE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
+const RECENT_DELIVERY_HEALTH_GRACE_MS: i64 = 2 * 60 * 1000;
 const DEFAULT_RETENTION_WARN_ROWS: i64 = 100_000;
 const DEFAULT_IDLE_STATION_WARN: usize = 1_000;
 
@@ -347,6 +348,9 @@ struct MemberRecord {
     owner_instance_id: String,
     idle: bool,
     idle_rearmable: bool,
+    last_waiter_exit_at_ms: Option<i64>,
+    last_waiter_outcome: Option<String>,
+    last_delivered_message_id: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -440,9 +444,43 @@ impl DaemonState {
         let member_records: Vec<MemberRecord> =
             self.members.lock().unwrap().values().cloned().collect();
         let live_waiters = self.live_waiter_statuses();
+        let store_backends: HashMap<String, Arc<dyn Backend>> = store_entries
+            .iter()
+            .map(|(store_key, entry)| (store_key.clone(), entry.backend.clone()))
+            .collect();
+        let mut pending_counts: HashMap<(String, String), i64> = HashMap::new();
+        for member in &member_records {
+            let key = (member.store_key.clone(), member.address.clone());
+            if pending_counts.contains_key(&key) {
+                continue;
+            }
+            let pending = match store_backends.get(&member.store_key) {
+                Some(backend) => match backend.pending_unconsumed_count(&member.address).await {
+                    Ok(count) => count,
+                    Err(e) => {
+                        self.push_recent_error(
+                            "BackendDisconnect",
+                            format!(
+                                "pending count failed for {} {}: {e:#}",
+                                member.store_key, member.address
+                            ),
+                        );
+                        0
+                    }
+                },
+                None => 0,
+            };
+            pending_counts.insert(key, pending);
+        }
         let members: Vec<MemberStatus> = member_records
             .iter()
-            .map(|member| member.status(&live_waiters))
+            .map(|member| {
+                let pending = pending_counts
+                    .get(&(member.store_key.clone(), member.address.clone()))
+                    .copied()
+                    .unwrap_or(0);
+                member.status(&live_waiters, pending)
+            })
             .collect();
         let epoch_by_address = members
             .iter()
@@ -916,10 +954,41 @@ impl DaemonState {
             member.waiters = member.waiters.saturating_sub(1);
         }
     }
+
+    fn record_waiter_message_exit(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+        message_id: i64,
+    ) {
+        if let Some(member) = self
+            .members
+            .lock()
+            .unwrap()
+            .get_mut(&Self::member_key(store_key, session_id, address))
+        {
+            member.last_waiter_exit_at_ms = Some(now_ms());
+            member.last_waiter_outcome = Some("message".to_string());
+            member.last_delivered_message_id = Some(message_id);
+        }
+    }
 }
 
 impl MemberRecord {
-    fn status(&self, live_waiters: &[LiveWaiterStatus]) -> MemberStatus {
+    fn status(&self, live_waiters: &[LiveWaiterStatus], pending_unconsumed_count: i64) -> MemberStatus {
+        let member_waiters: Vec<LiveWaiterStatus> = live_waiters
+            .iter()
+            .filter(|waiter| {
+                waiter.store_key == self.store_key
+                    && waiter.session_id == self.session_id
+                    && waiter.address == self.address
+            })
+            .cloned()
+            .collect();
+        let live_waiters_count = member_waiters.len();
+        let (station_health, health_detail) =
+            self.station_health(live_waiters_count, pending_unconsumed_count);
         MemberStatus {
             store_key: self.store_key.clone(),
             backend: self.backend.clone(),
@@ -928,15 +997,14 @@ impl MemberRecord {
             occupant: self.occupant.clone(),
             host: self.host.clone(),
             waiters: self.waiters,
-            live_waiters: live_waiters
-                .iter()
-                .filter(|waiter| {
-                    waiter.store_key == self.store_key
-                        && waiter.session_id == self.session_id
-                        && waiter.address == self.address
-                })
-                .cloned()
-                .collect(),
+            live_waiters_count,
+            pending_unconsumed_count,
+            station_health,
+            health_detail,
+            last_waiter_exit_at_ms: self.last_waiter_exit_at_ms,
+            last_waiter_outcome: self.last_waiter_outcome.clone(),
+            last_delivered_message_id: self.last_delivered_message_id,
+            live_waiters: member_waiters,
             watch_pids: self.watch_pids.iter().map(WatchPidRecord::status).collect(),
             description: self.description.clone(),
             scope: self.scope.clone(),
@@ -944,6 +1012,47 @@ impl MemberRecord {
             lease_epoch: self.lease_epoch,
             owner_instance_id: self.owner_instance_id.clone(),
             idle: self.idle,
+        }
+    }
+
+    fn station_health(
+        &self,
+        live_waiters_count: usize,
+        pending_unconsumed_count: i64,
+    ) -> (StationHealth, Option<String>) {
+        if self.idle {
+            return (StationHealth::Idle, Some("station is marked idle".to_string()));
+        }
+        if live_waiters_count > 0 {
+            return (StationHealth::Armed, None);
+        }
+        if self.last_waiter_outcome.as_deref() == Some("message") {
+            if let Some(exit_at) = self.last_waiter_exit_at_ms {
+                if now_ms().saturating_sub(exit_at) <= RECENT_DELIVERY_HEALTH_GRACE_MS {
+                    return (
+                        StationHealth::RecentlyDelivered,
+                        Some(format!(
+                            "last waiter delivered message {} recently; agent may be handling before re-arm",
+                            self.last_delivered_message_id
+                                .map(|id| id.to_string())
+                                .unwrap_or_else(|| "?".to_string())
+                        )),
+                    );
+                }
+            }
+        }
+        if pending_unconsumed_count > 0 {
+            (
+                StationHealth::UnattendedWithBacklog,
+                Some(format!(
+                    "station has {pending_unconsumed_count} pending unconsumed message(s) and no live waiter"
+                )),
+            )
+        } else {
+            (
+                StationHealth::Unattended,
+                Some("station has no live waiter".to_string()),
+            )
         }
     }
 }
@@ -2169,6 +2278,9 @@ async fn register_member(
         owner_instance_id: claimed.owner_instance_id.clone(),
         idle: false,
         idle_rearmable: false,
+        last_waiter_exit_at_ms: None,
+        last_waiter_outcome: None,
+        last_delivered_message_id: None,
     };
     state.check_session_id_reuse_tripwire(&record);
     if !recovery {
@@ -2562,6 +2674,7 @@ async fn wait_for_message_with_idle_ttl(
             {
                 return response;
             }
+            state.record_waiter_message_exit(&store_key, &session_id, &address, row.id);
             let response = Response::Message {
                 id: row.id,
                 thread_id: row.thread_id,
@@ -4272,6 +4385,69 @@ mod p3_tests {
         assert_eq!(status.members.len(), 1);
         assert_eq!(status.members[0].waiters, 0);
         assert!(status.members[0].live_waiters.is_empty());
+    }
+
+    #[tokio::test]
+    async fn status_reports_unattended_station_health_states() {
+        let state = test_state("station-health");
+        let store = store_key("station-health");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let status = state.status().await;
+        assert_eq!(status.members.len(), 1);
+        assert_eq!(status.members[0].station_health, StationHealth::Unattended);
+        assert_eq!(status.members[0].pending_unconsumed_count, 0);
+        assert_eq!(status.members[0].live_waiters_count, 0);
+
+        let backend = state.backend_for(&store).await.unwrap();
+        let message_id = insert_test_message(&backend, "addr:a", None).await;
+        let status = state.status().await;
+        assert_eq!(status.members[0].station_health, StationHealth::UnattendedWithBacklog);
+        assert_eq!(status.members[0].pending_unconsumed_count, 1);
+        assert_eq!(status.members[0].live_waiters_count, 0);
+        assert!(
+            status.members[0]
+                .health_detail
+                .as_deref()
+                .unwrap_or_default()
+                .contains("pending unconsumed")
+        );
+
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(wait, Response::Message { id, .. } if id == message_id));
+        let status = state.status().await;
+        assert_eq!(status.members[0].station_health, StationHealth::RecentlyDelivered);
+        assert_eq!(status.members[0].last_delivered_message_id, Some(message_id));
+        assert_eq!(status.members[0].last_waiter_outcome.as_deref(), Some("message"));
+    }
+
+    #[tokio::test]
+    async fn status_reports_armed_station_health() {
+        let state = test_state("station-health-armed");
+        let store = store_key("station-health-armed");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let waiter_req = wait_req(&store, "s1", "addr:a", 5_000);
+        let waiter_state = state.clone();
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_req).await });
+        tokio::time::sleep(Duration::from_millis(75)).await;
+
+        let status = state.status().await;
+        assert_eq!(status.members[0].station_health, StationHealth::Armed);
+        assert_eq!(status.members[0].live_waiters_count, 1);
+
+        let stopped = request(
+            state.clone(),
+            Request::StationStop {
+                store_key: store,
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                wait_grace_ms: 1_000,
+            },
+        )
+        .await;
+        assert!(matches!(stopped, Response::StationStopped { .. }));
+        assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
     }
 
     #[tokio::test]
