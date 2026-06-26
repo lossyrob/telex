@@ -13,8 +13,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::cli::{
-    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotSessionEndArgs, CopilotSkillArgs,
-    CopilotTurnGuardArgs, Ctx,
+    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotSessionEndArgs, CopilotTurnGuardArgs, Ctx,
 };
 use crate::daemon_ipc::{DaemonStatus, MemberStatus, Request, Response, WatchPidSpec};
 use crate::model::now_ms;
@@ -30,7 +29,7 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
         CopilotCmd::Attach(args) => attach(ctx, args).await,
         CopilotCmd::SessionEnd(args) => session_end(ctx, args).await,
         CopilotCmd::TurnGuard(args) => turn_guard(ctx, args).await,
-        CopilotCmd::Skill(args) => skill(args),
+        CopilotCmd::Skill => skill(),
     }
 }
 
@@ -265,8 +264,7 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
     Ok(0)
 }
 
-fn skill(args: CopilotSkillArgs) -> Result<i32> {
-    let _ = args.raw;
+fn skill() -> Result<i32> {
     print!("{}", crate::commands::skill::raw_skill());
     Ok(0)
 }

@@ -430,7 +430,7 @@ pub enum CopilotCmd {
     TurnGuard(CopilotTurnGuardArgs),
     /// Print the canonical embedded telex skill for plugin consumers.
     #[command(hide = true)]
-    Skill(CopilotSkillArgs),
+    Skill,
 }
 
 #[derive(Args)]
@@ -464,13 +464,6 @@ pub struct CopilotTurnGuardArgs {
     /// Stable Copilot session identity; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
     pub session: Option<String>,
-}
-
-#[derive(Args)]
-pub struct CopilotSkillArgs {
-    /// Print the embedded SKILL.md verbatim.
-    #[arg(long)]
-    pub raw: bool,
 }
 
 #[derive(Args)]
