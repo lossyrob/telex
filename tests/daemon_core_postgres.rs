@@ -1,6 +1,7 @@
 #![cfg(all(feature = "postgres", feature = "sqlite"))]
 
 use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -61,6 +62,22 @@ fn pg_config(url: &str) -> tokio_postgres::Config {
     cfg
 }
 
+fn write_temp_config(name: &str, config: &ConfigFile) -> PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "telex-daemon-pg-{name}-config-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
+    std::fs::create_dir_all(&root).expect("create temp config dir");
+    let config_path = root.join("config.toml");
+    std::fs::write(
+        &config_path,
+        toml::to_string_pretty(config).expect("serialize config"),
+    )
+    .expect("write temp config");
+    config_path
+}
+
 async fn insert_message(backend: &Arc<dyn Backend>, to: &str) -> i64 {
     backend
         .insert_message(&NewMessage {
@@ -79,6 +96,48 @@ async fn insert_message(backend: &Arc<dyn Backend>, to: &str) -> i64 {
         .await
         .expect("insert message")
         .id
+}
+
+#[tokio::test]
+async fn postgres_profile_resolution_ambiguous_fails_closed() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let prior_config = std::env::var_os("TELEX_CONFIG");
+    let profile = BackendProfile {
+        kind: "postgres".to_string(),
+        path: None,
+        url: Some("postgres://postgres:one@example.invalid/postgres".to_string()),
+        auth: Some("password".to_string()),
+        password_env: None,
+        password_command: None,
+        schema: Some("telex_ambiguous".to_string()),
+        entra_cred: None,
+        entra_scope: None,
+    };
+    let mut profile_two = profile.clone();
+    profile_two.url = Some("postgres://postgres:two@example.invalid/postgres".to_string());
+    let store_key = profiles::store_key(&profile, None);
+    let mut backends = BTreeMap::new();
+    backends.insert("pg-one".to_string(), profile);
+    backends.insert("pg-two".to_string(), profile_two);
+    let config_path = write_temp_config(
+        "ambiguous",
+        &ConfigFile {
+            default: Some("pg-one".to_string()),
+            backends,
+        },
+    );
+    std::env::set_var("TELEX_CONFIG", &config_path);
+
+    let daemon = TestDaemon::new("pg-ambiguous");
+    let response = daemon.register(&store_key, "s1", "addr:a").await;
+    assert!(
+        matches!(response, Response::Error { ref code, ref message, .. }
+            if code == proto::ERROR_UNSUPPORTED && message.contains("ambiguous Postgres backend profiles")),
+        "ambiguous profile resolution must fail closed before connecting, got {response:?}"
+    );
+
+    let _ = std::fs::remove_dir_all(config_path.parent().unwrap());
+    restore_env("TELEX_CONFIG", prior_config);
 }
 
 #[tokio::test]
@@ -285,5 +344,89 @@ async fn postgres_listen_notify_wakes_blocked_waiter() {
         .await
         .expect("post-test schema cleanup");
     let _ = std::fs::remove_dir_all(&root);
+    restore_env("TELEX_CONFIG", prior_config);
+}
+
+#[tokio::test]
+async fn postgres_listener_degradation_surfaces_recent_error() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_listener_degradation_surfaces_recent_error") else {
+        return;
+    };
+
+    let prior_config = std::env::var_os("TELEX_CONFIG");
+    let schema = sanitize_ident(&format!(
+        "telex_daemon_pg_degraded_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .expect("derived schema");
+    let cfg = pg_config(&url);
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("pre-test schema cleanup");
+
+    let profile = BackendProfile {
+        kind: "postgres".to_string(),
+        path: None,
+        url: Some(url.clone()),
+        auth: Some("password".to_string()),
+        password_env: std::env::var("TELEX_PG_PASSWORD")
+            .ok()
+            .filter(|pw| !pw.is_empty())
+            .map(|_| "TELEX_PG_PASSWORD".to_string()),
+        password_command: None,
+        schema: Some(schema.clone()),
+        entra_cred: None,
+        entra_scope: None,
+    };
+    let store_key = profiles::store_key(&profile, None);
+    let mut backends = BTreeMap::new();
+    backends.insert("pg-degraded-test".to_string(), profile);
+    let config_path = write_temp_config(
+        "degraded",
+        &ConfigFile {
+            default: Some("pg-degraded-test".to_string()),
+            backends,
+        },
+    );
+    std::env::set_var("TELEX_CONFIG", &config_path);
+
+    let daemon = TestDaemon::new("pg-degraded");
+    registered_epoch(&daemon, &store_key, "receiver", "addr:receiver").await;
+    tokio::time::sleep(Duration::from_millis(250)).await;
+
+    admin_exec(
+        &cfg,
+        "SELECT pg_terminate_backend(pid)
+         FROM pg_stat_activity
+         WHERE pid <> pg_backend_pid()
+           AND query LIKE 'LISTEN telex_messages_%'",
+    )
+    .await
+    .expect("terminate listener backend");
+
+    let deadline = Instant::now() + Duration::from_secs(3);
+    loop {
+        let status = daemon.status().await;
+        if status
+            .recent_errors
+            .iter()
+            .any(|err| err.kind == "NotifyDegraded" && err.message.contains("LISTEN loop"))
+        {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "expected NotifyDegraded recent error after listener termination, got {:?}",
+            status.recent_errors
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("post-test schema cleanup");
+    let _ = std::fs::remove_dir_all(config_path.parent().unwrap());
     restore_env("TELEX_CONFIG", prior_config);
 }

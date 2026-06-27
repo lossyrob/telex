@@ -204,32 +204,6 @@ fn fanout_recipients(to_addr: &str, cc: Option<&str>) -> Vec<String> {
     recipients
 }
 
-async fn pg_column_exists(
-    client: &tokio_postgres::Client,
-    table: &str,
-    column: &str,
-) -> Result<bool> {
-    Ok(client
-        .query_one(
-            "SELECT EXISTS (
-                SELECT 1 FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                  AND table_name = $1
-                  AND column_name = $2
-             )",
-            &[&table, &column],
-        )
-        .await?
-        .get(0))
-}
-
-async fn pg_table_exists(client: &tokio_postgres::Client, table: &str) -> Result<bool> {
-    Ok(client
-        .query_one("SELECT to_regclass($1) IS NOT NULL", &[&table])
-        .await?
-        .get(0))
-}
-
 async fn pg_now_ms(client: &tokio_postgres::Client) -> Result<i64> {
     Ok(client
         .query_one(
@@ -262,7 +236,7 @@ async fn materialize_pending_delivery_rows_for_recipient(
                     m.created_at_ms,
                     CASE WHEN m.to_addr = $1 THEN NULL ELSE m.created_at_ms END
              FROM messages m
-             WHERE (m.to_addr=$1 OR m.cc LIKE '%' || $1 || '%')
+             WHERE m.to_addr=$1
                AND NOT EXISTS (
                    SELECT 1 FROM deliveries d
                    WHERE d.message_id=m.id AND d.recipient=$1
@@ -285,7 +259,7 @@ async fn materialize_pending_delivery_rows_for_recipient_tx(
                 m.created_at_ms,
                 CASE WHEN m.to_addr = $1 THEN NULL ELSE m.created_at_ms END
          FROM messages m
-         WHERE (m.to_addr=$1 OR m.cc LIKE '%' || $1 || '%')
+         WHERE m.to_addr=$1
            AND NOT EXISTS (
                SELECT 1 FROM deliveries d
                WHERE d.message_id=m.id AND d.recipient=$1
@@ -294,6 +268,40 @@ async fn materialize_pending_delivery_rows_for_recipient_tx(
         &[&recipient],
     )
     .await?;
+    Ok(())
+}
+
+async fn backfill_existing_deliveries_consumed_once(
+    client: &mut tokio_postgres::Client,
+) -> Result<()> {
+    let tx = client.transaction().await?;
+    let complete: bool = tx
+        .query_one(
+            "SELECT EXISTS(
+                SELECT 1 FROM telex_schema_meta
+                WHERE key='delivery_consumed_backfill_v1_complete' AND value='1'
+             )",
+            &[],
+        )
+        .await?
+        .get(0);
+    if !complete {
+        tx.execute(
+            "UPDATE deliveries
+             SET consumed_at_ms = delivered_at_ms
+             WHERE consumed_at_ms IS NULL",
+            &[],
+        )
+        .await?;
+        tx.execute(
+            "INSERT INTO telex_schema_meta(key, value)
+             VALUES ('delivery_consumed_backfill_v1_complete', '1')
+             ON CONFLICT(key) DO UPDATE SET value='1'",
+            &[],
+        )
+        .await?;
+    }
+    tx.commit().await?;
     Ok(())
 }
 
@@ -358,10 +366,7 @@ impl Backend for PgBackend {
     }
 
     async fn init_schema(&self) -> Result<()> {
-        let client = self.client.lock().await;
-        let deliveries_existed = pg_table_exists(&client, "deliveries").await?;
-        let deliveries_had_consumed =
-            pg_column_exists(&client, "deliveries", "consumed_at_ms").await?;
+        let mut client = self.client.lock().await;
         client.batch_execute(SCHEMA).await?;
         client
             .batch_execute(
@@ -385,16 +390,7 @@ impl Backend for PgBackend {
                     ON detach_tombstones(session_id);",
             )
             .await?;
-        if deliveries_existed && !deliveries_had_consumed {
-            client
-                .execute(
-                    "UPDATE deliveries
-                     SET consumed_at_ms = delivered_at_ms
-                     WHERE consumed_at_ms IS NULL",
-                    &[],
-                )
-                .await?;
-        }
+        backfill_existing_deliveries_consumed_once(&mut client).await?;
         Ok(())
     }
 
@@ -700,19 +696,36 @@ impl Backend for PgBackend {
             }
         } else {
             let now = pg_tx_now_ms(&tx).await?;
-            let row = tx
-                .query_one(
+            let rows = tx
+                .query(
                     "INSERT INTO leases(address, since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id)
                      VALUES ($1, $2, $2, 1, $3)
+                     ON CONFLICT(address) DO NOTHING
                      RETURNING lease_epoch, owner_instance_id",
                     &[&address, &now, &owner_instance_id],
                 )
                 .await?;
-            EpochClaimResult::Claimed(EpochClaimed {
-                lease_epoch: row.get("lease_epoch"),
-                owner_instance_id: row.get("owner_instance_id"),
-                legacy_cutover: false,
-            })
+            if let Some(row) = rows.first() {
+                EpochClaimResult::Claimed(EpochClaimed {
+                    lease_epoch: row.get("lease_epoch"),
+                    owner_instance_id: row.get("owner_instance_id"),
+                    legacy_cutover: false,
+                })
+            } else {
+                let lease_row = tx
+                    .query_one(
+                        "SELECT address, occupant, host, principal, description, tags, scope, pid, since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id
+                         FROM leases WHERE address=$1",
+                        &[&address],
+                    )
+                    .await?;
+                let lease_row = map_lease(&lease_row);
+                EpochClaimResult::AlreadyOwned {
+                    lease_epoch: lease_row.lease_epoch.unwrap_or(1),
+                    owner_instance_id: lease_row.owner_instance_id.clone().unwrap_or_default(),
+                    lease_row,
+                }
+            }
         };
         tx.commit().await?;
         Ok(result)

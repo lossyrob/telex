@@ -113,6 +113,7 @@ where
     undelivered_delivery(make_store().await).await;
     delivery_backlog(make_store().await).await;
     epoch_leases_and_ack_fence(make_store().await).await;
+    epoch_concurrent_first_claim(make_store().await).await;
     detach_tombstones(make_store().await).await;
     messages_threading(make_store().await).await;
     inbox_derivation(make_store().await).await;
@@ -222,6 +223,39 @@ async fn detach_tombstones(store: Store) {
         .await
         .unwrap()
         .is_none());
+}
+
+async fn epoch_concurrent_first_claim(store: Store) {
+    let addr = "epoch:first-race";
+    let first_backend = store.connect().await;
+    let second_backend = store.connect().await;
+    let first = {
+        tokio::spawn(async move {
+            first_backend
+                .claim_epoch_lease(addr, "owner-race-a", 15)
+                .await
+                .expect("first concurrent claim must not error")
+        })
+    };
+    let second = {
+        tokio::spawn(async move {
+            second_backend
+                .claim_epoch_lease(addr, "owner-race-b", 15)
+                .await
+                .expect("second concurrent claim must not error")
+        })
+    };
+    let results = vec![first.await.unwrap(), second.await.unwrap()];
+    let claimed = results
+        .iter()
+        .filter(|result| matches!(result, EpochClaimResult::Claimed(_)))
+        .count();
+    let already_owned = results
+        .iter()
+        .filter(|result| matches!(result, EpochClaimResult::AlreadyOwned { .. }))
+        .count();
+    assert_eq!(claimed, 1, "exactly one fresh claimant should win");
+    assert_eq!(already_owned, 1, "the loser should see AlreadyOwned");
 }
 
 /// Capabilities + signals smoke coverage: `kind`, `capabilities`, and the best-effort
@@ -1076,6 +1110,105 @@ mod postgres_fixture {
             },
         )
         .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn postgres_delivery_consumed_backfill_retries_until_marker() {
+        let require = std::env::var("TELEX_PG_REQUIRE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let url = match std::env::var("TELEX_PG_URL") {
+            Ok(u) if !u.trim().is_empty() => u,
+            _ => {
+                assert!(
+                    !require,
+                    "TELEX_PG_REQUIRE is set but TELEX_PG_URL is unset/empty; \
+                     refusing to skip the Postgres backfill retry test."
+                );
+                eprintln!(
+                    "[conformance] TELEX_PG_URL not set; skipping the Postgres backfill retry test."
+                );
+                return;
+            }
+        };
+        let mut cfg: tokio_postgres::Config = url
+            .parse()
+            .expect("TELEX_PG_URL must be a libpq URI or key=value DSN");
+        if let Ok(pw) = std::env::var("TELEX_PG_PASSWORD") {
+            if !pw.is_empty() {
+                cfg.password(pw);
+            }
+        }
+        let schema = sanitize_ident(&format!(
+            "telex_backfill_{}_{}",
+            std::process::id(),
+            now_ms()
+        ))
+        .expect("derived schema name must be valid");
+
+        admin_exec(
+            &cfg,
+            &format!(
+                "DROP SCHEMA IF EXISTS {schema} CASCADE;
+                 CREATE SCHEMA {schema};
+                 CREATE TABLE {schema}.deliveries (
+                    id bigserial PRIMARY KEY,
+                    message_id bigint NOT NULL,
+                    recipient text NOT NULL,
+                    occupant text,
+                    delivered_at_ms bigint NOT NULL,
+                    consumed_at_ms bigint,
+                    UNIQUE(message_id, recipient)
+                 );
+                 CREATE TABLE {schema}.telex_schema_meta (
+                    key text PRIMARY KEY,
+                    value text NOT NULL
+                 );
+                 INSERT INTO {schema}.deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
+                 VALUES (1, 'addr:old', 123, NULL);"
+            ),
+        )
+        .await
+        .expect("seed partial migration state");
+
+        let backend = PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .expect("connect postgres");
+        backend.init_schema().await.expect("retry init schema");
+        drop(backend);
+
+        let (client, connection) = cfg
+            .connect(make_tls().expect("tls"))
+            .await
+            .expect("connect");
+        let handle = tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let row = client
+            .query_one(
+                &format!(
+                    "SELECT consumed_at_ms,
+                            EXISTS(
+                              SELECT 1 FROM {schema}.telex_schema_meta
+                              WHERE key='delivery_consumed_backfill_v1_complete' AND value='1'
+                            ) AS marker
+                     FROM {schema}.deliveries
+                     WHERE message_id=1 AND recipient='addr:old'"
+                ),
+                &[],
+            )
+            .await
+            .expect("read backfilled row");
+        let consumed_at_ms: Option<i64> = row.get("consumed_at_ms");
+        let marker: bool = row.get("marker");
+        assert_eq!(consumed_at_ms, Some(123));
+        assert!(marker, "migration marker should be written after backfill");
+        drop(client);
+        let _ = handle.await;
+
+        admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+            .await
+            .expect("post-test schema drop");
     }
 
     /// Issue #18, against real Postgres MVCC: a lower id committed AFTER a higher id (reverse commit

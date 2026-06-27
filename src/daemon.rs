@@ -31,7 +31,9 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::io::BufReader;
-use tokio::sync::{mpsc, Mutex as AsyncMutex, Notify};
+#[cfg(feature = "postgres")]
+use tokio::sync::mpsc;
+use tokio::sync::{Mutex as AsyncMutex, Notify};
 #[cfg(feature = "postgres")]
 use tokio_postgres::AsyncMessage;
 
@@ -837,16 +839,7 @@ impl DaemonState {
     }
 
     fn push_recent_error(&self, kind: impl Into<String>, message: impl Into<String>) {
-        let mut errors = self.recent_errors.lock().unwrap();
-        let message = proto::redact_secrets(message.into(), &[&self.admin_cap]);
-        errors.push_back(RecentErrorStatus {
-            at_ms: now_ms(),
-            kind: kind.into(),
-            message,
-        });
-        while errors.len() > RECENT_ERROR_LIMIT {
-            errors.pop_front();
-        }
+        push_recent_error_to_queue(&self.recent_errors, kind, message, &[&self.admin_cap]);
     }
 
     fn recent_errors(&self) -> Vec<RecentErrorStatus> {
@@ -1582,6 +1575,9 @@ async fn open_store_entry(
     store_key: &str,
     recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
 ) -> std::result::Result<StoreEntry, Response> {
+    #[cfg(not(feature = "postgres"))]
+    let _ = &recent_errors;
+
     if let Some(path) = store_key.strip_prefix("sqlite:") {
         let path = Path::new(path);
         if !path.is_absolute() {
@@ -1635,13 +1631,8 @@ async fn open_store_entry(
                 .await
                 .map_err(|e| proto::unsupported(format!("initializing Postgres store: {e:#}")))?;
             let notify = Arc::new(Notify::new());
-            spawn_postgres_notify_listener(
-                store_key.to_string(),
-                cfg,
-                schema,
-                notify.clone(),
-                recent_errors,
-            );
+            let _ = (cfg, schema);
+            spawn_postgres_notify_listener(store_key.to_string(), notify.clone(), recent_errors);
             return Ok(StoreEntry {
                 kind: backend.kind().to_string(),
                 backend: Arc::new(backend),
@@ -1694,20 +1685,26 @@ fn resolve_postgres_profile_for_store_key(
 #[cfg(feature = "postgres")]
 fn spawn_postgres_notify_listener(
     store_key: String,
-    cfg: tokio_postgres::Config,
-    schema: Option<String>,
     notify: Arc<Notify>,
     recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
 ) {
     tokio::spawn(async move {
         let mut backoff = BACKOFF_INITIAL;
         loop {
-            match run_postgres_notify_listener(&cfg, schema.as_deref(), notify.clone()).await {
+            let result = async {
+                let (_, profile) = resolve_postgres_profile_for_store_key(&store_key)
+                    .map_err(|response| anyhow::anyhow!("{response:?}"))?;
+                let (cfg, schema) = crate::profiles::pg_connect_config(&profile).await?;
+                run_postgres_notify_listener(&cfg, schema.as_deref(), notify.clone()).await
+            }
+            .await;
+            match result {
                 Ok(()) => {
                     push_recent_error_to_queue(
                         &recent_errors,
                         "NotifyDegraded",
                         format!("postgres LISTEN loop ended for {store_key}; reconnecting"),
+                        &[],
                     );
                 }
                 Err(e) => {
@@ -1715,6 +1712,7 @@ fn spawn_postgres_notify_listener(
                         &recent_errors,
                         "NotifyDegraded",
                         format!("postgres LISTEN loop failed for {store_key}: {e:#}; reconnecting"),
+                        &[],
                     );
                 }
             }
@@ -1735,12 +1733,14 @@ fn push_recent_error_to_queue(
     recent_errors: &Arc<Mutex<VecDeque<RecentErrorStatus>>>,
     kind: impl Into<String>,
     message: impl Into<String>,
+    redactions: &[&str],
 ) {
     let mut errors = recent_errors.lock().unwrap();
+    let message = proto::redact_secrets(message.into(), redactions);
     errors.push_back(RecentErrorStatus {
         at_ms: now_ms(),
         kind: kind.into(),
-        message: message.into(),
+        message,
     });
     while errors.len() > RECENT_ERROR_LIMIT {
         errors.pop_front();
