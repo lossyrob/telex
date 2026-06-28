@@ -78,8 +78,9 @@ guessing.
    stdout; that regresses the waiter into foreground-ish UX. Trust the artifact
    `exit.code`, not the shell task exit code. The detached completion notification
    is the wake signal; after it arrives, read
-   `exit.code` (then `delivery.json` or `message.json` if it is `0`), `ack` the delivered message and
-   dedupe by id, then re-arm a fresh detached `wait` before longer processing.
+   `exit.code` (then `delivery.json` or `message.json` if it is `0`), `ack` the delivered message
+   with the same session id, dedupe by id, then re-arm a fresh detached `wait`
+   with the same session id before longer processing.
    Do not hide `wait` inside an infinite shell loop.
    `wait` does **not** spawn the daemon. If the daemon is gone, `wait` exits 3 so
    the agent can run `telex attach` (the spawning/recovery verb) and then re-arm.
@@ -88,7 +89,7 @@ guessing.
 
    | Exit | Meaning | What you do |
    |---:|---|---|
-   | 0 | delivered | Read `delivery.json` (or `message.json`/stdout JSON), `ack` + dedupe by id, then re-arm a fresh `wait` before longer processing. |
+   | 0 | delivered | Read `delivery.json` (or `message.json`/stdout JSON), `ack --session <session-id>` + dedupe by id, then re-arm a fresh `wait --session <session-id>` before longer processing. |
    | 2 | idle-timeout | Nothing arrived before `--timeout-ms`; re-arm if still attending. |
    | 3 | daemon gone / not running | Run `telex attach` and re-arm. |
    | 4 | daemon hung / no response after a finite wait's `--timeout-ms + --hang-ms` watchdog | Re-arm or restart the daemon if repeated. |
@@ -98,8 +99,8 @@ guessing.
    disposition that reflects the actual outcome:
 
    ```sh
-   telex ack --address <addr> --id <message-id>
-   telex handle --address <addr> --id <message-id> --note "completed"
+   telex ack --address <addr> --session <session-id> --id <message-id>
+   telex handle --address <addr> --session <session-id> --id <message-id> --note "completed"
    ```
 
    `ack` is transport consumption for `(message_id, recipient-address)`. Terminal
@@ -113,14 +114,14 @@ guessing.
 Drive the loop from your own turn cycle:
 
 ```text
-once:   telex attach --address <addr> --description "<s>"
+once:   telex attach --address <addr> --session <session-id> --description "<s>"
 then repeat:
   1. start one detached background command named `TELEX MESSAGE WAITER`:
-     while focused on other work: `telex wait --address <addr> --min-attention interrupt --out-dir <dir>`
-     while idle/ready for anything: `telex wait --address <addr> --out-dir <dir>`
+     while focused on other work: `telex wait --address <addr> --session <session-id> --min-attention interrupt --out-dir <dir>`
+     while idle/ready for anything: `telex wait --address <addr> --session <session-id> --out-dir <dir>`
   2. it blocks until one message, exits, and the runtime completion wakes you
   3. read `<dir>\exit.code` (not the shell task exit code):
-     0 -> parse `delivery.json` (or `message.json`), run `telex ack`, dedupe by id, then start a fresh wait before longer processing
+     0 -> parse `delivery.json` (or `message.json`), run `telex ack --session <session-id>`, dedupe by id, then start a fresh wait before longer processing
      5 -> attach/wait again if the session is still live
      2/3/4 -> re-arm or restart as indicated above (see `status.json` for detail)
 ```
