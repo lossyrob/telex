@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-06-26T21:55:00.000Z",
+  "updatedAt": "2026-06-28T03:40:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -138,7 +138,7 @@
       "id": "copilot-plugin",
       "type": "task",
       "title": "Copilot plugin: sessionEnd hook + skill",
-      "summary": "sessionEnd hook removes the session's addresses via explicit Detach (daemon.md sec.14.2; healthy disconnect on quit + dismiss) - membership is explicit-only and daemon-native, NOT PR #31's filesystem registry (its hook plumbing is reused, the registry storage is dropped). The hook is a thin mapper of the Copilot env/payload (COPILOT_AGENT_SESSION_ID -> TELEX_SESSION_ID; COPILOT_LOADER_PID -> --watch-pid) onto generic inputs; the core COPILOT_* fallback is removed so Copilot JSON parsing is not a core protocol dependency. Move telex skill into a real Copilot plugin skill with one source serving both the CLI command and the plugin skill. Sketch; may split hook vs skill at promotion.",
+      "summary": "sessionEnd hook removes the session's addresses via explicit Detach (daemon.md sec.14.2; healthy disconnect on quit + dismiss) - membership is explicit-only and daemon-native, NOT PR #31's filesystem registry (its hook plumbing is reused, the registry storage is dropped). The hook is a thin mapper of the Copilot env/payload (COPILOT_AGENT_SESSION_ID -> TELEX_SESSION_ID; COPILOT_LOADER_PID -> --watch-pid) onto generic inputs; the core COPILOT_* fallback is removed so Copilot JSON parsing is not a core protocol dependency. Move telex skill into a real Copilot plugin skill with one source serving both the CLI command and the plugin skill. Sketch; may split hook vs skill at promotion. Scope extended (council-informed): add the Tier-A plugin-owned heartbeat -- a bounded-timeout tracked waiter + a notification hook re-injecting the spawn recipe from the plugin (not agent memory) -- so deafness is bounded and the re-arm recipe survives compaction (see #41 comment; ledger council-harness-wake).",
       "status": "ready",
       "attention": "watch",
       "repoIds": [
@@ -149,6 +149,46 @@
         "owner": "lossyrob",
         "repo": "telex",
         "number": 41
+      },
+      "dependsOn": [
+        "fencing-proof"
+      ]
+    },
+    {
+      "id": "cc-stream-wake",
+      "type": "task",
+      "title": "CC / stream-wake (deliberative-table visibility)",
+      "summary": "Let a seat opt in to being woken by the stream/table it belongs to (its CC/observer traffic) instead of only a primary TO, so a deliberative seat can see and be woken by its conversation without hand-rolled DB polling. Daemon delivery-semantics change (the daemon owns delivery emission + wake); opt-in subscribe / wake-on-stream or a per-address wake-attention setting, NOT CC-always-wakes (which would reintroduce notification churn). Preserve durable ack-aware delivery + zero loss; backend-agnostic. From #45 cluster D; needs a small design pass. Gates closure.",
+      "status": "ready",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 40
+      },
+      "dependsOn": [
+        "fencing-proof"
+      ]
+    },
+    {
+      "id": "liveness-visibility",
+      "type": "task",
+      "title": "Liveness & visibility hardening (deaf-evidence, terminal-exit-status, foreign-lease view)",
+      "summary": "Daemon-side observability so deafness, abnormal waiter exits, and ghost leases are self-evident rather than diagnosable only by going to look (from #45 clusters A/B/E). Make the already-computed UnattendedWithBacklog grade visible cross-session and proactively surfaced past a threshold; author a consistent terminal status on EVERY waiter exit (incl. kill/no-op/lost-race), decoupled from the waiter writing a file; add an --all-sessions / foreign-lease view so a session-scoped status no longer hides a ghost lease. The observability seam the validation-harness asserts through; pairs with the copilot-plugin heartbeat/guard (the station self-corrects, this makes the condition observable to peers/operator).",
+      "status": "ready",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 46
       },
       "dependsOn": [
         "fencing-proof"
@@ -237,7 +277,9 @@
         "telex"
       ],
       "dependsOn": [
-        "hardening-gate"
+        "hardening-gate",
+        "cc-stream-wake",
+        "liveness-visibility"
       ]
     }
   ],
@@ -270,6 +312,16 @@
       "nodeIds": [
         "postgres-parity",
         "copilot-plugin"
+      ]
+    },
+    {
+      "id": "coordination-hardening",
+      "title": "Coordination hardening (stream-wake + liveness visibility)",
+      "summary": "The #45 dogfooding friction is addressed in the daemon layer: a deliberative seat can opt in to being woken by its CC/table stream (no polling), and deafness / abnormal waiter exits / ghost leases are self-evident. Runs parallel to backends-and-plugin; gates closure.",
+      "status": "planned",
+      "nodeIds": [
+        "cc-stream-wake",
+        "liveness-visibility"
       ]
     },
     {
