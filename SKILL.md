@@ -33,10 +33,14 @@ guessing.
 
    In Copilot CLI with the telex plugin installed, use the adapter so the plugin
    maps `$COPILOT_AGENT_SESSION_ID` to the generic session id and
-   `$COPILOT_LOADER_PID` to the loader `--watch-pid` backstop:
+   `$COPILOT_LOADER_PID` to the loader `--watch-pid` backstop. Generic telex
+   commands still need the generic session id on each invocation, so pass
+   `--session "$COPILOT_AGENT_SESSION_ID"` (or set `TELEX_SESSION_ID` in the same
+   shell command/script that invokes telex):
 
    ```sh
    telex --address <addr> copilot attach --description "<what this session is doing>"
+   telex --address <addr> wait --session "$COPILOT_AGENT_SESSION_ID" --out-dir <dir>
    ```
 
    Optional metadata:
@@ -59,7 +63,7 @@ guessing.
    relying on captured stdout:
 
    ```sh
-   telex wait --address <addr> --out-dir <dir>
+   telex wait --address <addr> --session <session-id> --out-dir <dir>
    ```
 
    On exit, `telex wait --out-dir` writes into `<dir>`:

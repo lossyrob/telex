@@ -61,15 +61,22 @@ In Copilot CLI, install/use the telex plugin and attach with:
 
 ```sh
 telex --address workstream:proj/node:issue-215 copilot attach --description "<work>"
+telex --address workstream:proj/node:issue-215 wait --session "$COPILOT_AGENT_SESSION_ID" --out-dir <dir>
 ```
 
 The adapter maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id and
 `$COPILOT_LOADER_PID` to a loader watch-pid. Generic telex commands intentionally
-do not read Copilot-specific env variables directly.
+do not read Copilot-specific env variables directly, so follow-up generic commands
+must pass `--session "$COPILOT_AGENT_SESSION_ID"` or run in a shell/script that
+sets `TELEX_SESSION_ID`.
 
 The plugin shape is validated against GitHub Copilot CLI 1.0.66-1; see
 [`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)
 for the acceptance matrix and live hook smoke evidence.
+
+Release archives include a `copilot-plugin/` directory containing `plugin.json`,
+`hooks.json`, and the plugin skill mirror. Install scripts copy it next to the
+binary and print the plugin install command.
 
 ## Networked backends
 

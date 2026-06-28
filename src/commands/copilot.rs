@@ -6,7 +6,6 @@
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeSet;
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -95,8 +94,8 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
         }
     };
 
-    let (mut status_client, status_cap) = match connect_existing_with_cap(&store_key).await {
-        Ok((client, cap)) => (client, cap),
+    let (mut client, cap) = match connect_existing_with_cap(&store_key).await {
+        Ok(connection) => connection,
         Err(e) => {
             let event = HookLogEvent::session_end("daemon_unavailable", Some(&session), Some(&e));
             write_hook_log_best_effort(&event);
@@ -107,53 +106,22 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
         }
     };
 
-    let status = match daemon_status(&mut status_client, &store_key, &status_cap.admin_cap).await {
-        Ok(status) => status,
-        Err(e) => {
-            let event = HookLogEvent::session_end("status_error", Some(&session), Some(&e));
-            write_hook_log_best_effort(&event);
-            print_json(
-                &serde_json::json!({"session_end": false, "session_id": session, "store_key": store_key, "outcome": "status_error"}),
-            );
-            return Ok(0);
-        }
-    };
-
-    let mut affected_stores = status
-        .members
-        .iter()
-        .filter(|member| member.session_id == session && !member.idle)
-        .map(|member| member.store_key.clone())
-        .collect::<BTreeSet<_>>();
-    if affected_stores.is_empty() {
-        affected_stores.insert(store_key.clone());
-    }
-
     let mut ended = Vec::new();
     let mut failed = Vec::new();
-    for affected_store in affected_stores {
-        let (mut client, cap) = match connect_existing_with_cap(&affected_store).await {
-            Ok(connection) => connection,
-            Err(e) => {
-                failed.push(format!("{affected_store}: {e}"));
-                continue;
-            }
-        };
-        let response = client
-            .request(&Request::SessionEnd {
-                store_key: affected_store.clone(),
-                session_id: session.clone(),
-                proof: Some(cap.admin_cap),
-            })
-            .await;
-        match response {
-            Ok(Response::Ack { .. }) => ended.push(affected_store),
-            Ok(Response::Error { code, message, .. }) => {
-                failed.push(format!("{affected_store}: {code}: {message}"));
-            }
-            Ok(other) => failed.push(format!("{affected_store}: unexpected {other:?}")),
-            Err(e) => failed.push(format!("{affected_store}: {e}")),
+    let response = client
+        .request(&Request::SessionEnd {
+            store_key: store_key.clone(),
+            session_id: session.clone(),
+            proof: Some(cap.admin_cap),
+        })
+        .await;
+    match response {
+        Ok(Response::Ack { .. }) => ended.push(store_key.clone()),
+        Ok(Response::Error { code, message, .. }) => {
+            failed.push(format!("{store_key}: {code}: {message}"));
         }
+        Ok(other) => failed.push(format!("{store_key}: unexpected {other:?}")),
+        Err(e) => failed.push(format!("{store_key}: {e}")),
     }
 
     cleanup_turn_guard_state_best_effort(&session);
@@ -185,11 +153,7 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
             } else {
                 "missing_session"
             };
-            return allow_with_log(
-                None,
-                reason_code,
-                "No Copilot session id was available.",
-            )
+            return allow_with_log(None, reason_code, "No Copilot session id was available.");
         }
     };
 
@@ -218,7 +182,7 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
         Err(e) => return allow_with_log(Some(&session), "status_error", &e),
     };
 
-    let active_members = active_session_members(&status, &session);
+    let active_members = active_session_members(&status, &store_key, &session);
     let state_path = turn_guard_state_path(&session)?;
     let _lock = match StateLock::acquire(&state_path) {
         Ok(lock) => lock,
@@ -341,11 +305,17 @@ async fn daemon_status(
     }
 }
 
-fn active_session_members(status: &DaemonStatus, session: &str) -> Vec<MemberStatus> {
+fn active_session_members(
+    status: &DaemonStatus,
+    store_key: &str,
+    session: &str,
+) -> Vec<MemberStatus> {
     status
         .members
         .iter()
-        .filter(|member| member.session_id == session && !member.idle)
+        .filter(|member| {
+            member.store_key == store_key && member.session_id == session && !member.idle
+        })
         .cloned()
         .collect()
 }
@@ -388,6 +358,8 @@ struct GuardState {
     nudges: u32,
     last_decision: String,
     updated_at_ms: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    unarmed_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -436,7 +408,6 @@ fn evaluate_guard(
         .iter()
         .filter(|member| member.live_waiters_count == 0)
         .collect::<Vec<_>>();
-    let any_live_waiter = members.iter().any(|member| member.live_waiters_count > 0);
     if unarmed.is_empty() {
         return GuardEvaluation {
             decision: HookDecision::Allow,
@@ -447,10 +418,10 @@ fn evaluate_guard(
         };
     }
 
-    let prior_nudges = if any_live_waiter {
-        0
-    } else {
-        prior_state.map(|s| s.nudges).unwrap_or(0)
+    let unarmed_key = unarmed_station_key(&unarmed);
+    let prior_nudges = match prior_state {
+        Some(state) if state.unarmed_key.as_deref() == Some(unarmed_key.as_str()) => state.nudges,
+        _ => 0,
     };
     if prior_nudges >= settings.max_nudges {
         return GuardEvaluation {
@@ -464,6 +435,7 @@ fn evaluate_guard(
                 nudges: prior_nudges,
                 last_decision: "cap_exhausted".to_string(),
                 updated_at_ms: now_ms(),
+                unarmed_key: Some(unarmed_key),
             }),
         };
     }
@@ -492,8 +464,18 @@ fn evaluate_guard(
             nudges,
             last_decision: "unarmed_attended_station".to_string(),
             updated_at_ms: now_ms(),
+            unarmed_key: Some(unarmed_key),
         }),
     }
+}
+
+fn unarmed_station_key(unarmed: &[&MemberStatus]) -> String {
+    let mut parts = unarmed
+        .iter()
+        .map(|member| format!("{}\0{}", member.store_key, member.address))
+        .collect::<Vec<_>>();
+    parts.sort();
+    parts.join("\n")
 }
 
 fn allow_with_log(session: Option<&str>, reason_code: &'static str, detail: &str) -> Result<i32> {
@@ -523,9 +505,10 @@ fn hook_log_path() -> Result<PathBuf> {
 }
 
 fn path_token(value: &str) -> String {
-    if value
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+    if value.len() <= 80
+        && value
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
     {
         value.to_string()
     } else {
@@ -578,7 +561,10 @@ impl StateLock {
             .open(&lock_path)
         {
             Ok(file) => file,
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists && Self::stale_lock(&lock_path) => {
+            Err(e)
+                if e.kind() == std::io::ErrorKind::AlreadyExists
+                    && Self::stale_lock(&lock_path) =>
+            {
                 let _ = std::fs::remove_file(&lock_path);
                 OpenOptions::new()
                     .write(true)
@@ -742,6 +728,19 @@ mod tests {
         }
     }
 
+    fn member_in_store(
+        store_key: &str,
+        session: &str,
+        address: &str,
+        live_waiters_count: usize,
+        pending: i64,
+    ) -> MemberStatus {
+        let mut member = member(address, live_waiters_count, pending);
+        member.store_key = store_key.to_string();
+        member.session_id = session.to_string();
+        member
+    }
+
     fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
         match value {
             Some(value) => std::env::set_var(key, value),
@@ -790,6 +789,7 @@ mod tests {
             nudges: 2,
             last_decision: "unarmed_attended_station".to_string(),
             updated_at_ms: 1,
+            unarmed_key: Some(unarmed_station_key(&[&member("addr:a", 0, 0)])),
         });
         let eval = evaluate_guard("s1", &[member("addr:a", 0, 0)], settings, prior);
         assert_eq!(eval.reason_code, "cap_exhausted");
@@ -798,22 +798,39 @@ mod tests {
     }
 
     #[test]
-    fn guard_resets_when_live_waiter_is_observed() {
+    fn guard_counts_persistent_unarmed_set_even_with_other_live_waiter() {
         let settings = GuardSettings {
             enabled: true,
             max_nudges: 3,
         };
+        let armed = member("addr:armed", 1, 0);
+        let unarmed = member("addr:unarmed", 0, 0);
+        let prior = Some(GuardState {
+            nudges: 2,
+            last_decision: "unarmed_attended_station".to_string(),
+            updated_at_ms: 1,
+            unarmed_key: Some(unarmed_station_key(&[&unarmed])),
+        });
+        let eval = evaluate_guard("s1", &[armed, unarmed], settings, prior);
+        assert_eq!(eval.reason_code, "unarmed_attended_station");
+        assert_eq!(eval.next_state.unwrap().nudges, 3);
+    }
+
+    #[test]
+    fn guard_resets_when_unarmed_station_set_changes() {
+        let settings = GuardSettings {
+            enabled: true,
+            max_nudges: 3,
+        };
+        let previous = member("addr:old", 0, 0);
+        let current = member("addr:new", 0, 0);
         let prior = Some(GuardState {
             nudges: 3,
             last_decision: "cap_exhausted".to_string(),
             updated_at_ms: 1,
+            unarmed_key: Some(unarmed_station_key(&[&previous])),
         });
-        let eval = evaluate_guard(
-            "s1",
-            &[member("addr:armed", 1, 0), member("addr:unarmed", 0, 0)],
-            settings,
-            prior,
-        );
+        let eval = evaluate_guard("s1", &[current], settings, prior);
         assert_eq!(eval.reason_code, "unarmed_attended_station");
         assert_eq!(eval.next_state.unwrap().nudges, 1);
     }
@@ -845,11 +862,20 @@ mod tests {
     }
 
     #[test]
-    fn active_members_filter_ignores_idle_and_other_sessions() {
+    fn path_token_hashes_overlong_safe_session_ids() {
+        let long = "a".repeat(300);
+        let token = path_token(&long);
+        assert_ne!(token, long);
+        assert!(token.len() <= 80);
+    }
+
+    #[test]
+    fn active_members_filter_ignores_idle_other_sessions_and_other_stores() {
         let mut idle = member("idle", 0, 0);
         idle.idle = true;
         let mut other = member("other", 0, 0);
         other.session_id = "s2".to_string();
+        let other_store = member_in_store("sqlite:/other.db", "s1", "other-store", 0, 0);
         let active = member("active", 0, 0);
         let status = DaemonStatus {
             protocol_version: ProtocolVersion { major: 1, minor: 2 },
@@ -860,12 +886,12 @@ mod tests {
             backoff: Vec::new(),
             recent_errors: Vec::new(),
             epoch_by_address: Vec::new(),
-            members: vec![idle, other, active],
+            members: vec![idle, other, other_store, active],
             live_waiters: Vec::new(),
             retention: Vec::new(),
             idle_stations: Default::default(),
         };
-        let got = active_session_members(&status, "s1");
+        let got = active_session_members(&status, "sqlite:/tmp/telex.db", "s1");
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].address, "active");
     }

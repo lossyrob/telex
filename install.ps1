@@ -57,6 +57,12 @@ try {
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     New-Item -ItemType Directory -Force -Path $installDir | Out-Null
     Copy-Item (Join-Path $tmp 'telex.exe') (Join-Path $installDir 'telex.exe') -Force
+    $pluginSrc = Join-Path $tmp 'copilot-plugin'
+    if (Test-Path $pluginSrc) {
+        $pluginDest = Join-Path $installDir 'copilot-plugin'
+        Remove-Item -Recurse -Force $pluginDest -ErrorAction SilentlyContinue
+        Copy-Item $pluginSrc $pluginDest -Recurse -Force
+    }
 
     Write-Host ""
     Write-Host "Installed telex $tag to $installDir\telex.exe"
@@ -68,6 +74,9 @@ try {
         Write-Host "Added $installDir to your user PATH (restart your terminal to pick it up)."
     }
     Write-Host "Next:  telex skill"
+    if (Test-Path (Join-Path $installDir 'copilot-plugin\plugin.json')) {
+        Write-Host "Copilot plugin:  copilot plugin install `"$installDir\copilot-plugin`""
+    }
 }
 finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue

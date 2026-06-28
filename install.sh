@@ -70,6 +70,11 @@ fi
 tar -C "${tmp}" -xzf "${tmp}/${asset}"
 mkdir -p "${INSTALL_DIR}"
 install -m 0755 "${tmp}/telex" "${INSTALL_DIR}/telex"
+if [ -d "${tmp}/copilot-plugin" ]; then
+  rm -rf "${INSTALL_DIR}/copilot-plugin"
+  mkdir -p "${INSTALL_DIR}/copilot-plugin"
+  cp -R "${tmp}/copilot-plugin/." "${INSTALL_DIR}/copilot-plugin/"
+fi
 
 say ""
 say "Installed telex ${tag} to ${INSTALL_DIR}/telex"
@@ -78,3 +83,6 @@ case ":${PATH}:" in
   *) say "Add it to your PATH:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
 esac
 say "Next:  telex skill"
+if [ -f "${INSTALL_DIR}/copilot-plugin/plugin.json" ]; then
+  say "Copilot plugin:  copilot plugin install \"${INSTALL_DIR}/copilot-plugin\""
+fi
