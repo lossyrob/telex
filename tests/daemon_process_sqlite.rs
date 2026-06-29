@@ -1989,14 +1989,6 @@ fn real_process_station_status_all_sessions_exposes_foreign_station() {
         "text output should mark foreign station: {}",
         text.stdout
     );
-}
-
-#[test]
-fn real_process_station_status_all_sessions_without_session_env_marks_foreign() {
-    let env = ProcessEnv::new("real-station-all-sessions-no-env");
-    let foreign_session = "real-station-all-sessions-no-env-foreign";
-    let address = "addr:real-station-all-sessions-no-env";
-    env.attach(foreign_session, address);
 
     let mut all_cmd = env.command_with_session("unused-session");
     all_cmd
