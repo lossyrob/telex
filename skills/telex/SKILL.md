@@ -44,10 +44,12 @@ guessing.
    ```
 
    The plugin's default-on `agentStop` guard checks coverage at turn-end and
-   nudges if a station has no live waiter or has delivered-but-unacked work. The
-   bounded-timeout notification heartbeat is intentionally not installed by
-   default; overnight/AFK deterministic wake belongs to the ACP track, not to
-   visible in-conversation heartbeat turns.
+   nudges if a station has no live waiter or has delivered-but-unacked work.
+   Detached waiter stdout is not delivered to the agent, so the agent still reads
+   `message.json` / `delivery.json` from `--out-dir` after the completion wake.
+   Notification-hook content enrichment was evaluated, but the hook payload does
+   not provide a stable `--out-dir` path to read. Overnight/AFK deterministic
+   wake belongs to the ACP track, not to visible in-conversation heartbeat turns.
 
    Optional metadata:
 

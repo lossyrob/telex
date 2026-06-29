@@ -70,11 +70,13 @@ do not read Copilot-specific env variables directly, so follow-up generic comman
 must pass `--session "$COPILOT_AGENT_SESSION_ID"` or run in a shell/script that
 sets `TELEX_SESSION_ID`.
 
-The bounded-timeout notification heartbeat was evaluated and left out: sync and
-agent-read shell completions already carry stdout in context, while the
-notification hook payload exposes only notification metadata and not a stable
-`--out-dir` path. Classic waiter robustness in this PR comes from the default-on
-`agentStop` guard; overnight/AFK deterministic wake belongs to the ACP track.
+Detached waiter stdout is not delivered to the agent; agents still read
+`message.json` / `delivery.json` from `--out-dir` after the completion wake.
+Notification-hook content enrichment was evaluated for removing that fetch step,
+but the hook payload exposes only notification metadata and no stable `--out-dir`
+path to read. Classic waiter robustness in this PR comes from the default-on
+`agentStop` coverage guard; overnight/AFK deterministic wake belongs to the ACP
+track.
 
 The plugin shape is validated against GitHub Copilot CLI 1.0.66-1; see
 [`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)
