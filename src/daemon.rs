@@ -1,6 +1,10 @@
 //! Hidden daemon singleton foundation: singleton identity, endpoint naming, capability
 //! file handling, connect-or-spawn, and a P2 JSONL server loop.
 
+#[cfg(feature = "postgres")]
+use crate::backend::postgres::{
+    make_tls as make_postgres_tls, notify_channel_for_schema, sanitize_ident,
+};
 #[cfg(feature = "sqlite")]
 use crate::backend::sqlite::SqliteBackend;
 use crate::backend::Backend;
@@ -15,6 +19,8 @@ use crate::model::{
     cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient, Attention,
     DeliveryOutcome, EpochClaimResult, NewMessage, STATUS_RETIRED,
 };
+#[cfg(feature = "postgres")]
+use anyhow::Context;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
@@ -26,7 +32,11 @@ use std::sync::Arc;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::io::BufReader;
-use tokio::sync::Mutex as AsyncMutex;
+#[cfg(feature = "postgres")]
+use tokio::sync::mpsc;
+use tokio::sync::{Mutex as AsyncMutex, Notify};
+#[cfg(feature = "postgres")]
+use tokio_postgres::AsyncMessage;
 
 pub const READINESS_TIMEOUT: Duration = Duration::from_secs(5);
 pub const CONNECT_ATTEMPT_TIMEOUT: Duration = Duration::from_millis(500);
@@ -305,7 +315,7 @@ pub struct DaemonState {
     members: Mutex<BTreeMap<MemberKey, MemberRecord>>,
     waiters: Mutex<BTreeMap<WaiterKey, WaiterRecord>>,
     next_waiter_id: AtomicU64,
-    recent_errors: Mutex<VecDeque<RecentErrorStatus>>,
+    recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
     draining: AtomicBool,
 }
@@ -314,6 +324,7 @@ pub struct DaemonState {
 struct StoreEntry {
     kind: String,
     backend: Arc<dyn Backend>,
+    notify: Arc<Notify>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -586,15 +597,21 @@ impl DaemonState {
             return Ok(entry.backend);
         }
 
-        let backend = open_store_backend(store_key).await?;
-        self.stores.lock().unwrap().insert(
-            store_key.to_string(),
-            StoreEntry {
-                kind: backend.kind().to_string(),
-                backend: backend.clone(),
-            },
-        );
+        let entry = open_store_entry(store_key, self.recent_errors.clone()).await?;
+        let backend = entry.backend.clone();
+        self.stores
+            .lock()
+            .unwrap()
+            .insert(store_key.to_string(), entry);
         Ok(backend)
+    }
+
+    fn store_notify(&self, store_key: &str) -> Option<Arc<Notify>> {
+        self.stores
+            .lock()
+            .unwrap()
+            .get(store_key)
+            .map(|entry| entry.notify.clone())
     }
 
     fn member_key(store_key: &str, session_id: &str, address: &str) -> MemberKey {
@@ -909,16 +926,7 @@ impl DaemonState {
     }
 
     fn push_recent_error(&self, kind: impl Into<String>, message: impl Into<String>) {
-        let mut errors = self.recent_errors.lock().unwrap();
-        let message = proto::redact_secrets(message.into(), &[&self.admin_cap]);
-        errors.push_back(RecentErrorStatus {
-            at_ms: now_ms(),
-            kind: kind.into(),
-            message,
-        });
-        while errors.len() > RECENT_ERROR_LIMIT {
-            errors.pop_front();
-        }
+        push_recent_error_to_queue(&self.recent_errors, kind, message, &[&self.admin_cap]);
     }
 
     fn recent_errors(&self) -> Vec<RecentErrorStatus> {
@@ -1749,7 +1757,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         members: Mutex::new(BTreeMap::new()),
         waiters: Mutex::new(BTreeMap::new()),
         next_waiter_id: AtomicU64::new(1),
-        recent_errors: Mutex::new(VecDeque::new()),
+        recent_errors: Arc::new(Mutex::new(VecDeque::new())),
         ended_sessions: Mutex::new(BTreeMap::new()),
         draining: AtomicBool::new(false),
     })
@@ -1766,34 +1774,234 @@ fn current_process_start_time_for_cap() -> Result<Option<u64>> {
     Ok(start_time)
 }
 
-async fn open_store_backend(store_key: &str) -> std::result::Result<Arc<dyn Backend>, Response> {
-    let Some(path) = store_key.strip_prefix("sqlite:") else {
-        return Err(proto::unsupported(format!(
-            "daemon-core P3 serves sqlite:<absolute-path> store keys only, got {store_key}"
-        )));
-    };
-    let path = Path::new(path);
-    if !path.is_absolute() {
-        return Err(proto::unsupported(format!(
-            "sqlite store key must contain an absolute path, got {store_key}"
-        )));
+async fn open_store_entry(
+    store_key: &str,
+    recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
+) -> std::result::Result<StoreEntry, Response> {
+    #[cfg(not(feature = "postgres"))]
+    let _ = &recent_errors;
+
+    if let Some(path) = store_key.strip_prefix("sqlite:") {
+        let path = Path::new(path);
+        if !path.is_absolute() {
+            return Err(proto::unsupported(format!(
+                "sqlite store key must contain an absolute path, got {store_key}"
+            )));
+        }
+        #[cfg(feature = "sqlite")]
+        {
+            let backend = SqliteBackend::open_locked(&path.to_string_lossy())
+                .map_err(|e| proto::unsupported(format!("opening SQLite store: {e:#}")))?;
+            backend
+                .init_schema()
+                .await
+                .map_err(|e| proto::unsupported(format!("initializing SQLite store: {e:#}")))?;
+            return Ok(StoreEntry {
+                kind: backend.kind().to_string(),
+                backend: Arc::new(backend),
+                notify: Arc::new(Notify::new()),
+            });
+        }
+        #[cfg(not(feature = "sqlite"))]
+        {
+            return Err(proto::unsupported(
+                "this telex build does not include the sqlite backend",
+            ));
+        }
     }
-    #[cfg(feature = "sqlite")]
-    {
-        let backend = SqliteBackend::open_locked(&path.to_string_lossy())
-            .map_err(|e| proto::unsupported(format!("opening SQLite store: {e:#}")))?;
-        backend
-            .init_schema()
+
+    if store_key.starts_with("postgres:") {
+        #[cfg(feature = "postgres")]
+        {
+            let (profile_name, profile) = resolve_postgres_profile_for_store_key(store_key)?;
+            let (cfg, schema) = crate::profiles::pg_connect_config(&profile)
+                .await
+                .map_err(|e| {
+                    proto::unsupported(format!(
+                        "resolving Postgres backend profile '{profile_name}' for daemon store open: {e:#}"
+                    ))
+                })?;
+            let backend =
+                crate::backend::postgres::PgBackend::connect_with(cfg.clone(), schema.as_deref())
+                    .await
+                    .map_err(|e| {
+                        proto::unsupported(format!(
+                            "opening Postgres backend profile '{profile_name}': {e:#}"
+                        ))
+                    })?;
+            backend
+                .init_schema()
+                .await
+                .map_err(|e| proto::unsupported(format!("initializing Postgres store: {e:#}")))?;
+            let notify = Arc::new(Notify::new());
+            let _ = (cfg, schema);
+            spawn_postgres_notify_listener(store_key.to_string(), notify.clone(), recent_errors);
+            return Ok(StoreEntry {
+                kind: backend.kind().to_string(),
+                backend: Arc::new(backend),
+                notify,
+            });
+        }
+        #[cfg(not(feature = "postgres"))]
+        {
+            return Err(proto::unsupported(
+                "this telex build does not include the postgres backend",
+            ));
+        }
+    }
+
+    Err(proto::unsupported(format!(
+        "daemon store key must be sqlite:<absolute-path> or postgres:<profile-target>, got {store_key}"
+    )))
+}
+
+#[cfg(feature = "postgres")]
+fn resolve_postgres_profile_for_store_key(
+    store_key: &str,
+) -> std::result::Result<(String, crate::profiles::BackendProfile), Response> {
+    let cfg = crate::profiles::load()
+        .map_err(|e| proto::unsupported(format!("loading backend profiles: {e:#}")))?;
+    let mut matches = cfg
+        .backends
+        .into_iter()
+        .filter(|(_, profile)| profile.kind == "postgres")
+        .filter(|(_, profile)| crate::profiles::store_key(profile, None) == store_key)
+        .collect::<Vec<_>>();
+    match matches.len() {
+        1 => Ok(matches.remove(0)),
+        0 => Err(proto::unsupported(format!(
+            "no configured Postgres backend profile matches store key {store_key}; add the profile on this host before attaching"
+        ))),
+        _ => {
+            let names = matches
+                .iter()
+                .map(|(name, _)| name.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            Err(proto::unsupported(format!(
+                "ambiguous Postgres backend profiles for store key {store_key}: {names}; refusing to choose one"
+            )))
+        }
+    }
+}
+
+#[cfg(feature = "postgres")]
+fn spawn_postgres_notify_listener(
+    store_key: String,
+    notify: Arc<Notify>,
+    recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
+) {
+    tokio::spawn(async move {
+        let mut backoff = BACKOFF_INITIAL;
+        loop {
+            let result = async {
+                let (_, profile) = resolve_postgres_profile_for_store_key(&store_key)
+                    .map_err(|response| anyhow::anyhow!("{response:?}"))?;
+                let (cfg, schema) = crate::profiles::pg_connect_config(&profile).await?;
+                run_postgres_notify_listener(&cfg, schema.as_deref(), notify.clone()).await
+            }
+            .await;
+            match result {
+                Ok(()) => {
+                    push_recent_error_to_queue(
+                        &recent_errors,
+                        "NotifyDegraded",
+                        format!("postgres LISTEN loop ended for {store_key}; reconnecting"),
+                        &[],
+                    );
+                }
+                Err(e) => {
+                    push_recent_error_to_queue(
+                        &recent_errors,
+                        "NotifyDegraded",
+                        format!("postgres LISTEN loop failed for {store_key}: {e:#}; reconnecting"),
+                        &[],
+                    );
+                }
+            }
+            tokio::time::sleep(backoff).await;
+            backoff = (backoff * 2).min(BACKOFF_MAX);
+        }
+    });
+}
+
+#[cfg(feature = "postgres")]
+enum PgListenEvent {
+    Message(AsyncMessage),
+    Error(tokio_postgres::Error),
+    Closed,
+}
+
+fn push_recent_error_to_queue(
+    recent_errors: &Arc<Mutex<VecDeque<RecentErrorStatus>>>,
+    kind: impl Into<String>,
+    message: impl Into<String>,
+    redactions: &[&str],
+) {
+    let mut errors = recent_errors.lock().unwrap();
+    let message = proto::redact_secrets(message.into(), redactions);
+    errors.push_back(RecentErrorStatus {
+        at_ms: now_ms(),
+        kind: kind.into(),
+        message,
+    });
+    while errors.len() > RECENT_ERROR_LIMIT {
+        errors.pop_front();
+    }
+}
+
+#[cfg(feature = "postgres")]
+async fn run_postgres_notify_listener(
+    cfg: &tokio_postgres::Config,
+    schema: Option<&str>,
+    notify: Arc<Notify>,
+) -> anyhow::Result<()> {
+    let (client, mut connection) = cfg
+        .connect(make_postgres_tls()?)
+        .await
+        .context("connecting postgres LISTEN client")?;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        loop {
+            let event = match std::future::poll_fn(|cx| connection.poll_message(cx)).await {
+                Some(Ok(message)) => PgListenEvent::Message(message),
+                Some(Err(e)) => PgListenEvent::Error(e),
+                None => PgListenEvent::Closed,
+            };
+            let terminal = matches!(event, PgListenEvent::Error(_) | PgListenEvent::Closed);
+            if tx.send(event).is_err() || terminal {
+                break;
+            }
+        }
+    });
+
+    client
+        .batch_execute("SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL READ COMMITTED")
+        .await
+        .context("pinning LISTEN client READ COMMITTED isolation")?;
+    if let Some(schema) = schema {
+        let schema = sanitize_ident(schema)?;
+        client
+            .batch_execute(&format!("SET search_path TO {schema}, public;"))
             .await
-            .map_err(|e| proto::unsupported(format!("initializing SQLite store: {e:#}")))?;
-        Ok(Arc::new(backend))
+            .context("setting LISTEN client search_path")?;
     }
-    #[cfg(not(feature = "sqlite"))]
-    {
-        let _ = path;
-        Err(proto::unsupported(
-            "this telex build does not include the sqlite backend",
-        ))
+    let notify_channel = notify_channel_for_schema(schema)?;
+    client
+        .batch_execute(&format!("LISTEN {notify_channel};"))
+        .await
+        .context("subscribing postgres LISTEN channel")?;
+    loop {
+        match rx.recv().await {
+            Some(PgListenEvent::Message(AsyncMessage::Notification(notification)))
+                if notification.channel() == notify_channel =>
+            {
+                notify.notify_waiters();
+            }
+            Some(PgListenEvent::Message(_)) => {}
+            Some(PgListenEvent::Error(e)) => return Err(e.into()),
+            Some(PgListenEvent::Closed) | None => return Ok(()),
+        }
     }
 }
 
@@ -3036,7 +3244,12 @@ async fn wait_for_message_with_idle_ttl(
             }
             let remaining = deadline.saturating_duration_since(now);
             let ttl_remaining = idle_deadline.saturating_duration_since(now);
-            tokio::time::sleep(remaining.min(ttl_remaining).min(Duration::from_millis(100))).await;
+            sleep_until_next_poll_or_notify(
+                &state,
+                &store_key,
+                remaining.min(ttl_remaining).min(Duration::from_millis(100)),
+            )
+            .await;
         } else {
             let now = Instant::now();
             if now >= idle_deadline {
@@ -3058,13 +3271,29 @@ async fn wait_for_message_with_idle_ttl(
                 );
                 return Response::PresenceEnded;
             }
-            tokio::time::sleep(
+            sleep_until_next_poll_or_notify(
+                &state,
+                &store_key,
                 idle_deadline
                     .saturating_duration_since(now)
                     .min(Duration::from_millis(250)),
             )
             .await;
         }
+    }
+}
+
+async fn sleep_until_next_poll_or_notify(state: &DaemonState, store_key: &str, duration: Duration) {
+    if duration.is_zero() {
+        return;
+    }
+    if let Some(notify) = state.store_notify(store_key) {
+        tokio::select! {
+            _ = notify.notified() => {}
+            _ = tokio::time::sleep(duration) => {}
+        }
+    } else {
+        tokio::time::sleep(duration).await;
     }
 }
 
@@ -3278,7 +3507,15 @@ async fn send_message(
         Ok(row) => row,
         Err(e) => return proto::internal(format!("inserting message: {e:#}")),
     };
-    let _ = backend.notify_new(&to_addr, row.id, row.sent_at_ms).await;
+    if let Err(e) = backend.notify_new(&to_addr, row.id, row.sent_at_ms).await {
+        state.push_recent_error(
+            "NotifyDegraded",
+            format!(
+                "notify_new failed store={store_key} address={to_addr} message_id={}: {e:#}; polling fallback remains active",
+                row.id
+            ),
+        );
+    }
     state.note_backlog_for_unattended_address(&store_key, &to_addr);
     let occupied = state.has_address_member(&store_key, &to_addr);
     Response::Sent {
@@ -3377,7 +3614,15 @@ async fn reply_message(
         Ok(row) => row,
         Err(e) => return proto::internal(format!("inserting reply: {e:#}")),
     };
-    let _ = backend.notify_new(&to, row.id, row.sent_at_ms).await;
+    if let Err(e) = backend.notify_new(&to, row.id, row.sent_at_ms).await {
+        state.push_recent_error(
+            "NotifyDegraded",
+            format!(
+                "notify_new failed store={store_key} address={to} message_id={}: {e:#}; polling fallback remains active",
+                row.id
+            ),
+        );
+    }
     state.note_backlog_for_unattended_address(&store_key, &to);
     let occupied = state.has_address_member(&store_key, &to);
     Response::Sent {
@@ -3523,7 +3768,7 @@ mod p3_tests {
             members: Mutex::new(BTreeMap::new()),
             waiters: Mutex::new(BTreeMap::new()),
             next_waiter_id: AtomicU64::new(1),
-            recent_errors: Mutex::new(VecDeque::new()),
+            recent_errors: Arc::new(Mutex::new(VecDeque::new())),
             ended_sessions: Mutex::new(BTreeMap::new()),
             draining: AtomicBool::new(false),
         })
@@ -5813,7 +6058,7 @@ pub mod test_support {
                 members: Mutex::new(BTreeMap::new()),
                 waiters: Mutex::new(BTreeMap::new()),
                 next_waiter_id: AtomicU64::new(1),
-                recent_errors: Mutex::new(VecDeque::new()),
+                recent_errors: Arc::new(Mutex::new(VecDeque::new())),
                 ended_sessions: Mutex::new(BTreeMap::new()),
                 draining: AtomicBool::new(false),
             });
