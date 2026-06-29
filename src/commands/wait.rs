@@ -1006,7 +1006,10 @@ mod tests {
         let status: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("status.json")).unwrap())
                 .unwrap();
-        assert_eq!(status.get("outcome").and_then(|v| v.as_str()), Some("armed"));
+        assert_eq!(
+            status.get("outcome").and_then(|v| v.as_str()),
+            Some("armed")
+        );
         assert!(status.get("exit_code").unwrap().is_null());
         assert!(!dir.join("message.json").exists());
         assert!(!dir.join("delivery.json").exists());

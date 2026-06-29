@@ -44,16 +44,16 @@ Additional Inputs: streamliner-context=streamliner/context.md
 ## Control State
 
 TODO Mirror: active-required-items
-Reconciliation: not_run
+Reconciliation: pending
 
 ### Required Workflow Items
 - `init` | `resolved` | `activity`
-- `planning` | `pending` | `activity`
-- `planning-docs-review` | `pending` | `activity`
-- `implementation` | `pending` | `activity`
+- `planning` | `resolved` | `activity`
+- `planning-docs-review` | `resolved` | `activity`
+- `implementation` | `resolved` | `activity`
 - `final-review` | `pending` | `activity`
 - `final-pr` | `pending` | `activity`
 
 ### Configured Procedure Items
-- `procedure:planning-review` | `pending` | `procedure`
+- `procedure:planning-review` | `resolved` | `procedure`
 - `procedure:final-review` | `pending` | `procedure`
