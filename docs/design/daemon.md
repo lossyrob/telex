@@ -307,15 +307,17 @@ Frozen Status fields:
   attention, timeout), `pending_unconsumed_count`, `station_health`
   (`armed` / `recently_delivered` / `unattended` / `unattended_with_backlog` / `idle`),
   thresholded deaf-station fields (`unattended_since_ms`, `unattended_for_ms`, `deaf_since_ms`,
-  `deaf_warn`),
+  `deaf_for_ms`, `deaf_warn`),
   daemon-authored terminal waiter fields (`last_waiter_exit_at_ms`, `last_waiter_outcome`,
   `last_waiter_exit_code`, `last_waiter_detail`, `last_waiter_pid`) whose outcome vocabulary is
-  `message` / `idle-timeout` / `presence-ended` / `daemon-error` / `abnormal-exit`, and
+  `message` / `idle-timeout` / `presence-ended` / `abnormal-exit`, and
   `watch_pids` (pid + role + **alive**) so a live-but-quiet station is distinguishable from an
   unattended one with queued work,
   `backend`/`store_key`, `host`. (Membership is in-memory and explicit-only — see
   [§14.1](#141-identity-and-in-memory-membership) — so this set is empty for sessions that
   have not (re-)attached since the last daemon start.)
+  `presence-ended` detail tokens are `session-end`, `station-stop`, `idle-ttl-reap`, `reset`,
+  and `watch-pid-death`.
 - **`live_waiters`** — the top-level live waiter registry, keyed by daemon-assigned
   `waiter_id`, including waiters that are in the small teardown interval between
   membership release and process exit. At most one live waiter is accepted for a

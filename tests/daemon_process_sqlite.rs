@@ -2115,6 +2115,32 @@ fn real_process_address_surfaces_report_deaf_and_foreign_state() {
 }
 
 #[test]
+fn real_process_status_reports_foreign_members_without_session_env() {
+    let env = ProcessEnv::new("real-foreign-no-session");
+    let owner = "real-foreign-no-session-owner";
+    let address = "addr:real-foreign-no-session";
+    env.attach(owner, address);
+
+    let mut status_cmd = env.command_with_session("unused-session");
+    status_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env_remove("COPILOT_AGENT_SESSION_ID")
+        .args(["--json", "--address", address, "status"]);
+    let status = run_command_with_capture(status_cmd, &env.root, Duration::from_secs(5));
+    status.assert_success("status without session env");
+    let status_json = status.json("status without session env");
+
+    assert!(
+        !status_json
+            .get("foreign_members")
+            .and_then(Value::as_array)
+            .unwrap()
+            .is_empty(),
+        "session-less operator status should still expose foreign members: {status_json}"
+    );
+}
+
+#[test]
 fn real_process_status_hints_when_address_active_on_other_store() {
     let env = ProcessEnv::new("real-backend-hint");
     let session = "real-backend-hint-session";

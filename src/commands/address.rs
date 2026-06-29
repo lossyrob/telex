@@ -74,7 +74,7 @@ async fn list(ctx: &Ctx, args: AddressListArgs) -> Result<i32> {
             .filter(|member| {
                 current_session_id
                     .as_ref()
-                    .map_or(false, |session_id| member.session_id != *session_id)
+                    .map_or(true, |session_id| member.session_id != *session_id)
             })
             .cloned()
             .collect();
@@ -95,6 +95,7 @@ async fn list(ctx: &Ctx, args: AddressListArgs) -> Result<i32> {
             "unattended_since_ms": daemon_member.and_then(|m| m.unattended_since_ms),
             "unattended_for_ms": daemon_member.and_then(|m| m.unattended_for_ms),
             "deaf_since_ms": daemon_member.and_then(|m| m.deaf_since_ms),
+            "deaf_for_ms": daemon_member.and_then(|m| m.deaf_for_ms),
             "deaf_warn": deaf_warn,
             "foreign_members": foreign_members,
             "daemon_members": daemon_members,
@@ -170,7 +171,7 @@ async fn show(ctx: &Ctx) -> Result<i32> {
         .filter(|member| {
             current_session_id
                 .as_ref()
-                .map_or(false, |session_id| member.session_id != *session_id)
+                .map_or(true, |session_id| member.session_id != *session_id)
         })
         .cloned()
         .collect();
@@ -190,6 +191,7 @@ async fn show(ctx: &Ctx) -> Result<i32> {
         "unattended_since_ms": daemon_members.first().and_then(|m| m.unattended_since_ms),
         "unattended_for_ms": daemon_members.first().and_then(|m| m.unattended_for_ms),
         "deaf_since_ms": daemon_members.first().and_then(|m| m.deaf_since_ms),
+        "deaf_for_ms": daemon_members.first().and_then(|m| m.deaf_for_ms),
         "deaf_warn": deaf_warn,
         "last_waiter_outcome": daemon_members.first().and_then(|m| m.last_waiter_outcome),
         "last_waiter_exit_code": daemon_members.first().and_then(|m| m.last_waiter_exit_code),

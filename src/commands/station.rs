@@ -56,6 +56,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                         "unattended_since_ms": member.unattended_since_ms,
                         "unattended_for_ms": member.unattended_for_ms,
                         "deaf_since_ms": member.deaf_since_ms,
+                        "deaf_for_ms": member.deaf_for_ms,
                         "deaf_warn": member.deaf_warn,
                         "last_waiter_exit_at_ms": member.last_waiter_exit_at_ms,
                         "last_waiter_outcome": member.last_waiter_outcome,
