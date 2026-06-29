@@ -43,6 +43,13 @@ guessing.
    telex --address <addr> wait --session "$COPILOT_AGENT_SESSION_ID" --out-dir <dir>
    ```
 
+   The plugin also listens for tracked shell completion notifications and injects
+   a bounded waiter recipe back into the session. It tells the agent to re-arm one
+   tracked `TELEX MESSAGE WAITER` with `--timeout-ms <T>` so a still-attending
+   idle terminal gets prompted at least every T. Configure T with
+   `TELEX_TURN_GUARD_HEARTBEAT_TIMEOUT_MS` (default 30 minutes), or set
+   `TELEX_TURN_GUARD=off` to disable both the turn guard and heartbeat guidance.
+
    Optional metadata:
 
    ```sh
@@ -117,8 +124,8 @@ Drive the loop from your own turn cycle:
 once:   telex attach --address <addr> --session <session-id> --description "<s>"
 then repeat:
   1. start one detached background command named `TELEX MESSAGE WAITER`:
-     while focused on other work: `telex wait --address <addr> --session <session-id> --min-attention interrupt --out-dir <dir>`
-     while idle/ready for anything: `telex wait --address <addr> --session <session-id> --out-dir <dir>`
+     while focused on other work: `telex wait --address <addr> --session <session-id> --timeout-ms <T> --min-attention interrupt --out-dir <dir>`
+     while idle/ready for anything: `telex wait --address <addr> --session <session-id> --timeout-ms <T> --out-dir <dir>`
   2. it blocks until one message, exits, and the runtime completion wakes you
   3. read `<dir>\exit.code` (not the shell task exit code):
      0 -> parse `delivery.json` (or `message.json`), run `telex ack --session <session-id>`, dedupe by id, then start a fresh wait before longer processing
@@ -183,9 +190,9 @@ param(
   [string]$MinAttention
 )
 if ([string]::IsNullOrWhiteSpace($MinAttention)) {
-  & $Telex --json --address $Address wait --session $Session --out-dir $OutDir
+  & $Telex --json --address $Address wait --session $Session --timeout-ms 1800000 --out-dir $OutDir
 } else {
-  & $Telex --json --address $Address wait --session $Session --min-attention $MinAttention --out-dir $OutDir
+  & $Telex --json --address $Address wait --session $Session --timeout-ms 1800000 --min-attention $MinAttention --out-dir $OutDir
 }
 exit $LASTEXITCODE
 ```

@@ -428,6 +428,9 @@ pub enum CopilotCmd {
     /// Handle Copilot agentStop by nudging unarmed attended stations to re-arm or detach.
     #[command(hide = true)]
     TurnGuard(CopilotTurnGuardArgs),
+    /// Handle Copilot shell completion notifications with bounded waiter re-arm guidance.
+    #[command(hide = true)]
+    Notification(CopilotNotificationArgs),
     /// Print the canonical embedded telex skill for plugin consumers.
     #[command(hide = true)]
     Skill,
@@ -461,6 +464,13 @@ pub struct CopilotSessionEndArgs {
 
 #[derive(Args)]
 pub struct CopilotTurnGuardArgs {
+    /// Stable Copilot session identity; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotNotificationArgs {
     /// Stable Copilot session identity; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
     pub session: Option<String>,
@@ -740,6 +750,12 @@ mod tests {
                 .unwrap()
                 .command,
             Command::Copilot(CopilotCmd::TurnGuard(_))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "notification"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::Notification(_))
         ));
     }
 

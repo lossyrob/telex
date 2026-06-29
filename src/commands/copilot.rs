@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::cli::{
-    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotSessionEndArgs, CopilotTurnGuardArgs, Ctx,
+    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotNotificationArgs, CopilotSessionEndArgs,
+    CopilotTurnGuardArgs, Ctx,
 };
 use crate::daemon_ipc::{DaemonStatus, MemberStatus, Request, Response, WatchPidSpec};
 use crate::model::now_ms;
@@ -22,12 +23,14 @@ const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
 const HOOK_LOG_FILE: &str = "hook-events.ndjson";
 const HOOK_LOG_ROTATE_BYTES: u64 = 1_048_576;
 const LOCK_STALE_AFTER: Duration = Duration::from_secs(5 * 60);
+const DEFAULT_HEARTBEAT_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 
 pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
     match cmd {
         CopilotCmd::Attach(args) => attach(ctx, args).await,
         CopilotCmd::SessionEnd(args) => session_end(ctx, args).await,
         CopilotCmd::TurnGuard(args) => turn_guard(ctx, args).await,
+        CopilotCmd::Notification(args) => notification(args),
         CopilotCmd::Skill => skill(),
     }
 }
@@ -233,6 +236,48 @@ fn skill() -> Result<i32> {
     Ok(0)
 }
 
+fn notification(args: CopilotNotificationArgs) -> Result<i32> {
+    let payload = read_stdin_payload();
+    let notification_type = payload
+        .as_deref()
+        .and_then(parse_notification_type)
+        .unwrap_or_default();
+    if !matches!(
+        notification_type.as_str(),
+        "shell_completed" | "shell_detached_completed"
+    ) {
+        print_json(&serde_json::json!({}));
+        return Ok(0);
+    }
+
+    let session = resolve_copilot_session(args.session.as_deref(), payload.as_deref())
+        .unwrap_or_else(|| "<session-id>".to_string());
+    if matches!(
+        env_nonempty("TELEX_TURN_GUARD")
+            .map(|v| v.to_ascii_lowercase())
+            .as_deref(),
+        Some("off" | "0" | "false")
+    ) {
+        write_hook_log_best_effort(&HookLogEvent::notification(
+            TURN_GUARD_DISABLED,
+            Some(&session),
+            Some("TELEX_TURN_GUARD disabled notification heartbeat guidance"),
+        ));
+        print_json(&serde_json::json!({}));
+        return Ok(0);
+    }
+
+    let (timeout_ms, detail) = heartbeat_timeout_ms();
+    let context = heartbeat_additional_context(&session, timeout_ms);
+    write_hook_log_best_effort(&HookLogEvent::notification(
+        "heartbeat_recipe_injected",
+        Some(&session),
+        detail.as_deref(),
+    ));
+    print_json(&serde_json::json!({ "additionalContext": context }));
+    Ok(0)
+}
+
 fn read_stdin_payload() -> Option<String> {
     let mut buf = String::new();
     if std::io::stdin().read_to_string(&mut buf).is_ok() && !buf.trim().is_empty() {
@@ -257,6 +302,21 @@ fn parse_session_id(payload: &str) -> Option<String> {
         .or_else(|| v.get("data").and_then(|d| json_string(d, "session_id")))
 }
 
+fn parse_notification_type(payload: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
+    json_string(&v, "notificationType")
+        .or_else(|| json_string(&v, "notification_type"))
+        .or_else(|| {
+            v.get("notification")
+                .and_then(|notification| json_string(notification, "type"))
+        })
+        .or_else(|| v.get("data").and_then(|d| json_string(d, "notificationType")))
+        .or_else(|| {
+            v.get("data")
+                .and_then(|d| json_string(d, "notification_type"))
+        })
+}
+
 fn json_string(v: &serde_json::Value, key: &str) -> Option<String> {
     v.get(key).and_then(|s| s.as_str()).and_then(nonempty)
 }
@@ -272,6 +332,27 @@ fn env_nonempty(name: &str) -> Option<String> {
 
 fn copilot_loader_pid() -> Option<u32> {
     env_nonempty("COPILOT_LOADER_PID").and_then(|s| s.parse::<u32>().ok())
+}
+
+fn heartbeat_timeout_ms() -> (u64, Option<String>) {
+    match env_nonempty("TELEX_TURN_GUARD_HEARTBEAT_TIMEOUT_MS") {
+        Some(value) => match value.parse::<u64>() {
+            Ok(ms) if ms > 0 => (ms, None),
+            _ => (
+                DEFAULT_HEARTBEAT_TIMEOUT_MS,
+                Some(format!(
+                    "invalid TELEX_TURN_GUARD_HEARTBEAT_TIMEOUT_MS={value:?}; using default {DEFAULT_HEARTBEAT_TIMEOUT_MS}"
+                )),
+            ),
+        },
+        None => (DEFAULT_HEARTBEAT_TIMEOUT_MS, None),
+    }
+}
+
+fn heartbeat_additional_context(session: &str, timeout_ms: u64) -> String {
+    format!(
+        "Telex plugin heartbeat: a tracked shell completed. If you are still attending a telex station, immediately re-arm exactly one runtime-tracked `TELEX MESSAGE WAITER` shell task with a bounded wait timeout so idle deafness is bounded. Use this recipe, substituting the attended address and an out-dir you will inspect on completion: `telex --address <addr> wait --session {session} --timeout-ms {timeout_ms} --out-dir <dir>`. If focused, add `--min-attention interrupt`. When that waiter exits 0, read `delivery.json`, run `telex ack --address <addr> --session {session} --id <message-id>`, then re-arm before longer processing. If you are done attending, run `telex detach --address <addr> --session {session}` instead. Do not run an infinite shell loop; each wait must be a separate tracked shell task."
+    )
 }
 
 async fn connect_existing_with_cap(
@@ -636,6 +717,22 @@ impl<'a> HookLogEvent<'a> {
         }
     }
 
+    fn notification(
+        reason_code: &'a str,
+        session_id: Option<&'a str>,
+        detail: Option<&'a str>,
+    ) -> Self {
+        Self {
+            ts_ms: now_ms(),
+            hook: "notification",
+            reason_code,
+            session_id,
+            detail,
+            nudges: None,
+            cap: None,
+        }
+    }
+
     fn turn_guard(
         reason_code: &'a str,
         session_id: Option<&'a str>,
@@ -759,6 +856,28 @@ mod tests {
             Some("nested")
         );
         assert_eq!(parse_session_id(r#"{"other":"x"}"#), None);
+    }
+
+    #[test]
+    fn parses_notification_payload_shapes() {
+        assert_eq!(
+            parse_notification_type(r#"{"notificationType":"shell_completed"}"#).as_deref(),
+            Some("shell_completed")
+        );
+        assert_eq!(
+            parse_notification_type(r#"{"notification":{"type":"shell_detached_completed"}}"#)
+                .as_deref(),
+            Some("shell_detached_completed")
+        );
+    }
+
+    #[test]
+    fn heartbeat_context_carries_bounded_wait_recipe() {
+        let context = heartbeat_additional_context("session-1", 900_000);
+        assert!(context.contains("--session session-1"));
+        assert!(context.contains("--timeout-ms 900000"));
+        assert!(context.contains("TELEX MESSAGE WAITER"));
+        assert!(context.contains("Do not run an infinite shell loop"));
     }
 
     #[test]
