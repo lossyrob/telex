@@ -3,7 +3,7 @@
 
 #[cfg(feature = "sqlite")]
 use crate::backend::sqlite::SqliteBackend;
-use crate::backend::Backend;
+use crate::backend::{Backend, WaitFetchOptions};
 use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
     EpochStatus, HandshakeError, HelloAck, IdleStationStatus, LiveWaiterStatus, MemberStatus,
@@ -372,6 +372,8 @@ struct WaiterRecord {
     started_at_ms: i64,
     attention: Option<String>,
     min_attention: Option<String>,
+    wake_on_cc: bool,
+    cc_after_ms: Option<i64>,
     timeout_ms: Option<u64>,
 }
 
@@ -977,7 +979,11 @@ impl DaemonState {
 }
 
 impl MemberRecord {
-    fn status(&self, live_waiters: &[LiveWaiterStatus], pending_unconsumed_count: i64) -> MemberStatus {
+    fn status(
+        &self,
+        live_waiters: &[LiveWaiterStatus],
+        pending_unconsumed_count: i64,
+    ) -> MemberStatus {
         let member_waiters: Vec<LiveWaiterStatus> = live_waiters
             .iter()
             .filter(|waiter| {
@@ -1022,7 +1028,10 @@ impl MemberRecord {
         pending_unconsumed_count: i64,
     ) -> (StationHealth, Option<String>) {
         if self.idle {
-            return (StationHealth::Idle, Some("station is marked idle".to_string()));
+            return (
+                StationHealth::Idle,
+                Some("station is marked idle".to_string()),
+            );
         }
         if live_waiters_count > 0 {
             return (StationHealth::Armed, None);
@@ -1083,6 +1092,8 @@ impl WaiterRecord {
             start_time: self.start_time,
             attention: self.attention.clone(),
             min_attention: self.min_attention.clone(),
+            wake_on_cc: self.wake_on_cc,
+            cc_after_ms: self.cc_after_ms,
             timeout_ms: self.timeout_ms,
         }
     }
@@ -1106,6 +1117,8 @@ impl WaiterGuard {
         start_time: Option<u64>,
         attention: Option<String>,
         min_attention: Option<String>,
+        wake_on_cc: bool,
+        cc_after_ms: Option<i64>,
         timeout_ms: Option<u64>,
     ) -> Self {
         let pid = pid.unwrap_or(0);
@@ -1119,6 +1132,8 @@ impl WaiterGuard {
             started_at_ms: now_ms(),
             attention,
             min_attention,
+            wake_on_cc,
+            cc_after_ms,
             timeout_ms,
         });
         Self {
@@ -2002,6 +2017,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             address,
             attention,
             min_attention,
+            wake_on_cc,
             timeout_ms,
             waiter_pid,
             waiter_start_time,
@@ -2013,6 +2029,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 address,
                 attention,
                 min_attention,
+                wake_on_cc,
                 timeout_ms,
                 waiter_pid,
                 waiter_start_time,
@@ -2532,6 +2549,7 @@ async fn wait_for_message(
     address: String,
     attention: Option<String>,
     min_attention: Option<String>,
+    wake_on_cc: bool,
     timeout_ms: Option<u64>,
     waiter_pid: Option<u32>,
     waiter_start_time: Option<u64>,
@@ -2543,6 +2561,7 @@ async fn wait_for_message(
         address,
         attention,
         min_attention,
+        wake_on_cc,
         timeout_ms,
         waiter_pid,
         waiter_start_time,
@@ -2558,6 +2577,7 @@ async fn wait_for_message_with_idle_ttl(
     address: String,
     attention: Option<String>,
     min_attention: Option<String>,
+    wake_on_cc: bool,
     timeout_ms: Option<u64>,
     waiter_pid: Option<u32>,
     waiter_start_time: Option<u64>,
@@ -2589,6 +2609,18 @@ async fn wait_for_message_with_idle_ttl(
         Ok(backend) => backend,
         Err(response) => return response,
     };
+    let cc_after_ms = if wake_on_cc {
+        match backend.durable_clock_now_ms().await {
+            Ok(value) => Some(value),
+            Err(e) => {
+                return proto::unsupported(format!(
+                    "wake-on-cc requires durable CC lower-bound support for {address}: {e:#}"
+                ));
+            }
+        }
+    } else {
+        None
+    };
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let idle_deadline = Instant::now() + idle_ttl;
     if state.has_live_waiter_for(&store_key, &session_id, &address) {
@@ -2609,6 +2641,8 @@ async fn wait_for_message_with_idle_ttl(
         waiter_start_time,
         attention.clone(),
         min_attention.clone(),
+        wake_on_cc,
+        cc_after_ms,
         timeout_ms,
     );
     let parsed_min_attention = match min_attention.as_deref().map(Attention::parse).transpose() {
@@ -2642,15 +2676,34 @@ async fn wait_for_message_with_idle_ttl(
         if current.idle {
             return Response::PresenceEnded;
         }
-        let rows = match backend.fetch_undelivered(&address).await {
+        let candidates = match backend
+            .fetch_wait_candidates(
+                &address,
+                WaitFetchOptions {
+                    wake_on_cc,
+                    cc_after_ms: cc_after_ms.unwrap_or_default(),
+                },
+            )
+            .await
+        {
             Ok(rows) => rows,
             Err(e) => {
-                return proto::internal(format!("fetching undelivered for {address}: {e:#}"));
+                let detail = format!("{e:#}");
+                if wake_on_cc && detail.contains("wake-on-cc") {
+                    return proto::unsupported(format!(
+                        "fetching wake-on-cc candidates for {address}: {detail}"
+                    ));
+                }
+                return proto::internal(format!(
+                    "fetching wait candidates for {address}: {detail}"
+                ));
             }
         };
         if let Some(last_id) = current.last_delivered_message_id {
             if current.last_waiter_outcome.as_deref() == Some("message")
-                && rows.iter().any(|row| row.id == last_id)
+                && candidates.iter().any(|candidate| {
+                    !candidate.notification_only && candidate.message.id == last_id
+                })
             {
                 state.push_recent_error(
                     "UnackedDelivery",
@@ -2661,13 +2714,14 @@ async fn wait_for_message_with_idle_ttl(
                 return Response::PresenceEnded;
             }
         }
-        if let Some(row) = rows.into_iter().find(|row| {
+        if let Some(candidate) = candidates.into_iter().find(|candidate| {
             wait_attention_matches(
-                row.attention.as_str(),
+                candidate.message.attention.as_str(),
                 attention.as_deref(),
                 parsed_min_attention,
             )
         }) {
+            let row = candidate.message;
             let current = match state.get_member(&store_key, &session_id, &address) {
                 Some(member) => member,
                 None => {
@@ -2692,9 +2746,13 @@ async fn wait_for_message_with_idle_ttl(
             }
             state.record_waiter_message_exit(&store_key, &session_id, &address, row.id);
             let cc = cc_recipients(row.cc.as_deref());
-            let delivery_role = delivery_role(&address, &row.to_addr, row.cc.as_deref()).to_string();
-            let requires_disposition_for_current_recipient =
-                requires_disposition_for_recipient(row.requires_disposition, &address, &row.to_addr);
+            let delivery_role =
+                delivery_role(&address, &row.to_addr, row.cc.as_deref()).to_string();
+            let requires_disposition_for_current_recipient = requires_disposition_for_recipient(
+                row.requires_disposition,
+                &address,
+                &row.to_addr,
+            );
             let response = Response::Message {
                 id: row.id,
                 thread_id: row.thread_id,
@@ -3284,6 +3342,7 @@ mod p3_tests {
             address: address.to_string(),
             attention: None,
             min_attention: None,
+            wake_on_cc: false,
             timeout_ms: Some(timeout_ms),
             waiter_pid: Some(std::process::id()),
             waiter_start_time: crate::session_watch::capture_process_start_time(std::process::id()),
@@ -4256,6 +4315,212 @@ mod p3_tests {
     }
 
     #[tokio::test]
+    async fn wake_on_cc_delivers_live_cc_without_ack_requirement_or_replay() {
+        let state = test_state("wake-on-cc");
+        let store = store_key("wake-on-cc");
+        registered_epoch(state.clone(), &store, "s1", "addr:primary").await;
+        registered_epoch(state.clone(), &store, "s1", "addr:cc").await;
+        let backend = state.backend_for(&store).await.unwrap();
+
+        let waiter_state = state.clone();
+        let waiter_store = store.clone();
+        let waiter = tokio::spawn(async move {
+            request(
+                waiter_state,
+                Request::Wait {
+                    store_key: waiter_store,
+                    session_id: "s1".to_string(),
+                    address: "addr:cc".to_string(),
+                    attention: None,
+                    min_attention: None,
+                    wake_on_cc: true,
+                    timeout_ms: Some(1_000),
+                    waiter_pid: Some(std::process::id()),
+                    waiter_start_time: crate::session_watch::capture_process_start_time(
+                        std::process::id(),
+                    ),
+                },
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let message_id = insert_test_message(&backend, "addr:primary", Some("addr:cc")).await;
+
+        let delivered = waiter.await.expect("waiter");
+        assert!(matches!(
+            delivered,
+            Response::Message {
+                id,
+                delivery_role,
+                requires_disposition_for_current_recipient,
+                ..
+            } if id == message_id
+                && delivery_role == "cc"
+                && !requires_disposition_for_current_recipient
+        ));
+        let ack_cc = request(state.clone(), ack_req(&store, "s1", "addr:cc", message_id)).await;
+        assert!(matches!(
+            ack_cc,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::AlreadyConsumed),
+                ..
+            }
+        ));
+
+        let rearm = request(
+            state,
+            Request::Wait {
+                store_key: store,
+                session_id: "s1".to_string(),
+                address: "addr:cc".to_string(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: true,
+                timeout_ms: Some(1),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: crate::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
+            },
+        )
+        .await;
+        assert!(matches!(rearm, Response::Timeout));
+    }
+
+    #[tokio::test]
+    async fn wake_on_cc_does_not_weaken_primary_unacked_rearm_guard() {
+        let state = test_state("wake-on-cc-primary-guard");
+        let store = store_key("wake-on-cc-primary-guard");
+        registered_epoch(state.clone(), &store, "s1", "addr:primary").await;
+        registered_epoch(state.clone(), &store, "s1", "addr:cc").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let cc_message = insert_test_message(&backend, "addr:primary", Some("addr:cc")).await;
+
+        let cc_wait = request(
+            state.clone(),
+            Request::Wait {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:cc".to_string(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: true,
+                timeout_ms: Some(1),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: crate::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
+            },
+        )
+        .await;
+        assert!(
+            matches!(cc_wait, Response::Timeout),
+            "historical CC {cc_message} must not replay after the wait lower bound"
+        );
+
+        let primary_id = insert_test_message(&backend, "addr:cc", None).await;
+        let primary_wait = request(state.clone(), wait_req(&store, "s1", "addr:cc", 1_000)).await;
+        assert!(matches!(primary_wait, Response::Message { id, .. } if id == primary_id));
+        let rearm_before_ack =
+            request(state.clone(), wait_req(&store, "s1", "addr:cc", 1_000)).await;
+        assert!(matches!(rearm_before_ack, Response::PresenceEnded));
+
+        let ack = request(state.clone(), ack_req(&store, "s1", "addr:cc", primary_id)).await;
+        assert!(matches!(
+            ack,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
+        let after_ack = request(state, wait_req(&store, "s1", "addr:cc", 1)).await;
+        assert!(matches!(after_ack, Response::Timeout));
+    }
+
+    #[tokio::test]
+    async fn wake_on_cc_composes_with_min_attention() {
+        let state = test_state("wake-on-cc-min-attention");
+        let store = store_key("wake-on-cc-min-attention");
+        registered_epoch(state.clone(), &store, "s1", "addr:primary").await;
+        registered_epoch(state.clone(), &store, "s1", "addr:cc").await;
+        let backend = state.backend_for(&store).await.unwrap();
+
+        let waiter_state = state.clone();
+        let waiter_store = store.clone();
+        let waiter = tokio::spawn(async move {
+            request(
+                waiter_state,
+                Request::Wait {
+                    store_key: waiter_store,
+                    session_id: "s1".to_string(),
+                    address: "addr:cc".to_string(),
+                    attention: None,
+                    min_attention: Some("interrupt".to_string()),
+                    wake_on_cc: true,
+                    timeout_ms: Some(1_000),
+                    waiter_pid: Some(std::process::id()),
+                    waiter_start_time: crate::session_watch::capture_process_start_time(
+                        std::process::id(),
+                    ),
+                },
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let background = insert_test_message(&backend, "addr:primary", Some("addr:cc")).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let interrupt = backend
+            .insert_message(&NewMessage {
+                parent_id: None,
+                from_addr: Some("sender".to_string()),
+                to_addr: "addr:primary".to_string(),
+                cc: Some("addr:cc".to_string()),
+                kind: "note".to_string(),
+                attention: Attention::Interrupt,
+                requires_disposition: false,
+                subject: Some("interrupt cc".to_string()),
+                body: "interrupt body".to_string(),
+                metadata: None,
+                sent_at_ms: now_ms(),
+            })
+            .await
+            .unwrap()
+            .id;
+
+        let delivered = waiter.await.expect("waiter");
+        assert!(
+            matches!(delivered, Response::Message { id, delivery_role, .. } if id == interrupt && delivery_role == "cc"),
+            "interrupt CC should wake, background CC {background} should be skipped by min-attention"
+        );
+    }
+
+    #[tokio::test]
+    async fn wake_on_cc_non_sqlite_store_is_typed_unsupported() {
+        let state = test_state("wake-on-cc-non-sqlite");
+        let response = request(
+            state,
+            Request::Wait {
+                store_key: "postgres:unavailable-for-daemon-core".to_string(),
+                session_id: "s1".to_string(),
+                address: "addr:cc".to_string(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: true,
+                timeout_ms: Some(1),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: crate::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
+            },
+        )
+        .await;
+        assert!(matches!(
+            response,
+            Response::Error { code, .. } if code == proto::ERROR_UNSUPPORTED
+        ));
+    }
+
+    #[tokio::test]
     async fn session_end_marks_idle_releases_waiter_and_rearm_receives_message() {
         let state = test_state("session-end");
         let store = store_key("session-end");
@@ -4349,6 +4614,7 @@ mod p3_tests {
             address: "addr:a".to_string(),
             attention: None,
             min_attention: None,
+            wake_on_cc: false,
             timeout_ms: Some(5_000),
             waiter_pid: None,
             waiter_start_time: None,
@@ -4407,6 +4673,8 @@ mod p3_tests {
                 started_at_ms: now_ms(),
                 attention: None,
                 min_attention: None,
+                wake_on_cc: false,
+                cc_after_ms: None,
                 timeout_ms: Some(5_000),
             },
         );
@@ -4433,23 +4701,33 @@ mod p3_tests {
         let backend = state.backend_for(&store).await.unwrap();
         let message_id = insert_test_message(&backend, "addr:a", None).await;
         let status = state.status().await;
-        assert_eq!(status.members[0].station_health, StationHealth::UnattendedWithBacklog);
+        assert_eq!(
+            status.members[0].station_health,
+            StationHealth::UnattendedWithBacklog
+        );
         assert_eq!(status.members[0].pending_unconsumed_count, 1);
         assert_eq!(status.members[0].live_waiters_count, 0);
-        assert!(
-            status.members[0]
-                .health_detail
-                .as_deref()
-                .unwrap_or_default()
-                .contains("pending unconsumed")
-        );
+        assert!(status.members[0]
+            .health_detail
+            .as_deref()
+            .unwrap_or_default()
+            .contains("pending unconsumed"));
 
         let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
         assert!(matches!(wait, Response::Message { id, .. } if id == message_id));
         let status = state.status().await;
-        assert_eq!(status.members[0].station_health, StationHealth::RecentlyDelivered);
-        assert_eq!(status.members[0].last_delivered_message_id, Some(message_id));
-        assert_eq!(status.members[0].last_waiter_outcome.as_deref(), Some("message"));
+        assert_eq!(
+            status.members[0].station_health,
+            StationHealth::RecentlyDelivered
+        );
+        assert_eq!(
+            status.members[0].last_delivered_message_id,
+            Some(message_id)
+        );
+        assert_eq!(
+            status.members[0].last_waiter_outcome.as_deref(),
+            Some("message")
+        );
     }
 
     #[tokio::test]
@@ -4627,7 +4905,8 @@ mod p3_tests {
         let first = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
         assert!(matches!(first, Response::Message { id, .. } if id == message_id));
 
-        let rearm_before_ack = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
+        let rearm_before_ack =
+            request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
         assert!(matches!(rearm_before_ack, Response::PresenceEnded));
         assert!(state
             .status()
@@ -4697,6 +4976,7 @@ mod p3_tests {
                 address: "addr:a".to_string(),
                 attention: None,
                 min_attention: Some("interrupt".to_string()),
+                wake_on_cc: false,
                 timeout_ms: Some(1_000),
                 waiter_pid: Some(std::process::id()),
                 waiter_start_time: crate::session_watch::capture_process_start_time(
@@ -4735,6 +5015,7 @@ mod p3_tests {
                 address: "addr:a".to_string(),
                 attention: None,
                 min_attention: Some("interrupt".to_string()),
+                wake_on_cc: false,
                 timeout_ms: Some(1),
                 waiter_pid: Some(std::process::id()),
                 waiter_start_time: crate::session_watch::capture_process_start_time(
@@ -4899,6 +5180,7 @@ mod p3_tests {
             "addr:a".to_string(),
             None,
             None,
+            false,
             Some(5_000),
             Some(std::process::id()),
             crate::session_watch::capture_process_start_time(std::process::id()),
@@ -5276,6 +5558,7 @@ pub mod test_support {
                 address.to_string(),
                 None,
                 None,
+                false,
                 Some(timeout_ms),
                 Some(std::process::id()),
                 crate::session_watch::capture_process_start_time(std::process::id()),
@@ -5417,6 +5700,7 @@ pub mod test_support {
             address: address.to_string(),
             attention: None,
             min_attention: None,
+            wake_on_cc: false,
             timeout_ms: Some(timeout_ms),
             waiter_pid: Some(std::process::id()),
             waiter_start_time: crate::session_watch::capture_process_start_time(std::process::id()),

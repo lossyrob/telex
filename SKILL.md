@@ -73,6 +73,12 @@ It fails closed rather than guessing.
    If a replacement daemon already exists, `wait` can reconnect/re-register during
    its bounded reconnect grace.
 
+   CC traffic is pull-only by default: it remains visible in `inbox --all` /
+   `read`, but a bare `wait` does not wake for it. If this seat is deliberately
+   acting as an observer/relay for a table and should be woken by live CC traffic,
+   arm that wait with `--wake-on-cc`. This is an explicit per-wait opt-in, not CC
+   backlog replay and not a manual-ack requirement.
+
    | Exit | Meaning | What you do |
    |---:|---|---|
    | 0 | delivered | Read `delivery.json` (or `message.json`/stdout JSON), `ack` + dedupe by id, then re-arm a fresh `wait` before longer processing. |
@@ -104,6 +110,7 @@ once:   telex attach --address <addr> --description "<s>"
 then repeat:
   1. start one detached background command named `TELEX MESSAGE WAITER`:
      while focused on other work: `telex wait --address <addr> --min-attention interrupt --out-dir <dir>`
+     while observing a table: `telex wait --address <addr> --wake-on-cc --out-dir <dir>`
      while idle/ready for anything: `telex wait --address <addr> --out-dir <dir>`
   2. it blocks until one message, exits, and the runtime completion wakes you
   3. read `<dir>\exit.code` (not the shell task exit code):
@@ -121,6 +128,11 @@ When you finish the current unit of work or reach a natural checkpoint, do phase
 2: inspect `telex inbox --all --address <addr>`, read/ack/disposition the
 pending messages you are ready to handle, then either continue with an
 interrupt-only waiter or, if you are idle, arm an unfiltered waiter.
+
+`--wake-on-cc` composes with this pattern. Use it only for seats that deliberately
+want live CC observer traffic to wake them, and combine it with `--min-attention`
+when the observer should wake only for urgent table traffic. After a CC wake,
+inspect `inbox --all` or the thread if you need surrounding observer context.
 
 Do not run an interrupt-only waiter and an unfiltered waiter at the same time:
 the daemon permits only one live waiter per station. To switch modes, let the
@@ -354,7 +366,7 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex wait` | Block on the local exchange; on delivery print one message as JSON and exit. Does not spawn a missing daemon; run `attach` first or after exit 3. Use `--min-attention interrupt` while focused. | `--address <addr>`, `--session <id>`, `--timeout-ms N`, `--min-attention <level>`, `--reconnect-grace-ms N` |
+| `telex wait` | Block on the local exchange; on delivery print one message as JSON and exit. Does not spawn a missing daemon; run `attach` first or after exit 3. Use `--min-attention interrupt` while focused; add `--wake-on-cc` only for explicit observer/relay wake. | `--address <addr>`, `--session <id>`, `--timeout-ms N`, `--min-attention <level>`, `--wake-on-cc`, `--reconnect-grace-ms N` |
 | `telex inbox` | List actionable messages requiring disposition and recent messages for the address. | `--address <addr>`, `--all`, `--limit N` |
 | `telex read` | Read a message. `--thread` shows compact thread context; `--full` shows full history. | `--id <message-id>`, `--thread`, `--full` |
 

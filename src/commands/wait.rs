@@ -37,6 +37,7 @@ pub async fn run(ctx: &Ctx, args: WaitArgs) -> Result<i32> {
         address: address.clone(),
         timeout_ms: args.timeout_ms,
         min_attention: args.min_attention.map(|a| a.as_str().to_string()),
+        wake_on_cc: args.wake_on_cc,
         hang_ms: args.hang_ms,
         reconnect_grace_ms: reconnect_grace_ms(args.reconnect_grace_ms),
         waiter_pid: std::process::id(),
@@ -79,6 +80,7 @@ struct WaitLoopConfig {
     address: String,
     timeout_ms: Option<u64>,
     min_attention: Option<String>,
+    wake_on_cc: bool,
     hang_ms: u64,
     reconnect_grace_ms: u64,
     waiter_pid: u32,
@@ -262,6 +264,7 @@ fn wait_request(cfg: &WaitLoopConfig, timeout_ms: Option<u64>) -> Request {
         address: cfg.address.clone(),
         attention: None,
         min_attention: cfg.min_attention.clone(),
+        wake_on_cc: cfg.wake_on_cc,
         timeout_ms,
         waiter_pid: Some(cfg.waiter_pid),
         waiter_start_time: cfg.waiter_start_time,
@@ -728,6 +731,7 @@ mod tests {
             address: "addr:a".to_string(),
             timeout_ms: Some(1_000),
             min_attention: None,
+            wake_on_cc: false,
             hang_ms: 1_000,
             reconnect_grace_ms: 500,
             waiter_pid: std::process::id(),
@@ -1006,7 +1010,10 @@ mod tests {
         let status: serde_json::Value =
             serde_json::from_str(&std::fs::read_to_string(dir.join("status.json")).unwrap())
                 .unwrap();
-        assert_eq!(status.get("outcome").and_then(|v| v.as_str()), Some("armed"));
+        assert_eq!(
+            status.get("outcome").and_then(|v| v.as_str()),
+            Some("armed")
+        );
         assert!(status.get("exit_code").unwrap().is_null());
         assert!(!dir.join("message.json").exists());
         assert!(!dir.join("delivery.json").exists());

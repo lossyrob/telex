@@ -1443,7 +1443,7 @@ metadata.
 ## 0033 — CC deliveries are visibility-only and auto-seen
 
 - **Date:** 2026-06-26
-- **Status:** Accepted (`daemon-core` acceptance)
+- **Status:** Accepted (amended by 0039)
 
 **Context.** Dogfooding used CC as visibility-only fan-out. Under the transport ack model, CC delivery
 rows were pending like primary rows, so a CC recipient that did not manually `ack` would receive the
@@ -1493,6 +1493,31 @@ CC visibility semantics apply.
 
 **Consequences.** Threaded conversations can include observers without losing history. CC recipients of
 replies remain visibility-only under ADR 0033.
+
+## 0039 — Per-wait CC wake opt-in for live observer traffic
+
+- **Date:** 2026-06-28
+- **Status:** Accepted (`cc-stream-wake` acceptance)
+
+**Context.** ADR 0033 fixed the CC redelivery wedge by making CC delivery rows auto-consumed/seen for
+transport. Dogfooding a deliberative-table workload exposed the other side of that trade-off: a seat
+that belongs to the table often receives most meaningful context as CC observer traffic, so a bare
+waiter never wakes and the seat must poll `inbox --all` or the database to notice the conversation.
+Making all CC wake by default would undo the noise-control reason for ADR 0033.
+
+**Decision.** Add an explicit per-wait `--wake-on-cc` / IPC `wake_on_cc` opt-in. The opt-in wakes only
+for live CC traffic delivered after the wait's captured lower bound; it is not durable CC backlog replay
+and it does not make CC rows pending or ack-required. `--min-attention` composes with the opt-in but does
+not imply it. CC wake frames retain delivery-role metadata (`delivery_role: "cc"`) and
+`requires_disposition_for_current_recipient: false`; the primary `--to` path remains the only
+ack-required delivery path.
+
+**Consequences.** Observer/relay seats can be woken by the table they deliberately opted into without
+reintroducing notification churn for ordinary CC recipients. Agents that wake on CC should inspect
+`inbox --all` / thread context after the wake if they need surrounding observer traffic, because older
+CC rows remain pull-only. Persistent station-level CC wake and full stream/table subscription schemas
+remain future work, to be justified by workflow evidence rather than introduced as part of this narrow
+daemon delivery-semantics change.
 
 ## 0036 — Status hints at activity on another store
 

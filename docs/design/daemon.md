@@ -225,6 +225,29 @@ ack/disposition the buffered lower-priority messages via `inbox`/`read`. Because
 is accepted per station, an agent switches modes by letting the current waiter complete or using
 `station stop` + `attach`, then arming either another interrupt-only waiter or a bare wait if idle.
 
+#### 3.2.3 `--wake-on-cc` live observer waits
+
+CC remains visibility-only by default: a bare `telex wait` does not wake for CC traffic. A station that
+is deliberately participating as an observer/relay MAY arm a per-wait opt-in with `telex wait
+--wake-on-cc`. This widens only that wait to live CC notification candidates for the current address.
+It does not create a durable stream subscription, does not make all CC traffic wake by default, and does
+not make CC ack-required.
+
+`--wake-on-cc` is a live wake, not CC backlog replay. When the daemon registers the wait, it captures a
+durable CC lower-bound timestamp for the backend. The wait may emit only CC candidates whose delivery
+timestamp is strictly after that lower bound (or an equivalent backend ordering proof). This preserves
+the auto-seen CC baseline: old observer traffic stays visible through `inbox --all` / `read`, but cannot
+be redelivered repeatedly by re-arming `--wake-on-cc`.
+
+`--min-attention` composes with `--wake-on-cc` but never implies it. For example, `telex wait
+--wake-on-cc --min-attention interrupt` wakes for primary interrupt messages and live CC interrupt
+messages, while lower-attention CC traffic remains visible for checkpoint inspection. CC wake frames
+carry `delivery_role: "cc"` and
+`requires_disposition_for_current_recipient: false`; clients MAY call `ack`, but the delivery row is
+already consumed and the ack is idempotent/no-op for transport. The primary `--to` path remains
+ack-required and the unacked-primary re-arm guard must not classify consumed CC notifications as pending
+primary deliveries.
+
 ### 3.3 `wait` reconnect-on-EOF grace
 
 A daemon **restart or handoff is not a turn failure when a replacement daemon already exists**.
@@ -501,10 +524,12 @@ unacked message redelivers; consumers dedupe by `message_id`. There is **no** wa
 `DeliveryAck`, **no** per-emit `delivery_nonce`, and "delivered" is **not** the stdout flush —
 the consumed commit is the explicit agent ack, decoupled from any EMIT-time connection.
 
-CC recipients are visibility-only: their delivery rows are materialized as already seen/consumed for
-transport, so they remain visible in `inbox --all` / `read` with `delivery_role: "cc"` but do not wake
-`wait` and do not require manual `ack`. The primary `--to` recipient remains the actionable,
-ack-required delivery.
+CC recipients are visibility-only by default: their delivery rows are materialized as already
+seen/consumed for transport, so they remain visible in `inbox --all` / `read` with
+`delivery_role: "cc"` but do not wake bare `wait` and do not require manual `ack`. A per-wait
+`--wake-on-cc` opt-in can wake for live CC traffic after that wait's lower bound without changing the
+auto-consumed CC delivery row. The primary `--to` recipient remains the actionable, ack-required
+delivery.
 
 ## 7. Authorization and the trust boundary
 

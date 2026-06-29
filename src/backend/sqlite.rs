@@ -16,7 +16,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use super::{Backend, Capabilities};
+use super::{Backend, Capabilities, WaitCandidate, WaitFetchOptions};
 use crate::model::*;
 
 const CURRENT_SCHEMA_VERSION: i64 = 2;
@@ -2015,6 +2015,59 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn fetch_wait_candidates(
+        &self,
+        address: &str,
+        options: WaitFetchOptions,
+    ) -> Result<Vec<WaitCandidate>> {
+        let a = address.to_string();
+        self.run(move |c| {
+            materialize_pending_delivery_rows_for_recipient(c, &a)?;
+            let terminal = terminal_dispositions_sql_list();
+            let primary_sql = format!(
+                "SELECT {MSG_COLS_M} FROM deliveries d \
+                 JOIN messages m ON m.id=d.message_id \
+                 WHERE d.recipient=?1 \
+                  AND d.consumed_at_ms IS NULL \
+                  AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                 WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                 ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal}) \
+                 ORDER BY d.message_id"
+            );
+            let mut candidates = c
+                .prepare(&primary_sql)?
+                .query_map(params![a.as_str()], map_message)?
+                .map(|row| row.map(WaitCandidate::primary))
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            if options.wake_on_cc {
+                let cc_sql = format!(
+                    "SELECT {MSG_COLS_M} FROM deliveries d \
+                     JOIN messages m ON m.id=d.message_id \
+                     WHERE d.recipient=?1 \
+                      AND d.consumed_at_ms IS NOT NULL \
+                      AND d.delivered_at_ms > ?2 \
+                      AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                     WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                     ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal}) \
+                     ORDER BY d.message_id"
+                );
+                let cc_messages = c
+                    .prepare(&cc_sql)?
+                    .query_map(params![a.as_str(), options.cc_after_ms], map_message)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                candidates.extend(cc_messages.into_iter().filter_map(|message| {
+                    (delivery_role(&a, &message.to_addr, message.cc.as_deref()) == "cc")
+                        .then(|| WaitCandidate::cc_notification(message))
+                }));
+            }
+
+            candidates.sort_by_key(|candidate| candidate.message.id);
+            Ok(candidates)
+        })
+        .await
+    }
+
     async fn has_delivery_for_recipient(&self, message_id: i64, recipient: &str) -> Result<bool> {
         let r = recipient.to_string();
         self.run(move |c| {
@@ -2035,7 +2088,7 @@ impl Backend for SqliteBackend {
         let m = m.clone();
         self.run(move |c| {
             with_immediate_transaction(c, |c| {
-                let now = now_ms();
+                let now = advance_clock_hwm(c)?;
                 c.execute(
                     "INSERT INTO messages(thread_id, parent_id, from_addr, to_addr, cc, kind, \
                      attention, requires_disposition, subject, body, metadata, sent_at_ms, \

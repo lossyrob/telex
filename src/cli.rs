@@ -162,6 +162,9 @@ pub struct WaitArgs {
     /// Only wake for messages at this attention or higher priority.
     #[arg(long, value_parser = parse_attention_arg)]
     pub min_attention: Option<Attention>,
+    /// Also wake for live CC traffic to this address without making CC ack-required.
+    #[arg(long)]
+    pub wake_on_cc: bool,
     /// Resume delivery strictly after this message id.
     #[arg(long, default_value_t = 0)]
     pub since: i64,
@@ -705,6 +708,16 @@ mod tests {
             "urgent",
         ])
         .is_err());
+    }
+
+    #[test]
+    fn wait_wake_on_cc_flag_parses() {
+        let cli =
+            Cli::try_parse_from(["telex", "--address", "addr:a", "wait", "--wake-on-cc"]).unwrap();
+        let Command::Wait(args) = cli.command else {
+            panic!("expected wait command");
+        };
+        assert!(args.wake_on_cc);
     }
 
     #[test]
