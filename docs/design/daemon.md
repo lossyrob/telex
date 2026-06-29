@@ -337,6 +337,7 @@ Frozen Status fields:
 `telex station status` remains session-scoped by default. `telex station status --all-sessions`
 uses the same admin-cap-backed Status path to intentionally project all stations in the selected
 store (optionally narrowed by `--address`) and marks rows owned by another session as foreign.
+When no current session id is available, all rows in the widened view are treated as foreign.
 Address-scoped `status` / `address show` / `address list` expose the same deaf/foreign state in
 JSON; their text output is a human operator aid, while JSON is the stable machine contract.
 

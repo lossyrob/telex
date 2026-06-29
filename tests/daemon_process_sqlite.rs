@@ -1992,6 +1992,37 @@ fn real_process_station_status_all_sessions_exposes_foreign_station() {
 }
 
 #[test]
+fn real_process_station_status_all_sessions_without_session_env_marks_foreign() {
+    let env = ProcessEnv::new("real-station-all-sessions-no-env");
+    let foreign_session = "real-station-all-sessions-no-env-foreign";
+    let address = "addr:real-station-all-sessions-no-env";
+    env.attach(foreign_session, address);
+
+    let mut all_cmd = env.command_with_session("unused-session");
+    all_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env_remove("COPILOT_AGENT_SESSION_ID")
+        .args([
+            "--json",
+            "--address",
+            address,
+            "station",
+            "status",
+            "--all-sessions",
+        ]);
+    let all = run_command_with_capture(all_cmd, &env.root, Duration::from_secs(5));
+    all.assert_success("station status all sessions without session env");
+    let all_json = all.json("station status all sessions without session env");
+    assert_eq!(all_json.get("session_id"), Some(&Value::Null));
+    assert_eq!(all_json.get("count").and_then(Value::as_u64), Some(1));
+    let station = &all_json.get("stations").and_then(Value::as_array).unwrap()[0];
+    assert_eq!(
+        station.get("foreign_session").and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
 fn real_process_address_surfaces_report_deaf_and_foreign_state() {
     let env = ProcessEnv::new("real-visibility-surfaces");
     let receiver = "real-visibility-surfaces-receiver";

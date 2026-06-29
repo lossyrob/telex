@@ -2851,10 +2851,14 @@ async fn wait_for_message_with_idle_ttl(
     );
     let parsed_min_attention = match min_attention.as_deref().map(Attention::parse).transpose() {
         Ok(value) => value,
-        Err(e) => return proto::error_response(proto::ERROR_INCOMPATIBLE, e.to_string()),
+        Err(e) => {
+            waiter_guard.suppress_abnormal_on_drop();
+            return proto::error_response(proto::ERROR_INCOMPATIBLE, e.to_string());
+        }
     };
     loop {
         if state.is_draining() {
+            waiter_guard.suppress_abnormal_on_drop();
             return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
         }
         let current = match state.rearm_idle_member_if_allowed(&store_key, &session_id, &address) {
@@ -2866,6 +2870,7 @@ async fn wait_for_message_with_idle_ttl(
                 {
                     return Response::PresenceEnded;
                 }
+                waiter_guard.suppress_abnormal_on_drop();
                 return needs_attach_for_missing_member(
                     &state,
                     &backend,
@@ -2883,6 +2888,7 @@ async fn wait_for_message_with_idle_ttl(
         let rows = match backend.fetch_undelivered(&address).await {
             Ok(rows) => rows,
             Err(e) => {
+                waiter_guard.suppress_abnormal_on_drop();
                 return proto::internal(format!("fetching undelivered for {address}: {e:#}"));
             }
         };
@@ -2936,9 +2942,9 @@ async fn wait_for_message_with_idle_ttl(
             if let Err(response) =
                 prove_current_owner(&state, &backend, &current, "wait delivery proof").await
             {
+                waiter_guard.suppress_abnormal_on_drop();
                 return response;
             }
-            state.record_waiter_message_exit(&store_key, &session_id, &address, row.id, waiter_pid);
             let cc = cc_recipients(row.cc.as_deref());
             let delivery_role =
                 delivery_role(&address, &row.to_addr, row.cc.as_deref()).to_string();
@@ -2968,16 +2974,31 @@ async fn wait_for_message_with_idle_ttl(
                 lease_epoch: Some(current.lease_epoch),
             };
             return match proto::json_line_frame_len(&response) {
-                Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => response,
-                Ok(len) => proto::error_response(
-                    proto::ERROR_INCOMPATIBLE,
-                    format!(
-                        "message {} serializes to {len} bytes, exceeding IPC frame limit {}",
+                Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => {
+                    state.record_waiter_message_exit(
+                        &store_key,
+                        &session_id,
+                        &address,
                         row.id,
-                        proto::MAX_JSONL_FRAME_BYTES
-                    ),
-                ),
-                Err(e) => proto::internal(format!("sizing message {} IPC frame: {e}", row.id)),
+                        waiter_pid,
+                    );
+                    response
+                }
+                Ok(len) => {
+                    waiter_guard.suppress_abnormal_on_drop();
+                    proto::error_response(
+                        proto::ERROR_INCOMPATIBLE,
+                        format!(
+                            "message {} serializes to {len} bytes, exceeding IPC frame limit {}",
+                            row.id,
+                            proto::MAX_JSONL_FRAME_BYTES
+                        ),
+                    )
+                }
+                Err(e) => {
+                    waiter_guard.suppress_abnormal_on_drop();
+                    proto::internal(format!("sizing message {} IPC frame: {e}", row.id))
+                }
             };
         }
         if let Some(deadline) = deadline {
@@ -4482,7 +4503,7 @@ mod p3_tests {
             .unwrap()
             .id;
 
-        let wait = request(state, wait_req(&store, "s1", "addr:a", 1_000)).await;
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
         match wait {
             Response::Error { code, message, .. } => {
                 assert_eq!(code, proto::ERROR_INCOMPATIBLE);
@@ -4491,6 +4512,15 @@ mod p3_tests {
             }
             other => panic!("expected oversized-frame error, got {other:?}"),
         }
+        let status = state.status().await;
+        assert_eq!(status.members[0].last_waiter_outcome, None);
+        assert_eq!(status.members[0].last_delivered_message_id, None);
+
+        let second_wait = request(state, wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(
+            matches!(second_wait, Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE),
+            "oversized message should fail the same way on retry, not be blocked as delivered"
+        );
     }
 
     #[tokio::test]
@@ -4984,6 +5014,38 @@ mod p3_tests {
         );
         assert_eq!(status.members[0].last_waiter_exit_code, Some(2));
         assert_eq!(status.members[0].last_waiter_pid, Some(std::process::id()));
+    }
+
+    #[tokio::test]
+    async fn daemon_owned_wait_error_does_not_record_abnormal_exit() {
+        let state = test_state("wait-error-not-abnormal");
+        let store = store_key("wait-error-not-abnormal");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let wait = request(
+            state.clone(),
+            Request::Wait {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                attention: None,
+                min_attention: Some("not-an-attention".to_string()),
+                timeout_ms: Some(1_000),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: crate::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
+            },
+        )
+        .await;
+        assert!(matches!(
+            wait,
+            Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
+        ));
+
+        let status = state.status().await;
+        assert_eq!(status.members[0].last_waiter_outcome, None);
+        assert_eq!(status.members[0].last_waiter_pid, None);
     }
 
     #[tokio::test]

@@ -3,7 +3,7 @@ use serde_json::json;
 
 use crate::cli::{Ctx, StationCmd, StationStatusArgs, StationStopArgs};
 use crate::daemon_ipc::{Request, Response};
-use crate::identity::resolve_session_id;
+use crate::identity::{optional_session_id, resolve_session_id};
 use crate::output::emit;
 
 pub async fn run(ctx: &Ctx, cmd: StationCmd) -> Result<i32> {
@@ -17,7 +17,11 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
     let paths = crate::daemon::DaemonPaths::current()?;
     let cap = crate::daemon::read_cap_file(&paths.cap_path)?;
     let store_key = ctx.store_key()?;
-    let session_id = resolve_session_id(args.session.as_deref())?;
+    let current_session_id = if args.all_sessions {
+        optional_session_id(args.session.as_deref())
+    } else {
+        Some(resolve_session_id(args.session.as_deref())?)
+    };
     let mut client = crate::daemon::connect_existing(&store_key).await?;
     let response = client
         .request(&Request::Status {
@@ -33,7 +37,10 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                 .into_iter()
                 .filter(|member| {
                     member.store_key == store_key
-                        && (args.all_sessions || member.session_id == session_id)
+                        && (args.all_sessions
+                            || current_session_id
+                                .as_ref()
+                                .is_some_and(|session_id| member.session_id == *session_id))
                 })
                 .filter(|member| {
                     ctx.address
@@ -41,7 +48,9 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                         .map_or(true, |addr| member.address == *addr)
                 })
                 .map(|member| {
-                    let foreign_session = member.session_id != session_id;
+                    let foreign_session = current_session_id
+                        .as_ref()
+                        .map_or(true, |session_id| member.session_id != *session_id);
                     json!({
                         "store_key": member.store_key,
                         "backend": member.backend,
@@ -70,7 +79,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                 })
                 .collect();
             let out = json!({
-                "session_id": session_id,
+                "session_id": current_session_id,
                 "store_key": store_key,
                 "all_sessions": args.all_sessions,
                 "count": stations.len(),
@@ -78,7 +87,8 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
             });
             emit(ctx.fmt, &out, || {
                 if stations.is_empty() {
-                    println!("(no stations for session {session_id})");
+                    let session_label = out["session_id"].as_str().unwrap_or("(none)");
+                    println!("(no stations for session {session_label})");
                 } else {
                     for station in &stations {
                         println!(
