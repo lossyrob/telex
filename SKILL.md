@@ -43,12 +43,13 @@ guessing.
    telex --address <addr> wait --session "$COPILOT_AGENT_SESSION_ID" --out-dir <dir>
    ```
 
-   The plugin also listens for tracked shell completion notifications and injects
-   a bounded waiter recipe back into the session. It tells the agent to re-arm one
-   tracked `TELEX MESSAGE WAITER` with `--timeout-ms <T>` so a still-attending
-   idle terminal gets prompted at least every T. Configure T with
-   `TELEX_TURN_GUARD_HEARTBEAT_TIMEOUT_MS` (default 30 minutes), or set
-   `TELEX_TURN_GUARD=off` to disable both the turn guard and heartbeat guidance.
+   The plugin also has an opt-in heartbeat for tracked shell completion
+   notifications. When `TELEX_TURN_HEARTBEAT=on`, it injects a bounded waiter
+   recipe back into the session that tells the agent to re-arm one tracked
+   `TELEX MESSAGE WAITER` with `--timeout-ms <T>`. It is off by default to avoid
+   idle-session turn noise. Configure T with
+   `TELEX_TURN_GUARD_HEARTBEAT_TIMEOUT_MS` (default 30 minutes). The `agentStop`
+   guard remains default-on and is controlled separately by `TELEX_TURN_GUARD`.
 
    Optional metadata:
 

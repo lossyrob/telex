@@ -252,16 +252,11 @@ fn notification(args: CopilotNotificationArgs) -> Result<i32> {
 
     let session = resolve_copilot_session(args.session.as_deref(), payload.as_deref())
         .unwrap_or_else(|| "<session-id>".to_string());
-    if matches!(
-        env_nonempty("TELEX_TURN_GUARD")
-            .map(|v| v.to_ascii_lowercase())
-            .as_deref(),
-        Some("off" | "0" | "false")
-    ) {
+    if !heartbeat_enabled() {
         write_hook_log_best_effort(&HookLogEvent::notification(
-            TURN_GUARD_DISABLED,
+            "heartbeat_disabled",
             Some(&session),
-            Some("TELEX_TURN_GUARD disabled notification heartbeat guidance"),
+            Some("TELEX_TURN_HEARTBEAT did not opt in to notification heartbeat guidance"),
         ));
         print_json(&serde_json::json!({}));
         return Ok(0);
@@ -347,6 +342,15 @@ fn heartbeat_timeout_ms() -> (u64, Option<String>) {
         },
         None => (DEFAULT_HEARTBEAT_TIMEOUT_MS, None),
     }
+}
+
+fn heartbeat_enabled() -> bool {
+    matches!(
+        env_nonempty("TELEX_TURN_HEARTBEAT")
+            .map(|v| v.to_ascii_lowercase())
+            .as_deref(),
+        Some("on" | "1" | "true")
+    )
 }
 
 fn heartbeat_additional_context(session: &str, timeout_ms: u64) -> String {
@@ -878,6 +882,24 @@ mod tests {
         assert!(context.contains("--timeout-ms 900000"));
         assert!(context.contains("TELEX MESSAGE WAITER"));
         assert!(context.contains("Do not run an infinite shell loop"));
+    }
+
+    #[test]
+    fn heartbeat_is_opt_in_and_uses_own_flag() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_heartbeat = std::env::var_os("TELEX_TURN_HEARTBEAT");
+        let prior_guard = std::env::var_os("TELEX_TURN_GUARD");
+        std::env::remove_var("TELEX_TURN_HEARTBEAT");
+        std::env::set_var("TELEX_TURN_GUARD", "on");
+        assert!(!heartbeat_enabled(), "heartbeat must be off by default");
+        std::env::set_var("TELEX_TURN_HEARTBEAT", "on");
+        std::env::set_var("TELEX_TURN_GUARD", "off");
+        assert!(
+            heartbeat_enabled(),
+            "heartbeat opt-in uses TELEX_TURN_HEARTBEAT, not TELEX_TURN_GUARD"
+        );
+        restore_env("TELEX_TURN_HEARTBEAT", prior_heartbeat);
+        restore_env("TELEX_TURN_GUARD", prior_guard);
     }
 
     #[test]
