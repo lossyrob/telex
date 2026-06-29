@@ -2057,6 +2057,9 @@ impl Backend for SqliteBackend {
                     .query_map(params![a.as_str(), options.cc_after_ms], map_message)?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
                 candidates.extend(cc_messages.into_iter().filter_map(|message| {
+                    // The SQL predicate is recipient-row based; keep the parsed delivery-role
+                    // check as the authority so comma-string false positives and acked primaries
+                    // cannot become CC wake candidates.
                     (delivery_role(&a, &message.to_addr, message.cc.as_deref()) == "cc")
                         .then(|| WaitCandidate::cc_notification(message))
                 }));
@@ -2088,6 +2091,9 @@ impl Backend for SqliteBackend {
         let m = m.clone();
         self.run(move |c| {
             with_immediate_transaction(c, |c| {
+                // CC live-wake lower bounds compare against delivery timestamps. Advance the
+                // durable clock inside the insert transaction so a wait boundary cannot share a
+                // timestamp with a later message.
                 let now = advance_clock_hwm(c)?;
                 c.execute(
                     "INSERT INTO messages(thread_id, parent_id, from_addr, to_addr, cc, kind, \
