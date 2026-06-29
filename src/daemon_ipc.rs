@@ -436,6 +436,8 @@ pub struct MemberStatus {
     pub unattended_since_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unattended_for_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deaf_since_ms: Option<i64>,
     #[serde(default)]
     pub deaf_warn: bool,
     #[serde(default)]

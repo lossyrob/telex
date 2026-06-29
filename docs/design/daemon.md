@@ -306,7 +306,8 @@ Frozen Status fields:
   `occupant`, `waiters` (count of blocked waiters), `live_waiters` (pid/start-time/alive,
   attention, timeout), `pending_unconsumed_count`, `station_health`
   (`armed` / `recently_delivered` / `unattended` / `unattended_with_backlog` / `idle`),
-  thresholded deaf-station fields (`unattended_since_ms`, `unattended_for_ms`, `deaf_warn`),
+  thresholded deaf-station fields (`unattended_since_ms`, `unattended_for_ms`, `deaf_since_ms`,
+  `deaf_warn`),
   daemon-authored terminal waiter fields (`last_waiter_exit_at_ms`, `last_waiter_outcome`,
   `last_waiter_exit_code`, `last_waiter_detail`, `last_waiter_pid`) whose outcome vocabulary is
   `message` / `idle-timeout` / `presence-ended` / `daemon-error` / `abnormal-exit`, and

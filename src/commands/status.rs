@@ -81,6 +81,7 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
             info["live_waiters_count"] = serde_json::json!(daemon_members[0].live_waiters_count);
             info["unattended_since_ms"] = serde_json::json!(daemon_members[0].unattended_since_ms);
             info["unattended_for_ms"] = serde_json::json!(daemon_members[0].unattended_for_ms);
+            info["deaf_since_ms"] = serde_json::json!(daemon_members[0].deaf_since_ms);
             info["deaf_warn"] = serde_json::json!(deaf_warn);
             info["last_waiter_outcome"] = serde_json::json!(daemon_members[0].last_waiter_outcome);
             info["last_waiter_exit_code"] =

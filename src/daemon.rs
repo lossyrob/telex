@@ -352,6 +352,7 @@ struct MemberRecord {
     idle: bool,
     idle_rearmable: bool,
     unattended_since_ms: Option<i64>,
+    unattended_with_backlog_since_ms: Option<i64>,
     last_waiter_exit_at_ms: Option<i64>,
     last_waiter_outcome: Option<WaiterOutcome>,
     last_waiter_exit_code: Option<i32>,
@@ -454,9 +455,9 @@ impl DaemonState {
             }
         }
 
+        let live_waiters = self.live_waiter_statuses();
         let member_records: Vec<MemberRecord> =
             self.members.lock().unwrap().values().cloned().collect();
-        let live_waiters = self.live_waiter_statuses();
         let store_backends: HashMap<String, Arc<dyn Backend>> = store_entries
             .iter()
             .map(|(store_key, entry)| (store_key.clone(), entry.backend.clone()))
@@ -485,6 +486,35 @@ impl DaemonState {
             };
             pending_counts.insert(key, pending);
         }
+        let member_records: Vec<MemberRecord> = {
+            let now = now_ms();
+            let mut members = self.members.lock().unwrap();
+            for member in members.values_mut() {
+                let live_waiters_count = live_waiters
+                    .iter()
+                    .filter(|waiter| {
+                        waiter.store_key == member.store_key
+                            && waiter.session_id == member.session_id
+                            && waiter.address == member.address
+                    })
+                    .count();
+                let pending = pending_counts
+                    .get(&(member.store_key.clone(), member.address.clone()))
+                    .copied()
+                    .unwrap_or(0);
+                if !member.idle && live_waiters_count == 0 {
+                    member.unattended_since_ms.get_or_insert(now);
+                    if pending > 0 {
+                        member.unattended_with_backlog_since_ms.get_or_insert(now);
+                    } else {
+                        member.unattended_with_backlog_since_ms = None;
+                    }
+                } else {
+                    member.unattended_with_backlog_since_ms = None;
+                }
+            }
+            members.values().cloned().collect()
+        };
         let members: Vec<MemberStatus> = member_records
             .iter()
             .map(|member| {
@@ -639,6 +669,7 @@ impl DaemonState {
                 member.idle_rearmable = false;
                 member.waiters = 0;
                 member.unattended_since_ms = Some(now_ms());
+                member.unattended_with_backlog_since_ms = None;
                 member.last_waiter_exit_at_ms = Some(now_ms());
                 member.last_waiter_outcome = Some(WaiterOutcome::PresenceEnded);
                 member.last_waiter_exit_code = Some(5);
@@ -680,6 +711,7 @@ impl DaemonState {
                 member.idle_rearmable = false;
                 member.waiters = 0;
                 member.unattended_since_ms = Some(now_ms());
+                member.unattended_with_backlog_since_ms = None;
                 member.last_waiter_exit_at_ms = Some(now_ms());
                 member.last_waiter_outcome = Some(WaiterOutcome::PresenceEnded);
                 member.last_waiter_exit_code = Some(5);
@@ -720,6 +752,7 @@ impl DaemonState {
                         member.idle_rearmable = kind == "IdleTtlReap";
                         member.waiters = 0;
                         member.unattended_since_ms = Some(now_ms());
+                        member.unattended_with_backlog_since_ms = None;
                         member.last_waiter_exit_at_ms = Some(now_ms());
                         member.last_waiter_outcome = Some(WaiterOutcome::PresenceEnded);
                         member.last_waiter_exit_code = Some(5);
@@ -986,6 +1019,7 @@ impl DaemonState {
         )) {
             member.waiters = member.waiters.saturating_add(1);
             member.unattended_since_ms = None;
+            member.unattended_with_backlog_since_ms = None;
         }
         waiter_id
     }
@@ -1113,8 +1147,14 @@ impl MemberRecord {
             None
         };
         let unattended_for_ms = unattended_since_ms.map(|since| now.saturating_sub(since));
+        let deaf_since_ms = if station_health == StationHealth::UnattendedWithBacklog {
+            self.unattended_with_backlog_since_ms.or(Some(now))
+        } else {
+            None
+        };
+        let deaf_for_ms = deaf_since_ms.map(|since| now.saturating_sub(since));
         let deaf_warn = station_health == StationHealth::UnattendedWithBacklog
-            && unattended_for_ms
+            && deaf_for_ms
                 .map(|age| age >= deaf_warn_threshold_ms)
                 .unwrap_or(false);
         MemberStatus {
@@ -1137,6 +1177,7 @@ impl MemberRecord {
             last_delivered_message_id: self.last_delivered_message_id,
             unattended_since_ms,
             unattended_for_ms,
+            deaf_since_ms,
             deaf_warn,
             live_waiters: member_waiters,
             watch_pids: self.watch_pids.iter().map(WatchPidRecord::status).collect(),
@@ -2438,6 +2479,7 @@ async fn register_member(
         idle: false,
         idle_rearmable: false,
         unattended_since_ms: Some(now_ms()),
+        unattended_with_backlog_since_ms: None,
         last_waiter_exit_at_ms: None,
         last_waiter_outcome: None,
         last_waiter_exit_code: None,
@@ -4737,6 +4779,41 @@ mod p3_tests {
         assert_eq!(status.deaf_stations.count, 1);
         assert!(status.deaf_stations.warn);
         assert_eq!(status.deaf_stations.warn_threshold_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn deaf_warn_threshold_starts_when_backlog_appears() {
+        let state = test_state("deaf-backlog-threshold");
+        let store = store_key("deaf-backlog-threshold");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        {
+            let mut members = state.members.lock().unwrap();
+            members
+                .get_mut(&DaemonState::member_key(&store, "s1", "addr:a"))
+                .unwrap()
+                .unattended_since_ms = Some(now_ms().saturating_sub(60_000));
+        }
+        let backend = state.backend_for(&store).await.unwrap();
+        insert_test_message(&backend, "addr:a", None).await;
+
+        let status = state.status_with_thresholds(100_000, 100_000, 30_000).await;
+
+        assert_eq!(
+            status.members[0].station_health,
+            StationHealth::UnattendedWithBacklog
+        );
+        assert!(
+            status.members[0].unattended_for_ms.unwrap_or_default() >= 60_000,
+            "plain unattended age should preserve no-waiter duration"
+        );
+        assert!(
+            status.members[0].deaf_since_ms.is_some(),
+            "deaf threshold should have its own backlog start timestamp"
+        );
+        assert!(
+            !status.members[0].deaf_warn,
+            "deaf warning should not immediately inherit long no-backlog unattended age"
+        );
     }
 
     #[test]
