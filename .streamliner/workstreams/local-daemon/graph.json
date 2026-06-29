@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-06-28T03:40:00.000Z",
+  "updatedAt": "2026-06-29T04:20:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -138,7 +138,7 @@
       "id": "copilot-plugin",
       "type": "task",
       "title": "Copilot plugin: sessionEnd hook + skill",
-      "summary": "sessionEnd hook removes the session's addresses via explicit Detach (daemon.md sec.14.2; healthy disconnect on quit + dismiss) - membership is explicit-only and daemon-native, NOT PR #31's filesystem registry (its hook plumbing is reused, the registry storage is dropped). The hook is a thin mapper of the Copilot env/payload (COPILOT_AGENT_SESSION_ID -> TELEX_SESSION_ID; COPILOT_LOADER_PID -> --watch-pid) onto generic inputs; the core COPILOT_* fallback is removed so Copilot JSON parsing is not a core protocol dependency. Move telex skill into a real Copilot plugin skill with one source serving both the CLI command and the plugin skill. Sketch; may split hook vs skill at promotion. Scope extended (council-informed): add the Tier-A plugin-owned heartbeat -- a bounded-timeout tracked waiter + a notification hook re-injecting the spawn recipe from the plugin (not agent memory) -- so deafness is bounded and the re-arm recipe survives compaction (see #41 comment; ledger council-harness-wake).",
+      "summary": "sessionEnd hook removes the session's addresses via explicit Detach (daemon.md sec.14.2; healthy disconnect on quit + dismiss) - membership is explicit-only and daemon-native, NOT PR #31's filesystem registry (its hook plumbing is reused, the registry storage is dropped). The hook is a thin mapper of the Copilot env/payload (COPILOT_AGENT_SESSION_ID -> TELEX_SESSION_ID; COPILOT_LOADER_PID -> --watch-pid) onto generic inputs; the core COPILOT_* fallback is removed so Copilot JSON parsing is not a core protocol dependency. Move telex skill into a real Copilot plugin skill with one source serving both the CLI command and the plugin skill. Sketch; may split hook vs skill at promotion. Scope (council-informed): the agentStop turn-end guard is the Tier-A floor; the plugin-owned heartbeat (bounded-timeout tracked waiter + recipe re-injection) is OPT-IN / off by default -- every timeout is a visible context-charged turn, so overnight bounding is ACP/Tier-B's job, not a small-T heartbeat (see #41 comments; ledger council-harness-wake).",
       "status": "ready",
       "attention": "watch",
       "repoIds": [
