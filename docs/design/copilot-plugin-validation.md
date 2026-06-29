@@ -6,7 +6,7 @@ Verified with GitHub Copilot CLI 1.0.66-1 on Windows.
 
 | Acceptance / risk | Evidence |
 |---|---|
-| Plugin installs and exposes a plugin skill | `copilot --config-dir <temp> plugin install <repo>` reports `Installed 1 skill`; `copilot --config-dir <temp> skill list --json` includes plugin skill `telex` from `skills/telex`. |
+| Marketplace installs and exposes a plugin skill | `.github/plugin/marketplace.json` declares marketplace `telex` and plugin `telex`. Isolated verification: `copilot --config-dir <temp> plugin marketplace add <repo>` followed by `copilot --config-dir <temp> plugin install telex@telex` reports `Installed 1 skill`; `skill list --json` includes plugin skill `telex` from `skills/telex`. |
 | CLI and plugin skill stay non-divergent | `tests/copilot_plugin.rs` asserts root `SKILL.md` and `skills/telex/SKILL.md` are byte-identical and are the only `SKILL.md` files in the package. |
 | Hooks are contributed by a real plugin manifest | `plugin.json` declares `hooks.json`; `hooks.json` declares `sessionEnd` and `agentStop` command hooks that invoke hidden Rust adapter commands, not shell scripts. |
 | Notification content enrichment is omitted | Detached waiter stdout is not delivered to the agent, so enrichment would be useful only if the notification hook could locate the completed `--out-dir`. A local spike found the notification hook payload exposes only notification metadata and not a stable `--out-dir` path; sync/agent-read shell completions already carry stdout in context. `hooks.json` intentionally does not install a notification hook. |
@@ -25,7 +25,7 @@ Verified with GitHub Copilot CLI 1.0.66-1 on Windows.
 | Hidden adapter is not public CLI surface | CLI tests assert top-level help does not mention `copilot` and hidden subcommands still parse. |
 | No PR #31 filesystem session registry authority | Plugin hooks call daemon/status/session operations only; tests assert hook manifest targets `telex --json copilot ...` and no copied plugin skill other than byte-identical mirror. |
 | Upgrade-facing constraints | Hooks invoke `telex` by PATH name, not an absolute binary path, preserving room for the later seamless-upgrade launcher shim. |
-| Release distribution contains plugin assets | `.github/workflows/release.yml` packages `copilot-plugin/plugin.json`, `copilot-plugin/hooks.json`, and `copilot-plugin/skills/`; install scripts copy that directory next to the binary and print `copilot plugin install`. |
+| Release install path points at the marketplace | Release archives contain the binary and license; install scripts print tag-pinned marketplace commands (`copilot plugin marketplace add lossyrob/telex#<tag>` then `copilot plugin install telex@telex`) so plugin assets are installed via the supported marketplace channel rather than deprecated direct installs. |
 
 Live smoke summary:
 

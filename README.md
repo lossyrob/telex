@@ -9,9 +9,10 @@ zero-config) or Postgres (networked, with or without Microsoft Entra auth).
 One small binary, `telex`. It even carries its own usage instructions: run
 `telex skill` (or `telex skill --raw` for the exact embedded skill file).
 
-The repository also ships a Copilot CLI plugin manifest (`plugin.json` +
-`hooks.json`). The plugin maps Copilot session env into generic telex session
-inputs, handles non-destructive `sessionEnd`, and guards turn-end re-arming.
+The repository also ships a Copilot CLI plugin marketplace (`.github/plugin/`)
+and plugin manifest (`plugin.json` + `hooks.json`). The plugin maps Copilot
+session env into generic telex session inputs, handles non-destructive
+`sessionEnd`, and guards turn-end re-arming.
 
 ## Install
 
@@ -60,6 +61,8 @@ telex skill --address workstream:proj/node:issue-215
 In Copilot CLI, install/use the telex plugin and attach with:
 
 ```sh
+copilot plugin marketplace add lossyrob/telex
+copilot plugin install telex@telex
 telex --address workstream:proj/node:issue-215 copilot attach --description "<work>"
 telex --address workstream:proj/node:issue-215 wait --session "$COPILOT_AGENT_SESSION_ID" --out-dir <dir>
 ```
@@ -82,9 +85,10 @@ The plugin shape is validated against GitHub Copilot CLI 1.0.66-1; see
 [`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)
 for the acceptance matrix and live hook smoke evidence.
 
-Release archives include a `copilot-plugin/` directory containing `plugin.json`,
-`hooks.json`, and the plugin skill mirror. Install scripts copy it next to the
-binary and print the plugin install command.
+Marketplace install is the supported plugin channel. Release install scripts
+print a tag-pinned marketplace command, for example
+`copilot plugin marketplace add lossyrob/telex#vX.Y.Z`, so the plugin assets and
+installed binary can be kept on the same release tag.
 
 ## Networked backends
 

@@ -61,10 +61,6 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist, package | Out-Null
           Copy-Item "target\$target\release\telex.exe" "package\telex.exe" -Force
           Copy-Item "LICENSE" "package\LICENSE" -Force
-          New-Item -ItemType Directory -Force -Path "package\copilot-plugin" | Out-Null
-          Copy-Item "plugin.json" "package\copilot-plugin\plugin.json" -Force
-          Copy-Item "hooks.json" "package\copilot-plugin\hooks.json" -Force
-          Copy-Item "skills" "package\copilot-plugin\skills" -Recurse -Force
           Compress-Archive -Path "package\*" -DestinationPath "dist\$archive" -Force
           $hash = (Get-FileHash "dist\$archive" -Algorithm SHA256).Hash.ToLower()
           "$hash  $archive" | Out-File -Encoding ascii -NoNewline "dist\$archive.sha256"
@@ -80,11 +76,7 @@ jobs:
           mkdir -p dist package
           cp "target/${target}/release/telex" package/telex
           cp LICENSE package/LICENSE
-          mkdir -p package/copilot-plugin
-          cp plugin.json package/copilot-plugin/plugin.json
-          cp hooks.json package/copilot-plugin/hooks.json
-          cp -R skills package/copilot-plugin/skills
-          tar -C package -czf "dist/${archive}" telex LICENSE copilot-plugin
+          tar -C package -czf "dist/${archive}" telex LICENSE
           ( cd dist && shasum -a 256 "${archive}" > "${archive}.sha256" )
 
       - name: Upload archive artifact

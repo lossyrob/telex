@@ -20,6 +20,19 @@ fn plugin_manifest_declares_hooks_and_root_skill_source() {
 }
 
 #[test]
+fn marketplace_manifest_advertises_telex_plugin() {
+    let marketplace: Value = serde_json::from_str(include_str!("../.github/plugin/marketplace.json"))
+        .expect("marketplace.json parses");
+    assert_eq!(marketplace["name"], "telex");
+    let plugins = marketplace["plugins"].as_array().expect("plugins array");
+    assert_eq!(plugins.len(), 1);
+    let plugin = &plugins[0];
+    assert_eq!(plugin["name"], "telex");
+    assert_eq!(plugin["source"], ".");
+    assert_eq!(plugin["repository"], "https://github.com/lossyrob/telex");
+}
+
+#[test]
 fn hook_manifest_wires_session_end_and_agent_stop_to_hidden_rust_adapter() {
     let hooks: Value =
         serde_json::from_str(include_str!("../hooks.json")).expect("hooks.json parses");
