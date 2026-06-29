@@ -54,6 +54,9 @@ impl WaitCandidate {
 pub trait Backend: Send + Sync {
     fn kind(&self) -> &'static str;
     fn capabilities(&self) -> Capabilities;
+    fn supports_wake_on_cc(&self) -> bool {
+        false
+    }
 
     async fn init_schema(&self) -> Result<()>;
 

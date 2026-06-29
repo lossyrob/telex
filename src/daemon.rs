@@ -2609,13 +2609,17 @@ async fn wait_for_message_with_idle_ttl(
         Ok(backend) => backend,
         Err(response) => return response,
     };
+    if wake_on_cc && !backend.supports_wake_on_cc() {
+        return proto::unsupported(format!(
+            "wake-on-cc wait candidates are not supported by the {} backend",
+            backend.kind()
+        ));
+    }
     let cc_after_ms = if wake_on_cc {
         match backend.durable_clock_now_ms().await {
             Ok(value) => Some(value),
             Err(e) => {
-                return proto::unsupported(format!(
-                    "wake-on-cc requires durable CC lower-bound support for {address}: {e:#}"
-                ));
+                return proto::internal(format!("capturing CC lower bound for {address}: {e:#}"))
             }
         }
     } else {
@@ -2689,11 +2693,6 @@ async fn wait_for_message_with_idle_ttl(
             Ok(rows) => rows,
             Err(e) => {
                 let detail = format!("{e:#}");
-                if wake_on_cc && detail.contains("wake-on-cc") {
-                    return proto::unsupported(format!(
-                        "fetching wake-on-cc candidates for {address}: {detail}"
-                    ));
-                }
                 return proto::internal(format!(
                     "fetching wait candidates for {address}: {detail}"
                 ));

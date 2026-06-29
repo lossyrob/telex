@@ -74,10 +74,12 @@ It fails closed rather than guessing.
    its bounded reconnect grace.
 
    CC traffic is pull-only by default: it remains visible in `inbox --all` /
-   `read`, but a bare `wait` does not wake for it. If this seat is deliberately
-   acting as an observer/relay for a table and should be woken by live CC traffic,
-   arm that wait with `--wake-on-cc`. This is an explicit per-wait opt-in, not CC
-   backlog replay and not a manual-ack requirement.
+   `read`, but a bare `wait` does not wake for it. On SQLite-backed daemon stores,
+   if this seat is deliberately acting as an observer/relay for a table and should
+   be woken by live CC traffic, arm that wait with `--wake-on-cc`. This is an
+   explicit per-wait opt-in, not CC backlog replay and not a manual-ack
+   requirement. Non-SQLite daemon stores return `Unsupported` until equivalent
+   backend wake support lands.
 
    | Exit | Meaning | What you do |
    |---:|---|---|
@@ -129,10 +131,11 @@ When you finish the current unit of work or reach a natural checkpoint, do phase
 pending messages you are ready to handle, then either continue with an
 interrupt-only waiter or, if you are idle, arm an unfiltered waiter.
 
-`--wake-on-cc` composes with this pattern. Use it only for seats that deliberately
-want live CC observer traffic to wake them, and combine it with `--min-attention`
-when the observer should wake only for urgent table traffic. After a CC wake,
-inspect `inbox --all` or the thread if you need surrounding observer context.
+`--wake-on-cc` composes with this pattern on SQLite-backed daemon stores. Use it
+only for seats that deliberately want live CC observer traffic to wake them, and
+combine it with `--min-attention` when the observer should wake only for urgent
+table traffic. After a CC wake, inspect `inbox --all` or the thread if you need
+surrounding observer context.
 
 Do not run an interrupt-only waiter and an unfiltered waiter at the same time:
 the daemon permits only one live waiter per station. To switch modes, let the
@@ -366,7 +369,7 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex wait` | Block on the local exchange; on delivery print one message as JSON and exit. Does not spawn a missing daemon; run `attach` first or after exit 3. Use `--min-attention interrupt` while focused; add `--wake-on-cc` only for explicit observer/relay wake. | `--address <addr>`, `--session <id>`, `--timeout-ms N`, `--min-attention <level>`, `--wake-on-cc`, `--reconnect-grace-ms N` |
+| `telex wait` | Block on the local exchange; on delivery print one message as JSON and exit. Does not spawn a missing daemon; run `attach` first or after exit 3. Use `--min-attention interrupt` while focused; add `--wake-on-cc` only for explicit observer/relay wake on SQLite-backed daemon stores. | `--address <addr>`, `--session <id>`, `--timeout-ms N`, `--min-attention <level>`, `--wake-on-cc`, `--reconnect-grace-ms N` |
 | `telex inbox` | List actionable messages requiring disposition and recent messages for the address. | `--address <addr>`, `--all`, `--limit N` |
 | `telex read` | Read a message. `--thread` shows compact thread context; `--full` shows full history. | `--id <message-id>`, `--thread`, `--full` |
 

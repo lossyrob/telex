@@ -227,17 +227,23 @@ is accepted per station, an agent switches modes by letting the current waiter c
 
 #### 3.2.3 `--wake-on-cc` live observer waits
 
-CC remains visibility-only by default: a bare `telex wait` does not wake for CC traffic. A station that
-is deliberately participating as an observer/relay MAY arm a per-wait opt-in with `telex wait
---wake-on-cc`. This widens only that wait to live CC notification candidates for the current address.
-It does not create a durable stream subscription, does not make all CC traffic wake by default, and does
-not make CC ack-required.
+CC remains visibility-only by default: a bare `telex wait` does not wake for CC traffic. On
+SQLite-backed daemon stores, a station that is deliberately participating as an observer/relay MAY arm
+a per-wait opt-in with `telex wait --wake-on-cc`. This widens only that wait to live CC notification
+candidates for the current address. It does not create a durable stream subscription, does not make all
+CC traffic wake by default, and does not make CC ack-required. Non-SQLite daemon stores return a typed
+`Unsupported` response until an equivalent backend implementation lands.
 
 `--wake-on-cc` is a live wake, not CC backlog replay. When the daemon registers the wait, it captures a
 durable CC lower-bound timestamp for the backend. The wait may emit only CC candidates whose delivery
 timestamp is strictly after that lower bound (or an equivalent backend ordering proof). This preserves
 the auto-seen CC baseline: old observer traffic stays visible through `inbox --all` / `read`, but cannot
 be redelivered repeatedly by re-arming `--wake-on-cc`.
+
+This guarantee is scoped to the in-memory daemon waiter registration. If the logical client wait has to
+reconnect/re-register after the original daemon request is lost, CC traffic that arrived in the gap is
+still durable and visible through `inbox --all` / `read`, but remains pull-only; primary `--to`
+deliveries keep their normal durable buffered reconnect behavior.
 
 `--min-attention` composes with `--wake-on-cc` but never implies it. For example, `telex wait
 --wake-on-cc --min-attention interrupt` wakes for primary interrupt messages and live CC interrupt
@@ -527,9 +533,9 @@ the consumed commit is the explicit agent ack, decoupled from any EMIT-time conn
 CC recipients are visibility-only by default: their delivery rows are materialized as already
 seen/consumed for transport, so they remain visible in `inbox --all` / `read` with
 `delivery_role: "cc"` but do not wake bare `wait` and do not require manual `ack`. A per-wait
-`--wake-on-cc` opt-in can wake for live CC traffic after that wait's lower bound without changing the
-auto-consumed CC delivery row. The primary `--to` recipient remains the actionable, ack-required
-delivery.
+`--wake-on-cc` opt-in can wake for live CC traffic after that wait's lower bound on SQLite-backed daemon
+stores without changing the auto-consumed CC delivery row. The primary `--to` recipient remains the
+actionable, ack-required delivery.
 
 ## 7. Authorization and the trust boundary
 

@@ -162,7 +162,7 @@ pub struct WaitArgs {
     /// Only wake for messages at this attention or higher priority.
     #[arg(long, value_parser = parse_attention_arg)]
     pub min_attention: Option<Attention>,
-    /// Also wake for live CC traffic to this address without making CC ack-required.
+    /// Also wake for live CC traffic on SQLite-backed daemon stores; CC stays non-ack-required.
     #[arg(long)]
     pub wake_on_cc: bool,
     /// Resume delivery strictly after this message id.
