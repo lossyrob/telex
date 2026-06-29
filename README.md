@@ -70,12 +70,11 @@ do not read Copilot-specific env variables directly, so follow-up generic comman
 must pass `--session "$COPILOT_AGENT_SESSION_ID"` or run in a shell/script that
 sets `TELEX_SESSION_ID`.
 
-The plugin can also inject a bounded waiter re-arm recipe on tracked shell
-completion notifications, but that heartbeat is opt-in/off by default to avoid
-idle-session turn noise. Enable it with `TELEX_TURN_HEARTBEAT=on` and tune `T`
-with `TELEX_TURN_GUARD_HEARTBEAT_TIMEOUT_MS` (default 30 minutes). The
-`agentStop` guard remains default-on and is controlled separately by
-`TELEX_TURN_GUARD`.
+The bounded-timeout notification heartbeat was evaluated and left out: sync and
+agent-read shell completions already carry stdout in context, while the
+notification hook payload exposes only notification metadata and not a stable
+`--out-dir` path. Classic waiter robustness in this PR comes from the default-on
+`agentStop` guard; overnight/AFK deterministic wake belongs to the ACP track.
 
 The plugin shape is validated against GitHub Copilot CLI 1.0.66-1; see
 [`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)

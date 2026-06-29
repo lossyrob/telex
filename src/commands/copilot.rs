@@ -12,8 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::cli::{
-    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotNotificationArgs, CopilotSessionEndArgs,
-    CopilotTurnGuardArgs, Ctx,
+    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotSessionEndArgs, CopilotTurnGuardArgs, Ctx,
 };
 use crate::daemon_ipc::{DaemonStatus, MemberStatus, Request, Response, WatchPidSpec};
 use crate::model::now_ms;
@@ -23,14 +22,12 @@ const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
 const HOOK_LOG_FILE: &str = "hook-events.ndjson";
 const HOOK_LOG_ROTATE_BYTES: u64 = 1_048_576;
 const LOCK_STALE_AFTER: Duration = Duration::from_secs(5 * 60);
-const DEFAULT_HEARTBEAT_TIMEOUT_MS: u64 = 30 * 60 * 1000;
 
 pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
     match cmd {
         CopilotCmd::Attach(args) => attach(ctx, args).await,
         CopilotCmd::SessionEnd(args) => session_end(ctx, args).await,
         CopilotCmd::TurnGuard(args) => turn_guard(ctx, args).await,
-        CopilotCmd::Notification(args) => notification(args),
         CopilotCmd::Skill => skill(),
     }
 }
@@ -236,43 +233,6 @@ fn skill() -> Result<i32> {
     Ok(0)
 }
 
-fn notification(args: CopilotNotificationArgs) -> Result<i32> {
-    let payload = read_stdin_payload();
-    let notification_type = payload
-        .as_deref()
-        .and_then(parse_notification_type)
-        .unwrap_or_default();
-    if !matches!(
-        notification_type.as_str(),
-        "shell_completed" | "shell_detached_completed"
-    ) {
-        print_json(&serde_json::json!({}));
-        return Ok(0);
-    }
-
-    let session = resolve_copilot_session(args.session.as_deref(), payload.as_deref())
-        .unwrap_or_else(|| "<session-id>".to_string());
-    if !heartbeat_enabled() {
-        write_hook_log_best_effort(&HookLogEvent::notification(
-            "heartbeat_disabled",
-            Some(&session),
-            Some("TELEX_TURN_HEARTBEAT did not opt in to notification heartbeat guidance"),
-        ));
-        print_json(&serde_json::json!({}));
-        return Ok(0);
-    }
-
-    let (timeout_ms, detail) = heartbeat_timeout_ms();
-    let context = heartbeat_additional_context(&session, timeout_ms);
-    write_hook_log_best_effort(&HookLogEvent::notification(
-        "heartbeat_recipe_injected",
-        Some(&session),
-        detail.as_deref(),
-    ));
-    print_json(&serde_json::json!({ "additionalContext": context }));
-    Ok(0)
-}
-
 fn read_stdin_payload() -> Option<String> {
     let mut buf = String::new();
     if std::io::stdin().read_to_string(&mut buf).is_ok() && !buf.trim().is_empty() {
@@ -297,21 +257,6 @@ fn parse_session_id(payload: &str) -> Option<String> {
         .or_else(|| v.get("data").and_then(|d| json_string(d, "session_id")))
 }
 
-fn parse_notification_type(payload: &str) -> Option<String> {
-    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
-    json_string(&v, "notificationType")
-        .or_else(|| json_string(&v, "notification_type"))
-        .or_else(|| {
-            v.get("notification")
-                .and_then(|notification| json_string(notification, "type"))
-        })
-        .or_else(|| v.get("data").and_then(|d| json_string(d, "notificationType")))
-        .or_else(|| {
-            v.get("data")
-                .and_then(|d| json_string(d, "notification_type"))
-        })
-}
-
 fn json_string(v: &serde_json::Value, key: &str) -> Option<String> {
     v.get(key).and_then(|s| s.as_str()).and_then(nonempty)
 }
@@ -327,36 +272,6 @@ fn env_nonempty(name: &str) -> Option<String> {
 
 fn copilot_loader_pid() -> Option<u32> {
     env_nonempty("COPILOT_LOADER_PID").and_then(|s| s.parse::<u32>().ok())
-}
-
-fn heartbeat_timeout_ms() -> (u64, Option<String>) {
-    match env_nonempty("TELEX_TURN_GUARD_HEARTBEAT_TIMEOUT_MS") {
-        Some(value) => match value.parse::<u64>() {
-            Ok(ms) if ms > 0 => (ms, None),
-            _ => (
-                DEFAULT_HEARTBEAT_TIMEOUT_MS,
-                Some(format!(
-                    "invalid TELEX_TURN_GUARD_HEARTBEAT_TIMEOUT_MS={value:?}; using default {DEFAULT_HEARTBEAT_TIMEOUT_MS}"
-                )),
-            ),
-        },
-        None => (DEFAULT_HEARTBEAT_TIMEOUT_MS, None),
-    }
-}
-
-fn heartbeat_enabled() -> bool {
-    matches!(
-        env_nonempty("TELEX_TURN_HEARTBEAT")
-            .map(|v| v.to_ascii_lowercase())
-            .as_deref(),
-        Some("on" | "1" | "true")
-    )
-}
-
-fn heartbeat_additional_context(session: &str, timeout_ms: u64) -> String {
-    format!(
-        "Telex plugin heartbeat: a tracked shell completed. If you are still attending a telex station, immediately re-arm exactly one runtime-tracked `TELEX MESSAGE WAITER` shell task with a bounded wait timeout so idle deafness is bounded. Use this recipe, substituting the attended address and an out-dir you will inspect on completion: `telex --address <addr> wait --session {session} --timeout-ms {timeout_ms} --out-dir <dir>`. If focused, add `--min-attention interrupt`. When that waiter exits 0, read `delivery.json`, run `telex ack --address <addr> --session {session} --id <message-id>`, then re-arm before longer processing. If you are done attending, run `telex detach --address <addr> --session {session}` instead. Do not run an infinite shell loop; each wait must be a separate tracked shell task."
-    )
 }
 
 async fn connect_existing_with_cap(
@@ -444,7 +359,7 @@ struct GuardState {
     last_decision: String,
     updated_at_ms: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    unarmed_key: Option<String>,
+    issue_key: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -493,19 +408,28 @@ fn evaluate_guard(
         .iter()
         .filter(|member| member.live_waiters_count == 0)
         .collect::<Vec<_>>();
+    let delivered_unacked = members
+        .iter()
+        .filter(|member| {
+            member.pending_unconsumed_count > 0
+                && member.last_waiter_outcome.as_deref() == Some("message")
+        })
+        .collect::<Vec<_>>();
     if unarmed.is_empty() {
-        return GuardEvaluation {
-            decision: HookDecision::Allow,
-            reason_code: "all_armed",
-            summary: "All attended stations have live waiters.".to_string(),
-            nudges: 0,
-            next_state: None,
-        };
+        if delivered_unacked.is_empty() {
+            return GuardEvaluation {
+                decision: HookDecision::Allow,
+                reason_code: "covered",
+                summary: "All attended stations are covered.".to_string(),
+                nudges: 0,
+                next_state: None,
+            };
+        }
     }
 
-    let unarmed_key = unarmed_station_key(&unarmed);
+    let issue_key = coverage_issue_key(&unarmed, &delivered_unacked);
     let prior_nudges = match prior_state {
-        Some(state) if state.unarmed_key.as_deref() == Some(unarmed_key.as_str()) => state.nudges,
+        Some(state) if state.issue_key.as_deref() == Some(issue_key.as_str()) => state.nudges,
         _ => 0,
     };
     if prior_nudges >= settings.max_nudges {
@@ -520,45 +444,65 @@ fn evaluate_guard(
                 nudges: prior_nudges,
                 last_decision: "cap_exhausted".to_string(),
                 updated_at_ms: now_ms(),
-                unarmed_key: Some(unarmed_key),
+                issue_key: Some(issue_key),
             }),
         };
     }
 
     let nudges = prior_nudges.saturating_add(1);
-    let station_list = unarmed
-        .iter()
-        .map(|member| {
-            format!(
-                "{} (pending {})",
-                member.address, member.pending_unconsumed_count
-            )
-        })
-        .collect::<Vec<_>>()
-        .join(", ");
+    let station_list = coverage_summary(&unarmed, &delivered_unacked);
+    let guidance = if !unarmed.is_empty() && !delivered_unacked.is_empty() {
+        "Ack handled deliveries, then re-arm `telex wait ... --out-dir <dir>` if still attending, or run `telex detach --address <station>` if done."
+    } else if !unarmed.is_empty() {
+        "Re-arm `telex wait ... --out-dir <dir>` if still attending, or run `telex detach --address <station>` if done."
+    } else {
+        "Ack handled deliveries with `telex ack --address <station> --session <session-id> --id <message-id>` before ending the turn; unacked messages redeliver."
+    };
     let reason = format!(
-        "Telex turn guard: session {session} is attending station(s) with no live waiter: {station_list}. Re-arm `telex wait ... --out-dir <dir>` if still attending, or run `telex detach --address <station>` if done. Nudge {nudges}/{}.",
+        "Telex turn guard: session {session} has uncovered station work: {station_list}. {guidance} Nudge {nudges}/{}.",
         settings.max_nudges
     );
     GuardEvaluation {
         decision: HookDecision::Block { reason },
-        reason_code: "unarmed_attended_station",
+        reason_code: "coverage_gap",
         summary: station_list,
         nudges,
         next_state: Some(GuardState {
             nudges,
-            last_decision: "unarmed_attended_station".to_string(),
+            last_decision: "coverage_gap".to_string(),
             updated_at_ms: now_ms(),
-            unarmed_key: Some(unarmed_key),
+            issue_key: Some(issue_key),
         }),
     }
 }
 
-fn unarmed_station_key(unarmed: &[&MemberStatus]) -> String {
-    let mut parts = unarmed
-        .iter()
-        .map(|member| format!("{}\0{}", member.store_key, member.address))
-        .collect::<Vec<_>>();
+fn coverage_summary(unarmed: &[&MemberStatus], delivered_unacked: &[&MemberStatus]) -> String {
+    let mut parts = Vec::new();
+    parts.extend(unarmed.iter().map(|member| {
+        format!(
+            "{} has no live waiter (pending {})",
+            member.address, member.pending_unconsumed_count
+        )
+    }));
+    parts.extend(delivered_unacked.iter().map(|member| {
+        format!(
+            "{} has {} delivered/unacked message(s)",
+            member.address, member.pending_unconsumed_count
+        )
+    }));
+    parts.join(", ")
+}
+
+fn coverage_issue_key(unarmed: &[&MemberStatus], delivered_unacked: &[&MemberStatus]) -> String {
+    let mut parts = Vec::new();
+    parts.extend(
+        unarmed
+            .iter()
+            .map(|member| format!("unarmed\0{}\0{}", member.store_key, member.address)),
+    );
+    parts.extend(delivered_unacked.iter().map(|member| {
+        format!("unacked\0{}\0{}", member.store_key, member.address)
+    }));
     parts.sort();
     parts.join("\n")
 }
@@ -721,22 +665,6 @@ impl<'a> HookLogEvent<'a> {
         }
     }
 
-    fn notification(
-        reason_code: &'a str,
-        session_id: Option<&'a str>,
-        detail: Option<&'a str>,
-    ) -> Self {
-        Self {
-            ts_ms: now_ms(),
-            hook: "notification",
-            reason_code,
-            session_id,
-            detail,
-            nudges: None,
-            cap: None,
-        }
-    }
-
     fn turn_guard(
         reason_code: &'a str,
         session_id: Option<&'a str>,
@@ -863,57 +791,17 @@ mod tests {
     }
 
     #[test]
-    fn parses_notification_payload_shapes() {
-        assert_eq!(
-            parse_notification_type(r#"{"notificationType":"shell_completed"}"#).as_deref(),
-            Some("shell_completed")
-        );
-        assert_eq!(
-            parse_notification_type(r#"{"notification":{"type":"shell_detached_completed"}}"#)
-                .as_deref(),
-            Some("shell_detached_completed")
-        );
-    }
-
-    #[test]
-    fn heartbeat_context_carries_bounded_wait_recipe() {
-        let context = heartbeat_additional_context("session-1", 900_000);
-        assert!(context.contains("--session session-1"));
-        assert!(context.contains("--timeout-ms 900000"));
-        assert!(context.contains("TELEX MESSAGE WAITER"));
-        assert!(context.contains("Do not run an infinite shell loop"));
-    }
-
-    #[test]
-    fn heartbeat_is_opt_in_and_uses_own_flag() {
-        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let prior_heartbeat = std::env::var_os("TELEX_TURN_HEARTBEAT");
-        let prior_guard = std::env::var_os("TELEX_TURN_GUARD");
-        std::env::remove_var("TELEX_TURN_HEARTBEAT");
-        std::env::set_var("TELEX_TURN_GUARD", "on");
-        assert!(!heartbeat_enabled(), "heartbeat must be off by default");
-        std::env::set_var("TELEX_TURN_HEARTBEAT", "on");
-        std::env::set_var("TELEX_TURN_GUARD", "off");
-        assert!(
-            heartbeat_enabled(),
-            "heartbeat opt-in uses TELEX_TURN_HEARTBEAT, not TELEX_TURN_GUARD"
-        );
-        restore_env("TELEX_TURN_HEARTBEAT", prior_heartbeat);
-        restore_env("TELEX_TURN_GUARD", prior_guard);
-    }
-
-    #[test]
     fn guard_blocks_unarmed_attended_station_with_pending_count() {
         let settings = GuardSettings {
             enabled: true,
             max_nudges: 3,
         };
         let eval = evaluate_guard("s1", &[member("addr:a", 0, 2)], settings, None);
-        assert_eq!(eval.reason_code, "unarmed_attended_station");
+        assert_eq!(eval.reason_code, "coverage_gap");
         assert_eq!(eval.nudges, 1);
         match eval.decision {
             HookDecision::Block { reason } => {
-                assert!(reason.contains("addr:a (pending 2)"));
+                assert!(reason.contains("addr:a has no live waiter (pending 2)"));
                 assert!(reason.contains("Nudge 1/3"));
             }
             other => panic!("expected block, got {other:?}"),
@@ -928,9 +816,9 @@ mod tests {
         };
         let prior = Some(GuardState {
             nudges: 2,
-            last_decision: "unarmed_attended_station".to_string(),
+            last_decision: "coverage_gap".to_string(),
             updated_at_ms: 1,
-            unarmed_key: Some(unarmed_station_key(&[&member("addr:a", 0, 0)])),
+            issue_key: Some(coverage_issue_key(&[&member("addr:a", 0, 0)], &[])),
         });
         let eval = evaluate_guard("s1", &[member("addr:a", 0, 0)], settings, prior);
         assert_eq!(eval.reason_code, "cap_exhausted");
@@ -948,12 +836,12 @@ mod tests {
         let unarmed = member("addr:unarmed", 0, 0);
         let prior = Some(GuardState {
             nudges: 2,
-            last_decision: "unarmed_attended_station".to_string(),
+            last_decision: "coverage_gap".to_string(),
             updated_at_ms: 1,
-            unarmed_key: Some(unarmed_station_key(&[&unarmed])),
+            issue_key: Some(coverage_issue_key(&[&unarmed], &[])),
         });
         let eval = evaluate_guard("s1", &[armed, unarmed], settings, prior);
-        assert_eq!(eval.reason_code, "unarmed_attended_station");
+        assert_eq!(eval.reason_code, "coverage_gap");
         assert_eq!(eval.next_state.unwrap().nudges, 3);
     }
 
@@ -969,11 +857,42 @@ mod tests {
             nudges: 3,
             last_decision: "cap_exhausted".to_string(),
             updated_at_ms: 1,
-            unarmed_key: Some(unarmed_station_key(&[&previous])),
+            issue_key: Some(coverage_issue_key(&[&previous], &[])),
         });
         let eval = evaluate_guard("s1", &[current], settings, prior);
-        assert_eq!(eval.reason_code, "unarmed_attended_station");
+        assert_eq!(eval.reason_code, "coverage_gap");
         assert_eq!(eval.next_state.unwrap().nudges, 1);
+    }
+
+    #[test]
+    fn guard_nudges_for_delivered_unacked_message() {
+        let settings = GuardSettings {
+            enabled: true,
+            max_nudges: 3,
+        };
+        let mut delivered = member("addr:delivered", 1, 1);
+        delivered.last_waiter_outcome = Some("message".to_string());
+        let eval = evaluate_guard("s1", &[delivered], settings, None);
+        assert_eq!(eval.reason_code, "coverage_gap");
+        match eval.decision {
+            HookDecision::Block { reason } => {
+                assert!(reason.contains("delivered/unacked"));
+                assert!(reason.contains("Ack handled deliveries"));
+            }
+            other => panic!("expected block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn guard_does_not_nudge_for_inflight_pending_without_delivery_exit() {
+        let settings = GuardSettings {
+            enabled: true,
+            max_nudges: 3,
+        };
+        let pending_with_waiter = member("addr:pending", 1, 1);
+        let eval = evaluate_guard("s1", &[pending_with_waiter], settings, None);
+        assert_eq!(eval.reason_code, "covered");
+        assert!(matches!(eval.decision, HookDecision::Allow));
     }
 
     #[test]

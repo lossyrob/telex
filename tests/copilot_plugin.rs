@@ -46,20 +46,10 @@ fn hook_manifest_wires_session_end_and_agent_stop_to_hidden_rust_adapter() {
         .unwrap()
         .contains("telex --json copilot turn-guard"));
 
-    let notification = &hooks["hooks"]["notification"][0];
-    assert_eq!(notification["type"], "command");
-    assert_eq!(
-        notification["matcher"].as_str().unwrap(),
-        "shell_completed|shell_detached_completed"
+    assert!(
+        hooks["hooks"].get("notification").is_none(),
+        "notification hook is intentionally not installed by default; content enrichment is spike-gated"
     );
-    assert!(notification["powershell"]
-        .as_str()
-        .unwrap()
-        .contains("telex --json copilot notification"));
-    assert!(notification["bash"]
-        .as_str()
-        .unwrap()
-        .contains("telex --json copilot notification"));
 }
 
 #[test]

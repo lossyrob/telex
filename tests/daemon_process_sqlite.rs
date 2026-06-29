@@ -2021,6 +2021,73 @@ fn real_process_copilot_turn_guard_caps_mixed_armed_unarmed_state() {
 }
 
 #[test]
+fn real_process_copilot_turn_guard_nudges_delivered_unacked_message() {
+    let env = ProcessEnv::new("real-copilot-unacked-guard");
+    let session = "real-copilot-unacked-session";
+    let address = "addr:copilot-unacked";
+    env.attach(session, address);
+
+    let out_dir = env.root.join("copilot-unacked-wait");
+    let mut wait_cmd = env.command_with_session(session);
+    wait_cmd
+        .args([
+            "--json",
+            "--address",
+            address,
+            "wait",
+            "--session",
+            session,
+            "--timeout-ms",
+            "10000",
+            "--out-dir",
+            out_dir.to_str().expect("out dir"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let waiter = wait_cmd.spawn().expect("spawn unacked waiter");
+    wait_until_path_exists(&out_dir.join("wait.pid"), Duration::from_secs(3));
+
+    let send = env.run_with_session(
+        session,
+        [
+            "--json",
+            "send",
+            "--to",
+            address,
+            "--body",
+            "needs ack",
+            "--from",
+            address,
+        ],
+        Duration::from_secs(5),
+    );
+    send.assert_success("send unacked message");
+    let _ = wait_status_with_timeout(waiter, Duration::from_secs(5));
+    wait_until_path_exists(&out_dir.join("message.json"), Duration::from_secs(3));
+
+    let mut guard_cmd = env.command_with_session("ignored");
+    guard_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .args(["--json", "copilot", "turn-guard"]);
+    let guard = run_command_with_capture(guard_cmd, &env.root, Duration::from_secs(5));
+    guard.assert_success("copilot turn guard delivered unacked");
+    let guard_json = guard.json("copilot turn guard delivered unacked");
+    assert_eq!(
+        guard_json.get("decision").and_then(Value::as_str),
+        Some("block")
+    );
+    assert!(
+        guard_json
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .contains("delivered/unacked"),
+        "guard should mention delivered/unacked work: {guard_json}"
+    );
+}
+
+#[test]
 fn real_process_copilot_turn_guard_daemon_down_fails_open_and_logs() {
     let env = ProcessEnv::new("real-copilot-daemon-down");
     let mut cmd = env.command_with_session("ignored");

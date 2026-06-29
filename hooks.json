@@ -16,15 +16,6 @@
         "bash": "telex --json copilot turn-guard",
         "timeoutSec": 30
       }
-    ],
-    "notification": [
-      {
-        "type": "command",
-        "matcher": "shell_completed|shell_detached_completed",
-        "powershell": "telex --json copilot notification",
-        "bash": "telex --json copilot notification",
-        "timeoutSec": 10
-      }
     ]
   }
 }
