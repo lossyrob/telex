@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-06-29T21:10:00.000Z",
+  "updatedAt": "2026-06-30T21:30:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -138,8 +138,8 @@
       "id": "copilot-plugin",
       "type": "task",
       "title": "Copilot plugin: sessionEnd hook + skill",
-      "summary": "sessionEnd hook maps Copilot session lifecycle to the daemon's non-destructive SessionEnd path (release waiters + mark stations idle; membership is explicit-only and daemon-native, NOT PR #31's filesystem registry). The hook is a thin mapper of the Copilot env/payload (COPILOT_AGENT_SESSION_ID -> TELEX_SESSION_ID; COPILOT_LOADER_PID -> --watch-pid) onto generic inputs; the core COPILOT_* fallback is removed so Copilot JSON parsing is not a core protocol dependency. Move telex skill into a real Copilot plugin skill with one source serving both the CLI command and the plugin skill. Scope expanded in PR #44: always-on agentStop guard for the classic waiter path, spike-gated content-enriched shell-completed notification hook (avoid a fetch turn if stdout is not already in context), and delivered-but-unacked nudges using pending_unconsumed_count with false-positive hardening via delivered_at_ms / #46. The bounded-timeout heartbeat is dropped/superseded; ui-server push delivery is the follow-on node (#53).",
-      "status": "ready",
+      "summary": "Merged in PR #44: plugin package, sessionEnd hook mapped to daemon SessionEnd, single-source skill plumbing, and the `copilot.rs` harness boundary. The merged skill is waiter-oriented (classic `telex wait` / re-arm / out-dir path) and becomes rework input to #53: Copilot delivery pivots to bind -> load bridge -> receive pushed turns -> disposition, while `telex wait` remains the generic pull primitive for non-Copilot/non-extension harnesses.",
+      "status": "completed",
       "attention": "watch",
       "repoIds": [
         "telex"
@@ -155,30 +155,10 @@
       ]
     },
     {
-      "id": "cc-stream-wake",
-      "type": "task",
-      "title": "CC / stream-wake (deliberative-table visibility)",
-      "summary": "Let a seat opt in to being woken by the stream/table it belongs to (its CC/observer traffic) instead of only a primary TO, so a deliberative seat can see and be woken by its conversation without hand-rolled DB polling. Daemon delivery-semantics change (the daemon owns delivery emission + wake); opt-in subscribe / wake-on-stream or a per-address wake-attention setting, NOT CC-always-wakes (which would reintroduce notification churn). Preserve durable ack-aware delivery + zero loss; backend-agnostic. From #45 cluster D; needs a small design pass. Gates closure.",
-      "status": "ready",
-      "attention": "watch",
-      "repoIds": [
-        "telex"
-      ],
-      "tracker": {
-        "type": "github",
-        "owner": "lossyrob",
-        "repo": "telex",
-        "number": 40
-      },
-      "dependsOn": [
-        "fencing-proof"
-      ]
-    },
-    {
       "id": "liveness-visibility",
       "type": "task",
       "title": "Liveness & visibility hardening (deaf-evidence, terminal-exit-status, foreign-lease view)",
-      "summary": "Daemon-side observability so deafness, abnormal waiter exits, and ghost leases are self-evident rather than diagnosable only by going to look (from #45 clusters A/B/E). Make the already-computed UnattendedWithBacklog grade visible cross-session and proactively surfaced past a threshold; author a consistent terminal status on EVERY waiter exit (incl. kill/no-op/lost-race), decoupled from the waiter writing a file; add an --all-sessions / foreign-lease view so a session-scoped status no longer hides a ghost lease. The observability seam the validation-harness asserts through; pairs with the copilot-plugin heartbeat/guard (the station self-corrects, this makes the condition observable to peers/operator).",
+      "summary": "Generic hardening after the #53 bridge pivot: terminal status on EVERY `telex wait` exit for non-Copilot/pull-mode users; an --all-sessions / foreign-lease view so a session-scoped status no longer hides a ghost lease; and any bridge health/orphan-extension visibility not carried directly by #53. The Copilot-specific deaf-waiter unblock moves to push-delivery, so this is useful hardening but no longer a closure gate by itself.",
       "status": "ready",
       "attention": "watch",
       "repoIds": [
@@ -197,9 +177,9 @@
     {
       "id": "push-delivery",
       "type": "task",
-      "title": "Push delivery for Copilot --ui-server sessions",
-      "summary": "Implement the #53 design: a terminal-preserving push path for Copilot sessions launched with --ui-server. Add a generic daemon on-deliver exec capability (argv, same-user, bounded, off the durable critical path) and `telex copilot push` (self-discover ui-server port, inject a content-rich turn through the loopback JSON-RPC, receipt-gated ack). Skill mode-awareness: ui-server sessions register the push handler and manage no waiter; non-ui-server sessions stay on the classic waiter + #41 guard path. This supersedes the heartbeat idea and is the local-daemon realization of push-based wake while keeping #12 SDK integration out of scope.",
-      "status": "planned",
+      "title": "Push delivery for Copilot bridge sessions",
+      "summary": "Implement the #53 design of record: Copilot delivery via a load-on-bind in-session bridge extension using `joinSession()` + local authenticated `/send` + `session.send({prompt, mode:\"enqueue\"})`, with a generic daemon on-deliver exec as the Copilot-agnostic trigger. `telex attach --copilot-bridge` materializes the session-scoped extension and registers the on-deliver handler; `extensions_reload` loads it live; `telex detach` unloads it on the last binding. Copilot no longer arms, re-arms, or reasons about `telex wait`; the merged #41 skill content is reworked to bind -> load bridge -> receive pushed turns -> disposition. `telex wait` remains for generic pull users. No --ui-server requirement for the common case.",
+      "status": "ready",
       "attention": "watch",
       "repoIds": [
         "telex"
@@ -298,8 +278,6 @@
       ],
       "dependsOn": [
         "hardening-gate",
-        "cc-stream-wake",
-        "liveness-visibility",
         "push-delivery"
       ]
     }
@@ -329,7 +307,7 @@
       "id": "backends-and-plugin",
       "title": "Both backends + Copilot plugin landed",
       "summary": "Postgres parity and the Copilot plugin (explicit Detach hook + single-source skill) landed; with the plugin on SQLite the first operator-unblock slice is shippable.",
-      "status": "planned",
+      "status": "completed",
       "nodeIds": [
         "postgres-parity",
         "copilot-plugin"
@@ -337,11 +315,10 @@
     },
     {
       "id": "coordination-hardening",
-      "title": "Coordination hardening (stream-wake + liveness visibility + push delivery)",
-      "summary": "The #45 dogfooding friction is addressed: a deliberative seat can opt in to being woken by its CC/table stream (no polling); deafness / abnormal waiter exits / ghost leases are self-evident; and --ui-server Copilot sessions can receive push-delivered content without managing a waiter. Runs parallel to backends-and-plugin; gates closure.",
+      "title": "Coordination hardening (bridge push + generic liveness visibility)",
+      "summary": "The #45 dogfooding friction is addressed by the #53 Copilot bridge push path (no agent-managed waiter/re-arm loop for Copilot) plus remaining generic liveness/visibility hardening for non-Copilot/pull-mode users. The former cc-stream-wake node is folded into #53's bridge/attention model for Copilot.",
       "status": "planned",
       "nodeIds": [
-        "cc-stream-wake",
         "liveness-visibility",
         "push-delivery"
       ]
