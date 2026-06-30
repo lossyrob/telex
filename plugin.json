@@ -1,0 +1,13 @@
+{
+  "name": "telex",
+  "description": "Telex Copilot CLI plugin: session lifecycle hooks, turn-end waiter guard, and the canonical Telex skill.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Rob Emanuele"
+  },
+  "license": "MIT",
+  "keywords": ["telex", "copilot", "hooks", "skill", "agent-session"],
+  "hooks": "hooks.json",
+  "skills": "skills/"
+}
+

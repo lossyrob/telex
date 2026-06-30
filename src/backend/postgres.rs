@@ -122,8 +122,9 @@ CREATE TABLE IF NOT EXISTS deliveries (
     consumed_at_ms  bigint,
     UNIQUE(message_id, recipient)
 );
-CREATE INDEX IF NOT EXISTS deliveries_recipient_pending_idx
-    ON deliveries(recipient, consumed_at_ms, message_id);
+-- deliveries_recipient_pending_idx is created after the consumed_at_ms migration below.
+-- Do not create it in this initial batch: on upgrade, CREATE TABLE IF NOT EXISTS is a
+-- no-op for old deliveries tables, so indexing consumed_at_ms here fails before ALTER can add it.
 CREATE TABLE IF NOT EXISTS telex_schema_meta (
     key   text PRIMARY KEY,
     value text NOT NULL

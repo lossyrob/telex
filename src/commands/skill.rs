@@ -9,9 +9,13 @@ use crate::cli::{Ctx, SkillArgs};
 
 const SKILL_MD: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/SKILL.md"));
 
+pub fn raw_skill() -> &'static str {
+    SKILL_MD
+}
+
 pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
     if args.raw {
-        print!("{SKILL_MD}");
+        print!("{}", raw_skill());
         return Ok(0);
     }
 
@@ -64,7 +68,7 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
         println!("```\n");
     }
 
-    print!("{}", strip_frontmatter(SKILL_MD));
+    print!("{}", strip_frontmatter(raw_skill()));
     Ok(0)
 }
 

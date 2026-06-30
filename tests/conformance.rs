@@ -1157,15 +1157,14 @@ mod postgres_fixture {
                     recipient text NOT NULL,
                     occupant text,
                     delivered_at_ms bigint NOT NULL,
-                    consumed_at_ms bigint,
                     UNIQUE(message_id, recipient)
                  );
                  CREATE TABLE {schema}.telex_schema_meta (
                     key text PRIMARY KEY,
                     value text NOT NULL
                  );
-                 INSERT INTO {schema}.deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
-                 VALUES (1, 'addr:old', 123, NULL);"
+                 INSERT INTO {schema}.deliveries(message_id, recipient, delivered_at_ms)
+                 VALUES (1, 'addr:old', 123);"
             ),
         )
         .await
@@ -1203,6 +1202,18 @@ mod postgres_fixture {
         let marker: bool = row.get("marker");
         assert_eq!(consumed_at_ms, Some(123));
         assert!(marker, "migration marker should be written after backfill");
+        let index_exists: bool = client
+            .query_one(
+                "SELECT to_regclass($1) IS NOT NULL",
+                &[&format!("{schema}.deliveries_recipient_pending_idx")],
+            )
+            .await
+            .expect("check pending index")
+            .get(0);
+        assert!(
+            index_exists,
+            "pending-delivery index should be created after ALTER"
+        );
         drop(client);
         let _ = handle.await;
 
