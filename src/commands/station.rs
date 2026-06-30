@@ -3,7 +3,7 @@ use serde_json::json;
 
 use crate::cli::{Ctx, StationCmd, StationStatusArgs, StationStopArgs};
 use crate::daemon_ipc::{Request, Response};
-use crate::identity::resolve_session_id;
+use crate::identity::{optional_session_id, resolve_session_id};
 use crate::output::emit;
 
 pub async fn run(ctx: &Ctx, cmd: StationCmd) -> Result<i32> {
@@ -17,7 +17,11 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
     let paths = crate::daemon::DaemonPaths::current()?;
     let cap = crate::daemon::read_cap_file(&paths.cap_path)?;
     let store_key = ctx.store_key()?;
-    let session_id = resolve_session_id(args.session.as_deref())?;
+    let current_session_id = if args.all_sessions {
+        optional_session_id(args.session.as_deref())
+    } else {
+        Some(resolve_session_id(args.session.as_deref())?)
+    };
     let mut client = crate::daemon::connect_existing(&store_key).await?;
     let response = client
         .request(&Request::Status {
@@ -31,20 +35,43 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
             let stations: Vec<_> = status
                 .members
                 .into_iter()
-                .filter(|member| member.store_key == store_key && member.session_id == session_id)
+                .filter(|member| {
+                    member.store_key == store_key
+                        && (args.all_sessions
+                            || current_session_id
+                                .as_ref()
+                                .is_some_and(|session_id| member.session_id == *session_id))
+                })
+                .filter(|member| {
+                    ctx.address
+                        .as_ref()
+                        .map_or(true, |addr| member.address == *addr)
+                })
                 .map(|member| {
+                    let foreign_session = current_session_id
+                        .as_ref()
+                        .map_or(true, |session_id| member.session_id != *session_id);
                     json!({
                         "store_key": member.store_key,
                         "backend": member.backend,
                         "session_id": member.session_id,
+                        "foreign_session": foreign_session,
                         "address": member.address,
                         "station_health": member.station_health,
                         "health_detail": member.health_detail,
                         "waiters": member.waiters,
                         "live_waiters_count": member.live_waiters_count,
                         "pending_unconsumed_count": member.pending_unconsumed_count,
+                        "unattended_since_ms": member.unattended_since_ms,
+                        "unattended_for_ms": member.unattended_for_ms,
+                        "deaf_since_ms": member.deaf_since_ms,
+                        "deaf_for_ms": member.deaf_for_ms,
+                        "deaf_warn": member.deaf_warn,
                         "last_waiter_exit_at_ms": member.last_waiter_exit_at_ms,
                         "last_waiter_outcome": member.last_waiter_outcome,
+                        "last_waiter_exit_code": member.last_waiter_exit_code,
+                        "last_waiter_detail": member.last_waiter_detail,
+                        "last_waiter_pid": member.last_waiter_pid,
                         "last_delivered_message_id": member.last_delivered_message_id,
                         "idle": member.idle,
                         "live_waiters": member.live_waiters,
@@ -52,22 +79,35 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                 })
                 .collect();
             let out = json!({
-                "session_id": session_id,
+                "session_id": current_session_id,
                 "store_key": store_key,
+                "all_sessions": args.all_sessions,
                 "count": stations.len(),
                 "stations": stations.clone(),
             });
             emit(ctx.fmt, &out, || {
                 if stations.is_empty() {
-                    println!("(no stations for session {session_id})");
+                    let session_label = out["session_id"].as_str().unwrap_or("(none)");
+                    println!("(no stations for session {session_label})");
                 } else {
                     for station in &stations {
                         println!(
-                            "{} waiters={} pending={} health={}",
+                            "{} session={}{} waiters={} pending={} health={}{}",
                             station["address"].as_str().unwrap_or("?"),
+                            station["session_id"].as_str().unwrap_or("?"),
+                            if station["foreign_session"].as_bool().unwrap_or(false) {
+                                " foreign"
+                            } else {
+                                ""
+                            },
                             station["live_waiters_count"],
                             station["pending_unconsumed_count"],
-                            station["station_health"].as_str().unwrap_or("?")
+                            station["station_health"].as_str().unwrap_or("?"),
+                            if station["deaf_warn"].as_bool().unwrap_or(false) {
+                                " DEAF"
+                            } else {
+                                ""
+                            }
                         );
                     }
                 }
@@ -75,7 +115,9 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
             Ok(0)
         }
         Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
-        other => Err(anyhow!("unexpected daemon station-status response: {other:?}")),
+        other => Err(anyhow!(
+            "unexpected daemon station-status response: {other:?}"
+        )),
     }
 }
 

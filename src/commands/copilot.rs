@@ -14,7 +14,9 @@ use std::time::Duration;
 use crate::cli::{
     AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotSessionEndArgs, CopilotTurnGuardArgs, Ctx,
 };
-use crate::daemon_ipc::{DaemonStatus, MemberStatus, Request, Response, WatchPidSpec};
+use crate::daemon_ipc::{
+    DaemonStatus, MemberStatus, Request, Response, WaiterOutcome, WatchPidSpec,
+};
 use crate::model::now_ms;
 
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
@@ -412,7 +414,7 @@ fn evaluate_guard(
         .iter()
         .filter(|member| {
             member.pending_unconsumed_count > 0
-                && member.last_waiter_outcome.as_deref() == Some("message")
+                && member.last_waiter_outcome == Some(WaiterOutcome::Message)
         })
         .collect::<Vec<_>>();
     if unarmed.is_empty() && delivered_unacked.is_empty() {
@@ -745,7 +747,15 @@ mod tests {
             health_detail: None,
             last_waiter_exit_at_ms: None,
             last_waiter_outcome: None,
+            last_waiter_exit_code: None,
+            last_waiter_detail: None,
+            last_waiter_pid: None,
             last_delivered_message_id: None,
+            unattended_since_ms: None,
+            unattended_for_ms: None,
+            deaf_since_ms: None,
+            deaf_for_ms: None,
+            deaf_warn: false,
             live_waiters: Vec::new(),
             watch_pids: Vec::new(),
             description: None,
@@ -871,7 +881,7 @@ mod tests {
             max_nudges: 3,
         };
         let mut delivered = member("addr:delivered", 1, 1);
-        delivered.last_waiter_outcome = Some("message".to_string());
+        delivered.last_waiter_outcome = Some(WaiterOutcome::Message);
         let eval = evaluate_guard("s1", &[delivered], settings, None);
         assert_eq!(eval.reason_code, "coverage_gap");
         match eval.decision {
@@ -950,6 +960,7 @@ mod tests {
             live_waiters: Vec::new(),
             retention: Vec::new(),
             idle_stations: Default::default(),
+            deaf_stations: Default::default(),
         };
         let got = active_session_members(&status, "sqlite:/tmp/telex.db", "s1");
         assert_eq!(got.len(), 1);

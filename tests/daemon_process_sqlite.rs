@@ -450,6 +450,26 @@ fn wait_until_path_exists(path: &Path, timeout: Duration) {
     panic!("timed out waiting for {}", path.display());
 }
 
+fn wait_until_daemon_lists_waiter(env: &ProcessEnv, waiter_pid: u32, timeout: Duration) {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        let status = env.daemon_status();
+        if status.code == Some(0) {
+            let status_json = status.json("daemon status while waiting for waiter");
+            if let Some(waiters) = status_json.get("live_waiters").and_then(Value::as_array) {
+                if waiters
+                    .iter()
+                    .any(|w| w.get("pid").and_then(Value::as_u64) == Some(waiter_pid as u64))
+                {
+                    return;
+                }
+            }
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    panic!("timed out waiting for daemon to list waiter pid {waiter_pid}");
+}
+
 fn wait_status_with_timeout(
     mut child: std::process::Child,
     timeout: Duration,
@@ -1698,6 +1718,82 @@ fn real_process_station_stop_drains_waiter_and_preserves_next_message() {
 }
 
 #[test]
+fn real_process_killed_waiter_leaves_daemon_authored_abnormal_status() {
+    let env = ProcessEnv::new("real-abnormal-waiter-status");
+    let receiver = "real-abnormal-waiter-status-receiver";
+    let address = "addr:real-abnormal-waiter-status";
+    env.attach(receiver, address);
+
+    let out_dir = env.root.join("abnormal-wait-out");
+    let mut wait_cmd = env.command_with_session(receiver);
+    wait_cmd
+        .args([
+            "--json",
+            "--address",
+            address,
+            "wait",
+            "--session",
+            receiver,
+            "--timeout-ms",
+            "30000",
+            "--out-dir",
+            out_dir.to_str().expect("out dir is utf8"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let waiter = wait_cmd.spawn().expect("spawn abnormal waiter");
+    wait_until_path_exists(&out_dir.join("wait.pid"), Duration::from_secs(3));
+    let waiter_pid: u32 = std::fs::read_to_string(out_dir.join("wait.pid"))
+        .expect("wait.pid written")
+        .trim()
+        .parse()
+        .expect("wait.pid parses");
+    wait_until_daemon_lists_waiter(&env, waiter_pid, Duration::from_secs(3));
+    terminate_pid(waiter_pid);
+    let (_wait_code, wait_timed_out) = wait_status_with_timeout(waiter, Duration::from_secs(3));
+    assert!(
+        !wait_timed_out,
+        "killed waiter process should exit promptly"
+    );
+
+    std::thread::sleep(Duration::from_secs(6));
+
+    let status = env.run_with_session(
+        receiver,
+        [
+            "--json",
+            "--address",
+            address,
+            "station",
+            "status",
+            "--session",
+            receiver,
+            "--all-sessions",
+        ],
+        Duration::from_secs(5),
+    );
+    status.assert_success("station status after killed waiter");
+    let status_json = status.json("station status after killed waiter");
+    let station = &status_json
+        .get("stations")
+        .and_then(Value::as_array)
+        .unwrap()[0];
+    assert_eq!(
+        station.get("last_waiter_outcome").and_then(Value::as_str),
+        Some("abnormal-exit"),
+        "daemon should author terminal abnormal-exit status: {status_json}"
+    );
+    assert_eq!(
+        station.get("last_waiter_pid").and_then(Value::as_u64),
+        Some(waiter_pid as u64)
+    );
+    assert!(
+        !out_dir.join("exit.code").exists(),
+        "killed waiter should not have to write exit.code for daemon status to be useful"
+    );
+}
+
+#[test]
 fn real_process_status_and_address_list_agree_after_attach() {
     let env = ProcessEnv::new("real-status");
     let session = "real-status-session";
@@ -1910,6 +2006,103 @@ fn real_process_station_status_filters_by_session_and_reports_waiter_state() {
 }
 
 #[test]
+fn real_process_station_status_all_sessions_exposes_foreign_station() {
+    let env = ProcessEnv::new("real-station-all-sessions");
+    let foreign_session = "real-station-all-sessions-foreign";
+    let observer_session = "real-station-all-sessions-observer";
+    let address = "addr:real-station-all-sessions";
+    env.attach(foreign_session, address);
+
+    let scoped = env.run_with_session(
+        observer_session,
+        [
+            "--json",
+            "--address",
+            address,
+            "station",
+            "status",
+            "--session",
+            observer_session,
+        ],
+        Duration::from_secs(5),
+    );
+    scoped.assert_success("station status scoped foreign");
+    let scoped_json = scoped.json("station status scoped foreign");
+    assert_eq!(scoped_json.get("count").and_then(Value::as_u64), Some(0));
+
+    let all = env.run_with_session(
+        observer_session,
+        [
+            "--json",
+            "--address",
+            address,
+            "station",
+            "status",
+            "--session",
+            observer_session,
+            "--all-sessions",
+        ],
+        Duration::from_secs(5),
+    );
+    all.assert_success("station status all sessions");
+    let all_json = all.json("station status all sessions");
+    assert_eq!(all_json.get("count").and_then(Value::as_u64), Some(1));
+    let station = &all_json.get("stations").and_then(Value::as_array).unwrap()[0];
+    assert_eq!(
+        station.get("session_id").and_then(Value::as_str),
+        Some(foreign_session)
+    );
+    assert_eq!(
+        station.get("foreign_session").and_then(Value::as_bool),
+        Some(true)
+    );
+
+    let text = env.run_with_session(
+        observer_session,
+        [
+            "--text",
+            "--address",
+            address,
+            "station",
+            "status",
+            "--session",
+            observer_session,
+            "--all-sessions",
+        ],
+        Duration::from_secs(5),
+    );
+    text.assert_success("station status all sessions text");
+    assert!(
+        text.stdout.contains("foreign"),
+        "text output should mark foreign station: {}",
+        text.stdout
+    );
+
+    let mut all_cmd = env.command_with_session("unused-session");
+    all_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env_remove("COPILOT_AGENT_SESSION_ID")
+        .args([
+            "--json",
+            "--address",
+            address,
+            "station",
+            "status",
+            "--all-sessions",
+        ]);
+    let all = run_command_with_capture(all_cmd, &env.root, Duration::from_secs(5));
+    all.assert_success("station status all sessions without session env");
+    let all_json = all.json("station status all sessions without session env");
+    assert_eq!(all_json.get("session_id"), Some(&Value::Null));
+    assert_eq!(all_json.get("count").and_then(Value::as_u64), Some(1));
+    let station = &all_json.get("stations").and_then(Value::as_array).unwrap()[0];
+    assert_eq!(
+        station.get("foreign_session").and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
 fn real_process_copilot_attach_maps_session_and_loader_pid() {
     let env = ProcessEnv::new("real-copilot-attach");
     let session = "real-copilot-session";
@@ -1954,6 +2147,129 @@ fn real_process_copilot_attach_maps_session_and_loader_pid() {
             .get("pid")
             .and_then(Value::as_u64),
         Some(std::process::id() as u64)
+    );
+}
+
+#[test]
+fn real_process_address_surfaces_report_deaf_and_foreign_state() {
+    let env = ProcessEnv::new("real-visibility-surfaces");
+    let receiver = "real-visibility-surfaces-receiver";
+    let sender = "real-visibility-surfaces-sender";
+    let observer = "real-visibility-surfaces-observer";
+    let receiver_addr = "addr:real-visibility-surfaces-receiver";
+    let sender_addr = "addr:real-visibility-surfaces-sender";
+    let mut attach_receiver = env.command_with_session(receiver);
+    attach_receiver.env("TELEX_DEAF_WARN_MS", "0").args([
+        "--json",
+        "--address",
+        receiver_addr,
+        "attach",
+        "--session",
+        receiver,
+        "--description",
+        "process integration test",
+    ]);
+    let attached_receiver =
+        run_command_with_capture(attach_receiver, &env.root, Duration::from_secs(8));
+    attached_receiver.assert_success("attach receiver with deaf threshold");
+    env.attach(sender, sender_addr);
+
+    let sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            receiver_addr,
+            "--subject",
+            "deaf visibility",
+            "--body",
+            "queued without waiter",
+        ],
+        Duration::from_secs(5),
+    );
+    sent.assert_success("send visibility backlog");
+
+    let mut status_cmd = env.command_with_session(observer);
+    status_cmd.env("TELEX_DEAF_WARN_MS", "0").args([
+        "--json",
+        "--address",
+        receiver_addr,
+        "status",
+    ]);
+    let status = run_command_with_capture(status_cmd, &env.root, Duration::from_secs(5));
+    status.assert_success("status deaf foreign");
+    let status_json = status.json("status deaf foreign");
+    assert_eq!(
+        status_json.get("station_health").and_then(Value::as_str),
+        Some("unattended_with_backlog")
+    );
+    assert_eq!(
+        status_json.get("deaf_warn").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert!(
+        !status_json
+            .get("foreign_members")
+            .and_then(Value::as_array)
+            .unwrap()
+            .is_empty(),
+        "status should expose foreign current-store members: {status_json}"
+    );
+
+    let mut show_cmd = env.command_with_session(observer);
+    show_cmd.env("TELEX_DEAF_WARN_MS", "0").args([
+        "--json",
+        "--address",
+        receiver_addr,
+        "address",
+        "show",
+    ]);
+    let show = run_command_with_capture(show_cmd, &env.root, Duration::from_secs(5));
+    show.assert_success("address show deaf foreign");
+    let show_json = show.json("address show deaf foreign");
+    assert_eq!(
+        show_json.get("deaf_warn").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert!(
+        !show_json
+            .get("foreign_members")
+            .and_then(Value::as_array)
+            .unwrap()
+            .is_empty(),
+        "address show should expose foreign members: {show_json}"
+    );
+
+    let mut list_cmd = env.command_with_session(observer);
+    list_cmd.env("TELEX_DEAF_WARN_MS", "0").args([
+        "--json",
+        "address",
+        "list",
+        "--match",
+        receiver_addr,
+    ]);
+    let list = run_command_with_capture(list_cmd, &env.root, Duration::from_secs(5));
+    list.assert_success("address list deaf foreign");
+    let list_json = list.json("address list deaf foreign");
+    let listed = &list_json
+        .get("addresses")
+        .and_then(Value::as_array)
+        .unwrap()[0];
+    assert_eq!(listed.get("deaf_warn").and_then(Value::as_bool), Some(true));
+    assert!(
+        !listed
+            .get("foreign_members")
+            .and_then(Value::as_array)
+            .unwrap()
+            .is_empty(),
+        "address list should expose foreign members: {list_json}"
     );
 }
 
@@ -2026,6 +2342,32 @@ fn real_process_copilot_session_end_is_store_scoped() {
             .and_then(Value::as_bool),
         Some(false),
         "sessionEnd for store A must not mark store B idle: {status_b_json}"
+    );
+}
+
+#[test]
+fn real_process_status_reports_foreign_members_without_session_env() {
+    let env = ProcessEnv::new("real-foreign-no-session");
+    let owner = "real-foreign-no-session-owner";
+    let address = "addr:real-foreign-no-session";
+    env.attach(owner, address);
+
+    let mut status_cmd = env.command_with_session("unused-session");
+    status_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env_remove("COPILOT_AGENT_SESSION_ID")
+        .args(["--json", "--address", address, "status"]);
+    let status = run_command_with_capture(status_cmd, &env.root, Duration::from_secs(5));
+    status.assert_success("status without session env");
+    let status_json = status.json("status without session env");
+
+    assert!(
+        !status_json
+            .get("foreign_members")
+            .and_then(Value::as_array)
+            .unwrap()
+            .is_empty(),
+        "session-less operator status should still expose foreign members: {status_json}"
     );
 }
 

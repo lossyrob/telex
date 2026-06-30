@@ -275,7 +275,11 @@ fn resolve_disposition_recipient(ctx: &Ctx, args: &DispArgs, msg: &MessageRow) -
     let address = ctx.address.as_deref().ok_or_else(|| {
         anyhow!("disposition requires --address for the current recipient or explicit --recipient")
     })?;
-    if address == msg.to_addr || cc_recipients(msg.cc.as_deref()).iter().any(|cc| cc == address) {
+    if address == msg.to_addr
+        || cc_recipients(msg.cc.as_deref())
+            .iter()
+            .any(|cc| cc == address)
+    {
         Ok(address.to_string())
     } else {
         Err(anyhow!(

@@ -210,6 +210,11 @@ the stdout flush as pure transport: the file artifacts are likewise transport-on
 new consumers that want message, delivery-role context, and status in one document; `read --id`
 continues to return its own envelope with message/dispositions.
 
+The `--out-dir` files are still waiter-authored transport artifacts. The daemon also records
+queryable terminal waiter state on the relevant `MemberStatus`, so supervisors can distinguish a
+killed/pruned waiter (`abnormal-exit`) from an armed waiter even when the waiter process never gets
+to write `status.json` or `exit.code`.
+
 #### 3.2.2 `--min-attention` threshold waits (two-phase attention loop)
 
 `telex wait --min-attention <LEVEL>` delivers only messages whose attention is at least that
@@ -328,12 +333,19 @@ Frozen Status fields:
 - **`members`** — for each in-memory membership record: `address`, `session_id` (opaque),
   `occupant`, `waiters` (count of blocked waiters), `live_waiters` (pid/start-time/alive,
   attention, timeout), `pending_unconsumed_count`, `station_health`
-  (`armed` / `recently_delivered` / `unattended` / `unattended_with_backlog` / `idle`), and
+  (`armed` / `recently_delivered` / `unattended` / `unattended_with_backlog` / `idle`),
+  thresholded deaf-station fields (`unattended_since_ms`, `unattended_for_ms`, `deaf_since_ms`,
+  `deaf_for_ms`, `deaf_warn`),
+  daemon-authored terminal waiter fields (`last_waiter_exit_at_ms`, `last_waiter_outcome`,
+  `last_waiter_exit_code`, `last_waiter_detail`, `last_waiter_pid`) whose outcome vocabulary is
+  `message` / `idle-timeout` / `presence-ended` / `abnormal-exit`, and
   `watch_pids` (pid + role + **alive**) so a live-but-quiet station is distinguishable from an
   unattended one with queued work,
   `backend`/`store_key`, `host`. (Membership is in-memory and explicit-only — see
   [§14.1](#141-identity-and-in-memory-membership) — so this set is empty for sessions that
   have not (re-)attached since the last daemon start.)
+  `presence-ended` detail tokens are `session-end`, `station-stop`, `idle-ttl-reap`, `reset`,
+  and `watch-pid-death`.
 - **`live_waiters`** — the top-level live waiter registry, keyed by daemon-assigned
   `waiter_id`, including waiters that are in the small teardown interval between
   membership release and process exit. At most one live waiter is accepted for a
@@ -345,7 +357,17 @@ Frozen Status fields:
   idle-TTL reaps, backend disconnects), each with a timestamp.
 - **`retention`** — per store, the durable **message/ack buffer row count**, with a
   **warn flag** when it crosses the frozen v1 budget.
+- **`deaf_stations`** — daemon-wide summary of stations currently past the configured
+  `unattended_with_backlog` warning threshold (`count`, `warn`, `warn_threshold_ms`). The default
+  threshold is 120000 ms and local operators/tests can override it with `TELEX_DEAF_WARN_MS`.
 - **`stores`** — the set of stores this exchange currently serves.
+
+`telex station status` remains session-scoped by default. `telex station status --all-sessions`
+uses the same admin-cap-backed Status path to intentionally project all stations in the selected
+store (optionally narrowed by `--address`) and marks rows owned by another session as foreign.
+When no current session id is available, all rows in the widened view are treated as foreign.
+Address-scoped `status` / `address show` / `address list` expose the same deaf/foreign state in
+JSON; their text output is a human operator aid, while JSON is the stable machine contract.
 
 ## 5. Membership model and record shapes
 

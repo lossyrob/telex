@@ -10,9 +10,10 @@ use crate::backend::sqlite::SqliteBackend;
 use crate::backend::{Backend, WaitFetchOptions};
 use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
-    EpochStatus, HandshakeError, HelloAck, IdleStationStatus, LiveWaiterStatus, MemberStatus,
-    NeedsAttachReason, RecentErrorStatus, Request, Response, RetentionStatus, SentReceipt,
-    StationHealth, StoreStatus, WatchPidRole, WatchPidSpec, WatchPidStatus,
+    DeafStationStatus, EpochStatus, HandshakeError, HelloAck, IdleStationStatus, LiveWaiterStatus,
+    MemberStatus, NeedsAttachReason, RecentErrorStatus, Request, Response, RetentionStatus,
+    SentReceipt, StationHealth, StoreStatus, WaiterOutcome, WatchPidRole, WatchPidSpec,
+    WatchPidStatus,
 };
 use crate::model::{
     cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient, Attention,
@@ -49,6 +50,7 @@ const DEFAULT_IDLE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 const RECENT_DELIVERY_HEALTH_GRACE_MS: i64 = 2 * 60 * 1000;
 const DEFAULT_RETENTION_WARN_ROWS: i64 = 100_000;
 const DEFAULT_IDLE_STATION_WARN: usize = 1_000;
+const DEFAULT_DEAF_WARN_MS: i64 = 2 * 60 * 1000;
 
 pub type Result<T> = std::result::Result<T, DaemonError>;
 
@@ -360,8 +362,13 @@ struct MemberRecord {
     owner_instance_id: String,
     idle: bool,
     idle_rearmable: bool,
+    unattended_since_ms: Option<i64>,
+    unattended_with_backlog_since_ms: Option<i64>,
     last_waiter_exit_at_ms: Option<i64>,
-    last_waiter_outcome: Option<String>,
+    last_waiter_outcome: Option<WaiterOutcome>,
+    last_waiter_exit_code: Option<i32>,
+    last_waiter_detail: Option<String>,
+    last_waiter_pid: Option<u32>,
     last_delivered_message_id: Option<i64>,
 }
 
@@ -398,8 +405,12 @@ struct EndedSessionRecord {
 
 impl DaemonState {
     async fn status(&self) -> DaemonStatus {
-        self.status_with_thresholds(retention_warn_threshold(), idle_station_warn_threshold())
-            .await
+        self.status_with_thresholds(
+            retention_warn_threshold(),
+            idle_station_warn_threshold(),
+            deaf_warn_threshold_ms(),
+        )
+        .await
     }
 
     fn status_minimal(&self) -> DaemonStatus {
@@ -416,6 +427,7 @@ impl DaemonState {
             live_waiters: Vec::new(),
             retention: Vec::new(),
             idle_stations: IdleStationStatus::default(),
+            deaf_stations: DeafStationStatus::default(),
         }
     }
 
@@ -423,6 +435,7 @@ impl DaemonState {
         &self,
         retention_warn_threshold: i64,
         idle_station_warn_threshold: usize,
+        deaf_warn_threshold_ms: i64,
     ) -> DaemonStatus {
         self.prune_dead_waiters();
         let store_entries: Vec<(String, StoreEntry)> = self
@@ -455,9 +468,9 @@ impl DaemonState {
             }
         }
 
+        let live_waiters = self.live_waiter_statuses();
         let member_records: Vec<MemberRecord> =
             self.members.lock().unwrap().values().cloned().collect();
-        let live_waiters = self.live_waiter_statuses();
         let store_backends: HashMap<String, Arc<dyn Backend>> = store_entries
             .iter()
             .map(|(store_key, entry)| (store_key.clone(), entry.backend.clone()))
@@ -486,6 +499,35 @@ impl DaemonState {
             };
             pending_counts.insert(key, pending);
         }
+        let member_records: Vec<MemberRecord> = {
+            let now = now_ms();
+            let mut members = self.members.lock().unwrap();
+            for member in members.values_mut() {
+                let live_waiters_count = live_waiters
+                    .iter()
+                    .filter(|waiter| {
+                        waiter.store_key == member.store_key
+                            && waiter.session_id == member.session_id
+                            && waiter.address == member.address
+                    })
+                    .count();
+                let pending = pending_counts
+                    .get(&(member.store_key.clone(), member.address.clone()))
+                    .copied()
+                    .unwrap_or(0);
+                if !member.idle && live_waiters_count == 0 {
+                    member.unattended_since_ms.get_or_insert(now);
+                    if pending > 0 {
+                        member.unattended_with_backlog_since_ms.get_or_insert(now);
+                    } else {
+                        member.unattended_with_backlog_since_ms = None;
+                    }
+                } else {
+                    member.unattended_with_backlog_since_ms = None;
+                }
+            }
+            members.values().cloned().collect()
+        };
         let members: Vec<MemberStatus> = member_records
             .iter()
             .map(|member| {
@@ -493,7 +535,7 @@ impl DaemonState {
                     .get(&(member.store_key.clone(), member.address.clone()))
                     .copied()
                     .unwrap_or(0);
-                member.status(&live_waiters, pending)
+                member.status(&live_waiters, pending, deaf_warn_threshold_ms)
             })
             .collect();
         let epoch_by_address = members
@@ -507,6 +549,7 @@ impl DaemonState {
             })
             .collect();
         let idle_count = members.iter().filter(|m| m.idle).count();
+        let deaf_count = members.iter().filter(|m| m.deaf_warn).count();
         DaemonStatus {
             protocol_version: current_protocol_version(),
             daemon_version: proto::DAEMON_VERSION.to_string(),
@@ -523,6 +566,11 @@ impl DaemonState {
                 count: idle_count,
                 warn: idle_count >= idle_station_warn_threshold,
                 warn_threshold: idle_station_warn_threshold,
+            },
+            deaf_stations: DeafStationStatus {
+                count: deaf_count,
+                warn: deaf_count > 0,
+                warn_threshold_ms: deaf_warn_threshold_ms,
             },
         }
     }
@@ -613,6 +661,17 @@ impl DaemonState {
             .any(|m| m.store_key == store_key && m.address == address && !m.idle)
     }
 
+    fn note_backlog_for_unattended_address(&self, store_key: &str, address: &str) {
+        let now = now_ms();
+        let mut members = self.members.lock().unwrap();
+        for member in members.values_mut().filter(|m| {
+            m.store_key == store_key && m.address == address && !m.idle && m.waiters == 0
+        }) {
+            member.unattended_since_ms.get_or_insert(now);
+            member.unattended_with_backlog_since_ms.get_or_insert(now);
+        }
+    }
+
     fn insert_member(&self, record: MemberRecord) {
         self.members.lock().unwrap().insert(
             Self::member_key(&record.store_key, &record.session_id, &record.address),
@@ -639,6 +698,14 @@ impl DaemonState {
                 member.idle = true;
                 member.idle_rearmable = false;
                 member.waiters = 0;
+                member.unattended_since_ms = Some(now_ms());
+                member.unattended_with_backlog_since_ms = None;
+                if prior.waiters > 0 {
+                    member.last_waiter_exit_at_ms = Some(now_ms());
+                    member.last_waiter_outcome = Some(WaiterOutcome::PresenceEnded);
+                    member.last_waiter_exit_code = Some(5);
+                    member.last_waiter_detail = Some(presence_ended_detail(kind));
+                }
                 affected.push(prior);
             }
         }
@@ -675,6 +742,14 @@ impl DaemonState {
                 member.idle = true;
                 member.idle_rearmable = false;
                 member.waiters = 0;
+                member.unattended_since_ms = Some(now_ms());
+                member.unattended_with_backlog_since_ms = None;
+                if prior.waiters > 0 {
+                    member.last_waiter_exit_at_ms = Some(now_ms());
+                    member.last_waiter_outcome = Some(WaiterOutcome::PresenceEnded);
+                    member.last_waiter_exit_code = Some(5);
+                    member.last_waiter_detail = Some(presence_ended_detail(kind));
+                }
                 affected.push(prior);
             }
         }
@@ -710,6 +785,14 @@ impl DaemonState {
                         member.idle = true;
                         member.idle_rearmable = kind == "IdleTtlReap";
                         member.waiters = 0;
+                        member.unattended_since_ms = Some(now_ms());
+                        member.unattended_with_backlog_since_ms = None;
+                        if prior.waiters > 0 {
+                            member.last_waiter_exit_at_ms = Some(now_ms());
+                            member.last_waiter_outcome = Some(WaiterOutcome::PresenceEnded);
+                            member.last_waiter_exit_code = Some(5);
+                            member.last_waiter_detail = Some(presence_ended_detail(kind));
+                        }
                         Some(prior)
                     }
                 })
@@ -796,6 +879,9 @@ impl DaemonState {
         let mut members = self.members.lock().unwrap();
         let member = members.get_mut(&key)?;
         if !member.idle {
+            if member.unattended_since_ms.is_none() {
+                member.unattended_since_ms = Some(now_ms());
+            }
             return Some(member.clone());
         }
         if !member.idle_rearmable {
@@ -803,6 +889,7 @@ impl DaemonState {
         }
         member.idle = false;
         member.idle_rearmable = false;
+        member.unattended_since_ms = Some(now_ms());
         Some(member.clone())
     }
 
@@ -913,6 +1000,8 @@ impl DaemonState {
                         waiter.store_key.clone(),
                         waiter.session_id.clone(),
                         waiter.address.clone(),
+                        waiter.pid,
+                        waiter.started_at_ms,
                     ));
                 }
                 alive
@@ -922,11 +1011,28 @@ impl DaemonState {
             return;
         }
         let mut members = self.members.lock().unwrap();
-        for (store_key, session_id, address) in removed {
+        for (store_key, session_id, address, pid, started_at_ms) in removed {
             if let Some(member) =
                 members.get_mut(&Self::member_key(&store_key, &session_id, &address))
             {
+                let removed_at_ms = now_ms();
                 member.waiters = member.waiters.saturating_sub(1);
+                let terminal_recorded = member
+                    .last_waiter_exit_at_ms
+                    .map(|exit_at| exit_at >= started_at_ms)
+                    .unwrap_or(false)
+                    && member.last_waiter_pid == Some(pid);
+                if !terminal_recorded {
+                    member.last_waiter_exit_at_ms = Some(removed_at_ms);
+                    member.last_waiter_outcome = Some(WaiterOutcome::AbnormalExit);
+                    member.last_waiter_exit_code = None;
+                    member.last_waiter_detail =
+                        Some("waiter process exited before daemon response".to_string());
+                    member.last_waiter_pid = Some(pid);
+                }
+                if !member.idle {
+                    member.unattended_since_ms = Some(removed_at_ms);
+                }
             }
         }
     }
@@ -947,12 +1053,22 @@ impl DaemonState {
             &address,
         )) {
             member.waiters = member.waiters.saturating_add(1);
+            member.unattended_since_ms = None;
+            member.unattended_with_backlog_since_ms = None;
         }
         waiter_id
     }
 
-    fn remove_waiter(&self, store_key: &str, session_id: &str, address: &str, waiter_id: u64) {
-        self.waiters
+    fn remove_waiter(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+        waiter_id: u64,
+        record_abnormal_if_unreported: bool,
+    ) {
+        let removed = self
+            .waiters
             .lock()
             .unwrap()
             .remove(&Self::waiter_key(waiter_id));
@@ -963,6 +1079,51 @@ impl DaemonState {
             .get_mut(&Self::member_key(store_key, session_id, address))
         {
             member.waiters = member.waiters.saturating_sub(1);
+            if let Some(waiter) = &removed {
+                let terminal_recorded = member
+                    .last_waiter_exit_at_ms
+                    .map(|exit_at| exit_at >= waiter.started_at_ms)
+                    .unwrap_or(false)
+                    && (waiter.pid == 0 || member.last_waiter_pid == Some(waiter.pid));
+                if record_abnormal_if_unreported && !member.idle && !terminal_recorded {
+                    member.last_waiter_exit_at_ms = Some(now_ms());
+                    member.last_waiter_outcome = Some(WaiterOutcome::AbnormalExit);
+                    member.last_waiter_exit_code = None;
+                    member.last_waiter_detail =
+                        Some("waiter ended before daemon-authored terminal response".to_string());
+                    member.last_waiter_pid = (waiter.pid != 0).then_some(waiter.pid);
+                }
+            }
+            if record_abnormal_if_unreported && member.waiters == 0 && !member.idle {
+                member.unattended_since_ms = Some(now_ms());
+            }
+        }
+    }
+
+    fn record_waiter_exit(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+        outcome: WaiterOutcome,
+        exit_code: Option<i32>,
+        detail: Option<String>,
+        pid: Option<u32>,
+    ) {
+        if let Some(member) = self
+            .members
+            .lock()
+            .unwrap()
+            .get_mut(&Self::member_key(store_key, session_id, address))
+        {
+            member.last_waiter_exit_at_ms = Some(now_ms());
+            member.last_waiter_outcome = Some(outcome);
+            member.last_waiter_exit_code = exit_code;
+            member.last_waiter_detail = detail;
+            member.last_waiter_pid = pid;
+            if member.waiters == 0 && !member.idle {
+                member.unattended_since_ms = Some(now_ms());
+            }
         }
     }
 
@@ -972,6 +1133,7 @@ impl DaemonState {
         session_id: &str,
         address: &str,
         message_id: i64,
+        pid: Option<u32>,
     ) {
         if let Some(member) = self
             .members
@@ -980,8 +1142,14 @@ impl DaemonState {
             .get_mut(&Self::member_key(store_key, session_id, address))
         {
             member.last_waiter_exit_at_ms = Some(now_ms());
-            member.last_waiter_outcome = Some("message".to_string());
+            member.last_waiter_outcome = Some(WaiterOutcome::Message);
+            member.last_waiter_exit_code = Some(0);
+            member.last_waiter_detail = None;
+            member.last_waiter_pid = pid;
             member.last_delivered_message_id = Some(message_id);
+            if member.waiters == 0 && !member.idle {
+                member.unattended_since_ms = Some(now_ms());
+            }
         }
     }
 }
@@ -991,6 +1159,7 @@ impl MemberRecord {
         &self,
         live_waiters: &[LiveWaiterStatus],
         pending_unconsumed_count: i64,
+        deaf_warn_threshold_ms: i64,
     ) -> MemberStatus {
         let member_waiters: Vec<LiveWaiterStatus> = live_waiters
             .iter()
@@ -1002,8 +1171,27 @@ impl MemberRecord {
             .cloned()
             .collect();
         let live_waiters_count = member_waiters.len();
+        let now = now_ms();
         let (station_health, health_detail) =
             self.station_health(live_waiters_count, pending_unconsumed_count);
+        let unattended_since_ms = if !self.idle && live_waiters_count == 0 {
+            self.unattended_since_ms
+                .or(self.last_waiter_exit_at_ms)
+                .or(Some(now))
+        } else {
+            None
+        };
+        let unattended_for_ms = unattended_since_ms.map(|since| now.saturating_sub(since));
+        let deaf_since_ms = if station_health == StationHealth::UnattendedWithBacklog {
+            self.unattended_with_backlog_since_ms.or(Some(now))
+        } else {
+            None
+        };
+        let deaf_for_ms = deaf_since_ms.map(|since| now.saturating_sub(since));
+        let deaf_warn = station_health == StationHealth::UnattendedWithBacklog
+            && deaf_for_ms
+                .map(|age| age >= deaf_warn_threshold_ms)
+                .unwrap_or(false);
         MemberStatus {
             store_key: self.store_key.clone(),
             backend: self.backend.clone(),
@@ -1018,7 +1206,15 @@ impl MemberRecord {
             health_detail,
             last_waiter_exit_at_ms: self.last_waiter_exit_at_ms,
             last_waiter_outcome: self.last_waiter_outcome.clone(),
+            last_waiter_exit_code: self.last_waiter_exit_code,
+            last_waiter_detail: self.last_waiter_detail.clone(),
+            last_waiter_pid: self.last_waiter_pid,
             last_delivered_message_id: self.last_delivered_message_id,
+            unattended_since_ms,
+            unattended_for_ms,
+            deaf_since_ms,
+            deaf_for_ms,
+            deaf_warn,
             live_waiters: member_waiters,
             watch_pids: self.watch_pids.iter().map(WatchPidRecord::status).collect(),
             description: self.description.clone(),
@@ -1044,7 +1240,7 @@ impl MemberRecord {
         if live_waiters_count > 0 {
             return (StationHealth::Armed, None);
         }
-        if self.last_waiter_outcome.as_deref() == Some("message") {
+        if self.last_waiter_outcome == Some(WaiterOutcome::Message) {
             if let Some(exit_at) = self.last_waiter_exit_at_ms {
                 if now_ms().saturating_sub(exit_at) <= RECENT_DELIVERY_HEALTH_GRACE_MS {
                     return (
@@ -1113,6 +1309,7 @@ struct WaiterGuard {
     session_id: String,
     address: String,
     waiter_id: u64,
+    suppress_abnormal_on_drop: bool,
 }
 
 impl WaiterGuard {
@@ -1150,7 +1347,12 @@ impl WaiterGuard {
             session_id: session_id.to_string(),
             address: address.to_string(),
             waiter_id,
+            suppress_abnormal_on_drop: false,
         }
+    }
+
+    fn suppress_abnormal_on_drop(&mut self) {
+        self.suppress_abnormal_on_drop = true;
     }
 }
 
@@ -1161,6 +1363,7 @@ impl Drop for WaiterGuard {
             &self.session_id,
             &self.address,
             self.waiter_id,
+            !self.suppress_abnormal_on_drop,
         );
     }
 }
@@ -1826,6 +2029,7 @@ async fn heartbeat_members_once(state: Arc<DaemonState>) {
     if state.is_draining() {
         return;
     }
+    state.prune_dead_waiters();
     let members = state.members_snapshot();
     for member in members {
         if state
@@ -1890,6 +2094,18 @@ async fn heartbeat_members_once(state: Arc<DaemonState>) {
             }
         }
     }
+}
+
+fn presence_ended_detail(kind: &str) -> String {
+    match kind {
+        "IdleTtlReap" => "idle-ttl-reap",
+        "SessionEnd" => "session-end",
+        "StationStop" => "station-stop",
+        "Reset" => "reset",
+        "WatchPidDeath" => "watch-pid-death",
+        _ => "presence-ended",
+    }
+    .to_string()
 }
 
 fn watch_pid_reap_reason(watch_pids: &[WatchPidRecord]) -> Option<String> {
@@ -2506,8 +2722,13 @@ async fn register_member(
         owner_instance_id: claimed.owner_instance_id.clone(),
         idle: false,
         idle_rearmable: false,
+        unattended_since_ms: Some(now_ms()),
+        unattended_with_backlog_since_ms: None,
         last_waiter_exit_at_ms: None,
         last_waiter_outcome: None,
+        last_waiter_exit_code: None,
+        last_waiter_detail: None,
+        last_waiter_pid: None,
         last_delivered_message_id: None,
     };
     state.check_session_id_reuse_tripwire(&record);
@@ -2844,7 +3065,17 @@ async fn wait_for_message_with_idle_ttl(
         );
         return Response::PresenceEnded;
     }
-    let _waiter = WaiterGuard::new(
+    let (prior_unattended_since, prior_deaf_since) = state
+        .get_member(&store_key, &session_id, &address)
+        .map(|member| {
+            (
+                member.unattended_since_ms,
+                member.unattended_with_backlog_since_ms,
+            )
+        })
+        .unwrap_or((None, None));
+    let waiter_pid_for_status = waiter_pid;
+    let mut waiter_guard = WaiterGuard::new(
         state.clone(),
         &store_key,
         &session_id,
@@ -2859,10 +3090,14 @@ async fn wait_for_message_with_idle_ttl(
     );
     let parsed_min_attention = match min_attention.as_deref().map(Attention::parse).transpose() {
         Ok(value) => value,
-        Err(e) => return proto::error_response(proto::ERROR_INCOMPATIBLE, e.to_string()),
+        Err(e) => {
+            waiter_guard.suppress_abnormal_on_drop();
+            return proto::error_response(proto::ERROR_INCOMPATIBLE, e.to_string());
+        }
     };
     loop {
         if state.is_draining() {
+            waiter_guard.suppress_abnormal_on_drop();
             return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
         }
         let current = match state.rearm_idle_member_if_allowed(&store_key, &session_id, &address) {
@@ -2874,6 +3109,7 @@ async fn wait_for_message_with_idle_ttl(
                 {
                     return Response::PresenceEnded;
                 }
+                waiter_guard.suppress_abnormal_on_drop();
                 return needs_attach_for_missing_member(
                     &state,
                     &backend,
@@ -2901,13 +3137,14 @@ async fn wait_for_message_with_idle_ttl(
             Ok(rows) => rows,
             Err(e) => {
                 let detail = format!("{e:#}");
+                waiter_guard.suppress_abnormal_on_drop();
                 return proto::internal(format!(
                     "fetching wait candidates for {address}: {detail}"
                 ));
             }
         };
         if let Some(last_id) = current.last_delivered_message_id {
-            if current.last_waiter_outcome.as_deref() == Some("message")
+            if current.last_waiter_outcome == Some(WaiterOutcome::Message)
                 && candidates.iter().any(|candidate| {
                     !candidate.notification_only && candidate.message.id == last_id
                 })
@@ -2918,6 +3155,16 @@ async fn wait_for_message_with_idle_ttl(
                         "rejected wait re-arm store={store_key} session={session_id} address={address}: previously delivered message {last_id} is still unacked"
                     ),
                 );
+                if let Some(member) = state
+                    .members
+                    .lock()
+                    .unwrap()
+                    .get_mut(&DaemonState::member_key(&store_key, &session_id, &address))
+                {
+                    member.unattended_since_ms = prior_unattended_since;
+                    member.unattended_with_backlog_since_ms = prior_deaf_since;
+                }
+                waiter_guard.suppress_abnormal_on_drop();
                 return Response::PresenceEnded;
             }
         }
@@ -2949,9 +3196,9 @@ async fn wait_for_message_with_idle_ttl(
             if let Err(response) =
                 prove_current_owner(&state, &backend, &current, "wait delivery proof").await
             {
+                waiter_guard.suppress_abnormal_on_drop();
                 return response;
             }
-            state.record_waiter_message_exit(&store_key, &session_id, &address, row.id);
             let cc = cc_recipients(row.cc.as_deref());
             let delivery_role =
                 delivery_role(&address, &row.to_addr, row.cc.as_deref()).to_string();
@@ -2981,21 +3228,45 @@ async fn wait_for_message_with_idle_ttl(
                 lease_epoch: Some(current.lease_epoch),
             };
             return match proto::json_line_frame_len(&response) {
-                Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => response,
-                Ok(len) => proto::error_response(
-                    proto::ERROR_INCOMPATIBLE,
-                    format!(
-                        "message {} serializes to {len} bytes, exceeding IPC frame limit {}",
+                Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => {
+                    state.record_waiter_message_exit(
+                        &store_key,
+                        &session_id,
+                        &address,
                         row.id,
-                        proto::MAX_JSONL_FRAME_BYTES
-                    ),
-                ),
-                Err(e) => proto::internal(format!("sizing message {} IPC frame: {e}", row.id)),
+                        waiter_pid,
+                    );
+                    response
+                }
+                Ok(len) => {
+                    waiter_guard.suppress_abnormal_on_drop();
+                    proto::error_response(
+                        proto::ERROR_INCOMPATIBLE,
+                        format!(
+                            "message {} serializes to {len} bytes, exceeding IPC frame limit {}",
+                            row.id,
+                            proto::MAX_JSONL_FRAME_BYTES
+                        ),
+                    )
+                }
+                Err(e) => {
+                    waiter_guard.suppress_abnormal_on_drop();
+                    proto::internal(format!("sizing message {} IPC frame: {e}", row.id))
+                }
             };
         }
         if let Some(deadline) = deadline {
             let now = Instant::now();
             if now >= deadline {
+                state.record_waiter_exit(
+                    &store_key,
+                    &session_id,
+                    &address,
+                    WaiterOutcome::IdleTimeout,
+                    Some(2),
+                    None,
+                    waiter_pid_for_status,
+                );
                 return Response::Timeout;
             }
             if now >= idle_deadline {
@@ -3005,6 +3276,15 @@ async fn wait_for_message_with_idle_ttl(
                     &address,
                     "IdleTtlReap",
                     "blocked wait exceeded idle TTL",
+                );
+                state.record_waiter_exit(
+                    &store_key,
+                    &session_id,
+                    &address,
+                    WaiterOutcome::PresenceEnded,
+                    Some(5),
+                    Some("idle-ttl-reap".to_string()),
+                    waiter_pid_for_status,
                 );
                 return Response::PresenceEnded;
             }
@@ -3025,6 +3305,15 @@ async fn wait_for_message_with_idle_ttl(
                     &address,
                     "IdleTtlReap",
                     "blocked wait exceeded idle TTL",
+                );
+                state.record_waiter_exit(
+                    &store_key,
+                    &session_id,
+                    &address,
+                    WaiterOutcome::PresenceEnded,
+                    Some(5),
+                    Some("idle-ttl-reap".to_string()),
+                    waiter_pid_for_status,
                 );
                 return Response::PresenceEnded;
             }
@@ -3273,6 +3562,7 @@ async fn send_message(
             ),
         );
     }
+    state.note_backlog_for_unattended_address(&store_key, &to_addr);
     let occupied = state.has_address_member(&store_key, &to_addr);
     Response::Sent {
         receipt: SentReceipt {
@@ -3379,6 +3669,7 @@ async fn reply_message(
             ),
         );
     }
+    state.note_backlog_for_unattended_address(&store_key, &to);
     let occupied = state.has_address_member(&store_key, &to);
     Response::Sent {
         receipt: SentReceipt {
@@ -3486,6 +3777,14 @@ fn idle_station_warn_threshold() -> usize {
         .ok()
         .and_then(|s| s.parse::<usize>().ok())
         .unwrap_or(DEFAULT_IDLE_STATION_WARN)
+}
+
+fn deaf_warn_threshold_ms() -> i64 {
+    std::env::var("TELEX_DEAF_WARN_MS")
+        .ok()
+        .and_then(|s| s.parse::<i64>().ok())
+        .filter(|ms| *ms >= 0)
+        .unwrap_or(DEFAULT_DEAF_WARN_MS)
 }
 
 #[cfg(all(test, feature = "sqlite"))]
@@ -4496,7 +4795,7 @@ mod p3_tests {
             .unwrap()
             .id;
 
-        let wait = request(state, wait_req(&store, "s1", "addr:a", 1_000)).await;
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
         match wait {
             Response::Error { code, message, .. } => {
                 assert_eq!(code, proto::ERROR_INCOMPATIBLE);
@@ -4505,6 +4804,15 @@ mod p3_tests {
             }
             other => panic!("expected oversized-frame error, got {other:?}"),
         }
+        let status = state.status().await;
+        assert_eq!(status.members[0].last_waiter_outcome, None);
+        assert_eq!(status.members[0].last_delivered_message_id, None);
+
+        let second_wait = request(state, wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(
+            matches!(second_wait, Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE),
+            "oversized message should fail the same way on retry, not be blocked as delivered"
+        );
     }
 
     #[tokio::test]
@@ -4928,6 +5236,63 @@ mod p3_tests {
         assert_eq!(status.members.len(), 1);
         assert_eq!(status.members[0].waiters, 0);
         assert!(status.members[0].live_waiters.is_empty());
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::AbnormalExit)
+        );
+        assert_eq!(status.members[0].last_waiter_pid, Some(2_000_000_000));
+    }
+
+    #[tokio::test]
+    async fn heartbeat_prunes_dead_waiter_into_abnormal_terminal_status() {
+        let state = test_state("dead-waiter-heartbeat");
+        let store = store_key("dead-waiter-heartbeat");
+        let mut register = register_req(&store, "s1", "addr:a");
+        if let Request::Register { watch_pids, .. } = &mut register {
+            watch_pids.clear();
+        }
+        assert!(matches!(
+            request(state.clone(), register).await,
+            Response::Registered { .. }
+        ));
+        {
+            let mut members = state.members.lock().unwrap();
+            members
+                .get_mut(&DaemonState::member_key(&store, "s1", "addr:a"))
+                .unwrap()
+                .waiters = 1;
+        }
+        state.waiters.lock().unwrap().insert(
+            WaiterKey { waiter_id: 99 },
+            WaiterRecord {
+                waiter_id: 99,
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                pid: 2_000_000_000,
+                start_time: None,
+                started_at_ms: now_ms(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: false,
+                cc_after_ms: None,
+                timeout_ms: Some(5_000),
+            },
+        );
+
+        heartbeat_members_once(state.clone()).await;
+
+        let status = state.status().await;
+        assert!(status.live_waiters.is_empty());
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::AbnormalExit)
+        );
+        assert_eq!(status.members[0].last_waiter_exit_code, None);
+        assert_eq!(
+            status.members[0].last_waiter_detail.as_deref(),
+            Some("waiter process exited before daemon response")
+        );
     }
 
     #[tokio::test]
@@ -4969,8 +5334,248 @@ mod p3_tests {
             Some(message_id)
         );
         assert_eq!(
-            status.members[0].last_waiter_outcome.as_deref(),
-            Some("message")
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::Message)
+        );
+        assert_eq!(status.members[0].last_waiter_exit_code, Some(0));
+    }
+
+    #[tokio::test]
+    async fn status_reports_thresholded_deaf_station_summary() {
+        let state = test_state("deaf-summary");
+        let store = store_key("deaf-summary");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        insert_test_message(&backend, "addr:a", None).await;
+
+        let status = state.status_with_thresholds(100_000, 100_000, 0).await;
+        assert_eq!(
+            status.members[0].station_health,
+            StationHealth::UnattendedWithBacklog
+        );
+        assert!(status.members[0].deaf_warn);
+        assert!(status.members[0].unattended_for_ms.unwrap_or_default() >= 0);
+        assert_eq!(status.deaf_stations.count, 1);
+        assert!(status.deaf_stations.warn);
+        assert_eq!(status.deaf_stations.warn_threshold_ms, 0);
+    }
+
+    #[tokio::test]
+    async fn deaf_warn_threshold_starts_when_backlog_appears() {
+        let state = test_state("deaf-backlog-threshold");
+        let store = store_key("deaf-backlog-threshold");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        {
+            let mut members = state.members.lock().unwrap();
+            members
+                .get_mut(&DaemonState::member_key(&store, "s1", "addr:a"))
+                .unwrap()
+                .unattended_since_ms = Some(now_ms().saturating_sub(60_000));
+        }
+        let backend = state.backend_for(&store).await.unwrap();
+        insert_test_message(&backend, "addr:a", None).await;
+
+        let status = state.status_with_thresholds(100_000, 100_000, 30_000).await;
+
+        assert_eq!(
+            status.members[0].station_health,
+            StationHealth::UnattendedWithBacklog
+        );
+        assert!(
+            status.members[0].unattended_for_ms.unwrap_or_default() >= 60_000,
+            "plain unattended age should preserve no-waiter duration"
+        );
+        assert!(
+            status.members[0].deaf_since_ms.is_some(),
+            "deaf threshold should have its own backlog start timestamp"
+        );
+        assert!(
+            !status.members[0].deaf_warn,
+            "deaf warning should not immediately inherit long no-backlog unattended age"
+        );
+    }
+
+    #[tokio::test]
+    async fn send_starts_deaf_clock_before_first_status_poll() {
+        let state = test_state("deaf-send-clock");
+        let store = store_key("deaf-send-clock");
+        registered_epoch(state.clone(), &store, "receiver", "addr:receiver").await;
+        registered_epoch(state.clone(), &store, "sender", "addr:sender").await;
+
+        let sent = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "sender".to_string(),
+                from_addr: Some("addr:sender".to_string()),
+                to_addr: "addr:receiver".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: "queued for deaf clock".to_string(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(sent, Response::Sent { .. }));
+
+        tokio::time::sleep(Duration::from_millis(5)).await;
+        let status = state.status_with_thresholds(100_000, 100_000, 1).await;
+
+        assert_eq!(
+            status.members[0].station_health,
+            StationHealth::UnattendedWithBacklog
+        );
+        assert!(status.members[0].deaf_warn);
+        assert!(status.members[0].deaf_for_ms.unwrap_or_default() >= 1);
+    }
+
+    #[tokio::test]
+    async fn rearm_rejection_does_not_reset_unattended_clock() {
+        let state = test_state("deaf-rearm-rejection");
+        let store = store_key("deaf-rearm-rejection");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let message_id = insert_test_message(&backend, "addr:a", None).await;
+
+        let first = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(first, Response::Message { id, .. } if id == message_id));
+        let old_deaf_since = now_ms().saturating_sub(60_000);
+        {
+            let mut members = state.members.lock().unwrap();
+            let member = members
+                .get_mut(&DaemonState::member_key(&store, "s1", "addr:a"))
+                .unwrap();
+            member.unattended_since_ms = Some(old_deaf_since);
+            member.unattended_with_backlog_since_ms = Some(old_deaf_since);
+        }
+
+        let rearm_before_ack =
+            request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(rearm_before_ack, Response::PresenceEnded));
+
+        let status = state.status_with_thresholds(100_000, 100_000, 30_000).await;
+        assert_eq!(status.members[0].unattended_since_ms, Some(old_deaf_since));
+        assert!(status.members[0]
+            .unattended_for_ms
+            .is_some_and(|age| age >= 60_000));
+    }
+
+    #[tokio::test]
+    async fn idle_marker_without_live_waiter_preserves_recent_message_terminal_outcome() {
+        let state = test_state("idle-preserves-message");
+        let store = store_key("idle-preserves-message");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let message_id = insert_test_message(&backend, "addr:a", None).await;
+
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(wait, Response::Message { id, .. } if id == message_id));
+        let end = request(state.clone(), session_end_req(&state, &store, "s1")).await;
+        assert!(matches!(end, Response::Ack { .. }));
+
+        let status = state.status().await;
+        assert!(status.members[0].idle);
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::Message)
+        );
+        assert_eq!(
+            status.members[0].last_delivered_message_id,
+            Some(message_id)
+        );
+    }
+
+    #[test]
+    fn waiter_outcome_serializes_as_stable_kebab_case() {
+        let values = [
+            (WaiterOutcome::Message, "message"),
+            (WaiterOutcome::IdleTimeout, "idle-timeout"),
+            (WaiterOutcome::PresenceEnded, "presence-ended"),
+            (WaiterOutcome::AbnormalExit, "abnormal-exit"),
+        ];
+        for (outcome, expected) in values {
+            assert_eq!(serde_json::to_value(outcome).unwrap(), expected);
+        }
+    }
+
+    #[tokio::test]
+    async fn wait_timeout_records_daemon_authored_terminal_status() {
+        let state = test_state("timeout-terminal-status");
+        let store = store_key("timeout-terminal-status");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1)).await;
+        assert!(matches!(wait, Response::Timeout));
+
+        let status = state.status().await;
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::IdleTimeout)
+        );
+        assert_eq!(status.members[0].last_waiter_exit_code, Some(2));
+        assert_eq!(status.members[0].last_waiter_pid, Some(std::process::id()));
+    }
+
+    #[tokio::test]
+    async fn daemon_owned_wait_error_does_not_record_abnormal_exit() {
+        let state = test_state("wait-error-not-abnormal");
+        let store = store_key("wait-error-not-abnormal");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let wait = request(
+            state.clone(),
+            Request::Wait {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                attention: None,
+                min_attention: Some("not-an-attention".to_string()),
+                wake_on_cc: false,
+                timeout_ms: Some(1_000),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: crate::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
+            },
+        )
+        .await;
+        assert!(matches!(
+            wait,
+            Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
+        ));
+
+        let status = state.status().await;
+        assert_eq!(status.members[0].last_waiter_outcome, None);
+        assert_eq!(status.members[0].last_waiter_pid, None);
+    }
+
+    #[tokio::test]
+    async fn session_end_records_presence_ended_detail() {
+        let state = test_state("session-end-terminal-status");
+        let store = store_key("session-end-terminal-status");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let waiter_req = wait_req(&store, "s1", "addr:a", 5_000);
+        let waiter_state = state.clone();
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_req).await });
+        tokio::time::sleep(Duration::from_millis(75)).await;
+
+        let end = request(state.clone(), session_end_req(&state, &store, "s1")).await;
+        assert!(matches!(end, Response::Ack { .. }));
+        assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
+
+        let status = state.status().await;
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::PresenceEnded)
+        );
+        assert_eq!(status.members[0].last_waiter_exit_code, Some(5));
+        assert_eq!(
+            status.members[0].last_waiter_detail.as_deref(),
+            Some("session-end")
         );
     }
 
@@ -5092,6 +5697,12 @@ mod p3_tests {
             .recent_errors
             .iter()
             .any(|e| e.kind == "ConcurrentWaiter"));
+        let after_rejection = state.status().await;
+        assert_eq!(
+            after_rejection.members[0].station_health,
+            StationHealth::Armed
+        );
+        assert_eq!(after_rejection.members[0].last_waiter_outcome, None);
 
         registered_epoch(state.clone(), &store, "sender", "addr:sender").await;
         let sent = request(
@@ -5152,6 +5763,15 @@ mod p3_tests {
         let rearm_before_ack =
             request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
         assert!(matches!(rearm_before_ack, Response::PresenceEnded));
+        let after_rearm_rejection = state.status().await;
+        assert_eq!(
+            after_rearm_rejection.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::Message)
+        );
+        assert_eq!(
+            after_rearm_rejection.members[0].last_delivered_message_id,
+            Some(message_id)
+        );
         assert!(state
             .status()
             .await
@@ -5469,7 +6089,7 @@ mod p3_tests {
             Response::Ack { .. }
         ));
 
-        let status = state.status_with_thresholds(0, 1).await;
+        let status = state.status_with_thresholds(0, 1, 0).await;
         assert_eq!(status.protocol_version, current_protocol_version());
         assert_eq!(status.instance_id, state.instance_id.as_str());
         assert!(status.stores.iter().any(|s| s.store_key == store));
@@ -5855,9 +6475,14 @@ pub mod test_support {
             &self,
             retention_warn_threshold: i64,
             idle_station_warn_threshold: usize,
+            deaf_warn_threshold_ms: i64,
         ) -> DaemonStatus {
             self.state
-                .status_with_thresholds(retention_warn_threshold, idle_station_warn_threshold)
+                .status_with_thresholds(
+                    retention_warn_threshold,
+                    idle_station_warn_threshold,
+                    deaf_warn_threshold_ms,
+                )
                 .await
         }
 

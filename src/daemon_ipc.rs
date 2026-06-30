@@ -388,6 +388,8 @@ pub struct DaemonStatus {
     pub retention: Vec<RetentionStatus>,
     #[serde(default)]
     pub idle_stations: IdleStationStatus,
+    #[serde(default)]
+    pub deaf_stations: DeafStationStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -425,9 +427,25 @@ pub struct MemberStatus {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_waiter_exit_at_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub last_waiter_outcome: Option<String>,
+    pub last_waiter_outcome: Option<WaiterOutcome>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_waiter_exit_code: Option<i32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_waiter_detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_waiter_pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_delivered_message_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unattended_since_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unattended_for_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deaf_since_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub deaf_for_ms: Option<i64>,
+    #[serde(default)]
+    pub deaf_warn: bool,
     #[serde(default)]
     pub live_waiters: Vec<LiveWaiterStatus>,
     #[serde(default)]
@@ -441,6 +459,15 @@ pub struct MemberStatus {
     pub lease_epoch: i64,
     pub owner_instance_id: String,
     pub idle: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WaiterOutcome {
+    Message,
+    IdleTimeout,
+    PresenceEnded,
+    AbnormalExit,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -506,6 +533,13 @@ pub struct IdleStationStatus {
     pub count: usize,
     pub warn: bool,
     pub warn_threshold: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct DeafStationStatus {
+    pub count: usize,
+    pub warn: bool,
+    pub warn_threshold_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]

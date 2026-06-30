@@ -209,6 +209,9 @@ pub struct StationStatusArgs {
     /// Stable session identity for daemon membership.
     #[arg(long, env = "TELEX_SESSION_ID")]
     pub session: Option<String>,
+    /// Show all stations in the selected store instead of only this session.
+    #[arg(long)]
+    pub all_sessions: bool,
 }
 
 #[derive(Args)]
@@ -752,8 +755,19 @@ mod tests {
             Cli::try_parse_from(["telex", "station", "status", "--session", "s1"])
                 .unwrap()
                 .command,
-            Command::Station(StationCmd::Status(StationStatusArgs { session: Some(s) }))
-                if s == "s1"
+            Command::Station(StationCmd::Status(StationStatusArgs {
+                session: Some(s),
+                all_sessions: false,
+            })) if s == "s1"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "station", "status", "--all-sessions"])
+                .unwrap()
+                .command,
+            Command::Station(StationCmd::Status(StationStatusArgs {
+                all_sessions: true,
+                ..
+            }))
         ));
     }
 
