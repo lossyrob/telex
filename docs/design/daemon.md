@@ -227,12 +227,11 @@ is accepted per station, an agent switches modes by letting the current waiter c
 
 #### 3.2.3 `--wake-on-cc` live observer waits
 
-CC remains visibility-only by default: a bare `telex wait` does not wake for CC traffic. On
-SQLite-backed daemon stores, a station that is deliberately participating as an observer/relay MAY arm
-a per-wait opt-in with `telex wait --wake-on-cc`. This widens only that wait to live CC notification
-candidates for the current address. It does not create a durable stream subscription, does not make all
-CC traffic wake by default, and does not make CC ack-required. Non-SQLite daemon stores return a typed
-`Unsupported` response until an equivalent backend implementation lands.
+CC remains visibility-only by default: a bare `telex wait` does not wake for CC traffic. A station that
+is deliberately participating as an observer/relay MAY arm a per-wait opt-in with `telex wait
+--wake-on-cc`. This widens only that wait to live CC notification candidates for the current address.
+It does not create a durable stream subscription, does not make all CC traffic wake by default, and does
+not make CC ack-required.
 
 `--wake-on-cc` is a live wake, not CC backlog replay. When the daemon registers the wait, it captures a
 durable CC lower-bound timestamp for the backend. The wait may emit only CC candidates whose delivery
@@ -533,9 +532,9 @@ the consumed commit is the explicit agent ack, decoupled from any EMIT-time conn
 CC recipients are visibility-only by default: their delivery rows are materialized as already
 seen/consumed for transport, so they remain visible in `inbox --all` / `read` with
 `delivery_role: "cc"` but do not wake bare `wait` and do not require manual `ack`. A per-wait
-`--wake-on-cc` opt-in can wake for live CC traffic after that wait's lower bound on SQLite-backed daemon
-stores without changing the auto-consumed CC delivery row. The primary `--to` recipient remains the
-actionable, ack-required delivery.
+`--wake-on-cc` opt-in can wake for live CC traffic after that wait's lower bound without changing the
+auto-consumed CC delivery row. The primary `--to` recipient remains the actionable, ack-required
+delivery.
 
 ## 7. Authorization and the trust boundary
 
@@ -1564,8 +1563,9 @@ One source serves both the CLI command and the plugin skill:
 - **CLI consumer:** `telex skill` prints the embedded `SKILL.md`
   (`include_str!` in `src/commands/skill.rs`, unchanged) — add a `--raw` form for
   machine consumption.
-- **Plugin-skill consumer:** a plugin manifest pointer if the harness supports pointing
-  at a file, otherwise a thin wrapper that `exec`s `telex skill --raw`.
+- **Plugin-skill consumer:** Copilot plugin discovery reads `skills/telex/SKILL.md`, a
+  byte-identical mirror of the canonical root `SKILL.md`. Tests fail if the mirror diverges or if
+  additional `SKILL.md` files appear. Root `SKILL.md` remains the source authors edit.
 - **Invariant:** **no generated divergent copy** — both consumers resolve to the same
   `SKILL.md`. The `SKILL.md` narrative content is owned by `daemon-core`.
 

@@ -99,6 +99,10 @@ pub enum Command {
     #[command(subcommand)]
     Backend(BackendCmd),
 
+    /// Hidden Copilot CLI plugin adapter commands.
+    #[command(hide = true, subcommand)]
+    Copilot(CopilotCmd),
+
     /// Hidden daemon lifecycle and diagnostics entrypoint.
     #[command(hide = true, subcommand)]
     Daemon(DaemonCmd),
@@ -162,7 +166,7 @@ pub struct WaitArgs {
     /// Only wake for messages at this attention or higher priority.
     #[arg(long, value_parser = parse_attention_arg)]
     pub min_attention: Option<Attention>,
-    /// Also wake for live CC traffic on SQLite-backed daemon stores; CC stays non-ack-required.
+    /// Also wake for live CC traffic without making CC ack-required.
     #[arg(long)]
     pub wake_on_cc: bool,
     /// Resume delivery strictly after this message id.
@@ -416,6 +420,55 @@ pub struct DaemonSessionEndArgs {
     pub session: Option<String>,
 }
 
+#[derive(Subcommand)]
+pub enum CopilotCmd {
+    /// Register a Copilot session using Copilot env vars mapped to generic telex inputs.
+    #[command(hide = true)]
+    Attach(CopilotAttachArgs),
+    /// Handle Copilot sessionEnd by non-destructively ending this session in the daemon.
+    #[command(hide = true)]
+    SessionEnd(CopilotSessionEndArgs),
+    /// Handle Copilot agentStop by nudging unarmed attended stations to re-arm or detach.
+    #[command(hide = true)]
+    TurnGuard(CopilotTurnGuardArgs),
+    /// Print the canonical embedded telex skill for plugin consumers.
+    #[command(hide = true)]
+    Skill,
+}
+
+#[derive(Args)]
+pub struct CopilotAttachArgs {
+    /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// One-line directory description of what this session is doing.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Project/workstream scope this address belongs to.
+    #[arg(long)]
+    pub scope: Option<String>,
+    /// Comma-separated coarse tags (e.g. issue:215,repo:telex).
+    #[arg(long)]
+    pub tags: Option<String>,
+    /// Occupant identity recorded on the lease (default: session host/pid).
+    #[arg(long)]
+    pub occupant: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotSessionEndArgs {
+    /// Stable Copilot session identity; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotTurnGuardArgs {
+    /// Stable Copilot session identity; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
 #[derive(Args)]
 pub struct SkillArgs {
     /// Tailor the instructions for a specific assigned address.
@@ -600,6 +653,7 @@ pub async fn run() -> i32 {
         Command::Address(cmd) => crate::commands::address::run(&ctx, cmd).await,
         Command::Resolve(a) => crate::commands::address::resolve(&ctx, a).await,
         Command::Backend(cmd) => crate::commands::backend::run(&ctx, cmd).await,
+        Command::Copilot(cmd) => crate::commands::copilot::run(&ctx, cmd).await,
         Command::Daemon(cmd) => crate::commands::daemon::run(&ctx, cmd).await,
         Command::Export(a) => crate::commands::export::run(&ctx, a).await,
     };
@@ -624,6 +678,10 @@ mod tests {
         assert!(
             !help.contains("daemon"),
             "top-level help leaked daemon:\n{help}"
+        );
+        assert!(
+            !help.contains("copilot"),
+            "top-level help leaked copilot adapter:\n{help}"
         );
     }
 
@@ -652,6 +710,39 @@ mod tests {
                 .unwrap()
                 .command,
             Command::Daemon(DaemonCmd::Stop(DaemonStopArgs { drain: true }))
+        ));
+    }
+
+    #[test]
+    fn hidden_copilot_subcommands_parse() {
+        assert!(matches!(
+            Cli::try_parse_from([
+                "telex",
+                "--address",
+                "addr:a",
+                "copilot",
+                "attach",
+                "--description",
+                "work",
+            ])
+            .unwrap()
+            .command,
+            Command::Copilot(CopilotCmd::Attach(CopilotAttachArgs {
+                description: Some(d),
+                ..
+            })) if d == "work"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "session-end"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::SessionEnd(_))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "turn-guard"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::TurnGuard(_))
         ));
     }
 

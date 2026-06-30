@@ -9,9 +9,13 @@ use crate::cli::{Ctx, SkillArgs};
 
 const SKILL_MD: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/SKILL.md"));
 
+pub fn raw_skill() -> &'static str {
+    SKILL_MD
+}
+
 pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
     if args.raw {
-        print!("{SKILL_MD}");
+        print!("{}", raw_skill());
         return Ok(0);
     }
 
@@ -56,7 +60,7 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
         );
         println!("then re-arm interrupt-only or unfiltered depending on whether you are idle.");
         println!("Observer/relay seats that explicitly want live CC traffic to wake them can add");
-        println!("`--wake-on-cc` on SQLite-backed daemon stores; bare waits keep CC pull-only.");
+        println!("`--wake-on-cc`; bare waits keep CC pull-only/visibility-only by default.");
         println!("For teardown or upgrade, run `telex station stop --address {addr}` first; it");
         println!("releases the station and waits for tracked live waiters to exit.");
         println!("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");
@@ -66,7 +70,7 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
         println!("```\n");
     }
 
-    print!("{}", strip_frontmatter(SKILL_MD));
+    print!("{}", strip_frontmatter(raw_skill()));
     Ok(0)
 }
 

@@ -1910,6 +1910,293 @@ fn real_process_station_status_filters_by_session_and_reports_waiter_state() {
 }
 
 #[test]
+fn real_process_copilot_attach_maps_session_and_loader_pid() {
+    let env = ProcessEnv::new("real-copilot-attach");
+    let session = "real-copilot-session";
+    let address = "addr:real-copilot-attach";
+    let mut cmd = env.command_with_session("ignored");
+    cmd.env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .env("COPILOT_LOADER_PID", std::process::id().to_string())
+        .args([
+            "--json",
+            "--address",
+            address,
+            "copilot",
+            "attach",
+            "--description",
+            "copilot process test",
+        ]);
+    let attach = run_command_with_capture(cmd, &env.root, Duration::from_secs(8));
+    attach.assert_success("copilot attach");
+    let attach_json = attach.json("copilot attach");
+    assert_eq!(
+        attach_json.get("session_id").and_then(Value::as_str),
+        Some(session)
+    );
+
+    let status = env.daemon_status();
+    status.assert_success("daemon status after copilot attach");
+    let status_json = status.json("daemon status after copilot attach");
+    let member = status_json
+        .get("members")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|member| member.get("address").and_then(Value::as_str) == Some(address))
+        .expect("copilot-attached member");
+    assert_eq!(
+        member.get("session_id").and_then(Value::as_str),
+        Some(session)
+    );
+    assert_eq!(
+        member.get("watch_pids").and_then(Value::as_array).unwrap()[0]
+            .get("pid")
+            .and_then(Value::as_u64),
+        Some(std::process::id() as u64)
+    );
+}
+
+#[test]
+fn real_process_copilot_session_end_is_store_scoped() {
+    let env = ProcessEnv::new("real-copilot-session-end-store");
+    let session = "real-copilot-store-session";
+    let addr_a = "addr:copilot-store-a";
+    let addr_b = "addr:copilot-store-b";
+    let db_b = env.root.join("store-b.sqlite");
+    env.attach(session, addr_a);
+    let attach_b = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--db",
+            db_b.to_str().expect("db_b path"),
+            "--address",
+            addr_b,
+            "attach",
+            "--session",
+            session,
+            "--description",
+            "store b",
+        ],
+        Duration::from_secs(8),
+    );
+    attach_b.assert_success("attach store b");
+
+    let mut end_cmd = env.command_with_session("ignored");
+    end_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .args(["--json", "copilot", "session-end"]);
+    let ended = run_command_with_capture(end_cmd, &env.root, Duration::from_secs(8));
+    ended.assert_success("copilot session-end");
+
+    let status_a = env.run_with_session(
+        session,
+        ["--json", "station", "status", "--session", session],
+        Duration::from_secs(5),
+    );
+    status_a.assert_success("station status store a");
+    let status_a_json = status_a.json("station status store a");
+    assert_eq!(
+        status_a_json["stations"][0]
+            .get("idle")
+            .and_then(Value::as_bool),
+        Some(true)
+    );
+
+    let status_b = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--db",
+            db_b.to_str().expect("db_b path"),
+            "station",
+            "status",
+            "--session",
+            session,
+        ],
+        Duration::from_secs(5),
+    );
+    status_b.assert_success("station status store b");
+    let status_b_json = status_b.json("station status store b");
+    assert_eq!(
+        status_b_json["stations"][0]
+            .get("idle")
+            .and_then(Value::as_bool),
+        Some(false),
+        "sessionEnd for store A must not mark store B idle: {status_b_json}"
+    );
+}
+
+#[test]
+fn real_process_copilot_turn_guard_caps_mixed_armed_unarmed_state() {
+    let env = ProcessEnv::new("real-copilot-guard-cap");
+    let session = "real-copilot-guard-session";
+    let armed = "addr:copilot-armed";
+    let unarmed = "addr:copilot-unarmed";
+    env.attach(session, armed);
+    env.attach(session, unarmed);
+
+    let out_dir = env.root.join("copilot-armed-wait");
+    let mut wait_cmd = env.command_with_session(session);
+    wait_cmd
+        .args([
+            "--json",
+            "--address",
+            armed,
+            "wait",
+            "--session",
+            session,
+            "--timeout-ms",
+            "10000",
+            "--out-dir",
+            out_dir.to_str().expect("out dir"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let waiter = wait_cmd.spawn().expect("spawn armed waiter");
+    wait_until_path_exists(&out_dir.join("wait.pid"), Duration::from_secs(3));
+
+    let mut first_cmd = env.command_with_session("ignored");
+    first_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .env("TELEX_TURN_GUARD_MAX_NUDGES", "1")
+        .args(["--json", "copilot", "turn-guard"]);
+    let first = run_command_with_capture(first_cmd, &env.root, Duration::from_secs(5));
+    first.assert_success("first copilot turn guard");
+    assert_eq!(
+        first
+            .json("first copilot turn guard")
+            .get("decision")
+            .and_then(Value::as_str),
+        Some("block")
+    );
+
+    let mut second_cmd = env.command_with_session("ignored");
+    second_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .env("TELEX_TURN_GUARD_MAX_NUDGES", "1")
+        .args(["--json", "copilot", "turn-guard"]);
+    let second = run_command_with_capture(second_cmd, &env.root, Duration::from_secs(5));
+    second.assert_success("second copilot turn guard");
+    assert_eq!(
+        second
+            .json("second copilot turn guard")
+            .get("decision")
+            .and_then(Value::as_str),
+        Some("allow"),
+        "same unresolved unarmed station should hit cap even while another station is armed"
+    );
+
+    let stopped = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            armed,
+            "station",
+            "stop",
+            "--session",
+            session,
+        ],
+        Duration::from_secs(5),
+    );
+    stopped.assert_success("stop armed station");
+    let _ = wait_status_with_timeout(waiter, Duration::from_secs(3));
+}
+
+#[test]
+fn real_process_copilot_turn_guard_nudges_delivered_unacked_message() {
+    let env = ProcessEnv::new("real-copilot-unacked-guard");
+    let session = "real-copilot-unacked-session";
+    let address = "addr:copilot-unacked";
+    env.attach(session, address);
+
+    let out_dir = env.root.join("copilot-unacked-wait");
+    let mut wait_cmd = env.command_with_session(session);
+    wait_cmd
+        .args([
+            "--json",
+            "--address",
+            address,
+            "wait",
+            "--session",
+            session,
+            "--timeout-ms",
+            "10000",
+            "--out-dir",
+            out_dir.to_str().expect("out dir"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let waiter = wait_cmd.spawn().expect("spawn unacked waiter");
+    wait_until_path_exists(&out_dir.join("wait.pid"), Duration::from_secs(3));
+
+    let send = env.run_with_session(
+        session,
+        [
+            "--json",
+            "send",
+            "--to",
+            address,
+            "--body",
+            "needs ack",
+            "--from",
+            address,
+        ],
+        Duration::from_secs(5),
+    );
+    send.assert_success("send unacked message");
+    let _ = wait_status_with_timeout(waiter, Duration::from_secs(5));
+    wait_until_path_exists(&out_dir.join("message.json"), Duration::from_secs(3));
+
+    let mut guard_cmd = env.command_with_session("ignored");
+    guard_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .args(["--json", "copilot", "turn-guard"]);
+    let guard = run_command_with_capture(guard_cmd, &env.root, Duration::from_secs(5));
+    guard.assert_success("copilot turn guard delivered unacked");
+    let guard_json = guard.json("copilot turn guard delivered unacked");
+    assert_eq!(
+        guard_json.get("decision").and_then(Value::as_str),
+        Some("block")
+    );
+    assert!(
+        guard_json
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .contains("delivered/unacked"),
+        "guard should mention delivered/unacked work: {guard_json}"
+    );
+}
+
+#[test]
+fn real_process_copilot_turn_guard_daemon_down_fails_open_and_logs() {
+    let env = ProcessEnv::new("real-copilot-daemon-down");
+    let mut cmd = env.command_with_session("ignored");
+    cmd.env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", "daemon-down-session")
+        .args(["--json", "copilot", "turn-guard"]);
+    let out = run_command_with_capture(cmd, &env.root, Duration::from_secs(5));
+    out.assert_success("daemon-down turn guard");
+    assert_eq!(
+        out.json("daemon-down turn guard")
+            .get("decision")
+            .and_then(Value::as_str),
+        Some("allow")
+    );
+    let log = env.run_dir.join("copilot").join("hook-events.ndjson");
+    let text = std::fs::read_to_string(&log)
+        .unwrap_or_else(|e| panic!("reading hook log {}: {e}", log.display()));
+    assert!(text.contains("daemon_unavailable"), "hook log was: {text}");
+}
+
+#[test]
 fn real_process_status_hints_when_address_active_on_other_store() {
     let env = ProcessEnv::new("real-backend-hint");
     let session = "real-backend-hint-session";

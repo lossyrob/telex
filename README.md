@@ -9,6 +9,11 @@ zero-config) or Postgres (networked, with or without Microsoft Entra auth).
 One small binary, `telex`. It even carries its own usage instructions: run
 `telex skill` (or `telex skill --raw` for the exact embedded skill file).
 
+The repository also ships a Copilot CLI plugin marketplace (`.github/plugin/`)
+and plugin manifest (`plugin.json` + `hooks.json`). The plugin maps Copilot
+session env into generic telex session inputs, handles non-destructive
+`sessionEnd`, and guards turn-end re-arming.
+
 ## Install
 
 **macOS / Linux:**
@@ -52,6 +57,38 @@ message peers. To hand an agent a specific assignment in one command:
 ```sh
 telex skill --address workstream:proj/node:issue-215
 ```
+
+In Copilot CLI, install/use the telex plugin and attach with:
+
+```sh
+copilot plugin marketplace add lossyrob/telex
+copilot plugin install telex@telex
+telex --address workstream:proj/node:issue-215 copilot attach --description "<work>"
+telex --address workstream:proj/node:issue-215 wait --session "$COPILOT_AGENT_SESSION_ID" --out-dir <dir>
+```
+
+The adapter maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id and
+`$COPILOT_LOADER_PID` to a loader watch-pid. Generic telex commands intentionally
+do not read Copilot-specific env variables directly, so follow-up generic commands
+must pass `--session "$COPILOT_AGENT_SESSION_ID"` or run in a shell/script that
+sets `TELEX_SESSION_ID`.
+
+Detached waiter stdout is not delivered to the agent; agents still read
+`message.json` / `delivery.json` from `--out-dir` after the completion wake.
+Notification-hook content enrichment was evaluated for removing that fetch step,
+but the hook payload exposes only notification metadata and no stable `--out-dir`
+path to read. Classic waiter robustness in this PR comes from the default-on
+`agentStop` coverage guard; overnight/AFK deterministic wake belongs to the ACP
+track.
+
+The plugin shape is validated against GitHub Copilot CLI 1.0.66-1; see
+[`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)
+for the acceptance matrix and live hook smoke evidence.
+
+Marketplace install is the supported plugin channel. Release install scripts
+print a tag-pinned marketplace command, for example
+`copilot plugin marketplace add lossyrob/telex#vX.Y.Z`, so the plugin assets and
+installed binary can be kept on the same release tag.
 
 ## Networked backends
 

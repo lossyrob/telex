@@ -1505,15 +1505,14 @@ that belongs to the table often receives most meaningful context as CC observer 
 waiter never wakes and the seat must poll `inbox --all` or the database to notice the conversation.
 Making all CC wake by default would undo the noise-control reason for ADR 0033.
 
-**Decision.** Add an explicit per-wait `--wake-on-cc` / IPC `wake_on_cc` opt-in for SQLite-backed daemon
-stores. The opt-in wakes only for live CC traffic delivered after the wait's captured lower bound; it is
-not durable CC backlog replay and it does not make CC rows pending or ack-required. If the logical
-client wait must reconnect/re-register after losing the original daemon request, CC traffic that arrived
-in that gap remains pull-only via `inbox --all` / `read`. `--min-attention` composes with the opt-in but
-does not imply it. CC wake frames retain delivery-role metadata (`delivery_role: "cc"`) and
+**Decision.** Add an explicit per-wait `--wake-on-cc` / IPC `wake_on_cc` opt-in. The opt-in wakes only
+for live CC traffic delivered after the wait's captured lower bound; it is not durable CC backlog replay
+and it does not make CC rows pending or ack-required. If the logical client wait must
+reconnect/re-register after losing the original daemon request, CC traffic that arrived in that gap
+remains pull-only via `inbox --all` / `read`. `--min-attention` composes with the opt-in but does not
+imply it. CC wake frames retain delivery-role metadata (`delivery_role: "cc"`) and
 `requires_disposition_for_current_recipient: false`; the primary `--to` path remains the only
-ack-required delivery path. Non-SQLite daemon stores return `Unsupported` until equivalent backend
-semantics land.
+ack-required delivery path.
 
 **Consequences.** Observer/relay seats can be woken by the table they deliberately opted into without
 reintroducing notification churn for ordinary CC recipients. Agents that wake on CC should inspect

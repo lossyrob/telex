@@ -1,0 +1,24 @@
+{
+  "name": "telex",
+  "owner": {
+    "name": "Rob Emanuele"
+  },
+  "metadata": {
+    "description": "Marketplace for the Telex Copilot CLI plugin",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "telex",
+      "description": "Telex Copilot CLI plugin: session lifecycle hooks, turn-end waiter guard, and the canonical Telex skill.",
+      "version": "0.1.0",
+      "source": ".",
+      "author": {
+        "name": "Rob Emanuele"
+      },
+      "repository": "https://github.com/lossyrob/telex",
+      "license": "MIT",
+      "keywords": ["telex", "copilot", "hooks", "skill", "agent-session"]
+    }
+  ]
+}
