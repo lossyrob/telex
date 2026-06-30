@@ -28,8 +28,9 @@ pub const RECEIPT_AMBIGUOUS: &str = "refused-ambiguous-from";
 
 /// Resolve the stable Telex session identity for one-shot daemon verbs.
 ///
-/// Precedence is explicit `--session`, then `TELEX_SESSION_ID`, then the Copilot
-/// harness's `COPILOT_AGENT_SESSION_ID`. The helper deliberately fails closed
+/// Precedence is explicit `--session`, then `TELEX_SESSION_ID`.
+/// Copilot harness variables are mapped by the plugin boundary, not by core identity
+/// resolution. The helper deliberately fails closed
 /// instead of minting a random identity, because `NeedsAttach` recovery must
 /// name the same session that originally attached.
 pub fn resolve_session_id(explicit: Option<&str>) -> Result<String> {
@@ -37,10 +38,9 @@ pub fn resolve_session_id(explicit: Option<&str>) -> Result<String> {
         .filter(|s| !s.trim().is_empty())
         .map(|s| s.to_string())
         .or_else(|| nonempty_env("TELEX_SESSION_ID"))
-        .or_else(|| nonempty_env("COPILOT_AGENT_SESSION_ID"))
         .ok_or_else(|| {
             anyhow!(
-                "no session id available; pass --session, set TELEX_SESSION_ID, or set COPILOT_AGENT_SESSION_ID"
+                "no session id available; pass --session or set TELEX_SESSION_ID (Copilot users should run the telex Copilot plugin mapper)"
             )
         })
 }
@@ -182,9 +182,33 @@ pub async fn resolve_from(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
 
     fn holders(addrs: &[&str]) -> Vec<String> {
         addrs.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn resolve_session_id_does_not_read_copilot_env() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_telex = std::env::var_os("TELEX_SESSION_ID");
+        let prior_copilot = std::env::var_os("COPILOT_AGENT_SESSION_ID");
+        std::env::remove_var("TELEX_SESSION_ID");
+        std::env::set_var("COPILOT_AGENT_SESSION_ID", "copilot-session");
+        let err = resolve_session_id(None).unwrap_err().to_string();
+        restore_env("TELEX_SESSION_ID", prior_telex);
+        restore_env("COPILOT_AGENT_SESSION_ID", prior_copilot);
+        assert!(err.contains("TELEX_SESSION_ID"));
+        assert!(!err.contains("COPILOT_AGENT_SESSION_ID"));
+    }
+
+    fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
+        match value {
+            Some(value) => std::env::set_var(key, value),
+            None => std::env::remove_var(key),
+        }
     }
 
     // Criterion: after attach A, send with no --from/env infers from = A.

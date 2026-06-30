@@ -5,6 +5,7 @@ use anyhow::{anyhow, Result};
 pub mod address;
 pub mod attach;
 pub mod backend;
+pub mod copilot;
 pub mod daemon;
 pub mod detach;
 pub mod disposition;

@@ -68,6 +68,9 @@ try {
         Write-Host "Added $installDir to your user PATH (restart your terminal to pick it up)."
     }
     Write-Host "Next:  telex skill"
+    Write-Host "Copilot plugin marketplace:"
+    Write-Host "  copilot plugin marketplace add lossyrob/telex#$tag"
+    Write-Host "  copilot plugin install telex@telex"
 }
 finally {
     Remove-Item -Recurse -Force $tmp -ErrorAction SilentlyContinue

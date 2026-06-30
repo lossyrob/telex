@@ -78,3 +78,6 @@ case ":${PATH}:" in
   *) say "Add it to your PATH:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
 esac
 say "Next:  telex skill"
+say "Copilot plugin marketplace:"
+say "  copilot plugin marketplace add lossyrob/telex#${tag}"
+say "  copilot plugin install telex@telex"

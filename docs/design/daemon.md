@@ -1533,8 +1533,9 @@ One source serves both the CLI command and the plugin skill:
 - **CLI consumer:** `telex skill` prints the embedded `SKILL.md`
   (`include_str!` in `src/commands/skill.rs`, unchanged) — add a `--raw` form for
   machine consumption.
-- **Plugin-skill consumer:** a plugin manifest pointer if the harness supports pointing
-  at a file, otherwise a thin wrapper that `exec`s `telex skill --raw`.
+- **Plugin-skill consumer:** Copilot plugin discovery reads `skills/telex/SKILL.md`, a
+  byte-identical mirror of the canonical root `SKILL.md`. Tests fail if the mirror diverges or if
+  additional `SKILL.md` files appear. Root `SKILL.md` remains the source authors edit.
 - **Invariant:** **no generated divergent copy** — both consumers resolve to the same
   `SKILL.md`. The `SKILL.md` narrative content is owned by `daemon-core`.
 
