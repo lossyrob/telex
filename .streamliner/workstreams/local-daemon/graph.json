@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-06-30T21:30:00.000Z",
+  "updatedAt": "2026-06-30T21:40:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -159,7 +159,7 @@
       "type": "task",
       "title": "Liveness & visibility hardening (deaf-evidence, terminal-exit-status, foreign-lease view)",
       "summary": "Generic hardening after the #53 bridge pivot: terminal status on EVERY `telex wait` exit for non-Copilot/pull-mode users; an --all-sessions / foreign-lease view so a session-scoped status no longer hides a ghost lease; and any bridge health/orphan-extension visibility not carried directly by #53. The Copilot-specific deaf-waiter unblock moves to push-delivery, so this is useful hardening but no longer a closure gate by itself.",
-      "status": "ready",
+      "status": "completed",
       "attention": "watch",
       "repoIds": [
         "telex"
