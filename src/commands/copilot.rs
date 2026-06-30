@@ -328,12 +328,12 @@ struct GuardSettings {
 
 impl GuardSettings {
     fn from_env() -> std::result::Result<Self, String> {
-        let enabled = match env_nonempty("TELEX_TURN_GUARD") {
-            Some(value) if matches!(value.to_ascii_lowercase().as_str(), "off" | "0" | "false") => {
-                false
-            }
-            _ => true,
-        };
+        let enabled = !matches!(
+            env_nonempty("TELEX_TURN_GUARD")
+                .map(|value| value.to_ascii_lowercase())
+                .as_deref(),
+            Some("off" | "0" | "false")
+        );
         if !enabled {
             return Ok(Self {
                 enabled,
@@ -415,16 +415,14 @@ fn evaluate_guard(
                 && member.last_waiter_outcome.as_deref() == Some("message")
         })
         .collect::<Vec<_>>();
-    if unarmed.is_empty() {
-        if delivered_unacked.is_empty() {
-            return GuardEvaluation {
-                decision: HookDecision::Allow,
-                reason_code: "covered",
-                summary: "All attended stations are covered.".to_string(),
-                nudges: 0,
-                next_state: None,
-            };
-        }
+    if unarmed.is_empty() && delivered_unacked.is_empty() {
+        return GuardEvaluation {
+            decision: HookDecision::Allow,
+            reason_code: "covered",
+            summary: "All attended stations are covered.".to_string(),
+            nudges: 0,
+            next_state: None,
+        };
     }
 
     let issue_key = coverage_issue_key(&unarmed, &delivered_unacked);
@@ -500,9 +498,11 @@ fn coverage_issue_key(unarmed: &[&MemberStatus], delivered_unacked: &[&MemberSta
             .iter()
             .map(|member| format!("unarmed\0{}\0{}", member.store_key, member.address)),
     );
-    parts.extend(delivered_unacked.iter().map(|member| {
-        format!("unacked\0{}\0{}", member.store_key, member.address)
-    }));
+    parts.extend(
+        delivered_unacked
+            .iter()
+            .map(|member| format!("unacked\0{}\0{}", member.store_key, member.address)),
+    );
     parts.sort();
     parts.join("\n")
 }
