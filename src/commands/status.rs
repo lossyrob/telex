@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 
 use crate::cli::Ctx;
 use crate::daemon_ipc::{DaemonStatus, Request, Response, ERROR_UNAUTHORIZED};
+use crate::identity::optional_session_id;
 use crate::output::emit;
 
 pub async fn run(ctx: &Ctx) -> Result<i32> {
@@ -57,6 +58,17 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
             .as_ref()
             .map(|status| alternate_backend_activity(status, &store_key, &addr))
             .unwrap_or_default();
+        let current_session_id = optional_session_id(None);
+        let foreign_members: Vec<_> = daemon_members
+            .iter()
+            .filter(|member| {
+                current_session_id
+                    .as_ref()
+                    .map_or(true, |session_id| member.session_id != *session_id)
+            })
+            .cloned()
+            .collect();
+        let deaf_warn = daemon_members.iter().any(|member| member.deaf_warn);
         info["address"] = serde_json::json!(addr);
         info["occupancy"] = serde_json::to_value(&occ)?;
         if !daemon_members.is_empty() {
@@ -67,9 +79,21 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
             info["pending_unconsumed_count"] =
                 serde_json::json!(daemon_members[0].pending_unconsumed_count);
             info["live_waiters_count"] = serde_json::json!(daemon_members[0].live_waiters_count);
+            info["unattended_since_ms"] = serde_json::json!(daemon_members[0].unattended_since_ms);
+            info["unattended_for_ms"] = serde_json::json!(daemon_members[0].unattended_for_ms);
+            info["deaf_since_ms"] = serde_json::json!(daemon_members[0].deaf_since_ms);
+            info["deaf_for_ms"] = serde_json::json!(daemon_members[0].deaf_for_ms);
+            info["deaf_warn"] = serde_json::json!(deaf_warn);
+            info["last_waiter_outcome"] = serde_json::json!(daemon_members[0].last_waiter_outcome);
+            info["last_waiter_exit_code"] =
+                serde_json::json!(daemon_members[0].last_waiter_exit_code);
+            info["last_waiter_detail"] =
+                serde_json::json!(daemon_members[0].last_waiter_detail.clone());
+            info["last_waiter_pid"] = serde_json::json!(daemon_members[0].last_waiter_pid);
         }
         info["lease"] = serde_json::to_value(&lease)?;
         info["daemon_members"] = serde_json::to_value(&daemon_members)?;
+        info["foreign_members"] = serde_json::to_value(&foreign_members)?;
         info["live_waiters"] = serde_json::to_value(&live_waiters)?;
         info["also_active_on"] = serde_json::to_value(&also_active_on)?;
         if daemon_members.is_empty() && !also_active_on.is_empty() {
@@ -94,6 +118,31 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
         }
         if let Some(members) = info.get("daemon_members").and_then(|v| v.as_array()) {
             println!("daemon_members {}", members.len());
+        }
+        if let Some(health) = info.get("station_health").and_then(|v| v.as_str()) {
+            let pending = info
+                .get("pending_unconsumed_count")
+                .map(|v| v.to_string())
+                .unwrap_or_else(|| "null".to_string());
+            println!(
+                "station_health {} pending={}{}",
+                health,
+                pending,
+                if info
+                    .get("deaf_warn")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    " DEAF"
+                } else {
+                    ""
+                }
+            );
+        }
+        if let Some(foreign) = info.get("foreign_members").and_then(|v| v.as_array()) {
+            if !foreign.is_empty() {
+                println!("foreign_sessions {}", foreign.len());
+            }
         }
         if let Some(waiters) = info.get("live_waiters").and_then(|v| v.as_array()) {
             println!("live_waiters {}", waiters.len());

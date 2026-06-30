@@ -1210,7 +1210,10 @@ mod postgres_fixture {
             .await
             .expect("check pending index")
             .get(0);
-        assert!(index_exists, "pending-delivery index should be created after ALTER");
+        assert!(
+            index_exists,
+            "pending-delivery index should be created after ALTER"
+        );
         drop(client);
         let _ = handle.await;
 

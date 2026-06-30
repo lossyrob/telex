@@ -34,15 +34,19 @@ pub const RECEIPT_AMBIGUOUS: &str = "refused-ambiguous-from";
 /// instead of minting a random identity, because `NeedsAttach` recovery must
 /// name the same session that originally attached.
 pub fn resolve_session_id(explicit: Option<&str>) -> Result<String> {
-    explicit
-        .filter(|s| !s.trim().is_empty())
-        .map(|s| s.to_string())
-        .or_else(|| nonempty_env("TELEX_SESSION_ID"))
+    optional_session_id(explicit)
         .ok_or_else(|| {
             anyhow!(
                 "no session id available; pass --session or set TELEX_SESSION_ID (Copilot users should run the telex Copilot plugin mapper)"
             )
         })
+}
+
+pub fn optional_session_id(explicit: Option<&str>) -> Option<String> {
+    explicit
+        .filter(|s| !s.trim().is_empty())
+        .map(|s| s.to_string())
+        .or_else(|| nonempty_env("TELEX_SESSION_ID"))
 }
 
 fn nonempty_env(name: &str) -> Option<String> {
