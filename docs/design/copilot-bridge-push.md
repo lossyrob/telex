@@ -170,7 +170,43 @@ response to a concrete constraint, not a stylistic preference.
   the current SDK (`MessageOptions.displayPrompt`, 1.0.66) and is preserved on
   the underlying session RPC; the bridge uses the path that preserves it. (An
   earlier build's high-level wrapper dropped it; the bridge does not rely on that
-  wrapper.)
+  wrapper.) Confirmed rendering in a live run: the timeline showed the
+  `[telex] ...` label.
+
+## Lifecycle: load on bind, unload on detach
+
+Load-on-bind needs a symmetric **unload-on-detach**, because a session-scoped
+extension is durable. The bridge `extension.mjs` lives in
+`session-state/<sessionId>/extensions/telex-bridge/`, and that directory
+**persists across session resume**. So a bridge left there reloads every time
+the session is resumed -- not just for the run that bound it. Without an unbind
+step, a session that used telex once keeps forking the bridge forever.
+
+The full lifecycle:
+
+- **Bind** -- `telex attach --copilot-bridge` writes the embedded
+  `extension.mjs` into the session extension dir and registers the daemon
+  on-deliver handler. The agent calls `extensions_reload` to load it.
+- **Unbind** -- `telex detach` deregisters the handler and **removes the
+  `extension.mjs`** (so it will not reload on a later resume); the agent calls
+  `extensions_reload` to unload the live process now. Removal is **ref-counted
+  to the session's last telex binding**: one bridge serves all of a session's
+  addresses, so it is removed only when the final binding for that session goes
+  away. Both steps live in the `copilot.rs` boundary, so the daemon stays
+  agnostic.
+- **No elevated permission** -- the bridge requests no `skipPermission` and
+  needs no agent tool for delivery (the pipe is the interface). So a (re)load is
+  **silent** -- no permission prompt. This is what makes the orphan case below
+  painless. (Observed: a `skipPermission` debug tool triggered an
+  elevated-permission prompt on every resume; dropping it removes the prompt.)
+- **Orphan safety (closed without detach)** -- if a session is killed or closed
+  before `telex detach`, the file persists and the bridge reloads silently on
+  the next resume. Mitigations, in order of cost: (a) silent load means it is
+  harmless if unused; (b) a `telex copilot gc` (or an attach-time sweep) prunes
+  session-bridge dirs whose session ids telex no longer binds; (c) optionally
+  the bridge self-exits on load if telex shows no binding for its session id,
+  keeping orphan memory near zero. (a)+(b) are the v1 floor; (c) is an
+  optimization that couples the bridge to a harness-neutral telex marker file.
 
 ## Effect on sessions that do not use this
 

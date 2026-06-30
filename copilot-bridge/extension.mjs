@@ -36,7 +36,9 @@ const session = await joinSession({
       description:
         "Return this session's telex bridge endpoint, registry path, and pid.",
       parameters: { type: "object", properties: {} },
-      skipPermission: true,
+      // No skipPermission: the bridge requests no elevated permission, so a
+      // (re)load is silent (no permission prompt). The push path is the pipe,
+      // not this tool; the tool is only a debug affordance.
       handler: async () =>
         JSON.stringify(
           { sessionId, endpoint, registryPath, pid: process.pid },
