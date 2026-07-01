@@ -17,12 +17,12 @@ use crate::daemon_ipc::{
 };
 use crate::model::{
     cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient, Attention,
-    DeliveryOutcome, EpochClaimResult, NewMessage, STATUS_RETIRED,
+    DeliveryOutcome, EpochClaimResult, MessageRow, NewMessage, STATUS_RETIRED,
 };
 #[cfg(feature = "postgres")]
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
 #[cfg(not(windows))]
@@ -33,7 +33,9 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::io::BufReader;
 #[cfg(feature = "postgres")]
+use std::process::Stdio;
 use tokio::sync::mpsc;
+use tokio::sync::Semaphore;
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 #[cfg(feature = "postgres")]
 use tokio_postgres::AsyncMessage;
@@ -318,6 +320,7 @@ pub struct DaemonState {
     recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
     draining: AtomicBool,
+    on_deliver: OnDeliverState,
 }
 
 #[derive(Clone)]
@@ -370,6 +373,8 @@ struct MemberRecord {
     last_waiter_detail: Option<String>,
     last_waiter_pid: Option<u32>,
     last_delivered_message_id: Option<i64>,
+    /// Harness-neutral on-deliver handler argv registered for this address/session, if any.
+    on_deliver: Option<Vec<String>>,
 }
 
 #[derive(Clone, Debug)]
@@ -1760,6 +1765,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         recent_errors: Arc::new(Mutex::new(VecDeque::new())),
         ended_sessions: Mutex::new(BTreeMap::new()),
         draining: AtomicBool::new(false),
+        on_deliver: OnDeliverState::default(),
     })
 }
 
@@ -2010,6 +2016,265 @@ enum ClientAction {
     Drain,
 }
 
+/// Max concurrent on-deliver handler processes across the daemon.
+const ON_DELIVER_MAX_CONCURRENCY: usize = 8;
+/// Wall-clock budget for a single on-deliver handler process.
+const ON_DELIVER_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Identifies one in-flight on-deliver exec so concurrent commit + sweep paths do not
+/// double-spawn a handler for the same (address, message).
+#[derive(Clone, PartialEq, Eq, Hash)]
+struct OnDeliverKey {
+    store_key: String,
+    address: String,
+    message_id: i64,
+}
+
+/// Daemon-side liveness state for the generic on-deliver exec primitive. This is a
+/// best-effort push notifier: it never marks messages delivered or consumed (that stays
+/// agent-driven via `Ack`), so a failed or missing push only leaves the message durably
+/// queued, exactly like an unarmed pull station. `pushed` dedups already-notified messages
+/// and is pruned to the currently-undelivered set on each sweep; `inflight` prevents a
+/// commit-path and a sweep-path from racing the same message.
+struct OnDeliverState {
+    sem: Arc<Semaphore>,
+    inflight: Mutex<HashSet<OnDeliverKey>>,
+    pushed: Mutex<HashMap<MemberKey, BTreeSet<i64>>>,
+}
+
+impl Default for OnDeliverState {
+    fn default() -> Self {
+        Self {
+            sem: Arc::new(Semaphore::new(ON_DELIVER_MAX_CONCURRENCY)),
+            inflight: Mutex::new(HashSet::new()),
+            pushed: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+impl DaemonState {
+    /// Non-idle members attending `address` that registered an on-deliver handler.
+    fn on_deliver_candidates(&self, store_key: &str, address: &str) -> Vec<(MemberKey, Vec<String>)> {
+        self.members
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_k, m)| {
+                m.store_key == store_key
+                    && m.address == address
+                    && !m.idle
+                    && m.on_deliver.is_some()
+            })
+            .map(|(k, m)| (k.clone(), m.on_deliver.clone().unwrap_or_default()))
+            .collect()
+    }
+
+    fn on_deliver_already_pushed(&self, member: &MemberKey, id: i64) -> bool {
+        self.on_deliver
+            .pushed
+            .lock()
+            .unwrap()
+            .get(member)
+            .is_some_and(|s| s.contains(&id))
+    }
+
+    fn on_deliver_mark_pushed(&self, member: &MemberKey, id: i64) {
+        self.on_deliver
+            .pushed
+            .lock()
+            .unwrap()
+            .entry(member.clone())
+            .or_default()
+            .insert(id);
+    }
+
+    /// Prune a member's pushed-id set to only ids still in `keep` (the currently-undelivered
+    /// set), so the dedup set stays bounded as messages are acked.
+    fn on_deliver_retain_pushed(&self, member: &MemberKey, keep: &BTreeSet<i64>) {
+        let mut map = self.on_deliver.pushed.lock().unwrap();
+        if let Some(set) = map.get_mut(member) {
+            set.retain(|id| keep.contains(id));
+            if set.is_empty() {
+                map.remove(member);
+            }
+        }
+    }
+
+    fn on_deliver_try_begin(&self, key: OnDeliverKey) -> bool {
+        self.on_deliver.inflight.lock().unwrap().insert(key)
+    }
+
+    fn on_deliver_end(&self, key: &OnDeliverKey) {
+        self.on_deliver.inflight.lock().unwrap().remove(key);
+    }
+
+    /// Fast-path push on durable commit: fire the handler for the just-committed message to
+    /// every recipient address (to + cc) that registered one. Off the critical path.
+    fn fire_on_deliver_on_commit(self: &Arc<Self>, store_key: &str, row: &MessageRow) {
+        let mut addrs = vec![row.to_addr.clone()];
+        addrs.extend(cc_recipients(row.cc.as_deref()));
+        for addr in addrs {
+            for (member_key, argv) in self.on_deliver_candidates(store_key, &addr) {
+                self.spawn_on_deliver(member_key, argv, store_key.to_string(), addr.clone(), row.clone());
+            }
+        }
+    }
+
+    /// Spawn one on-deliver handler exec for a (member, message), deduped by the pushed set
+    /// and the in-flight guard. Never blocks the caller.
+    fn spawn_on_deliver(
+        self: &Arc<Self>,
+        member_key: MemberKey,
+        argv: Vec<String>,
+        store_key: String,
+        address: String,
+        row: MessageRow,
+    ) {
+        if argv.is_empty() {
+            return;
+        }
+        let id = row.id;
+        if self.on_deliver_already_pushed(&member_key, id) {
+            return;
+        }
+        let key = OnDeliverKey {
+            store_key: store_key.clone(),
+            address: address.clone(),
+            message_id: id,
+        };
+        if !self.on_deliver_try_begin(key.clone()) {
+            return;
+        }
+        let descriptor = on_deliver_descriptor_json(&store_key, &address, &row);
+        let sem = self.on_deliver.sem.clone();
+        let state = self.clone();
+        tokio::spawn(async move {
+            let ok = run_on_deliver(sem, argv, descriptor).await;
+            if ok {
+                state.on_deliver_mark_pushed(&member_key, id);
+            } else {
+                state.push_recent_error(
+                    "OnDeliverFailed",
+                    format!(
+                        "on-deliver handler failed store={store_key} address={address} message_id={id}"
+                    ),
+                );
+            }
+            state.on_deliver_end(&key);
+        });
+    }
+}
+
+/// Serialize a harness-neutral message descriptor fed to the on-deliver handler on stdin.
+/// The daemon exposes only transport facts; it never learns what the handler does with them.
+fn on_deliver_descriptor_json(store_key: &str, address: &str, row: &MessageRow) -> String {
+    serde_json::json!({
+        "message_id": row.id,
+        "thread_id": row.thread_id,
+        "store_key": store_key,
+        "address": address,
+        "from": row.from_addr,
+        "kind": row.kind,
+        "attention": row.attention,
+        "requires_disposition": row.requires_disposition,
+        "subject": row.subject,
+        "body": row.body,
+    })
+    .to_string()
+}
+
+/// Exec one on-deliver handler process: descriptor on stdin, bounded concurrency, bounded
+/// wall-clock. Returns true only on a clean exit 0. The daemon treats the argv opaquely.
+async fn run_on_deliver(sem: Arc<Semaphore>, argv: Vec<String>, descriptor: String) -> bool {
+    if argv.is_empty() {
+        return false;
+    }
+    let _permit = match sem.acquire().await {
+        Ok(permit) => permit,
+        Err(_) => return false,
+    };
+    let mut cmd = tokio::process::Command::new(&argv[0]);
+    cmd.args(&argv[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut child = match cmd.spawn() {
+        Ok(child) => child,
+        Err(_) => return false,
+    };
+    if let Some(mut stdin) = child.stdin.take() {
+        use tokio::io::AsyncWriteExt;
+        let _ = stdin.write_all(descriptor.as_bytes()).await;
+        let _ = stdin.write_all(b"\n").await;
+        // stdin drops here, closing the pipe so the handler sees EOF.
+    }
+    match tokio::time::timeout(ON_DELIVER_TIMEOUT, child.wait()).await {
+        Ok(Ok(status)) => status.success(),
+        Ok(Err(_)) => false,
+        Err(_) => {
+            let _ = child.start_kill();
+            false
+        }
+    }
+}
+
+/// Reconciliation sweep for one member with a handler: (re)push any durably-undelivered
+/// message not already pushed. Reuses `fetch_undelivered` (the holder's source of truth for
+/// "still needs delivering") so backlog that arrived while the bridge was down is delivered
+/// on the next tick or on re-bind. Best effort; never touches delivery/consumption state.
+async fn on_deliver_sweep_member(
+    state: Arc<DaemonState>,
+    backend: &Arc<dyn Backend>,
+    member: &MemberRecord,
+) {
+    let argv = match &member.on_deliver {
+        Some(argv) if !argv.is_empty() => argv.clone(),
+        _ => return,
+    };
+    let undelivered = match backend.fetch_undelivered(&member.address).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            state.push_recent_error(
+                "OnDeliverSweep",
+                format!(
+                    "fetch_undelivered failed store={} address={}: {e:#}",
+                    member.store_key, member.address
+                ),
+            );
+            return;
+        }
+    };
+    let member_key = MemberKey {
+        store_key: member.store_key.clone(),
+        session_id: member.session_id.clone(),
+        address: member.address.clone(),
+    };
+    let keep: BTreeSet<i64> = undelivered.iter().map(|r| r.id).collect();
+    state.on_deliver_retain_pushed(&member_key, &keep);
+    for row in undelivered {
+        if state.on_deliver_already_pushed(&member_key, row.id) {
+            continue;
+        }
+        state.spawn_on_deliver(
+            member_key.clone(),
+            argv.clone(),
+            member.store_key.clone(),
+            member.address.clone(),
+            row,
+        );
+    }
+}
+
+/// Spawn a one-shot backlog sweep for a member (used on register/re-bind and per heartbeat
+/// tick), so it never blocks the registration response or the heartbeat cycle.
+fn spawn_on_deliver_backlog(state: Arc<DaemonState>, member: MemberRecord) {
+    tokio::spawn(async move {
+        if let Ok(backend) = state.backend_for(&member.store_key).await {
+            on_deliver_sweep_member(state.clone(), &backend, &member).await;
+        }
+    });
+}
+
 async fn heartbeat_loop(state: Arc<DaemonState>) {
     loop {
         tokio::time::sleep(HEARTBEAT_INTERVAL).await;
@@ -2071,7 +2336,11 @@ async fn heartbeat_members_once(state: Arc<DaemonState>) {
             )
             .await
         {
-            Ok(true) => {}
+            Ok(true) => {
+                if member.on_deliver.is_some() {
+                    spawn_on_deliver_backlog(state.clone(), member.clone());
+                }
+            }
             Ok(false) => {
                 self_demote_member(&state, &member, "epoch heartbeat returned 0 rows");
             }
@@ -2401,6 +2670,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             tags,
             watch_pids,
             recovery,
+            on_deliver,
         } => {
             register_member(
                 state.clone(),
@@ -2413,6 +2683,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 tags,
                 watch_pids,
                 recovery,
+                on_deliver,
             )
             .await
         }
@@ -2527,6 +2798,7 @@ async fn register_member(
     tags: Option<String>,
     watch_pids: Vec<WatchPidSpec>,
     recovery: bool,
+    on_deliver: Option<Vec<String>>,
 ) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
@@ -2551,11 +2823,15 @@ async fn register_member(
                 refreshed.watch_pids = watch_pids;
                 refreshed.idle = false;
                 refreshed.idle_rearmable = false;
+                refreshed.on_deliver = on_deliver.clone();
                 state.check_session_id_reuse_tripwire(&refreshed);
                 if !recovery {
                     state.clear_definite_session_end(&store_key, &session_id);
                 }
                 state.insert_member(refreshed.clone());
+                if refreshed.on_deliver.is_some() {
+                    spawn_on_deliver_backlog(state.clone(), refreshed.clone());
+                }
                 return Response::Registered {
                     lease_epoch: refreshed.lease_epoch,
                     owner_instance_id: refreshed.owner_instance_id,
@@ -2720,12 +2996,21 @@ async fn register_member(
         last_waiter_detail: None,
         last_waiter_pid: None,
         last_delivered_message_id: None,
+        on_deliver,
     };
     state.check_session_id_reuse_tripwire(&record);
     if !recovery {
         state.clear_definite_session_end(&store_key, &session_id);
     }
+    let backlog = if record.on_deliver.is_some() {
+        Some(record.clone())
+    } else {
+        None
+    };
     state.insert_member(record);
+    if let Some(member) = backlog {
+        spawn_on_deliver_backlog(state.clone(), member);
+    }
     Response::Registered {
         lease_epoch: claimed.lease_epoch,
         owner_instance_id: claimed.owner_instance_id,
@@ -3517,6 +3802,7 @@ async fn send_message(
         );
     }
     state.note_backlog_for_unattended_address(&store_key, &to_addr);
+    state.fire_on_deliver_on_commit(&store_key, &row);
     let occupied = state.has_address_member(&store_key, &to_addr);
     Response::Sent {
         receipt: SentReceipt {
@@ -3624,6 +3910,7 @@ async fn reply_message(
         );
     }
     state.note_backlog_for_unattended_address(&store_key, &to);
+    state.fire_on_deliver_on_commit(&store_key, &row);
     let occupied = state.has_address_member(&store_key, &to);
     Response::Sent {
         receipt: SentReceipt {
@@ -3771,6 +4058,7 @@ mod p3_tests {
             recent_errors: Arc::new(Mutex::new(VecDeque::new())),
             ended_sessions: Mutex::new(BTreeMap::new()),
             draining: AtomicBool::new(false),
+            on_deliver: OnDeliverState::default(),
         })
     }
 
@@ -3829,6 +4117,7 @@ mod p3_tests {
             tags: Some("p3".to_string()),
             watch_pids: vec![WatchPidSpec::anchor(42)],
             recovery: false,
+            on_deliver: None,
         }
     }
 
@@ -6061,6 +6350,7 @@ pub mod test_support {
                 recent_errors: Arc::new(Mutex::new(VecDeque::new())),
                 ended_sessions: Mutex::new(BTreeMap::new()),
                 draining: AtomicBool::new(false),
+                on_deliver: OnDeliverState::default(),
             });
             Self { state, root }
         }
@@ -6291,6 +6581,7 @@ pub mod test_support {
             tags: Some("section17".to_string()),
             watch_pids,
             recovery: false,
+            on_deliver: None,
         }
     }
 

@@ -165,6 +165,11 @@ pub enum Request {
         watch_pids: Vec<WatchPidSpec>,
         #[serde(default)]
         recovery: bool,
+        /// Optional harness-neutral on-deliver handler argv. When present, the daemon
+        /// execs this command (message descriptor on stdin) after a message for this
+        /// address is durably committed. The daemon never interprets the argv.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_deliver: Option<Vec<String>>,
     },
     Detach {
         store_key: String,
