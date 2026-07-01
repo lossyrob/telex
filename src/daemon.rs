@@ -25,7 +25,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
-#[cfg(not(windows))]
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -33,7 +32,6 @@ use std::sync::Mutex;
 use std::time::{Duration, Instant};
 use tokio::io::BufReader;
 #[cfg(feature = "postgres")]
-use std::process::Stdio;
 use tokio::sync::mpsc;
 use tokio::sync::Semaphore;
 use tokio::sync::{Mutex as AsyncMutex, Notify};
@@ -2054,7 +2052,11 @@ impl Default for OnDeliverState {
 
 impl DaemonState {
     /// Non-idle members attending `address` that registered an on-deliver handler.
-    fn on_deliver_candidates(&self, store_key: &str, address: &str) -> Vec<(MemberKey, Vec<String>)> {
+    fn on_deliver_candidates(
+        &self,
+        store_key: &str,
+        address: &str,
+    ) -> Vec<(MemberKey, Vec<String>)> {
         self.members
             .lock()
             .unwrap()
@@ -2115,7 +2117,13 @@ impl DaemonState {
         addrs.extend(cc_recipients(row.cc.as_deref()));
         for addr in addrs {
             for (member_key, argv) in self.on_deliver_candidates(store_key, &addr) {
-                self.spawn_on_deliver(member_key, argv, store_key.to_string(), addr.clone(), row.clone());
+                self.spawn_on_deliver(
+                    member_key,
+                    argv,
+                    store_key.to_string(),
+                    addr.clone(),
+                    row.clone(),
+                );
             }
         }
     }

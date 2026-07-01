@@ -102,7 +102,10 @@ fn remove_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
         let _ = std::fs::remove_file(bridge_bindings_path(session_id)?);
         Ok(true)
     } else {
-        std::fs::write(bridge_bindings_path(session_id)?, serde_json::to_string(&addrs)?)?;
+        std::fs::write(
+            bridge_bindings_path(session_id)?,
+            serde_json::to_string(&addrs)?,
+        )?;
         Ok(false)
     }
 }
@@ -272,7 +275,10 @@ fn build_push_prompt(d: &OnDeliverDescriptor) -> String {
     if let Some(subject) = d.subject.as_deref().filter(|s| !s.is_empty()) {
         p.push_str(&format!("subject: {subject}\n"));
     }
-    p.push_str(&format!("requires_disposition: {}\n\n", d.requires_disposition));
+    p.push_str(&format!(
+        "requires_disposition: {}\n\n",
+        d.requires_disposition
+    ));
     p.push_str(&d.body);
     p.push_str(&format!(
         "\n\nThis message was pushed by telex. Record consumption with `telex ack --address {} --id {}`",
@@ -341,20 +347,22 @@ async fn push(_ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
     };
     let line = serde_json::to_string(&request)?;
 
-    let response =
-        match tokio::time::timeout(Duration::from_secs(20), bridge_roundtrip(&registry.endpoint.path, &line))
-            .await
-        {
-            Ok(Ok(response)) => response,
-            Ok(Err(e)) => {
-                eprintln!("telex copilot push: bridge transport failed: {e}");
-                return Ok(2);
-            }
-            Err(_) => {
-                eprintln!("telex copilot push: bridge did not respond within budget");
-                return Ok(2);
-            }
-        };
+    let response = match tokio::time::timeout(
+        Duration::from_secs(20),
+        bridge_roundtrip(&registry.endpoint.path, &line),
+    )
+    .await
+    {
+        Ok(Ok(response)) => response,
+        Ok(Err(e)) => {
+            eprintln!("telex copilot push: bridge transport failed: {e}");
+            return Ok(2);
+        }
+        Err(_) => {
+            eprintln!("telex copilot push: bridge did not respond within budget");
+            return Ok(2);
+        }
+    };
 
     let parsed: BridgePushResponse = match serde_json::from_str(response.trim()) {
         Ok(parsed) => parsed,
