@@ -908,13 +908,19 @@ impl DaemonState {
 
     fn remove_member_if_current(&self, record: &MemberRecord) -> bool {
         let key = Self::member_key(&record.store_key, &record.session_id, &record.address);
-        let mut members = self.members.lock().unwrap();
-        let should_remove = members.get(&key).is_some_and(|current| {
-            current.lease_epoch == record.lease_epoch
-                && current.owner_instance_id == record.owner_instance_id
-        });
+        let should_remove = {
+            let mut members = self.members.lock().unwrap();
+            let should = members.get(&key).is_some_and(|current| {
+                current.lease_epoch == record.lease_epoch
+                    && current.owner_instance_id == record.owner_instance_id
+            });
+            if should {
+                members.remove(&key);
+            }
+            should
+        };
         if should_remove {
-            members.remove(&key);
+            self.on_deliver_forget_member(&key);
         }
         should_remove
     }
@@ -926,6 +932,7 @@ impl DaemonState {
     fn clear_members(&self) {
         self.members.lock().unwrap().clear();
         self.waiters.lock().unwrap().clear();
+        self.on_deliver.pushed.lock().unwrap().clear();
     }
 
     fn push_recent_error(&self, kind: impl Into<String>, message: impl Into<String>) {
@@ -1211,6 +1218,7 @@ impl MemberRecord {
             last_waiter_detail: self.last_waiter_detail.clone(),
             last_waiter_pid: self.last_waiter_pid,
             last_delivered_message_id: self.last_delivered_message_id,
+            push_registered: self.on_deliver.is_some(),
             unattended_since_ms,
             unattended_for_ms,
             deaf_since_ms,
@@ -2016,6 +2024,9 @@ enum ClientAction {
 
 /// Max concurrent on-deliver handler processes across the daemon.
 const ON_DELIVER_MAX_CONCURRENCY: usize = 8;
+/// Max messages a single per-member sweep will (re)push per tick, so a large backlog cannot
+/// starve fresh commit-time pushes; the remainder is delivered on subsequent sweeps.
+const ON_DELIVER_SWEEP_BATCH: usize = 64;
 /// Wall-clock budget for a single on-deliver handler process.
 const ON_DELIVER_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -2110,21 +2121,25 @@ impl DaemonState {
         self.on_deliver.inflight.lock().unwrap().remove(key);
     }
 
-    /// Fast-path push on durable commit: fire the handler for the just-committed message to
-    /// every recipient address (to + cc) that registered one. Off the critical path.
+    /// Drop a member's push dedup state so a later re-bind re-pushes still-undelivered messages
+    /// (lifecycle-scoped dedup). Called on member removal and on (re-)register.
+    fn on_deliver_forget_member(&self, member: &MemberKey) {
+        self.on_deliver.pushed.lock().unwrap().remove(member);
+    }
+
+    /// Fast-path push on durable commit: fire the handler for the just-committed message to the
+    /// primary recipient that registered one. CC recipients are observers whose delivery rows
+    /// are inserted already-consumed (not returned by `fetch_undelivered`), so they cannot be
+    /// retried consistently; they read cc'd messages via `telex inbox`, not push.
     fn fire_on_deliver_on_commit(self: &Arc<Self>, store_key: &str, row: &MessageRow) {
-        let mut addrs = vec![row.to_addr.clone()];
-        addrs.extend(cc_recipients(row.cc.as_deref()));
-        for addr in addrs {
-            for (member_key, argv) in self.on_deliver_candidates(store_key, &addr) {
-                self.spawn_on_deliver(
-                    member_key,
-                    argv,
-                    store_key.to_string(),
-                    addr.clone(),
-                    row.clone(),
-                );
-            }
+        for (member_key, argv) in self.on_deliver_candidates(store_key, &row.to_addr) {
+            self.spawn_on_deliver(
+                member_key,
+                argv,
+                store_key.to_string(),
+                row.to_addr.clone(),
+                row.clone(),
+            );
         }
     }
 
@@ -2157,14 +2172,15 @@ impl DaemonState {
         let sem = self.on_deliver.sem.clone();
         let state = self.clone();
         tokio::spawn(async move {
-            let ok = run_on_deliver(sem, argv, descriptor).await;
+            let (ok, stderr) = run_on_deliver(sem, argv, descriptor).await;
             if ok {
                 state.on_deliver_mark_pushed(&member_key, id);
             } else {
+                let detail = stderr.map(|s| format!(": {s}")).unwrap_or_default();
                 state.push_recent_error(
                     "OnDeliverFailed",
                     format!(
-                        "on-deliver handler failed store={store_key} address={address} message_id={id}"
+                        "on-deliver handler failed store={store_key} address={address} message_id={id}{detail}"
                     ),
                 );
             }
@@ -2192,23 +2208,28 @@ fn on_deliver_descriptor_json(store_key: &str, address: &str, row: &MessageRow) 
 }
 
 /// Exec one on-deliver handler process: descriptor on stdin, bounded concurrency, bounded
-/// wall-clock. Returns true only on a clean exit 0. The daemon treats the argv opaquely.
-async fn run_on_deliver(sem: Arc<Semaphore>, argv: Vec<String>, descriptor: String) -> bool {
+/// wall-clock. Returns (success, bounded-stderr-tail-on-failure). The daemon treats the argv
+/// opaquely.
+async fn run_on_deliver(
+    sem: Arc<Semaphore>,
+    argv: Vec<String>,
+    descriptor: String,
+) -> (bool, Option<String>) {
     if argv.is_empty() {
-        return false;
+        return (false, None);
     }
     let _permit = match sem.acquire().await {
         Ok(permit) => permit,
-        Err(_) => return false,
+        Err(_) => return (false, None),
     };
     let mut cmd = tokio::process::Command::new(&argv[0]);
     cmd.args(&argv[1..])
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::piped());
     let mut child = match cmd.spawn() {
         Ok(child) => child,
-        Err(_) => return false,
+        Err(e) => return (false, Some(format!("spawn failed: {e}"))),
     };
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
@@ -2216,13 +2237,31 @@ async fn run_on_deliver(sem: Arc<Semaphore>, argv: Vec<String>, descriptor: Stri
         let _ = stdin.write_all(b"\n").await;
         // stdin drops here, closing the pipe so the handler sees EOF.
     }
+    let stderr_pipe = child.stderr.take();
     match tokio::time::timeout(ON_DELIVER_TIMEOUT, child.wait()).await {
-        Ok(Ok(status)) => status.success(),
-        Ok(Err(_)) => false,
+        Ok(Ok(status)) if status.success() => (true, None),
+        Ok(Ok(_)) => (false, read_bounded_stderr(stderr_pipe).await),
+        Ok(Err(e)) => (false, Some(format!("wait failed: {e}"))),
         Err(_) => {
             let _ = child.start_kill();
-            false
+            (false, Some("handler timed out".to_string()))
         }
+    }
+}
+
+/// Read a bounded tail of a finished child's stderr for diagnostics. No message bodies flow
+/// through stderr; `telex copilot push` writes only short error lines.
+async fn read_bounded_stderr(pipe: Option<tokio::process::ChildStderr>) -> Option<String> {
+    use tokio::io::AsyncReadExt;
+    let pipe = pipe?;
+    let mut buf = Vec::new();
+    let _ = pipe.take(4096).read_to_end(&mut buf).await;
+    let text = String::from_utf8_lossy(&buf);
+    let text = text.trim();
+    if text.is_empty() {
+        None
+    } else {
+        Some(text.chars().take(400).collect())
     }
 }
 
@@ -2259,6 +2298,7 @@ async fn on_deliver_sweep_member(
     };
     let keep: BTreeSet<i64> = undelivered.iter().map(|r| r.id).collect();
     state.on_deliver_retain_pushed(&member_key, &keep);
+    let mut fired = 0usize;
     for row in undelivered {
         if state.on_deliver_already_pushed(&member_key, row.id) {
             continue;
@@ -2270,6 +2310,10 @@ async fn on_deliver_sweep_member(
             member.address.clone(),
             row,
         );
+        fired += 1;
+        if fired >= ON_DELIVER_SWEEP_BATCH {
+            break;
+        }
     }
 }
 
@@ -2838,6 +2882,11 @@ async fn register_member(
                 }
                 state.insert_member(refreshed.clone());
                 if refreshed.on_deliver.is_some() {
+                    state.on_deliver_forget_member(&MemberKey {
+                        store_key: refreshed.store_key.clone(),
+                        session_id: refreshed.session_id.clone(),
+                        address: refreshed.address.clone(),
+                    });
                     spawn_on_deliver_backlog(state.clone(), refreshed.clone());
                 }
                 return Response::Registered {
@@ -3017,6 +3066,11 @@ async fn register_member(
     };
     state.insert_member(record);
     if let Some(member) = backlog {
+        state.on_deliver_forget_member(&MemberKey {
+            store_key: member.store_key.clone(),
+            session_id: member.session_id.clone(),
+            address: member.address.clone(),
+        });
         spawn_on_deliver_backlog(state.clone(), member);
     }
     Response::Registered {
@@ -4187,6 +4241,141 @@ mod p3_tests {
         assert_eq!(v["attention"], "interrupt");
         assert_eq!(v["requires_disposition"], true);
         assert_eq!(v["body"], "hello body");
+    }
+
+    fn exit_zero_argv() -> Vec<String> {
+        #[cfg(windows)]
+        {
+            vec!["cmd".into(), "/c".into(), "exit".into(), "0".into()]
+        }
+        #[cfg(unix)]
+        {
+            vec!["sh".into(), "-c".into(), "exit 0".into()]
+        }
+    }
+
+    fn exit_one_argv() -> Vec<String> {
+        #[cfg(windows)]
+        {
+            vec!["cmd".into(), "/c".into(), "exit".into(), "1".into()]
+        }
+        #[cfg(unix)]
+        {
+            vec!["sh".into(), "-c".into(), "exit 1".into()]
+        }
+    }
+
+    async fn insert_to(state: &Arc<DaemonState>, store: &str, address: &str) -> i64 {
+        let backend = match state.backend_for(store).await {
+            Ok(backend) => backend,
+            Err(e) => panic!("backend_for failed: {e:?}"),
+        };
+        backend
+            .insert_message(&NewMessage {
+                to_addr: address.to_string(),
+                from_addr: Some("addr:snd".to_string()),
+                kind: "note".to_string(),
+                attention: Attention::Interrupt,
+                body: "hello".to_string(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .expect("insert_message")
+            .id
+    }
+
+    #[tokio::test]
+    async fn on_deliver_fires_and_marks_pushed_on_success() {
+        let state = test_state("on-deliver-fires");
+        let store = store_key("on-deliver-fires");
+        let mut req = register_req(&store, "rcv", "addr:rcv");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_zero_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        let id = insert_to(&state, &store, "addr:rcv").await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(id)
+            .await
+            .unwrap()
+            .unwrap();
+        state.fire_on_deliver_on_commit(&store, &row);
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "rcv".to_string(),
+            address: "addr:rcv".to_string(),
+        };
+        let mut pushed = false;
+        for _ in 0..100 {
+            if state.on_deliver_already_pushed(&member_key, id) {
+                pushed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            pushed,
+            "a successful on-deliver handler should mark the message pushed"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_deliver_failure_does_not_mark_pushed() {
+        let state = test_state("on-deliver-fails");
+        let store = store_key("on-deliver-fails");
+        let mut req = register_req(&store, "rcv", "addr:rcv");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_one_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        let id = insert_to(&state, &store, "addr:rcv").await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(id)
+            .await
+            .unwrap()
+            .unwrap();
+        state.fire_on_deliver_on_commit(&store, &row);
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "rcv".to_string(),
+            address: "addr:rcv".to_string(),
+        };
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert!(
+            !state.on_deliver_already_pushed(&member_key, id),
+            "a failed on-deliver handler must leave the message unpushed (retryable)"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_deliver_forget_member_clears_pushed() {
+        let state = test_state("on-deliver-forget");
+        let store = store_key("on-deliver-forget");
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        state.on_deliver_mark_pushed(&member_key, 7);
+        assert!(state.on_deliver_already_pushed(&member_key, 7));
+        state.on_deliver_forget_member(&member_key);
+        assert!(
+            !state.on_deliver_already_pushed(&member_key, 7),
+            "forgetting a member must clear its push dedup set so a rebind re-pushes"
+        );
     }
 
     fn wait_req(store: &str, session: &str, address: &str, timeout_ms: u64) -> Request {

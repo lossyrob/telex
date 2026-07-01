@@ -53,7 +53,8 @@ node .\push.mjs --session $sid --prompt "hello from the bridge" --display "[tele
 Cross-terminal (push from session A to session B):
 
 ```powershell
-# launch a peer that loads the bridge (see peer-prompt.txt), then from A:
+# in session B, load the bridge (copy extension.mjs into its session dir + extensions_reload),
+# then from session A:
 node .\push.mjs --latest --prompt "Write BRIDGE-PUSH-OK to .\peer-proof.txt" --display "[telex] cross-terminal"
 ```
 
@@ -70,9 +71,11 @@ node .\push.mjs --latest --prompt "Write BRIDGE-PUSH-OK to .\peer-proof.txt" --d
   framing where the server responds then closes.)
 - **`displayPrompt`** renders a clean timeline label.
 
-## Not included (intentionally)
+## Relationship to the shipped implementation
 
-This is a transport prototype. The daemon's generic on-deliver exec primitive,
-the `telex attach --copilot-bridge` provisioning, the `telex copilot push` Rust
-handler, and stale-entry health probing are described in the design doc and are
-the implementation work.
+These are the reference bytes: `extension.mjs` is embedded in the telex binary
+(`include_str!`) and written into the session extension dir on
+`telex copilot attach --copilot-bridge`. The daemon's generic on-deliver exec
+primitive and the `telex copilot push` Rust handler (which supersedes `push.mjs`)
+drive delivery; `push.mjs` remains as a wire-protocol reference and debugging
+tool. See `docs/design/copilot-bridge-push.md`.

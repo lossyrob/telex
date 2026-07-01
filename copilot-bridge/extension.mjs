@@ -23,7 +23,7 @@
 // The bridge forwards `mode` verbatim; the attention->mode decision
 // (interrupt -> immediate, else -> enqueue) is made by `telex copilot push`.
 
-import { mkdir, writeFile, rm, chmod } from "node:fs/promises";
+import { mkdir, writeFile, rm, chmod, readFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
@@ -137,7 +137,20 @@ await new Promise((resolve, reject) => {
   server.listen(endpoint.path, resolve);
 });
 if (isPosix && endpoint.kind === "unix") {
-  await chmod(endpoint.path, 0o600).catch(() => {});
+  // Fail closed: if we cannot restrict the socket to the owner, do not serve an insecure
+  // endpoint. The daemon's push handler then fails and retries, and the failure is visible.
+  try {
+    await chmod(endpoint.path, 0o600);
+  } catch (e) {
+    try {
+      server.close();
+    } catch {}
+    await rm(endpoint.path, { force: true }).catch(() => {});
+    throw new Error(
+      "telex-bridge: refusing to serve, could not secure socket permissions: " +
+        (e && e.message ? e.message : e),
+    );
+  }
 }
 
 await writeFile(
@@ -166,8 +179,14 @@ const cleanup = async () => {
   try {
     server.close();
   } catch {}
+  // Only remove the registry if it still points at THIS process, so a /clear reload (old
+  // process SIGTERM'd after the new one rewrote the registry) does not delete the newer
+  // bridge's registry and make push report "no live bridge".
   try {
-    await rm(registryPath, { force: true });
+    const raw = await readFile(registryPath, "utf8");
+    if (JSON.parse(raw).pid === process.pid) {
+      await rm(registryPath, { force: true });
+    }
   } catch {}
   if (endpoint.kind === "unix") {
     await rm(endpoint.path, { force: true }).catch(() => {});

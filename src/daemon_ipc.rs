@@ -437,6 +437,9 @@ pub struct MemberStatus {
     pub last_waiter_pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_delivered_message_id: Option<i64>,
+    /// Whether this member registered a daemon on-deliver push handler (bridge push is active).
+    #[serde(default)]
+    pub push_registered: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unattended_since_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
