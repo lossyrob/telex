@@ -173,7 +173,7 @@ response to a concrete constraint, not a stylistic preference.
 ### 7. displayPrompt label
 
 - **Change:** the bridge sends with `displayPrompt` so the timeline shows a
-  clean `[telex] from <addr> (<attention>)` label instead of the raw injected prompt.
+  clean `[telex] FROM: <addr> SUBJECT: <subject>` label instead of the raw injected prompt.
 - **Why:** operator legibility. `displayPrompt` is a first-class send option in
   the current SDK (`MessageOptions.displayPrompt`, 1.0.66) and is preserved on
   the underlying session RPC; the bridge uses the path that preserves it. (An

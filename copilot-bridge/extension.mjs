@@ -18,7 +18,7 @@
 // DACL grants Everyone READ, so the OS ACL alone does not restrict the pipe to the owner.
 //
 // Wire protocol: one JSON request per connection, newline-terminated:
-//   {"prompt": "...", "displayPrompt": "[telex] from <addr>", "mode": "enqueue"}
+//   {"prompt": "...", "displayPrompt": "[telex] FROM: <addr> SUBJECT: <subject>", "mode": "enqueue"}
 // Response, newline-terminated:
 //   {"ok": true, "sessionId": "...", "mode": "enqueue", "accepted": "queued"|"pending"}
 // The bridge forwards `mode` verbatim; the attention->mode decision

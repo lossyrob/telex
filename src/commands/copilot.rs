@@ -468,6 +468,26 @@ fn build_push_prompt(d: &OnDeliverDescriptor, session_id: &str, store_selector: 
     p
 }
 
+fn compact_one_line(value: &str, max_chars: usize) -> String {
+    let mut out = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    if out.chars().count() > max_chars {
+        out = out.chars().take(max_chars.saturating_sub(3)).collect();
+        out.push_str("...");
+    }
+    out
+}
+
+fn push_display_prompt(d: &OnDeliverDescriptor) -> String {
+    let from = d.from.as_deref().unwrap_or("unknown");
+    let subject = d
+        .subject
+        .as_deref()
+        .map(|s| compact_one_line(s, 96))
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| "(no subject)".to_string());
+    format!("[telex] FROM: {from} SUBJECT: {subject}")
+}
+
 /// Map a bridge push response to the handler exit code: 0 on success, `PUSH_EXIT_PERMANENT`
 /// (dead-letter) when the bridge reports `request_too_large` (structurally unpushable), else a
 /// transient nonzero the daemon retries.
@@ -545,11 +565,7 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
 
     let request = BridgePushRequest {
         prompt: build_push_prompt(&descriptor, &session, &store_selector_flags(&ctx.cfg)),
-        display_prompt: format!(
-            "[telex] from {} ({})",
-            descriptor.from.as_deref().unwrap_or("unknown"),
-            descriptor.attention
-        ),
+        display_prompt: push_display_prompt(&descriptor),
         mode: attention_to_send_mode(&descriptor.attention),
         secret: bridge_secret,
     };
@@ -1735,6 +1751,24 @@ mod tests {
             secret: None,
         };
         assert!(!serde_json::to_string(&without).unwrap().contains("secret"));
+    }
+
+    #[test]
+    fn push_display_prompt_uses_from_and_subject() {
+        let descriptor = OnDeliverDescriptor {
+            message_id: 42,
+            address: "addr:rcv".to_string(),
+            from: Some("addr:sender".to_string()),
+            kind: "note".to_string(),
+            attention: "background".to_string(),
+            requires_disposition: false,
+            subject: Some("Status update".to_string()),
+            body: "body".to_string(),
+        };
+        assert_eq!(
+            push_display_prompt(&descriptor),
+            "[telex] FROM: addr:sender SUBJECT: Status update"
+        );
     }
 
     fn member(address: &str, live_waiters_count: usize, pending: i64) -> MemberStatus {
