@@ -37,7 +37,7 @@ pub fn resolve_session_id(explicit: Option<&str>) -> Result<String> {
     optional_session_id(explicit)
         .ok_or_else(|| {
             anyhow!(
-                "no session id available; pass --session or set TELEX_SESSION_ID (Copilot users should run the telex Copilot plugin mapper)"
+                "no session id available; pass --session or set TELEX_SESSION_ID (Copilot CLI: see 'telex copilot skill')"
             )
         })
 }

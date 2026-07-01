@@ -357,6 +357,7 @@ async fn register_for_retry<C: WaitConnector>(
                 tags: None,
                 watch_pids: Vec::new(),
                 recovery: true,
+                on_deliver: None,
             }),
         )
         .await;

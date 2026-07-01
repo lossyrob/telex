@@ -58,28 +58,25 @@ message peers. To hand an agent a specific assignment in one command:
 telex skill --address workstream:proj/node:issue-215
 ```
 
-In Copilot CLI, install/use the telex plugin and attach with:
+In Copilot CLI, install/use the telex plugin and bind with push delivery so
+messages arrive as turns (no waiter to run or re-arm):
 
 ```sh
 copilot plugin marketplace add lossyrob/telex
 copilot plugin install telex@telex
-telex --address workstream:proj/node:issue-215 copilot attach --description "<work>"
-telex --address workstream:proj/node:issue-215 wait --session "$COPILOT_AGENT_SESSION_ID" --out-dir <dir>
+telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --description "<work>"
+# then run the `extensions_reload` tool once; delivered telex messages arrive as turns.
+telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
 ```
 
 The adapter maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id and
 `$COPILOT_LOADER_PID` to a loader watch-pid. Generic telex commands intentionally
 do not read Copilot-specific env variables directly, so follow-up generic commands
-must pass `--session "$COPILOT_AGENT_SESSION_ID"` or run in a shell/script that
-sets `TELEX_SESSION_ID`.
+(e.g. `telex ack`) must pass `--session "$COPILOT_AGENT_SESSION_ID"` or run in a
+shell/script that sets `TELEX_SESSION_ID`.
 
-Detached waiter stdout is not delivered to the agent; agents still read
-`message.json` / `delivery.json` from `--out-dir` after the completion wake.
-Notification-hook content enrichment was evaluated for removing that fetch step,
-but the hook payload exposes only notification metadata and no stable `--out-dir`
-path to read. Classic waiter robustness in this PR comes from the default-on
-`agentStop` coverage guard; overnight/AFK deterministic wake belongs to the ACP
-track.
+`telex wait` remains the generic pull primitive for scripts, CI, and non-extension
+harnesses; Copilot sessions use push delivery above instead.
 
 The plugin shape is validated against GitHub Copilot CLI 1.0.66-1; see
 [`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)

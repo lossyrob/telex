@@ -153,6 +153,10 @@ pub struct AttachArgs {
     /// Do not convert `$TELEX_SESSION_PID` into a daemon watch-pid.
     #[arg(long)]
     pub no_session_bind: bool,
+    /// Programmatic-only: harness-neutral on-deliver handler argv registered with the daemon.
+    /// Not a CLI flag; set by the Copilot bridge bind path.
+    #[arg(skip)]
+    pub on_deliver: Option<Vec<String>>,
 }
 
 #[derive(Args)]
@@ -426,7 +430,6 @@ pub struct DaemonSessionEndArgs {
 #[derive(Subcommand)]
 pub enum CopilotCmd {
     /// Register a Copilot session using Copilot env vars mapped to generic telex inputs.
-    #[command(hide = true)]
     Attach(CopilotAttachArgs),
     /// Handle Copilot sessionEnd by non-destructively ending this session in the daemon.
     #[command(hide = true)]
@@ -434,9 +437,13 @@ pub enum CopilotCmd {
     /// Handle Copilot agentStop by nudging unarmed attended stations to re-arm or detach.
     #[command(hide = true)]
     TurnGuard(CopilotTurnGuardArgs),
-    /// Print the canonical embedded telex skill for plugin consumers.
+    /// Print version-matched Copilot CLI instructions (the binary is the source of truth).
+    Skill(CopilotSkillArgs),
+    /// Deliver one telex message (descriptor on stdin) into a session via its bridge.
     #[command(hide = true)]
-    Skill,
+    Push(CopilotPushArgs),
+    /// Detach a Copilot session's address and tear down its bridge if it was the last binding.
+    Detach(CopilotDetachArgs),
 }
 
 #[derive(Args)]
@@ -456,6 +463,10 @@ pub struct CopilotAttachArgs {
     /// Occupant identity recorded on the lease (default: session host/pid).
     #[arg(long)]
     pub occupant: Option<String>,
+    /// Provision the in-session push bridge (write the extension and register the
+    /// on-deliver push handler) so messages arrive as turns without a waiter.
+    #[arg(long)]
+    pub copilot_bridge: bool,
 }
 
 #[derive(Args)]
@@ -470,6 +481,29 @@ pub struct CopilotTurnGuardArgs {
     /// Stable Copilot session identity; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
     pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotPushArgs {
+    /// Stable Copilot session identity whose bridge should receive the message;
+    /// defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotDetachArgs {
+    /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotSkillArgs {
+    /// The invoking telex plugin's version, for a plugin/binary compatibility check.
+    /// Falls back to the TELEX_PLUGIN_VERSION environment variable.
+    #[arg(long)]
+    pub plugin_version: Option<String>,
 }
 
 #[derive(Args)]
@@ -747,6 +781,35 @@ mod tests {
                 .command,
             Command::Copilot(CopilotCmd::TurnGuard(_))
         ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "skill", "--plugin-version", "0.1.0"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::Skill(CopilotSkillArgs {
+                plugin_version: Some(v),
+            })) if v == "0.1.0"
+        ));
+    }
+
+    #[test]
+    fn copilot_help_lists_user_facing_subcommands_and_hides_internal_ones() {
+        let mut cmd = Cli::command();
+        let copilot = cmd
+            .find_subcommand_mut("copilot")
+            .expect("copilot subcommand exists");
+        let help = copilot.render_long_help().to_string();
+        for sub in ["skill", "attach", "detach"] {
+            assert!(
+                help.contains(sub),
+                "`telex copilot --help` should list `{sub}`:\n{help}"
+            );
+        }
+        for hidden in ["session-end", "turn-guard"] {
+            assert!(
+                !help.contains(hidden),
+                "`telex copilot --help` leaked internal `{hidden}`:\n{help}"
+            );
+        }
     }
 
     #[test]

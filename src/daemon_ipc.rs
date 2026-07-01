@@ -26,6 +26,11 @@ pub const CAP_STATUS_P5: &str = "status_p5";
 pub const CAP_STATION_LIFECYCLE_P8: &str = "station_lifecycle_p8";
 pub const CAP_WAIT_MIN_ATTENTION_P9: &str = "wait_min_attention_p9";
 pub const CAP_WAIT_WAKE_ON_CC_P10: &str = "wait_wake_on_cc_p10";
+/// Advertised (not required): the daemon honors `Register.on_deliver` and runs the generic
+/// on-deliver exec push primitive. A client provisioning push delivery checks this / the
+/// `push_registered` status to fail closed against an older daemon that would silently ignore
+/// `on_deliver`.
+pub const CAP_ON_DELIVER_EXEC: &str = "on_deliver_exec_v1";
 
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
@@ -167,6 +172,11 @@ pub enum Request {
         watch_pids: Vec<WatchPidSpec>,
         #[serde(default)]
         recovery: bool,
+        /// Optional harness-neutral on-deliver handler argv. When present, the daemon
+        /// execs this command (message descriptor on stdin) after a message for this
+        /// address is durably committed. The daemon never interprets the argv.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        on_deliver: Option<Vec<String>>,
     },
     Detach {
         store_key: String,
@@ -436,6 +446,9 @@ pub struct MemberStatus {
     pub last_waiter_pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_delivered_message_id: Option<i64>,
+    /// Whether this member registered a daemon on-deliver push handler (bridge push is active).
+    #[serde(default)]
+    pub push_registered: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unattended_since_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -613,10 +626,14 @@ impl From<serde_json::Error> for HandshakeError {
 }
 
 pub fn daemon_capabilities() -> Vec<String> {
-    REQUIRED_CAPABILITIES
+    let mut caps: Vec<String> = REQUIRED_CAPABILITIES
         .iter()
         .map(|s| (*s).to_string())
-        .collect()
+        .collect();
+    // Advertised-but-optional so it never breaks the required-capability handshake with an
+    // older peer; provisioning code gates on it (and on `push_registered`) explicitly.
+    caps.push(CAP_ON_DELIVER_EXEC.to_string());
+    caps
 }
 
 pub fn daemon_required_capabilities() -> Vec<String> {
