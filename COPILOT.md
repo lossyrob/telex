@@ -63,6 +63,20 @@ yours to make.
    `extensions_reload` or session end; run `extensions_reload` once after detach if you want
    it unloaded immediately. Session end also removes the files.
 
+## Sending and replying
+
+Receiving is push; **sending is not**. To start or continue a conversation, `telex send` and
+`telex reply` need your session id -- exactly like `ack`/`handle`, they do **not** read Copilot
+env vars, and fail closed with `no session id available` without it:
+
+```sh
+telex --address <addr> send --to <peer> --body "..." --session "$COPILOT_AGENT_SESSION_ID"
+```
+
+On PowerShell use `$env:COPILOT_AGENT_SESSION_ID`. `telex reply` takes the same `--session`
+(run `telex reply --help` for its exact flags). Only `telex copilot attach`/`detach` map the
+Copilot session id for you; the generic verbs do not.
+
 ## Fallback: no bridge
 
 If the bridge cannot be loaded (extensions disabled), telex push is unavailable.
