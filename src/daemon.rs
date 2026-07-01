@@ -2039,6 +2039,10 @@ const ON_DELIVER_RETRY_BASE: Duration = Duration::from_secs(15);
 const ON_DELIVER_RETRY_MAX: Duration = Duration::from_secs(300);
 /// After this many attempts on the same still-unacked message, surface a degraded status.
 const ON_DELIVER_DEGRADED_AFTER: u32 = 6;
+/// Exit code the on-deliver handler returns for a permanent, non-retryable failure (e.g. a
+/// message too large to ever fit the harness frame). The message is dead-lettered rather than
+/// retried; it stays durably queued.
+const ON_DELIVER_PERMANENT_EXIT: i32 = 3;
 
 /// Backoff before re-pushing a still-undelivered message that has already been attempted
 /// `attempts` times: `ON_DELIVER_RETRY_BASE` doubling per attempt, capped at
@@ -2074,12 +2078,15 @@ struct PushAttempt {
 /// agent-driven via `Ack`), so a failed or missing push only leaves the message durably
 /// queued, exactly like an unarmed pull station. `pushed` records the last attempt per
 /// still-undelivered `(member, message_id)` so re-pushes back off while the message stays
-/// unacked, and is pruned to the currently-undelivered set on each sweep; `inflight` prevents
-/// a commit-path and a sweep-path from racing the same message.
+/// unacked, and is pruned to the currently-undelivered set on each sweep; `dead_lettered`
+/// holds messages a handler reported as permanently unpushable (skipped from further pushes,
+/// surfaced via a degraded status, still durably queued); `inflight` prevents a commit-path
+/// and a sweep-path from racing the same message.
 struct OnDeliverState {
     sem: Arc<Semaphore>,
     inflight: Mutex<HashSet<OnDeliverKey>>,
     pushed: Mutex<HashMap<MemberKey, HashMap<i64, PushAttempt>>>,
+    dead_lettered: Mutex<HashMap<MemberKey, BTreeSet<i64>>>,
 }
 
 impl Default for OnDeliverState {
@@ -2088,6 +2095,7 @@ impl Default for OnDeliverState {
             sem: Arc::new(Semaphore::new(ON_DELIVER_MAX_CONCURRENCY)),
             inflight: Mutex::new(HashSet::new()),
             pushed: Mutex::new(HashMap::new()),
+            dead_lettered: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -2113,10 +2121,21 @@ impl DaemonState {
             .collect()
     }
 
-    /// Whether a re-push of `(member, id)` should be skipped right now: true only while the
-    /// last attempt is still inside its backoff window. A never-attempted or backed-off-past
-    /// message is eligible, so a message accepted-but-never-acked keeps being retried.
+    /// Whether a re-push of `(member, id)` should be skipped right now: true if the message was
+    /// dead-lettered (permanent failure), or while its last attempt is still inside its backoff
+    /// window. A never-attempted or backed-off-past message is eligible, so a message
+    /// accepted-but-never-acked keeps being retried.
     fn on_deliver_should_skip(&self, member: &MemberKey, id: i64, now: Instant) -> bool {
+        if self
+            .on_deliver
+            .dead_lettered
+            .lock()
+            .unwrap()
+            .get(member)
+            .is_some_and(|s| s.contains(&id))
+        {
+            return true;
+        }
         self.on_deliver
             .pushed
             .lock()
@@ -2144,14 +2163,23 @@ impl DaemonState {
         entry.attempts
     }
 
-    /// Prune a member's push-attempt records to only ids still in `keep` (the currently-
-    /// undelivered set), so the attempt map stays bounded as messages are acked/consumed.
+    /// Prune a member's push-attempt and dead-letter records to only ids still in `keep` (the
+    /// currently-undelivered set), so both maps stay bounded as messages are acked/consumed.
     fn on_deliver_retain_pushed(&self, member: &MemberKey, keep: &BTreeSet<i64>) {
-        let mut map = self.on_deliver.pushed.lock().unwrap();
-        if let Some(attempts) = map.get_mut(member) {
-            attempts.retain(|id, _| keep.contains(id));
-            if attempts.is_empty() {
-                map.remove(member);
+        {
+            let mut map = self.on_deliver.pushed.lock().unwrap();
+            if let Some(attempts) = map.get_mut(member) {
+                attempts.retain(|id, _| keep.contains(id));
+                if attempts.is_empty() {
+                    map.remove(member);
+                }
+            }
+        }
+        let mut dead = self.on_deliver.dead_lettered.lock().unwrap();
+        if let Some(set) = dead.get_mut(member) {
+            set.retain(|id| keep.contains(id));
+            if set.is_empty() {
+                dead.remove(member);
             }
         }
     }
@@ -2168,6 +2196,21 @@ impl DaemonState {
     /// (lifecycle-scoped dedup). Called on member removal and on (re-)register.
     fn on_deliver_forget_member(&self, member: &MemberKey) {
         self.on_deliver.pushed.lock().unwrap().remove(member);
+        self.on_deliver.dead_lettered.lock().unwrap().remove(member);
+    }
+
+    /// Mark `(member, id)` permanently unpushable (the handler reported a non-retryable failure,
+    /// e.g. a message too large for the harness frame). It is skipped from further pushes and
+    /// pruned once the message leaves the undelivered set; it is never marked delivered/consumed,
+    /// so it stays durably queued and readable via `telex inbox`.
+    fn on_deliver_dead_letter(&self, member: &MemberKey, id: i64) {
+        self.on_deliver
+            .dead_lettered
+            .lock()
+            .unwrap()
+            .entry(member.clone())
+            .or_default()
+            .insert(id);
     }
 
     /// Fast-path push on durable commit: fire the handler for the just-committed message to the
@@ -2215,26 +2258,39 @@ impl DaemonState {
         let sem = self.on_deliver.sem.clone();
         let state = self.clone();
         tokio::spawn(async move {
-            let (ok, stderr) = run_on_deliver(sem, argv, descriptor).await;
-            // Record the attempt regardless of outcome so the next re-push backs off; the
-            // message is only removed from the attempt map once it is acked (retain sweep).
-            let attempts = state.on_deliver_record_attempt(&member_key, id, Instant::now());
-            if !ok {
+            let (outcome, stderr) = run_on_deliver(sem, argv, descriptor).await;
+            if outcome == RunOutcome::Permanent {
+                // Dead-letter: stop retrying a structurally unpushable message. It stays durably
+                // queued (never marked consumed) and is readable via `telex inbox`.
+                state.on_deliver_dead_letter(&member_key, id);
                 let detail = stderr.map(|s| format!(": {s}")).unwrap_or_default();
                 state.push_recent_error(
-                    "OnDeliverFailed",
+                    "OnDeliverDeadLettered",
                     format!(
-                        "on-deliver handler failed store={store_key} address={address} message_id={id}{detail}"
+                        "on-deliver permanently failed (not retried) store={store_key} address={address} message_id={id}{detail}; message stays durable, read it via `telex inbox`"
                     ),
                 );
-            }
-            if attempts == ON_DELIVER_DEGRADED_AFTER {
-                state.push_recent_error(
-                    "OnDeliverDegraded",
-                    format!(
-                        "on-deliver still unacked after {attempts} attempts store={store_key} address={address} message_id={id}; the bridge may be unloaded/unreachable or the agent has not acked"
-                    ),
-                );
+            } else {
+                // Record the attempt regardless of transient outcome so the next re-push backs
+                // off; the message leaves the attempt map only once it is acked (retain sweep).
+                let attempts = state.on_deliver_record_attempt(&member_key, id, Instant::now());
+                if outcome == RunOutcome::Transient {
+                    let detail = stderr.map(|s| format!(": {s}")).unwrap_or_default();
+                    state.push_recent_error(
+                        "OnDeliverFailed",
+                        format!(
+                            "on-deliver handler failed store={store_key} address={address} message_id={id}{detail}"
+                        ),
+                    );
+                }
+                if attempts == ON_DELIVER_DEGRADED_AFTER {
+                    state.push_recent_error(
+                        "OnDeliverDegraded",
+                        format!(
+                            "on-deliver still unacked after {attempts} attempts store={store_key} address={address} message_id={id}; the bridge may be unloaded/unreachable or the agent has not acked"
+                        ),
+                    );
+                }
             }
             state.on_deliver_end(&key);
         });
@@ -2259,20 +2315,31 @@ fn on_deliver_descriptor_json(store_key: &str, address: &str, row: &MessageRow) 
     .to_string()
 }
 
+/// Outcome of one on-deliver handler exec.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum RunOutcome {
+    /// The handler accepted the push (exit 0).
+    Ok,
+    /// A retryable failure (nonzero exit, spawn error, timeout) -- retried on backoff.
+    Transient,
+    /// A permanent, non-retryable failure (`ON_DELIVER_PERMANENT_EXIT`) -- dead-lettered.
+    Permanent,
+}
+
 /// Exec one on-deliver handler process: descriptor on stdin, bounded concurrency, bounded
-/// wall-clock. Returns (success, bounded-stderr-tail-on-failure). The daemon treats the argv
-/// opaquely.
+/// wall-clock. Returns (outcome, bounded-stderr-tail-on-failure). The daemon treats the argv
+/// opaquely, distinguishing only a permanent exit code so it can dead-letter that message.
 async fn run_on_deliver(
     sem: Arc<Semaphore>,
     argv: Vec<String>,
     descriptor: String,
-) -> (bool, Option<String>) {
+) -> (RunOutcome, Option<String>) {
     if argv.is_empty() {
-        return (false, None);
+        return (RunOutcome::Transient, None);
     }
     let _permit = match sem.acquire().await {
         Ok(permit) => permit,
-        Err(_) => return (false, None),
+        Err(_) => return (RunOutcome::Transient, None),
     };
     let mut cmd = tokio::process::Command::new(&argv[0]);
     cmd.args(&argv[1..])
@@ -2281,7 +2348,7 @@ async fn run_on_deliver(
         .stderr(Stdio::piped());
     let mut child = match cmd.spawn() {
         Ok(child) => child,
-        Err(e) => return (false, Some(format!("spawn failed: {e}"))),
+        Err(e) => return (RunOutcome::Transient, Some(format!("spawn failed: {e}"))),
     };
     if let Some(mut stdin) = child.stdin.take() {
         use tokio::io::AsyncWriteExt;
@@ -2291,12 +2358,19 @@ async fn run_on_deliver(
     }
     let stderr_pipe = child.stderr.take();
     match tokio::time::timeout(ON_DELIVER_TIMEOUT, child.wait()).await {
-        Ok(Ok(status)) if status.success() => (true, None),
-        Ok(Ok(_)) => (false, read_bounded_stderr(stderr_pipe).await),
-        Ok(Err(e)) => (false, Some(format!("wait failed: {e}"))),
+        Ok(Ok(status)) if status.success() => (RunOutcome::Ok, None),
+        Ok(Ok(status)) => {
+            let outcome = if status.code() == Some(ON_DELIVER_PERMANENT_EXIT) {
+                RunOutcome::Permanent
+            } else {
+                RunOutcome::Transient
+            };
+            (outcome, read_bounded_stderr(stderr_pipe).await)
+        }
+        Ok(Err(e)) => (RunOutcome::Transient, Some(format!("wait failed: {e}"))),
         Err(_) => {
             let _ = child.start_kill();
-            (false, Some("handler timed out".to_string()))
+            (RunOutcome::Transient, Some("handler timed out".to_string()))
         }
     }
 }
@@ -4325,6 +4399,17 @@ mod p3_tests {
         }
     }
 
+    fn exit_three_argv() -> Vec<String> {
+        #[cfg(windows)]
+        {
+            vec!["cmd".into(), "/c".into(), "exit".into(), "3".into()]
+        }
+        #[cfg(unix)]
+        {
+            vec!["sh".into(), "-c".into(), "exit 3".into()]
+        }
+    }
+
     async fn insert_to(state: &Arc<DaemonState>, store: &str, address: &str) -> i64 {
         let backend = match state.backend_for(store).await {
             Ok(backend) => backend,
@@ -4474,6 +4559,58 @@ mod p3_tests {
         assert!(on_deliver_backoff(3) > on_deliver_backoff(2));
         assert_eq!(on_deliver_backoff(100), ON_DELIVER_RETRY_MAX);
         assert!(on_deliver_backoff(6) <= ON_DELIVER_RETRY_MAX);
+    }
+
+    #[tokio::test]
+    async fn on_deliver_permanent_exit_dead_letters_and_stops_retrying() {
+        let state = test_state("on-deliver-deadletter");
+        let store = store_key("on-deliver-deadletter");
+        let mut req = register_req(&store, "rcv", "addr:rcv");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_three_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        let id = insert_to(&state, &store, "addr:rcv").await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(id)
+            .await
+            .unwrap()
+            .unwrap();
+        state.fire_on_deliver_on_commit(&store, &row);
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "rcv".to_string(),
+            address: "addr:rcv".to_string(),
+        };
+        // Wait for the permanent-exit handler to run and dead-letter the message.
+        let mut dead = false;
+        for _ in 0..100 {
+            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
+                dead = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            dead,
+            "a permanent-exit handler must dead-letter the message"
+        );
+        // Unlike a transient failure (which becomes retryable past its backoff), a dead-lettered
+        // message stays skipped indefinitely -- no more futile retries (Namra push oversize).
+        assert!(
+            state.on_deliver_should_skip(
+                &member_key,
+                id,
+                Instant::now() + Duration::from_secs(86400)
+            ),
+            "a dead-lettered message must stay skipped (not retried) indefinitely"
+        );
     }
 
     #[tokio::test]

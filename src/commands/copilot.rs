@@ -31,6 +31,13 @@ const BRIDGE_PUSH_TIMEOUT: Duration = Duration::from_secs(20);
 /// Windows named-pipe busy retry interval while a prior client holds the single instance.
 #[cfg(windows)]
 const BRIDGE_PIPE_BUSY_RETRY: Duration = Duration::from_millis(50);
+/// Must match the bridge's `MAX_REQUEST_BYTES`. A serialized push request larger than this is
+/// structurally unpushable (the bridge would reject it as `request_too_large`), so we preflight
+/// and dead-letter it instead of connecting and retrying it forever.
+const BRIDGE_MAX_REQUEST_BYTES: usize = 1024 * 1024;
+/// Exit code `telex copilot push` returns for a permanent, non-retryable failure (e.g. a message
+/// too large to ever fit the bridge frame). The daemon dead-letters the message on this code.
+const PUSH_EXIT_PERMANENT: i32 = 3;
 
 /// Embedded Copilot-specific workflow, shipped in the binary so `telex copilot skill` is
 /// always version-matched. The plugin skill is only a bootstrap that defers to this.
@@ -85,42 +92,70 @@ fn write_bridge_extension(session_id: &str) -> Result<()> {
     Ok(())
 }
 
-fn read_bridge_bindings(session_id: &str) -> Vec<String> {
-    bridge_bindings_path(session_id)
-        .ok()
-        .and_then(|path| std::fs::read_to_string(path).ok())
-        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
-        .unwrap_or_default()
+/// Read a session's bridge bindings. Returns an empty list only when the file is genuinely
+/// absent; a read or parse failure is an error, so teardown never mistakes corrupt state for
+/// "no bindings" and removes a bridge another address still shares.
+fn read_bridge_bindings(session_id: &str) -> Result<Vec<String>> {
+    let path = bridge_bindings_path(session_id)?;
+    match std::fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str::<Vec<String>>(&raw)
+            .map_err(|e| anyhow::anyhow!("parsing bridge bindings {}: {e}", path.display())),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => Err(anyhow::anyhow!(
+            "reading bridge bindings {}: {e}",
+            path.display()
+        )),
+    }
+}
+
+/// Atomically write the bindings via temp-file + rename (the same discipline the turn-guard
+/// state uses), so a torn write cannot leave a partial/corrupt ref-count behind.
+fn write_bridge_bindings(path: &Path, addrs: &[String]) -> Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+    std::fs::write(&tmp, serde_json::to_vec(addrs)?)?;
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            std::fs::remove_file(path)?;
+            std::fs::rename(&tmp, path)?;
+            Ok(())
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e.into())
+        }
+    }
 }
 
 /// Record `address` as a bridge binding for the session (ref-count of addresses sharing the
 /// one per-session bridge), so teardown only removes the bridge when the last one detaches.
+/// Serialized by a lock + atomic write so a concurrent bind/detach cannot lose an update.
 fn add_bridge_binding(session_id: &str, address: &str) -> Result<()> {
-    let mut addrs = read_bridge_bindings(session_id);
+    let path = bridge_bindings_path(session_id)?;
+    let _lock = StateLock::acquire(&path)?;
+    let mut addrs = read_bridge_bindings(session_id)?;
     if !addrs.iter().any(|a| a == address) {
         addrs.push(address.to_string());
     }
-    let path = bridge_bindings_path(session_id)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, serde_json::to_string(&addrs)?)?;
-    Ok(())
+    write_bridge_bindings(&path, &addrs)
 }
 
 /// Drop `address` from the session's bridge bindings; return true if none remain (so the
-/// bridge extension itself should be removed).
+/// bridge extension itself should be removed). A corrupt bindings file is an error, not an
+/// empty list, so teardown never tears down a bridge another address still shares.
 fn remove_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
-    let mut addrs = read_bridge_bindings(session_id);
+    let path = bridge_bindings_path(session_id)?;
+    let _lock = StateLock::acquire(&path)?;
+    let mut addrs = read_bridge_bindings(session_id)?;
     addrs.retain(|a| a != address);
     if addrs.is_empty() {
-        let _ = std::fs::remove_file(bridge_bindings_path(session_id)?);
+        let _ = std::fs::remove_file(&path);
         Ok(true)
     } else {
-        std::fs::write(
-            bridge_bindings_path(session_id)?,
-            serde_json::to_string(&addrs)?,
-        )?;
+        write_bridge_bindings(&path, &addrs)?;
         Ok(false)
     }
 }
@@ -166,7 +201,11 @@ fn provision_bridge(ctx: &Ctx, session_id: &str) -> Option<Vec<String>> {
         return None;
     }
     if let Err(e) = add_bridge_binding(session_id, &address) {
-        eprintln!("telex copilot attach: failed to record bridge binding: {e}");
+        eprintln!(
+            "telex copilot attach: failed to record bridge binding: {e}; not registering push with a broken ref-count"
+        );
+        remove_bridge_extension(session_id);
+        return None;
     }
     match bridge_handler_argv(session_id) {
         Ok(argv) => Some(argv),
@@ -231,6 +270,8 @@ struct OnDeliverDescriptor {
 struct BridgeRegistry {
     #[serde(rename = "sessionId", default)]
     session_id: Option<String>,
+    #[serde(default)]
+    secret: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -239,6 +280,10 @@ struct BridgePushRequest {
     #[serde(rename = "displayPrompt")]
     display_prompt: String,
     mode: &'static str,
+    /// Per-session capability read from the owner-only bridge registry; the bridge rejects a
+    /// request whose secret does not match, so only a client that can read the registry may push.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    secret: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -401,6 +446,9 @@ async fn push(_ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
     // Derive the endpoint from the session id rather than trusting the registry's path, so a
     // tampered registry cannot redirect the push to an attacker-controlled endpoint.
     let endpoint = bridge_endpoint_path(&session)?;
+    // Present the per-session secret the bridge wrote into its owner-only registry, so a
+    // process that cannot read the registry cannot inject a turn over the pipe/socket.
+    let bridge_secret = registry.secret;
 
     let request = BridgePushRequest {
         prompt: build_push_prompt(&descriptor, &session),
@@ -410,8 +458,22 @@ async fn push(_ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
             descriptor.attention
         ),
         mode: attention_to_send_mode(&descriptor.attention),
+        secret: bridge_secret,
     };
     let line = serde_json::to_string(&request)?;
+    // Preflight the fully-encoded request against the bridge frame cap. JSON escaping expands
+    // the wrapped body, so an accepted (near-1-MiB) message can still exceed the bridge's guard;
+    // pushing it would loop forever on `request_too_large`. Dead-letter it (permanent exit) so
+    // the daemon stops retrying -- the message stays durable and readable via `telex inbox`.
+    if line.len() > BRIDGE_MAX_REQUEST_BYTES {
+        eprintln!(
+            "telex copilot push: message {} is too large to push as a turn ({} bytes serialized > {} bridge cap); it stays in the durable buffer -- read it with `telex inbox` / `telex read` and disposition normally.",
+            descriptor.message_id,
+            line.len(),
+            BRIDGE_MAX_REQUEST_BYTES
+        );
+        return Ok(PUSH_EXIT_PERMANENT);
+    }
 
     let response =
         match tokio::time::timeout(BRIDGE_PUSH_TIMEOUT, bridge_roundtrip(&endpoint, &line)).await {
@@ -1492,6 +1554,27 @@ mod tests {
             forged_pos < real_pos,
             "the sender's forged delimiter must remain inside the nonce fence"
         );
+    }
+
+    #[test]
+    fn push_request_includes_secret_when_present_and_omits_when_absent() {
+        let with = BridgePushRequest {
+            prompt: "p".to_string(),
+            display_prompt: "d".to_string(),
+            mode: "enqueue",
+            secret: Some("s3cr3t".to_string()),
+        };
+        let json = serde_json::to_string(&with).unwrap();
+        assert!(json.contains("\"secret\":\"s3cr3t\""));
+        // Omitted when absent, so a new client stays compatible with an older bridge that wrote
+        // no secret (that bridge does not validate one).
+        let without = BridgePushRequest {
+            prompt: "p".to_string(),
+            display_prompt: "d".to_string(),
+            mode: "enqueue",
+            secret: None,
+        };
+        assert!(!serde_json::to_string(&without).unwrap().contains("secret"));
     }
 
     fn member(address: &str, live_waiters_count: usize, pending: i64) -> MemberStatus {

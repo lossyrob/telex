@@ -2,9 +2,10 @@
 //
 // Simulates the telex daemon's on-deliver handler: resolve a session's bridge
 // endpoint from the registry, connect, hand off one message, print the result.
-// The real handler is `telex copilot push --session <id>` (Rust), exec'd by the
-// daemon's generic on-deliver primitive. This JS reference proves the wire
-// contract and is the oracle the Rust handler must match.
+// The real handler is `telex copilot push --session <id>` (Rust), which supersedes this
+// reference: it derives the bridge endpoint from the session id and uses the registry only
+// for liveness / session ownership (it does NOT trust a registry endpoint path). This JS
+// file is a wire-protocol / debugging reference only, not an oracle the Rust handler tracks.
 //
 // Usage:
 //   node push.mjs --session <copilot-session-id> --prompt "text" [--display "[telex] from <addr>"] [--mode enqueue|immediate]
@@ -109,6 +110,7 @@ async function main() {
     prompt: args.prompt,
     mode: args.mode,
   };
+  if (reg.secret) payload.secret = reg.secret;
   if (args.display) payload.displayPrompt = args.display;
   const result = await sendOverEndpoint(reg.endpoint, payload);
   console.log(JSON.stringify(result));

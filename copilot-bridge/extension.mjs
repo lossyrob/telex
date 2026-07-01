@@ -12,9 +12,10 @@
 //
 // Transport (Option A): a per-session OS named pipe (Windows) / unix domain
 // socket (POSIX). The endpoint path is derived from the Copilot session id so it
-// is stable across `/clear` reloads. Same-user isolation is enforced by the OS:
-// on POSIX via 0700 dir + 0600 socket; on Windows via the default pipe DACL
-// (single-user hosts). No bearer token at rest.
+// is stable across `/clear` reloads. Access is gated two ways: the OS (POSIX 0700 dir +
+// 0600 socket) AND a per-session secret, written into the owner-only registry, that every
+// push request must present. The secret is required because the default Windows named-pipe
+// DACL grants Everyone READ, so the OS ACL alone does not restrict the pipe to the owner.
 //
 // Wire protocol: one JSON request per connection, newline-terminated:
 //   {"prompt": "...", "displayPrompt": "[telex] from <addr>", "mode": "enqueue"}
@@ -28,6 +29,7 @@ import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { joinSession } from "@github/copilot-sdk/extension";
+import { randomBytes } from "node:crypto";
 
 const isPosix = platform() !== "win32";
 const MAX_REQUEST_BYTES = 1024 * 1024; // 1 MiB guard
@@ -59,6 +61,10 @@ const session = await joinSession({
 });
 
 const sessionId = session.sessionId;
+// Per-session shared secret: an application-layer capability so only a client that can read
+// the owner-only registry (i.e. `telex copilot push`) may inject a turn. Defense-in-depth
+// over the OS ACL, needed because the default Windows named-pipe DACL grants Everyone READ.
+const secret = randomBytes(32).toString("hex");
 const registryPath = join(registryDir, `${sessionId}.json`);
 
 // Derive the same-user endpoint from the session id (stable across reloads).
@@ -98,6 +104,11 @@ async function handleConnection(socket) {
       input = JSON.parse(line.trim() || "{}");
     } catch (e) {
       writeResponse(socket, { ok: false, error: "bad_json" });
+      socket.end();
+      return;
+    }
+    if (typeof input.secret !== "string" || input.secret !== secret) {
+      writeResponse(socket, { ok: false, error: "unauthorized" });
       socket.end();
       return;
     }
@@ -160,6 +171,7 @@ await writeFile(
       sessionId,
       endpoint,
       pid: process.pid,
+      secret,
       createdAt: new Date().toISOString(),
     },
     null,

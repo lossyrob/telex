@@ -1,10 +1,9 @@
 # Copilot bridge push: converged path forward (issue #53)
 
-> Status: design of record for the push-delivery node. Supersedes the
-> `--ui-server`-only framing in the original #53 body and folds in Namra's
-> in-session bridge proposal with a small set of deliberate changes. The "why"
-> behind each change is spelled out so the orchestrator can adopt or contest it
-> with the reasoning visible.
+> Status: design of record for Copilot push delivery (issue #53). It supersedes the
+> `--ui-server`-only framing in the original #53 body and folds in the in-session bridge
+> proposal with a small set of deliberate changes; the "why" behind each change is spelled
+> out so the reasoning stays visible to future maintainers.
 >
 > **Normative contract:** the daemon primitive this doc introduces is specified in
 > [daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral) and
