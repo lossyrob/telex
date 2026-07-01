@@ -623,9 +623,12 @@ For a **push-capable harness** (e.g. a Copilot CLI session with the in-session b
 even that supervision is unnecessary: the agent registers a daemon **on-deliver exec** once
 at attach, and a committed message is handed to the harness as a real turn without any
 agent-owned `wait` loop to run or re-arm. This is a strict superset of the pull model — the
-durable buffer and the agent-ack fence are unchanged, delivery stays at-least-once, and
-`interrupt` still means "next turn boundary" (below) — it only removes the agent-managed
-waiter as the wake path. It is distinct from the *transport* push of decision 0005 (the
+durable buffer and the agent-ack fence are unchanged and delivery stays at-least-once — it
+only removes the agent-managed waiter as the wake path. For the Copilot bridge specifically,
+`interrupt` maps to Copilot `immediate` (delivered as soon as possible, ahead of enqueued
+turns) and every other attention level to `enqueue` (after the current turn); neither
+preempts a turn already running (the latency note below still bounds what "immediate" can
+mean on today's runtimes). It is distinct from the *transport* push of decision 0005 (the
 exchange releasing a blocked read): here the daemon runs a harness-neutral handler that
 injects the turn. Normative contract in
 [daemon.md §13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral) / ADR 0039; the

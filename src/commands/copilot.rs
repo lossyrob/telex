@@ -248,8 +248,9 @@ struct BridgePushResponse {
     error: Option<String>,
 }
 
-/// Locked two-mode mapping (#53): `interrupt` steers the running turn (`immediate`);
-/// every other attention level waits for the next turn boundary (`enqueue`).
+/// Locked two-mode mapping (#53): `interrupt` maps to Copilot `immediate` (delivered as
+/// soon as possible); every other attention level waits for the next turn boundary
+/// (`enqueue`). Neither preempts a turn already running.
 fn attention_to_send_mode(attention: &str) -> &'static str {
     if attention == "interrupt" {
         "immediate"

@@ -427,7 +427,6 @@ pub struct DaemonSessionEndArgs {
 #[derive(Subcommand)]
 pub enum CopilotCmd {
     /// Register a Copilot session using Copilot env vars mapped to generic telex inputs.
-    #[command(hide = true)]
     Attach(CopilotAttachArgs),
     /// Handle Copilot sessionEnd by non-destructively ending this session in the daemon.
     #[command(hide = true)]
@@ -436,13 +435,11 @@ pub enum CopilotCmd {
     #[command(hide = true)]
     TurnGuard(CopilotTurnGuardArgs),
     /// Print version-matched Copilot CLI instructions (the binary is the source of truth).
-    #[command(hide = true)]
     Skill(CopilotSkillArgs),
     /// Deliver one telex message (descriptor on stdin) into a session via its bridge.
     #[command(hide = true)]
     Push(CopilotPushArgs),
     /// Detach a Copilot session's address and tear down its bridge if it was the last binding.
-    #[command(hide = true)]
     Detach(CopilotDetachArgs),
 }
 
@@ -789,6 +786,27 @@ mod tests {
                 plugin_version: Some(v),
             })) if v == "0.1.0"
         ));
+    }
+
+    #[test]
+    fn copilot_help_lists_user_facing_subcommands_and_hides_internal_ones() {
+        let mut cmd = Cli::command();
+        let copilot = cmd
+            .find_subcommand_mut("copilot")
+            .expect("copilot subcommand exists");
+        let help = copilot.render_long_help().to_string();
+        for sub in ["skill", "attach", "detach"] {
+            assert!(
+                help.contains(sub),
+                "`telex copilot --help` should list `{sub}`:\n{help}"
+            );
+        }
+        for hidden in ["session-end", "turn-guard"] {
+            assert!(
+                !help.contains(hidden),
+                "`telex copilot --help` leaked internal `{hidden}`:\n{help}"
+            );
+        }
     }
 
     #[test]

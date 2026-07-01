@@ -1399,8 +1399,12 @@ that member.
 - **Registration.** `Register` ([§6.2](#62-request--response-frames)) carries an optional
   `on_deliver: Vec<String>` — an **argv** (program + args), **not** a shell string (no shell is
   spawned; no interpolation). It is stored on the member record and surfaced in the Status
-  projection as `push_registered: bool`. Re-issuing `Register` **replaces** it (idempotent
-  refresh); `Detach`, operator reset, and epoch loss **clear** it.
+  projection as `push_registered: bool`. Re-issuing `Register` **replaces** it and resets its
+  repeat-fire dedup. The handler lives on the member record, so **removing** the member (an
+  epoch-current takedown, or a plain `Detach`) drops it with the record; operator reset and
+  Copilot `sessionEnd` instead mark the member **idle** and do **not** clear the stored handler,
+  so a still-undelivered message can trigger a further (harmless, liveness-only) push retry — and
+  `push_registered` stays true — until the member is actually removed.
 - **Fire point.** The daemon runs the argv **after** the message row and its durable
   `deliveries(message_id, recipient)` entry are committed and after in-process `wait` notification
   — i.e. strictly **off the ack critical path** and **after** durability. It fires for the
@@ -1413,8 +1417,9 @@ that member.
   fence ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) are unchanged. If
   the exec fails, is slow, or fires twice, the message is simply re-surfaced — **at-least-once with
   duplicates is the safe direction**; silent consume-without-see remains forbidden ([§13](#13-delivery-and-seen-dedup)).
-  Repeat-fire dedup is a **lifecycle-scoped** in-memory fast-path keyed per member, reset on member
-  removal / re-register — never the authority.
+  Repeat-fire dedup is a **lifecycle-scoped** in-memory fast-path keyed per member, reset on
+  re-register and on an epoch-current member removal (a plain `Detach` drops the record and the
+  fast-path is reclaimed on the next `Register` for that key) — never the authority.
 - **Bounded.** Per-exec concurrency and timeout are capped, and the sweep is batched, so a slow or
   hung exec can never block delivery, the fence, or another member. The push timeout is set strictly
   under the exec timeout so the handler fails fast rather than being killed mid-flight.
@@ -1588,17 +1593,25 @@ zero-config, like `rust-analyzer`/`gopls`.
 
 ### 15.2 Single-source SKILL
 
-One source serves both the CLI command and the plugin skill:
+One source serves every consumer: the installed **binary is the source of truth** for agent
+instructions, and the plugin skill is only a locator, so a static file can never drift into
+misleading an agent (see
+[DECISIONS.md ADR 0040](DECISIONS.md#0040--copilot-skill-is-binary-owned-the-plugin-skill-is-a-bootstrap)):
 
-- **Canonical file:** root `SKILL.md` (unchanged; stays at the repo root).
-- **CLI consumer:** `telex skill` prints the embedded `SKILL.md`
-  (`include_str!` in `src/commands/skill.rs`, unchanged) — add a `--raw` form for
-  machine consumption.
-- **Plugin-skill consumer:** Copilot plugin discovery reads `skills/telex/SKILL.md`, a
-  byte-identical mirror of the canonical root `SKILL.md`. Tests fail if the mirror diverges or if
-  additional `SKILL.md` files appear. Root `SKILL.md` remains the source authors edit.
-- **Invariant:** **no generated divergent copy** — both consumers resolve to the same
-  `SKILL.md`. The `SKILL.md` narrative content is owned by `daemon-core`.
+- **Generic skill:** root `SKILL.md` is embedded (`include_str!` in `src/commands/skill.rs`)
+  and printed by `telex skill` (`--raw` for the verbatim form) — version-matched because it
+  ships in the binary.
+- **Copilot skill:** `COPILOT.md` is embedded and printed by `telex copilot skill`, headed by
+  the binary version, the Copilot bridge protocol version, and the minimum compatible plugin
+  version — the version-matched source of truth for the Copilot push workflow.
+- **Plugin bootstrap:** Copilot plugin discovery reads `skills/telex/SKILL.md`, a small, stable
+  **bootstrap** that says what telex is and tells the agent to load the real instructions from
+  the binary (`telex copilot skill` / `telex skill`) and to use `--help` for syntax. It is
+  intentionally **not** a copy of the canonical skill; a test asserts it stays a thin bootstrap
+  that defers to the binary and embeds no detailed recipes (superseding the former
+  byte-identical mirror).
+- **Invariant:** the detailed, version-accurate behavior is owned by the binary; a plugin/binary
+  mismatch is surfaced by `telex copilot skill` rather than trusted silently.
 
 ## 16. Minimal upgrade floor
 

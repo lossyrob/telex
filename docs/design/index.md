@@ -26,8 +26,10 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   generic daemon on-deliver exec primitive and the Copilot CLI session bridge that turns a
   delivered message into an agent turn, the alternative to the agent-armed `wait` pull for
   push-capable harnesses. Governed by
-  [daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral) and
-  [DECISIONS.md ADR 0039](DECISIONS.md).
+  [daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral),
+  [DECISIONS.md ADR 0039](DECISIONS.md#0039--push-delivery-via-a-generic-on-deliver-exec--copilot-session-bridge),
+  and the Copilot skill-ownership decision
+  [DECISIONS.md ADR 0040](DECISIONS.md#0040--copilot-skill-is-binary-owned-the-plugin-skill-is-a-bootstrap).
 
 ## Reading order
 

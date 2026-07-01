@@ -1580,7 +1580,9 @@ required. The daemon gains exactly one opaque, harness-neutral hook (an argv + a
 stdin; **no** Copilot/SDK types in core), preserving the boundary. A slow/hung exec can never block
 delivery, the fence, or another member. Deferred and documented in PR #55: refcount
 multi-store + atomic (SF-2), descriptor size cap (SF-5), stale-exe guard (C-4), bridge protocol
-version (C-5), and a `telex copilot gc` for orphaned endpoints. See
+negotiation/enforcement (C-5 — PR #55 ships only an informational `COPILOT_BRIDGE_PROTOCOL`
+number in the `telex copilot skill` header, not wire negotiation), and a `telex copilot gc`
+for orphaned endpoints. See
 [copilot-bridge-push.md](copilot-bridge-push.md) and
 [daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral).
 

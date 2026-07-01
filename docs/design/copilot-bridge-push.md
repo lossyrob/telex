@@ -26,7 +26,7 @@ harness-boundary module plus a small embedded bridge script.
 The agent's entire setup is two one-time calls at bind:
 
 ```
-telex attach --copilot-bridge --address <addr>   # telex writes the bridge + registers the handler
+telex --address <addr> copilot attach --copilot-bridge   # telex writes the bridge + registers the handler
 extensions_reload                                 # agent tool: loads the bridge live, same turn
 ```
 
@@ -37,7 +37,7 @@ tax at its root, because the fragile thing (the agent-managed waiter) is gone.
 
 ## How it works (data flow)
 
-1. **Bind (once).** `telex attach --copilot-bridge` does two things:
+1. **Bind (once).** `telex --address <addr> copilot attach --copilot-bridge` does two things:
    (a) materializes the bridge `extension.mjs` into this session's extension
    discovery dir, and (b) registers an on-deliver handler command with the
    daemon for this address: `telex copilot push --session <id>`. Neither step
@@ -49,8 +49,9 @@ tax at its root, because the fragile thing (the agent-managed waiter) is gone.
    Copilot session id.
 3. **Deliver (per message).** When a durable message is committed for the
    address, the daemon execs the registered handler argv. `telex copilot push`
-   resolves the bridge endpoint from the registry, hands the message body to the
-   bridge over the local endpoint, and the bridge calls `session.send(...)`,
+   derives the bridge endpoint from the session id (checking the registry only for
+   liveness / session ownership, not trusting its path), hands the message body to
+   the bridge over the local endpoint, and the bridge calls `session.send(...)`,
    which injects the message as a queued user turn.
 4. **See and disposition.** The agent processes the injected turn like any other
    message and records a normal telex disposition (`ack` / `rejected` / ...).
@@ -144,8 +145,10 @@ response to a concrete constraint, not a stylistic preference.
 
 ### 5. Lazy endpoint resolution (order-independent, self-healing)
 
-- **Change:** `telex copilot push` resolves the bridge endpoint from the
-  registry at delivery time, not at bind time.
+- **Change:** `telex copilot push` resolves the bridge endpoint at delivery time,
+  not at bind time. As shipped it **derives** the endpoint from the session id and
+  checks the registry only for liveness / session ownership, so a tampered registry
+  path cannot redirect a push.
 - **Why:** it removes a bind-vs-load ordering dependency and a chicken-and-egg.
   Bind can register the handler before the bridge is loaded; if a message
   arrives before the bridge is up, the handler simply fails to find a live
@@ -171,7 +174,7 @@ response to a concrete constraint, not a stylistic preference.
 ### 7. displayPrompt label
 
 - **Change:** the bridge sends with `displayPrompt` so the timeline shows a
-  clean `[telex] from <addr>` label instead of the raw injected prompt.
+  clean `[telex] from <addr> (<attention>)` label instead of the raw injected prompt.
 - **Why:** operator legibility. `displayPrompt` is a first-class send option in
   the current SDK (`MessageOptions.displayPrompt`, 1.0.66) and is preserved on
   the underlying session RPC; the bridge uses the path that preserves it. (An
@@ -190,10 +193,10 @@ step, a session that used telex once keeps forking the bridge forever.
 
 The full lifecycle:
 
-- **Bind** -- `telex attach --copilot-bridge` writes the embedded
+- **Bind** -- `telex --address <addr> copilot attach --copilot-bridge` writes the embedded
   `extension.mjs` into the session extension dir and registers the daemon
   on-deliver handler. The agent calls `extensions_reload` to load it.
-- **Unbind** -- `telex detach` deregisters the handler and **removes the
+- **Unbind** -- `telex --address <addr> copilot detach` deregisters the handler and **removes the
   `extension.mjs`** (so it will not reload on a later resume); the agent calls
   `extensions_reload` to unload the live process now. Removal is **ref-counted
   to the session's last telex binding**: one bridge serves all of a session's
@@ -206,13 +209,15 @@ The full lifecycle:
   painless. (Observed: a `skipPermission` debug tool triggered an
   elevated-permission prompt on every resume; dropping it removes the prompt.)
 - **Orphan safety (closed without detach)** -- if a session is killed or closed
-  before `telex detach`, the file persists and the bridge reloads silently on
-  the next resume. Mitigations, in order of cost: (a) silent load means it is
-  harmless if unused; (b) a `telex copilot gc` (or an attach-time sweep) prunes
-  session-bridge dirs whose session ids telex no longer binds; (c) optionally
-  the bridge self-exits on load if telex shows no binding for its session id,
-  keeping orphan memory near zero. (a)+(b) are the v1 floor; (c) is an
-  optimization that couples the bridge to a harness-neutral telex marker file.
+  before `telex --address <addr> copilot detach`, the file persists and the bridge
+  reloads silently on the next resume. Mitigations, in order of cost: (a) silent load
+  means it is harmless if unused; (b) a `telex copilot gc` (or an attach-time sweep)
+  prunes session-bridge dirs whose session ids telex no longer binds; (c) optionally
+  the bridge self-exits on load if telex shows no binding for its session id, keeping
+  orphan memory near zero. **v1 ships (a) only** -- silent-load-is-harmless plus the
+  explicit cleanup paths (`copilot detach`, Copilot `sessionEnd`, and attach-failure
+  rollback each remove the extension dir / registry / bindings); (b) `telex copilot gc`
+  / attach-time sweep and (c) self-exit are **deferred** (ADR 0039).
 
 ## Effect on sessions that do not use this
 
@@ -252,7 +257,7 @@ The full lifecycle:
 | Resident Node process (~25 MB) once loaded | Only for telex sessions, only after bind; non-telex pay zero |
 | `/clear` reloads the bridge (in-memory state lost) | Endpoint is derived from session id (named pipe) so it is stable; the daemon registration is daemon-side and survives `/clear`; one idempotent re-load re-arms |
 | Delivery racing a reload gap | Lazy endpoint resolution + daemon retry redelivers; named pipe keeps the endpoint stable so the window is tiny |
-| Stale registry on hard kill (SIGKILL skips cleanup) | `telex copilot push` treats a dead endpoint as a failed delivery -> daemon retry; a health-probe / liveness check prunes stale entries |
+| Stale registry on hard kill (SIGKILL skips cleanup) | `telex copilot push` treats a dead endpoint as a failed delivery -> daemon retry; the bridge best-effort removes its registry entry on SIGTERM/SIGINT, and explicit `copilot detach` / `sessionEnd` clean up. A GC / health-probe pruner is deferred (ADR 0039) |
 | `extensions_reload` is global (restarts all extensions) | Acceptable; reload is idempotent and infrequent (bind, `/clear`) |
 | Address mapping | telex owns address -> session mapping via `attach`; the Copilot-side registry is keyed by session id and correlated by the handler |
 | Bridge bytes drift from protocol | telex embeds the bridge (`include_str!`) so it is versioned with the daemon |

@@ -13,11 +13,12 @@ a message into a live Copilot CLI session as a real turn, with no agent-managed
   each connection injects the supplied prompt via `session.send(...)`. Writes a
   registry entry at `~/.copilot/telex-bridge/<sessionId>.json`. This is the
   prototype of the bytes telex would embed (`include_str!`) and write on
-  `telex attach --copilot-bridge`.
-- `push.mjs` -- reference for the daemon on-deliver handler
-  (`telex copilot push`). Resolves a session's endpoint from the registry,
-  connects, hands off one message, prints the result. The oracle the Rust
-  handler must match.
+  `telex --address <addr> copilot attach --copilot-bridge`.
+- `push.mjs` -- a prototype/debug reference for the daemon on-deliver handler
+  (`telex copilot push`). It connects to a session's bridge, hands off one message,
+  and prints the result. The shipped Rust handler supersedes it and **derives** the
+  endpoint from the session id (using the registry only for liveness / session
+  ownership), so treat `push.mjs` as a wire-protocol reference, not an endpoint oracle.
 - `peer-prompt.txt` -- seed prompt for a peer Copilot terminal in the
   cross-terminal proof.
 
@@ -27,7 +28,7 @@ One JSON request per connection, newline-terminated; one JSON response,
 newline-terminated.
 
 ```
--> {"prompt":"...","displayPrompt":"[telex] from <addr>","mode":"enqueue"}
+-> {"prompt":"...","displayPrompt":"[telex] from <addr> (<attention>)","mode":"enqueue"}
 <- {"ok":true,"sessionId":"...","messageId":"...","mode":"enqueue"}
 ```
 

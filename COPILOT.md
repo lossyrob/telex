@@ -32,28 +32,36 @@ yours to make.
    After `/clear` (which reloads extensions), run it once more.
 
 3. **Receive messages as turns.** A delivered telex message arrives as a new turn
-   labelled `[telex] from <addr>`. An `interrupt` message steers the running turn
-   (mid-stream); every other attention level waits for your next turn boundary. Read it,
-   then record disposition **by id**:
+   labelled `[telex] from <addr> (<attention>)`. An `interrupt` message is delivered as
+   soon as possible (Copilot `immediate`, ahead of enqueued messages); every other
+   attention level is `enqueue`d and arrives after your current turn. Neither preempts a
+   turn already running. Read it, then record disposition **by id**:
 
    ```sh
-   telex ack --address <addr> --id <message-id>
-   telex handle --address <addr> --id <message-id> --note "completed"
+   telex ack --address <addr> --id <message-id> --session "$COPILOT_AGENT_SESSION_ID"
+   telex handle --address <addr> --id <message-id> --session "$COPILOT_AGENT_SESSION_ID" --note "completed"
    ```
+
+   The pushed turn already includes these commands with your address, id, and session
+   filled in -- prefer copying them. Generic `telex ack`/`handle` do not read Copilot env
+   vars, so they need the session via `--session` (your session id is in
+   `COPILOT_AGENT_SESSION_ID`; on PowerShell use `$env:COPILOT_AGENT_SESSION_ID`).
 
    `ack` is transport consumption for `(message_id, recipient-address)`. Terminal
    workflow disposition is still `handle`, `reject`, or `close`; `defer` and `escalate`
    are non-terminal. **Dedupe by id**: push is at-least-once, so a message may
    occasionally be delivered more than once (e.g. after a reconnect).
 
-4. **Tear down when done (unloads the bridge).**
+4. **Tear down when done.**
 
    ```sh
    telex --address <addr> copilot detach
    ```
 
-   This detaches the address and removes the bridge when it was the last binding, so it
-   will not reload on a later resume. Session end also removes it.
+   This detaches the address and, when it was the last binding, removes the bridge files so
+   it will not reload on a later resume. The already-loaded bridge stays live until the next
+   `extensions_reload` or session end; run `extensions_reload` once after detach if you want
+   it unloaded immediately. Session end also removes the files.
 
 ## Fallback: no bridge
 
