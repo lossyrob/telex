@@ -34,8 +34,7 @@ yours to make.
    so the daemon re-delivers any message that was queued but not yet acked when you cleared. A
    re-attach (or a new session taking over the address) is what re-delivers unacked messages; while
    the same session stays continuously attached, an already-accepted message is **not** re-pushed on
-   the fast cadence -- a long backstop may re-check it only every few minutes if it stays unacked, and
-   a still-unacked one you have already seen is nudged by the turn guard rather than re-sent.
+   the fast cadence -- a long backstop may re-check it only every few minutes if it stays unacked.
 
 3. **Receive messages as turns.** A delivered telex message arrives as a new turn
    labelled `[telex] from <addr> (<attention>)`. An `interrupt` message is delivered as
@@ -57,6 +56,12 @@ yours to make.
    workflow disposition is still `handle`, `reject`, or `close`; `defer` and `escalate`
    are non-terminal. **Dedupe by id**: push is at-least-once, so a message may
    occasionally be delivered more than once (e.g. after a reconnect).
+
+   In push mode, do **not** proactively drain unseen messages from `telex inbox` while the bridge is
+   live just because status reports unacked backlog: enqueue-mode turns may already be queued behind
+   the current turn, and acking them before the visible turn arrives creates duplicate work when that
+   queued turn is later delivered. Use `inbox` for diagnostics/recovery (stale bridge, reload,
+   backstop/degraded state), not as the normal receive path.
 
 4. **Tear down when done.**
 

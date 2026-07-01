@@ -308,17 +308,19 @@ Namra's PR review flagged edge cases where "push registered" could still let a s
 silently deaf or strand a durable message. Fixed in this PR (see
 [daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral)):
 
-- **Push accept is not delivery.** A successful `session.send` only proves Copilot *accepted*
-  the turn, so "pushed" is an **attempt record**, not terminal suppression: a still-unacked
-  message is re-pushed on a per-message **backoff** (base doubling to a cap), with a **degraded**
-  status after a ceiling. A crash/reload after accept-but-before-ack no longer strands it.
+- **Push accept is not delivery.** The bridge waits briefly for the SDK `session.send` RPC ack, then
+  replies success once the enqueue is confirmed or still pending behind a busy current turn; it does
+  **not** wait for the injected turn to be processed. "Pushed" is an **attempt record**, not terminal
+  suppression: the durable ack fence remains authoritative, and a crash/reload after
+  accept-but-before-ack no longer strands it.
 - **Handler survives a pull re-attach.** A generic refresh that re-registers with
   `on_deliver = None` **preserves** the existing bridge handler; only an explicit re-provision
   replaces it.
 - **Guard is mixed-session aware.** The turn guard no longer suppresses coverage for a whole
   session when any member is push-registered: pull members still get waiter-coverage checks, and a
-  push member with an **unacked backlog** is surfaced (`push_registered` is "handler registered",
-  not "bridge live").
+  push member whose bridge heartbeat is stale is surfaced (`push_registered` is "handler
+  registered", not "bridge live"). A live push member's unacked backlog is **not** surfaced by the
+  guard, because enqueue-mode turns may already be queued behind the current turn.
 - **Compatibility gate.** The daemon advertises an `on_deliver_exec_v1` capability, and a
   `--copilot-bridge` bind **verifies `push_registered`** and fails closed against an older daemon
   that would silently ignore `on_deliver`.
@@ -358,11 +360,26 @@ A second review pass and builder-directed follow-ups added:
 - **Re-delivery is re-provision-triggered, not timer-churned.** An **accepted** push (already queued
   in the live session) is no longer re-pushed on the fast failure backoff; while the same session
   stays continuously attached it is not re-sent on that cadence -- only a long backstop may re-check
-  it every few minutes if it stays unacked, and a seen-but-unacked message is nudged by the turn
-  guard instead. Un-acked messages are re-delivered when the **attachment changes** -- a reattach, a
+  it every few minutes if it stays unacked. Un-acked messages are re-delivered when the
+  **attachment changes** -- a reattach, a
   `/clear` bridge-reload re-provision, or a new session taking the address -- which resets the
   attempt map and rescans `fetch_undelivered`. A **failed** push (dead / absent bridge) still retries
   on the fast backoff, and a long backstop covers the rare silent in-session drop of a queued turn.
   This removes the redelivery amplification a busy / slow recipient hit under the old fixed backoff
   (each re-push was a duplicate turn the agent had to dedupe) while preserving at-least-once: nothing
   is dropped, and the durable+ack fence is unchanged.
+- **Bridge success is a bounded enqueue acknowledgement.** The bridge waits a short window for
+  `session.send(...)` to return its message id (idle path), but if that promise is still blocked
+  behind a long-running current turn, it writes `{ok:true, accepted:"pending"}` before the Rust
+  handler's timeout. Without this, the daemon sees a false failed push, retries on the fast failure
+  backoff, and a late SDK enqueue plus fast retry inject duplicate turns. The bridge **retains and
+  observes** the pending `session.send(...)` promise until it settles, so the SDK request remains
+  live after the socket response. Synchronous / quick `session.send` failures still return failure;
+  asynchronous rejection after the pending ack is logged by the bridge and the durable long-backstop
+  / re-provision path remains the recovery route.
+- **Inbox is recovery, not the live push receive path.** With a fresh bridge heartbeat, unacked
+  backlog can simply mean enqueue-mode turns are already queued behind the current turn. Agents
+  should not proactively `inbox`+ack unseen messages in that state; doing so can consume the message
+  before the already-queued turn arrives, making that later turn look like a duplicate. `telex inbox`
+  remains the diagnostic/recovery path for stale bridge, reload/re-provision, degraded/backstop, or
+  explicit operator intervention.

@@ -1186,8 +1186,9 @@ fn evaluate_guard(
         .collect::<Vec<_>>();
     // A push-covered member needs no waiter, but `push_registered` is only "handler registered",
     // not "bridge live". If the bridge is not live (crashed/unloaded/hung -- stale heartbeat) the
-    // member is effectively uncovered and must be surfaced; if it is live, only an unacked backlog
-    // is worth a nudge (the agent has not dispositioned it, or delivery is lagging).
+    // member is effectively uncovered and must be surfaced. If the bridge is live, do not nudge
+    // merely because a push message is still unacked: enqueue-mode turns may be waiting behind the
+    // current turn, and a guard nudge would race those queued turns and create duplicate work.
     let push_dead = if bridge_live {
         Vec::new()
     } else {
@@ -1196,14 +1197,7 @@ fn evaluate_guard(
             .filter(|member| member.push_registered)
             .collect::<Vec<_>>()
     };
-    let push_backlog = if bridge_live {
-        members
-            .iter()
-            .filter(|member| member.push_registered && member.pending_unconsumed_count > 0)
-            .collect::<Vec<_>>()
-    } else {
-        Vec::new()
-    };
+    let push_backlog = Vec::new();
     if unarmed.is_empty()
         && delivered_unacked.is_empty()
         && push_backlog.is_empty()
@@ -1862,23 +1856,19 @@ mod tests {
     }
 
     #[test]
-    fn guard_nudges_push_member_with_unacked_backlog() {
+    fn guard_allows_live_push_member_with_unacked_backlog() {
         let settings = GuardSettings {
             enabled: true,
             max_nudges: 3,
         };
-        // `push_registered` means "handler registered", not "bridge live": an unacked backlog on
-        // a push member must be surfaced (possible deaf bridge), not suppressed.
+        // With a live bridge, backlog can mean an enqueue-mode turn is still waiting in the
+        // session queue. Nudging here races that queued turn and creates duplicate work; stale
+        // bridge coverage is handled by `guard_nudges_push_member_when_bridge_not_live`.
         let mut push = member("addr:push", 0, 1);
         push.push_registered = true;
         let eval = evaluate_guard("s1", &[push], settings, None, true);
-        assert_eq!(eval.reason_code, "coverage_gap");
-        match eval.decision {
-            HookDecision::Block { reason } => {
-                assert!(reason.contains("addr:push (push) has 1 unacked message(s)"));
-            }
-            other => panic!("expected block, got {other:?}"),
-        }
+        assert_eq!(eval.reason_code, "covered");
+        assert!(matches!(eval.decision, HookDecision::Allow));
     }
 
     #[test]

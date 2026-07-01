@@ -20,7 +20,7 @@
 // Wire protocol: one JSON request per connection, newline-terminated:
 //   {"prompt": "...", "displayPrompt": "[telex] from <addr>", "mode": "enqueue"}
 // Response, newline-terminated:
-//   {"ok": true, "sessionId": "...", "messageId": "...", "mode": "enqueue"}
+//   {"ok": true, "sessionId": "...", "mode": "enqueue", "accepted": "queued"}
 // The bridge forwards `mode` verbatim; the attention->mode decision
 // (interrupt -> immediate, else -> enqueue) is made by `telex copilot push`.
 
@@ -33,6 +33,8 @@ import { randomBytes } from "node:crypto";
 
 const isPosix = platform() !== "win32";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024; // 8 MiB: fits a max daemon message plus JSON-escaped prompt wrapping, so large messages push as turns instead of dead-lettering
+const SEND_ACK_TIMEOUT_MS = 2_000;
+const pendingSends = new Set();
 const registryDir = join(homedir(), ".copilot", "telex-bridge");
 await mkdir(registryDir, { recursive: true, mode: 0o700 });
 if (isPosix) {
@@ -79,6 +81,29 @@ function writeResponse(socket, value) {
   } catch {}
 }
 
+function sendAckTimeout() {
+  return new Promise((resolve) => {
+    setTimeout(() => resolve({ timedOut: true }), SEND_ACK_TIMEOUT_MS).unref();
+  });
+}
+
+function observeSendPromise(sendPromise) {
+  const observed = Promise.resolve(sendPromise)
+    .then((messageId) => ({ ok: true, messageId }))
+    .catch((e) => {
+      console.error(
+        "telex-bridge: session.send rejected after push acknowledgement:",
+        (e && e.message) || e,
+      );
+      return { ok: false, error: String((e && e.message) || e) };
+    })
+    .finally(() => {
+      pendingSends.delete(observed);
+    });
+  pendingSends.add(observed);
+  return observed;
+}
+
 async function handleConnection(socket) {
   // Newline-delimited framing: process the first complete line (one JSON
   // request), respond with one JSON line, then close. Does not depend on the
@@ -123,8 +148,27 @@ async function handleConnection(socket) {
       options.displayPrompt = input.displayPrompt;
     }
     try {
-      const messageId = await session.send(options);
-      writeResponse(socket, { ok: true, sessionId, messageId, mode });
+      const observedSend = observeSendPromise(session.send(options));
+      // Wait briefly for the SDK's `session.send` RPC ack. In the normal/idle path this preserves
+      // the old positive confirmation and message id. When the agent is busy, that promise can sit
+      // behind the current turn; if `telex copilot push` times out first, the daemon records a failed
+      // push and retries quickly, producing duplicate turns even though the original enqueue often
+      // lands later. After this short window, report "pending" success and keep observing the promise
+      // for logging; durable re-provision/backstop redelivery covers the rare async failure.
+      const result = await Promise.race([observedSend, sendAckTimeout()]);
+      if (result && result.timedOut) {
+        writeResponse(socket, { ok: true, sessionId, mode, accepted: "pending" });
+      } else if (!result.ok) {
+        writeResponse(socket, { ok: false, error: result.error });
+      } else {
+        writeResponse(socket, {
+          ok: true,
+          sessionId,
+          messageId: result.messageId,
+          mode,
+          accepted: "queued",
+        });
+      }
     } catch (e) {
       writeResponse(socket, {
         ok: false,

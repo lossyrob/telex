@@ -1644,8 +1644,23 @@ never landed — re-delivery is genuinely needed.
   new session taking the address, or a `/clear` bridge-reload re-provision — which already calls
   `on_deliver_forget_member` + rescans `fetch_undelivered`. A long `ON_DELIVER_ACCEPTED_BACKSTOP`
   (5 min) is retained only as a backstop against a silent in-session drop of a queued turn.
-- A **seen-but-unacked** message is the agent-stop **turn guard's** job (it already lists unacked
-  deliveries and nudges the agent to ack), not the daemon's to re-push.
+- A **live push** member's unacked backlog is not the agent-stop **turn guard's** job: enqueue-mode
+  turns may already be queued behind the current turn, and an eager guard nudge can race those turns
+  and create duplicate work. The guard still surfaces stale/dead bridge coverage; live push backlog
+  is left to the queued turn, re-provision re-delivery, or the long backstop.
+- The Copilot bridge reports push success after a **bounded enqueue acknowledgement**: it waits a
+  short window for `session.send(...)` to return its message id in the idle path, but if that promise
+  is still blocked behind the agent's current long-running turn it returns `{ok:true,
+  accepted:"pending"}` before the Rust handler times out. Otherwise the daemon records a false failed
+  push and a late enqueue plus fast retry inject duplicate turns. The bridge retains and observes the
+  pending `session.send(...)` promise until it settles, so the SDK request remains live after the
+  socket response. Synchronous / quick `session.send` failures still fail; asynchronous rejection
+  after a pending ack is logged and recovered by the durable long-backstop / re-provision path.
+- The live push workflow treats `telex inbox` as **diagnostic/recovery**, not the normal receive path.
+  With a fresh bridge heartbeat, unacked backlog can mean enqueue-mode turns are already queued
+  behind the current turn; acking those unseen messages from `inbox` before the visible turns arrive
+  creates duplicate work when the queued turns later surface. Normal push receive is: wait for the
+  `[telex]` turn, then ack/handle its id.
 The COPILOT.md workflow now tells the agent to **re-provision after `/clear`** (re-run
 `copilot attach --copilot-bridge` before `extensions_reload`) so a reload re-delivers the backlog.
 
