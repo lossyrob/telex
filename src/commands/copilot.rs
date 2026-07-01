@@ -179,20 +179,32 @@ fn remove_bridge_extension(session_id: &str) {
     }
 }
 
+/// The backend name to freeze into the handler argv so the pushed ack/handle hints keep targeting
+/// this session's store even if the config `default` pointer later changes: explicit `--backend`,
+/// else `$TELEX_BACKEND`, else the config default pointer. `None` for the built-in implicit sqlite
+/// default (stable, and "default" is not a real backend name to pass to `--backend`).
+fn resolved_backend_name(cfg: &crate::config::Config) -> Option<String> {
+    if let Some(backend) = cfg.backend_selector.as_deref().filter(|s| !s.is_empty()) {
+        return Some(backend.to_string());
+    }
+    if let Ok(env) = std::env::var("TELEX_BACKEND") {
+        if !env.is_empty() {
+            return Some(env);
+        }
+    }
+    crate::profiles::load().ok().and_then(|c| c.default)
+}
+
 fn bridge_handler_argv(ctx: &Ctx, session_id: &str) -> Result<Vec<String>> {
     let exe = std::env::current_exe()?.to_string_lossy().to_string();
     let mut argv = vec![exe];
-    // Bake this session's effective backend selection into the handler argv the daemon execs, so
-    // `telex copilot push` (and the ack/handle hints it prints) target the exact store the session
-    // attached with -- correct for named backends / profiles, not just the default sqlite store.
-    if let Some(backend) = ctx
-        .cfg
-        .backend_selector
-        .as_deref()
-        .filter(|s| !s.is_empty())
-    {
+    // Bake this session's *resolved* backend selection into the handler argv the daemon execs, so
+    // `telex copilot push` (and the ack/handle hints it prints) target the exact store even if the
+    // config `default` pointer later changes -- correct for named backends / profiles, not just the
+    // built-in default sqlite store.
+    if let Some(backend) = resolved_backend_name(&ctx.cfg) {
         argv.push("--backend".to_string());
-        argv.push(backend.to_string());
+        argv.push(backend);
     }
     if let Some(db) = ctx.cfg.db_override.as_deref().filter(|s| !s.is_empty()) {
         argv.push("--db".to_string());
@@ -456,6 +468,19 @@ fn build_push_prompt(d: &OnDeliverDescriptor, session_id: &str, store_selector: 
     p
 }
 
+/// Map a bridge push response to the handler exit code: 0 on success, `PUSH_EXIT_PERMANENT`
+/// (dead-letter) when the bridge reports `request_too_large` (structurally unpushable), else a
+/// transient nonzero the daemon retries.
+fn push_exit_for_response(ok: bool, error: Option<&str>) -> i32 {
+    if ok {
+        0
+    } else if error == Some("request_too_large") {
+        PUSH_EXIT_PERMANENT
+    } else {
+        1
+    }
+}
+
 /// `telex copilot push --session <id>`: the daemon's registered on-deliver handler.
 /// Reads a message descriptor from stdin, resolves the session's bridge endpoint from the
 /// registry, and hands the message to the in-session bridge over the local pipe/socket.
@@ -529,15 +554,16 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
         secret: bridge_secret,
     };
     let line = serde_json::to_string(&request)?;
-    // Preflight the fully-encoded request against the bridge frame cap. JSON escaping expands
-    // the wrapped body, so an accepted (near-1-MiB) message can still exceed the bridge's guard;
-    // pushing it would loop forever on `request_too_large`. Dead-letter it (permanent exit) so
-    // the daemon stops retrying -- the message stays durable and readable via `telex inbox`.
-    if line.len() > bridge_cap {
+    // Preflight the fully-encoded request plus the newline the transport appends (the bridge
+    // counts it in `raw.length`) against the bridge frame cap. JSON escaping expands the wrapped
+    // body, so an accepted (near-cap) message can still exceed the guard; pushing it would loop
+    // forever on `request_too_large`. Dead-letter it (permanent exit) so the daemon stops retrying
+    // -- the message stays durable and readable via `telex inbox`.
+    if line.len() + 1 > bridge_cap {
         eprintln!(
-            "telex copilot push: message {} is too large to push as a turn ({} bytes serialized > {} bridge cap); it stays in the durable buffer -- read it with `telex inbox` / `telex read` and disposition normally.",
+            "telex copilot push: message {} is too large to push as a turn ({} wire bytes > {} bridge cap); it stays in the durable buffer -- read it with `telex inbox` / `telex read` and disposition normally.",
             descriptor.message_id,
-            line.len(),
+            line.len() + 1,
             bridge_cap
         );
         return Ok(PUSH_EXIT_PERMANENT);
@@ -563,16 +589,24 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
             return Ok(1);
         }
     };
-    if parsed.ok {
-        Ok(0)
-    } else {
+    // The bridge may reject with `request_too_large` a message the client preflight passed (it
+    // counts the newline; an older live bridge may enforce a smaller, un-advertised cap), so map
+    // that to a permanent exit -- the daemon dead-letters instead of retrying a structurally
+    // unpushable message. It stays durable and readable via `telex inbox`.
+    let exit = push_exit_for_response(parsed.ok, parsed.error.as_deref());
+    if exit == PUSH_EXIT_PERMANENT {
+        eprintln!(
+            "telex copilot push: message {} exceeds the bridge frame cap; it stays in the durable buffer -- read it with `telex inbox` / `telex read` and disposition normally.",
+            descriptor.message_id
+        );
+    } else if exit != 0 {
         eprintln!(
             "telex copilot push: bridge rejected message {}: {}",
             descriptor.message_id,
             parsed.error.as_deref().unwrap_or("unknown error")
         );
-        Ok(1)
     }
+    Ok(exit)
 }
 
 /// Connect to the in-session bridge endpoint, send one JSON request line, read one JSON
@@ -1617,6 +1651,19 @@ mod tests {
         assert!(prompt.contains("from: unknown"));
         assert!(prompt.contains("telex ack --address role:x --id 7 --session sess-2"));
         assert!(!prompt.contains("handle|reject|close"));
+    }
+
+    #[test]
+    fn push_exit_dead_letters_on_request_too_large() {
+        assert_eq!(push_exit_for_response(true, None), 0);
+        // A bridge frame-cap rejection is permanent -> dead-letter, not a retryable failure.
+        assert_eq!(
+            push_exit_for_response(false, Some("request_too_large")),
+            PUSH_EXIT_PERMANENT
+        );
+        // Other rejections stay transient (retryable).
+        assert_eq!(push_exit_for_response(false, Some("bad_json")), 1);
+        assert_eq!(push_exit_for_response(false, None), 1);
     }
 
     #[test]
