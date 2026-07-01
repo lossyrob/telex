@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::cli::{
-    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotSessionEndArgs, CopilotTurnGuardArgs, Ctx,
+    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotDetachArgs, CopilotPushArgs,
+    CopilotSessionEndArgs, CopilotTurnGuardArgs, Ctx, DetachArgs,
 };
 use crate::daemon_ipc::{
     DaemonStatus, MemberStatus, Request, Response, WaiterOutcome, WatchPidSpec,
@@ -31,7 +32,387 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
         CopilotCmd::SessionEnd(args) => session_end(ctx, args).await,
         CopilotCmd::TurnGuard(args) => turn_guard(ctx, args).await,
         CopilotCmd::Skill => skill(),
+        CopilotCmd::Push(args) => push(ctx, args).await,
+        CopilotCmd::Detach(args) => detach(ctx, args).await,
     }
+}
+
+/// The bridge extension bytes, embedded so they version with the daemon protocol.
+const BRIDGE_EXTENSION_MJS: &str = include_str!("../../copilot-bridge/extension.mjs");
+const BRIDGE_EXTENSION_NAME: &str = "telex-bridge";
+
+fn copilot_home_dir() -> Result<PathBuf> {
+    dirs::home_dir()
+        .map(|home| home.join(".copilot"))
+        .ok_or_else(|| anyhow::anyhow!("no home directory"))
+}
+
+fn bridge_extension_dir(session_id: &str) -> Result<PathBuf> {
+    Ok(copilot_home_dir()?
+        .join("session-state")
+        .join(session_id)
+        .join("extensions")
+        .join(BRIDGE_EXTENSION_NAME))
+}
+
+fn bridge_bindings_path(session_id: &str) -> Result<PathBuf> {
+    Ok(copilot_home_dir()?
+        .join("telex-bridge")
+        .join(format!("{session_id}.bindings.json")))
+}
+
+/// Write the embedded bridge extension into the session's extension discovery dir. The agent
+/// still runs `extensions_reload` to load it (telex cannot trigger a reload).
+fn write_bridge_extension(session_id: &str) -> Result<()> {
+    let dir = bridge_extension_dir(session_id)?;
+    std::fs::create_dir_all(&dir)?;
+    std::fs::write(dir.join("extension.mjs"), BRIDGE_EXTENSION_MJS)?;
+    Ok(())
+}
+
+fn read_bridge_bindings(session_id: &str) -> Vec<String> {
+    bridge_bindings_path(session_id)
+        .ok()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|raw| serde_json::from_str::<Vec<String>>(&raw).ok())
+        .unwrap_or_default()
+}
+
+/// Record `address` as a bridge binding for the session (ref-count of addresses sharing the
+/// one per-session bridge), so teardown only removes the bridge when the last one detaches.
+fn add_bridge_binding(session_id: &str, address: &str) -> Result<()> {
+    let mut addrs = read_bridge_bindings(session_id);
+    if !addrs.iter().any(|a| a == address) {
+        addrs.push(address.to_string());
+    }
+    let path = bridge_bindings_path(session_id)?;
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(path, serde_json::to_string(&addrs)?)?;
+    Ok(())
+}
+
+/// Drop `address` from the session's bridge bindings; return true if none remain (so the
+/// bridge extension itself should be removed).
+fn remove_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
+    let mut addrs = read_bridge_bindings(session_id);
+    addrs.retain(|a| a != address);
+    if addrs.is_empty() {
+        let _ = std::fs::remove_file(bridge_bindings_path(session_id)?);
+        Ok(true)
+    } else {
+        std::fs::write(bridge_bindings_path(session_id)?, serde_json::to_string(&addrs)?)?;
+        Ok(false)
+    }
+}
+
+/// Remove the session's bridge extension, registry, and bindings (best effort). Called on
+/// last-binding detach and on session end so a bridge never reloads on a later resume.
+fn remove_bridge_extension(session_id: &str) {
+    if let Ok(dir) = bridge_extension_dir(session_id) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    if let Ok(registry) = bridge_registry_path(session_id) {
+        let _ = std::fs::remove_file(registry);
+    }
+    if let Ok(bindings) = bridge_bindings_path(session_id) {
+        let _ = std::fs::remove_file(bindings);
+    }
+}
+
+fn bridge_handler_argv(session_id: &str) -> Result<Vec<String>> {
+    let exe = std::env::current_exe()?.to_string_lossy().to_string();
+    Ok(vec![
+        exe,
+        "copilot".to_string(),
+        "push".to_string(),
+        "--session".to_string(),
+        session_id.to_string(),
+    ])
+}
+
+/// On `--copilot-bridge` bind: materialize the bridge, record the binding, and return the
+/// on-deliver handler argv the daemon should exec for this address. Returns None (no push
+/// registration) if the bridge could not be provisioned.
+fn provision_bridge(ctx: &Ctx, session_id: &str) -> Option<Vec<String>> {
+    let address = match ctx.cfg.require_address(&ctx.address) {
+        Ok(address) => address,
+        Err(e) => {
+            eprintln!("telex copilot attach: --copilot-bridge needs an address: {e}");
+            return None;
+        }
+    };
+    if let Err(e) = write_bridge_extension(session_id) {
+        eprintln!("telex copilot attach: failed to write bridge extension: {e}");
+        return None;
+    }
+    if let Err(e) = add_bridge_binding(session_id, &address) {
+        eprintln!("telex copilot attach: failed to record bridge binding: {e}");
+    }
+    match bridge_handler_argv(session_id) {
+        Ok(argv) => Some(argv),
+        Err(e) => {
+            eprintln!("telex copilot attach: {e}");
+            None
+        }
+    }
+}
+
+/// `telex copilot detach`: generic address detach plus bridge teardown when this was the
+/// session's last bridge binding.
+async fn detach(ctx: &Ctx, args: CopilotDetachArgs) -> Result<i32> {
+    let session = match resolve_copilot_session(args.session.as_deref(), None) {
+        Some(session) => session,
+        None => {
+            eprintln!(
+                "telex: no Copilot session id available; set COPILOT_AGENT_SESSION_ID or pass --session"
+            );
+            return Ok(1);
+        }
+    };
+    let address = ctx.cfg.require_address(&ctx.address).ok();
+    let code = crate::commands::detach::run(
+        ctx,
+        DetachArgs {
+            session: Some(session.clone()),
+        },
+    )
+    .await?;
+    if let Some(address) = address {
+        if let Ok(true) = remove_bridge_binding(&session, &address) {
+            remove_bridge_extension(&session);
+        }
+    }
+    Ok(code)
+}
+
+/// Harness-neutral message descriptor the daemon's on-deliver exec feeds on stdin.
+#[derive(Deserialize)]
+struct OnDeliverDescriptor {
+    message_id: i64,
+    address: String,
+    #[serde(default)]
+    from: Option<String>,
+    #[serde(default)]
+    kind: String,
+    #[serde(default)]
+    attention: String,
+    #[serde(default)]
+    requires_disposition: bool,
+    #[serde(default)]
+    subject: Option<String>,
+    #[serde(default)]
+    body: String,
+}
+
+/// The bridge registry entry the in-session extension writes for its session.
+#[derive(Deserialize)]
+struct BridgeRegistry {
+    endpoint: BridgeEndpoint,
+}
+
+#[derive(Deserialize)]
+struct BridgeEndpoint {
+    #[allow(dead_code)]
+    kind: String,
+    path: String,
+}
+
+#[derive(Serialize)]
+struct BridgePushRequest {
+    prompt: String,
+    #[serde(rename = "displayPrompt")]
+    display_prompt: String,
+    mode: &'static str,
+}
+
+#[derive(Deserialize)]
+struct BridgePushResponse {
+    ok: bool,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+/// Locked two-mode mapping (#53): `interrupt` steers the running turn (`immediate`);
+/// every other attention level waits for the next turn boundary (`enqueue`).
+fn attention_to_send_mode(attention: &str) -> &'static str {
+    if attention == "interrupt" {
+        "immediate"
+    } else {
+        "enqueue"
+    }
+}
+
+fn bridge_registry_path(session_id: &str) -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+    Ok(home
+        .join(".copilot")
+        .join("telex-bridge")
+        .join(format!("{session_id}.json")))
+}
+
+/// Compose the prompt the agent sees for a pushed telex message: enough context to act
+/// and to record disposition by id (the durable ack stays agent-driven).
+fn build_push_prompt(d: &OnDeliverDescriptor) -> String {
+    let from = d.from.as_deref().unwrap_or("unknown");
+    let mut p = String::new();
+    p.push_str("[telex message]\n");
+    p.push_str(&format!("from: {from}\n"));
+    p.push_str(&format!("to (your address): {}\n", d.address));
+    p.push_str(&format!("id: {}\n", d.message_id));
+    p.push_str(&format!("attention: {}\n", d.attention));
+    if !d.kind.is_empty() {
+        p.push_str(&format!("kind: {}\n", d.kind));
+    }
+    if let Some(subject) = d.subject.as_deref().filter(|s| !s.is_empty()) {
+        p.push_str(&format!("subject: {subject}\n"));
+    }
+    p.push_str(&format!("requires_disposition: {}\n\n", d.requires_disposition));
+    p.push_str(&d.body);
+    p.push_str(&format!(
+        "\n\nThis message was pushed by telex. Record consumption with `telex ack --address {} --id {}`",
+        d.address, d.message_id
+    ));
+    if d.requires_disposition {
+        p.push_str(&format!(
+            ", then a terminal disposition (`telex handle|reject|close --address {} --id {}`)",
+            d.address, d.message_id
+        ));
+    }
+    p.push_str(". Dedupe by id if you have already seen it.");
+    p
+}
+
+/// `telex copilot push --session <id>`: the daemon's registered on-deliver handler.
+/// Reads a message descriptor from stdin, resolves the session's bridge endpoint from the
+/// registry, and hands the message to the in-session bridge over the local pipe/socket.
+/// Exit 0 only when the bridge accepted it (session.send succeeded); any non-zero exit
+/// leaves the message durably unacked so the daemon retries. Never acks telex.
+async fn push(_ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
+    let session = match resolve_copilot_session(args.session.as_deref(), None) {
+        Some(session) => session,
+        None => {
+            eprintln!("telex copilot push: no Copilot session id; set COPILOT_AGENT_SESSION_ID or --session");
+            return Ok(2);
+        }
+    };
+
+    let mut input = String::new();
+    if std::io::stdin().read_to_string(&mut input).is_err() || input.trim().is_empty() {
+        eprintln!("telex copilot push: empty message descriptor on stdin");
+        return Ok(2);
+    }
+    let descriptor: OnDeliverDescriptor = match serde_json::from_str(input.trim()) {
+        Ok(descriptor) => descriptor,
+        Err(e) => {
+            eprintln!("telex copilot push: malformed descriptor: {e}");
+            return Ok(2);
+        }
+    };
+
+    let registry_path = bridge_registry_path(&session)?;
+    let registry: BridgeRegistry = match std::fs::read_to_string(&registry_path)
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+    {
+        Some(registry) => registry,
+        None => {
+            eprintln!(
+                "telex copilot push: no live bridge for session {session} at {}",
+                registry_path.display()
+            );
+            return Ok(2);
+        }
+    };
+
+    let request = BridgePushRequest {
+        prompt: build_push_prompt(&descriptor),
+        display_prompt: format!(
+            "[telex] from {} ({})",
+            descriptor.from.as_deref().unwrap_or("unknown"),
+            descriptor.attention
+        ),
+        mode: attention_to_send_mode(&descriptor.attention),
+    };
+    let line = serde_json::to_string(&request)?;
+
+    let response =
+        match tokio::time::timeout(Duration::from_secs(20), bridge_roundtrip(&registry.endpoint.path, &line))
+            .await
+        {
+            Ok(Ok(response)) => response,
+            Ok(Err(e)) => {
+                eprintln!("telex copilot push: bridge transport failed: {e}");
+                return Ok(2);
+            }
+            Err(_) => {
+                eprintln!("telex copilot push: bridge did not respond within budget");
+                return Ok(2);
+            }
+        };
+
+    let parsed: BridgePushResponse = match serde_json::from_str(response.trim()) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            eprintln!("telex copilot push: malformed bridge response: {e}");
+            return Ok(1);
+        }
+    };
+    if parsed.ok {
+        Ok(0)
+    } else {
+        eprintln!(
+            "telex copilot push: bridge rejected message {}: {}",
+            descriptor.message_id,
+            parsed.error.as_deref().unwrap_or("unknown error")
+        );
+        Ok(1)
+    }
+}
+
+/// Connect to the in-session bridge endpoint, send one JSON request line, read one JSON
+/// response line. Windows named pipe path.
+#[cfg(windows)]
+async fn bridge_roundtrip(path: &str, request_line: &str) -> Result<String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::windows::named_pipe::ClientOptions;
+    const ERROR_PIPE_BUSY: i32 = 231;
+
+    let mut client = loop {
+        match ClientOptions::new().open(path) {
+            Ok(client) => break client,
+            Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+            }
+            Err(e) => return Err(anyhow::anyhow!("opening bridge pipe {path}: {e}")),
+        }
+    };
+    client.write_all(request_line.as_bytes()).await?;
+    client.write_all(b"\n").await?;
+    client.flush().await?;
+    let mut reader = BufReader::new(client);
+    let mut response = String::new();
+    reader.read_line(&mut response).await?;
+    Ok(response)
+}
+
+/// POSIX unix domain socket path.
+#[cfg(unix)]
+async fn bridge_roundtrip(path: &str, request_line: &str) -> Result<String> {
+    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::net::UnixStream;
+
+    let mut client = UnixStream::connect(path)
+        .await
+        .map_err(|e| anyhow::anyhow!("connecting bridge socket {path}: {e}"))?;
+    client.write_all(request_line.as_bytes()).await?;
+    client.write_all(b"\n").await?;
+    client.flush().await?;
+    let mut reader = BufReader::new(client);
+    let mut response = String::new();
+    reader.read_line(&mut response).await?;
+    Ok(response)
 }
 
 async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
@@ -48,6 +429,11 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     if let Some(pid) = copilot_loader_pid() {
         watch_pid.push(WatchPidSpec::anchor(pid));
     }
+    let on_deliver = if args.copilot_bridge {
+        provision_bridge(ctx, &session)
+    } else {
+        None
+    };
     let attach_args = AttachArgs {
         description: args.description,
         scope: args.scope,
@@ -62,6 +448,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
         watch_pid,
         session_poll_secs: 2,
         no_session_bind: false,
+        on_deliver,
     };
     crate::commands::attach::run(ctx, attach_args).await
 }
@@ -127,6 +514,7 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
     }
 
     cleanup_turn_guard_state_best_effort(&session);
+    remove_bridge_extension(&session);
     let outcome = if failed.is_empty() {
         "session_end"
     } else {

@@ -153,6 +153,10 @@ pub struct AttachArgs {
     /// Do not convert `$TELEX_SESSION_PID` into a daemon watch-pid.
     #[arg(long)]
     pub no_session_bind: bool,
+    /// Programmatic-only: harness-neutral on-deliver handler argv registered with the daemon.
+    /// Not a CLI flag; set by the Copilot bridge bind path.
+    #[arg(skip)]
+    pub on_deliver: Option<Vec<String>>,
 }
 
 #[derive(Args)]
@@ -434,6 +438,12 @@ pub enum CopilotCmd {
     /// Print the canonical embedded telex skill for plugin consumers.
     #[command(hide = true)]
     Skill,
+    /// Deliver one telex message (descriptor on stdin) into a session via its bridge.
+    #[command(hide = true)]
+    Push(CopilotPushArgs),
+    /// Detach a Copilot session's address and tear down its bridge if it was the last binding.
+    #[command(hide = true)]
+    Detach(CopilotDetachArgs),
 }
 
 #[derive(Args)]
@@ -453,6 +463,10 @@ pub struct CopilotAttachArgs {
     /// Occupant identity recorded on the lease (default: session host/pid).
     #[arg(long)]
     pub occupant: Option<String>,
+    /// Provision the in-session push bridge (write the extension and register the
+    /// on-deliver push handler) so messages arrive as turns without a waiter.
+    #[arg(long)]
+    pub copilot_bridge: bool,
 }
 
 #[derive(Args)]
@@ -465,6 +479,21 @@ pub struct CopilotSessionEndArgs {
 #[derive(Args)]
 pub struct CopilotTurnGuardArgs {
     /// Stable Copilot session identity; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotPushArgs {
+    /// Stable Copilot session identity whose bridge should receive the message;
+    /// defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotDetachArgs {
+    /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
     pub session: Option<String>,
 }

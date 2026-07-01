@@ -1,32 +1,41 @@
-// telex copilot bridge (prototype)
+// telex copilot bridge
 //
 // An in-session Copilot CLI extension that lets an external same-user process
 // (the telex daemon's on-deliver handler, `telex copilot push`) inject a
-// message into THIS live session as a queued turn -- without the agent running
-// or re-arming a `telex wait` waiter.
+// message into THIS live session as a turn -- without the agent running or
+// re-arming a `telex wait` waiter.
 //
-// Transport: a per-session OS named pipe (Windows) / unix domain socket
-// (POSIX), authorized by same-user OS ACL. No bearer token at rest. The pipe
-// path is derived from the Copilot session id, so it is stable across `/clear`
-// reloads.
+// telex embeds these bytes (include_str!) and writes them into the session
+// extension dir on `telex copilot attach --copilot-bridge`; the agent then runs
+// the `extensions_reload` tool once to load it. `telex copilot detach` removes
+// the file (and the agent reloads to unload).
 //
-// Wire protocol: one JSON request object per connection, newline-terminated:
+// Transport (Option A): a per-session OS named pipe (Windows) / unix domain
+// socket (POSIX). The endpoint path is derived from the Copilot session id so it
+// is stable across `/clear` reloads. Same-user isolation is enforced by the OS:
+// on POSIX via 0700 dir + 0600 socket; on Windows via the default pipe DACL
+// (single-user hosts). No bearer token at rest.
+//
+// Wire protocol: one JSON request per connection, newline-terminated:
 //   {"prompt": "...", "displayPrompt": "[telex] from <addr>", "mode": "enqueue"}
 // Response, newline-terminated:
 //   {"ok": true, "sessionId": "...", "messageId": "...", "mode": "enqueue"}
-//
-// This is a PROTOTYPE of the bytes telex would embed (include_str!) and write
-// into the session extension dir on `telex attach --copilot-bridge`.
+// The bridge forwards `mode` verbatim; the attention->mode decision
+// (interrupt -> immediate, else -> enqueue) is made by `telex copilot push`.
 
-import { mkdir, writeFile, rm } from "node:fs/promises";
+import { mkdir, writeFile, rm, chmod } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { joinSession } from "@github/copilot-sdk/extension";
 
+const isPosix = platform() !== "win32";
 const MAX_REQUEST_BYTES = 1024 * 1024; // 1 MiB guard
 const registryDir = join(homedir(), ".copilot", "telex-bridge");
-await mkdir(registryDir, { recursive: true });
+await mkdir(registryDir, { recursive: true, mode: 0o700 });
+if (isPosix) {
+  await chmod(registryDir, 0o700).catch(() => {});
+}
 
 // joinSession first: we need session.sessionId to derive the endpoint + registry.
 const session = await joinSession({
@@ -127,6 +136,9 @@ await new Promise((resolve, reject) => {
   server.once("error", reject);
   server.listen(endpoint.path, resolve);
 });
+if (isPosix && endpoint.kind === "unix") {
+  await chmod(endpoint.path, 0o600).catch(() => {});
+}
 
 await writeFile(
   registryPath,
@@ -142,6 +154,9 @@ await writeFile(
   ),
   "utf8",
 );
+if (isPosix) {
+  await chmod(registryPath, 0o600).catch(() => {});
+}
 
 await session.log(
   `telex-bridge ready for ${sessionId} on ${endpoint.kind} ${endpoint.path}`,
