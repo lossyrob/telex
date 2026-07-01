@@ -357,8 +357,9 @@ A second review pass and builder-directed follow-ups added:
   bridge cannot ship baked into the binary.
 - **Re-delivery is re-provision-triggered, not timer-churned.** An **accepted** push (already queued
   in the live session) is no longer re-pushed on the fast failure backoff; while the same session
-  stays continuously attached it is not re-sent (a seen-but-unacked message is nudged by the turn
-  guard instead). Un-acked messages are re-delivered when the **attachment changes** -- a reattach, a
+  stays continuously attached it is not re-sent on that cadence -- only a long backstop may re-check
+  it every few minutes if it stays unacked, and a seen-but-unacked message is nudged by the turn
+  guard instead. Un-acked messages are re-delivered when the **attachment changes** -- a reattach, a
   `/clear` bridge-reload re-provision, or a new session taking the address -- which resets the
   attempt map and rescans `fetch_undelivered`. A **failed** push (dead / absent bridge) still retries
   on the fast backoff, and a long backstop covers the rare silent in-session drop of a queued turn.
