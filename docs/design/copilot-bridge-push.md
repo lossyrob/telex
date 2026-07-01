@@ -5,6 +5,12 @@
 > in-session bridge proposal with a small set of deliberate changes. The "why"
 > behind each change is spelled out so the orchestrator can adopt or contest it
 > with the reasoning visible.
+>
+> **Normative contract:** the daemon primitive this doc introduces is specified in
+> [daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral) and
+> [DECISIONS.md ADR 0039](DECISIONS.md#0039--push-delivery-via-a-generic-on-deliver-exec--copilot-session-bridge);
+> [ARCHITECTURE.md sec.9](ARCHITECTURE.md#9-push-delivery-on-deliver-exec--in-session-bridge)
+> carries the sequence diagram. This doc is the design narrative behind those contracts.
 
 ## TL;DR
 
@@ -265,6 +271,18 @@ The full lifecycle:
   load-on-bind model so the agent runs it once and then just reads turns.
 
 ## Open questions
+
+> **Resolved as shipped in PR #55.** The normative answers live in
+> [daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral) and
+> [DECISIONS.md ADR 0039](DECISIONS.md#0039--push-delivery-via-a-generic-on-deliver-exec--copilot-session-bridge).
+> For the record: daemon registration is `Register.on_deliver: Vec<String>` (an argv), exec'd
+> off the ack path with capped concurrency/timeout and a bounded per-heartbeat retry sweep;
+> `telex copilot push` does a bounded round-trip to the bridge but delivery stays
+> **at-least-once** via the sweep (no ack-gating in v1); the POSIX endpoint is a per-session UDS
+> under `~/.copilot/telex-bridge/` with a `0700` dir and fail-closed `0600` socket; and the
+> copilot module ships in the binary (no feature gate).
+
+The original open questions, retained for history:
 
 - Exact name/shape of the daemon on-deliver registration (per-address handler
   argv; capping and retry policy; how it reads from unacked store state).

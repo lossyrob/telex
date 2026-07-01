@@ -619,6 +619,18 @@ does not start it. Generic loop/skill mechanisms remain appropriate for dynamic,
 agent-invented checks; they are simply not how Telex message-waiting and answerback are
 implemented.
 
+For a **push-capable harness** (e.g. a Copilot CLI session with the in-session bridge),
+even that supervision is unnecessary: the agent registers a daemon **on-deliver exec** once
+at attach, and a committed message is handed to the harness as a real turn without any
+agent-owned `wait` loop to run or re-arm. This is a strict superset of the pull model — the
+durable buffer and the agent-ack fence are unchanged, delivery stays at-least-once, and
+`interrupt` still means "next turn boundary" (below) — it only removes the agent-managed
+waiter as the wake path. It is distinct from the *transport* push of decision 0005 (the
+exchange releasing a blocked read): here the daemon runs a harness-neutral handler that
+injects the turn. Normative contract in
+[daemon.md §13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral) / ADR 0039; the
+`telex wait` loop below remains the harness-agnostic fallback.
+
 The delivery loop should:
 
 - `attach` (one-shot) to one or more addresses;

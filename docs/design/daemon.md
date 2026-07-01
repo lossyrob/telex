@@ -490,7 +490,7 @@ station it intentionally dropped (for `Ack`, the message simply redelivers to a 
 | Request | Purpose | Privileged? |
 |---|---|---|
 | `Hello` | version + capability handshake | no |
-| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[] }` | **explicit attach** — establishes the in-memory membership `(store_key, session_id) → address` and claims/renews the durable lease for the address. **Idempotent**: re-issuing it for an already-attended address is a no-op refresh. This is the **only** way membership is created; nothing implicit ever (re)creates it. | no (same-trust) |
+| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[], on_deliver? }` | **explicit attach** — establishes the in-memory membership `(store_key, session_id) → address` and claims/renews the durable lease for the address. **Idempotent**: re-issuing it for an already-attended address is a no-op refresh (which also **replaces** any registered `on_deliver`). This is the **only** way membership is created; nothing implicit ever (re)creates it. The optional `on_deliver` argv registers an opt-in **push exec** ([§13.2](#132-on-deliver-push-opt-in-harness-neutral)). | no (same-trust) |
 | `Detach { store_key, session_id, address }` | drop one station — removes the in-memory membership entry and releases the address's waiters. Non-privileged (same-user trust): like every unprivileged op it carries **no per-session proof**, so **any same-user process can drop any same-user station** — the accepted v1 same-user-trust tradeoff ([§7.3](#73-no-intra-user-isolation-in-v1-mr6)), **not** a per-session authorization guarantee; nothing is tombstoned (a later explicit `Register` re-attaches if wanted). | no |
 | `Wait { store_key, session_id, address, attention?, timeout_ms }` | block for one delivery against the address. If the exchange has no membership for `(store_key, session_id, address)`, returns **`NeedsAttach`** (the agent re-attaches then re-waits). Waiters are **detached** ([§9](#9-liveness-model)). | no |
 | `Send { store_key, session_id, to_addr, … }` / `Reply { store_key, session_id, message_id, … }` | enqueue a message into the durable buffer. If the exchange does not know the sending session/address, returns **`NeedsAttach`** (the agent re-attaches its own address, then retries) — `from` is never silently `None` ([§14.6](#146-from-resolution-and-re-attach)). | no |
@@ -1386,6 +1386,45 @@ ordering or the fence**:
 - These budgets are single-user / pre-beta acceptance limits
   ([§7.0](#70-v1-threat-model-normative)); multi-user / hot-address scaling is revisited at
   beta.
+
+### 13.2 On-deliver push (opt-in, harness-neutral)
+
+Delivery via `Wait` ([§6.2](#62-request--response-frames)) is **pull**: an agent-owned blocking
+waiter must be armed for a message to surface. For harnesses that cannot guarantee a continuously
+re-armed waiter (e.g. a CLI agent that must re-arm at every turn boundary, so a single miss makes
+the station deaf while messages queue durably), the daemon offers an **opt-in push primitive** — a
+member may register an **on-deliver exec** the daemon runs when a message is durably committed for
+that member.
+
+- **Registration.** `Register` ([§6.2](#62-request--response-frames)) carries an optional
+  `on_deliver: Vec<String>` — an **argv** (program + args), **not** a shell string (no shell is
+  spawned; no interpolation). It is stored on the member record and surfaced in the Status
+  projection as `push_registered: bool`. Re-issuing `Register` **replaces** it (idempotent
+  refresh); `Detach`, operator reset, and epoch loss **clear** it.
+- **Fire point.** The daemon runs the argv **after** the message row and its durable
+  `deliveries(message_id, recipient)` entry are committed and after in-process `wait` notification
+  — i.e. strictly **off the ack critical path** and **after** durability. It fires for the
+  **primary** recipient only, **never for cc** (ADRs 0032/0033; cc is visibility-only,
+  [§6.2](#62-request--response-frames)). A per-heartbeat **bounded** sweep re-fires still-undelivered
+  rows so a push missed while the exec target was briefly absent is retried on the next tick, and a
+  fresh `Register` / re-bind rescans `fetch_undelivered`.
+- **Liveness-only — never a consume.** The exec is a **wake signal**, not a delivery or an ack. It
+  **never** marks a message delivered or consumed; the durable buffer and the explicit-agent-`Ack`
+  fence ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) are unchanged. If
+  the exec fails, is slow, or fires twice, the message is simply re-surfaced — **at-least-once with
+  duplicates is the safe direction**; silent consume-without-see remains forbidden ([§13](#13-delivery-and-seen-dedup)).
+  Repeat-fire dedup is a **lifecycle-scoped** in-memory fast-path keyed per member, reset on member
+  removal / re-register — never the authority.
+- **Bounded.** Per-exec concurrency and timeout are capped, and the sweep is batched, so a slow or
+  hung exec can never block delivery, the fence, or another member. The push timeout is set strictly
+  under the exec timeout so the handler fails fast rather than being killed mid-flight.
+- **Harness-neutral boundary.** The daemon knows only an **opaque argv** and the harness-neutral
+  message descriptor it passes on the exec's **stdin**; it holds **no** Copilot / SDK /
+  session-transport knowledge. All harness specifics — deriving a session's bridge endpoint,
+  injecting the message as a turn, mapping attention to immediate/enqueue — live in the `telex
+  copilot` verbs and the in-session bridge they drive, **outside** the core. See
+  [copilot-bridge-push.md](copilot-bridge-push.md) and
+  [DECISIONS.md ADR 0039](DECISIONS.md#0039--push-delivery-via-a-generic-on-deliver-exec--copilot-session-bridge).
 
 ## 14. Session identity and explicit membership
 

@@ -300,3 +300,43 @@ owner-only `admin_cap`. Intra-user isolation (`per_session_cap`) is reserved, no
 
 *Governing spec:* [daemon.md sec.7 authorization](daemon.md#7-authorization-and-the-trust-boundary) ,
 [sec.7.2 OS trust boundary](daemon.md#72-os-level-trust-boundary-mr5)
+
+---
+
+## 9. Push delivery (on-deliver exec + in-session bridge)
+
+**Answers:** How does a message reach a harness that cannot keep a blocking `wait` armed — without the agent owning a listener, and without the daemon learning anything about that harness? (Contrast diagram 2, which is pull.)
+
+```mermaid
+sequenceDiagram
+    actor S as Sender session
+    participant X as Local exchange (daemon)
+    participant DB as deliveries(message_id, recipient)
+    participant P as telex copilot push (opaque argv)
+    participant B as In-session bridge (extension)
+    actor R as Recipient agent turn
+
+    S->>X: send / reply (message)
+    X->>DB: INSERT (message_id, recipient) -- durable
+    Note over X: on-deliver fires AFTER durable commit + wait-notify, PRIMARY recipient only, off the ack path
+    X->>P: exec argv, harness-neutral descriptor on stdin
+    P->>P: derive session bridge endpoint (NOT trusted from registry path)
+    P->>B: connect (named pipe / UDS, same-user)
+    B-->>R: session.send -> message arrives as a TURN (immediate | enqueue)
+    R->>X: ack (message_id, address)
+    X->>DB: epoch-guarded MARK consumed
+    Note over X,P: on-deliver is LIVENESS-ONLY -- it never marks delivered/consumed; a missed/failed/duplicate push just re-surfaces (at-least-once)
+```
+
+Push is a **wake**, not a second delivery path: the durable buffer and the agent-`ack` fence (diagram 2)
+are unchanged. The daemon runs an **opaque argv** (`telex copilot push`) with the harness-neutral message
+descriptor on stdin the moment a message is durably committed for the **primary** recipient (**never** cc);
+everything Copilot-specific -- deriving the session's bridge endpoint, the in-session extension bridge, and
+mapping attention to `immediate`/`enqueue` turn injection -- lives **outside** the daemon. A per-heartbeat
+bounded sweep retries a push whose target was briefly absent. This removes the deaf-station failure mode (a
+missed waiter re-arm) for push-capable sessions, while `wait` (diagram 2) remains the harness-agnostic pull
+fallback.
+
+*Governing spec:* [daemon.md sec.13.2 on-deliver push](daemon.md#132-on-deliver-push-opt-in-harness-neutral) ,
+[copilot-bridge-push.md](copilot-bridge-push.md) ,
+[DECISIONS.md ADR 0039](DECISIONS.md#0039--push-delivery-via-a-generic-on-deliver-exec--copilot-session-bridge)

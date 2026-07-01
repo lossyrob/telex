@@ -1546,3 +1546,40 @@ live waiter details.
 **Consequences.** The plugin can implement an agent-stop/re-arm guard without new daemon state or a
 separate lifecycle protocol. The projection is read-only and requires the same same-user/admin-cap
 access as detailed daemon status.
+
+## 0039 — Push delivery via a generic on-deliver exec + Copilot session bridge
+
+- **Date:** 2026-06-30
+- **Status:** Accepted (`push-delivery` node / PR #55)
+
+**Context.** Delivery to a Copilot CLI session depends on an **agent-armed** `wait` waiter that
+must be re-armed at every turn boundary. A single missed re-arm makes the station **deaf** while
+messages queue durably — the exact friction #53 targets. We want a message to arrive as an agent
+**turn** without the agent owning a listener, while keeping two invariants sacred: the daemon /
+Rust core stays **harness-agnostic** (no Copilot/SDK coupling — ADR-level boundary), and the
+durable buffer + explicit-agent-`Ack` fence ([sec.11.3](daemon.md#113-server-side-delivery-fence-mr1--at-least-once-preserving))
+never regress.
+
+**Decision.** Add a **generic daemon on-deliver exec** primitive: `Register` gains an optional
+`on_deliver: Vec<String>` **argv** the daemon runs when a message is durably committed for that
+member — **after** the `deliveries` commit and `wait` notify, strictly **off the ack critical
+path**, for the **primary** recipient only (never cc, per ADR 0032/0033). It is **liveness-only**:
+a wake signal that **never** marks delivered or consumed, so the fence is unchanged and
+**at-least-once with duplicates is the safe direction**. Concurrency and per-exec timeout are
+capped; a per-heartbeat bounded sweep retries pushes whose target was briefly absent; repeat-fire
+dedup is a lifecycle-scoped fast-path (reset on removal / re-register), never the authority. The
+**Copilot** binding lives entirely **outside core**: `telex copilot push` reads the harness-neutral
+message descriptor on stdin, derives the session's bridge endpoint (not trusted from the registry
+path), and hands it to an **in-session extension bridge** that injects it as a turn via the CLI's
+`session.send`. Attention maps two ways — `interrupt → immediate`, everything else → `enqueue`
+(delivered after the current turn). The `telex wait` CLI is **retained** as the harness-agnostic
+**pull fallback**; the Copilot skill defaults to push.
+
+**Consequences.** Push-capable sessions lose the deaf-station failure mode — no agent re-arm is
+required. The daemon gains exactly one opaque, harness-neutral hook (an argv + a descriptor on
+stdin; **no** Copilot/SDK types in core), preserving the boundary. A slow/hung exec can never block
+delivery, the fence, or another member. Deferred and documented in PR #55: refcount
+multi-store + atomic (SF-2), descriptor size cap (SF-5), stale-exe guard (C-4), bridge protocol
+version (C-5), and a `telex copilot gc` for orphaned endpoints. See
+[copilot-bridge-push.md](copilot-bridge-push.md) and
+[daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral).
