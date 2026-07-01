@@ -1546,3 +1546,129 @@ live waiter details.
 **Consequences.** The plugin can implement an agent-stop/re-arm guard without new daemon state or a
 separate lifecycle protocol. The projection is read-only and requires the same same-user/admin-cap
 access as detailed daemon status.
+
+## 0039 — Push delivery via a generic on-deliver exec + Copilot session bridge
+
+- **Date:** 2026-06-30
+- **Status:** Accepted (`push-delivery` node / PR #55)
+
+**Context.** Delivery to a Copilot CLI session depends on an **agent-armed** `wait` waiter that
+must be re-armed at every turn boundary. A single missed re-arm makes the station **deaf** while
+messages queue durably — the exact friction #53 targets. We want a message to arrive as an agent
+**turn** without the agent owning a listener, while keeping two invariants sacred: the daemon /
+Rust core stays **harness-agnostic** (no Copilot/SDK coupling — ADR-level boundary), and the
+durable buffer + explicit-agent-`Ack` fence ([sec.11.3](daemon.md#113-server-side-delivery-fence-mr1--at-least-once-preserving))
+never regress.
+
+**Decision.** Add a **generic daemon on-deliver exec** primitive: `Register` gains an optional
+`on_deliver: Vec<String>` **argv** the daemon runs when a message is durably committed for that
+member — **after** the `deliveries` commit and `wait` notify, strictly **off the ack critical
+path**, for the **primary** recipient only (never cc, per ADR 0032/0033). It is **liveness-only**:
+a wake signal that **never** marks delivered or consumed, so the fence is unchanged and
+**at-least-once with duplicates is the safe direction**. Concurrency and per-exec timeout are
+capped; a per-heartbeat bounded sweep retries pushes whose target was briefly absent; repeat-fire
+dedup is a lifecycle-scoped fast-path (reset on removal / re-register), never the authority. The
+**Copilot** binding lives entirely **outside core**: `telex copilot push` reads the harness-neutral
+message descriptor on stdin, derives the session's bridge endpoint (not trusted from the registry
+path), and hands it to an **in-session extension bridge** that injects it as a turn via the CLI's
+`session.send`. Attention maps two ways — `interrupt → immediate`, everything else → `enqueue`
+(delivered after the current turn). The `telex wait` CLI is **retained** as the harness-agnostic
+**pull fallback**; the Copilot skill defaults to push.
+
+**Consequences.** Push-capable sessions lose the deaf-station failure mode — no agent re-arm is
+required. The daemon gains exactly one opaque, harness-neutral hook (an argv + a descriptor on
+stdin; **no** Copilot/SDK types in core), preserving the boundary. A slow/hung exec can never block
+delivery, the fence, or another member. Deferred and documented in PR #55: refcount
+multi-store + atomic (SF-2), descriptor size cap (SF-5), stale-exe guard (C-4), bridge protocol
+negotiation/enforcement (C-5 — PR #55 ships only an informational `COPILOT_BRIDGE_PROTOCOL`
+number in the `telex copilot skill` header, not wire negotiation), and a `telex copilot gc`
+for orphaned endpoints. See
+[copilot-bridge-push.md](copilot-bridge-push.md) and
+[daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral).
+
+## 0040 — Copilot skill is binary-owned; the plugin skill is a bootstrap
+
+- **Date:** 2026-07-01
+- **Status:** Accepted (`push-delivery` node / PR #55)
+
+**Context.** The #53 skill rewrite risks baking a long, detailed copy of the Copilot
+workflow into the static plugin skill (`skills/telex/SKILL.md`). Because #53 moves the
+Copilot path from waiter/re-arm to bind → bridge → pushed turns → disposition, a static
+skill is especially prone to drifting from the installed binary and misleading the agent —
+the detailed command syntax and workflow should come from the exact `telex` binary
+installed in that session.
+
+**Decision.** Invert ownership. The plugin `skills/telex/SKILL.md` becomes a small, stable
+**bootstrap**: it says what Telex is, tells the agent to load version-matched instructions
+from the installed binary (`telex copilot skill` for the Copilot push path, `telex skill`
+for the generic pull path), and names command `--help` as the syntax source of truth. The
+installed binary owns the detail: `telex copilot skill` prints the version-matched Copilot
+workflow from an embedded `COPILOT.md`, headed by `telex v..`, the Copilot **bridge
+protocol** version, and the **minimum compatible plugin** version. It accepts
+`--plugin-version` (or `TELEX_PLUGIN_VERSION`) and prints a clear compatibility **warning**
+when the plugin is older than the binary supports. The detailed Copilot section in the root
+`SKILL.md` is likewise reduced to a pointer at `telex copilot skill`, so the Copilot flow
+has a single source of truth.
+
+**Consequences.** Future protocol/bridge changes update the binary (and its embedded
+`COPILOT.md`) without a coordinated edit to a static plugin file, and a stale plugin is
+flagged rather than silently trusted. The former byte-identical plugin↔root mirror
+invariant (and its test) is replaced by a bootstrap invariant: the plugin skill stays
+small, defers to the binary, and embeds no detailed recipes. `telex copilot skill` no
+longer dumps the whole generic skill; agents wanting the generic/pull reference still run
+`telex skill`. The plugin's own version is the one version fact the bootstrap legitimately
+carries (it matches `plugin.json`), used only to drive the compatibility check.
+
+## 0041 — On-deliver re-delivery is re-provision-triggered, not timer-until-ack
+
+- **Date:** 2026-07-01
+- **Status:** Accepted (`push-delivery` node / PR #55)
+
+**Context.** ADR 0039's on-deliver push kept re-pushing a still-unacked message on a fixed
+per-message backoff (base 15s, doubling) until the agent acked, to guarantee no loss between
+"harness accepted the turn" and "agent durably consumed it." A live two-terminal dogfood test
+showed this over-fires: a **successful** `session.send` only means the turn was *queued*, so
+against a busy or slow recipient the daemon re-pushes the same message every ~15s, enqueuing
+duplicate turns the agent must dedupe — the agent can fall behind acking while it burns turns on
+dupes (correct via id-dedupe, but wasteful and confusing). The re-push conflated two situations it
+should treat differently: (a) the queue is intact and the message is simply pending/seen —
+re-pushing is pure duplication; (b) the queue was lost (crash / reattach / reload) or the push
+never landed — re-delivery is genuinely needed.
+
+**Decision.** Split the re-push cadence by the last push's **outcome**, and make re-delivery
+**re-provision-triggered** rather than timer-driven:
+- A **failed** push (bridge unreachable / target absent) keeps the fast `on_deliver_backoff`
+  (15s doubling to a cap) so a transiently dead bridge recovers quickly.
+- An **accepted** push is already queued in the live session, so it is **not** re-pushed on the
+  fast cadence. Re-delivery of un-acked messages happens on **attachment change** — a reattach, a
+  new session taking the address, or a `/clear` bridge-reload re-provision — which already calls
+  `on_deliver_forget_member` + rescans `fetch_undelivered`. A long `ON_DELIVER_ACCEPTED_BACKSTOP`
+  (5 min) is retained only as a backstop against a silent in-session drop of a queued turn.
+- A **live push** member's unacked backlog is not the agent-stop **turn guard's** job: enqueue-mode
+  turns may already be queued behind the current turn, and an eager guard nudge can race those turns
+  and create duplicate work. The guard still surfaces stale/dead bridge coverage; live push backlog
+  is left to the queued turn, re-provision re-delivery, or the long backstop.
+- The Copilot bridge reports push success after a **bounded enqueue acknowledgement**: it waits a
+  short window for `session.send(...)` to return its message id in the idle path, but if that promise
+  is still blocked behind the agent's current long-running turn it returns `{ok:true,
+  accepted:"pending"}` before the Rust handler times out. Otherwise the daemon records a false failed
+  push and a late enqueue plus fast retry inject duplicate turns. The bridge retains and observes the
+  pending `session.send(...)` promise until it settles, so the SDK request remains live after the
+  socket response. Synchronous / quick `session.send` failures still fail; asynchronous rejection
+  after a pending ack is logged and recovered by the durable long-backstop / re-provision path.
+- The live push workflow treats `telex inbox` as **diagnostic/recovery**, not the normal receive path.
+  With a fresh bridge heartbeat, unacked backlog can mean enqueue-mode turns are already queued
+  behind the current turn; acking those unseen messages from `inbox` before the visible turns arrive
+  creates duplicate work when the queued turns later surface. Normal push receive is: wait for the
+  `[telex]` turn, then ack/handle its id.
+The COPILOT.md workflow now tells the agent to **re-provision after `/clear`** (re-run
+`copilot attach --copilot-bridge` before `extensions_reload`) so a reload re-delivers the backlog.
+
+**Consequences.** The redelivery amplification is gone: a continuously-held session gets each
+message once (plus rare backstop re-checks), not every 15s. The **sacred durable+ack invariant is
+preserved** — the durable store still never loses a message, and every queue-loss path (crash,
+reattach, reload, new holder) re-delivers un-acked messages at-least-once (a duplicate to a fresh
+attachment is the safe direction). The daemon stays **harness-neutral**: "attachment generation"
+is realized as re-provision events (lease-epoch bump + re-`Register`), not a bridge-specific token
+plumbed through the core. Residual risk — an accepted turn silently dropped while the same session
+stays attached without a reload — is covered by the 5-min backstop and the existing degraded status.

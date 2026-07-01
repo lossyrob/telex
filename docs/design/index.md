@@ -18,18 +18,28 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   + Status surface, daemon-native session ownership, the liveness model, the minimal
   upgrade floor, the gating tests, and the consolidated resolutions of the
   design-foundation open questions.
-- **[ARCHITECTURE.md](ARCHITECTURE.md)** — the **visual on-ramp** to the daemon design: five
-  mermaid diagrams (component map, message delivery, restart/re-attach, station liveness, the
-  single-writer epoch fence) that teach the local-exchange architecture above the contract.
-  Non-normative; `daemon.md` governs.
+- **[ARCHITECTURE.md](ARCHITECTURE.md)** — the **visual on-ramp** to the daemon design:
+  mermaid diagrams (component map, pull **and push** message delivery, restart/re-attach,
+  station liveness, the single-writer epoch fence, authorization) that teach the
+  local-exchange architecture above the contract. Non-normative; `daemon.md` governs.
+- **[copilot-bridge-push.md](copilot-bridge-push.md)** — the **push-delivery** design: the
+  generic daemon on-deliver exec primitive and the Copilot CLI session bridge that turns a
+  delivered message into an agent turn, the alternative to the agent-armed `wait` pull for
+  push-capable harnesses. Governed by
+  [daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral),
+  [DECISIONS.md ADR 0039](DECISIONS.md#0039--push-delivery-via-a-generic-on-deliver-exec--copilot-session-bridge),
+  and the Copilot skill-ownership decision
+  [DECISIONS.md ADR 0040](DECISIONS.md#0040--copilot-skill-is-binary-owned-the-plugin-skill-is-a-bootstrap).
 
 ## Reading order
 
 1. `PRODUCT-THESIS.md` (root) — why telex exists and what it promises.
 2. `DESIGN.md` — how the system is shaped.
-3. `ARCHITECTURE.md` — the visual on-ramp (5 diagrams) to the local-exchange design.
+3. `ARCHITECTURE.md` — the visual on-ramp (mermaid diagrams) to the local-exchange design.
 4. `daemon.md` — the precise contracts `daemon-core` and downstream nodes implement.
-5. `DECISIONS.md` — why each load-bearing choice was made.
+5. `copilot-bridge-push.md` — how push delivery layers a harness bridge on the daemon's
+   on-deliver exec (read after `daemon.md` sec.13.2).
+6. `DECISIONS.md` — why each load-bearing choice was made.
 
 ## Open-question resolutions (design-foundation)
 

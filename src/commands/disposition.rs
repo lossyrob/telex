@@ -211,6 +211,7 @@ async fn register_for_retry<C: AckConnector>(
                 tags: None,
                 watch_pids: Vec::new(),
                 recovery: true,
+                on_deliver: None,
             }),
         )
         .await;

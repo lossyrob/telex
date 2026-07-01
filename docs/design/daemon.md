@@ -490,7 +490,7 @@ station it intentionally dropped (for `Ack`, the message simply redelivers to a 
 | Request | Purpose | Privileged? |
 |---|---|---|
 | `Hello` | version + capability handshake | no |
-| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[] }` | **explicit attach** — establishes the in-memory membership `(store_key, session_id) → address` and claims/renews the durable lease for the address. **Idempotent**: re-issuing it for an already-attended address is a no-op refresh. This is the **only** way membership is created; nothing implicit ever (re)creates it. | no (same-trust) |
+| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[], on_deliver? }` | **explicit attach** — establishes the in-memory membership `(store_key, session_id) → address` and claims/renews the durable lease for the address. **Idempotent**: re-issuing it for an already-attended address is a no-op refresh (which also **replaces** any registered `on_deliver`). This is the **only** way membership is created; nothing implicit ever (re)creates it. The optional `on_deliver` argv registers an opt-in **push exec** ([§13.2](#132-on-deliver-push-opt-in-harness-neutral)). | no (same-trust) |
 | `Detach { store_key, session_id, address }` | drop one station — removes the in-memory membership entry and releases the address's waiters. Non-privileged (same-user trust): like every unprivileged op it carries **no per-session proof**, so **any same-user process can drop any same-user station** — the accepted v1 same-user-trust tradeoff ([§7.3](#73-no-intra-user-isolation-in-v1-mr6)), **not** a per-session authorization guarantee; nothing is tombstoned (a later explicit `Register` re-attaches if wanted). | no |
 | `Wait { store_key, session_id, address, attention?, timeout_ms }` | block for one delivery against the address. If the exchange has no membership for `(store_key, session_id, address)`, returns **`NeedsAttach`** (the agent re-attaches then re-waits). Waiters are **detached** ([§9](#9-liveness-model)). | no |
 | `Send { store_key, session_id, to_addr, … }` / `Reply { store_key, session_id, message_id, … }` | enqueue a message into the durable buffer. If the exchange does not know the sending session/address, returns **`NeedsAttach`** (the agent re-attaches its own address, then retries) — `from` is never silently `None` ([§14.6](#146-from-resolution-and-re-attach)). | no |
@@ -1387,6 +1387,70 @@ ordering or the fence**:
   ([§7.0](#70-v1-threat-model-normative)); multi-user / hot-address scaling is revisited at
   beta.
 
+### 13.2 On-deliver push (opt-in, harness-neutral)
+
+Delivery via `Wait` ([§6.2](#62-request--response-frames)) is **pull**: an agent-owned blocking
+waiter must be armed for a message to surface. For harnesses that cannot guarantee a continuously
+re-armed waiter (e.g. a CLI agent that must re-arm at every turn boundary, so a single miss makes
+the station deaf while messages queue durably), the daemon offers an **opt-in push primitive** — a
+member may register an **on-deliver exec** the daemon runs when a message is durably committed for
+that member.
+
+- **Registration.** `Register` ([§6.2](#62-request--response-frames)) carries an optional
+  `on_deliver: Vec<String>` — an **argv** (program + args), **not** a shell string (no shell is
+  spawned; no interpolation). It is stored on the member record and surfaced in the Status
+  projection as `push_registered: bool`. An **explicit re-provision** (`Register` with a new
+  `on_deliver`) replaces the handler and resets its per-message retry state; a **generic refresh**
+  that re-registers with `on_deliver = None` (e.g. a `telex wait` re-attach) **preserves** the
+  existing handler, so a pull re-attach cannot silently disarm the bridge. The handler lives on
+  the member record, so **removing** the member (an epoch-current takedown, or a plain `Detach`)
+  drops it with the record; operator reset and Copilot `sessionEnd` instead mark the member
+  **idle** and do **not** clear the stored handler, so a still-undelivered message keeps being
+  re-pushed (on the backoff below) — and `push_registered` stays true — until the member is
+  actually removed.
+- **Fire point.** The daemon runs the argv **after** the message row and its durable
+  `deliveries(message_id, recipient)` entry are committed and after in-process `wait` notification
+  — i.e. strictly **off the ack critical path** and **after** durability. It fires for the
+  **primary** recipient only, **never for cc** (ADRs 0032/0033; cc is visibility-only,
+  [§6.2](#62-request--response-frames)). A per-heartbeat **bounded** sweep re-fires still-undelivered
+  rows so a push missed while the exec target was briefly absent is retried on the next tick, and a
+  fresh `Register` / re-bind rescans `fetch_undelivered`.
+- **Liveness-only — never a consume.** The exec is a **wake signal**, not a delivery or an ack. It
+  **never** marks a message delivered or consumed; the durable buffer and the explicit-agent-`Ack`
+  fence ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) are unchanged. If
+  the exec fails, is slow, or fires twice, the message is simply re-surfaced — **at-least-once with
+  duplicates is the safe direction**; silent consume-without-see remains forbidden ([§13](#13-delivery-and-seen-dedup)).
+  A successful exec only proves the harness **accepted** the turn, not that the agent saw or
+  acked it, so "pushed" is an **attempt record, not terminal suppression**. Re-push cadence now
+  depends on the last outcome: a **failed** push (target briefly absent / bridge unreachable)
+  retries on a **fast per-message backoff** (base doubling to a cap) so a transiently dead target
+  recovers quickly, while an **accepted** push waits on a **long backstop** — an accepted turn is
+  already queued in the live session, so its real re-delivery trigger is a **re-provision**
+  (reattach / reload / a new session taking the address → the attempt map is reset and the unacked
+  backlog re-delivered via `fetch_undelivered`), not the timer; the backstop only guards a silent
+  in-session drop of a queued turn. While the bridge heartbeat is fresh, an unacked backlog is not
+  itself a turn-guard issue: enqueue-mode turns may already be queued behind the current turn, and
+  `telex inbox` is a diagnostics/recovery path rather than the normal live push receive path. After
+  a small attempt ceiling the daemon surfaces a **degraded** status. The attempt map is a
+  lifecycle-scoped in-memory fast-path keyed per member — pruned to the still-undelivered set each
+  sweep, reset on explicit re-provision, and reclaimed on the next `Register` after a plain
+  `Detach` — never the authority.
+- **Version compatibility.** Because the daemon is persistent, a new client can meet an **older**
+  daemon that predates `on_deliver`. The daemon advertises an `on_deliver_exec_v1` capability in
+  its handshake, and a `--copilot-bridge` bind **verifies `push_registered` after registering**; if
+  an older daemon silently ignored `on_deliver`, the bind **fails closed** (rolling back the
+  bridge) rather than leaving the agent believing push is live when only pull would work.
+- **Bounded.** Per-exec concurrency and timeout are capped, and the sweep is batched, so a slow or
+  hung exec can never block delivery, the fence, or another member. The push timeout is set strictly
+  under the exec timeout so the handler fails fast rather than being killed mid-flight.
+- **Harness-neutral boundary.** The daemon knows only an **opaque argv** and the harness-neutral
+  message descriptor it passes on the exec's **stdin**; it holds **no** Copilot / SDK /
+  session-transport knowledge. All harness specifics — deriving a session's bridge endpoint,
+  injecting the message as a turn, mapping attention to immediate/enqueue — live in the `telex
+  copilot` verbs and the in-session bridge they drive, **outside** the core. See
+  [copilot-bridge-push.md](copilot-bridge-push.md) and
+  [DECISIONS.md ADR 0039](DECISIONS.md#0039--push-delivery-via-a-generic-on-deliver-exec--copilot-session-bridge).
+
 ## 14. Session identity and explicit membership
 
 ### 14.1 Identity and in-memory membership
@@ -1549,17 +1613,25 @@ zero-config, like `rust-analyzer`/`gopls`.
 
 ### 15.2 Single-source SKILL
 
-One source serves both the CLI command and the plugin skill:
+One source serves every consumer: the installed **binary is the source of truth** for agent
+instructions, and the plugin skill is only a locator, so a static file can never drift into
+misleading an agent (see
+[DECISIONS.md ADR 0040](DECISIONS.md#0040--copilot-skill-is-binary-owned-the-plugin-skill-is-a-bootstrap)):
 
-- **Canonical file:** root `SKILL.md` (unchanged; stays at the repo root).
-- **CLI consumer:** `telex skill` prints the embedded `SKILL.md`
-  (`include_str!` in `src/commands/skill.rs`, unchanged) — add a `--raw` form for
-  machine consumption.
-- **Plugin-skill consumer:** Copilot plugin discovery reads `skills/telex/SKILL.md`, a
-  byte-identical mirror of the canonical root `SKILL.md`. Tests fail if the mirror diverges or if
-  additional `SKILL.md` files appear. Root `SKILL.md` remains the source authors edit.
-- **Invariant:** **no generated divergent copy** — both consumers resolve to the same
-  `SKILL.md`. The `SKILL.md` narrative content is owned by `daemon-core`.
+- **Generic skill:** root `SKILL.md` is embedded (`include_str!` in `src/commands/skill.rs`)
+  and printed by `telex skill` (`--raw` for the verbatim form) — version-matched because it
+  ships in the binary.
+- **Copilot skill:** `COPILOT.md` is embedded and printed by `telex copilot skill`, headed by
+  the binary version, the Copilot bridge protocol version, and the minimum compatible plugin
+  version — the version-matched source of truth for the Copilot push workflow.
+- **Plugin bootstrap:** Copilot plugin discovery reads `skills/telex/SKILL.md`, a small, stable
+  **bootstrap** that says what telex is and tells the agent to load the real instructions from
+  the binary (`telex copilot skill` / `telex skill`) and to use `--help` for syntax. It is
+  intentionally **not** a copy of the canonical skill; a test asserts it stays a thin bootstrap
+  that defers to the binary and embeds no detailed recipes (superseding the former
+  byte-identical mirror).
+- **Invariant:** the detailed, version-accurate behavior is owned by the binary; a plugin/binary
+  mismatch is surfaced by `telex copilot skill` rather than trusted silently.
 
 ## 16. Minimal upgrade floor
 
