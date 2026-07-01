@@ -327,7 +327,31 @@ silently deaf or strand a durable message. Fixed in this PR (see
 - **POSIX reload cleanup.** The bridge's unix-socket unlink is now inside the pid-ownership guard,
   so an old bridge's reload cannot unlink a newer bridge's socket.
 
-Deferred as follow-up hardening (non-blocking): a larger/negotiated bridge frame cap with
-prompt-wrapping headroom, per-`(member, message)` attempt surfacing / dead-letter, per-endpoint
-ordering, `store_key` in the ack/handle hints for named-backend users, session-id token
-validation in the JS bridge, and explicit Windows named-pipe ACL hardening.
+Deferred as follow-up hardening (non-blocking): per-endpoint push ordering when queued-turn
+order matters, and session-id token validation in the JS bridge.
+
+## Further hardening (PR #55)
+
+A second review pass and builder-directed follow-ups added:
+
+- **Oversize dead-letter.** `telex copilot push` preflights the fully-encoded request against the
+  bridge frame cap; a message that cannot fit returns a permanent exit and the daemon
+  **dead-letters** it (skips further pushes, surfaces a status) instead of retrying forever -- it
+  stays durably queued and readable via `telex inbox`.
+- **Negotiated / larger frame cap.** The bridge advertises its `maxRequestBytes` in the registry
+  and the cap is raised (8 MiB) so realistic large messages push as turns; dead-letter is only a
+  backstop for anything larger than the negotiated cap.
+- **Atomic bridge bindings.** The per-session bridge ref-count uses a lock + temp-file-rename and
+  distinguishes an absent bindings file (empty) from a corrupt one (error), so teardown never
+  removes a bridge another address still shares; a failed bind rolls back.
+- **Per-session pipe secret.** The bridge mints a secret into its owner-only registry and rejects
+  any push whose secret does not match (the default Windows named-pipe DACL grants Everyone READ,
+  so the OS ACL alone does not restrict the pipe to the owner).
+- **Store-correct disposition hints.** The on-deliver handler argv carries the session's
+  `--backend` / `--db` selection, so the `ack` / `handle` hints in the pushed turn target the exact
+  store even for named-backend / profile users.
+- **Direct bridge-liveness signal.** The bridge heartbeats into its registry; the turn guard treats
+  a push member whose registry heartbeat is stale as uncovered (bridge not loaded / live) and
+  nudges to `extensions_reload`, rather than only inferring deafness from unacked backlog.
+- **CI JS gate.** `node --check copilot-bridge/extension.mjs` runs in CI so a broken embedded
+  bridge cannot ship baked into the binary.

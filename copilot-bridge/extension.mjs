@@ -32,7 +32,7 @@ import { joinSession } from "@github/copilot-sdk/extension";
 import { randomBytes } from "node:crypto";
 
 const isPosix = platform() !== "win32";
-const MAX_REQUEST_BYTES = 1024 * 1024; // 1 MiB guard
+const MAX_REQUEST_BYTES = 8 * 1024 * 1024; // 8 MiB: fits a max daemon message plus JSON-escaped prompt wrapping, so large messages push as turns instead of dead-lettering
 const registryDir = join(homedir(), ".copilot", "telex-bridge");
 await mkdir(registryDir, { recursive: true, mode: 0o700 });
 if (isPosix) {
@@ -164,30 +164,47 @@ if (isPosix && endpoint.kind === "unix") {
   }
 }
 
-await writeFile(
-  registryPath,
-  JSON.stringify(
-    {
-      sessionId,
-      endpoint,
-      pid: process.pid,
-      secret,
-      createdAt: new Date().toISOString(),
-    },
-    null,
-    2,
-  ),
-  "utf8",
-);
-if (isPosix) {
-  await chmod(registryPath, 0o600).catch(() => {});
+const createdAt = new Date().toISOString();
+// Registry write, re-run on a heartbeat so `telex copilot push` and the turn guard can tell a
+// live bridge (fresh heartbeat + live pid) from a stale registry a crashed process left behind.
+// It also advertises the max request size so push can preflight against the real (negotiated) cap.
+async function writeRegistry() {
+  await writeFile(
+    registryPath,
+    JSON.stringify(
+      {
+        sessionId,
+        endpoint,
+        pid: process.pid,
+        secret,
+        maxRequestBytes: MAX_REQUEST_BYTES,
+        createdAt,
+        heartbeatAt: new Date().toISOString(),
+      },
+      null,
+      2,
+    ),
+    "utf8",
+  );
+  if (isPosix) {
+    await chmod(registryPath, 0o600).catch(() => {});
+  }
 }
+await writeRegistry();
+const heartbeatTimer = setInterval(() => {
+  writeRegistry().catch(() => {});
+}, 15000);
+// Never let the heartbeat keep the process alive on its own.
+heartbeatTimer.unref?.();
 
 await session.log(
   `telex-bridge ready for ${sessionId} on ${endpoint.kind} ${endpoint.path}`,
 );
 
 const cleanup = async () => {
+  try {
+    clearInterval(heartbeatTimer);
+  } catch {}
   try {
     server.close();
   } catch {}
