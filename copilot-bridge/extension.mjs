@@ -179,18 +179,19 @@ const cleanup = async () => {
   try {
     server.close();
   } catch {}
-  // Only remove the registry if it still points at THIS process, so a /clear reload (old
-  // process SIGTERM'd after the new one rewrote the registry) does not delete the newer
-  // bridge's registry and make push report "no live bridge".
+  // Only remove the registry AND the unix socket if they still point at THIS process, so a
+  // /clear reload (old process SIGTERM'd after the new one rewrote the registry and rebound the
+  // same session-derived endpoint) does not delete the newer bridge's registry/socket and make
+  // push report "no live bridge".
   try {
     const raw = await readFile(registryPath, "utf8");
     if (JSON.parse(raw).pid === process.pid) {
       await rm(registryPath, { force: true });
+      if (endpoint.kind === "unix") {
+        await rm(endpoint.path, { force: true }).catch(() => {});
+      }
     }
   } catch {}
-  if (endpoint.kind === "unix") {
-    await rm(endpoint.path, { force: true }).catch(() => {});
-  }
 };
 
 process.once("SIGTERM", cleanup);

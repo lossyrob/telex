@@ -2029,6 +2029,27 @@ const ON_DELIVER_MAX_CONCURRENCY: usize = 8;
 const ON_DELIVER_SWEEP_BATCH: usize = 64;
 /// Wall-clock budget for a single on-deliver handler process.
 const ON_DELIVER_TIMEOUT: Duration = Duration::from_secs(30);
+/// Base cooldown before re-pushing a still-undelivered message; it doubles per attempt up to
+/// `ON_DELIVER_RETRY_MAX`. A successful `session.send` only proves the harness *accepted* the
+/// turn, not that the agent saw or acked it, so "pushed" is an **attempt record**, not terminal
+/// suppression: while a message stays durably unacked we keep re-pushing on this backoff, so a
+/// crash/reload after accept-but-before-disposition cannot strand it.
+const ON_DELIVER_RETRY_BASE: Duration = Duration::from_secs(15);
+/// Ceiling for the per-message re-push backoff (also the steady-state retry interval).
+const ON_DELIVER_RETRY_MAX: Duration = Duration::from_secs(300);
+/// After this many attempts on the same still-unacked message, surface a degraded status.
+const ON_DELIVER_DEGRADED_AFTER: u32 = 6;
+
+/// Backoff before re-pushing a still-undelivered message that has already been attempted
+/// `attempts` times: `ON_DELIVER_RETRY_BASE` doubling per attempt, capped at
+/// `ON_DELIVER_RETRY_MAX`.
+fn on_deliver_backoff(attempts: u32) -> Duration {
+    let steps = attempts.saturating_sub(1).min(5);
+    ON_DELIVER_RETRY_BASE
+        .checked_mul(1u32 << steps)
+        .unwrap_or(ON_DELIVER_RETRY_MAX)
+        .min(ON_DELIVER_RETRY_MAX)
+}
 
 /// Identifies one in-flight on-deliver exec so concurrent commit + sweep paths do not
 /// double-spawn a handler for the same (address, message).
@@ -2039,16 +2060,26 @@ struct OnDeliverKey {
     message_id: i64,
 }
 
+/// One still-unacked message's push bookkeeping: when it was last attempted and how many
+/// times, so re-pushes back off (`on_deliver_backoff`) instead of hammering a dead bridge
+/// every heartbeat.
+#[derive(Clone, Copy)]
+struct PushAttempt {
+    last: Instant,
+    attempts: u32,
+}
+
 /// Daemon-side liveness state for the generic on-deliver exec primitive. This is a
 /// best-effort push notifier: it never marks messages delivered or consumed (that stays
 /// agent-driven via `Ack`), so a failed or missing push only leaves the message durably
-/// queued, exactly like an unarmed pull station. `pushed` dedups already-notified messages
-/// and is pruned to the currently-undelivered set on each sweep; `inflight` prevents a
-/// commit-path and a sweep-path from racing the same message.
+/// queued, exactly like an unarmed pull station. `pushed` records the last attempt per
+/// still-undelivered `(member, message_id)` so re-pushes back off while the message stays
+/// unacked, and is pruned to the currently-undelivered set on each sweep; `inflight` prevents
+/// a commit-path and a sweep-path from racing the same message.
 struct OnDeliverState {
     sem: Arc<Semaphore>,
     inflight: Mutex<HashSet<OnDeliverKey>>,
-    pushed: Mutex<HashMap<MemberKey, BTreeSet<i64>>>,
+    pushed: Mutex<HashMap<MemberKey, HashMap<i64, PushAttempt>>>,
 }
 
 impl Default for OnDeliverState {
@@ -2082,32 +2113,44 @@ impl DaemonState {
             .collect()
     }
 
-    fn on_deliver_already_pushed(&self, member: &MemberKey, id: i64) -> bool {
+    /// Whether a re-push of `(member, id)` should be skipped right now: true only while the
+    /// last attempt is still inside its backoff window. A never-attempted or backed-off-past
+    /// message is eligible, so a message accepted-but-never-acked keeps being retried.
+    fn on_deliver_should_skip(&self, member: &MemberKey, id: i64, now: Instant) -> bool {
         self.on_deliver
             .pushed
             .lock()
             .unwrap()
             .get(member)
-            .is_some_and(|s| s.contains(&id))
+            .and_then(|m| m.get(&id))
+            .is_some_and(|a| now.saturating_duration_since(a.last) < on_deliver_backoff(a.attempts))
     }
 
-    fn on_deliver_mark_pushed(&self, member: &MemberKey, id: i64) {
-        self.on_deliver
-            .pushed
-            .lock()
-            .unwrap()
+    /// Record one push attempt (success or failure) for `(member, id)` and return the new
+    /// attempt count. Both outcomes back off: a failure retries a dead bridge with backoff, and
+    /// a success re-pushes later in case the agent never acked what the harness merely accepted.
+    fn on_deliver_record_attempt(&self, member: &MemberKey, id: i64, now: Instant) -> u32 {
+        let mut map = self.on_deliver.pushed.lock().unwrap();
+        let entry = map
             .entry(member.clone())
             .or_default()
-            .insert(id);
+            .entry(id)
+            .or_insert(PushAttempt {
+                last: now,
+                attempts: 0,
+            });
+        entry.attempts = entry.attempts.saturating_add(1);
+        entry.last = now;
+        entry.attempts
     }
 
-    /// Prune a member's pushed-id set to only ids still in `keep` (the currently-undelivered
-    /// set), so the dedup set stays bounded as messages are acked.
+    /// Prune a member's push-attempt records to only ids still in `keep` (the currently-
+    /// undelivered set), so the attempt map stays bounded as messages are acked/consumed.
     fn on_deliver_retain_pushed(&self, member: &MemberKey, keep: &BTreeSet<i64>) {
         let mut map = self.on_deliver.pushed.lock().unwrap();
-        if let Some(set) = map.get_mut(member) {
-            set.retain(|id| keep.contains(id));
-            if set.is_empty() {
+        if let Some(attempts) = map.get_mut(member) {
+            attempts.retain(|id, _| keep.contains(id));
+            if attempts.is_empty() {
                 map.remove(member);
             }
         }
@@ -2143,8 +2186,8 @@ impl DaemonState {
         }
     }
 
-    /// Spawn one on-deliver handler exec for a (member, message), deduped by the pushed set
-    /// and the in-flight guard. Never blocks the caller.
+    /// Spawn one on-deliver handler exec for a (member, message), rate-limited by the per-message
+    /// backoff and the in-flight guard. Never blocks the caller.
     fn spawn_on_deliver(
         self: &Arc<Self>,
         member_key: MemberKey,
@@ -2157,7 +2200,7 @@ impl DaemonState {
             return;
         }
         let id = row.id;
-        if self.on_deliver_already_pushed(&member_key, id) {
+        if self.on_deliver_should_skip(&member_key, id, Instant::now()) {
             return;
         }
         let key = OnDeliverKey {
@@ -2173,14 +2216,23 @@ impl DaemonState {
         let state = self.clone();
         tokio::spawn(async move {
             let (ok, stderr) = run_on_deliver(sem, argv, descriptor).await;
-            if ok {
-                state.on_deliver_mark_pushed(&member_key, id);
-            } else {
+            // Record the attempt regardless of outcome so the next re-push backs off; the
+            // message is only removed from the attempt map once it is acked (retain sweep).
+            let attempts = state.on_deliver_record_attempt(&member_key, id, Instant::now());
+            if !ok {
                 let detail = stderr.map(|s| format!(": {s}")).unwrap_or_default();
                 state.push_recent_error(
                     "OnDeliverFailed",
                     format!(
                         "on-deliver handler failed store={store_key} address={address} message_id={id}{detail}"
+                    ),
+                );
+            }
+            if attempts == ON_DELIVER_DEGRADED_AFTER {
+                state.push_recent_error(
+                    "OnDeliverDegraded",
+                    format!(
+                        "on-deliver still unacked after {attempts} attempts store={store_key} address={address} message_id={id}; the bridge may be unloaded/unreachable or the agent has not acked"
                     ),
                 );
             }
@@ -2298,9 +2350,10 @@ async fn on_deliver_sweep_member(
     };
     let keep: BTreeSet<i64> = undelivered.iter().map(|r| r.id).collect();
     state.on_deliver_retain_pushed(&member_key, &keep);
+    let now = Instant::now();
     let mut fired = 0usize;
     for row in undelivered {
-        if state.on_deliver_already_pushed(&member_key, row.id) {
+        if state.on_deliver_should_skip(&member_key, row.id, now) {
             continue;
         }
         state.spawn_on_deliver(
@@ -2875,13 +2928,20 @@ async fn register_member(
                 refreshed.watch_pids = watch_pids;
                 refreshed.idle = false;
                 refreshed.idle_rearmable = false;
-                refreshed.on_deliver = on_deliver.clone();
+                // Preserve an already-registered push handler when a generic recovery/refresh
+                // re-registers with `on_deliver = None` (e.g. a `telex wait` re-attach); only an
+                // explicit re-provision replaces it, so a pull re-attach cannot silently disarm
+                // the Copilot bridge (Namra #6).
+                refreshed.on_deliver = on_deliver.clone().or_else(|| existing.on_deliver.clone());
                 state.check_session_id_reuse_tripwire(&refreshed);
                 if !recovery {
                     state.clear_definite_session_end(&store_key, &session_id);
                 }
                 state.insert_member(refreshed.clone());
-                if refreshed.on_deliver.is_some() {
+                // Reset the push retry state and re-scan backlog only on an explicit
+                // (re-)provision; a plain refresh that merely preserved the handler keeps its
+                // backoff intact (the per-heartbeat sweep still delivers any backlog).
+                if on_deliver.is_some() {
                     state.on_deliver_forget_member(&MemberKey {
                         store_key: refreshed.store_key.clone(),
                         session_id: refreshed.session_id.clone(),
@@ -4314,7 +4374,7 @@ mod p3_tests {
         };
         let mut pushed = false;
         for _ in 0..100 {
-            if state.on_deliver_already_pushed(&member_key, id) {
+            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
                 pushed = true;
                 break;
             }
@@ -4322,12 +4382,23 @@ mod p3_tests {
         }
         assert!(
             pushed,
-            "a successful on-deliver handler should mark the message pushed"
+            "a successful on-deliver handler should record a push attempt (backed off)"
+        );
+        // Regression (Namra #1): a successful push is an ATTEMPT, not terminal suppression.
+        // While the message stays undelivered/unacked it must become re-pushable after the
+        // backoff window, so a crash/reload after accept-but-before-ack cannot strand it.
+        assert!(
+            !state.on_deliver_should_skip(
+                &member_key,
+                id,
+                Instant::now() + Duration::from_secs(600)
+            ),
+            "an accepted-but-unacked message must be re-pushable after its backoff"
         );
     }
 
     #[tokio::test]
-    async fn on_deliver_failure_does_not_mark_pushed() {
+    async fn on_deliver_failure_backs_off_but_stays_retryable() {
         let state = test_state("on-deliver-fails");
         let store = store_key("on-deliver-fails");
         let mut req = register_req(&store, "rcv", "addr:rcv");
@@ -4353,10 +4424,27 @@ mod p3_tests {
             session_id: "rcv".to_string(),
             address: "addr:rcv".to_string(),
         };
-        tokio::time::sleep(Duration::from_millis(1000)).await;
+        // The failed attempt is recorded and backed off (no every-heartbeat hammering)...
+        let mut recorded = false;
+        for _ in 0..100 {
+            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
+                recorded = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
         assert!(
-            !state.on_deliver_already_pushed(&member_key, id),
-            "a failed on-deliver handler must leave the message unpushed (retryable)"
+            recorded,
+            "a failed on-deliver attempt must be recorded and backed off"
+        );
+        // ...but a failed push stays retryable past the backoff window.
+        assert!(
+            !state.on_deliver_should_skip(
+                &member_key,
+                id,
+                Instant::now() + Duration::from_secs(600)
+            ),
+            "a failed push must remain retryable after backoff"
         );
     }
 
@@ -4369,12 +4457,57 @@ mod p3_tests {
             session_id: "s1".to_string(),
             address: "addr:a".to_string(),
         };
-        state.on_deliver_mark_pushed(&member_key, 7);
-        assert!(state.on_deliver_already_pushed(&member_key, 7));
+        let now = Instant::now();
+        state.on_deliver_record_attempt(&member_key, 7, now);
+        assert!(state.on_deliver_should_skip(&member_key, 7, now));
         state.on_deliver_forget_member(&member_key);
         assert!(
-            !state.on_deliver_already_pushed(&member_key, 7),
-            "forgetting a member must clear its push dedup set so a rebind re-pushes"
+            !state.on_deliver_should_skip(&member_key, 7, now),
+            "forgetting a member must clear its push attempt state so a rebind re-pushes"
+        );
+    }
+
+    #[test]
+    fn on_deliver_backoff_grows_and_caps() {
+        assert_eq!(on_deliver_backoff(1), ON_DELIVER_RETRY_BASE);
+        assert!(on_deliver_backoff(2) > on_deliver_backoff(1));
+        assert!(on_deliver_backoff(3) > on_deliver_backoff(2));
+        assert_eq!(on_deliver_backoff(100), ON_DELIVER_RETRY_MAX);
+        assert!(on_deliver_backoff(6) <= ON_DELIVER_RETRY_MAX);
+    }
+
+    #[tokio::test]
+    async fn register_refresh_with_none_preserves_push_handler() {
+        let state = test_state("on-deliver-preserve");
+        let store = store_key("on-deliver-preserve");
+        // Provision a push handler.
+        let mut req = register_req(&store, "rcv", "addr:rcv");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_zero_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        assert!(state
+            .get_member(&store, "rcv", "addr:rcv")
+            .unwrap()
+            .on_deliver
+            .is_some());
+        // A generic refresh (recovery/pull re-attach) with on_deliver = None must NOT wipe it
+        // (Namra #6). `register_req` defaults on_deliver to None.
+        let refresh = register_req(&store, "rcv", "addr:rcv");
+        assert!(matches!(
+            request(state.clone(), refresh).await,
+            Response::Registered { .. }
+        ));
+        assert!(
+            state
+                .get_member(&store, "rcv", "addr:rcv")
+                .unwrap()
+                .on_deliver
+                .is_some(),
+            "a refresh with on_deliver=None must preserve the existing bridge handler"
         );
     }
 

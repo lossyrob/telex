@@ -9,7 +9,7 @@ use std::fmt;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_MAJOR: u16 = 1;
-pub const PROTOCOL_MINOR: u16 = 2;
+pub const PROTOCOL_MINOR: u16 = 3;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
@@ -25,6 +25,11 @@ pub const CAP_LIVENESS_P5: &str = "liveness_p5";
 pub const CAP_STATUS_P5: &str = "status_p5";
 pub const CAP_STATION_LIFECYCLE_P8: &str = "station_lifecycle_p8";
 pub const CAP_WAIT_MIN_ATTENTION_P9: &str = "wait_min_attention_p9";
+/// Advertised (not required): the daemon honors `Register.on_deliver` and runs the generic
+/// on-deliver exec push primitive. A client provisioning push delivery checks this / the
+/// `push_registered` status to fail closed against an older daemon that would silently ignore
+/// `on_deliver`.
+pub const CAP_ON_DELIVER_EXEC: &str = "on_deliver_exec_v1";
 
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
@@ -613,10 +618,14 @@ impl From<serde_json::Error> for HandshakeError {
 }
 
 pub fn daemon_capabilities() -> Vec<String> {
-    REQUIRED_CAPABILITIES
+    let mut caps: Vec<String> = REQUIRED_CAPABILITIES
         .iter()
         .map(|s| (*s).to_string())
-        .collect()
+        .collect();
+    // Advertised-but-optional so it never breaks the required-capability handshake with an
+    // older peer; provisioning code gates on it (and on `push_registered`) explicitly.
+    caps.push(CAP_ON_DELIVER_EXEC.to_string());
+    caps
 }
 
 pub fn daemon_required_capabilities() -> Vec<String> {

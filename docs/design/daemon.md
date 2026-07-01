@@ -1399,12 +1399,15 @@ that member.
 - **Registration.** `Register` ([§6.2](#62-request--response-frames)) carries an optional
   `on_deliver: Vec<String>` — an **argv** (program + args), **not** a shell string (no shell is
   spawned; no interpolation). It is stored on the member record and surfaced in the Status
-  projection as `push_registered: bool`. Re-issuing `Register` **replaces** it and resets its
-  repeat-fire dedup. The handler lives on the member record, so **removing** the member (an
-  epoch-current takedown, or a plain `Detach`) drops it with the record; operator reset and
-  Copilot `sessionEnd` instead mark the member **idle** and do **not** clear the stored handler,
-  so a still-undelivered message can trigger a further (harmless, liveness-only) push retry — and
-  `push_registered` stays true — until the member is actually removed.
+  projection as `push_registered: bool`. An **explicit re-provision** (`Register` with a new
+  `on_deliver`) replaces the handler and resets its per-message retry state; a **generic refresh**
+  that re-registers with `on_deliver = None` (e.g. a `telex wait` re-attach) **preserves** the
+  existing handler, so a pull re-attach cannot silently disarm the bridge. The handler lives on
+  the member record, so **removing** the member (an epoch-current takedown, or a plain `Detach`)
+  drops it with the record; operator reset and Copilot `sessionEnd` instead mark the member
+  **idle** and do **not** clear the stored handler, so a still-undelivered message keeps being
+  re-pushed (on the backoff below) — and `push_registered` stays true — until the member is
+  actually removed.
 - **Fire point.** The daemon runs the argv **after** the message row and its durable
   `deliveries(message_id, recipient)` entry are committed and after in-process `wait` notification
   — i.e. strictly **off the ack critical path** and **after** durability. It fires for the
@@ -1417,9 +1420,18 @@ that member.
   fence ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) are unchanged. If
   the exec fails, is slow, or fires twice, the message is simply re-surfaced — **at-least-once with
   duplicates is the safe direction**; silent consume-without-see remains forbidden ([§13](#13-delivery-and-seen-dedup)).
-  Repeat-fire dedup is a **lifecycle-scoped** in-memory fast-path keyed per member, reset on
-  re-register and on an epoch-current member removal (a plain `Detach` drops the record and the
-  fast-path is reclaimed on the next `Register` for that key) — never the authority.
+  A successful exec only proves the harness **accepted** the turn, not that the agent saw or
+  acked it, so "pushed" is an **attempt record, not terminal suppression**: while a message stays
+  durably unacked it is re-pushed on a **per-message backoff** (base doubling to a cap), and after
+  a small attempt ceiling the daemon surfaces a **degraded** status. The attempt map is a
+  lifecycle-scoped in-memory fast-path keyed per member — pruned to the still-undelivered set each
+  sweep, reset on explicit re-provision, and reclaimed on the next `Register` after a plain
+  `Detach` — never the authority.
+- **Version compatibility.** Because the daemon is persistent, a new client can meet an **older**
+  daemon that predates `on_deliver`. The daemon advertises an `on_deliver_exec_v1` capability in
+  its handshake, and a `--copilot-bridge` bind **verifies `push_registered` after registering**; if
+  an older daemon silently ignored `on_deliver`, the bind **fails closed** (rolling back the
+  bridge) rather than leaving the agent believing push is live when only pull would work.
 - **Bounded.** Per-exec concurrency and timeout are capped, and the sweep is batched, so a slow or
   hung exec can never block delivery, the fence, or another member. The push timeout is set strictly
   under the exec timeout so the handler fails fast rather than being killed mid-flight.

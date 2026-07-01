@@ -302,3 +302,33 @@ The original open questions, retained for history:
 - Whether to feature-gate the copilot module (`#[cfg(feature = "copilot")]`)
   given it is the primary use case (current lean: keep it in the binary, no
   extraction; the module is ~960 lines with only `anyhow` + `serde`).
+
+## Post-review hardening (PR #55)
+
+Namra's PR review flagged edge cases where "push registered" could still let a station go
+silently deaf or strand a durable message. Fixed in this PR (see
+[daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral)):
+
+- **Push accept is not delivery.** A successful `session.send` only proves Copilot *accepted*
+  the turn, so "pushed" is an **attempt record**, not terminal suppression: a still-unacked
+  message is re-pushed on a per-message **backoff** (base doubling to a cap), with a **degraded**
+  status after a ceiling. A crash/reload after accept-but-before-ack no longer strands it.
+- **Handler survives a pull re-attach.** A generic refresh that re-registers with
+  `on_deliver = None` **preserves** the existing bridge handler; only an explicit re-provision
+  replaces it.
+- **Guard is mixed-session aware.** The turn guard no longer suppresses coverage for a whole
+  session when any member is push-registered: pull members still get waiter-coverage checks, and a
+  push member with an **unacked backlog** is surfaced (`push_registered` is "handler registered",
+  not "bridge live").
+- **Compatibility gate.** The daemon advertises an `on_deliver_exec_v1` capability, and a
+  `--copilot-bridge` bind **verifies `push_registered`** and fails closed against an older daemon
+  that would silently ignore `on_deliver`.
+- **Prompt fence.** The untrusted-content fence uses a per-message **nonce** so a sender cannot
+  forge the `END TELEX MESSAGE` delimiter and smuggle instructions past it.
+- **POSIX reload cleanup.** The bridge's unix-socket unlink is now inside the pid-ownership guard,
+  so an old bridge's reload cannot unlink a newer bridge's socket.
+
+Deferred as follow-up hardening (non-blocking): a larger/negotiated bridge frame cap with
+prompt-wrapping headroom, per-`(member, message)` attempt surfacing / dead-letter, per-endpoint
+ordering, `store_key` in the ack/handle hints for named-backend users, session-id token
+validation in the JS bridge, and explicit Windows named-pipe ACL hardening.
