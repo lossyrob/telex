@@ -267,8 +267,13 @@ The full lifecycle:
   per address; exec on commit, capped, off the critical path, retried).
 - embedded bridge -- `extension.mjs` bytes carried in the binary, written on
   bind. Prototyped under `copilot-bridge/` in this branch.
-- `skills/telex/SKILL.md` -- document the two-call bind sequence and the
-  load-on-bind model so the agent runs it once and then just reads turns.
+- `skills/telex/SKILL.md` -- a small **bootstrap** that points the agent at
+  `telex copilot skill` (version-matched, binary-owned) and `--help` for syntax,
+  rather than embedding the workflow. See
+  [DECISIONS.md ADR 0040](DECISIONS.md#0040--copilot-skill-is-binary-owned-the-plugin-skill-is-a-bootstrap).
+- `COPILOT.md` + `telex copilot skill` -- the binary-owned, version-matched Copilot
+  workflow (bind, load bridge, pushed turns, disposition, teardown, fallback) with a
+  plugin/binary compatibility header (`telex v..`, bridge protocol, minimum plugin).
 
 ## Open questions
 

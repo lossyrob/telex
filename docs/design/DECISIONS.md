@@ -1583,3 +1583,36 @@ multi-store + atomic (SF-2), descriptor size cap (SF-5), stale-exe guard (C-4), 
 version (C-5), and a `telex copilot gc` for orphaned endpoints. See
 [copilot-bridge-push.md](copilot-bridge-push.md) and
 [daemon.md sec.13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral).
+
+## 0040 — Copilot skill is binary-owned; the plugin skill is a bootstrap
+
+- **Date:** 2026-07-01
+- **Status:** Accepted (`push-delivery` node / PR #55)
+
+**Context.** The #53 skill rewrite risks baking a long, detailed copy of the Copilot
+workflow into the static plugin skill (`skills/telex/SKILL.md`). Because #53 moves the
+Copilot path from waiter/re-arm to bind → bridge → pushed turns → disposition, a static
+skill is especially prone to drifting from the installed binary and misleading the agent —
+the detailed command syntax and workflow should come from the exact `telex` binary
+installed in that session.
+
+**Decision.** Invert ownership. The plugin `skills/telex/SKILL.md` becomes a small, stable
+**bootstrap**: it says what Telex is, tells the agent to load version-matched instructions
+from the installed binary (`telex copilot skill` for the Copilot push path, `telex skill`
+for the generic pull path), and names command `--help` as the syntax source of truth. The
+installed binary owns the detail: `telex copilot skill` prints the version-matched Copilot
+workflow from an embedded `COPILOT.md`, headed by `telex v..`, the Copilot **bridge
+protocol** version, and the **minimum compatible plugin** version. It accepts
+`--plugin-version` (or `TELEX_PLUGIN_VERSION`) and prints a clear compatibility **warning**
+when the plugin is older than the binary supports. The detailed Copilot section in the root
+`SKILL.md` is likewise reduced to a pointer at `telex copilot skill`, so the Copilot flow
+has a single source of truth.
+
+**Consequences.** Future protocol/bridge changes update the binary (and its embedded
+`COPILOT.md`) without a coordinated edit to a static plugin file, and a stale plugin is
+flagged rather than silently trusted. The former byte-identical plugin↔root mirror
+invariant (and its test) is replaced by a bootstrap invariant: the plugin skill stays
+small, defers to the binary, and embeds no detailed recipes. `telex copilot skill` no
+longer dumps the whole generic skill; agents wanting the generic/pull reference still run
+`telex skill`. The plugin's own version is the one version fact the bootstrap legitimately
+carries (it matches `plugin.json`), used only to drive the compatibility check.

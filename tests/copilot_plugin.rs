@@ -67,7 +67,7 @@ fn hook_manifest_wires_session_end_and_agent_stop_to_hidden_rust_adapter() {
 }
 
 #[test]
-fn plugin_skill_mirror_matches_root_skill_exactly() {
+fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut skill_files = Vec::new();
     collect_skill_files(root, &mut skill_files);
@@ -76,12 +76,56 @@ fn plugin_skill_mirror_matches_root_skill_exactly() {
     assert_eq!(
         skill_files,
         vec![root_skill.clone(), plugin_skill.clone()],
-        "only the canonical root skill and plugin skill mirror should exist"
+        "only the canonical root skill and the plugin bootstrap skill should exist"
     );
-    assert_eq!(
-        std::fs::read(&root_skill).expect("read root skill"),
-        std::fs::read(&plugin_skill).expect("read plugin skill"),
-        "plugin skill mirror must stay byte-identical to root SKILL.md"
+
+    let root_bytes = std::fs::read(&root_skill).expect("read root skill");
+    let plugin_text = std::fs::read_to_string(&plugin_skill).expect("read plugin skill");
+
+    // The bootstrap is deliberately small and is NOT a copy of the canonical skill.
+    assert!(
+        plugin_text.len() < root_bytes.len() / 3,
+        "plugin skill should be a thin bootstrap, not a mirror of root SKILL.md ({} vs {} bytes)",
+        plugin_text.len(),
+        root_bytes.len()
+    );
+
+    // It defers to the installed binary as the source of truth.
+    assert!(
+        plugin_text.contains("telex copilot skill"),
+        "bootstrap must point Copilot sessions at `telex copilot skill`"
+    );
+    assert!(
+        plugin_text.contains("telex copilot --help"),
+        "bootstrap must name command help as the syntax source of truth"
+    );
+    assert!(
+        plugin_text.contains("telex --version"),
+        "bootstrap must tell the agent to check the installed version"
+    );
+
+    // It must NOT embed the detailed recipes / flag matrices that belong to the binary.
+    for forbidden in [
+        "## Command reference",
+        "Detached waiter pattern",
+        "## Attention levels",
+        "## Disposition states",
+    ] {
+        assert!(
+            !plugin_text.contains(forbidden),
+            "bootstrap should not embed detailed section {forbidden:?}; that lives in the binary"
+        );
+    }
+}
+
+#[test]
+fn root_skill_points_copilot_sessions_at_the_binary_command() {
+    let root_skill =
+        std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("SKILL.md"))
+            .expect("read root skill");
+    assert!(
+        root_skill.contains("telex copilot skill"),
+        "root skill should route the Copilot push path to `telex copilot skill`"
     );
 }
 

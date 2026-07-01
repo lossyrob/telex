@@ -435,9 +435,9 @@ pub enum CopilotCmd {
     /// Handle Copilot agentStop by nudging unarmed attended stations to re-arm or detach.
     #[command(hide = true)]
     TurnGuard(CopilotTurnGuardArgs),
-    /// Print the canonical embedded telex skill for plugin consumers.
+    /// Print version-matched Copilot CLI instructions (the binary is the source of truth).
     #[command(hide = true)]
-    Skill,
+    Skill(CopilotSkillArgs),
     /// Deliver one telex message (descriptor on stdin) into a session via its bridge.
     #[command(hide = true)]
     Push(CopilotPushArgs),
@@ -496,6 +496,14 @@ pub struct CopilotDetachArgs {
     /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
     pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotSkillArgs {
+    /// The invoking telex plugin's version, for a plugin/binary compatibility check.
+    /// Falls back to the TELEX_PLUGIN_VERSION environment variable.
+    #[arg(long)]
+    pub plugin_version: Option<String>,
 }
 
 #[derive(Args)]
@@ -772,6 +780,14 @@ mod tests {
                 .unwrap()
                 .command,
             Command::Copilot(CopilotCmd::TurnGuard(_))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "skill", "--plugin-version", "0.1.0"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::Skill(CopilotSkillArgs {
+                plugin_version: Some(v),
+            })) if v == "0.1.0"
         ));
     }
 

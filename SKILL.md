@@ -11,54 +11,19 @@ Telex is a CLI-first message fabric for AI agent sessions. Ephemeral sessions at
 
 Your operator will tell you which address to attach to. You can reload these instructions anytime with `telex skill`, or `telex skill --address <addr>` for instructions tailored to your assigned address.
 
-## Copilot CLI: push delivery (the default path)
+## Copilot CLI: push delivery
 
-In Copilot CLI, telex delivers messages to you as **turns** -- you do not run,
-re-arm, or babysit a `telex wait` waiter. Bind once, load the in-session bridge
-once, then read messages as they arrive and record disposition by id.
+In Copilot CLI, telex delivers messages to you as **turns** -- you do not run, re-arm, or
+babysit a `telex wait` waiter. The full, version-matched Copilot workflow (bind, load the
+in-session bridge, receive pushed turns, record disposition, tear down, and fallback) is
+printed by the installed binary so it never drifts from a static copy:
 
-1. Bind your address and provision the bridge (one command):
+```sh
+telex copilot skill
+```
 
-   ```sh
-   telex --address <addr> copilot attach --copilot-bridge --description "<what this session is doing>"
-   ```
-
-   This registers your session/address with the local exchange and writes the
-   telex bridge extension into your session's extension dir. The plugin adapter
-   maps `$COPILOT_AGENT_SESSION_ID` and `$COPILOT_LOADER_PID` for you.
-
-2. Load the bridge into the live session (one agent tool call):
-
-   Run the `extensions_reload` tool. telex cannot trigger a reload, so you do
-   this once. After `/clear` (which reloads extensions), run it once more.
-
-3. Receive messages as turns. A delivered telex message arrives as a new turn
-   labelled `[telex] from <addr>`. An `interrupt` message steers the running turn
-   (mid-stream); every other attention level waits for your next turn boundary.
-   Read it, then record disposition **by id** -- the bridge never acks for you,
-   so the durable consumed mark is still yours to make:
-
-   ```sh
-   telex ack --address <addr> --id <message-id>
-   telex handle --address <addr> --id <message-id> --note "completed"
-   ```
-
-   `ack` is transport consumption for `(message_id, recipient-address)`. Terminal
-   workflow disposition is still `handle`, `reject`, or `close`; `defer` and
-   `escalate` are non-terminal. Dedupe by id: push is at-least-once, so a message
-   may occasionally be delivered more than once (e.g. after a reconnect).
-
-4. Tear down when done:
-
-   ```sh
-   telex --address <addr> copilot detach
-   ```
-
-   This detaches the address and removes the bridge when it was the last binding,
-   so it will not reload on a later resume. Session end also removes it.
-
-If the bridge cannot be loaded (extensions disabled), telex push is unavailable:
-surface that plainly or use pull mode below -- do not silently spin a waiter.
+Run that first when you are in Copilot CLI. The pull workflow below is the generic fallback
+for non-Copilot harnesses (and for Copilot sessions where the bridge cannot load).
 
 ## Pull mode: `telex wait` (generic / non-Copilot harnesses)
 

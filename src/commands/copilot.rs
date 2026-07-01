@@ -13,10 +13,10 @@ use std::time::Duration;
 
 use crate::cli::{
     AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotDetachArgs, CopilotPushArgs,
-    CopilotSessionEndArgs, CopilotTurnGuardArgs, Ctx, DetachArgs,
+    CopilotSessionEndArgs, CopilotSkillArgs, CopilotTurnGuardArgs, Ctx, DetachArgs,
 };
 use crate::daemon_ipc::{
-    DaemonStatus, MemberStatus, Request, Response, WaiterOutcome, WatchPidSpec,
+    DaemonStatus, MemberStatus, Request, Response, WaiterOutcome, WatchPidSpec, DAEMON_VERSION,
 };
 use crate::model::now_ms;
 
@@ -32,12 +32,21 @@ const BRIDGE_PUSH_TIMEOUT: Duration = Duration::from_secs(20);
 #[cfg(windows)]
 const BRIDGE_PIPE_BUSY_RETRY: Duration = Duration::from_millis(50);
 
+/// Embedded Copilot-specific workflow, shipped in the binary so `telex copilot skill` is
+/// always version-matched. The plugin skill is only a bootstrap that defers to this.
+const COPILOT_SKILL_MD: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/COPILOT.md"));
+/// Copilot in-session bridge protocol version (the descriptor + prompt + endpoint shape).
+/// Bump on a breaking change to the push/bridge contract.
+const COPILOT_BRIDGE_PROTOCOL: u32 = 1;
+/// Oldest telex plugin whose bootstrap is compatible with this binary's Copilot path.
+const MIN_COMPATIBLE_PLUGIN_VERSION: &str = "0.1.0";
+
 pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
     match cmd {
         CopilotCmd::Attach(args) => attach(ctx, args).await,
         CopilotCmd::SessionEnd(args) => session_end(ctx, args).await,
         CopilotCmd::TurnGuard(args) => turn_guard(ctx, args).await,
-        CopilotCmd::Skill => skill(),
+        CopilotCmd::Skill(args) => skill(args),
         CopilotCmd::Push(args) => push(ctx, args).await,
         CopilotCmd::Detach(args) => detach(ctx, args).await,
     }
@@ -684,8 +693,90 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
     Ok(0)
 }
 
-fn skill() -> Result<i32> {
-    print!("{}", crate::commands::skill::raw_skill());
+/// Parse a `major.minor.patch` version, ignoring any `-pre`/`+build` suffix and a leading
+/// `v`. Returns `None` if the leading numeric triple is missing or unparseable.
+fn parse_semver(s: &str) -> Option<(u64, u64, u64)> {
+    let core = s.trim().trim_start_matches('v');
+    let core = core.split(['-', '+']).next().unwrap_or(core);
+    let mut it = core.split('.');
+    let major = it.next()?.parse().ok()?;
+    let minor = it.next().unwrap_or("0").parse().ok()?;
+    let patch = it.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
+}
+
+/// Resolve the plugin version from the flag, falling back to `TELEX_PLUGIN_VERSION`.
+/// Blank values are treated as absent.
+fn resolve_plugin_version(arg: Option<String>) -> Option<String> {
+    arg.or_else(|| std::env::var("TELEX_PLUGIN_VERSION").ok())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
+/// A plugin/binary compatibility warning for `telex copilot skill`, or `None` when the
+/// plugin version is absent or new enough. The binary is always the source of truth; this
+/// only flags a plugin/bootstrap older than this binary supports (the drift a static
+/// plugin skill is designed to avoid).
+fn plugin_compat_warning(plugin_version: Option<&str>) -> Option<String> {
+    let raw = plugin_version?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let min = parse_semver(MIN_COMPATIBLE_PLUGIN_VERSION)
+        .expect("MIN_COMPATIBLE_PLUGIN_VERSION is valid semver");
+    match parse_semver(raw) {
+        None => Some(format!(
+            "could not parse plugin version {raw:?}; this binary expects telex plugin >= \
+             v{MIN_COMPATIBLE_PLUGIN_VERSION}. Verify the installed plugin and binary are a \
+             matched pair."
+        )),
+        Some(pv) if pv < min => Some(format!(
+            "telex plugin v{raw} is older than this binary's minimum \
+             (v{MIN_COMPATIBLE_PLUGIN_VERSION}). Update the telex plugin; its bootstrap may \
+             reference a workflow this binary changed."
+        )),
+        Some(_) => None,
+    }
+}
+
+/// Render the full `telex copilot skill` stdout: a version/compat header, an optional
+/// inline compatibility warning, then the embedded Copilot workflow.
+fn render_copilot_skill(plugin_version: Option<&str>) -> String {
+    let entra = if cfg!(feature = "entra") {
+        "available"
+    } else {
+        "not in this build"
+    };
+    let mut out = String::new();
+    out.push_str(&format!(
+        "telex v{DAEMON_VERSION} -- Copilot CLI skill (version-matched)\n"
+    ));
+    out.push_str(&format!(
+        "build: backends [{}]; entra auth {entra}\n",
+        crate::backend::available_kinds().join(", ")
+    ));
+    out.push_str(&format!(
+        "copilot bridge protocol: v{COPILOT_BRIDGE_PROTOCOL}; minimum compatible plugin: \
+         v{MIN_COMPATIBLE_PLUGIN_VERSION}\n"
+    ));
+    if let Some(pv) = plugin_version {
+        out.push_str(&format!("reported plugin: v{pv}\n"));
+    }
+    if let Some(warn) = plugin_compat_warning(plugin_version) {
+        out.push_str("\n> [!WARNING] Telex plugin/binary compatibility\n");
+        out.push_str(&format!("> {warn}\n"));
+    }
+    out.push('\n');
+    out.push_str(COPILOT_SKILL_MD);
+    out
+}
+
+fn skill(args: CopilotSkillArgs) -> Result<i32> {
+    let plugin_version = resolve_plugin_version(args.plugin_version);
+    if let Some(warn) = plugin_compat_warning(plugin_version.as_deref()) {
+        eprintln!("warning: {warn}");
+    }
+    print!("{}", render_copilot_skill(plugin_version.as_deref()));
     Ok(0)
 }
 
@@ -1181,6 +1272,51 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn parse_semver_reads_triples_and_strips_suffixes() {
+        assert_eq!(parse_semver("0.1.0"), Some((0, 1, 0)));
+        assert_eq!(parse_semver("v1.2.3"), Some((1, 2, 3)));
+        assert_eq!(parse_semver("1.4.0-beta.1"), Some((1, 4, 0)));
+        assert_eq!(parse_semver("2"), Some((2, 0, 0)));
+        assert_eq!(parse_semver("not-a-version"), None);
+    }
+
+    #[test]
+    fn plugin_compat_warning_flags_only_stale_or_unparseable_plugins() {
+        assert!(plugin_compat_warning(None).is_none());
+        assert!(plugin_compat_warning(Some("")).is_none());
+        // Current/newer plugins are compatible.
+        assert!(plugin_compat_warning(Some(MIN_COMPATIBLE_PLUGIN_VERSION)).is_none());
+        assert!(plugin_compat_warning(Some("9.9.9")).is_none());
+        // Older than the binary supports, or unparseable -> warn.
+        assert!(plugin_compat_warning(Some("0.0.9")).is_some());
+        assert!(plugin_compat_warning(Some("garbage")).is_some());
+    }
+
+    #[test]
+    fn copilot_skill_render_is_version_headed_and_workflow_complete() {
+        let doc = render_copilot_skill(None);
+        assert!(doc.contains(&format!("telex v{DAEMON_VERSION}")));
+        assert!(doc.contains(&format!(
+            "copilot bridge protocol: v{COPILOT_BRIDGE_PROTOCOL}"
+        )));
+        assert!(doc.contains(MIN_COMPATIBLE_PLUGIN_VERSION));
+        // The bridge workflow and the --help source-of-truth guidance are present.
+        assert!(doc.contains("copilot attach --copilot-bridge"));
+        assert!(doc.contains("extensions_reload"));
+        assert!(doc.contains("copilot detach"));
+        assert!(doc.contains("telex copilot --help"));
+        // No inline warning without a stale plugin version.
+        assert!(!doc.contains("[!WARNING]"));
+    }
+
+    #[test]
+    fn copilot_skill_render_inlines_compat_warning_for_stale_plugin() {
+        let doc = render_copilot_skill(Some("0.0.1"));
+        assert!(doc.contains("[!WARNING]"));
+        assert!(doc.contains("reported plugin: v0.0.1"));
+    }
 
     #[test]
     fn attention_maps_interrupt_to_immediate_else_enqueue() {
