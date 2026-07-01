@@ -1428,9 +1428,10 @@ that member.
   already queued in the live session, so its real re-delivery trigger is a **re-provision**
   (reattach / reload / a new session taking the address → the attempt map is reset and the unacked
   backlog re-delivered via `fetch_undelivered`), not the timer; the backstop only guards a silent
-  in-session drop of a queued turn. A still-unacked message the agent has already **seen** is nudged
-  by the agent-stop **turn guard**, not re-sent. After a small attempt ceiling the daemon surfaces a
-  **degraded** status. The attempt map is a
+  in-session drop of a queued turn. While the bridge heartbeat is fresh, an unacked backlog is not
+  itself a turn-guard issue: enqueue-mode turns may already be queued behind the current turn, and
+  `telex inbox` is a diagnostics/recovery path rather than the normal live push receive path. After
+  a small attempt ceiling the daemon surfaces a **degraded** status. The attempt map is a
   lifecycle-scoped in-memory fast-path keyed per member — pruned to the still-undelivered set each
   sweep, reset on explicit re-provision, and reclaimed on the next `Register` after a plain
   `Detach` — never the authority.

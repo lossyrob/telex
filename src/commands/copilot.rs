@@ -845,11 +845,11 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
     };
 
     let active_members = active_session_members(&status, &store_key, &session);
-    // Push coverage is handled inside `evaluate_guard`: a push-covered member needs no waiter,
-    // but a push member with an unacked backlog is still surfaced (push_registered means
-    // "handler registered", not "bridge live"), and any pull member in a mixed session still
-    // gets normal waiter-coverage checks -- so one push binding cannot hide an uncovered pull
-    // address or a deaf bridge (Namra #2/#3).
+    // Push coverage is handled inside `evaluate_guard`: a live push-covered member needs no waiter
+    // and its unacked backlog may be queued turns, so the guard does not race it via inbox recovery.
+    // A push member whose bridge heartbeat is stale is still surfaced, and any pull member in a
+    // mixed session still gets normal waiter-coverage checks -- so one push binding cannot hide an
+    // uncovered pull address or a deaf bridge (Namra #2/#3).
     let state_path = turn_guard_state_path(&session)?;
     let _lock = match StateLock::acquire(&state_path) {
         Ok(lock) => lock,

@@ -20,7 +20,7 @@
 // Wire protocol: one JSON request per connection, newline-terminated:
 //   {"prompt": "...", "displayPrompt": "[telex] from <addr>", "mode": "enqueue"}
 // Response, newline-terminated:
-//   {"ok": true, "sessionId": "...", "mode": "enqueue", "accepted": "queued"}
+//   {"ok": true, "sessionId": "...", "mode": "enqueue", "accepted": "queued"|"pending"}
 // The bridge forwards `mode` verbatim; the attention->mode decision
 // (interrupt -> immediate, else -> enqueue) is made by `telex copilot push`.
 
