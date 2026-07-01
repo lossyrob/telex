@@ -4121,6 +4121,66 @@ mod p3_tests {
         }
     }
 
+    #[tokio::test]
+    async fn register_stores_on_deliver_and_lists_candidate() {
+        let state = test_state("on-deliver-register");
+        let store = store_key("on-deliver-register");
+        let mut req = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(vec!["handler".to_string(), "--flag".to_string()]);
+        }
+        let resp = request(state.clone(), req).await;
+        assert!(matches!(resp, Response::Registered { .. }));
+        let member = state.get_member(&store, "s1", "addr:a").unwrap();
+        assert_eq!(
+            member.on_deliver,
+            Some(vec!["handler".to_string(), "--flag".to_string()])
+        );
+        let candidates = state.on_deliver_candidates(&store, "addr:a");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(
+            candidates[0].1,
+            vec!["handler".to_string(), "--flag".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn register_without_on_deliver_has_no_candidates() {
+        let state = test_state("on-deliver-none");
+        let store = store_key("on-deliver-none");
+        let resp = request(state.clone(), register_req(&store, "s1", "addr:a")).await;
+        assert!(matches!(resp, Response::Registered { .. }));
+        assert!(state.on_deliver_candidates(&store, "addr:a").is_empty());
+    }
+
+    #[test]
+    fn on_deliver_descriptor_has_transport_fields() {
+        let row = MessageRow {
+            id: 5,
+            thread_id: 2,
+            parent_id: None,
+            from_addr: Some("role:snd".to_string()),
+            to_addr: "role:rcv".to_string(),
+            cc: None,
+            kind: "note".to_string(),
+            attention: "interrupt".to_string(),
+            requires_disposition: true,
+            subject: Some("subj".to_string()),
+            body: "hello body".to_string(),
+            metadata: None,
+            sent_at_ms: 0,
+            created_at_ms: 0,
+        };
+        let json = on_deliver_descriptor_json("sqlite:/x", "role:rcv", &row);
+        let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(v["message_id"], 5);
+        assert_eq!(v["address"], "role:rcv");
+        assert_eq!(v["from"], "role:snd");
+        assert_eq!(v["attention"], "interrupt");
+        assert_eq!(v["requires_disposition"], true);
+        assert_eq!(v["body"], "hello body");
+    }
+
     fn wait_req(store: &str, session: &str, address: &str, timeout_ms: u64) -> Request {
         Request::Wait {
             store_key: store.to_string(),

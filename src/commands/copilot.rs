@@ -438,6 +438,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     } else {
         None
     };
+    let bridge_provisioned = on_deliver.is_some();
     let attach_args = AttachArgs {
         description: args.description,
         scope: args.scope,
@@ -446,7 +447,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
         poll_secs: 1,
         keepalive_secs: 3,
         occupant: args.occupant,
-        session: Some(session),
+        session: Some(session.clone()),
         push: false,
         session_pid: None,
         watch_pid,
@@ -454,7 +455,17 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
         no_session_bind: false,
         on_deliver,
     };
-    crate::commands::attach::run(ctx, attach_args).await
+    let result = crate::commands::attach::run(ctx, attach_args).await;
+    // Roll back a provisioned bridge if registration did not succeed, so a failed bind
+    // never leaves an orphaned bridge that reloads on a later resume.
+    if bridge_provisioned && !matches!(result, Ok(0)) {
+        if let Ok(address) = ctx.cfg.require_address(&ctx.address) {
+            if let Ok(true) = remove_bridge_binding(&session, &address) {
+                remove_bridge_extension(&session);
+            }
+        }
+    }
+    result
 }
 
 async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
@@ -1126,6 +1137,57 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn attention_maps_interrupt_to_immediate_else_enqueue() {
+        assert_eq!(attention_to_send_mode("interrupt"), "immediate");
+        assert_eq!(attention_to_send_mode("next-checkpoint"), "enqueue");
+        assert_eq!(attention_to_send_mode("background"), "enqueue");
+        assert_eq!(attention_to_send_mode("fyi"), "enqueue");
+        assert_eq!(attention_to_send_mode(""), "enqueue");
+        assert_eq!(attention_to_send_mode("bogus"), "enqueue");
+    }
+
+    #[test]
+    fn push_prompt_carries_context_and_ack_instruction() {
+        let descriptor = OnDeliverDescriptor {
+            message_id: 42,
+            address: "role:telex/rcv".to_string(),
+            from: Some("role:telex/snd".to_string()),
+            kind: "note".to_string(),
+            attention: "interrupt".to_string(),
+            requires_disposition: true,
+            subject: Some("hello".to_string()),
+            body: "the body".to_string(),
+        };
+        let prompt = build_push_prompt(&descriptor);
+        assert!(prompt.contains("from: role:telex/snd"));
+        assert!(prompt.contains("role:telex/rcv"));
+        assert!(prompt.contains("id: 42"));
+        assert!(prompt.contains("attention: interrupt"));
+        assert!(prompt.contains("subject: hello"));
+        assert!(prompt.contains("the body"));
+        assert!(prompt.contains("telex ack --address role:telex/rcv --id 42"));
+        assert!(prompt.contains("handle|reject|close"));
+    }
+
+    #[test]
+    fn push_prompt_omits_terminal_disposition_when_not_required() {
+        let descriptor = OnDeliverDescriptor {
+            message_id: 7,
+            address: "role:x".to_string(),
+            from: None,
+            kind: String::new(),
+            attention: "fyi".to_string(),
+            requires_disposition: false,
+            subject: None,
+            body: "b".to_string(),
+        };
+        let prompt = build_push_prompt(&descriptor);
+        assert!(prompt.contains("from: unknown"));
+        assert!(prompt.contains("telex ack --address role:x --id 7"));
+        assert!(!prompt.contains("handle|reject|close"));
+    }
 
     fn member(address: &str, live_waiters_count: usize, pending: i64) -> MemberStatus {
         MemberStatus {
