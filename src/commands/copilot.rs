@@ -121,6 +121,10 @@ fn remove_bridge_extension(session_id: &str) {
     }
 }
 
+fn session_has_bridge_binding(session_id: &str) -> bool {
+    !read_bridge_bindings(session_id).is_empty()
+}
+
 fn bridge_handler_argv(session_id: &str) -> Result<Vec<String>> {
     let exe = std::env::current_exe()?.to_string_lossy().to_string();
     Ok(vec![
@@ -556,6 +560,13 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
             Some(&session),
             TURN_GUARD_DISABLED,
             "TELEX_TURN_GUARD disabled the guard.",
+        );
+    }
+    if session_has_bridge_binding(&session) {
+        return allow_with_log(
+            Some(&session),
+            "push_mode",
+            "Session uses telex push delivery (bridge); no waiter to re-arm.",
         );
     }
 

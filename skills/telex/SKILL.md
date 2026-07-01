@@ -11,7 +11,60 @@ Telex is a CLI-first message fabric for AI agent sessions. Ephemeral sessions at
 
 Your operator will tell you which address to attach to. You can reload these instructions anytime with `telex skill`, or `telex skill --address <addr>` for instructions tailored to your assigned address.
 
-## The core loop
+## Copilot CLI: push delivery (the default path)
+
+In Copilot CLI, telex delivers messages to you as **turns** -- you do not run,
+re-arm, or babysit a `telex wait` waiter. Bind once, load the in-session bridge
+once, then read messages as they arrive and record disposition by id.
+
+1. Bind your address and provision the bridge (one command):
+
+   ```sh
+   telex --address <addr> copilot attach --copilot-bridge --description "<what this session is doing>"
+   ```
+
+   This registers your session/address with the local exchange and writes the
+   telex bridge extension into your session's extension dir. The plugin adapter
+   maps `$COPILOT_AGENT_SESSION_ID` and `$COPILOT_LOADER_PID` for you.
+
+2. Load the bridge into the live session (one agent tool call):
+
+   Run the `extensions_reload` tool. telex cannot trigger a reload, so you do
+   this once. After `/clear` (which reloads extensions), run it once more.
+
+3. Receive messages as turns. A delivered telex message arrives as a new turn
+   labelled `[telex] from <addr>`. An `interrupt` message steers the running turn
+   (mid-stream); every other attention level waits for your next turn boundary.
+   Read it, then record disposition **by id** -- the bridge never acks for you,
+   so the durable consumed mark is still yours to make:
+
+   ```sh
+   telex ack --address <addr> --id <message-id>
+   telex handle --address <addr> --id <message-id> --note "completed"
+   ```
+
+   `ack` is transport consumption for `(message_id, recipient-address)`. Terminal
+   workflow disposition is still `handle`, `reject`, or `close`; `defer` and
+   `escalate` are non-terminal. Dedupe by id: push is at-least-once, so a message
+   may occasionally be delivered more than once (e.g. after a reconnect).
+
+4. Tear down when done:
+
+   ```sh
+   telex --address <addr> copilot detach
+   ```
+
+   This detaches the address and removes the bridge when it was the last binding,
+   so it will not reload on a later resume. Session end also removes it.
+
+If the bridge cannot be loaded (extensions disabled), telex push is unavailable:
+surface that plainly or use pull mode below -- do not silently spin a waiter.
+
+## Pull mode: `telex wait` (generic / non-Copilot harnesses)
+
+`telex wait` is the generic pull primitive for scripts, CI, and harnesses
+without an in-session extension. **Copilot CLI sessions use push delivery above
+instead**; reach for `wait` only when the bridge is unavailable.
 
 Use Telex as a **one-shot command loop** backed by an auto-spawned per-user local
 exchange (daemon). Sessions no longer run a resident holder process. `attach`
@@ -31,25 +84,20 @@ guessing.
    telex attach --address <addr> --description "<what this session is doing>"
    ```
 
-   In Copilot CLI with the telex plugin installed, use the adapter so the plugin
-   maps `$COPILOT_AGENT_SESSION_ID` to the generic session id and
-   `$COPILOT_LOADER_PID` to the loader `--watch-pid` backstop. Generic telex
-   commands still need the generic session id on each invocation, so pass
+   In Copilot CLI with the telex plugin installed, the adapter maps
+   `$COPILOT_AGENT_SESSION_ID` to the generic session id and `$COPILOT_LOADER_PID`
+   to the loader `--watch-pid` backstop. Generic telex commands still need the
+   generic session id on each invocation, so pass
    `--session "$COPILOT_AGENT_SESSION_ID"` (or set `TELEX_SESSION_ID` in the same
-   shell command/script that invokes telex):
+   shell command that invokes telex). In Copilot, prefer push delivery (above);
+   use pull only as a fallback when the bridge is unavailable:
 
    ```sh
-   telex --address <addr> copilot attach --description "<what this session is doing>"
    telex --address <addr> wait --session "$COPILOT_AGENT_SESSION_ID" --out-dir <dir>
    ```
 
-   The plugin's default-on `agentStop` guard checks coverage at turn-end and
-   nudges if a station has no live waiter or has delivered-but-unacked work.
-   Detached waiter stdout is not delivered to the agent, so the agent still reads
-   `message.json` / `delivery.json` from `--out-dir` after the completion wake.
-   Notification-hook content enrichment was evaluated, but the hook payload does
-   not provide a stable `--out-dir` path to read. Overnight/AFK deterministic
-   wake belongs to the ACP track, not to visible in-conversation heartbeat turns.
+   Detached waiter stdout is not delivered to the agent, so read `message.json` /
+   `delivery.json` from `--out-dir` after the completion wake.
 
    Optional metadata:
 
@@ -136,6 +184,10 @@ then repeat:
 
 ### Two-phase attention loop
 
+> Pull mode only. In **push delivery** the daemon maps attention to send mode
+> automatically (interrupt -> immediate steering, everything else -> enqueue), so
+> you never manage waiter phases -- messages just arrive as turns.
+
 When you are actively working, arm a phase-1 waiter with
 `--min-attention interrupt`. It wakes only for urgent messages; `next-checkpoint`,
 `background`, and `fyi` messages stay durably buffered for your next checkpoint.
@@ -154,11 +206,14 @@ and arm the new mode.
 > runtimes surface output only when the command completes; an internal loop hides
 > delivered messages in a background buffer.
 
-### Copilot CLI detached waiter pattern
+### Detached waiter pattern (pull-mode fallback)
+
+> This is the pull-mode fallback for Copilot sessions when the push bridge is
+> unavailable. The default Copilot path is push delivery -- no waiter.
 
 Use a fully detached shell task (`detach: true`) for the waiter UX. This is the
-standard pattern: it does **not** spin the terminal like foreground work, and the
-Copilot CLI session is still notified when the detached task exits. Do **not** use
+standard pull pattern: it does **not** spin the terminal like foreground work, and
+the Copilot CLI session is still notified when the detached task exits. Do **not** use
 session-attached async (`detach:false`) as the normal waiter mode just because it
 returns stdout; use `--out-dir` artifacts instead. Let `telex wait --out-dir
 <dir>` write the result to files you read after the detached completion
@@ -228,11 +283,16 @@ plus the `exit.code` artifact are the wake signal.
 
 ### Teardown and upgrade
 
-Use `telex station stop --address <addr>` as the symmetric inverse of the
-`attach` + detached-wait loop. It marks the station non-attending, releases
-membership durably, and waits for tracked live waiters to exit. After it returns
-with `waiters_after: 0`, a later message to the address remains queued until a
-future attach/wait; it is not consumed by an orphan waiter.
+For a **push** (bridge) session, tear down with
+`telex --address <addr> copilot detach`: it detaches the address and removes the
+bridge extension when it was the last binding (session end also removes it), so
+nothing reloads on a later resume.
+
+For **pull mode**, use `telex station stop --address <addr>` as the symmetric
+inverse of the `attach` + detached-wait loop. It marks the station non-attending,
+releases membership durably, and waits for tracked live waiters to exit. After it
+returns with `waiters_after: 0`, a later message to the address remains queued
+until a future attach/wait; it is not consumed by an orphan waiter.
 
 For turn-end guards or resume reconciliation, use
 `telex station status --session <id>` to get a compact JSON projection of the
@@ -458,9 +518,15 @@ acknowledged | handled | deferred | rejected | closed | escalated
 Terminal states, removed from the actionable inbox: `handled`, `rejected`, `closed`.
 Non-terminal states, still needing final disposition: `acknowledged`, `deferred`, `escalated`.
 
-## Latency: interrupt means next turn
+## Latency: interrupt steers now, others wait for the turn boundary
 
-Agent wake dominates perceived latency: measured waiter-exit-to-agent-turn time is roughly 6-26 seconds, while Telex backend delivery is sub-second. `interrupt` means the message should be handled at the next turn boundary; it is not preemption and cannot stop a model mid-turn. Shorter polling or push changes backend latency, not agent wake latency.
+In **push delivery**, an `interrupt` message is sent as an *immediate* steering
+interjection into the running turn -- the model sees it mid-stream, between its
+own iterations (not a hard preemption, but not next-turn-only either). Every
+other attention level is enqueued and delivered at the next turn boundary. In
+**pull mode**, agent wake dominates perceived latency (measured
+waiter-exit-to-agent-turn time is roughly 6-26 seconds, while backend delivery is
+sub-second), and `interrupt` only means "handle at the next turn boundary."
 
 ## Backends
 
