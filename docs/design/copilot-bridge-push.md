@@ -355,3 +355,13 @@ A second review pass and builder-directed follow-ups added:
   nudges to `extensions_reload`, rather than only inferring deafness from unacked backlog.
 - **CI JS gate.** `node --check copilot-bridge/extension.mjs` runs in CI so a broken embedded
   bridge cannot ship baked into the binary.
+- **Re-delivery is re-provision-triggered, not timer-churned.** An **accepted** push (already queued
+  in the live session) is no longer re-pushed on the fast failure backoff; while the same session
+  stays continuously attached it is not re-sent (a seen-but-unacked message is nudged by the turn
+  guard instead). Un-acked messages are re-delivered when the **attachment changes** -- a reattach, a
+  `/clear` bridge-reload re-provision, or a new session taking the address -- which resets the
+  attempt map and rescans `fetch_undelivered`. A **failed** push (dead / absent bridge) still retries
+  on the fast backoff, and a long backstop covers the rare silent in-session drop of a queued turn.
+  This removes the redelivery amplification a busy / slow recipient hit under the old fixed backoff
+  (each re-push was a duplicate turn the agent had to dedupe) while preserving at-least-once: nothing
+  is dropped, and the durable+ack fence is unchanged.

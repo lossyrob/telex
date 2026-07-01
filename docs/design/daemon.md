@@ -1421,9 +1421,16 @@ that member.
   the exec fails, is slow, or fires twice, the message is simply re-surfaced — **at-least-once with
   duplicates is the safe direction**; silent consume-without-see remains forbidden ([§13](#13-delivery-and-seen-dedup)).
   A successful exec only proves the harness **accepted** the turn, not that the agent saw or
-  acked it, so "pushed" is an **attempt record, not terminal suppression**: while a message stays
-  durably unacked it is re-pushed on a **per-message backoff** (base doubling to a cap), and after
-  a small attempt ceiling the daemon surfaces a **degraded** status. The attempt map is a
+  acked it, so "pushed" is an **attempt record, not terminal suppression**. Re-push cadence now
+  depends on the last outcome: a **failed** push (target briefly absent / bridge unreachable)
+  retries on a **fast per-message backoff** (base doubling to a cap) so a transiently dead target
+  recovers quickly, while an **accepted** push waits on a **long backstop** — an accepted turn is
+  already queued in the live session, so its real re-delivery trigger is a **re-provision**
+  (reattach / reload / a new session taking the address → the attempt map is reset and the unacked
+  backlog re-delivered via `fetch_undelivered`), not the timer; the backstop only guards a silent
+  in-session drop of a queued turn. A still-unacked message the agent has already **seen** is nudged
+  by the agent-stop **turn guard**, not re-sent. After a small attempt ceiling the daemon surfaces a
+  **degraded** status. The attempt map is a
   lifecycle-scoped in-memory fast-path keyed per member — pruned to the still-undelivered set each
   sweep, reset on explicit re-provision, and reclaimed on the next `Register` after a plain
   `Detach` — never the authority.

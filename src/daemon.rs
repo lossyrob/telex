@@ -2029,14 +2029,25 @@ const ON_DELIVER_MAX_CONCURRENCY: usize = 8;
 const ON_DELIVER_SWEEP_BATCH: usize = 64;
 /// Wall-clock budget for a single on-deliver handler process.
 const ON_DELIVER_TIMEOUT: Duration = Duration::from_secs(30);
-/// Base cooldown before re-pushing a still-undelivered message; it doubles per attempt up to
-/// `ON_DELIVER_RETRY_MAX`. A successful `session.send` only proves the harness *accepted* the
-/// turn, not that the agent saw or acked it, so "pushed" is an **attempt record**, not terminal
-/// suppression: while a message stays durably unacked we keep re-pushing on this backoff, so a
-/// crash/reload after accept-but-before-disposition cannot strand it.
+/// Base cooldown before re-pushing a still-undelivered message whose last push **failed** (bridge
+/// unreachable); it doubles per attempt up to `ON_DELIVER_RETRY_MAX`, so a transiently dead bridge
+/// recovers quickly without hammering. A push the harness **accepted** instead waits on the much
+/// longer `ON_DELIVER_ACCEPTED_BACKSTOP`, because an accepted turn is already queued in the
+/// session; its real re-delivery trigger is re-provision (reattach/reload), which clears the push
+/// record via `on_deliver_forget_member` and re-delivers the un-acked backlog. "Pushed" is still an
+/// attempt record, not terminal suppression -- a crash/reload after accept-but-before-ack
+/// re-delivers on re-provision, and the backstop covers a silent in-session drop -- so a message is
+/// never stranded.
 const ON_DELIVER_RETRY_BASE: Duration = Duration::from_secs(15);
 /// Ceiling for the per-message re-push backoff (also the steady-state retry interval).
 const ON_DELIVER_RETRY_MAX: Duration = Duration::from_secs(300);
+/// Re-push interval for a still-unacked message whose last push was **accepted**. An accepted turn
+/// sits in the live session's queue (or was seen but not yet acked, which the agent-stop turn-guard
+/// nudges), so re-pushing it on the fast failure backoff would just inject duplicate turns. Its
+/// real re-delivery trigger is a re-provision (reattach or bridge reload -> re-deliver the un-acked
+/// backlog); this long backstop only guards the rare case where a continuously-held session
+/// silently drops the queued turn without any reload/reattach.
+const ON_DELIVER_ACCEPTED_BACKSTOP: Duration = Duration::from_secs(300);
 /// After this many attempts on the same still-unacked message, surface a degraded status.
 const ON_DELIVER_DEGRADED_AFTER: u32 = 6;
 /// Exit code the on-deliver handler returns for a permanent, non-retryable failure (e.g. a
@@ -2055,6 +2066,20 @@ fn on_deliver_backoff(attempts: u32) -> Duration {
         .min(ON_DELIVER_RETRY_MAX)
 }
 
+/// The delay before a still-unacked message is eligible for re-push. A **failed** push (bridge
+/// unreachable) uses the fast, growing `on_deliver_backoff` so a transiently dead bridge recovers
+/// quickly. An **accepted** push (already queued in the live session) uses the long
+/// `ON_DELIVER_ACCEPTED_BACKSTOP`: re-delivery of an accepted message is normally driven by
+/// re-provision (reattach/reload clears the push record and re-delivers the backlog), so this
+/// timer only needs to backstop the rare accept-but-silently-dropped-while-held case.
+fn on_deliver_redelivery_delay(attempt: &PushAttempt) -> Duration {
+    if attempt.accepted {
+        ON_DELIVER_ACCEPTED_BACKSTOP
+    } else {
+        on_deliver_backoff(attempt.attempts)
+    }
+}
+
 /// Identifies one in-flight on-deliver exec so concurrent commit + sweep paths do not
 /// double-spawn a handler for the same (address, message).
 #[derive(Clone, PartialEq, Eq, Hash)]
@@ -2064,21 +2089,27 @@ struct OnDeliverKey {
     message_id: i64,
 }
 
-/// One still-unacked message's push bookkeeping: when it was last attempted and how many
-/// times, so re-pushes back off (`on_deliver_backoff`) instead of hammering a dead bridge
-/// every heartbeat.
+/// One still-unacked message's push bookkeeping: when it was last attempted, how many times,
+/// and whether the last attempt was **accepted** by the harness (`session.send` returned ok) vs
+/// **failed** (bridge unreachable). Accepted and failed pushes back off very differently: a failed
+/// push retries fast (`on_deliver_backoff`) to recover a transiently dead bridge, while an accepted
+/// push is already in the live session's queue and is only re-pushed on a long backstop
+/// (`ON_DELIVER_ACCEPTED_BACKSTOP`) -- its real re-delivery trigger is re-provision
+/// (reattach/reload -> `on_deliver_forget_member`), not this timer.
 #[derive(Clone, Copy)]
 struct PushAttempt {
     last: Instant,
     attempts: u32,
+    accepted: bool,
 }
 
 /// Daemon-side liveness state for the generic on-deliver exec primitive. This is a
 /// best-effort push notifier: it never marks messages delivered or consumed (that stays
 /// agent-driven via `Ack`), so a failed or missing push only leaves the message durably
 /// queued, exactly like an unarmed pull station. `pushed` records the last attempt per
-/// still-undelivered `(member, message_id)` so re-pushes back off while the message stays
-/// unacked, and is pruned to the currently-undelivered set on each sweep; `dead_lettered`
+/// still-undelivered `(member, message_id)` so re-pushes back off (fast after a failed push, a
+/// long backstop after an accepted one) while the message stays unacked, and is pruned to the
+/// currently-undelivered set on each sweep; `dead_lettered`
 /// holds messages a handler reported as permanently unpushable (skipped from further pushes,
 /// surfaced via a degraded status, still durably queued); `inflight` prevents a commit-path
 /// and a sweep-path from racing the same message.
@@ -2122,9 +2153,9 @@ impl DaemonState {
     }
 
     /// Whether a re-push of `(member, id)` should be skipped right now: true if the message was
-    /// dead-lettered (permanent failure), or while its last attempt is still inside its backoff
-    /// window. A never-attempted or backed-off-past message is eligible, so a message
-    /// accepted-but-never-acked keeps being retried.
+    /// dead-lettered (permanent failure), or while its last attempt is still inside its re-delivery
+    /// delay (`on_deliver_redelivery_delay`: fast backoff after a failed push, long backstop after
+    /// an accepted one). A never-attempted or delay-elapsed message is eligible.
     fn on_deliver_should_skip(&self, member: &MemberKey, id: i64, now: Instant) -> bool {
         if self
             .on_deliver
@@ -2142,13 +2173,20 @@ impl DaemonState {
             .unwrap()
             .get(member)
             .and_then(|m| m.get(&id))
-            .is_some_and(|a| now.saturating_duration_since(a.last) < on_deliver_backoff(a.attempts))
+            .is_some_and(|a| now.saturating_duration_since(a.last) < on_deliver_redelivery_delay(a))
     }
 
-    /// Record one push attempt (success or failure) for `(member, id)` and return the new
-    /// attempt count. Both outcomes back off: a failure retries a dead bridge with backoff, and
-    /// a success re-pushes later in case the agent never acked what the harness merely accepted.
-    fn on_deliver_record_attempt(&self, member: &MemberKey, id: i64, now: Instant) -> u32 {
+    /// Record one push attempt for `(member, id)` -- its `accepted` outcome (the harness accepted
+    /// the turn vs a failed push) and time -- and return the new attempt count. The outcome selects
+    /// the re-delivery delay: a failed push retries fast to recover a dead bridge; an accepted push
+    /// waits on the long backstop (re-delivery is otherwise re-provision-driven).
+    fn on_deliver_record_attempt(
+        &self,
+        member: &MemberKey,
+        id: i64,
+        now: Instant,
+        accepted: bool,
+    ) -> u32 {
         let mut map = self.on_deliver.pushed.lock().unwrap();
         let entry = map
             .entry(member.clone())
@@ -2157,9 +2195,11 @@ impl DaemonState {
             .or_insert(PushAttempt {
                 last: now,
                 attempts: 0,
+                accepted: false,
             });
         entry.attempts = entry.attempts.saturating_add(1);
         entry.last = now;
+        entry.accepted = accepted;
         entry.attempts
     }
 
@@ -2271,9 +2311,15 @@ impl DaemonState {
                     ),
                 );
             } else {
-                // Record the attempt regardless of transient outcome so the next re-push backs
-                // off; the message leaves the attempt map only once it is acked (retain sweep).
-                let attempts = state.on_deliver_record_attempt(&member_key, id, Instant::now());
+                // Record the attempt with its outcome so the next re-push uses the right delay
+                // (accepted -> long backstop; failed -> fast backoff). The message leaves the
+                // attempt map only once it is acked (retain sweep).
+                let attempts = state.on_deliver_record_attempt(
+                    &member_key,
+                    id,
+                    Instant::now(),
+                    outcome == RunOutcome::Ok,
+                );
                 if outcome == RunOutcome::Transient {
                     let detail = stderr.map(|s| format!(": {s}")).unwrap_or_default();
                     state.push_recent_error(
@@ -4543,13 +4589,72 @@ mod p3_tests {
             address: "addr:a".to_string(),
         };
         let now = Instant::now();
-        state.on_deliver_record_attempt(&member_key, 7, now);
+        state.on_deliver_record_attempt(&member_key, 7, now, false);
         assert!(state.on_deliver_should_skip(&member_key, 7, now));
         state.on_deliver_forget_member(&member_key);
         assert!(
             !state.on_deliver_should_skip(&member_key, 7, now),
             "forgetting a member must clear its push attempt state so a rebind re-pushes"
         );
+    }
+
+    #[test]
+    fn accepted_push_uses_long_backstop_failed_push_uses_fast_backoff() {
+        let attempt = |accepted: bool, attempts: u32| PushAttempt {
+            last: Instant::now(),
+            attempts,
+            accepted,
+        };
+        // A failed push retries on the fast, growing backoff so a dead bridge recovers quickly.
+        assert_eq!(
+            on_deliver_redelivery_delay(&attempt(false, 1)),
+            ON_DELIVER_RETRY_BASE
+        );
+        assert_eq!(
+            on_deliver_redelivery_delay(&attempt(false, 2)),
+            ON_DELIVER_RETRY_BASE * 2
+        );
+        // An accepted push waits on the long backstop regardless of attempt count -- re-delivery
+        // is otherwise re-provision-driven, not timer-driven.
+        assert_eq!(
+            on_deliver_redelivery_delay(&attempt(true, 1)),
+            ON_DELIVER_ACCEPTED_BACKSTOP
+        );
+        assert_eq!(
+            on_deliver_redelivery_delay(&attempt(true, 9)),
+            ON_DELIVER_ACCEPTED_BACKSTOP
+        );
+        // The backstop is much longer than the fast failure backoff, so an accepted-but-unacked
+        // message is not re-pushed on the fast churn cadence.
+        assert!(ON_DELIVER_ACCEPTED_BACKSTOP > on_deliver_backoff(1));
+    }
+
+    #[tokio::test]
+    async fn accepted_push_is_not_re_pushed_until_backstop_but_failed_push_is() {
+        let state = test_state("on-deliver-accepted-backstop");
+        let store = store_key("on-deliver-accepted-backstop");
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        let now = Instant::now();
+        // Accepted push: skipped for the whole backstop window; eligible only after it elapses.
+        state.on_deliver_record_attempt(&member_key, 1, now, true);
+        assert!(state.on_deliver_should_skip(&member_key, 1, now + ON_DELIVER_RETRY_BASE * 4));
+        assert!(!state.on_deliver_should_skip(
+            &member_key,
+            1,
+            now + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
+        ));
+        // Failed push: eligible again as soon as the fast backoff elapses.
+        state.on_deliver_record_attempt(&member_key, 2, now, false);
+        assert!(state.on_deliver_should_skip(&member_key, 2, now));
+        assert!(!state.on_deliver_should_skip(
+            &member_key,
+            2,
+            now + ON_DELIVER_RETRY_BASE + Duration::from_secs(1)
+        ));
     }
 
     #[test]

@@ -29,7 +29,12 @@ yours to make.
 2. **Load the bridge into the live session (one agent tool call).**
 
    Run the `extensions_reload` tool. telex cannot trigger a reload, so you do this once.
-   After `/clear` (which reloads extensions), run it once more.
+   After `/clear` (which reloads extensions and clears the conversation), **re-provision first** --
+   re-run `telex --address <addr> copilot attach --copilot-bridge` and then `extensions_reload` --
+   so the daemon re-delivers any message that was queued but not yet acked when you cleared. A
+   re-attach (or a new session taking over the address) is what re-delivers unacked messages; while
+   the same session stays continuously attached, an already-accepted message is **not** re-pushed
+   (a still-unacked one you have seen is nudged by the turn guard, not re-sent).
 
 3. **Receive messages as turns.** A delivered telex message arrives as a new turn
    labelled `[telex] from <addr> (<attention>)`. An `interrupt` message is delivered as

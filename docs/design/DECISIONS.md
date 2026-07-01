@@ -1618,3 +1618,42 @@ small, defers to the binary, and embeds no detailed recipes. `telex copilot skil
 longer dumps the whole generic skill; agents wanting the generic/pull reference still run
 `telex skill`. The plugin's own version is the one version fact the bootstrap legitimately
 carries (it matches `plugin.json`), used only to drive the compatibility check.
+
+## 0041 — On-deliver re-delivery is re-provision-triggered, not timer-until-ack
+
+- **Date:** 2026-07-01
+- **Status:** Accepted (`push-delivery` node / PR #55)
+
+**Context.** ADR 0039's on-deliver push kept re-pushing a still-unacked message on a fixed
+per-message backoff (base 15s, doubling) until the agent acked, to guarantee no loss between
+"harness accepted the turn" and "agent durably consumed it." A live two-terminal dogfood test
+showed this over-fires: a **successful** `session.send` only means the turn was *queued*, so
+against a busy or slow recipient the daemon re-pushes the same message every ~15s, enqueuing
+duplicate turns the agent must dedupe — the agent can fall behind acking while it burns turns on
+dupes (correct via id-dedupe, but wasteful and confusing). The re-push conflated two situations it
+should treat differently: (a) the queue is intact and the message is simply pending/seen —
+re-pushing is pure duplication; (b) the queue was lost (crash / reattach / reload) or the push
+never landed — re-delivery is genuinely needed.
+
+**Decision.** Split the re-push cadence by the last push's **outcome**, and make re-delivery
+**re-provision-triggered** rather than timer-driven:
+- A **failed** push (bridge unreachable / target absent) keeps the fast `on_deliver_backoff`
+  (15s doubling to a cap) so a transiently dead bridge recovers quickly.
+- An **accepted** push is already queued in the live session, so it is **not** re-pushed on the
+  fast cadence. Re-delivery of un-acked messages happens on **attachment change** — a reattach, a
+  new session taking the address, or a `/clear` bridge-reload re-provision — which already calls
+  `on_deliver_forget_member` + rescans `fetch_undelivered`. A long `ON_DELIVER_ACCEPTED_BACKSTOP`
+  (5 min) is retained only as a backstop against a silent in-session drop of a queued turn.
+- A **seen-but-unacked** message is the agent-stop **turn guard's** job (it already lists unacked
+  deliveries and nudges the agent to ack), not the daemon's to re-push.
+The COPILOT.md workflow now tells the agent to **re-provision after `/clear`** (re-run
+`copilot attach --copilot-bridge` before `extensions_reload`) so a reload re-delivers the backlog.
+
+**Consequences.** The redelivery amplification is gone: a continuously-held session gets each
+message once (plus rare backstop re-checks), not every 15s. The **sacred durable+ack invariant is
+preserved** — the durable store still never loses a message, and every queue-loss path (crash,
+reattach, reload, new holder) re-delivers un-acked messages at-least-once (a duplicate to a fresh
+attachment is the safe direction). The daemon stays **harness-neutral**: "attachment generation"
+is realized as re-provision events (lease-epoch bump + re-`Register`), not a bridge-specific token
+plumbed through the core. Residual risk — an accepted turn silently dropped while the same session
+stays attached without a reload — is covered by the 5-min backstop and the existing degraded status.
