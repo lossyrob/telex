@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-02T04:20:00.000Z",
+  "updatedAt": "2026-07-02T17:10:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -197,8 +197,8 @@
     {
       "id": "seamless-upgrade",
       "type": "task",
-      "title": "Seamless upgrade local floor (#6 / PR #56)",
-      "summary": "Local versioned-install floor for #6: stable launcher dispatch, versioned layout, local upgrade --from / rollback / gc / version UX, source-derived manifests, installer migration, status/version metadata, conservative Copilot bridge GC, and daemon-aware schema-version gates. This PR intentionally uses Refs #6, not Closes: release discovery, stronger GC in-use detection, Unix launcher/fsync hardening, store-aware rollback, Postgres live successor handoff, and direct pre-epoch Postgres hard-fail semantics are split to seamless-upgrade-completion (#57).",
+      "title": "Seamless upgrade (#6 / PR #56)",
+      "summary": "Practical seamless-upgrade floor that closes #6 under the narrowed bar: versioned install + stable launcher, local upgrade/switch (upgrade --from is acceptable), current/previous manifests, conservative known-safe rollback (not a general downgrade guarantee), conservative GC preserving current/previous/active versions, incompatible/too-old binary fail-closed diagnostics, status/version mixed-version observability, install script migration, and current Copilot bridge version/GC needs. GitHub release discovery, full rollback/downgrade framework, Postgres live successor handoff beyond safe drain/release, stronger GC scanning, extra Unix/fsync hardening, and destructive direct-pre-epoch Postgres migrations are future hardening.",
       "status": "ready",
       "attention": "focus",
       "repoIds": [
@@ -217,26 +217,6 @@
       ]
     },
     {
-      "id": "seamless-upgrade-completion",
-      "type": "task",
-      "title": "Seamless upgrade completion (#6 closure)",
-      "summary": "Finish the remaining #6 closure work after the local floor: release discovery/download/verification; stronger cross-process in-use detection for GC; Unix launcher exec/signal handoff and fsync/atomicity hardening; store-aware rollback against live schema/protocol/epoch state; Postgres live successor handoff; direct pre-epoch Postgres fail-closed semantics or an explicit issue/design amendment; and bridge upgrade compatibility/stale bridge cleanup across version switches. This node should close #6 when complete.",
-      "status": "planned",
-      "attention": "watch",
-      "repoIds": [
-        "telex"
-      ],
-      "tracker": {
-        "type": "github",
-        "owner": "lossyrob",
-        "repo": "telex",
-        "number": 57
-      },
-      "dependsOn": [
-        "seamless-upgrade"
-      ]
-    },
-    {
       "id": "validation-harness",
       "type": "task",
       "title": "Validation harness + Tier 1/2 loop (chaos + Entra-PG multi-host)",
@@ -247,7 +227,7 @@
         "telex"
       ],
       "dependsOn": [
-        "seamless-upgrade-completion"
+        "seamless-upgrade"
       ]
     },
     {
@@ -261,7 +241,7 @@
         "telex"
       ],
       "dependsOn": [
-        "seamless-upgrade-completion"
+        "seamless-upgrade"
       ]
     },
     {
@@ -356,8 +336,7 @@
       "summary": "The full seamless upgrade platform (#6) landed; both backends, the plugin, and upgrade are all in, pending closure validation.",
       "status": "planned",
       "nodeIds": [
-        "seamless-upgrade",
-        "seamless-upgrade-completion"
+        "seamless-upgrade"
       ]
     },
     {
