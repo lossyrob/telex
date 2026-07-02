@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-06-30T21:40:00.000Z",
+  "updatedAt": "2026-07-02T01:50:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -179,7 +179,7 @@
       "type": "task",
       "title": "Push delivery for Copilot bridge sessions",
       "summary": "Implement the #53 design of record: Copilot delivery via a load-on-bind in-session bridge extension using `joinSession()` + local authenticated `/send` + `session.send({prompt, mode:\"enqueue\"})`, with a generic daemon on-deliver exec as the Copilot-agnostic trigger. `telex attach --copilot-bridge` materializes the session-scoped extension and registers the on-deliver handler; `extensions_reload` loads it live; `telex detach` unloads it on the last binding. Copilot no longer arms, re-arms, or reasons about `telex wait`; the merged #41 skill content is reworked to bind -> load bridge -> receive pushed turns -> disposition. `telex wait` remains for generic pull users. No --ui-server requirement for the common case.",
-      "status": "ready",
+      "status": "completed",
       "attention": "watch",
       "repoIds": [
         "telex"
@@ -317,7 +317,7 @@
       "id": "coordination-hardening",
       "title": "Coordination hardening (bridge push + generic liveness visibility)",
       "summary": "The #45 dogfooding friction is addressed by the #53 Copilot bridge push path (no agent-managed waiter/re-arm loop for Copilot) plus remaining generic liveness/visibility hardening for non-Copilot/pull-mode users. The former cc-stream-wake node is folded into #53's bridge/attention model for Copilot.",
-      "status": "planned",
+      "status": "completed",
       "nodeIds": [
         "liveness-visibility",
         "push-delivery"
