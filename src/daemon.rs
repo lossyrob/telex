@@ -2392,6 +2392,7 @@ async fn run_on_deliver(
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
+    configure_on_deliver_spawn(&mut cmd);
     let mut child = match cmd.spawn() {
         Ok(child) => child,
         Err(e) => return (RunOutcome::Transient, Some(format!("spawn failed: {e}"))),
@@ -2420,6 +2421,21 @@ async fn run_on_deliver(
         }
     }
 }
+
+#[cfg(windows)]
+fn configure_on_deliver_spawn(command: &mut tokio::process::Command) {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+
+    // The daemon is a background process. Without this flag, Windows can briefly create a console
+    // window for every on-deliver helper (`telex copilot push`), which appears as a desktop flash
+    // whenever a message is sent.
+    command.creation_flags(CREATE_NO_WINDOW);
+}
+
+#[cfg(not(windows))]
+fn configure_on_deliver_spawn(_command: &mut tokio::process::Command) {}
 
 /// Read a bounded tail of a finished child's stderr for diagnostics. No message bodies flow
 /// through stderr; `telex copilot push` writes only short error lines.
