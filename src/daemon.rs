@@ -2424,8 +2424,6 @@ async fn run_on_deliver(
 
 #[cfg(windows)]
 fn configure_on_deliver_spawn(command: &mut tokio::process::Command) {
-    use std::os::windows::process::CommandExt;
-
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
     // The daemon is a background process. Without this flag, Windows can briefly create a console
