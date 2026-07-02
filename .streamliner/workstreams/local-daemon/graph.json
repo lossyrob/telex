@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-02T20:35:00.000Z",
+  "updatedAt": "2026-07-02T20:45:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -217,6 +217,26 @@
       ]
     },
     {
+      "id": "harness-skill-layout",
+      "type": "task",
+      "title": "Harness-neutral skill/plugin layout",
+      "summary": "Restructure Telex skill/plugin content before public release: root `SKILL.md` becomes harness-neutral; Copilot-specific mechanics move to `COPILOT.md` / `telex copilot skill`; the Copilot plugin files move under a Copilot-specific nested plugin root with marketplace `source` pointing there; nested marketplace install is empirically verified; tests/docs/ADR are updated. Creates a single-source-per-harness content boundary and leaves room for future sibling harness plugins.",
+      "status": "ready",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 61
+      },
+      "dependsOn": [
+        "push-delivery"
+      ]
+    },
+    {
       "id": "validation-harness",
       "type": "task",
       "title": "Validation harness + Tier 1/2 loop (chaos + Entra-PG multi-host)",
@@ -247,7 +267,8 @@
         "number": 59
       },
       "dependsOn": [
-        "seamless-upgrade"
+        "seamless-upgrade",
+        "harness-skill-layout"
       ]
     },
     {
@@ -377,6 +398,7 @@
       "status": "planned",
       "nodeIds": [
         "seamless-upgrade",
+        "harness-skill-layout",
         "public-release",
         "release-upgrade"
       ]
