@@ -38,6 +38,18 @@ pub struct VersionManifest {
     pub previous_tag: Option<String>,
 }
 
+#[derive(Debug, Clone)]
+pub struct SourceMetadata {
+    pub package_version: String,
+    pub schema_min: i64,
+    pub schema_max: i64,
+    pub protocol_major: u16,
+    pub protocol_minor: u16,
+    pub required_capabilities: Vec<String>,
+    pub copilot_bridge_protocol: u32,
+    pub min_compatible_plugin_version: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct VersionInfo {
     pub package_version: &'static str,
@@ -236,6 +248,7 @@ pub fn install_binary(
     source_binary: &Path,
     source_label: &str,
     switch_current: bool,
+    source_metadata: Option<SourceMetadata>,
 ) -> Result<InstallResult> {
     validate_tag(tag)?;
     if !source_binary.is_file() {
@@ -265,7 +278,13 @@ pub fn install_binary(
         }
     }
 
-    let manifest = current_manifest(tag, &version_binary, source_label, previous_tag.clone());
+    let manifest = current_manifest(
+        tag,
+        &version_binary,
+        source_label,
+        previous_tag.clone(),
+        source_metadata,
+    );
     write_manifest(layout, tag, &manifest)?;
     if switch_current {
         switch_to(layout, tag)?;
@@ -379,24 +398,18 @@ pub fn gc(layout: &InstallLayout, dry_run: bool, force: bool) -> Result<GcReport
             });
             continue;
         }
-        match std::fs::remove_dir_all(&path) {
+        match remove_version_dir(&path, force) {
             Ok(()) => entries.push(GcEntry {
                 tag,
                 path: path.to_string_lossy().into_owned(),
                 action: "removed",
                 reason: "stale installed version".to_string(),
             }),
-            Err(e) if !force => entries.push(GcEntry {
-                tag,
-                path: path.to_string_lossy().into_owned(),
-                action: "keep",
-                reason: format!("remove failed, treating as possibly in use: {e}"),
-            }),
             Err(e) => entries.push(GcEntry {
                 tag,
                 path: path.to_string_lossy().into_owned(),
                 action: "keep",
-                reason: format!("forced removal still refused by OS/filesystem: {e}"),
+                reason: format!("remove failed, treating as possibly in use: {e}"),
             }),
         }
     }
@@ -428,13 +441,10 @@ fn current_manifest(
     binary: &Path,
     source: &str,
     previous_tag: Option<String>,
+    source_metadata: Option<SourceMetadata>,
 ) -> VersionManifest {
-    VersionManifest {
-        tag: tag.to_string(),
+    let source_metadata = source_metadata.unwrap_or_else(|| SourceMetadata {
         package_version: env!("CARGO_PKG_VERSION").to_string(),
-        binary: binary.to_string_lossy().into_owned(),
-        installed_at_ms: crate::model::now_ms(),
-        source: source.to_string(),
         schema_min: SUPPORTED_SCHEMA_MIN,
         schema_max: SUPPORTED_SCHEMA_MAX,
         protocol_major: crate::daemon_ipc::PROTOCOL_MAJOR,
@@ -446,8 +456,51 @@ fn current_manifest(
         copilot_bridge_protocol: crate::commands::copilot::COPILOT_BRIDGE_PROTOCOL,
         min_compatible_plugin_version: crate::commands::copilot::MIN_COMPATIBLE_PLUGIN_VERSION
             .to_string(),
+    });
+    VersionManifest {
+        tag: tag.to_string(),
+        package_version: source_metadata.package_version,
+        binary: binary.to_string_lossy().into_owned(),
+        installed_at_ms: crate::model::now_ms(),
+        source: source.to_string(),
+        schema_min: source_metadata.schema_min,
+        schema_max: source_metadata.schema_max,
+        protocol_major: source_metadata.protocol_major,
+        protocol_minor: source_metadata.protocol_minor,
+        required_capabilities: source_metadata.required_capabilities,
+        copilot_bridge_protocol: source_metadata.copilot_bridge_protocol,
+        min_compatible_plugin_version: source_metadata.min_compatible_plugin_version,
         previous_tag,
     }
+}
+
+fn remove_version_dir(path: &Path, force: bool) -> Result<()> {
+    match std::fs::remove_dir_all(path) {
+        Ok(()) => Ok(()),
+        Err(first) if force => {
+            make_tree_writable(path).ok();
+            std::fs::remove_dir_all(path).with_context(|| {
+                format!(
+                    "forced removal failed after clearing read-only bits; original error: {first}"
+                )
+            })
+        }
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn make_tree_writable(path: &Path) -> Result<()> {
+    if path.is_dir() {
+        for entry in std::fs::read_dir(path)? {
+            make_tree_writable(&entry?.path())?;
+        }
+    }
+    let mut perms = std::fs::metadata(path)?.permissions();
+    if perms.readonly() {
+        perms.set_readonly(false);
+        std::fs::set_permissions(path, perms)?;
+    }
+    Ok(())
 }
 
 fn write_manifest(layout: &InstallLayout, tag: &str, manifest: &VersionManifest) -> Result<()> {
@@ -539,14 +592,14 @@ mod tests {
         let src1 = source_binary(&root, "src1");
         let src2 = source_binary(&root, "src2");
 
-        install_binary(&layout, "v1", &src1, "test", true).unwrap();
+        install_binary(&layout, "v1", &src1, "test", true, None).unwrap();
         assert_eq!(
             std::fs::read_to_string(&layout.current_path)
                 .unwrap()
                 .trim(),
             "v1"
         );
-        install_binary(&layout, "v2", &src2, "test", true).unwrap();
+        install_binary(&layout, "v2", &src2, "test", true, None).unwrap();
         assert_eq!(
             std::fs::read_to_string(&layout.current_path)
                 .unwrap()
@@ -578,7 +631,7 @@ mod tests {
         let root = temp_root("bad-protocol");
         let layout = layout_for_root(&root);
         let src = source_binary(&root, "src");
-        install_binary(&layout, "v1", &src, "test", false).unwrap();
+        install_binary(&layout, "v1", &src, "test", false, None).unwrap();
         let manifest_path = layout.versions_dir.join("v1").join("manifest.json");
         let mut manifest = read_manifest(&layout, "v1").unwrap();
         manifest.protocol_major = manifest.protocol_major.saturating_add(1);

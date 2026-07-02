@@ -68,7 +68,7 @@ try {
 
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     $payload = Join-Path $tmp 'telex.exe'
-    & $payload --json upgrade --from $payload --version $tag --root $installRoot --skip-drain | Out-Null
+    & $payload --json upgrade --from $payload --version $tag --root $installRoot | Out-Null
 
     Write-Host ""
     Write-Host "Installed telex $tag under $installRoot"

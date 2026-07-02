@@ -80,7 +80,7 @@ fi
 
 tar -C "${tmp}" -xzf "${tmp}/${asset}"
 chmod 0755 "${tmp}/telex"
-"${tmp}/telex" --json upgrade --from "${tmp}/telex" --version "${tag}" --root "${install_root}" --skip-drain >/dev/null
+"${tmp}/telex" --json upgrade --from "${tmp}/telex" --version "${tag}" --root "${install_root}" >/dev/null
 
 say ""
 say "Installed telex ${tag} under ${install_root}"

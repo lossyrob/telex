@@ -1,6 +1,7 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::json;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::time::Duration;
 
 use crate::cli::{Ctx, GcArgs, RollbackArgs, UpgradeArgs, VersionArgs};
@@ -53,12 +54,14 @@ pub async fn upgrade(ctx: &Ctx, args: UpgradeArgs) -> Result<i32> {
         .version
         .unwrap_or_else(|| format!("v{}", env!("CARGO_PKG_VERSION")));
     let source = resolve_source_binary(&args.from)?;
+    let source_metadata = source_metadata(&source, &layout.root)?;
     let installed = install::install_binary(
         &layout,
         &tag,
         &source,
         &format!("local:{}", args.from.display()),
         false,
+        Some(source_metadata),
     )?;
     let drain = if args.no_switch || args.skip_drain {
         json!({"skipped": true})
@@ -146,6 +149,90 @@ fn resolve_source_binary(path: &Path) -> Result<PathBuf> {
         );
     }
     Ok(path.to_path_buf())
+}
+
+fn source_metadata(source: &Path, root: &Path) -> Result<install::SourceMetadata> {
+    if !source.is_file() {
+        bail!("upgrade source is not a file: {}", source.display());
+    }
+    let output = Command::new(source)
+        .arg("--json")
+        .arg("version")
+        .arg("--root")
+        .arg(root)
+        .env(install::LAUNCHER_GUARD_ENV, "1")
+        .output()
+        .map_err(|e| anyhow!("running source telex binary {}: {e}", source.display()))?;
+    if !output.status.success() {
+        bail!(
+            "upgrade source {} did not run `telex --json version` successfully: {}",
+            source.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| {
+        anyhow!(
+            "upgrade source {} did not emit valid version JSON: {e}",
+            source.display()
+        )
+    })?;
+    let version = value
+        .get("version")
+        .ok_or_else(|| anyhow!("source version JSON missing `version` object"))?;
+    let daemon = value
+        .get("daemon_metadata")
+        .ok_or_else(|| anyhow!("source version JSON missing `daemon_metadata` object"))?;
+    let protocol = daemon
+        .get("protocol_version")
+        .ok_or_else(|| anyhow!("source version JSON missing protocol_version"))?;
+    let copilot = value
+        .get("copilot")
+        .ok_or_else(|| anyhow!("source version JSON missing `copilot` object"))?;
+    Ok(install::SourceMetadata {
+        package_version: required_str(version, "package_version")?.to_string(),
+        schema_min: required_i64(version, "supported_schema_min")?,
+        schema_max: required_i64(version, "supported_schema_max")?,
+        protocol_major: required_u16(protocol, "major")?,
+        protocol_minor: required_u16(protocol, "minor")?,
+        required_capabilities: daemon
+            .get("required_capabilities")
+            .and_then(|v| v.as_array())
+            .ok_or_else(|| anyhow!("source version JSON missing required_capabilities"))?
+            .iter()
+            .map(|v| {
+                v.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| anyhow!("required_capabilities must be strings"))
+            })
+            .collect::<Result<Vec<_>>>()?,
+        copilot_bridge_protocol: required_u32(copilot, "bridge_protocol")?,
+        min_compatible_plugin_version: required_str(copilot, "min_compatible_plugin_version")?
+            .to_string(),
+    })
+}
+
+fn required_str<'a>(value: &'a serde_json::Value, key: &str) -> Result<&'a str> {
+    value
+        .get(key)
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("source version JSON missing string field `{key}`"))
+}
+
+fn required_i64(value: &serde_json::Value, key: &str) -> Result<i64> {
+    value
+        .get(key)
+        .and_then(|v| v.as_i64())
+        .ok_or_else(|| anyhow!("source version JSON missing integer field `{key}`"))
+}
+
+fn required_u16(value: &serde_json::Value, key: &str) -> Result<u16> {
+    let raw = required_i64(value, key)?;
+    u16::try_from(raw).map_err(|_| anyhow!("source version field `{key}` is out of range: {raw}"))
+}
+
+fn required_u32(value: &serde_json::Value, key: &str) -> Result<u32> {
+    let raw = required_i64(value, key)?;
+    u32::try_from(raw).map_err(|_| anyhow!("source version field `{key}` is out of range: {raw}"))
 }
 
 async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
