@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-02T17:10:00.000Z",
+  "updatedAt": "2026-07-02T20:35:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -227,7 +227,47 @@
         "telex"
       ],
       "dependsOn": [
+        "release-upgrade"
+      ]
+    },
+    {
+      "id": "public-release",
+      "type": "task",
+      "title": "Public release readiness + first GitHub release",
+      "summary": "Prepare Telex for public/open-source consumption and publish the first GitHub release with stable platform assets and checksums. This comes after the local versioned-install floor because release-based upgrade UX cannot be fully validated before public release assets exist. Scope: public docs/metadata, release asset naming/checksum contract, release workflow, install artifact validation, and first release publication.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 59
+      },
+      "dependsOn": [
         "seamless-upgrade"
+      ]
+    },
+    {
+      "id": "release-upgrade",
+      "type": "task",
+      "title": "Release-based telex upgrade UX",
+      "summary": "Add the standard user-facing `telex upgrade` path after public releases exist: discover latest or explicit GitHub release, select the correct platform asset, download and verify checksum, then install through the versioned layout from #6. `upgrade --from <binary>` remains the local/manual path; this node adds release discovery/download/checksum behavior and actionable failures for missing assets, checksum mismatch, unsupported platforms, or incompatible versions.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 60
+      },
+      "dependsOn": [
+        "public-release"
       ]
     },
     {
@@ -241,7 +281,7 @@
         "telex"
       ],
       "dependsOn": [
-        "seamless-upgrade"
+        "release-upgrade"
       ]
     },
     {
@@ -336,7 +376,9 @@
       "summary": "The full seamless upgrade platform (#6) landed; both backends, the plugin, and upgrade are all in, pending closure validation.",
       "status": "planned",
       "nodeIds": [
-        "seamless-upgrade"
+        "seamless-upgrade",
+        "public-release",
+        "release-upgrade"
       ]
     },
     {
