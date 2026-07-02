@@ -22,6 +22,12 @@ else
   install_root="$HOME/.local/share/telex"
 fi
 bin_dir="${install_root}/bin"
+path_dir="${bin_dir}"
+legacy_link=""
+if [ -z "${TELEX_INSTALL_ROOT:-}" ] && [ -z "${TELEX_INSTALL_DIR:-}" ]; then
+  path_dir="$HOME/.local/bin"
+  legacy_link="${path_dir}/telex"
+fi
 
 say() { printf '%s\n' "$*"; }
 err() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -80,14 +86,23 @@ fi
 
 tar -C "${tmp}" -xzf "${tmp}/${asset}"
 chmod 0755 "${tmp}/telex"
-"${tmp}/telex" --json upgrade --from "${tmp}/telex" --version "${tag}" --root "${install_root}" >/dev/null
+if ! "${tmp}/telex" --json upgrade --from "${tmp}/telex" --version "${tag}" --root "${install_root}" >/dev/null; then
+  err "downloaded telex ${tag} could not run the versioned installer; install a newer release or use cargo install"
+fi
+if [ -n "${legacy_link}" ]; then
+  mkdir -p "${path_dir}"
+  ln -sf "${bin_dir}/telex" "${legacy_link}" || err "could not create launcher link ${legacy_link}"
+fi
 
 say ""
 say "Installed telex ${tag} under ${install_root}"
 say "Launcher: ${bin_dir}/telex"
+if [ -n "${legacy_link}" ]; then
+  say "PATH shim: ${legacy_link} -> ${bin_dir}/telex"
+fi
 case ":${PATH}:" in
-  *":${bin_dir}:"*) : ;;
-  *) say "Add it to your PATH:  export PATH=\"${bin_dir}:\$PATH\"" ;;
+  *":${path_dir}:"*) : ;;
+  *) say "Add it to your PATH:  export PATH=\"${path_dir}:\$PATH\"" ;;
 esac
 say "Next:  telex skill"
 say "Copilot plugin marketplace:"

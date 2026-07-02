@@ -69,6 +69,9 @@ try {
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
     $payload = Join-Path $tmp 'telex.exe'
     & $payload --json upgrade --from $payload --version $tag --root $installRoot | Out-Null
+    if ($LASTEXITCODE -ne 0) {
+        throw "downloaded telex $tag could not run the versioned installer; install a newer release or use cargo install"
+    }
 
     Write-Host ""
     Write-Host "Installed telex $tag under $installRoot"

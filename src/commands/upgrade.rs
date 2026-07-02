@@ -1,8 +1,8 @@
 use anyhow::{anyhow, bail, Result};
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use std::process::Command;
-use std::time::Duration;
+use std::process::{Command, Output};
+use std::time::{Duration, Instant};
 
 use crate::cli::{Ctx, GcArgs, RollbackArgs, UpgradeArgs, VersionArgs};
 use crate::daemon::DaemonError;
@@ -63,6 +63,10 @@ pub async fn upgrade(ctx: &Ctx, args: UpgradeArgs) -> Result<i32> {
         false,
         Some(source_metadata),
     )?;
+    if !args.no_switch {
+        let manifest = install::read_manifest(&layout, &tag)?;
+        install::validate_manifest_for_current(&manifest)?;
+    }
     let drain = if args.no_switch || args.skip_drain {
         json!({"skipped": true})
     } else {
@@ -106,6 +110,8 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
             .previous_tag
             .ok_or_else(|| anyhow!("no previous installed version recorded; pass --version"))?,
     };
+    let manifest = install::read_manifest(&layout, &target)?;
+    install::validate_manifest_for_current(&manifest)?;
     let drain = if args.skip_drain {
         json!({"skipped": true})
     } else {
@@ -155,20 +161,46 @@ fn source_metadata(source: &Path, root: &Path) -> Result<install::SourceMetadata
     if !source.is_file() {
         bail!("upgrade source is not a file: {}", source.display());
     }
-    let output = Command::new(source)
-        .arg("--json")
-        .arg("version")
-        .arg("--root")
-        .arg(root)
-        .env(install::LAUNCHER_GUARD_ENV, "1")
-        .output()
-        .map_err(|e| anyhow!("running source telex binary {}: {e}", source.display()))?;
+    let output = source_version_output(source, root, Duration::from_secs(10))?;
     if !output.status.success() {
         bail!(
             "upgrade source {} did not run `telex --json version` successfully: {}",
             source.display(),
             String::from_utf8_lossy(&output.stderr).trim()
         );
+    }
+
+    fn source_version_output(source: &Path, root: &Path, timeout: Duration) -> Result<Output> {
+        let mut child = Command::new(source)
+            .arg("--json")
+            .arg("version")
+            .arg("--root")
+            .arg(root)
+            .env(install::LAUNCHER_GUARD_ENV, "1")
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .map_err(|e| anyhow!("running source telex binary {}: {e}", source.display()))?;
+        let deadline = Instant::now() + timeout;
+        loop {
+            match child.try_wait() {
+                Ok(Some(_status)) => {
+                    return child
+                        .wait_with_output()
+                        .map_err(|e| anyhow!("collecting source telex version output: {e}"));
+                }
+                Ok(None) if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    bail!(
+                        "upgrade source {} timed out while running `telex --json version`",
+                        source.display()
+                    );
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+                Err(e) => bail!("waiting for source telex version command: {e}"),
+            }
+        }
     }
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).map_err(|e| {
         anyhow!(

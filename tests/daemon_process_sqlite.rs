@@ -943,6 +943,109 @@ fn versioned_launcher_dispatches_to_current_binary() {
 }
 
 #[test]
+fn versioned_rollback_switches_to_previous_version() {
+    let env = ProcessEnv::new("versioned-rollback");
+    let install_root = env.root.join("install");
+    let source = env.bin.to_string_lossy().into_owned();
+    let root_arg = install_root.to_string_lossy().into_owned();
+
+    env.run(
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &source,
+            "--version",
+            "vtest-one",
+            "--root",
+            &root_arg,
+        ],
+        Duration::from_secs(8),
+    )
+    .assert_success("upgrade v1");
+    env.run(
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &source,
+            "--version",
+            "vtest-two",
+            "--root",
+            &root_arg,
+        ],
+        Duration::from_secs(8),
+    )
+    .assert_success("upgrade v2");
+    let rollback = env.run(
+        ["--json", "rollback", "--root", &root_arg],
+        Duration::from_secs(8),
+    );
+    rollback.assert_success("rollback to previous");
+    let json = rollback.json("rollback");
+    assert_eq!(
+        json.get("switch")
+            .and_then(|s| s.get("switched_to"))
+            .and_then(Value::as_str),
+        Some("vtest-one")
+    );
+    assert_eq!(
+        std::fs::read_to_string(install_root.join("current"))
+            .unwrap()
+            .trim(),
+        "vtest-one"
+    );
+}
+
+#[test]
+fn rollback_without_previous_fails_clearly() {
+    let env = ProcessEnv::new("rollback-no-previous");
+    let install_root = env.root.join("install");
+    let root_arg = install_root.to_string_lossy().into_owned();
+    let out = env.run(
+        ["--json", "rollback", "--root", &root_arg],
+        Duration::from_secs(8),
+    );
+    out.assert_failure("rollback without previous");
+    assert!(
+        out.stderr.contains("no previous installed version"),
+        "stderr should name missing previous version: {}",
+        out.stderr
+    );
+}
+
+#[test]
+fn upgrade_rejects_non_telex_source_before_writing_version() {
+    let env = ProcessEnv::new("upgrade-reject-source");
+    let install_root = env.root.join("install");
+    let root_arg = install_root.to_string_lossy().into_owned();
+    let fake = env
+        .root
+        .join(format!("not-telex{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&fake, b"not a telex binary").expect("write fake source");
+    let fake_arg = fake.to_string_lossy().into_owned();
+
+    let out = env.run(
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &fake_arg,
+            "--version",
+            "vbad",
+            "--root",
+            &root_arg,
+        ],
+        Duration::from_secs(8),
+    );
+    out.assert_failure("upgrade rejects non-telex source");
+    assert!(
+        !install_root.join("versions").join("vbad").exists(),
+        "invalid source must fail before writing versions/vbad"
+    );
+}
+
+#[test]
 fn real_process_send_without_daemon_does_not_spawn() {
     let env = ProcessEnv::new("real-send-no-spawn");
     let sender = "real-send-no-spawn-session";

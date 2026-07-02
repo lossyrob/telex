@@ -19,7 +19,7 @@ use std::sync::{Arc, Mutex};
 use super::{Backend, Capabilities};
 use crate::model::*;
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 // ---------------------------------------------------------------------------
 // Store advisory lock

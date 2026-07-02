@@ -3,6 +3,7 @@
 use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -10,6 +11,9 @@ pub const LAUNCHER_GUARD_ENV: &str = "TELEX_LAUNCHER_ACTIVE";
 pub const INSTALL_ROOT_ENV: &str = "TELEX_INSTALL_ROOT";
 pub const SUPPORTED_SCHEMA_MIN: i64 = 2;
 pub const SUPPORTED_SCHEMA_MAX: i64 = 2;
+const _: () = assert!(SUPPORTED_SCHEMA_MAX == crate::backend::sqlite::CURRENT_SCHEMA_VERSION);
+#[cfg(feature = "postgres")]
+const _: () = assert!(SUPPORTED_SCHEMA_MAX == crate::backend::postgres::CURRENT_SCHEMA_VERSION);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct InstallLayout {
@@ -147,9 +151,10 @@ pub fn layout_for_root(root: impl Into<PathBuf>) -> InstallLayout {
 
 pub fn current_layout() -> Result<InstallLayout> {
     let exe = std::env::current_exe().context("resolving current executable")?;
-    Ok(layout_for_root(
-        infer_install_root_from_exe(&exe).unwrap_or(default_install_root()?),
-    ))
+    Ok(layout_for_root(match infer_install_root_from_exe(&exe) {
+        Some(root) => root,
+        None => default_install_root()?,
+    }))
 }
 
 pub fn layout_from_optional_root(root: Option<PathBuf>) -> Result<InstallLayout> {
@@ -173,6 +178,9 @@ pub fn infer_install_root_from_exe(exe: &Path) -> Option<PathBuf> {
 }
 
 pub fn maybe_dispatch_launcher() -> Result<Option<i32>> {
+    // Run this binary's own CLI when any launcher invariant is absent: recursion guard already set,
+    // executable is outside a telex install root, executable is not the root bin/ launcher, no current
+    // tag is selected, current points back to this launcher, or the selected target cannot be exec'd.
     if std::env::var_os(LAUNCHER_GUARD_ENV).is_some() {
         return Ok(None);
     }
@@ -192,20 +200,45 @@ pub fn maybe_dispatch_launcher() -> Result<Option<i32>> {
     let Some(target) = current_binary(&layout)? else {
         return Ok(None);
     };
-    let exe_canon = std::fs::canonicalize(&exe).unwrap_or(exe);
-    let target_canon = std::fs::canonicalize(&target).unwrap_or(target.clone());
+    if !target.is_file() {
+        eprintln!(
+            "telex launcher: selected version binary is missing ({}); running bundled CLI. Run `telex rollback` or rerun the installer to repair.",
+            target.display()
+        );
+        return Ok(None);
+    }
+    let exe_canon = fs::canonicalize(&exe).unwrap_or(exe);
+    let target_canon = fs::canonicalize(&target).unwrap_or(target.clone());
+    let versions_canon = fs::canonicalize(&layout.versions_dir).unwrap_or(layout.versions_dir);
+    if !target_canon.starts_with(&versions_canon) {
+        eprintln!(
+            "telex launcher: selected version binary {} is outside {}; running bundled CLI.",
+            target_canon.display(),
+            versions_canon.display()
+        );
+        return Ok(None);
+    }
     if exe_canon == target_canon {
         return Ok(None);
     }
 
-    let status = Command::new(&target)
+    let status = match Command::new(&target)
         .args(std::env::args_os().skip(1))
         .env(LAUNCHER_GUARD_ENV, "1")
         .stdin(Stdio::inherit())
         .stdout(Stdio::inherit())
         .stderr(Stdio::inherit())
         .status()
-        .with_context(|| format!("launching selected telex binary {}", target.display()))?;
+    {
+        Ok(status) => status,
+        Err(e) => {
+            eprintln!(
+                "telex launcher: failed to exec {} ({e}); running bundled CLI.",
+                target.display()
+            );
+            return Ok(None);
+        }
+    };
     Ok(Some(status.code().unwrap_or(1)))
 }
 
@@ -344,7 +377,7 @@ pub fn validate_manifest_for_current(manifest: &VersionManifest) -> Result<()> {
     }
     if !(manifest.schema_min..=manifest.schema_max).contains(&SUPPORTED_SCHEMA_MAX) {
         bail!(
-            "version {} supports schema {}..{}, current store schema is {}",
+            "version {} supports schema {}..{}, but this binary requires schema {}",
             manifest.tag,
             manifest.schema_min,
             manifest.schema_max,
@@ -433,6 +466,7 @@ pub fn current_binary(layout: &InstallLayout) -> Result<Option<PathBuf>> {
     let Some(tag) = read_tag_file(&layout.current_path)? else {
         return Ok(None);
     };
+    validate_tag(&tag)?;
     Ok(Some(layout.versions_dir.join(tag).join(exe_name())))
 }
 
@@ -643,6 +677,63 @@ mod tests {
 
         let err = switch_to(&layout, "v1").unwrap_err();
         assert!(err.to_string().contains("protocol major"));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn switch_rejects_manifest_with_unsupported_schema_range() {
+        let root = temp_root("bad-schema");
+        let layout = layout_for_root(&root);
+        let src = source_binary(&root, "src");
+        install_binary(&layout, "v1", &src, "test", false, None).unwrap();
+        let manifest_path = layout.versions_dir.join("v1").join("manifest.json");
+        let mut manifest = read_manifest(&layout, "v1").unwrap();
+        manifest.schema_min = SUPPORTED_SCHEMA_MAX + 1;
+        manifest.schema_max = SUPPORTED_SCHEMA_MAX + 2;
+        atomic_write(
+            &manifest_path,
+            &serde_json::to_string_pretty(&manifest).unwrap(),
+        )
+        .unwrap();
+
+        let err = switch_to(&layout, "v1").unwrap_err();
+        assert!(err.to_string().contains("requires schema"));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn current_binary_rejects_path_traversal_tag() {
+        let root = temp_root("bad-current-tag");
+        let layout = layout_for_root(&root);
+        atomic_write(&layout.current_path, "..\\evil").unwrap();
+
+        let err = current_binary(&layout).unwrap_err();
+        assert!(err.to_string().contains("invalid version tag"));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn gc_removes_unprotected_stale_version() {
+        let root = temp_root("gc-remove");
+        let layout = layout_for_root(&root);
+        let src = source_binary(&root, "src");
+        install_binary(&layout, "v1", &src, "test", true, None).unwrap();
+        install_binary(&layout, "v2", &src, "test", true, None).unwrap();
+        install_binary(&layout, "v3", &src, "test", false, None).unwrap();
+
+        let report = gc(&layout, false, false).unwrap();
+        let removed = report
+            .entries
+            .iter()
+            .find(|entry| entry.tag == "v3")
+            .expect("v3 entry");
+        assert_eq!(removed.action, "removed");
+        assert!(!layout.versions_dir.join("v3").exists());
+        assert!(layout.versions_dir.join("v1").exists());
+        assert!(layout.versions_dir.join("v2").exists());
 
         std::fs::remove_dir_all(root).ok();
     }

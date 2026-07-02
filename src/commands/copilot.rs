@@ -1013,24 +1013,37 @@ fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
     let mut entries = Vec::new();
     for session in sessions {
         let live = bridge_is_live(&session);
-        let bindings = read_bridge_bindings(&session).unwrap_or_default();
-        let reason = if live {
-            "bridge heartbeat is live".to_string()
+        let bindings = match read_bridge_bindings(&session) {
+            Ok(bindings) => bindings,
+            Err(e) if !args.force => {
+                entries.push(serde_json::json!({
+                    "session": session,
+                    "action": "keep",
+                    "reason": format!("bindings unreadable ({e}); treating as still shared"),
+                    "live": live,
+                    "bindings": serde_json::Value::Null,
+                }));
+                continue;
+            }
+            Err(_) => Vec::new(),
+        };
+        let keep_reason = if live {
+            Some("bridge heartbeat is live".to_string())
         } else if !bindings.is_empty() && !args.force {
-            format!(
+            Some(format!(
                 "bindings still recorded ({}); use --force after verifying the session is gone",
                 bindings.join(", ")
-            )
+            ))
         } else {
-            "stale bridge files".to_string()
+            None
         };
-        let action = if live || (!bindings.is_empty() && !args.force) {
-            "keep"
+        let (action, reason) = if let Some(reason) = keep_reason {
+            ("keep", reason)
         } else if args.dry_run {
-            "would_remove"
+            ("would_remove", "stale bridge files".to_string())
         } else {
             remove_bridge_extension(&session);
-            "removed"
+            ("removed", "stale bridge files".to_string())
         };
         entries.push(serde_json::json!({
             "session": session,
@@ -2189,5 +2202,51 @@ mod tests {
         let got = active_session_members(&status, "sqlite:/tmp/telex.db", "s1");
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].address, "active");
+    }
+
+    #[test]
+    fn copilot_gc_keeps_corrupt_bindings_unless_forced() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let session = format!("gc-corrupt-bindings-{}", std::process::id());
+        let path = bridge_bindings_path(&session).expect("bindings path");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create bridge root");
+        }
+        std::fs::write(&path, b"not-json").expect("write corrupt bindings");
+        let ctx = Ctx {
+            cfg: crate::config::Config {
+                backend_selector: None,
+                db_override: None,
+                default_address: None,
+                liveness_window_secs: 15,
+            },
+            fmt: crate::output::Format::Json,
+            address: None,
+        };
+
+        gc(
+            &ctx,
+            CopilotGcArgs {
+                session: Some(session.clone()),
+                dry_run: false,
+                force: false,
+            },
+        )
+        .expect("non-force gc");
+        assert!(
+            path.exists(),
+            "corrupt bindings should be treated as shared unless forced"
+        );
+
+        gc(
+            &ctx,
+            CopilotGcArgs {
+                session: Some(session),
+                dry_run: false,
+                force: true,
+            },
+        )
+        .expect("forced gc");
+        assert!(!path.exists(), "forced gc removes corrupt bindings");
     }
 }
