@@ -5,14 +5,26 @@
   irm https://raw.githubusercontent.com/lossyrob/telex/main/install.ps1 | iex
 
   Environment variables:
-    TELEX_INSTALL_DIR  install location (default: $env:LOCALAPPDATA\telex\bin)
+    TELEX_INSTALL_ROOT versioned install root (default: $env:LOCALAPPDATA\telex)
+    TELEX_INSTALL_DIR  legacy override; if it ends in \bin, its parent is used as TELEX_INSTALL_ROOT
     TELEX_VERSION      version tag to install (default: latest)
     GITHUB_TOKEN       optional, raises GitHub API rate limits
 #>
 $ErrorActionPreference = 'Stop'
 
 $repo = 'lossyrob/telex'
-$installDir = if ($env:TELEX_INSTALL_DIR) { $env:TELEX_INSTALL_DIR } else { Join-Path $env:LOCALAPPDATA 'telex\bin' }
+$installRoot = if ($env:TELEX_INSTALL_ROOT) {
+    $env:TELEX_INSTALL_ROOT
+} elseif ($env:TELEX_INSTALL_DIR) {
+    if ((Split-Path -Leaf $env:TELEX_INSTALL_DIR) -eq 'bin') {
+        Split-Path -Parent $env:TELEX_INSTALL_DIR
+    } else {
+        $env:TELEX_INSTALL_DIR
+    }
+} else {
+    Join-Path $env:LOCALAPPDATA 'telex'
+}
+$binDir = Join-Path $installRoot 'bin'
 
 $arch = $env:PROCESSOR_ARCHITECTURE
 switch ($arch) {
@@ -55,17 +67,18 @@ try {
     } catch [System.Net.WebException] { } # no checksum published; skip
 
     Expand-Archive -Path $zip -DestinationPath $tmp -Force
-    New-Item -ItemType Directory -Force -Path $installDir | Out-Null
-    Copy-Item (Join-Path $tmp 'telex.exe') (Join-Path $installDir 'telex.exe') -Force
+    $payload = Join-Path $tmp 'telex.exe'
+    & $payload --json upgrade --from $payload --version $tag --root $installRoot --skip-drain | Out-Null
 
     Write-Host ""
-    Write-Host "Installed telex $tag to $installDir\telex.exe"
+    Write-Host "Installed telex $tag under $installRoot"
+    Write-Host "Launcher: $binDir\telex.exe"
 
     # Add to the user PATH if it is not already there.
     $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (($userPath -split ';') -notcontains $installDir) {
-        [Environment]::SetEnvironmentVariable('Path', "$userPath;$installDir", 'User')
-        Write-Host "Added $installDir to your user PATH (restart your terminal to pick it up)."
+    if (($userPath -split ';') -notcontains $binDir) {
+        [Environment]::SetEnvironmentVariable('Path', "$userPath;$binDir", 'User')
+        Write-Host "Added $binDir to your user PATH (restart your terminal to pick it up)."
     }
     Write-Host "Next:  telex skill"
     Write-Host "Copilot plugin marketplace:"

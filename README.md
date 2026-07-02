@@ -36,6 +36,34 @@ cargo install --git https://github.com/lossyrob/telex --features entra
 
 Or grab a prebuilt binary from [Releases](https://github.com/lossyrob/telex/releases).
 
+Release install scripts use a versioned layout instead of overwriting the PATH
+binary in place. A stable launcher lives under the install root's `bin/`
+directory, while immutable binaries live under `versions/<tag>/` and `current`
+selects the version new invocations use. This keeps old in-flight Telex
+processes running while new shells use the selected version.
+
+```text
+<install-root>/
+  bin/telex(.exe)
+  versions/<tag>/telex(.exe)
+  current
+  previous
+```
+
+Useful upgrade commands:
+
+```sh
+telex version --json
+telex upgrade --from <path-to-telex-binary> --version vX.Y.Z
+telex rollback
+telex gc --dry-run
+```
+
+`telex upgrade` and `telex rollback` drain the current local daemon before
+switching `current` unless `--skip-drain` is explicitly passed. Rollback refuses
+installed versions whose manifest is incompatible with this build's
+protocol/schema floor.
+
 ## Quickstart
 
 ```sh
@@ -67,6 +95,7 @@ copilot plugin install telex@telex
 telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --description "<work>"
 # then run the `extensions_reload` tool once; delivered telex messages arrive as turns.
 telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
+telex copilot gc --dry-run                                      # inspect stale bridge files
 ```
 
 The adapter maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id and

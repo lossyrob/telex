@@ -878,6 +878,71 @@ fn real_process_wait_without_daemon_does_not_spawn() {
 }
 
 #[test]
+fn versioned_launcher_dispatches_to_current_binary() {
+    let env = ProcessEnv::new("versioned-launcher");
+    let install_root = env.root.join("install");
+    let source = env.bin.to_string_lossy().into_owned();
+    let root_arg = install_root.to_string_lossy().into_owned();
+    let upgraded = env.run(
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &source,
+            "--version",
+            "vtest-launcher",
+            "--root",
+            &root_arg,
+            "--skip-drain",
+        ],
+        Duration::from_secs(8),
+    );
+    upgraded.assert_success("versioned upgrade");
+
+    let launcher = install_root
+        .join("bin")
+        .join(format!("telex{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        launcher.exists(),
+        "launcher exists at {}",
+        launcher.display()
+    );
+    let mut cmd = Command::new(&launcher);
+    cmd.env("TELEX_HOME", &env.home)
+        .env("TELEX_RUN_DIR", &env.run_dir)
+        .env("TELEX_DB", &env.db)
+        .env("TELEX_CONFIG", env.home.join("config.toml"))
+        .env("TELEX_SESSION_ID", &env.session_id)
+        .arg("--json")
+        .arg("version")
+        .arg("--root")
+        .arg(&install_root);
+    #[cfg(windows)]
+    {
+        cmd.env("LOCALAPPDATA", &env.state_dir);
+    }
+    let out = run_command_with_capture(cmd, &env.root, Duration::from_secs(8));
+    out.assert_success("launcher version");
+    let json = out.json("launcher version");
+    let version = json.get("version").expect("version field");
+    assert_eq!(
+        version
+            .get("install")
+            .and_then(|v| v.get("active_tag"))
+            .and_then(Value::as_str),
+        Some("vtest-launcher")
+    );
+    let current_exe = version
+        .get("current_exe")
+        .and_then(Value::as_str)
+        .expect("current_exe");
+    assert!(
+        current_exe.contains("versions") && current_exe.contains("vtest-launcher"),
+        "launcher should dispatch to versioned binary, got {current_exe}"
+    );
+}
+
+#[test]
 fn real_process_send_without_daemon_does_not_spawn() {
     let env = ProcessEnv::new("real-send-no-spawn");
     let sender = "real-send-no-spawn-session";

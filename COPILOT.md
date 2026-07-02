@@ -74,6 +74,16 @@ yours to make.
    `extensions_reload` or session end; run `extensions_reload` once after detach if you want
    it unloaded immediately. Session end also removes the files.
 
+   To inspect or clean orphaned bridge files from sessions that closed without detach:
+
+   ```sh
+   telex copilot gc --dry-run
+   telex copilot gc --force
+   ```
+
+   GC is conservative: a live bridge heartbeat is kept, and bindings are kept unless you
+   force cleanup after verifying the session is gone.
+
 ## Sending and replying
 
 Receiving is push; **sending is not**. To start or continue a conversation, `telex send` and
@@ -118,6 +128,7 @@ telex copilot skill
 telex copilot --help
 telex copilot attach --help
 telex copilot detach --help
+telex copilot gc --help
 telex ack --help
 telex handle --help
 ```
