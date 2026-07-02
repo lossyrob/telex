@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-02T01:50:00.000Z",
+  "updatedAt": "2026-07-02T02:05:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -198,15 +198,22 @@
       "id": "seamless-upgrade",
       "type": "task",
       "title": "Seamless upgrade (#6)",
-      "summary": "Versioned install + stable launcher shim + telex upgrade/rollback/gc + daemon drain-restart/handoff (epoch-based), so upgrades never require tearing down stations. Floor (fencing-ready schema + minimal restart) already lands in daemon-core; this node adds the full upgrade platform LAST, after Postgres + plugin are proven, so it never blocks the operator unblock. Sketch; detailed at promotion.",
-      "status": "planned",
-      "attention": "watch",
+      "summary": "Full seamless-upgrade platform: versioned install + stable launcher shim + telex upgrade/rollback/gc/version UX + daemon stop --drain / drain-restart / backend-specific handoff (SQLite release+next-call respawn, Postgres live transfer where possible) so upgrades never require tearing down stations. Includes schema/protocol compatibility gates, direct old-binary fail-closed behavior, and the Copilot bridge upgrade story (bridge bytes are embedded/versioned with telex, bridge protocol/version headers, stale bridge dir/registry GC). Minimal floor already landed; this node adds rollback/gc/UX and makes mixed-version state observable.",
+      "status": "ready",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 6
+      },
       "dependsOn": [
         "postgres-parity",
-        "copilot-plugin"
+        "copilot-plugin",
+        "push-delivery"
       ]
     },
     {
