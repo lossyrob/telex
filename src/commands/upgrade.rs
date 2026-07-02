@@ -65,6 +65,9 @@ pub async fn upgrade(ctx: &Ctx, args: UpgradeArgs) -> Result<i32> {
     } else {
         drain_daemon(ctx, args.drain_timeout_ms).await?
     };
+    for warning in &installed.warnings {
+        eprintln!("warning: {warning}");
+    }
     let switched = if args.no_switch {
         None
     } else {
@@ -78,6 +81,9 @@ pub async fn upgrade(ctx: &Ctx, args: UpgradeArgs) -> Result<i32> {
     });
     emit(ctx.fmt, &out, || {
         println!("installed {}", tag);
+        for warning in &installed.warnings {
+            println!("warning {warning}");
+        }
         if let Some(switched) = switched {
             println!("current {}", switched.switched_to);
             println!("binary {}", switched.current_binary);

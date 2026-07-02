@@ -256,13 +256,13 @@ pub fn install_binary(
     if !launcher.exists() {
         copy_if_different(source_binary, &launcher)
             .with_context(|| format!("creating launcher {}", launcher.display()))?;
-    } else if std::fs::canonicalize(&launcher).ok() != std::fs::canonicalize(source_binary).ok()
-        && !is_launcher_capable(&launcher)
-    {
-        warnings.push(format!(
-            "existing {} was left in place; if it predates launcher mode, rerun the installer after old processes exit",
-            launcher.display()
-        ));
+    } else if std::fs::canonicalize(&launcher).ok() != std::fs::canonicalize(source_binary).ok() {
+        if let Err(e) = copy_if_different(source_binary, &launcher) {
+            warnings.push(format!(
+                "could not refresh launcher {} ({e}); existing PATH binary may predate launcher mode, so rerun the installer after old processes exit",
+                launcher.display()
+            ));
+        }
     }
 
     let manifest = current_manifest(tag, &version_binary, source_label, previous_tag.clone());
@@ -508,10 +508,6 @@ fn validate_tag(tag: &str) -> Result<()> {
         bail!("invalid version tag {tag:?}");
     }
     Ok(())
-}
-
-fn is_launcher_capable(path: &Path) -> bool {
-    std::fs::metadata(path).is_ok()
 }
 
 #[cfg(test)]
