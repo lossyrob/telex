@@ -940,14 +940,6 @@ fn versioned_launcher_dispatches_to_current_binary() {
         current_exe.contains("versions") && current_exe.contains("vtest-launcher"),
         "launcher should dispatch to versioned binary, got {current_exe}"
     );
-}
-
-#[test]
-fn versioned_rollback_switches_to_previous_version() {
-    let env = ProcessEnv::new("versioned-rollback");
-    let install_root = env.root.join("install");
-    let source = env.bin.to_string_lossy().into_owned();
-    let root_arg = install_root.to_string_lossy().into_owned();
 
     env.run(
         [
@@ -956,29 +948,16 @@ fn versioned_rollback_switches_to_previous_version() {
             "--from",
             &source,
             "--version",
-            "vtest-one",
+            "vtest-next",
             "--root",
             &root_arg,
+            "--skip-drain",
         ],
         Duration::from_secs(8),
     )
-    .assert_success("upgrade v1");
-    env.run(
-        [
-            "--json",
-            "upgrade",
-            "--from",
-            &source,
-            "--version",
-            "vtest-two",
-            "--root",
-            &root_arg,
-        ],
-        Duration::from_secs(8),
-    )
-    .assert_success("upgrade v2");
+    .assert_success("upgrade next");
     let rollback = env.run(
-        ["--json", "rollback", "--root", &root_arg],
+        ["--json", "rollback", "--root", &root_arg, "--skip-drain"],
         Duration::from_secs(8),
     );
     rollback.assert_success("rollback to previous");
@@ -987,38 +966,36 @@ fn versioned_rollback_switches_to_previous_version() {
         json.get("switch")
             .and_then(|s| s.get("switched_to"))
             .and_then(Value::as_str),
-        Some("vtest-one")
+        Some("vtest-launcher")
     );
     assert_eq!(
         std::fs::read_to_string(install_root.join("current"))
             .unwrap()
             .trim(),
-        "vtest-one"
+        "vtest-launcher"
     );
-}
 
-#[test]
-fn rollback_without_previous_fails_clearly() {
-    let env = ProcessEnv::new("rollback-no-previous");
-    let install_root = env.root.join("install");
-    let root_arg = install_root.to_string_lossy().into_owned();
-    let out = env.run(
-        ["--json", "rollback", "--root", &root_arg],
+    let empty_root = env.root.join("empty-install");
+    let empty_root_arg = empty_root.to_string_lossy().into_owned();
+    let missing_previous = env.run(
+        [
+            "--json",
+            "rollback",
+            "--root",
+            &empty_root_arg,
+            "--skip-drain",
+        ],
         Duration::from_secs(8),
     );
-    out.assert_failure("rollback without previous");
+    missing_previous.assert_failure("rollback without previous");
     assert!(
-        out.stderr.contains("no previous installed version"),
+        missing_previous
+            .stderr
+            .contains("no previous installed version"),
         "stderr should name missing previous version: {}",
-        out.stderr
+        missing_previous.stderr
     );
-}
 
-#[test]
-fn upgrade_rejects_non_telex_source_before_writing_version() {
-    let env = ProcessEnv::new("upgrade-reject-source");
-    let install_root = env.root.join("install");
-    let root_arg = install_root.to_string_lossy().into_owned();
     let fake = env
         .root
         .join(format!("not-telex{}", std::env::consts::EXE_SUFFIX));
@@ -1034,13 +1011,13 @@ fn upgrade_rejects_non_telex_source_before_writing_version() {
             "--version",
             "vbad",
             "--root",
-            &root_arg,
+            &empty_root_arg,
         ],
         Duration::from_secs(8),
     );
     out.assert_failure("upgrade rejects non-telex source");
     assert!(
-        !install_root.join("versions").join("vbad").exists(),
+        !empty_root.join("versions").join("vbad").exists(),
         "invalid source must fail before writing versions/vbad"
     );
 }

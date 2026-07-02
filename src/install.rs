@@ -11,6 +11,7 @@ pub const LAUNCHER_GUARD_ENV: &str = "TELEX_LAUNCHER_ACTIVE";
 pub const INSTALL_ROOT_ENV: &str = "TELEX_INSTALL_ROOT";
 pub const SUPPORTED_SCHEMA_MIN: i64 = 2;
 pub const SUPPORTED_SCHEMA_MAX: i64 = 2;
+#[cfg(feature = "sqlite")]
 const _: () = assert!(SUPPORTED_SCHEMA_MAX == crate::backend::sqlite::CURRENT_SCHEMA_VERSION);
 #[cfg(feature = "postgres")]
 const _: () = assert!(SUPPORTED_SCHEMA_MAX == crate::backend::postgres::CURRENT_SCHEMA_VERSION);
