@@ -67,7 +67,6 @@ impl Store {
     /// occupancy or backlog lookup degrades that field rather than failing the whole call.
     pub async fn addresses(&self) -> Result<Vec<AddressEntry>> {
         let window = liveness_window_secs();
-        let max_id = self.backend.max_message_id().await.unwrap_or(i64::MAX);
         let rows = self.backend.list_addresses(None, false).await?;
         let mut out = Vec::with_capacity(rows.len());
         for address in rows {
@@ -76,12 +75,14 @@ impl Store {
                 Ok(_) => Occ::Idle,
                 Err(_) => Occ::Unknown,
             };
+            // Undelivered backlog: messages queued to this address that no waiter has
+            // consumed yet (the local-exchange model's per-recipient pending count).
             let undelivered = self
                 .backend
-                .undelivered_backlog(&address.address, max_id)
+                .pending_unconsumed_count(&address.address)
                 .await
                 .ok()
-                .map(|v| v.len());
+                .map(|n| n.max(0) as usize);
             out.push(AddressEntry {
                 address,
                 occupancy,
@@ -207,7 +208,11 @@ mod tests {
         let dels = store.deliveries(1).await.unwrap();
         assert_eq!(dels.len(), 1);
         assert_eq!(dels[0].recipient, "node:demo");
-        assert_eq!(dels[0].occupant.as_deref(), Some("holderA"));
-        assert!(store.deliveries(2).await.unwrap().is_empty());
+        // message 1 was actually delivered/consumed
+        assert!(dels[0].consumed_at_ms.is_some());
+        // message 2 has only a materialized *pending* row (from the backlog count above),
+        // so it is present but not yet consumed.
+        let dels2 = store.deliveries(2).await.unwrap();
+        assert!(dels2.iter().all(|d| d.consumed_at_ms.is_none()));
     }
 }

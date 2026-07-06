@@ -1,0 +1,10 @@
+[fence_latency_ms]
+p95 = 2000
+p99 = 5000
+
+[retention]
+max_delivery_rows = 256
+max_in_flight_entries = 64
+
+[workload]
+single_deliveries = 24

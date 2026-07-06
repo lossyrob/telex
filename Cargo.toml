@@ -31,6 +31,7 @@ toml = "0.8"
 anyhow = "1"
 clap = { version = "4", features = ["derive", "env"] }
 dirs = "5"
+getrandom = "0.2"
 
 # SQLite backend (feature: sqlite)
 rusqlite = { version = "0.32", features = ["bundled"], optional = true }
@@ -49,6 +50,15 @@ azure_core = { version = "1", optional = true }
 # Linux release builds are self-contained. Windows uses schannel, macOS Security.framework.
 [target.'cfg(target_os = "linux")'.dependencies]
 openssl = { version = "0.10", features = ["vendored"], optional = true }
+
+# Session-binding liveness check (issue #5): watch a launcher/session pid and self-exit when it
+# dies. Both crates are already present in the lock tree (transitively via tokio), so pinning
+# them as direct platform-gated deps fixes the API surface without growing the dependency graph.
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Security", "Win32_Security_Authorization", "Win32_Storage_FileSystem", "Win32_System_IO", "Win32_System_Memory", "Win32_System_Pipes", "Win32_System_Threading"] }
 
 [features]
 # Batteries-included default. Build a leaner binary with e.g.

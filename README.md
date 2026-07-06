@@ -7,7 +7,12 @@ messages with answerback liveness, and an auditable record — over SQLite (loca
 zero-config) or Postgres (networked, with or without Microsoft Entra auth).
 
 One small binary, `telex`. It even carries its own usage instructions: run
-`telex skill`.
+`telex skill` (or `telex skill --raw` for the exact embedded skill file).
+
+The repository also ships a Copilot CLI plugin marketplace (`.github/plugin/`)
+and plugin manifest (`plugin.json` + `hooks.json`). The plugin maps Copilot
+session env into generic telex session inputs, handles non-destructive
+`sessionEnd`, and guards turn-end re-arming.
 
 ## Install
 
@@ -31,6 +36,34 @@ cargo install --git https://github.com/lossyrob/telex --features entra
 
 Or grab a prebuilt binary from [Releases](https://github.com/lossyrob/telex/releases).
 
+Release install scripts use a versioned layout instead of overwriting the PATH
+binary in place. A stable launcher lives under the install root's `bin/`
+directory, while immutable binaries live under `versions/<tag>/` and `current`
+selects the version new invocations use. This keeps old in-flight Telex
+processes running while new shells use the selected version.
+
+```text
+<install-root>/
+  bin/telex(.exe)
+  versions/<tag>/telex(.exe)
+  current
+  previous
+```
+
+Useful upgrade commands:
+
+```sh
+telex version --json
+telex upgrade --from <path-to-telex-binary> --version vX.Y.Z
+telex rollback
+telex gc --dry-run
+```
+
+`telex upgrade` and `telex rollback` drain the current local daemon before
+switching `current` unless `--skip-drain` is explicitly passed. Rollback refuses
+installed versions whose manifest is incompatible with this build's
+protocol/schema floor.
+
 ## Quickstart
 
 ```sh
@@ -39,7 +72,8 @@ telex send --to me --body "hello"    # zero-config: a local SQLite store, no set
 telex --address me inbox             # read it back
 ```
 
-That's it — no server, no config. The default backend is a local SQLite store at
+That's it — no manual server setup and no config required. The first daemon-backed
+verb auto-spawns a per-user local exchange for the default local SQLite store at
 `~/.telex/telex.db`.
 
 ## For agents
@@ -51,6 +85,43 @@ message peers. To hand an agent a specific assignment in one command:
 ```sh
 telex skill --address workstream:proj/node:issue-215
 ```
+
+In Copilot CLI, install/use the telex plugin and bind with push delivery so
+messages arrive as turns (no waiter to run or re-arm):
+
+```sh
+copilot plugin marketplace add lossyrob/telex
+copilot plugin install telex@telex
+telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --description "<work>"
+# Observer/table seats that want live CC turns opt in at bind time:
+telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --wake-on-cc --description "<work>"
+# then run the `extensions_reload` tool once; delivered telex messages arrive as turns.
+telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
+telex copilot gc --dry-run                                      # inspect stale bridge files
+```
+
+The adapter maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id and
+`$COPILOT_LOADER_PID` to a loader watch-pid. Generic telex commands intentionally
+do not read Copilot-specific env variables directly, so follow-up generic commands
+(e.g. `telex ack`) must pass `--session "$COPILOT_AGENT_SESSION_ID"` or run in a
+shell/script that sets `TELEX_SESSION_ID`.
+
+If a Copilot observer sees CC messages in `telex inbox` but not as turns, re-run
+`telex --address <addr> copilot attach --copilot-bridge --wake-on-cc` and then run
+the `extensions_reload` tool. `telex wait --wake-on-cc` is only for non-Copilot
+pull waiters; Copilot asks for CC watching through the bridge bind.
+
+`telex wait` remains the generic pull primitive for scripts, CI, and non-extension
+harnesses; Copilot sessions use push delivery above instead.
+
+The plugin shape is validated against GitHub Copilot CLI 1.0.66-1; see
+[`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)
+for the acceptance matrix and live hook smoke evidence.
+
+Marketplace install is the supported plugin channel. Release install scripts
+print a tag-pinned marketplace command, for example
+`copilot plugin marketplace add lossyrob/telex#vX.Y.Z`, so the plugin assets and
+installed binary can be kept on the same release tag.
 
 ## Watch the line (TUI)
 
@@ -90,19 +161,21 @@ stored in the config file.
 
 ## How it works (in one breath)
 
-A durable **address** is the responsibility being served; an ephemeral **lease** is the
-live session serving it; a typed **message** carries coordination; a **disposition**
-records what happened. A session `attach`es to an address to start a **station** — the
-running presence serving it (a resident **holder** that holds the lease and answers
-liveness in the background, plus a **waiter** loop) — and loops `telex wait` to receive
-messages, acting and dispositioning each at its next turn.
+A durable **address** is the responsibility being served; a per-user local
+**exchange** daemon owns SQLite presence, lease heartbeats, delivery buffering,
+and local IPC; a session `attach`es once to register an in-memory **station** for
+its stable `TELEX_SESSION_ID`; `wait` is a one-shot daemon client that receives
+one message and exits; `ack` is the explicit durable consumed mark. If the daemon
+restarts, the next verb reconnects, re-registers on `NeedsAttach`, and continues
+against the retained delivery buffer.
 
 ## Learn more
 
 - **[SKILL.md](SKILL.md)** — how agents use telex (also `telex skill`)
 - **[telex-console/](telex-console/README.md)** — the read-only, live-tail TUI for watching messages
-- **[DESIGN.md](DESIGN.md)** — the working design
-- **[DECISIONS.md](DECISIONS.md)** — the decision log
+- **[DESIGN.md](docs/design/DESIGN.md)** — the working design
+- **[DECISIONS.md](docs/design/DECISIONS.md)** — the decision log
 - **[DISPATCH.md](DISPATCH.md)** — forward-looking discovery & dispatch (broadcast, Contract-Net)
+- **[EXTENSIONS.md](EXTENSIONS.md)** — proposal: extensions & capability cards (how addresses advertise what they do)
 - **[TELEX.md](TELEX.md)** / **[PRODUCT-THESIS.md](PRODUCT-THESIS.md)** — the name, the metaphor, the thesis
 - **[spike/](spike/)** — the throwaway validation spike that de-risked the design

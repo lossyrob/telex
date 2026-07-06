@@ -4,13 +4,30 @@
 #   curl -fsSL https://raw.githubusercontent.com/lossyrob/telex/main/install.sh | sh
 #
 # Options (environment variables):
-#   TELEX_INSTALL_DIR  install location (default: $HOME/.local/bin)
+#   TELEX_INSTALL_ROOT versioned install root (default: $HOME/.local/share/telex)
+#   TELEX_INSTALL_DIR  legacy override; if it ends in /bin, its parent is used as TELEX_INSTALL_ROOT
 #   TELEX_VERSION      version tag to install (default: latest)
 #   GITHUB_TOKEN       optional, raises GitHub API rate limits
 set -eu
 
 REPO="lossyrob/telex"
-INSTALL_DIR="${TELEX_INSTALL_DIR:-$HOME/.local/bin}"
+if [ -n "${TELEX_INSTALL_ROOT:-}" ]; then
+  install_root="${TELEX_INSTALL_ROOT}"
+elif [ -n "${TELEX_INSTALL_DIR:-}" ]; then
+  case "${TELEX_INSTALL_DIR}" in
+    */bin) install_root="$(dirname "${TELEX_INSTALL_DIR}")" ;;
+    *) install_root="${TELEX_INSTALL_DIR}" ;;
+  esac
+else
+  install_root="$HOME/.local/share/telex"
+fi
+bin_dir="${install_root}/bin"
+path_dir="${bin_dir}"
+legacy_link=""
+if [ -z "${TELEX_INSTALL_ROOT:-}" ] && [ -z "${TELEX_INSTALL_DIR:-}" ]; then
+  path_dir="$HOME/.local/bin"
+  legacy_link="${path_dir}/telex"
+fi
 
 say() { printf '%s\n' "$*"; }
 err() { printf 'error: %s\n' "$*" >&2; exit 1; }
@@ -68,13 +85,26 @@ if curl -fsSL "${url}.sha256" -o "${tmp}/${asset}.sha256" 2>/dev/null; then
 fi
 
 tar -C "${tmp}" -xzf "${tmp}/${asset}"
-mkdir -p "${INSTALL_DIR}"
-install -m 0755 "${tmp}/telex" "${INSTALL_DIR}/telex"
+chmod 0755 "${tmp}/telex"
+if ! "${tmp}/telex" --json upgrade --from "${tmp}/telex" --version "${tag}" --root "${install_root}" >/dev/null; then
+  err "downloaded telex ${tag} could not run the versioned installer; install a newer release or use cargo install"
+fi
+if [ -n "${legacy_link}" ]; then
+  mkdir -p "${path_dir}"
+  ln -sf "${bin_dir}/telex" "${legacy_link}" || err "could not create launcher link ${legacy_link}"
+fi
 
 say ""
-say "Installed telex ${tag} to ${INSTALL_DIR}/telex"
+say "Installed telex ${tag} under ${install_root}"
+say "Launcher: ${bin_dir}/telex"
+if [ -n "${legacy_link}" ]; then
+  say "PATH shim: ${legacy_link} -> ${bin_dir}/telex"
+fi
 case ":${PATH}:" in
-  *":${INSTALL_DIR}:"*) : ;;
-  *) say "Add it to your PATH:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
+  *":${path_dir}:"*) : ;;
+  *) say "Add it to your PATH:  export PATH=\"${path_dir}:\$PATH\"" ;;
 esac
 say "Next:  telex skill"
+say "Copilot plugin marketplace:"
+say "  copilot plugin marketplace add lossyrob/telex#${tag}"
+say "  copilot plugin install telex@telex"

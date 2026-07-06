@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "workstreamsDir": "workstreams",
+  "repos": {
+    "telex": {
+      "path": "..",
+      "designDocsPath": "docs/design"
+    }
+  }
+}

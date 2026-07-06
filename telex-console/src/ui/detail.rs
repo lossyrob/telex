@@ -114,27 +114,33 @@ pub(crate) fn build_lines(
         push_text(&mut lines, &pretty_json(meta), wrap);
     }
 
-    // Delivery badge: delivered (reached a waiter) is distinct from dispositioned/acted-on.
+    // Delivery badge. "Delivered" means a waiter actually consumed the message (a delivery
+    // row with consumed_at_ms set); the exchange also materializes *pending* rows for
+    // backlog accounting, which we surface as "pending", not delivered.
     lines.push(Line::from(""));
-    if dels.is_empty() {
+    let consumed: Vec<&DeliveryRow> = dels.iter().filter(|d| d.consumed_at_ms.is_some()).collect();
+    let pending = dels.iter().filter(|d| d.consumed_at_ms.is_none()).count();
+    if !consumed.is_empty() {
+        lines.push(Line::from(vec![Span::styled(
+            format!("{} delivered", theme::delivered_symbol(true)),
+            Style::default().fg(theme::delivered_color(true)),
+        )]));
+        for d in &consumed {
+            lines.push(delivery_line(d));
+        }
+    } else {
+        let note = if pending > 0 {
+            " (queued; not yet consumed by a waiter)"
+        } else {
+            " (not yet queued to a waiter)"
+        };
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} undelivered", theme::delivered_symbol(false)),
                 Style::default().fg(theme::delivered_color(false)),
             ),
-            Span::styled(
-                " (queued; not yet handed to a waiter)",
-                Style::default().fg(Color::DarkGray),
-            ),
+            Span::styled(note, Style::default().fg(Color::DarkGray)),
         ]));
-    } else {
-        lines.push(Line::from(vec![Span::styled(
-            format!("{} delivered", theme::delivered_symbol(true)),
-            Style::default().fg(theme::delivered_color(true)),
-        )]));
-        for d in dels {
-            lines.push(delivery_line(d));
-        }
     }
 
     if !disps.is_empty() {

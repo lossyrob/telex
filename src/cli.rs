@@ -3,10 +3,13 @@
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 use crate::backend::Backend;
 use crate::config::Config;
+use crate::daemon_ipc::{WatchPidRole, WatchPidSpec};
+use crate::model::Attention;
 use crate::output::Format;
 use crate::profiles::BackendProfile;
 
@@ -50,13 +53,24 @@ pub enum Command {
     Init,
     /// Show config, backend, address, station/occupancy status.
     Status,
+    /// Show telex binary, launcher, protocol, and install metadata.
+    Version(VersionArgs),
+    /// Install a versioned telex binary and optionally switch current to it.
+    Upgrade(UpgradeArgs),
+    /// Switch current back to a previously installed version.
+    Rollback(RollbackArgs),
+    /// Garbage-collect old installed telex versions.
+    Gc(GcArgs),
     /// Print the agent usage skill (how to use telex) for this build.
     Skill(SkillArgs),
 
-    /// Start a station on an address: become the live occupant, hold the lease, run the holder (blocks).
+    /// Attach this session to an address and exit.
     Attach(AttachArgs),
-    /// Stop the station for an address: release the lease and stop a running holder.
-    Detach,
+    /// Detach this session's address membership.
+    Detach(DetachArgs),
+    /// Station lifecycle operations.
+    #[command(subcommand)]
+    Station(StationCmd),
 
     /// Block until an actionable message arrives, print it as JSON, and exit.
     Wait(WaitArgs),
@@ -93,6 +107,14 @@ pub enum Command {
     #[command(subcommand)]
     Backend(BackendCmd),
 
+    /// Hidden Copilot CLI plugin adapter commands.
+    #[command(hide = true, subcommand)]
+    Copilot(CopilotCmd),
+
+    /// Hidden daemon lifecycle and diagnostics entrypoint.
+    #[command(hide = true, subcommand)]
+    Daemon(DaemonCmd),
+
     /// Export messages and disposition history as JSON lines.
     Export(ExportArgs),
 }
@@ -108,37 +130,113 @@ pub struct AttachArgs {
     /// Comma-separated coarse tags (e.g. issue:215,repo:telex).
     #[arg(long)]
     pub tags: Option<String>,
-    /// Lease heartbeat interval (seconds).
+    /// Deprecated compatibility flag; the daemon owns lease heartbeat cadence.
     #[arg(long, default_value_t = 5)]
     pub heartbeat_secs: u64,
-    /// Backend poll interval (seconds).
+    /// Deprecated compatibility flag; the daemon owns backend polling.
     #[arg(long, default_value_t = 1)]
     pub poll_secs: u64,
-    /// Keepalive frame interval to waiters (seconds).
+    /// Deprecated compatibility flag; daemon waiters use daemon IPC frames.
     #[arg(long, default_value_t = 3)]
     pub keepalive_secs: u64,
     /// Occupant identity recorded on the lease (default: session host/pid).
     #[arg(long)]
     pub occupant: Option<String>,
-    /// Enable Postgres LISTEN/NOTIFY push in addition to poll (no-op on SQLite).
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
+    /// Deprecated compatibility flag; daemon delivery owns push/poll behavior.
     #[arg(long)]
     pub push: bool,
+    /// Back-compat watch pid. Converted to an anchor watch-pid for daemon liveness.
+    #[arg(long)]
+    pub session_pid: Option<u32>,
+    /// Watch a pid as a typed liveness predicate. Accepts PID, anchor:PID, required:PID,
+    /// PID:anchor, or PID:required. Repeat to add multiple watch pids.
+    #[arg(long, value_parser = parse_watch_pid)]
+    pub watch_pid: Vec<WatchPidSpec>,
+    /// Deprecated compatibility flag; daemon liveness cadence is internal.
+    #[arg(long, default_value_t = 2)]
+    pub session_poll_secs: u64,
+    /// Do not convert `$TELEX_SESSION_PID` into a daemon watch-pid.
+    #[arg(long)]
+    pub no_session_bind: bool,
+    /// Programmatic-only: harness-neutral on-deliver handler argv registered with the daemon.
+    /// Not a CLI flag; set by the Copilot bridge bind path.
+    #[arg(skip)]
+    pub on_deliver: Option<Vec<String>>,
+    /// Programmatic-only: opt an on-deliver push handler into live CC observer traffic.
+    #[arg(skip)]
+    pub on_deliver_wake_on_cc: bool,
 }
 
 #[derive(Args)]
 pub struct WaitArgs {
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
     /// Give up waiting after this many milliseconds (exit code 2); default is no idle timeout.
     #[arg(long)]
     pub timeout_ms: Option<u64>,
+    /// Only wake for messages at this attention or higher priority.
+    #[arg(long, value_parser = parse_attention_arg)]
+    pub min_attention: Option<Attention>,
+    /// Also wake for live CC traffic without making CC ack-required.
+    #[arg(long)]
+    pub wake_on_cc: bool,
     /// Resume delivery strictly after this message id.
     #[arg(long, default_value_t = 0)]
     pub since: i64,
-    /// Treat the holder as hung if no frame arrives within this window (ms).
+    /// Deprecated idle-wait compatibility watchdog. For daemon waits, only applies after timeout-ms.
     #[arg(long, default_value_t = 8_000)]
     pub hang_ms: u64,
+    /// Retry daemon reconnect/re-register for this long after EOF/restart (ms).
+    #[arg(long, env = "TELEX_RECONNECT_GRACE_MS")]
+    pub reconnect_grace_ms: Option<u64>,
     /// Holder DB-heartbeat age beyond which it is considered degraded (ms).
     #[arg(long, default_value_t = 15_000)]
     pub stale_heartbeat_ms: i64,
+    /// Write outcome artifacts into this directory so a detached, variable-free
+    /// invocation can deliver results without relying on captured stdout. Writes
+    /// `message.json` (on delivery), `status.json` (always), and `exit.code`
+    /// (always, written last as the completion marker).
+    #[arg(long)]
+    pub out_dir: Option<PathBuf>,
+}
+
+#[derive(Args)]
+pub struct DetachArgs {
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum StationCmd {
+    /// Show this session's attended addresses and waiter state.
+    Status(StationStatusArgs),
+    /// Stop this session's station: release membership and drain its live waiters.
+    Stop(StationStopArgs),
+}
+
+#[derive(Args)]
+pub struct StationStatusArgs {
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
+    /// Show all stations in the selected store instead of only this session.
+    #[arg(long)]
+    pub all_sessions: bool,
+}
+
+#[derive(Args)]
+pub struct StationStopArgs {
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
+    /// How long to wait for live waiter processes to exit after teardown is signaled (ms).
+    #[arg(long, default_value_t = 3_000)]
+    pub wait_grace_ms: u64,
 }
 
 #[derive(Args)]
@@ -172,15 +270,15 @@ pub struct SendArgs {
     /// Subject line.
     #[arg(long)]
     pub subject: Option<String>,
-    /// Message body (inline). Mutually exclusive with --body-file; exactly one is required.
+    /// Message body (inline). Body/subject/metadata are capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body: Option<String>,
-    /// Read the message body from a UTF-8 file (`-` reads stdin). Mutually exclusive with --body.
+    /// Read the message body from UTF-8 (`-` stdin); capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body_file: Option<String>,
-    /// Comma-separated cc addresses (visible, not interrupting).
-    #[arg(long)]
-    pub cc: Option<String>,
+    /// CC addresses (visible observers). May be repeated and/or comma-separated.
+    #[arg(long, value_delimiter = ',')]
+    pub cc: Vec<String>,
     /// Message kind/profile label.
     #[arg(long, default_value = "note")]
     pub kind: String,
@@ -193,9 +291,12 @@ pub struct SendArgs {
     /// Sender address (defaults to the global --address if set).
     #[arg(long)]
     pub from: Option<String>,
-    /// Arbitrary JSON metadata.
+    /// Arbitrary JSON metadata; counted with body/subject against the IPC payload cap.
     #[arg(long)]
     pub metadata: Option<String>,
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Args)]
@@ -203,15 +304,18 @@ pub struct ReplyArgs {
     /// The message id being replied to.
     #[arg(long)]
     pub to_message: i64,
-    /// Reply body (inline). Mutually exclusive with --body-file; exactly one is required.
+    /// Reply body (inline). Body/subject are capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body: Option<String>,
-    /// Read the reply body from a UTF-8 file (`-` reads stdin). Mutually exclusive with --body.
+    /// Read the reply body from UTF-8 (`-` stdin); capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body_file: Option<String>,
     /// Subject (defaults to "Re: <parent subject>").
     #[arg(long)]
     pub subject: Option<String>,
+    /// CC addresses (visible observers). May be repeated and/or comma-separated.
+    #[arg(long, value_delimiter = ',')]
+    pub cc: Vec<String>,
     /// Attention level.
     #[arg(long, default_value = "background")]
     pub attention: String,
@@ -224,6 +328,9 @@ pub struct ReplyArgs {
     /// Message kind/profile label.
     #[arg(long, default_value = "note")]
     pub kind: String,
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Args)]
@@ -237,6 +344,9 @@ pub struct DispArgs {
     /// Recipient address whose disposition this is (defaults to the message's to_addr).
     #[arg(long)]
     pub recipient: Option<String>,
+    /// Stable session identity for daemon membership.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -289,6 +399,199 @@ pub struct ExportArgs {
     /// Only messages with id greater than this.
     #[arg(long, default_value_t = 0)]
     pub since: i64,
+}
+
+#[derive(Subcommand)]
+pub enum DaemonCmd {
+    /// Run the daemon server loop.
+    Serve,
+    /// Show daemon singleton status.
+    Status,
+    /// Show daemon/protocol version metadata.
+    Version,
+    /// Mark one station idle without destroying membership or buffered deliveries.
+    Reset(DaemonResetArgs),
+    /// Mark all stations for a session idle without destroying membership or buffered deliveries.
+    SessionEnd(DaemonSessionEndArgs),
+    /// Stop the daemon.
+    Stop(DaemonStopArgs),
+}
+
+#[derive(Args)]
+pub struct DaemonStopArgs {
+    /// Drain in-flight work before exiting.
+    #[arg(long)]
+    pub drain: bool,
+}
+
+#[derive(Args)]
+pub struct DaemonResetArgs {
+    /// Address to mark idle (defaults to global --address).
+    #[arg(long)]
+    pub address: Option<String>,
+}
+
+#[derive(Args)]
+pub struct DaemonSessionEndArgs {
+    /// Stable session identity to mark ended.
+    #[arg(long, env = "TELEX_SESSION_ID")]
+    pub session: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum CopilotCmd {
+    /// Register a Copilot session using Copilot env vars mapped to generic telex inputs.
+    Attach(CopilotAttachArgs),
+    /// Handle Copilot sessionEnd by non-destructively ending this session in the daemon.
+    #[command(hide = true)]
+    SessionEnd(CopilotSessionEndArgs),
+    /// Handle Copilot agentStop by nudging unarmed attended stations to re-arm or detach.
+    #[command(hide = true)]
+    TurnGuard(CopilotTurnGuardArgs),
+    /// Print version-matched Copilot CLI instructions (the binary is the source of truth).
+    Skill(CopilotSkillArgs),
+    /// Deliver one telex message (descriptor on stdin) into a session via its bridge.
+    #[command(hide = true)]
+    Push(CopilotPushArgs),
+    /// Detach a Copilot session's address and tear down its bridge if it was the last binding.
+    Detach(CopilotDetachArgs),
+    /// Garbage-collect stale Copilot bridge files for unloaded sessions.
+    Gc(CopilotGcArgs),
+}
+
+#[derive(Args)]
+pub struct VersionArgs {
+    /// Inspect a specific versioned install root instead of inferring it from this executable.
+    #[arg(long)]
+    pub root: Option<PathBuf>,
+}
+
+#[derive(Args)]
+pub struct UpgradeArgs {
+    /// Local telex binary or directory containing telex(.exe) to install.
+    #[arg(long = "from", value_name = "PATH")]
+    pub from: PathBuf,
+    /// Version tag to install/switch to (defaults to this binary's package version).
+    #[arg(long)]
+    pub version: Option<String>,
+    /// Versioned install root (default: inferred install root or platform default).
+    #[arg(long)]
+    pub root: Option<PathBuf>,
+    /// Install into versions/<tag> but do not switch current.
+    #[arg(long)]
+    pub no_switch: bool,
+    /// Skip daemon drain before switching current (not recommended).
+    #[arg(long)]
+    pub skip_drain: bool,
+    /// Bound daemon drain before switching current.
+    #[arg(long, default_value_t = 10_000)]
+    pub drain_timeout_ms: u64,
+}
+
+#[derive(Args)]
+pub struct RollbackArgs {
+    /// Installed version tag to switch to (default: previous).
+    #[arg(long)]
+    pub version: Option<String>,
+    /// Versioned install root (default: inferred install root or platform default).
+    #[arg(long)]
+    pub root: Option<PathBuf>,
+    /// Skip daemon drain before switching current (not recommended).
+    #[arg(long)]
+    pub skip_drain: bool,
+    /// Bound daemon drain before switching current.
+    #[arg(long, default_value_t = 10_000)]
+    pub drain_timeout_ms: u64,
+}
+
+#[derive(Args)]
+pub struct GcArgs {
+    /// Versioned install root (default: inferred install root or platform default).
+    #[arg(long)]
+    pub root: Option<PathBuf>,
+    /// Report what would be removed without deleting anything.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Try removal of stale versions even after ordinary removal errors; never removes current,
+    /// previous, or the active process version.
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Args)]
+pub struct CopilotAttachArgs {
+    /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// One-line directory description of what this session is doing.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Project/workstream scope this address belongs to.
+    #[arg(long)]
+    pub scope: Option<String>,
+    /// Comma-separated coarse tags (e.g. issue:215,repo:telex).
+    #[arg(long)]
+    pub tags: Option<String>,
+    /// Occupant identity recorded on the lease (default: session host/pid).
+    #[arg(long)]
+    pub occupant: Option<String>,
+    /// Provision the in-session push bridge (write the extension and register the
+    /// on-deliver push handler) so messages arrive as turns without a waiter.
+    #[arg(long)]
+    pub copilot_bridge: bool,
+    /// With --copilot-bridge, push live CC observer traffic to this session.
+    #[arg(long)]
+    pub wake_on_cc: bool,
+}
+
+#[derive(Args)]
+pub struct CopilotSessionEndArgs {
+    /// Stable Copilot session identity; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotTurnGuardArgs {
+    /// Stable Copilot session identity; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotPushArgs {
+    /// Stable Copilot session identity whose bridge should receive the message;
+    /// defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotDetachArgs {
+    /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotGcArgs {
+    /// Stable Copilot session identity to check/remove; defaults to all known bridge files.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// Report what would be removed without deleting anything.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Remove stale files even when liveness is uncertain. Live registry heartbeats are still kept.
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Args)]
+pub struct CopilotSkillArgs {
+    /// The invoking telex plugin's version, for a plugin/binary compatibility check.
+    /// Falls back to the TELEX_PLUGIN_VERSION environment variable.
+    #[arg(long)]
+    pub plugin_version: Option<String>,
 }
 
 #[derive(Args)]
@@ -362,6 +665,49 @@ pub struct BackendAddArgs {
     pub default: bool,
 }
 
+fn parse_watch_pid(raw: &str) -> std::result::Result<WatchPidSpec, String> {
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err("watch pid cannot be empty".to_string());
+    }
+
+    let parse_role = |s: &str| match s.to_ascii_lowercase().as_str() {
+        "anchor" => Ok(WatchPidRole::Anchor),
+        "required" => Ok(WatchPidRole::Required),
+        other => Err(format!(
+            "unknown watch-pid role {other:?}; use anchor or required"
+        )),
+    };
+    let parse_pid = |s: &str| {
+        s.parse::<u32>()
+            .map_err(|e| format!("invalid watch pid {s:?}: {e}"))
+    };
+
+    if let Some((a, b)) = raw.split_once(':') {
+        if let Ok(role) = parse_role(a) {
+            return Ok(WatchPidSpec {
+                pid: parse_pid(b)?,
+                role,
+            });
+        }
+        if let Ok(role) = parse_role(b) {
+            return Ok(WatchPidSpec {
+                pid: parse_pid(a)?,
+                role,
+            });
+        }
+        return Err(format!(
+            "watch pid {raw:?} must be PID, role:PID, or PID:role"
+        ));
+    }
+
+    Ok(WatchPidSpec::anchor(parse_pid(raw)?))
+}
+
+fn parse_attention_arg(raw: &str) -> std::result::Result<Attention, String> {
+    Attention::parse(raw).map_err(|e| e.to_string())
+}
+
 /// Shared command context.
 pub struct Ctx {
     pub cfg: Config,
@@ -382,6 +728,16 @@ impl Ctx {
             self.cfg.backend_selector.as_deref(),
             self.cfg.db_override.as_deref(),
         )
+    }
+
+    /// Effective store key for the selected backend, used to scope the holder registry so a
+    /// station on one store is never inferred as `from` for a send on another.
+    pub fn store_key(&self) -> Result<String> {
+        let (_name, profile) = self.resolved()?;
+        Ok(crate::profiles::store_key(
+            &profile,
+            self.cfg.db_override.as_deref(),
+        ))
     }
 }
 
@@ -404,15 +760,20 @@ pub async fn run() -> i32 {
     let result: Result<i32> = match cli.command {
         Command::Init => crate::commands::init::run(&ctx).await,
         Command::Status => crate::commands::status::run(&ctx).await,
+        Command::Version(a) => crate::commands::upgrade::version(&ctx, a).await,
+        Command::Upgrade(a) => crate::commands::upgrade::upgrade(&ctx, a).await,
+        Command::Rollback(a) => crate::commands::upgrade::rollback(&ctx, a).await,
+        Command::Gc(a) => crate::commands::upgrade::gc(&ctx, a).await,
         Command::Skill(a) => crate::commands::skill::run(&ctx, a).await,
         Command::Attach(a) => crate::commands::attach::run(&ctx, a).await,
-        Command::Detach => crate::commands::detach::run(&ctx).await,
+        Command::Detach(a) => crate::commands::detach::run(&ctx, a).await,
+        Command::Station(cmd) => crate::commands::station::run(&ctx, cmd).await,
         Command::Wait(a) => crate::commands::wait::run(&ctx, a).await,
         Command::Inbox(a) => crate::commands::inbox::run(&ctx, a).await,
         Command::Read(a) => crate::commands::read::run(&ctx, a).await,
         Command::Send(a) => crate::commands::send::run(&ctx, a).await,
         Command::Reply(a) => crate::commands::reply::run(&ctx, a).await,
-        Command::Ack(a) => crate::commands::disposition::run(&ctx, "acknowledged", a).await,
+        Command::Ack(a) => crate::commands::disposition::ack(&ctx, a).await,
         Command::Handle(a) => crate::commands::disposition::run(&ctx, "handled", a).await,
         Command::Defer(a) => crate::commands::disposition::run(&ctx, "deferred", a).await,
         Command::Reject(a) => crate::commands::disposition::run(&ctx, "rejected", a).await,
@@ -421,6 +782,8 @@ pub async fn run() -> i32 {
         Command::Address(cmd) => crate::commands::address::run(&ctx, cmd).await,
         Command::Resolve(a) => crate::commands::address::resolve(&ctx, a).await,
         Command::Backend(cmd) => crate::commands::backend::run(&ctx, cmd).await,
+        Command::Copilot(cmd) => crate::commands::copilot::run(&ctx, cmd).await,
+        Command::Daemon(cmd) => crate::commands::daemon::run(&ctx, cmd).await,
         Command::Export(a) => crate::commands::export::run(&ctx, a).await,
     };
 
@@ -430,5 +793,331 @@ pub async fn run() -> i32 {
             eprintln!("telex: {e:#}");
             1
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::{CommandFactory, Parser};
+
+    #[test]
+    fn daemon_subcommand_is_hidden_from_top_level_help() {
+        let help = Cli::command().render_long_help().to_string();
+        assert!(
+            !help.contains("daemon"),
+            "top-level help leaked daemon:\n{help}"
+        );
+        assert!(
+            !help.contains("copilot"),
+            "top-level help leaked copilot adapter:\n{help}"
+        );
+    }
+
+    #[test]
+    fn hidden_daemon_subcommands_parse() {
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "daemon", "serve"])
+                .unwrap()
+                .command,
+            Command::Daemon(DaemonCmd::Serve)
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "daemon", "status"])
+                .unwrap()
+                .command,
+            Command::Daemon(DaemonCmd::Status)
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "daemon", "version"])
+                .unwrap()
+                .command,
+            Command::Daemon(DaemonCmd::Version)
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "daemon", "stop", "--drain"])
+                .unwrap()
+                .command,
+            Command::Daemon(DaemonCmd::Stop(DaemonStopArgs { drain: true }))
+        ));
+    }
+
+    #[test]
+    fn hidden_copilot_subcommands_parse() {
+        assert!(matches!(
+            Cli::try_parse_from([
+                "telex",
+                "--address",
+                "addr:a",
+                "copilot",
+                "attach",
+                "--description",
+                "work",
+            ])
+            .unwrap()
+            .command,
+            Command::Copilot(CopilotCmd::Attach(CopilotAttachArgs {
+                description: Some(d),
+                ..
+            })) if d == "work"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from([
+                "telex",
+                "--address",
+                "addr:a",
+                "copilot",
+                "attach",
+                "--copilot-bridge",
+                "--wake-on-cc",
+            ])
+            .unwrap()
+            .command,
+            Command::Copilot(CopilotCmd::Attach(CopilotAttachArgs {
+                copilot_bridge: true,
+                wake_on_cc: true,
+                ..
+            }))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "session-end"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::SessionEnd(_))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "turn-guard"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::TurnGuard(_))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "skill", "--plugin-version", "0.1.0"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::Skill(CopilotSkillArgs {
+                plugin_version: Some(v),
+            })) if v == "0.1.0"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "gc", "--dry-run"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::Gc(CopilotGcArgs { dry_run: true, .. }))
+        ));
+    }
+
+    #[test]
+    fn upgrade_surface_subcommands_parse() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "upgrade",
+            "--from",
+            "target/debug/telex",
+            "--version",
+            "v0.2.0",
+            "--no-switch",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Upgrade(UpgradeArgs {
+                from,
+                version: Some(version),
+                no_switch: true,
+                ..
+            }) => {
+                assert_eq!(from, PathBuf::from("target/debug/telex"));
+                assert_eq!(version, "v0.2.0");
+            }
+            _ => panic!("unexpected upgrade parse"),
+        }
+
+        let cli = Cli::try_parse_from(["telex", "rollback", "--version", "v0.1.0"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Rollback(RollbackArgs {
+                version: Some(_),
+                ..
+            })
+        ));
+
+        let cli = Cli::try_parse_from(["telex", "gc", "--dry-run", "--force"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gc(GcArgs {
+                dry_run: true,
+                force: true,
+                ..
+            })
+        ));
+
+        let cli = Cli::try_parse_from(["telex", "version"]).unwrap();
+        assert!(matches!(cli.command, Command::Version(VersionArgs { .. })));
+    }
+
+    #[test]
+    fn copilot_help_lists_user_facing_subcommands_and_hides_internal_ones() {
+        let mut cmd = Cli::command();
+        let copilot = cmd
+            .find_subcommand_mut("copilot")
+            .expect("copilot subcommand exists");
+        let help = copilot.render_long_help().to_string();
+        for sub in ["skill", "attach", "detach", "gc"] {
+            assert!(
+                help.contains(sub),
+                "`telex copilot --help` should list `{sub}`:\n{help}"
+            );
+        }
+        for hidden in ["session-end", "turn-guard"] {
+            assert!(
+                !help.contains(hidden),
+                "`telex copilot --help` leaked internal `{hidden}`:\n{help}"
+            );
+        }
+    }
+
+    #[test]
+    fn station_status_subcommand_parses() {
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "station", "status", "--session", "s1"])
+                .unwrap()
+                .command,
+            Command::Station(StationCmd::Status(StationStatusArgs {
+                session: Some(s),
+                all_sessions: false,
+            })) if s == "s1"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "station", "status", "--all-sessions"])
+                .unwrap()
+                .command,
+            Command::Station(StationCmd::Status(StationStatusArgs {
+                all_sessions: true,
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn wait_reconnect_grace_flag_parses() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:a",
+            "wait",
+            "--reconnect-grace-ms",
+            "250",
+        ])
+        .unwrap();
+        let Command::Wait(args) = cli.command else {
+            panic!("expected wait command");
+        };
+        assert_eq!(args.reconnect_grace_ms, Some(250));
+    }
+
+    #[test]
+    fn wait_min_attention_flag_parses_and_validates() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:a",
+            "wait",
+            "--min-attention",
+            "next-checkpoint",
+        ])
+        .unwrap();
+        let Command::Wait(args) = cli.command else {
+            panic!("expected wait command");
+        };
+        assert_eq!(args.min_attention, Some(Attention::NextCheckpoint));
+
+        assert!(Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:a",
+            "wait",
+            "--min-attention",
+            "urgent",
+        ])
+        .is_err());
+    }
+
+    #[test]
+    fn wait_wake_on_cc_flag_parses() {
+        let cli =
+            Cli::try_parse_from(["telex", "--address", "addr:a", "wait", "--wake-on-cc"]).unwrap();
+        let Command::Wait(args) = cli.command else {
+            panic!("expected wait command");
+        };
+        assert!(args.wake_on_cc);
+    }
+
+    #[test]
+    fn send_cc_accepts_repeated_and_comma_separated_values() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:sender",
+            "send",
+            "--to",
+            "addr:to",
+            "--body",
+            "hello",
+            "--cc",
+            "addr:a,addr:b",
+            "--cc",
+            "addr:c",
+        ])
+        .unwrap();
+        let Command::Send(args) = cli.command else {
+            panic!("expected send command");
+        };
+        assert_eq!(args.cc, vec!["addr:a", "addr:b", "addr:c"]);
+    }
+
+    #[test]
+    fn reply_cc_accepts_repeated_and_comma_separated_values() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:sender",
+            "reply",
+            "--to-message",
+            "42",
+            "--body",
+            "hello",
+            "--cc",
+            "addr:a,addr:b",
+            "--cc",
+            "addr:c",
+        ])
+        .unwrap();
+        let Command::Reply(args) = cli.command else {
+            panic!("expected reply command");
+        };
+        assert_eq!(args.cc, vec!["addr:a", "addr:b", "addr:c"]);
+    }
+
+    #[test]
+    fn attach_watch_pid_flag_accepts_typed_repeatable_values() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "--address",
+            "addr:a",
+            "attach",
+            "--watch-pid",
+            "anchor:123",
+            "--watch-pid",
+            "456:required",
+        ])
+        .unwrap();
+        let Command::Attach(args) = cli.command else {
+            panic!("expected attach command");
+        };
+        assert_eq!(args.watch_pid.len(), 2);
+        assert_eq!(args.watch_pid[0].pid, 123);
+        assert_eq!(args.watch_pid[0].role, WatchPidRole::Anchor);
+        assert_eq!(args.watch_pid[1].pid, 456);
+        assert_eq!(args.watch_pid[1].role, WatchPidRole::Required);
     }
 }

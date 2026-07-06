@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 use serde_json::json;
 
 use crate::cli::{Ctx, ReadArgs};
+use crate::model::{cc_recipients, delivery_role, requires_disposition_for_recipient};
 use crate::output::emit;
 
 pub async fn run(ctx: &Ctx, args: ReadArgs) -> Result<i32> {
@@ -16,6 +17,21 @@ pub async fn run(ctx: &Ctx, args: ReadArgs) -> Result<i32> {
         "message": msg,
         "dispositions": dispositions,
     });
+    if let Some(address) = ctx.address.as_deref() {
+        let cc = cc_recipients(msg.cc.as_deref());
+        let role = delivery_role(address, &msg.to_addr, msg.cc.as_deref());
+        out["delivery"] = json!({
+            "delivered_to": address,
+            "primary_to": msg.to_addr.clone(),
+            "cc": cc,
+            "delivery_role": role,
+            "requires_disposition_for_current_recipient": requires_disposition_for_recipient(
+                msg.requires_disposition,
+                address,
+                &msg.to_addr,
+            ),
+        });
+    }
 
     if args.thread || args.full {
         let thread = backend.thread_messages(msg.thread_id).await?;

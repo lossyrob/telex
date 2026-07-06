@@ -1,6 +1,6 @@
 ---
 name: telex
-description: Use this skill when coordinating or messaging between AI agent sessions: attach a session to a durable address, wait for and disposition delivered messages, send or reply to operational messages, and find other live sessions through the self-registered address directory.
+description: Coordinate messages between AI agent sessions with telex.
 ---
 
 # Telex skill
@@ -11,97 +11,306 @@ Telex is a CLI-first message fabric for AI agent sessions. Ephemeral sessions at
 
 Your operator will tell you which address to attach to. You can reload these instructions anytime with `telex skill`, or `telex skill --address <addr>` for instructions tailored to your assigned address.
 
-## The core loop
+## Copilot CLI: push delivery
 
-Use Telex as a two-process loop. The running presence you set up to serve an address is its **station**: a resident **holder** that keeps the address live, plus a **waiter** — a single-shot `telex wait` that delivers one message and completes. (`attach` starts the station; `detach` stops it. The CLI verbs are unchanged — "station" is the umbrella noun for the holder + waiter pair.) Both processes run as **background processes**, and each needs two independent properties — set both:
+In Copilot CLI, telex delivers messages to you as **turns** -- you do not run, re-arm, or
+babysit a `telex wait` waiter. The full, version-matched Copilot workflow (bind, load the
+in-session bridge, receive pushed turns, record disposition, tear down, and fallback) is
+printed by the installed binary so it never drifts from a static copy:
 
-| Property | Holder + each `wait` | Why |
-|---|---|---|
-| Foreground or background? | **Background** (non-blocking) | so they don't consume your turns — the foreground stays free to act and take operator input |
-| Session-bound or persistent? | **Session-bound** — killed when your session ends | so the lease releases promptly once you're gone; a process that outlives the session keeps answering liveness for a session that no longer exists |
+```sh
+telex copilot skill
+```
 
-So: **background and session-bound.** Never start them as persistent / standalone / daemonized processes that survive the session — that orphans the holder and corrupts liveness. You drive the loop one delivery at a time: each single-shot `telex wait` surfaces a message to you when the command **completes**, and then you re-arm a fresh one (see **The re-arm pattern** below).
+Run that first when you are in Copilot CLI. The pull workflow below is the generic fallback
+for non-Copilot harnesses (and for Copilot sessions where the bridge cannot load).
 
-> **Two unrelated meanings of "attach/detach" — don't conflate them.**
-> - **telex `attach` / `detach`** are **lease** verbs: `attach` starts a station on the address (occupy), `detach` stops it (release). They say nothing about OS process lifecycle.
-> - Your **agent runtime** separately decides whether a background process is **session-bound** (dies with the session — what you want) or **fully detached / persistent** (outlives it — never use this for the holder or a `wait`).
->
-> The holder is long-lived, but unlike a typical server it must **not** be marked persistent. *(In Copilot CLI terms: start them async with `detach: false` — the default — never `detach: true`, even though they run long.)*
+## Pull mode: `telex wait` (generic / non-Copilot harnesses)
 
-1. Start the holder in the **background** and **bound to your session** — it must be terminated when the session ends, never daemonized or left to outlive it. The holder owns the lease/heartbeat, so binding its lifetime to the session lets the lease release promptly when you're gone.
+`telex wait` is the generic pull primitive for scripts, CI, and harnesses
+without an in-session extension. **Copilot CLI sessions use push delivery above
+instead**; reach for `wait` only when the bridge is unavailable.
+
+Use Telex as a **one-shot command loop** backed by an auto-spawned per-user local
+exchange (daemon). Sessions no longer run a resident holder process. `attach`
+registers your session/address with the local exchange and exits; `wait` blocks
+as one daemon client for one delivery and exits; `ack` is the explicit durable
+consumed mark for the message you just received.
+
+Before attaching, make sure the session has a stable identity. Generic telex
+commands use `--session` or `$TELEX_SESSION_ID`; Copilot-specific env names are
+mapped by the telex Copilot plugin adapter. Telex fails closed rather than
+guessing.
+
+1. Register your session's address once:
 
    ```sh
+   export TELEX_SESSION_ID=<stable-session-id>   # often already supplied by the harness
    telex attach --address <addr> --description "<what this session is doing>"
    ```
 
-   Export `TELEX_ADDRESS=<addr>` for the session so every later command — `wait`, `inbox`,
-   `send`, `reply` — defaults to this address, including the `from` stamped on what you send
-   (see **Your identity** below).
-
-   Optional attach flags:
-
-   ```sh
-   telex attach --address <addr> --description "<s>" --scope <s> --tags <a,b> --heartbeat-secs N --poll-secs N
-   ```
-
-2. Wait for one message with a **single-shot** background `telex wait` — **not** an internal loop. It connects to the holder, blocks until one message is delivered, prints it as JSON, and **completes**. The command *completing* is your wake signal (see the box below). On delivery, **immediately re-arm a fresh background `wait` before doing substantive work on the delivered message**; re-arm at your turn level, not inside a shell loop.
+   In Copilot CLI with the telex plugin installed, the adapter maps
+   `$COPILOT_AGENT_SESSION_ID` to the generic session id and `$COPILOT_LOADER_PID`
+   to the loader `--watch-pid` backstop. Generic telex commands still need the
+   generic session id on each invocation, so pass
+   `--session "$COPILOT_AGENT_SESSION_ID"` (or set `TELEX_SESSION_ID` in the same
+   shell command that invokes telex). In Copilot, prefer push delivery (above);
+   use pull only as a fallback when the bridge is unavailable:
 
    ```sh
-   telex wait --address <addr>          # one delivery, then the command completes
+   telex --address <addr> wait --session "$COPILOT_AGENT_SESSION_ID" --out-dir <dir>
    ```
 
-   Omit `--timeout-ms` so the command completes **only on a real delivery** — then every wake is an actual message. Use a timeout only if your runtime caps command duration; a timeout just completes the command with exit 2 ("nothing yet"), and you re-arm.
+   Detached waiter stdout is not delivered to the agent, so read `message.json` /
+   `delivery.json` from `--out-dir` after the completion wake.
 
-   When the `wait` command completes, read its exit code and output:
+   Optional metadata:
+
+   ```sh
+   telex attach --address <addr> --session <id> --description "<s>" --scope <s> --tags <a,b> --watch-pid anchor:<pid>
+   ```
+
+   `--watch-pid` is a non-destructive liveness backstop. The v1 floor is a loader
+   `anchor` pid with a start-time reuse guard; when it dies, blocked waits return
+   `PresenceEnded` but the station and durable message buffer remain.
+
+2. Wait for one message with a single-shot **fully detached** background
+   `telex wait` (`detach: true` in Copilot CLI). This is for **UX**, not just
+   shutdown survival: a session-attached async waiter keeps the terminal busy /
+   spinner-like and competes with normal user-agent interaction. A fully detached
+   background task still wakes the session when it completes; that completion
+   notification is the waiter loop's wake signal. Pass `--out-dir <dir>` so the
+   waiter writes its result to files; the woken agent reads those instead of
+   relying on captured stdout:
+
+   ```sh
+   telex wait --address <addr> --session <session-id> --out-dir <dir>
+   ```
+
+   On exit, `telex wait --out-dir` writes into `<dir>`:
+   - `message.json` — the delivered message (only on exit `0`);
+   - `delivery.json` — envelope `{ message, delivery, status }` (only on exit `0`);
+   - `status.json` — `{ outcome, exit_code, detail, address, written_at_ms }`, always;
+   - `exit.code` — the integer exit code, written **last** as the completion marker.
+
+   This matters because some runtimes (e.g. Copilot CLI) do not return fully
+   detached shell stdout, and the detached task's reported exit code may describe
+   only the launcher/wrapper. Do not fall back to `detach:false` just to recover
+   stdout; that regresses the waiter into foreground-ish UX. Trust the artifact
+   `exit.code`, not the shell task exit code. The detached completion notification
+   is the wake signal; after it arrives, read
+   `exit.code` (then `delivery.json` or `message.json` if it is `0`), `ack` the delivered message
+   with the same session id, dedupe by id, then re-arm a fresh detached `wait`
+   with the same session id before longer processing.
+   Do not hide `wait` inside an infinite shell loop.
+   `wait` does **not** spawn the daemon. If the daemon is gone, `wait` exits 3 so
+   the agent can run `telex attach` (the spawning/recovery verb) and then re-arm.
+   If a replacement daemon already exists, `wait` can reconnect/re-register during
+   its bounded reconnect grace.
+
+   CC traffic is pull-only by default: it remains visible in `inbox --all` /
+   `read`, but a bare `wait` does not wake for it. If this seat is deliberately
+   acting as an observer/relay for a table and should be woken by live CC traffic,
+   arm that wait with `--wake-on-cc`. This is an explicit per-wait opt-in, not CC
+   backlog replay and not a manual-ack requirement.
 
    | Exit | Meaning | What you do |
    |---:|---|---|
-   | 0 | delivered | Read/save the JSON message, immediately re-arm a fresh background `wait`, then act on and disposition the saved message. |
-   | 2 | idle-timeout | Nothing arrived before `--timeout-ms` (only if you set one); just re-arm. |
-   | 3 | holder-gone | Restart the holder (`telex attach`), then re-arm. |
-   | 4 | holder-hung | Restart the holder (`telex attach`), then re-arm. |
+   | 0 | delivered | Read `delivery.json` (or `message.json`/stdout JSON), `ack --session <session-id>` + dedupe by id, then re-arm a fresh `wait --session <session-id>` before longer processing. |
+   | 2 | idle-timeout | Nothing arrived before `--timeout-ms`; re-arm if still attending. |
+   | 3 | daemon gone / not running | Run `telex attach` and re-arm. |
+   | 4 | daemon hung / no response after a finite wait's `--timeout-ms + --hang-ms` watchdog | Re-arm or restart the daemon if repeated. |
+   | 5 | presence ended | Non-destructive reap; live sessions should `attach`/`wait` again. |
 
-3. After re-arming, act on the saved message and run an appropriate disposition verb with the message id from the JSON.
+3. After reading the delivered JSON, explicitly ack it, then apply the workflow
+   disposition that reflects the actual outcome:
 
    ```sh
-   telex handle --id <message-id> --note "completed"
+   telex ack --address <addr> --session <session-id> --id <message-id>
+   telex handle --address <addr> --session <session-id> --id <message-id> --note "completed"
    ```
 
-   Disposition verbs are `telex ack`, `telex handle`, `telex defer`, `telex reject`, `telex close`, and `telex escalate`; all take `--id <message-id>` and optional `--note <s>`. Non-terminal dispositions (`ack`, `defer`, `escalate`) still need a final terminal disposition later.
+   `ack` is transport consumption for `(message_id, recipient-address)`. Terminal
+   workflow disposition is still `handle`, `reject`, or `close`; `defer` and
+   `escalate` are non-terminal. Dispositions default to the current `--address`
+   recipient; pass `--recipient` only when intentionally recording for another
+   recipient.
 
 ### The re-arm pattern (one wait per delivery, not a shell loop)
 
-Drive the loop from your own turn cycle, one delivery at a time:
+Drive the loop from your own turn cycle:
 
 ```text
-once:   telex attach --address <addr> --description "<s>"   # background, session-bound; holds the lease
-then repeat, one delivery at a time:
-  1. start a SINGLE background command:  telex wait --address <addr>
-  2. it blocks until one message, prints JSON, and COMPLETES -> your runtime notifies you
-  3. read the completed command's output:
-       exit 0   -> save the JSON, immediately start a fresh background wait, then act/disposition
-       exit 3/4 -> restart telex attach (holder gone/hung)
-       exit 2   -> (only if you set --timeout-ms) nothing arrived
+once:   telex attach --address <addr> --session <session-id> --description "<s>"
+then repeat:
+  1. start one detached background command named `TELEX MESSAGE WAITER`:
+     while focused on other work: `telex wait --address <addr> --session <session-id> --timeout-ms <T> --min-attention interrupt --out-dir <dir>`
+     while observing a table: `telex wait --address <addr> --session <session-id> --timeout-ms <T> --wake-on-cc --out-dir <dir>`
+     while idle/ready for anything: `telex wait --address <addr> --session <session-id> --timeout-ms <T> --out-dir <dir>`
+  2. it blocks until one message, exits, and the runtime completion wakes you
+  3. read `<dir>\exit.code` (not the shell task exit code):
+     0 -> parse `delivery.json` (or `message.json`), run `telex ack --session <session-id>`, dedupe by id, then start a fresh wait before longer processing
+     5 -> attach/wait again if the session is still live
+     2/3/4 -> re-arm or restart as indicated above (see `status.json` for detail)
 ```
 
-This is not "ad hoc shell polling": each `telex wait` blocks for push delivery from the holder, and you only relaunch after one completes. (Ad hoc polling would be repeatedly running `telex inbox` on a timer with no holder — don't do that.) Telex owns the long-duration waiting; the holder keeps answerback live between your turns.
+### Two-phase attention loop
 
-Messages buffer in the holder, so immediate re-arm timing is safe: the delivered message has already been popped from the holder queue, and a second message that arrives while you are handling the first is delivered by the next `wait`. Re-arm first so a new message can complete its own `wait` early and be available for your next turn; none are dropped.
+> Pull mode only. In **push delivery** the daemon maps attention to send mode
+> automatically (interrupt -> immediate steering, everything else -> enqueue), so
+> you never manage waiter phases -- messages just arrive as turns.
 
-One-shot commands (`send`, `reply`, `resolve`, `address list`, `inbox`, and the disposition verbs) run directly from the foreground **while the background `wait` is blocked** — they reach the holder/backend independently and need no background task of their own.
+When you are actively working, arm a phase-1 waiter with
+`--min-attention interrupt`. It wakes only for urgent messages; `next-checkpoint`,
+`background`, and `fyi` messages stay durably buffered for your next checkpoint.
+When you finish the current unit of work or reach a natural checkpoint, do phase
+2: inspect `telex inbox --all --address <addr>`, read/ack/disposition the
+pending messages you are ready to handle, then either continue with an
+interrupt-only waiter or, if you are idle, arm an unfiltered waiter.
 
-> **Gotcha — the invisible-loop trap.** Do **not** wrap `telex wait` in an infinite background loop (`while true; do telex wait; done`). Many agent runtimes only surface a background command's output **when the command completes** — an internal loop never completes, so deliveries pile up in the loop's buffer and never wake you (you'd have to manually poll the background shell). `telex wait` exits on each delivery on purpose: let the **completion** drive a fresh single-shot re-arm at your turn level. Also avoid a short `--timeout-ms`, which wakes you on idle-timeouts carrying no message.
+`--wake-on-cc` composes with this pattern. Use it only for seats that deliberately
+want live CC observer traffic to wake them, and combine it with `--min-attention`
+when the observer should wake only for urgent table traffic. After a CC wake,
+inspect `inbox --all` or the thread if you need surrounding observer context.
+
+Do not run an interrupt-only waiter and an unfiltered waiter at the same time:
+the daemon permits only one live waiter per station. To switch modes, let the
+current waiter complete, or stop the station (`telex station stop`), re-attach,
+and arm the new mode.
+
+> **Gotcha — the invisible-loop trap.** Do **not** wrap `telex wait` in an
+> infinite background loop (`while true; do telex wait; done`). Many agent
+> runtimes surface output only when the command completes; an internal loop hides
+> delivered messages in a background buffer.
+
+### Detached waiter pattern (pull-mode fallback)
+
+> This is the pull-mode fallback for Copilot sessions when the push bridge is
+> unavailable. The default Copilot path is push delivery -- no waiter.
+
+Use a fully detached shell task (`detach: true`) for the waiter UX. This is the
+standard pull pattern: it does **not** spin the terminal like foreground work, and
+the Copilot CLI session is still notified when the detached task exits. Do **not** use
+session-attached async (`detach:false`) as the normal waiter mode just because it
+returns stdout; use `--out-dir` artifacts instead. Let `telex wait --out-dir
+<dir>` write the result to files you read after the detached completion
+notification. Name the background task **`TELEX MESSAGE WAITER`** so it is
+obvious in `/tasks`.
+
+On Windows/Copilot CLI, use a small `.ps1` file and detach `pwsh -File ...` as
+the primary reliable pattern. Some Copilot CLI versions silently no-op when a
+detached task is a bare external executable (`telex wait ...`) even though the
+same command works attached; wrapping the same call in `pwsh -File` preserves
+PATH/environment and reliably runs the child. Keep the detached command itself
+variable-free: pass concrete literal paths/addresses as script arguments.
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\telex-wait-once.ps1" `
+  -Telex "telex" `
+  -Address "<addr>" `
+  -Session "<session-id>" `
+  -OutDir "C:\path\to\telex-wait-<unique>"
+```
+
+The script body can be minimal:
+
+```powershell
+param(
+  [Parameter(Mandatory)] [string]$Telex,
+  [Parameter(Mandatory)] [string]$Address,
+  [Parameter(Mandatory)] [string]$Session,
+  [Parameter(Mandatory)] [string]$OutDir,
+  [string]$MinAttention
+)
+if ([string]::IsNullOrWhiteSpace($MinAttention)) {
+  & $Telex --json --address $Address wait --session $Session --timeout-ms 1800000 --out-dir $OutDir
+} else {
+  & $Telex --json --address $Address wait --session $Session --timeout-ms 1800000 --min-attention $MinAttention --out-dir $OutDir
+}
+exit $LASTEXITCODE
+```
+
+If you see a detached completion notification but `<dir>\exit.code` is missing,
+the waiter process did not actually run (or the harness failed before launching
+it); do not infer a Telex idle timeout. Re-arm using the `.ps1 -File` wrapper and
+inspect the task/stdout log if your runtime exposes one.
+
+On the detached completion notification:
+
+1. Read `<dir>\exit.code` (the completion marker); do not trust the Copilot detached task's exit code.
+2. If it is `0`, parse `<dir>\delivery.json` (or `<dir>\message.json` for the flat legacy shape). Otherwise read `<dir>\status.json` and the exit-code table.
+3. Run `telex ack --address <addr> --id <message-id>` and dedupe by `message_id`.
+4. Arm the next detached wait in the right mode: interrupt-only if resuming focused work, unfiltered if idle/ready for anything.
+
+`wait` also writes `<dir>\wait.pid` at startup. If you need to tear down the
+station before a message arrives, prefer `telex station stop --address <addr>`:
+it releases the station and waits for the live waiter to exit. The PID file is a
+diagnostic fallback only; do not hunt OS process lists unless `station stop`
+reports a still-live waiter after its grace window.
+
+Shape note: `wait --out-dir/message.json` is the flat delivery message for
+back-compat. `delivery.json` is the envelope form (`message`, `delivery`,
+`status`) and is closer to `read --id`, which returns an enveloped
+`{ message, dispositions, ... }` shape.
+
+Do **not** use `list_powershell` (or any task-list status) as the source of truth
+for whether the waiter is armed or finished — a detached command can show as
+`completed` while its child is still alive. The runtime completion notification
+plus the `exit.code` artifact are the wake signal.
+
+### Teardown and upgrade
+
+For a **push** (bridge) session, tear down with
+`telex --address <addr> copilot detach`: it detaches the address and removes the
+bridge extension when it was the last binding (session end also removes it), so
+nothing reloads on a later resume.
+
+For **pull mode**, use `telex station stop --address <addr>` as the symmetric
+inverse of the `attach` + detached-wait loop. It marks the station non-attending,
+releases membership durably, and waits for tracked live waiters to exit. After it
+returns with `waiters_after: 0`, a later message to the address remains queued
+until a future attach/wait; it is not consumed by an orphan waiter.
+
+For turn-end guards or resume reconciliation, use
+`telex station status --session <id>` to get a compact JSON projection of the
+current session's attended addresses, waiter counts, station health, and pending
+unconsumed counts.
+
+For a local binary upgrade on Windows, use this order:
+
+```sh
+telex station stop --address <addr>
+telex daemon stop --drain
+# replace telex.exe
+telex attach --address <addr> --description "<s>"
+telex wait --address <addr> --out-dir <dir>
+```
+
+If the session resumes without an armed waiter, recovery is durable: inspect
+`telex inbox --address <addr>` and `telex read --id <id>`, then arm a fresh
+detached wait.
 
 ## Sending and finding other sessions
 
-**Your identity — the `from` address.** Every `send` and `reply` stamps a `from` taken from
-`--from`, else `$TELEX_ADDRESS` / the global `--address`. Set it to the address you serve (the
-one you attached to) so replies route back to your inbox. If `from` is unset the message is
-**un-repliable**: `telex reply` to it fails with "no from address," and any reply has nowhere to
-go. So export `TELEX_ADDRESS=<your-addr>` once after attaching (recommended), or pass
-`--from <your-addr>` on each send. Use a *different* `--from` only deliberately — e.g. a one-shot
-sender declaring a reply-to it will attach to later; a `from` you don't actually serve means
-replies queue in an inbox nobody is watching.
+**Your identity — the `from` address.** Every `send`/`reply` stamps a `from` so replies can route
+back to you. It resolves inside the local exchange from explicit `--from`, else
+`$TELEX_ADDRESS` / the global `--address`, else the single address your
+`TELEX_SESSION_ID` currently attends. If your session attends multiple addresses,
+the send is refused as ambiguous until you pass `--from`.
+
+Guardrails the binary enforces:
+
+- **Unknown session/address returns `NeedsAttach`.** If the daemon does not know
+  your `(store_key, session_id, from-address)`, the CLI re-registers when it has
+  enough identity, otherwise it fails actionably.
+- **Ambiguous inference is refused.** If your session attends more than one address
+  and pass no `--from`/env, the send is refused rather than guessing.
+- **Explicit `--from` must be attended.** A same-user process can operate under
+  the v1 trust model, but the daemon still validates that the named session
+  attends the explicit sender address before using it.
+
+Use explicit `--from` when you attend multiple addresses or when the harness needs
+to re-register after a daemon restart. Do not rely on a silent `from = None`.
 
 Find targets by their self-registered attach descriptions, scope, or tags.
 
@@ -122,7 +331,7 @@ telex send --to <addr> --subject "<subject>" --body-file <path>   # body from a 
 Useful send flags:
 
 ```sh
-telex send --to <addr> --from <your-addr> --subject "<s>" --body "<s>" --cc <a,b> --kind <s> --attention interrupt|next-checkpoint|background|fyi --requires-disposition --metadata <json>
+telex send --to <addr> --from <your-addr> --subject "<s>" --body "<s>" --cc <a,b> --cc <c> --kind <s> --attention interrupt|next-checkpoint|background|fyi --requires-disposition --metadata <json>
 ```
 
 `--body` and `--body-file` are mutually exclusive and exactly one is required. Prefer
@@ -138,21 +347,13 @@ telex send --to <addr> --subject "Status" --body-file message.md --requires-disp
 
 `send` prints a receipt: `delivered`, `queued-unoccupied`, or `rejected-retired`, plus the new message id.
 
-A `queued-unoccupied` receipt is **durable**: the message is persisted and delivered by a later
-`telex wait` once a station re-occupies the address. On start, a holder recovers the queued backlog
-for its address, so messages sent while it was away are not lost — you do not need to scrape `inbox`
-to recover them. Messages already delivered to a waiter, or that you have terminally dispositioned
-(`handle`/`reject`/`close`), are not redelivered. Delivery is at-least-once across a holder restart:
-delivery is committed when the holder hands the frame to a `wait`, so a waiter that dies after the
-frame is sent but before it prints still counts as delivered (recover it from `inbox` if it required
-disposition). One-time transition note: the first holder started after upgrading to a build with
-durable delivery recovers its full undelivered history for the address — every message that is not
-terminally dispositioned, **including fire-and-forget `fyi`/`note` messages that are never
-dispositioned** — because there are no prior delivery records yet. Expect a one-time backlog on that
-first start. The backlog is a snapshot taken when the holder starts: dispositioning a message via
-`telex inbox` only prevents a *future* holder from re-recovering it — it won't pull back a message
-already seeded into the running holder's queue, which is delivered (then marked) once. After that
-first drain, steady-state delivery records keep the backlog empty.
+A `queued-unoccupied` receipt is **durable**: the message is persisted and
+delivered by a later `telex wait` once a station re-attends the address. Delivery
+is at-least-once: printing a message is transport only, and the message remains
+eligible until the agent runs `telex ack --id <id> --address <recipient>`. Ack is
+per recipient, so acking a message for address A never consumes the same
+`message_id` for cc recipient B. Terminal workflow dispositions (`handle`,
+`reject`, `close`) remain the way to close the work after ack/processing.
 
 Reply inside an existing thread:
 
@@ -161,7 +362,7 @@ telex reply --to-message <message-id> --body "<body>"
 telex reply --to-message <message-id> --body-file <path>   # reply body from a UTF-8 file (`-` = stdin)
 ```
 
-Optional reply flags are `--body-file <path>` (UTF-8 file body, `-` for stdin; mutually exclusive with `--body`, exactly one of the two required), `--from <your-addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, and `--requires-disposition`. As with `send`, `--from` defaults to `$TELEX_ADDRESS` / `--address`; the reply's destination is taken from the parent message's sender (so the parent must itself have had a `from`).
+Optional reply flags are `--body-file <path>` (UTF-8 file body, `-` for stdin; mutually exclusive with `--body`, exactly one of the two required), `--from <your-addr>`, `--subject <s>`, `--cc <a,b>` / repeated `--cc <c>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, and `--requires-disposition`. As with `send`, `--from` defaults to `$TELEX_ADDRESS` / `--address`; the reply's destination is taken from the parent message's sender (so the parent must itself have had a `from`).
 
 ## Reading
 
@@ -192,7 +393,7 @@ Global options apply to all subcommands.
 |---|---|
 | `--backend <name>` | Use a configured backend by name (or `$TELEX_BACKEND`); defaults to the configured default backend, or an implicit `default` sqlite store. |
 | `--db <path>` | Override the SQLite path for this invocation (sqlite backends only; or `$TELEX_DB`). |
-| `--address <addr>` | Default address (or `$TELEX_ADDRESS`) for commands that act on one address; also the default `from` for `send`/`reply`. |
+| `--address <addr>` | Default address (or `$TELEX_ADDRESS`) for commands that act on one address; also a `from` fallback for `send`/`reply` (which otherwise default `from` to the live local station you hold). |
 | `--json` / `--text` | Output format; default JSON when stdout is not a TTY, text when interactive. |
 
 Postgres connections are configured once as named backends with `telex backend add` (see Backends), not via per-call environment variables.
@@ -203,14 +404,16 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex attach` | Start a station on the address: become the live occupant, hold the lease, run the holder, and register the directory description. Blocks. Fails if the address is already occupied by a live lease. | `--address <addr>`, `--description <s>`, `--scope <s>`, `--tags <a,b>`, `--heartbeat-secs N`, `--poll-secs N` |
-| `telex detach` | Stop the station: release the lease and stop a running holder. | `--address <addr>` |
+| `telex attach` | One-shot register: attach this session to the address through the local exchange, claim the epoch lease, and register directory metadata. Exits immediately. | `--address <addr>`, `--session <id>` (or `$TELEX_SESSION_ID`), `--description <s>`, `--scope <s>`, `--tags <a,b>`, `--watch-pid anchor:<pid>` |
+| `telex detach` | One-shot detach: drop this session's in-memory membership and release epoch ownership non-destructively. | `--address <addr>`, `--session <id>` |
+| `telex station status` | Machine-readable projection of one session's attended addresses and waiter health. | `--session <id>` |
+| `telex station stop` | Stop a station and drain tracked waiters before detach. | `--address <addr>`, `--session <id>`, `--wait-grace-ms N` |
 
 ### RECEIVE
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex wait` | Block on the holder; on delivery print one message as JSON and exit. | `--address <addr>`, `--timeout-ms N` |
+| `telex wait` | Block on the local exchange; on delivery print one message as JSON and exit. Does not spawn a missing daemon; run `attach` first or after exit 3. Use `--min-attention interrupt` while focused; add `--wake-on-cc` only for explicit observer/relay wake. | `--address <addr>`, `--session <id>`, `--timeout-ms N`, `--min-attention <level>`, `--wake-on-cc`, `--reconnect-grace-ms N` |
 | `telex inbox` | List actionable messages requiring disposition and recent messages for the address. | `--address <addr>`, `--all`, `--limit N` |
 | `telex read` | Read a message. `--thread` shows compact thread context; `--full` shows full history. | `--id <message-id>`, `--thread`, `--full` |
 
@@ -218,14 +421,14 @@ Postgres connections are configured once as named backends with `telex backend a
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex send` | Send a message and print a delivery/queue/reject receipt plus message id. | `--to <addr>`, `--from <addr>`, `--subject <s>`, `--body <s>`, `--body-file <path>`, `--cc <a,b>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition`, `--metadata <json>` |
-| `telex reply` | Reply under a parent message thread. | `--to-message <id>`, `--body <s>`, `--body-file <path>`, `--from <addr>`, `--subject <s>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition` |
+| `telex send` | Send through the local exchange and print a delivery/queue/reject receipt plus message id. `from` must be an attended address for the session (or unambiguous from membership). `--cc` accepts repeated flags and comma-separated values. | `--session <id>`, `--to <addr>`, `--from <addr>`, `--subject <s>`, `--body <s>`, `--body-file <path>`, `--cc <a,b>`, `--cc <c>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition`, `--metadata <json>` |
+| `telex reply` | Reply under a parent message thread through the local exchange, optionally with CC visibility recipients. | `--session <id>`, `--to-message <id>`, `--body <s>`, `--body-file <path>`, `--from <addr>`, `--subject <s>`, `--cc <a,b>`, `--cc <c>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, `--requires-disposition` |
 
 ### DISPOSITION
 
 | Command | Purpose | Key flags |
 |---|---|---|
-| `telex ack` | Mark the message `acknowledged`. | `--id <message-id>`, `--note <s>` |
+| `telex ack` | Explicitly mark the delivered `(message_id, recipient address)` consumed in the daemon delivery buffer. | `--address <addr>` or `--recipient <addr>`, `--session <id>`, `--id <message-id>` |
 | `telex handle` | Mark the message `handled`. | `--id <message-id>`, `--note <s>` |
 | `telex defer` | Mark the message `deferred`. | `--id <message-id>`, `--note <s>` |
 | `telex reject` | Mark the message `rejected`. | `--id <message-id>`, `--note <s>` |
@@ -252,8 +455,8 @@ Postgres connections are configured once as named backends with `telex backend a
 | Command | Purpose | Key flags |
 |---|---|---|
 | `telex init` | Create `~/.telex/`, write a default sqlite backend, and initialize its schema. | `--backend <name>`, `--db <path>` |
-| `telex status` | Show the resolved backend, address, holder/IPC, and occupancy. | `--address <addr>` |
-| `telex skill` | Print these usage instructions (embedded in the binary). | `--address <addr>`, `--raw` |
+| `telex status` | Show the resolved backend/address projection. Use hidden `telex daemon status` for daemon internals. | `--address <addr>` |
+| `telex skill` | Print these usage instructions from the embedded single source. | `--address <addr>`, `--raw` |
 
 ### BACKENDS
 
@@ -292,9 +495,15 @@ acknowledged | handled | deferred | rejected | closed | escalated
 Terminal states, removed from the actionable inbox: `handled`, `rejected`, `closed`.
 Non-terminal states, still needing final disposition: `acknowledged`, `deferred`, `escalated`.
 
-## Latency: interrupt means next turn
+## Latency: interrupt steers now, others wait for the turn boundary
 
-Agent wake dominates perceived latency: measured waiter-exit-to-agent-turn time is roughly 6-26 seconds, while Telex backend delivery is sub-second. `interrupt` means the message should be handled at the next turn boundary; it is not preemption and cannot stop a model mid-turn. Shorter polling or push changes backend latency, not agent wake latency.
+In **push delivery**, an `interrupt` message is sent as an *immediate* steering
+interjection into the running turn -- the model sees it mid-stream, between its
+own iterations (not a hard preemption, but not next-turn-only either). Every
+other attention level is enqueued and delivered at the next turn boundary. In
+**pull mode**, agent wake dominates perceived latency (measured
+waiter-exit-to-agent-turn time is roughly 6-26 seconds, while backend delivery is
+sub-second), and `interrupt` only means "handle at the next turn boundary."
 
 ## Backends
 
@@ -339,27 +548,30 @@ the `entra` feature — which the published release binaries include.
 
 ## Worked example: two sessions
 
-Session A attaches to a durable address and waits. Run `telex attach` (the station's holder) and each single-shot `telex wait` (its waiter) in the background, bound to A's session — never as persistent processes that outlive it.
+Session A attaches to a durable address and waits. `attach` is one-shot; only
+`wait` blocks in the background.
 
 ```sh
-export TELEX_ADDRESS=session:a   # all of A's commands default to this address (and its from)
+export TELEX_ADDRESS=session:a   # optional: defaults A's wait/inbox to this address
+export TELEX_SESSION_ID=session-a # often supplied by the agent harness
 telex attach --address session:a --description "session A waiting for coordination" --scope project:telex --tags repo:telex,role:worker
 ```
 
-Then A waits with a **single-shot** background `telex wait` (session-bound, not blocking the foreground); it completes on the next delivery, which notifies A:
+Then A starts a **single-shot** background `telex wait`; it completes on the next delivery, which notifies A:
 
 ```sh
 telex wait --address session:a
 ```
 
-Session B also starts its own station in the background, bound to its session.
+Session B also registers its address.
 
 ```sh
-export TELEX_ADDRESS=session:b   # B's from; A's reply will route back here
+export TELEX_SESSION_ID=session-b
 telex attach --address session:b --description "session B requesting status" --scope project:telex --tags repo:telex,role:requester
+# B's send below stamps from=session:b automatically because B attends that address.
 ```
 
-Then Session B finds A and sends a disposition-required message. One-shot commands like `resolve` and `send` run directly — no background task needed; only the station's holder and each `telex wait` run in the background.
+Then Session B finds A and sends a disposition-required message. One-shot commands like `resolve` and `send` run directly — no background task needed.
 
 ```sh
 telex address list --scope project:telex --match "session A"
@@ -367,10 +579,11 @@ telex resolve --match "waiting for coordination" --scope project:telex
 telex send --to session:a --subject "Status request" --body "Please send your current status." --attention interrupt --requires-disposition
 ```
 
-A's `wait` command completes (exit 0) with the delivered message as JSON, which notifies A. A saves the JSON and **immediately re-arms** a fresh background `wait`, then reads the id from the saved JSON, handles the work, dispositions it, and replies in the same thread.
+A's `wait` command completes (exit 0) with the delivered message as JSON, which notifies A. A saves the JSON, **acks + dedupes by message id**, immediately re-arms a fresh background `wait` before longer processing, then handles the work, dispositions it, and replies in the same thread.
 
 ```sh
-telex wait --address session:a   # start this as a fresh background wait immediately
+telex ack --address session:a --id <message-id-from-wait-json>
+telex wait --address session:a   # start this as a fresh background wait after ack/dedupe
 telex handle --id <message-id-from-wait-json> --note "status prepared"
 telex reply --to-message <message-id-from-wait-json> --body "Status: holder is live; continuing work." --attention next-checkpoint
 ```
@@ -379,5 +592,6 @@ Session B waits, receives A's reply, and closes or handles it.
 
 ```sh
 telex wait --address session:b
+telex ack --address session:b --id <reply-message-id-from-wait-json>
 telex handle --id <reply-message-id-from-wait-json> --note "reply received"
 ```

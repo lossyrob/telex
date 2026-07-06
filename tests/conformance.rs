@@ -23,7 +23,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use telex::backend::Backend;
-use telex::model::{now_ms, Attention, LeaseClaim, LeaseOutcome, NewMessage};
+use telex::model::{
+    now_ms, Attention, DeliveryOutcome, EpochClaimResult, LeaseClaim, LeaseOutcome, NewMessage,
+};
 
 type BoxFut<T> = Pin<Box<dyn Future<Output = T> + Send>>;
 
@@ -93,24 +95,167 @@ where
     //     set_address_status / list_addresses ... addresses_directory
     //   claim_lease / heartbeat / release_lease /
     //     get_lease / occupancy ................. leases_liveness
-    //   max_id / fetch_after .................... cursor_delivery, concurrency
-    //   mark_delivered / undelivered_backlog .... delivery_backlog
+    //   fetch_undelivered ....................... undelivered_delivery, delivery_backlog, concurrency
+    //   mark_delivered .......................... undelivered_delivery, delivery_backlog
     //   insert_message / get_message /
     //     thread_messages ....................... messages_threading
     //   inbox ................................... inbox_derivation
+    //   claim_epoch_lease / heartbeat_epoch /
+    //     release_epoch_lease / reset_epoch_lease
+    //     / mark_consumed_if_current_owner ...... epoch_leases_and_ack_fence
+    //   record/clear/detach_tombstone .......... detach_tombstones
     //   insert_disposition / dispositions_for ... dispositions, inbox_derivation
     //   export .................................. export_filters
     capabilities_and_signals(make_store().await).await;
     schema_idempotent(make_store().await).await;
     addresses_directory(make_store().await).await;
     leases_liveness(make_store().await).await;
-    cursor_delivery(make_store().await).await;
+    undelivered_delivery(make_store().await).await;
     delivery_backlog(make_store().await).await;
+    epoch_leases_and_ack_fence(make_store().await).await;
+    epoch_concurrent_first_claim(make_store().await).await;
+    detach_tombstones(make_store().await).await;
     messages_threading(make_store().await).await;
     inbox_derivation(make_store().await).await;
     dispositions(make_store().await).await;
     export_filters(make_store().await).await;
     concurrency(make_store().await).await;
+}
+
+/// Epoch leases + explicit Ack fence: the durable owner/epoch row is the authority
+/// for Ack, stale reclaim advances epochs, old owners get NotOwner, and reset preserves
+/// the epoch high-water.
+async fn epoch_leases_and_ack_fence(store: Store) {
+    let b = store.connect().await;
+    let addr = "epoch:1";
+
+    let first = match b.claim_epoch_lease(addr, "owner-a", 15).await.unwrap() {
+        EpochClaimResult::Claimed(claimed) => claimed,
+        other => panic!("expected first epoch claim, got {other:?}"),
+    };
+    assert_eq!(first.lease_epoch, 1);
+    assert!(b
+        .heartbeat_epoch(addr, "owner-a", first.lease_epoch)
+        .await
+        .unwrap());
+
+    match b.claim_epoch_lease(addr, "owner-b", 15).await.unwrap() {
+        EpochClaimResult::AlreadyOwned {
+            lease_epoch,
+            owner_instance_id,
+            ..
+        } => {
+            assert_eq!(lease_epoch, first.lease_epoch);
+            assert_eq!(owner_instance_id, "owner-a");
+        }
+        other => panic!("live owner should block claim, got {other:?}"),
+    }
+
+    let message = b.insert_message(&new_msg(addr)).await.unwrap();
+    assert_eq!(
+        b.mark_consumed_if_current_owner(addr, "owner-b", first.lease_epoch + 1, message.id)
+            .await
+            .unwrap(),
+        DeliveryOutcome::NotOwner,
+        "NotOwner has precedence for non-current owners"
+    );
+    assert_eq!(
+        b.mark_consumed_if_current_owner(addr, "owner-a", first.lease_epoch, message.id)
+            .await
+            .unwrap(),
+        DeliveryOutcome::Marked
+    );
+    assert_eq!(
+        b.mark_consumed_if_current_owner(addr, "owner-a", first.lease_epoch, message.id)
+            .await
+            .unwrap(),
+        DeliveryOutcome::AlreadyConsumed
+    );
+
+    assert!(b
+        .release_epoch_lease(addr, "owner-a", first.lease_epoch)
+        .await
+        .unwrap());
+    let second = match b.claim_epoch_lease(addr, "owner-b", 15).await.unwrap() {
+        EpochClaimResult::Claimed(claimed) => claimed,
+        other => panic!("expected successor claim after release, got {other:?}"),
+    };
+    assert_eq!(second.lease_epoch, first.lease_epoch + 1);
+
+    assert_eq!(
+        b.reset_epoch_lease(addr).await.unwrap(),
+        Some(second.lease_epoch)
+    );
+    let third = match b.claim_epoch_lease(addr, "owner-c", 15).await.unwrap() {
+        EpochClaimResult::Claimed(claimed) => claimed,
+        other => panic!("expected successor claim after reset, got {other:?}"),
+    };
+    assert_eq!(third.lease_epoch, second.lease_epoch + 1);
+}
+
+async fn detach_tombstones(store: Store) {
+    let b = store.connect().await;
+    let addr = "detach:1";
+    let claimed = match b.claim_epoch_lease(addr, "owner-a", 15).await.unwrap() {
+        EpochClaimResult::Claimed(claimed) => claimed,
+        other => panic!("expected claim, got {other:?}"),
+    };
+    assert!(
+        b.release_epoch_lease_for_detach(
+            addr,
+            "owner-a",
+            claimed.lease_epoch,
+            "session-a",
+            "Detach",
+        )
+        .await
+        .unwrap()
+    );
+    let tombstone = b
+        .detach_tombstone("session-a", addr)
+        .await
+        .unwrap()
+        .expect("detach tombstone");
+    assert_eq!(tombstone.reason, "Detach");
+    b.clear_detach_tombstone("session-a", addr).await.unwrap();
+    assert!(b
+        .detach_tombstone("session-a", addr)
+        .await
+        .unwrap()
+        .is_none());
+}
+
+async fn epoch_concurrent_first_claim(store: Store) {
+    let addr = "epoch:first-race";
+    let first_backend = store.connect().await;
+    let second_backend = store.connect().await;
+    let first = {
+        tokio::spawn(async move {
+            first_backend
+                .claim_epoch_lease(addr, "owner-race-a", 15)
+                .await
+                .expect("first concurrent claim must not error")
+        })
+    };
+    let second = {
+        tokio::spawn(async move {
+            second_backend
+                .claim_epoch_lease(addr, "owner-race-b", 15)
+                .await
+                .expect("second concurrent claim must not error")
+        })
+    };
+    let results = vec![first.await.unwrap(), second.await.unwrap()];
+    let claimed = results
+        .iter()
+        .filter(|result| matches!(result, EpochClaimResult::Claimed(_)))
+        .count();
+    let already_owned = results
+        .iter()
+        .filter(|result| matches!(result, EpochClaimResult::AlreadyOwned { .. }))
+        .count();
+    assert_eq!(claimed, 1, "exactly one fresh claimant should win");
+    assert_eq!(already_owned, 1, "the loser should see AlreadyOwned");
 }
 
 /// Capabilities + signals smoke coverage: `kind`, `capabilities`, and the best-effort
@@ -347,54 +492,73 @@ async fn leases_liveness(store: Store) {
         Some("B")
     );
 
-    // Release frees the address.
+    // Release clears occupant fields but retains the row (epoch preserved for monotonicity).
     assert!(b.release_lease(stale, "B").await.unwrap());
-    assert!(b.get_lease(stale).await.unwrap().is_none());
+    // Row persists; occupancy is now false.
     assert!(!b.occupancy(stale, 1).await.unwrap().occupied);
 
     // Releasing a non-existent lease reports no change.
     assert!(!b.release_lease("lease:none", "X").await.unwrap());
 }
 
-/// Cursor delivery: `max_id`/`fetch_after` return rows strictly after the cursor in
-/// monotonic id order, scoped to one recipient address.
-async fn cursor_delivery(store: Store) {
+/// Undelivered delivery: `fetch_undelivered` returns every message addressed here that has no
+/// delivery record and a non-terminal disposition, in id order, scoped to one recipient — and
+/// crucially returns a lower undelivered id even after a HIGHER id has been delivered. That last
+/// property is what closes the Postgres commit-order gap (issue #18): visibility no longer depends
+/// on a monotonic id cursor, so a concurrently-committed lower id is never skipped.
+async fn undelivered_delivery(store: Store) {
     let b = store.connect().await;
-    let addr = "cur:1";
+    let addr = "und:1";
 
     let m1 = b.insert_message(&new_msg(addr)).await.unwrap();
     let m2 = b.insert_message(&new_msg(addr)).await.unwrap();
     let m3 = b.insert_message(&new_msg(addr)).await.unwrap();
     assert!(m1.id < m2.id && m2.id < m3.id, "ids are monotonic");
 
-    // A message to another address must not bleed into this cursor.
-    b.insert_message(&new_msg("cur:other")).await.unwrap();
+    // A message to another address must not bleed into this recipient's undelivered set.
+    b.insert_message(&new_msg("und:other")).await.unwrap();
 
-    assert_eq!(b.max_id(addr).await.unwrap(), m3.id);
-
-    let from_zero = b.fetch_after(addr, 0).await.unwrap();
+    let all = b.fetch_undelivered(addr).await.unwrap();
     assert_eq!(
-        from_zero.iter().map(|m| m.id).collect::<Vec<_>>(),
-        vec![m1.id, m2.id, m3.id]
+        all.iter().map(|m| m.id).collect::<Vec<_>>(),
+        vec![m1.id, m2.id, m3.id],
+        "all undelivered messages for the address, ordered by id, nothing from other addresses"
     );
 
-    let after_first = b.fetch_after(addr, m1.id).await.unwrap();
+    // The gap-closing invariant: deliver the HIGHER ids m2 and m3; the lower undelivered m1 must
+    // still be returned. A high-water cursor parked at m3 would skip m1 — `fetch_undelivered` does
+    // not, because delivery state (not id ordering) decides visibility.
+    b.mark_delivered(m2.id, addr, Some("holderA"))
+        .await
+        .unwrap();
+    b.mark_delivered(m3.id, addr, Some("holderA"))
+        .await
+        .unwrap();
     assert_eq!(
-        after_first.iter().map(|m| m.id).collect::<Vec<_>>(),
-        vec![m2.id, m3.id],
-        "fetch_after returns rows strictly after the cursor"
+        b.fetch_undelivered(addr)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect::<Vec<_>>(),
+        vec![m1.id],
+        "a lower undelivered id survives delivery of higher ids (issue #18 invariant)"
     );
 
+    // Delivering the last one empties the set.
+    b.mark_delivered(m1.id, addr, Some("holderA"))
+        .await
+        .unwrap();
     assert!(
-        b.fetch_after(addr, m3.id).await.unwrap().is_empty(),
-        "no rows beyond the head"
+        b.fetch_undelivered(addr).await.unwrap().is_empty(),
+        "no undelivered messages remain once all are delivered"
     );
 }
 
-/// Durable delivery backlog: `mark_delivered` records a holder->waiter handoff, and
-/// `undelivered_backlog(addr, upto_id)` returns the messages at or below the holder's start cursor
-/// that are neither delivered nor terminally dispositioned, in id order — exactly the set a holder
-/// re-enqueues on restart so messages queued while unoccupied are not skipped past `max_id`.
+/// Delivery + disposition interplay: `mark_delivered` records a holder->waiter handoff, and
+/// `fetch_undelivered` excludes a message once it is delivered OR terminally dispositioned, in id
+/// order — the two orthogonal do-not-deliver signals (a delivery record, primary; a terminal
+/// disposition, secondary for out-of-band `inbox` recovery), with the delivery record dominating.
 async fn delivery_backlog(store: Store) {
     let b = store.connect().await;
     let addr = "backlog:1";
@@ -403,42 +567,30 @@ async fn delivery_backlog(store: Store) {
     let m1 = b.insert_message(&new_msg(addr)).await.unwrap();
     let m2 = b.insert_message(&new_msg(addr)).await.unwrap();
     let m3 = b.insert_message(&new_msg(addr)).await.unwrap();
-    // A message to another address must never leak into this address's backlog.
+    // A message to another address must never leak into this address's undelivered set.
     let other = b.insert_message(&new_msg("backlog:other")).await.unwrap();
 
-    let head = b.max_id(addr).await.unwrap();
-    assert_eq!(head, m3.id);
-
-    // All three are undelivered and undispositioned -> the full backlog, ordered by id.
-    let bl = b.undelivered_backlog(addr, head).await.unwrap();
+    // All three are undelivered and undispositioned -> the full set, ordered by id.
+    let bl = b.fetch_undelivered(addr).await.unwrap();
     assert_eq!(
         bl.iter().map(|m| m.id).collect::<Vec<_>>(),
         vec![m1.id, m2.id, m3.id],
-        "undelivered, non-terminal messages are the backlog, ordered by id"
+        "undelivered, non-terminal messages, ordered by id"
     );
     assert!(
         !bl.iter().any(|m| m.id == other.id),
-        "another address's messages never appear in this backlog"
+        "another address's messages never appear here"
     );
 
-    // The upto_id bound excludes messages above the holder's start cursor: those belong to the
-    // streaming `fetch_after` drain, not the seeded backlog. This is the no-double-delivery guard.
-    let bounded = b.undelivered_backlog(addr, m2.id).await.unwrap();
-    assert_eq!(
-        bounded.iter().map(|m| m.id).collect::<Vec<_>>(),
-        vec![m1.id, m2.id],
-        "undelivered_backlog honors the id<=upto_id high-water bound"
-    );
-
-    // Delivering m1 (the holder->waiter handoff) drops it from the backlog: not redelivered.
+    // Delivering m1 (the holder->waiter handoff) drops it from the undelivered set: not redelivered.
     b.mark_delivered(m1.id, addr, Some("holderA"))
         .await
         .unwrap();
-    let after = b.undelivered_backlog(addr, head).await.unwrap();
+    let after = b.fetch_undelivered(addr).await.unwrap();
     assert_eq!(
         after.iter().map(|m| m.id).collect::<Vec<_>>(),
         vec![m2.id, m3.id],
-        "a delivered message is not re-surfaced as backlog"
+        "a delivered message is not re-surfaced as undelivered"
     );
 
     // A terminal disposition on a never-delivered message also removes it — covers out-of-band
@@ -446,32 +598,32 @@ async fn delivery_backlog(store: Store) {
     b.insert_disposition(m2.id, addr, "handled", None, None)
         .await
         .unwrap();
-    let after2 = b.undelivered_backlog(addr, head).await.unwrap();
+    let after2 = b.fetch_undelivered(addr).await.unwrap();
     assert_eq!(
         after2.iter().map(|m| m.id).collect::<Vec<_>>(),
         vec![m3.id],
-        "a terminally dispositioned message is excluded from the backlog"
+        "a terminally dispositioned message is excluded"
     );
 
-    // A non-terminal disposition keeps a never-delivered message in the backlog.
+    // A non-terminal disposition keeps a never-delivered message in the undelivered set.
     b.insert_disposition(m3.id, addr, "acknowledged", None, None)
         .await
         .unwrap();
     assert_eq!(
-        b.undelivered_backlog(addr, head)
+        b.fetch_undelivered(addr)
             .await
             .unwrap()
             .iter()
             .map(|m| m.id)
             .collect::<Vec<_>>(),
         vec![m3.id],
-        "a non-terminal disposition (acknowledged) does not remove a message from the backlog"
+        "a non-terminal disposition (acknowledged) does not exclude a message"
     );
 
     // Two-signal interaction: a *delivered* message that is later terminally dispositioned and then
-    // reopened (latest disposition non-terminal) must STILL stay out of the backlog. The durable
-    // delivery record dominates the disposition state, so a reopen never resurrects an already-
-    // delivered message — distinguishing this from inbox's latest-disposition-wins rule.
+    // reopened (latest disposition non-terminal) must STILL stay excluded. The durable delivery
+    // record dominates the disposition state, so a reopen never resurrects an already-delivered
+    // message — distinguishing this from inbox's latest-disposition-wins rule.
     b.mark_delivered(m3.id, addr, Some("holderA"))
         .await
         .unwrap();
@@ -482,8 +634,8 @@ async fn delivery_backlog(store: Store) {
         .await
         .unwrap();
     assert!(
-        b.undelivered_backlog(addr, head).await.unwrap().is_empty(),
-        "a delivered message stays out of the backlog even when reopened (delivery record dominates)"
+        b.fetch_undelivered(addr).await.unwrap().is_empty(),
+        "a delivered message stays excluded even when reopened (delivery record dominates)"
     );
 }
 
@@ -689,9 +841,9 @@ async fn export_filters(store: Store) {
 }
 
 /// Concurrency: multiple independent connections inserting concurrently each receive a
-/// distinct id with no lost writes (the cursor model depends on this). Each writer records the
-/// ids it was handed, so the assertions exercise concurrent id *assignment* rather than merely
-/// restating `fetch_after`'s `ORDER BY id`.
+/// distinct id with no lost writes. Each writer records the ids it was handed, so the assertions
+/// exercise concurrent id *assignment* rather than merely restating `fetch_undelivered`'s
+/// `ORDER BY id`.
 async fn concurrency(store: Store) {
     let addr = "conc:1";
     const WRITERS: usize = 4;
@@ -728,17 +880,18 @@ async fn concurrency(store: Store) {
     );
 
     // The store holds exactly the ids handed back to the writers — no lost writes, none extra.
+    // None are delivered, so the undelivered set is the full set of stored ids.
     let conn = store.connect().await;
-    let rows = conn.fetch_after(addr, 0).await.unwrap();
+    let rows = conn.fetch_undelivered(addr).await.unwrap();
     let stored: HashSet<i64> = rows.iter().map(|m| m.id).collect();
     assert_eq!(
         stored, assigned_set,
         "persisted ids must be exactly the ids handed back to the writers (no lost writes)"
     );
     assert_eq!(
-        conn.max_id(addr).await.unwrap(),
+        rows.iter().map(|m| m.id).max().unwrap(),
         *assigned_set.iter().max().unwrap(),
-        "max_id reflects the highest assigned id"
+        "the highest persisted id matches the highest assigned id"
     );
 }
 
@@ -957,5 +1110,658 @@ mod postgres_fixture {
             },
         )
         .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn postgres_delivery_consumed_backfill_retries_until_marker() {
+        let require = std::env::var("TELEX_PG_REQUIRE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let url = match std::env::var("TELEX_PG_URL") {
+            Ok(u) if !u.trim().is_empty() => u,
+            _ => {
+                assert!(
+                    !require,
+                    "TELEX_PG_REQUIRE is set but TELEX_PG_URL is unset/empty; \
+                     refusing to skip the Postgres backfill retry test."
+                );
+                eprintln!(
+                    "[conformance] TELEX_PG_URL not set; skipping the Postgres backfill retry test."
+                );
+                return;
+            }
+        };
+        let mut cfg: tokio_postgres::Config = url
+            .parse()
+            .expect("TELEX_PG_URL must be a libpq URI or key=value DSN");
+        if let Ok(pw) = std::env::var("TELEX_PG_PASSWORD") {
+            if !pw.is_empty() {
+                cfg.password(pw);
+            }
+        }
+        let schema = sanitize_ident(&format!(
+            "telex_backfill_{}_{}",
+            std::process::id(),
+            now_ms()
+        ))
+        .expect("derived schema name must be valid");
+
+        admin_exec(
+            &cfg,
+            &format!(
+                "DROP SCHEMA IF EXISTS {schema} CASCADE;
+                 CREATE SCHEMA {schema};
+                 CREATE TABLE {schema}.deliveries (
+                    id bigserial PRIMARY KEY,
+                    message_id bigint NOT NULL,
+                    recipient text NOT NULL,
+                    occupant text,
+                    delivered_at_ms bigint NOT NULL,
+                    UNIQUE(message_id, recipient)
+                 );
+                 CREATE TABLE {schema}.telex_schema_meta (
+                    key text PRIMARY KEY,
+                    value text NOT NULL
+                 );
+                 INSERT INTO {schema}.deliveries(message_id, recipient, delivered_at_ms)
+                 VALUES (1, 'addr:old', 123);"
+            ),
+        )
+        .await
+        .expect("seed partial migration state");
+
+        let backend = PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .expect("connect postgres");
+        backend.init_schema().await.expect("retry init schema");
+        drop(backend);
+
+        let (client, connection) = cfg
+            .connect(make_tls().expect("tls"))
+            .await
+            .expect("connect");
+        let handle = tokio::spawn(async move {
+            let _ = connection.await;
+        });
+        let row = client
+            .query_one(
+                &format!(
+                    "SELECT consumed_at_ms,
+                            EXISTS(
+                              SELECT 1 FROM {schema}.telex_schema_meta
+                              WHERE key='delivery_consumed_backfill_v1_complete' AND value='1'
+                            ) AS marker
+                     FROM {schema}.deliveries
+                     WHERE message_id=1 AND recipient='addr:old'"
+                ),
+                &[],
+            )
+            .await
+            .expect("read backfilled row");
+        let consumed_at_ms: Option<i64> = row.get("consumed_at_ms");
+        let marker: bool = row.get("marker");
+        assert_eq!(consumed_at_ms, Some(123));
+        assert!(marker, "migration marker should be written after backfill");
+        let index_exists: bool = client
+            .query_one(
+                "SELECT to_regclass($1) IS NOT NULL",
+                &[&format!("{schema}.deliveries_recipient_pending_idx")],
+            )
+            .await
+            .expect("check pending index")
+            .get(0);
+        assert!(
+            index_exists,
+            "pending-delivery index should be created after ALTER"
+        );
+        drop(client);
+        let _ = handle.await;
+
+        admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+            .await
+            .expect("post-test schema drop");
+    }
+
+    /// Issue #18, against real Postgres MVCC: a lower id committed AFTER a higher id (reverse commit
+    /// order) must still be delivered by the LIVE holder with no restart. Two independent
+    /// connections insert to one address; connection A holds the LOWER id in an open transaction
+    /// while connection B commits the HIGHER id. After the higher id is delivered and A finally
+    /// commits, `fetch_undelivered` must return the lower id — whereas the old high-water cursor
+    /// (`WHERE id > <delivered>`) would skip it. This is the faithful reproduction the conformance
+    /// battery (which inserts via auto-committing `insert_message`) cannot express. Gated on
+    /// `TELEX_PG_URL`; uses a distinct `telex_issue18_*` schema so it never collides with the
+    /// conformance schema.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn postgres_out_of_order_commit_delivers_lower_id() {
+        let require = std::env::var("TELEX_PG_REQUIRE")
+            .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+        let url = match std::env::var("TELEX_PG_URL") {
+            Ok(u) if !u.trim().is_empty() => u,
+            _ => {
+                assert!(
+                    !require,
+                    "TELEX_PG_REQUIRE is set but TELEX_PG_URL is unset/empty; \
+                     refusing to skip the issue-#18 out-of-order-commit test."
+                );
+                eprintln!(
+                    "[conformance] TELEX_PG_URL not set; skipping the issue-#18 out-of-order test."
+                );
+                return;
+            }
+        };
+
+        let mut cfg: tokio_postgres::Config = url
+            .parse()
+            .expect("TELEX_PG_URL must be a libpq URI or key=value DSN");
+        if let Ok(pw) = std::env::var("TELEX_PG_PASSWORD") {
+            if !pw.is_empty() {
+                cfg.password(pw);
+            }
+        }
+        let schema = sanitize_ident(&format!(
+            "telex_issue18_{}_{}",
+            std::process::id(),
+            now_ms()
+        ))
+        .expect("derived schema name must be a valid identifier");
+
+        // Create the schema + tables via the backend, then run the body with panic-safe cleanup.
+        let b = PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .expect("connect postgres");
+        b.init_schema().await.expect("init postgres schema");
+        drop(b);
+
+        let cfg_body = cfg.clone();
+        let schema_body = schema.clone();
+        let result = tokio::spawn(async move {
+            out_of_order_commit_body(cfg_body, &schema_body).await;
+        })
+        .await;
+
+        admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+            .await
+            .expect("post-test schema drop");
+        if let Err(e) = result {
+            std::panic::resume_unwind(e.into_panic());
+        }
+    }
+
+    /// Open two independent connections, force reverse-id commit order, and assert
+    /// `fetch_undelivered` sees the late lower id while a raw `id > <delivered>` cursor does not.
+    async fn out_of_order_commit_body(cfg: tokio_postgres::Config, schema: &str) {
+        let addr = "reorder:pg";
+
+        // Connection A: BEGIN; insert the LOWER id; hold the transaction open (uncommitted, so the
+        // row is invisible to every other connection).
+        let (ca, ca_conn) = cfg
+            .connect(make_tls().expect("tls"))
+            .await
+            .expect("connect A");
+        let ca_handle = tokio::spawn(async move {
+            let _ = ca_conn.await;
+        });
+        ca.batch_execute(&format!("SET search_path TO {schema}; BEGIN"))
+            .await
+            .unwrap();
+        let id_lower: i64 = ca
+            .query_one(
+                "INSERT INTO messages(to_addr, body, sent_at_ms, created_at_ms) \
+                 VALUES ($1,'lower',0,0) RETURNING id",
+                &[&addr],
+            )
+            .await
+            .unwrap()
+            .get("id");
+
+        // Connection B (auto-commit): insert the HIGHER id and commit it immediately.
+        let (cb, cb_conn) = cfg
+            .connect(make_tls().expect("tls"))
+            .await
+            .expect("connect B");
+        let cb_handle = tokio::spawn(async move {
+            let _ = cb_conn.await;
+        });
+        cb.batch_execute(&format!("SET search_path TO {schema}"))
+            .await
+            .unwrap();
+        let id_higher: i64 = cb
+            .query_one(
+                "INSERT INTO messages(to_addr, body, sent_at_ms, created_at_ms) \
+                 VALUES ($1,'higher',0,0) RETURNING id",
+                &[&addr],
+            )
+            .await
+            .unwrap()
+            .get("id");
+        assert!(
+            id_higher > id_lower,
+            "B must allocate a higher id than A (got {id_higher} vs {id_lower})"
+        );
+
+        // The holder's backend connection. Only the committed higher id is visible; A's lower id is
+        // still in flight.
+        let backend = PgBackend::connect_with(cfg.clone(), Some(schema))
+            .await
+            .expect("connect backend");
+        let before: Vec<i64> = backend
+            .fetch_undelivered(addr)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            before,
+            vec![id_higher],
+            "only the committed higher id is visible while A's transaction is open"
+        );
+
+        // The holder delivers the higher id (this is the moment a high-water cursor would advance
+        // past it and lose the still-uncommitted lower id forever, until a restart).
+        backend
+            .mark_delivered(id_higher, addr, Some("holder-pg"))
+            .await
+            .unwrap();
+
+        // Now A commits: the LOWER id becomes visible, committed *behind* the delivered higher id.
+        ca.batch_execute("COMMIT").await.unwrap();
+
+        // THE FIX: the live holder's drain query returns the late lower id — no restart required.
+        let undelivered: Vec<i64> = backend
+            .fetch_undelivered(addr)
+            .await
+            .unwrap()
+            .iter()
+            .map(|m| m.id)
+            .collect();
+        assert_eq!(
+            undelivered,
+            vec![id_lower],
+            "fetch_undelivered returns the concurrently-committed lower id (issue #18 closed)"
+        );
+
+        // CONTRAST: the OLD high-water cursor model (`id > <delivered>`) skips it. We run that raw
+        // query inline (the `fetch_after` method that did this is removed) to show it misses the
+        // lower id even though it is now committed and undelivered — exactly the bug #18 fixes.
+        let cursor_rows = cb
+            .query(
+                "SELECT id FROM messages WHERE to_addr=$1 AND id>$2 ORDER BY id",
+                &[&addr, &id_higher],
+            )
+            .await
+            .unwrap();
+        assert!(
+            cursor_rows.is_empty(),
+            "a high-water cursor parked at the delivered id skips the lower id (the #18 bug)"
+        );
+
+        drop(ca);
+        drop(cb);
+        let _ = ca_handle.await;
+        let _ = cb_handle.await;
+    }
+}
+
+// ----------------------------------------------------------------------------------------
+// SQLite epoch-aware storage tests (P1 — §11 / §13 / §17 rows 2,4,5,7,12,17,19)
+// ----------------------------------------------------------------------------------------
+
+#[cfg(feature = "sqlite")]
+mod sqlite_epoch_tests {
+    use super::*;
+    use telex::backend::sqlite::SqliteBackend;
+    use telex::model::{DeliveryOutcome, EpochClaimResult};
+
+    fn tmp_path(label: &str) -> String {
+        let mut p = std::env::temp_dir();
+        p.push(format!(
+            "telex-epoch-{}-{}-{}.db",
+            label,
+            std::process::id(),
+            now_ms()
+        ));
+        p.to_string_lossy().to_string()
+    }
+
+    async fn fresh(label: &str) -> (SqliteBackend, String) {
+        let path = tmp_path(label);
+        let b = SqliteBackend::open(&path).expect("open");
+        b.init_schema().await.expect("init");
+        (b, path)
+    }
+
+    /// After `release_lease`, the row must persist (epoch preserved); a second claim must get
+    /// epoch+1, not epoch=1 — proving the monotonic high-water mark is never reset.
+    #[tokio::test]
+    async fn epoch_non_deleting_release_and_monotonicity() {
+        let (b, _path) = fresh("epoch-monotone").await;
+        let addr = "epoch:monotone";
+        let claim = LeaseClaim {
+            address: addr.to_string(),
+            occupant: "A".into(),
+            ..Default::default()
+        };
+
+        // First claim → epoch 1.
+        b.claim_lease(&claim, 60).await.unwrap();
+        let row1 = b.get_lease(addr).await.unwrap().expect("row after claim");
+        assert_eq!(row1.lease_epoch, Some(1), "first claim epoch=1");
+
+        // Release — row must survive.
+        assert!(b.release_lease(addr, "A").await.unwrap());
+        let row2 = b.get_lease(addr).await.unwrap().expect("row after release");
+        assert_eq!(row2.lease_epoch, Some(1), "epoch preserved after release");
+        assert_eq!(row2.owner_instance_id, None, "owner cleared after release");
+
+        // Second claim (different occupant) must increment to epoch 2.
+        let claim2 = LeaseClaim {
+            address: addr.to_string(),
+            occupant: "B".into(),
+            ..Default::default()
+        };
+        b.claim_lease(&claim2, 60).await.unwrap();
+        let row3 = b
+            .get_lease(addr)
+            .await
+            .unwrap()
+            .expect("row after re-claim");
+        assert_eq!(
+            row3.lease_epoch,
+            Some(2),
+            "second claim epoch=2 (monotonic)"
+        );
+    }
+
+    /// `release_lease` must NOT delete the row (§11.2 non-deleting release).
+    #[tokio::test]
+    async fn epoch_release_no_row_deletion() {
+        let (b, _path) = fresh("epoch-nodelete").await;
+        let addr = "epoch:nodelete";
+        let claim = LeaseClaim {
+            address: addr.to_string(),
+            occupant: "X".into(),
+            ..Default::default()
+        };
+        b.claim_lease(&claim, 60).await.unwrap();
+        assert!(b.release_lease(addr, "X").await.unwrap());
+        // Row must still exist after release.
+        assert!(
+            b.get_lease(addr).await.unwrap().is_some(),
+            "release_lease must not delete the row"
+        );
+        // And occupancy must be false.
+        assert!(!b.occupancy(addr, 60).await.unwrap().occupied);
+    }
+
+    /// A v0 store with an existing `deliveries` table but no `consumed_at_ms` column must migrate
+    /// cleanly. This exercises the guarded ALTER TABLE path.
+    #[tokio::test]
+    async fn legacy_deliveries_table_migrates_consumed_column() {
+        let path = tmp_path("legacy-deliveries");
+        {
+            let conn = rusqlite::Connection::open(&path).expect("open legacy sqlite");
+            conn.execute_batch(
+                "CREATE TABLE deliveries (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    message_id      INTEGER NOT NULL,
+                    recipient       TEXT NOT NULL,
+                    occupant        TEXT,
+                    delivered_at_ms INTEGER NOT NULL,
+                    UNIQUE(message_id, recipient)
+                );
+                INSERT INTO deliveries(message_id, recipient, occupant, delivered_at_ms)
+                VALUES (7, 'addr:a', 'old-holder', 1234);",
+            )
+            .expect("seed legacy deliveries");
+        }
+
+        let b = SqliteBackend::open(&path).expect("open migrated sqlite");
+        b.init_schema().await.expect("migrate schema");
+
+        let conn = rusqlite::Connection::open(&path).expect("reopen migrated sqlite");
+        let consumed_at: i64 = conn
+            .query_row(
+                "SELECT consumed_at_ms FROM deliveries WHERE message_id=7 AND recipient='addr:a'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("consumed_at_ms backfilled");
+        assert_eq!(consumed_at, 1234);
+    }
+
+    /// `heartbeat_epoch` returns `true` for current owner/epoch, `false` for stale/wrong.
+    #[tokio::test]
+    async fn epoch_heartbeat_staleness() {
+        let (b, _path) = fresh("epoch-hb").await;
+        let addr = "epoch:hb";
+        let owner = "owner-hb";
+
+        // Set up via claim_epoch_lease.
+        let result = b.claim_epoch_lease(addr, owner, 15).await.unwrap();
+        let epoch = match result {
+            EpochClaimResult::Claimed(ref e) => e.lease_epoch,
+            other => panic!("expected Claimed, got {:?}", other),
+        };
+
+        // Correct owner+epoch → returns true.
+        assert!(
+            b.heartbeat_epoch(addr, owner, epoch).await.unwrap(),
+            "heartbeat with correct owner+epoch must return true"
+        );
+
+        // Wrong epoch → returns false.
+        assert!(
+            !b.heartbeat_epoch(addr, owner, epoch + 99).await.unwrap(),
+            "heartbeat with wrong epoch must return false"
+        );
+
+        // Wrong owner → returns false.
+        assert!(
+            !b.heartbeat_epoch(addr, "impostor", epoch).await.unwrap(),
+            "heartbeat with wrong owner must return false"
+        );
+    }
+
+    /// `mark_consumed_if_current_owner` returns the correct `DeliveryOutcome` variant based on
+    /// ownership check and existing delivery state (§11.3 / §13).
+    #[tokio::test]
+    async fn epoch_mark_consumed_outcomes() {
+        let (b, _path) = fresh("epoch-consume").await;
+
+        let addr = "epoch:consume";
+        let owner = "owner-consume";
+
+        // Claim lease.
+        let claim_result = b.claim_epoch_lease(addr, owner, 15).await.unwrap();
+        let epoch = match claim_result {
+            EpochClaimResult::Claimed(ref e) => e.lease_epoch,
+            other => panic!("expected Claimed, got {:?}", other),
+        };
+
+        // Insert a message addressed to addr.
+        let msg = b
+            .insert_message(&NewMessage {
+                to_addr: addr.to_string(),
+                body: "hello".to_string(),
+                attention: Attention::Background,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let mid = msg.id;
+
+        // Not owner (wrong owner_instance_id) → NotOwner wins over all.
+        assert_eq!(
+            b.mark_consumed_if_current_owner(addr, "impostor", epoch, mid)
+                .await
+                .unwrap(),
+            DeliveryOutcome::NotOwner
+        );
+
+        // AckNoOp case: message exists, delivery row pending (fan-out created by insert_message)
+        // but we haven't consumed it yet from the correct owner side — wait, the row DOES exist
+        // (fan-out created NULL). So this should be pending → Marked on first call.
+        // First call with correct owner/epoch → Marked.
+        assert_eq!(
+            b.mark_consumed_if_current_owner(addr, owner, epoch, mid)
+                .await
+                .unwrap(),
+            DeliveryOutcome::Marked,
+            "first mark should return Marked"
+        );
+
+        // Second call → AlreadyConsumed.
+        assert_eq!(
+            b.mark_consumed_if_current_owner(addr, owner, epoch, mid)
+                .await
+                .unwrap(),
+            DeliveryOutcome::AlreadyConsumed,
+            "second mark should return AlreadyConsumed"
+        );
+
+        // AckNoOp: message with no delivery row at all.
+        let msg2 = b
+            .insert_message(&NewMessage {
+                to_addr: "epoch:other".to_string(),
+                body: "other".to_string(),
+                attention: Attention::Background,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        // msg2.id was sent to a different address, so no delivery row for addr.
+        assert_eq!(
+            b.mark_consumed_if_current_owner(addr, owner, epoch, msg2.id)
+                .await
+                .unwrap(),
+            DeliveryOutcome::AckNoOp,
+            "no delivery row should return AckNoOp"
+        );
+
+        // NotOwner still takes precedence even if delivery row exists.
+        assert_eq!(
+            b.mark_consumed_if_current_owner(addr, "impostor", epoch, mid)
+                .await
+                .unwrap(),
+            DeliveryOutcome::NotOwner,
+            "NotOwner precedence over AlreadyConsumed"
+        );
+    }
+
+    /// Fan-out creates a pending primary delivery and a visibility-only CC delivery. The CC
+    /// recipient can observe the message in inbox/read surfaces, but it is auto-seen for transport
+    /// and does not wedge `wait`.
+    #[tokio::test]
+    async fn epoch_fanout_is_per_recipient() {
+        let (b, _path) = fresh("epoch-fanout").await;
+
+        let to = "epoch:fanout:to";
+        let cc = "epoch:fanout:cc";
+        let owner_to = "owner-to";
+        let owner_cc = "owner-cc";
+
+        let to_epoch = match b.claim_epoch_lease(to, owner_to, 15).await.unwrap() {
+            EpochClaimResult::Claimed(e) => e.lease_epoch,
+            other => panic!("expected to claim, got {:?}", other),
+        };
+        let cc_epoch = match b.claim_epoch_lease(cc, owner_cc, 15).await.unwrap() {
+            EpochClaimResult::Claimed(e) => e.lease_epoch,
+            other => panic!("expected cc claim, got {:?}", other),
+        };
+
+        let msg = b
+            .insert_message(&NewMessage {
+                to_addr: to.to_string(),
+                cc: Some(cc.to_string()),
+                body: "fanout".to_string(),
+                attention: Attention::Background,
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        assert_eq!(
+            b.fetch_undelivered(to).await.unwrap().len(),
+            1,
+            "to recipient has a pending delivery"
+        );
+        assert_eq!(
+            b.fetch_undelivered(cc).await.unwrap().len(),
+            0,
+            "cc recipient is visible but not wait-deliverable"
+        );
+        let cc_inbox = b.inbox(cc, true, 10).await.unwrap();
+        assert!(cc_inbox.iter().any(|item| {
+            item.message.id == msg.id
+                && item.delivery_role == "cc"
+                && !item.requires_disposition_for_current_recipient
+        }));
+
+        assert_eq!(
+            b.mark_consumed_if_current_owner(to, owner_to, to_epoch, msg.id)
+                .await
+                .unwrap(),
+            DeliveryOutcome::Marked
+        );
+
+        assert!(
+            b.fetch_undelivered(to).await.unwrap().is_empty(),
+            "to recipient consumed"
+        );
+        assert_eq!(
+            b.fetch_undelivered(cc).await.unwrap().len(),
+            0,
+            "cc recipient remains auto-seen after primary ack"
+        );
+
+        assert_eq!(
+            b.mark_consumed_if_current_owner(cc, owner_cc, cc_epoch, msg.id)
+                .await
+                .unwrap(),
+            DeliveryOutcome::AlreadyConsumed,
+            "cc recipient transport row is already seen"
+        );
+    }
+
+    /// The durable clock must be monotonically non-decreasing across backend reopens.
+    #[tokio::test]
+    async fn epoch_durable_clock_monotonic() {
+        let path = tmp_path("epoch-clock");
+        let t2;
+        {
+            let b = SqliteBackend::open(&path).expect("open1");
+            b.init_schema().await.expect("init");
+            let t1 = b.durable_clock_now_ms().await.unwrap();
+            t2 = b.durable_clock_now_ms().await.unwrap();
+            assert!(t2 >= t1, "clock must not go backward within same session");
+        }
+        // Reopen: clock must be >= last persisted HWM.
+        {
+            let b2 = SqliteBackend::open(&path).expect("open2");
+            b2.init_schema().await.expect("init2");
+            let t3 = b2.durable_clock_now_ms().await.unwrap();
+            assert!(t3 >= t2, "clock after reopen must not move backward");
+        }
+    }
+
+    /// Opening the same SQLite store via `open_locked` twice must fail on the second call
+    /// while the first lock holder is alive.
+    #[tokio::test]
+    async fn epoch_store_lock_contention() {
+        let path = tmp_path("epoch-lock");
+        // Create the DB first so `open_locked` can stat the file for its ID.
+        {
+            let b = SqliteBackend::open(&path).expect("create db");
+            b.init_schema().await.expect("init");
+        }
+
+        let _b1 = SqliteBackend::open_locked(&path).expect("first lock must succeed");
+        let second = SqliteBackend::open_locked(&path);
+        assert!(
+            second.is_err(),
+            "second open_locked must fail while the first store lock is held"
+        );
     }
 }

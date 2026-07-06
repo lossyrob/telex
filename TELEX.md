@@ -5,7 +5,7 @@ agent coordination faces in the early AI era.
 
 This document keeps the name, history, and metaphor. For the build-facing product
 thesis and design capture, see [PRODUCT-THESIS.md](PRODUCT-THESIS.md) and
-[DESIGN.md](DESIGN.md).
+[DESIGN.md](docs/design/DESIGN.md).
 
 ## The name
 
@@ -96,12 +96,12 @@ not a question the recipient had to stop and answer.
 
 That distinction is exactly what makes answerback fit agent sessions rather than
 fight them. A working agent should not be interrupted by a "hey, is this you?"
-ping. In the way these sessions run today, a session's **station** answers for it: its
-**background waiter loop is the answerback drum**, holding the address's lease and a live
-connection, and it
-confirms identity and liveness automatically while the foreground agent keeps
-reasoning. The sender gets a machine-verified answer — *yes, this address is
-served, and alive* — without the working agent ever being disturbed.
+ping. In Telex, the per-user local **exchange** answers for locally-attended
+addresses: it owns the lease heartbeat, delivery buffer, and waiters for the
+session's registered **station**, confirming identity and liveness while the
+foreground agent keeps reasoning. The sender gets a machine-verified answer —
+*yes, this address is served, and alive* — without the working agent ever being
+disturbed.
 
 Telex even ran answerback at two moments — at the start of a message and again at
 the end — and that maps onto two useful grades of liveness:
@@ -111,6 +111,11 @@ the end — and that maps onto two useful grades of liveness:
 - **The message was received and dispositioned.** Not just delivered, but
   acknowledged and handled, closed, or deferred by the occupant. This is the
   end-of-message confirmation that the exchange completed intact.
+
+> **Vocabulary note.** The original per-session holder process has been
+> superseded by the auto-spawned per-user **local exchange** (daemon) in
+> [docs/design/daemon.md](docs/design/daemon.md). The metaphor is unchanged:
+> answerback is infrastructure-supplied liveness; only the mechanism moved.
 
 How faithfully Telex can answer depends on the backend, and we are honest about
 that: on a local SQLite store the loop's heartbeat gives "last seen within its
@@ -170,7 +175,7 @@ map corrections, and decisions that require disposition.
 | Historical telex | Telex for agents | The problem it solves |
 |---|---|---|
 | Telex number | Durable address, e.g. `workstream:foo/role:orchestrator` | Reach a responsibility, not a fragile process id |
-| Answerback / WRU | A **station**'s lease + waiter loop answering automatically: *this address is served and alive* | Confirm a live recipient without interrupting the working agent |
+| Answerback / WRU | The local exchange answering automatically for an explicitly-attached station: *this address is served and alive* | Confirm a live recipient without interrupting the working agent |
 | Teleprinter | A CLI session endpoint that sends, receives, waits, reports | Give each agent a real terminal on the network |
 | Telex number ≠ phone number | A separate coordination plane, distinct from the work itself | Keep messaging out of the artifacts of record |
 | Switched text network | Pluggable backend: SQLite locally, Postgres across machines | Same protocol from one box to many |

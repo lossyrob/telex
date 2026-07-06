@@ -7,12 +7,18 @@ right *agent* on the network — not just the right address.
 
 Exploratory design capture, and a **forward-looking layer** rather than a V0
 requirement. Telex is useful with direct addressing and a passive, self-registered
-directory alone (see [DESIGN.md](DESIGN.md)). This document describes what becomes
+directory alone (see [DESIGN.md](docs/design/DESIGN.md)). This document describes what becomes
 possible *after* that foundation exists: a network where a session can ask "who is
 best placed to handle this?" and live agents answer for themselves.
 
 Treat everything here as a destination to build toward incrementally, reusing the
 existing message fabric rather than introducing new transport.
+
+> **Vocabulary note.** The old per-session resident holder is superseded by the
+> per-user **local exchange** (daemon) in [docs/design/daemon.md](docs/design/daemon.md).
+> This document remains forward-looking: the dispatch vision is still a presence
+> that can reason about enquiries on the session's behalf, but that presence is now
+> a station registered in the local exchange rather than a standalone holder loop.
 
 ## Where this sits: the discovery ladder
 
@@ -57,18 +63,19 @@ orchestrator (mediated dispatch) is a **Streamliner rollout choice layered on to
 not a Telex limitation. Telex provides the general peer capability and lets
 consumers narrow it.
 
-## The key principle: broadcasts target the waiter, not the agent
+## The key principle: broadcasts target the station/exchange, not the agent
 
 A naive broadcast spams every working agent, breaking Telex's core "do not
 interrupt the foreground" invariant. The resolution is that an enquiry is delivered
-to the address's **answerback drum — the background waiter of its station — and the
-waiter reasons about it autonomously.** (The station is the running presence serving
-the address: its holder holds the lease; its waiter answers and, here, reasons.)
+to the address's **answerback surface in the local exchange** — the station
+registered for that session/address — and a future responder reasons about it
+autonomously.
 
-Historical answerback automatically answered *who are you?* The waiter now
-automatically answers *are you a good fit for this?* — light reasoning, no
-foreground interruption. It escalates to the foreground only if it decides to
-**accept** real work. Active dispatch is answerback extended, not chat bolted on.
+Historical answerback automatically answered *who are you?* The exchange-backed
+station can grow into a responder that answers *are you a good fit for this?* —
+light reasoning, no foreground interruption. It escalates to the foreground only
+if it decides to **accept** real work. Active dispatch is answerback extended, not
+chat bolted on.
 
 ## The waiter's three responsibilities
 

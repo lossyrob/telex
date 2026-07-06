@@ -2,16 +2,22 @@
 
 ## Status
 
-Working design capture. This document intentionally preserves more design
-thinking than a final design spec should. It will be whittled later and may feed
-future design documentation, protocol specs, and decision records.
+Working design capture, kept current with the architecture. The normative
+mechanism-level contracts for the local presence/transport layer (the daemon, its
+IPC/attendance protocol, the lease-epoch fence, the lifecycle and recovery model) live
+in [daemon.md](daemon.md); this document owns the architecture and framing and points
+into daemon.md for the precise contracts. The decision trail is in
+[DECISIONS.md](DECISIONS.md).
 
 ## Design center
 
 Telex is a message fabric for AI agent sessions. Its design center is a
 CLI-first, backend-pluggable protocol that lets ephemeral sessions attach to
 durable addresses, exchange structured operational messages, prove liveness
-through answerback, and leave an auditable record.
+through answerback, and leave an auditable record. Presence and delivery for
+locally-attended addresses are supplied by an auto-spawned per-user **local
+exchange** (a daemon) rather than by a resident per-session process — see
+[Architecture overview](#architecture-overview) and [daemon.md](daemon.md).
 
 The central model:
 
@@ -20,9 +26,9 @@ durable address + ephemeral lease + structured message + disposition record
 ```
 
 The durable address is the responsibility being served. The ephemeral lease is
-the live session or loop currently serving it. The message carries typed
-coordination text. The disposition records what happened to the message after
-delivery.
+the live session currently serving it, fenced by a monotonic lease epoch. The
+message carries typed coordination text. The disposition records what happened to
+the message after delivery.
 
 ## Product-language anchors
 
@@ -32,7 +38,8 @@ maps directly to the system:
 | Historical telex | Telex for agents | Design consequence |
 |---|---|---|
 | Telex number | Durable address | Address a responsibility, not a process |
-| Answerback / WRU | Lease + waiter loop (the station) | Confirm identity/liveness without interrupting the agent |
+| Telex exchange | Local exchange (per-user daemon) | One supervised presence/transport owner, not a per-session process |
+| Answerback / WRU | Lease + attendance (the station) | Confirm identity/liveness without interrupting the agent |
 | Teleprinter | CLI endpoint | Agents send, wait, read, report, and disposition |
 | Switched text network | Pluggable backend | Same protocol locally and across machines |
 | Store-and-forward relay | Queued delivery | Sender and recipient need not coexist |
@@ -44,44 +51,51 @@ maps directly to the system:
 The metaphor should keep influencing names and behavior, especially around
 answerback, store-and-forward, line-open receipts, and paper-trail auditability.
 
-### Station: the running presence serving an address
+### Station: a registration in the local exchange
 
-A **station** is the running presence a session sets up to serve a telex address —
-the resident **holder** plus its **waiter** loop, taken together. It is the umbrella
-noun for "the thing you start to serve an address": not the passive directory act of
-registering an address, and not a metaphor-losing generic like "listener". A real
-telex **station** was the staffed installation that served a telex **number**, which
-maps exactly onto the holder (holds the line/lease) and the waiter (the answerback
-drum). The term also gives plain-language invariants a clean noun — e.g. "two
-stations can't hold one number."
+A **station** is a session's registration in the **local exchange** for a telex
+address — the durable lease row plus the in-exchange attendance record that says "this
+session attends this address." It is the umbrella noun for "the thing you set up to
+serve an address": not the passive directory act of merely naming an address, and not a
+metaphor-losing generic like "listener". A real telex **station** was the installation
+that served a telex **number** through the **exchange**; here the per-user exchange (the
+daemon) owns presence and transport for every locally-attended address, and a station is
+the registration it holds on a session's behalf. The term still gives plain-language
+invariants a clean noun — e.g. "two stations can't hold one number."
 
-A station is what a session runs to serve an address. Internally it is composed of
-the **holder** (lease + heartbeat + IPC server) and the **waiter** (the `telex wait`
-loop / answerback). "Station" is the umbrella concept; "holder" and "waiter" remain
-the precise terms for the two-process mechanics where that precision matters (notably
-the [SKILL.md](SKILL.md) re-arm pattern and the `[holder]` operational logs).
+A station is **not** a resident per-session process. Earlier designs realized it as a
+resident **holder** (lease + heartbeat + IPC server) plus a **waiter** loop; that
+two-process, session-resident model is **superseded** by the local exchange (see
+[Architecture overview](#architecture-overview) and decision 0014). The session now runs
+**one-shot** verbs against the exchange; the exchange supplies the heartbeat, the IPC
+endpoint, and the answerback continuously.
 
 | Telex metaphor | Telex term | Meaning |
 |---|---|---|
 | Telex number | **address** | the durable responsibility |
-| Telex station | **station** | the running presence serving an address: holder + waiter |
-| Holding the line | **lease** | the station's exclusive claim on the address |
-| Answerback | **waiter** | the answerback drum the station responds with (internal role) |
-| The teleprinter | **holder** | the resident process that holds the lease + serves waiters (internal role) |
+| Telex exchange | **local exchange** | the per-user daemon owning presence + transport for all local addresses |
+| Telex station | **station** | a session's registration in the exchange for an address (lease row + attendance record) |
+| Holding the line | **lease** | the station's exclusive, epoch-fenced claim on the address |
+| Answerback | **attendance** | the exchange-supplied proof the line is open (heartbeat + liveness) |
 
-`attach` and `detach` remain the **lease verbs**: `attach` starts a station on the
-address (claiming the lease); `detach` stops the station and releases the lease. The
-CLI verbs are unchanged — "station" is vocabulary, not a new command.
+`attach` and `detach` remain the **lease verbs**, now **one-shot** against the exchange:
+`attach` starts a station on the address (registering the lease with the exchange and
+exiting); `detach` removes the station (releasing the lease). The CLI verbs are
+unchanged — "station" is vocabulary and the exchange is implicit, not a new command.
 
 ## Architecture overview
 
-Telex should be built as a small client/library plus backend drivers.
+Telex is a small client/library plus backend drivers, with an auto-spawned per-user
+**local exchange** (a daemon) owning local presence and transport.
 
 ```text
-CLI
+CLI (one-shot verbs: attach / wait / detach / send / ...)
   uses
 Telex core library
   owns semantic model, routing rules, state transitions, output shaping
+  speaks
+Local exchange (per-user daemon)        <-- presence + transport, single lease writer
+  owns attendance, the durable buffer, the lease heartbeat + epoch, IPC, pid-watch
   calls
 Backend driver
   owns durable writes, indexed reads, subscription, lease primitive
@@ -89,14 +103,19 @@ Backend driver
 SQLite / Postgres / later backends
 ```
 
-There should not be a required Telex server in the first architecture. The
-backend is the shared coordination substrate. SQLite provides the local case.
-Postgres provides the networked case.
+There is **no required hosted Telex server** — the backend is the shared coordination
+substrate and the exchange is a local, zero-config daemon (implicit, like
+`rust-analyzer`/`gopls`), not a control plane. SQLite provides the local case; Postgres
+provides the networked case. The exchange is a singleton per `(user SID, config root,
+protocol-major)` and serves multiple stores; clients pass store identity explicitly. Its
+mechanism-level contract — auto-spawn, the IPC/attendance protocol, the lease-epoch
+fence, the lifecycle and crash-recovery model — is specified normatively in
+[daemon.md](daemon.md).
 
-Sessions should be able to self-attach by default. A supervising system such as
-Streamliner may pre-create addresses, suggest attachment commands, or perform
-privileged lifecycle operations, but messages do not flow through Streamliner and
-Telex does not require an orchestrator process to assign every lease.
+Sessions self-attach by default. A supervising system such as Streamliner may pre-create
+addresses, suggest attachment commands, or perform privileged lifecycle operations, but
+messages do not flow through Streamliner and Telex does not require an orchestrator
+process to assign every lease.
 
 ## Thin semantic core
 
@@ -125,7 +144,7 @@ Backends provide primitives:
 - subscribe or poll;
 - claim/release lease;
 - resolve address;
-- persist cursor/disposition state.
+- persist delivery/disposition state.
 
 Backend features may enforce mechanical invariants, but should not define the
 product semantics. Postgres can use constraints, indexes, transactions,
@@ -163,15 +182,21 @@ type BackendCapabilities = {
 The core adapts behavior:
 
 - if push is native, `wait` subscribes;
-- if push is unavailable, `wait` polls from a cursor;
+- if push is unavailable, the exchange polls for undelivered messages;
 - if leases are connection-bound, liveness can be exact;
 - if leases are TTL/heartbeat-based, liveness is "last seen within lease
   window";
 - if liveness is weak, receipts should say so honestly.
 
 **v0 baseline (see decision 0005).** The portable v0 baseline uses
-**poll-with-cursor** delivery and **TTL-heartbeat** liveness for *both* SQLite and
-Postgres — a single code path on each axis. `LISTEN/NOTIFY` (native push) and
+**poll** delivery and **TTL-heartbeat** liveness for *both* SQLite and
+Postgres — a single code path on each axis. (Under the local exchange, decision 0017
+narrows TTL-heartbeat to the *daemon-down backstop* role; live-session liveness is then
+the **authoritative non-destructive hook + loader-pid (negative-only) + idle-TTL backstop**
+model (decisions 0017, 0023) — see [daemon.md](daemon.md).) The exchange
+polls the **undelivered set** keyed on
+per-recipient delivery state rather than a monotonic id cursor (decision 0013, which superseded the
+original poll-with-cursor mechanism). `LISTEN/NOTIFY` (native push) and
 connection-bound advisory locks (exact liveness) are deferred to later, optional
 Postgres-only upgrades behind these same capability flags, added only if a measured
 need appears. The spike validated that poll + TTL is sufficient at agent-turn scale,
@@ -183,7 +208,7 @@ prerequisites.
 SQLite is the local substrate. It should support the same semantic model but with
 weaker liveness:
 
-- messages, recipients, threads, addresses, cursors, and dispositions live in
+- messages, recipients, threads, addresses, delivery state, and dispositions live in
   tables;
 - waiting uses polling or file-change observation;
 - leases use heartbeat rows and TTL windows;
@@ -201,7 +226,8 @@ behavior without a custom hosted API:
 - Entra credentials as a first-class authentication target for Azure Database for
   PostgreSQL Flexible Server.
 
-In v0, Postgres runs the same poll-with-cursor delivery and TTL-heartbeat liveness as
+In v0, Postgres runs the same poll delivery (the undelivered-set drain of decision 0013) and
+TTL-heartbeat liveness as
 SQLite (decision 0005); it earns its place through durability, indexed queries, and
 networked multi-machine access rather than through push or connection-bound liveness.
 
@@ -301,7 +327,7 @@ On attach a session should be able to declare:
 
 Two layers of description exist, and V0 only requires the first:
 
-- **Occupant-declared (ephemeral):** what the current lease holder says it is
+- **Occupant-declared (ephemeral):** what the current occupant says it is
   doing. It travels with the lease and changes when the occupant changes. This
   alone satisfies "find the session working on issue 215."
 - **Address-declared (durable):** a stable description of the responsibility
@@ -323,7 +349,7 @@ workstream:telex/node:directory        unoccupied   passive directory design (qu
 A simple substring or tag filter (for example `telex address list --match 215` or
 `--tag issue:215`) is enough for V0 resolution. Anything richer — natural-language
 matching, broadcast "who can handle this?" enquiries, or capability bidding — is
-deliberately deferred to active dispatch (see [DISPATCH.md](DISPATCH.md)).
+deliberately deferred to active dispatch (see [DISPATCH.md](../../DISPATCH.md)).
 
 Directory listings should respect the same scoping and lifecycle rules as the rest
 of the address model: retired addresses drop out of normal listings, and on a
@@ -332,41 +358,80 @@ enumeration of every principal's addresses.
 
 ## Leases and answerback
 
-A lease binds a live occupant to a durable address.
+A lease binds a live occupant to a durable address, fenced by a monotonic epoch.
 
 ```text
-address: workstream:dbagent/role:orchestrator
-occupant: session:abc123
-host: devbox-2
-principal: rob@example.com
-description: dbagent orchestrator
-since: ...
-backendProof: heartbeat | advisory-lock | connection
+address:           workstream:dbagent/role:orchestrator
+occupant:          session:abc123
+owner_instance_id: <the owning local exchange instance>
+lease_epoch:       7
+host:              devbox-2
+principal:         rob@example.com
+description:       dbagent orchestrator
+last_confirmed:    ...
+backendProof:      epoch-guarded heartbeat (single writer = the exchange)
 ```
 
-The lease is Telex's answerback drum. It gives senders two grades of confirmation:
+The lease is Telex's answerback drum, written by the exchange as the single writer. It
+gives senders two grades of confirmation:
 
-1. **Line is open** - the address is currently served by a live loop or
-   connection.
-2. **Message was dispositioned** - the recipient acknowledged and handled,
-   deferred, closed, rejected, or escalated the message.
+1. **Line is open** - the address is currently attended by a live session, proven by the
+   exchange's epoch-guarded heartbeat and liveness signals.
+2. **Message was dispositioned** - the recipient acknowledged and handled, deferred,
+   closed, rejected, or escalated the message.
 
-The foreground agent should not answer liveness pings. The background waiter or
-backend connection does that.
+The foreground agent should not answer liveness pings. The local exchange does that
+continuously while the agent works.
 
 ### Lease collision and takeover
 
-Detailed takeover policy can be deferred. The safe default should be:
+Leases are exclusive and epoch-fenced. The frozen rules (normative mechanism in
+[daemon.md](daemon.md)):
 
 - leases for role/node/session addresses are exclusive;
-- attach fails if the address is already occupied;
+- `attach` fails if the address is already occupied by a live lease;
 - the failure reports the current occupant and lease proof;
-- takeover is an explicit privileged operation;
-- shared visibility should use `cc`, `watchers`, or subscriptions, not multiple
-  owners of one exclusive address.
+- a competing claim is resolved by the **lease epoch**, not by timing — the higher epoch
+  wins and the loser self-demotes (see [daemon.md](daemon.md));
+- shared visibility should use `cc`, `watchers`, or subscriptions, not multiple owners of
+  one exclusive address.
 
-This default is safe enough to build while leaving room for supervisor authority,
-stale takeover, worker pools, and delegation later.
+Because loader-level liveness is a **negative-only signal** (a session can be dismissed
+without its process tree dying), presence is handled **non-destructively**: the exchange
+releases a station's blocked waiters and marks it **idle** on a definite signal (the
+**authoritative `sessionEnd` hook** or **loader-pid** death), and a single **idle-TTL
+(≥ 1 day)** backstops the rare unhooked-dismiss-with-loader-alive case. None of these ever
+destroy a station or lose a message, so an idle-but-alive session stays instantly wakeable
+**for days**. Identity is the **unique, stable `session_id`**; membership is **explicit-only**
+(a one-off `attach`), and the exchange returns **`NeedsAttach`** for an unknown session rather
+than implicitly rebuilding it — so a removed address is **never silently resurrected** (no
+incarnation token, no tombstones). Delivery is durable **at-least-once + explicit agent ack +
+`message_id` dedup**. The full model is normative in [daemon.md](daemon.md) §9–11, §14, and
+recorded in decision 0023.
+
+### Default `from` via daemon session ownership
+
+`send`/`reply` are one-shot processes separate from the session that holds the lease, so
+a sender needs a correct default `from`. Forcing every send to carry
+`--from`/`$TELEX_ADDRESS` made un-repliable messages (`from = None`) an easy, silent
+foot-gun.
+
+The local exchange owns the authoritative `(store_key, session_id) -> addresses` map (see
+[daemon.md](daemon.md), daemon-native session ownership), so `from` resolves with
+precedence **`--from` > `$TELEX_ADDRESS`/`--address` > the exchange's
+`ResolveFrom(store_key, session_id)`** against *that session's* registered addresses **for
+that store only**: exactly one inferred succeeds, multiple refuses as `Ambiguous`, and
+**none/unknown returns `NeedsAttach`** (the agent re-attaches its own address, then retries; if
+still none the send **fails actionably** as `refused-unrepliable` — never a silent `from = None`,
+mirroring [daemon.md](daemon.md) §14.6). The exchange **never** infers across all of its
+addresses (it serves many sessions across many stores), so a multi-session, multi-store
+exchange cannot misattribute a send; the harness propagates `store_key` + `TELEX_SESSION_ID`
+to the `send`/`reply` process. Identity is
+*defaulted, never forced*: explicit `--from`/env always win, preserving one-shot
+reply-to senders, multi-address supervisors, and operator-as-system sends. A
+disposition-required send that would still be un-repliable is refused outright. (This
+supersedes the earlier local-holder-registry file mechanism of decision 0010, which keyed
+off a resident holder that no longer exists.)
 
 ## Messaging model
 
@@ -473,123 +538,122 @@ Agents should be able to request:
 This prevents long threads from repeatedly consuming context while preserving
 auditability and explainability.
 
-## Waiter loop behavior
+## Presence and delivery via the local exchange
 
-The waiter loop is the current concrete mechanism for answerback and action
-delivery.
+Presence and action delivery are owned by the per-user **local exchange** (the daemon),
+not by a resident per-session process. The mechanism-level contract is normative in
+[daemon.md](daemon.md); this section gives the architectural shape and the reasoning.
 
 **Telex owns long-duration waiting.** The blocking wait is a native Telex primitive
 (`telex wait`), not something an agent reconstructs with generic loop skills, shell
-polling, or repeated short-lived CLI invocations. This is a deliberate boundary with
-a concrete technical reason, not just a consistency preference.
+polling, or repeated short-lived CLI invocations. This is a deliberate boundary with a
+concrete technical reason: honest answerback requires a **single long-lived process** to
+own the backend connection, the lease heartbeat, and the delivery buffer for the duration
+of the mission. Repeated short-lived invocations open and close a connection each time and
+structurally cannot keep a lease alive across turns; they would silently degrade
+answerback. Previously that long-lived process was a per-session resident **holder**; it
+is now the **local exchange**, shared across all of the user's sessions and addresses.
 
-The strongest answerback grade — a connection-bound lease that releases the instant a
-session dies — requires a single long-lived process to hold the backend connection
-(and, on Postgres, the advisory lock) for the duration of the mission. A pattern of
-repeated short-lived invocations (`check`, sleep, `check`) opens and closes a
-connection each time and structurally cannot hold a connection-bound lease; it would
-silently degrade answerback to the weaker heartbeat/TTL grade. So the long wait must
-live inside one durable Telex process that holds the lease and blocks efficiently
-(poll-with-cursor in the v0 baseline; `LISTEN/NOTIFY` is a later optional Postgres
-push upgrade — see decision 0005).
+There is a real tension with how agent runtimes work: an agent can only reason about a
+message once the call delivering it **returns**. Delivery to the reasoning layer requires
+a process exit and a turn — the agent reads the message, acts, dispositions, and resumes
+waiting. A single call cannot both block indefinitely and invoke agent turns mid-wait. If
+the lease-owning process were the one that exits to deliver, the lease would release
+during exactly the window when the agent is most alive — handling the message — which is
+backwards.
 
-This creates a real tension with how agent runtimes work: an agent can only reason
-about a message once the call delivering it **returns**. Delivery to the reasoning
-layer therefore requires a process exit and a turn — the agent reads the message,
-acts, dispositions, and resumes waiting. A single call cannot both block indefinitely
-and invoke agent turns mid-wait. If the lease-holding process were the one that exits
-to deliver, the lease would release during exactly the window when the agent is most
-alive — handling the message — which is backwards.
+Telex resolves this by separating the durable owner from the delivery courier across a
+**process boundary that is no longer per-session**:
 
-Telex resolves this by splitting the waiter into **two processes**:
+- the **local exchange** — long-lived, owns the backend connection(s), writes each lease's
+  epoch-guarded heartbeat (single writer), drains the **undelivered set** keyed on
+  per-recipient delivery state (decision 0013; `LISTEN/NOTIFY` is a later optional Postgres
+  push upgrade, decision 0005), and buffers actionable messages. It never takes an agent
+  turn, so it stays up across all turns and sessions. It is the literal answerback drum:
+  it answers liveness automatically and continuously while agents work elsewhere.
+- an **ephemeral delivery client** (`telex wait`) — a one-shot that blocks on the exchange
+  over fast local IPC and **exits** the moment an actionable message is ready, handing it
+  to the agent. The agent reasons, dispositions, and calls `telex wait` again.
 
-- a **resident holder** — long-lived, holds the backend connection and writes the
-  lease's TTL heartbeat, polls for actionable messages from a cursor, and buffers them
-  locally (on the optional Postgres upgrade it can instead hold an advisory lock and
-  run `LISTEN/NOTIFY`). It never needs to take an agent turn, so it can stay up for the
-  whole mission. This is the literal answerback drum: it answers liveness
-  automatically and continuously while the agent works elsewhere.
-- an **ephemeral delivery client** (`telex wait`) — blocks on the resident holder
-  over fast local IPC, and **exits** the moment an actionable message is ready,
-  handing it to the agent. The agent reasons, dispositions, and calls `telex wait`
-  again.
+The crucial property: the exit that hands a message to the agent happens at the *client*
+layer, while the lease and its heartbeat live in the *exchange*. The agent's turn
+therefore does **not** drop the backend connection or lapse the heartbeat, and the address
+stays correctly `occupied` while the agent is actively handling a message. Because the
+exchange outlives every session, this is strictly more robust than the old session-owned
+holder: there is no per-session resident process to orphan, race on startup, or leave
+attached on dismiss.
 
-Together, the resident holder and the waiter loop it serves are the **station** —
-the running presence serving the address. "Holder" and "waiter" name the two-process
-mechanics below; "station" is the umbrella term for the pair (see
-[Station](#station-the-running-presence-serving-an-address)).
+The exchange-to-client handoff follows one rule: **delivery is the exit trigger.** The
+exchange never sends a separate "you should exit" signal; handing the client a message
+*is* the instruction to exit. The exchange runs a daemon-scoped local IPC endpoint (a
+named pipe on Windows, a unix socket elsewhere). `telex wait` connects, completes the
+version handshake, sends a request describing what it is waiting for (store, address,
+attention filter), then blocks on a socket read. The exchange emits a matching message
+under an in-memory current-owner check and records the **durable** consumed mark only
+**after** the **agent explicitly acks** it (`telex ack` — the at-least-once
+`EMIT → print → agent Ack → MARK` fence; the stdout flush is transport-only, see
+[daemon.md](daemon.md) §11.3); otherwise it registers the client as a waiter and stays silent.
+The wakeup is push — the exchange's write releases the client's read — with no local
+polling.
 
-The crucial property: the exit that hands a message to the agent happens at the
-*client* layer, while the lease (and its heartbeat) lives in the *holder*. The agent's
-turn therefore does **not** drop the backend connection or lapse the heartbeat, and
-the address stays correctly `occupied` while the agent is actively handling a message
-— exactly when a naive single-process waiter would falsely report the line dead. This
-also preserves the familiar exit-with-info-then-restart cadence of background-task
-loops, but only
-the cheap local delivery client exits per turn; the durable backend connection is
-never disturbed.
+Delivery state and pending disposition live in the **exchange** (and ultimately the
+backend), never in the ephemeral client, which is a stateless courier. A later
+`telex ack`/`telex handle` is another short call that updates that state.
 
-The holder-to-client handoff follows one rule: **delivery is the exit trigger.** The
-holder never sends a separate "you should exit" signal; handing the client a message
-*is* the instruction to exit. Concretely, the holder runs a small local IPC endpoint
-(a named pipe on Windows, a unix socket elsewhere) and acts as a local server.
-`telex wait` connects, sends a request describing what it is waiting for
-(address(es), attention filter, since-cursor), then blocks on a socket read. The
-holder replies immediately if a matching message is already buffered; otherwise it
-registers the client as a waiter and stays silent, leaving the read blocked. When an
-actionable message arrives, the holder writes the framed payload to the waiting
-client's socket; the read returns, the client prints the concise payload to stdout,
-and exits. The wakeup is push — the holder's write releases the client's read — with
-no local polling.
+The client contract distinguishes outcomes by exit code: a delivered message (`0`); a
+`--timeout` expiry with no message (`2`), so a supervisor can refresh without blocking
+forever (agent runtimes cap tool-call duration); a daemon-gone error (`3`) **after** the
+reconnect-on-EOF grace; a daemon-hung error (`4`); and **presence-ended (`5`)** when the exchange
+reaps the waiter (sessionEnd hook / loader-pid death / idle-TTL — the agent re-attaches + re-waits).
+Crucially, a daemon **restart or
+ordered handoff is not a turn failure**: `telex wait` reconnects within a short grace
+window and, on `NeedsAttach`, **explicitly re-attaches** the session from inherited environment
+before it would return `3` (see [daemon.md](daemon.md)).
 
-Delivery state, cursor position, and pending disposition live in the **holder** (and
-ultimately the backend), never in the ephemeral client, which is a stateless courier.
-A later `telex ack`/`telex handle` is another short call that updates that state.
+The agent's job is therefore to **supervise**, not to **be**, the waiter — but
+supervision is now lighter, because there is no resident holder to launch and babysit. A
+supervising sub-agent runs the `telex wait` delivery loop, relays actionable payloads to
+the foreground, and refreshes the work-scope brief — the Plane A control role described in
+[../../DISPATCH.md](../../DISPATCH.md). The exchange auto-spawns on first use; the agent
+does not start it. Generic loop/skill mechanisms remain appropriate for dynamic,
+agent-invented checks; they are simply not how Telex message-waiting and answerback are
+implemented.
 
-The client contract distinguishes outcomes by exit code: a delivered message; a
-`--timeout` expiry with no message, so a supervisor can refresh and re-issue without
-blocking forever (agent runtimes cap tool-call duration); and a holder-gone error,
-signalling the supervisor to restart and reconnect the holder.
+For a **push-capable harness** (e.g. a Copilot CLI session with the in-session bridge),
+even that supervision is unnecessary: the agent registers a daemon **on-deliver exec** once
+at attach, and a committed message is handed to the harness as a real turn without any
+agent-owned `wait` loop to run or re-arm. This is a strict superset of the pull model — the
+durable buffer and the agent-ack fence are unchanged and delivery stays at-least-once — it
+only removes the agent-managed waiter as the wake path. For the Copilot bridge specifically,
+`interrupt` maps to Copilot `immediate` (delivered as soon as possible, ahead of enqueued
+turns) and every other attention level to `enqueue` (after the current turn); neither
+preempts a turn already running (the latency note below still bounds what "immediate" can
+mean on today's runtimes). It is distinct from the *transport* push of decision 0005 (the
+exchange releasing a blocked read): here the daemon runs a harness-neutral handler that
+injects the turn. Normative contract in
+[daemon.md §13.2](daemon.md#132-on-deliver-push-opt-in-harness-neutral) / ADR 0039; the
+`telex wait` loop below remains the harness-agnostic fallback.
 
-For the spike, the local socket server can be skipped in favour of a local SQLite (or
-file) buffer that the holder writes and `telex wait` blocks on via a short local poll
-or file-change watch — enough to prove the two-process liveness property before
-adding push IPC.
+The delivery loop should:
 
-Because liveness is bound to the holder, the holder's lifecycle must track the
-session's. It should be a session-owned process, **not** a fully detached daemon, so
-that when the session, terminal, or machine dies, the holder dies with it and the
-lease releases promptly. A fully detached holder would outlive a dead session and lie
-about liveness — worse than no guarantee.
-
-The agent's job is therefore to **supervise**, not to **be**, the waiter. A
-supervising sub-agent launches and monitors the resident holder (restarting and
-reconnecting it on failure), runs the `telex wait` delivery loop, relays actionable
-payloads to the foreground, and refreshes the work-scope brief — the Plane A control
-role described in [DISPATCH.md](DISPATCH.md). Generic loop/skill mechanisms remain
-appropriate for dynamic, agent-invented checks; they are simply not how Telex
-message-waiting and answerback are implemented.
-
-The loop should:
-
-- attach to one or more addresses;
-- hold or refresh the lease;
-- subscribe or poll for actionable messages;
-- wake only on messages that match the address, attention, and cursor rules;
+- `attach` (one-shot) to one or more addresses;
+- let the exchange hold and refresh the lease;
+- `wait` for actionable messages;
+- wake only on messages that match the address and attention rules;
 - emit a concise machine-readable payload that the foreground agent can inspect;
 - avoid waking the agent for passive liveness checks;
-- resume from a cursor after reconnects or process restarts.
+- transparently resume across an exchange restart or handoff (reconnect-on-EOF).
 
-If a message arrives while an agent is mid-task, the expected session protocol is
-not "drop everything." The agent should inspect the summary. If it is not
-interrupt-grade, it should create or remember a todo and finish the current work
-to a safe stopping point before handling the message.
+If a message arrives while an agent is mid-task, the expected session protocol is not
+"drop everything." The agent should inspect the summary. If it is not interrupt-grade, it
+should create or remember a todo and finish the current work to a safe stopping point
+before handling the message.
 
 ### A note on latency: "interrupt" means next turn
 
-Spike measurements (see [spike/](spike/README.md)) decomposed end-to-end
+Spike measurements (see [spike/](../../spike/README.md)) decomposed end-to-end
 delivery and found that the dominant term is **agent-wake latency** — the time the
-host agent runtime takes to wake the foreground into a new turn after the waiter
+host agent runtime takes to wake the foreground into a new turn after the exchange
 delivers — at roughly **6–26 seconds**, one to two orders of magnitude larger than
 Telex's own delivery (sub-second). No agent runtime today can preempt a foreground
 agent mid-turn. Telex's `interrupt` attention level therefore means "deliver at the
@@ -621,17 +685,20 @@ The v0 command surface is settled:
 
 PRESENCE
 - `telex attach --address <addr> [--description <s>] [--scope <s>] [--tags <a,b>]
-     [--heartbeat-secs N] [--poll-secs N]`
-  Become live occupant; start a station on the address (hold lease; run holder);
-  blocks. Exclusive: fails if the address
-  is already occupied by a live lease (reports current occupant). Registers the directory
-  description on attach.
-- `telex detach --address <addr>`  Stop the station and release the lease.
+     [--watch-pid <pid> ...] [--heartbeat-secs N] [--poll-secs N]`
+  Become live occupant: one-shot — register a station on the address with the local
+  exchange (which holds the lease and heartbeat), then exit. Exclusive: fails if the
+  address is already occupied by a live lease (reports current occupant). Registers the
+  directory description on attach. Auto-spawns the exchange on first use.
+- `telex detach --address <addr>`  One-shot: remove the station and release the lease.
 
 RECEIVE
 - `telex wait --address <addr> [--timeout-ms N]`
-  Block on the holder; on delivery print one message as JSON and exit 0. Exit codes:
-  0 delivered, 2 idle-timeout, 3 holder-gone, 4 holder-hung.
+  Block on the exchange; on delivery print one message as JSON and exit 0. Exit codes:
+  0 delivered, 2 idle-timeout, 3 daemon-gone (after the reconnect-on-EOF grace),
+  4 daemon-hung, 5 presence-ended (the exchange reaped the waiter — sessionEnd hook /
+  loader-pid death / idle-TTL; the agent re-attaches + re-waits). A daemon restart/handoff is
+  not a turn failure — `wait` reconnects and re-attaches on `NeedsAttach` within the grace window.
 - `telex inbox [--address <addr>] [--all] [--limit N]`
   List actionable (requires-disposition, not yet terminally dispositioned) and recent
   messages for the address.
@@ -648,7 +715,7 @@ SEND
   Reply; threads under the parent (inherits thread_id, sets parent_id).
 
 DISPOSITION (flat verbs; all take `--id <message-id>` and optional `--note <s>`)
-- `telex ack --id <id>`        acknowledged
+- `telex ack --id <id> [--address <addr>]`   acknowledged — the consume-ack carries the **delivered recipient address** (`--address`); the `wait` output's `to` field supplies it (else a flag/env), and a missing address **fails closed** rather than guessing ([daemon.md](daemon.md) §11.3)
 - `telex handle --id <id>`     handled
 - `telex defer --id <id>`      deferred
 - `telex reject --id <id>`     rejected
@@ -670,7 +737,7 @@ AUDIT
 SETUP
 - `telex init [--backend <name>] [--db <path>]`  Create `~/.telex/`, write a default
   sqlite backend, and initialize its schema.
-- `telex status [--address <addr>]`  Show the resolved backend, address, holder/IPC + occupancy.
+- `telex status [--address <addr>]`  Show the resolved backend, address, exchange/IPC + occupancy.
 - `telex skill [--address <addr>] [--raw]`  Print the agent usage instructions embedded in
   the binary (the `SKILL.md` for this build), optionally tailored to an assigned address.
 
@@ -689,9 +756,11 @@ DSN) plus a password reference; secrets are not written to the config file. This
 storage axis of the modular-backends model (see DECISIONS 0008); auth (`--entra`, AWS/GCP
 IAM) is the second axis, layered behind features.
 
-Two v0 details are settled: `attach` blocks as the resident holder — there is no
-separate `serve` verb; the holder IS `attach`. Disposition verbs are flat
-(`telex ack`, `telex handle`, ...), not nested under a `disp` parent.
+Two v0 details are settled: `attach` is the one-shot presence verb registering a station
+with the local exchange — there is no separate `serve` verb, and there is no resident
+per-session holder (the exchange owns presence; see decision 0014). Disposition verbs are
+flat (`telex ack`, `telex handle`, ...), not nested under a `disp` parent. A hidden
+`telex daemon` entrypoint runs the exchange (auto-spawned; not shown in normal help).
 
 The CLI should optimize for agents:
 
@@ -831,4 +900,4 @@ Deferred questions:
 - directory visibility and scoping on a shared backend.
 
 Active discovery, broadcast enquiries, and Contract-Net dispatch are explored
-separately in [DISPATCH.md](DISPATCH.md), which carries its own open questions.
+separately in [DISPATCH.md](../../DISPATCH.md), which carries its own open questions.
