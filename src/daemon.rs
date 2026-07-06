@@ -2189,7 +2189,7 @@ impl DaemonState {
                     && m.on_deliver.is_some()
                     && m.on_deliver_wake_on_cc
                     && m.on_deliver_cc_after_ms
-                        .is_some_and(|lower| row.created_at_ms > lower)
+                        .is_some_and(|lower| row.created_at_ms >= lower)
                     && delivery_role(&m.address, &row.to_addr, row.cc.as_deref()) == "cc"
             })
             .map(|(k, m)| OnDeliverCandidate {
@@ -2294,6 +2294,18 @@ impl DaemonState {
         self.on_deliver.dead_lettered.lock().unwrap().remove(member);
     }
 
+    fn on_deliver_advance_cc_lower_bound(&self, member_key: &MemberKey, lower_bound: i64) {
+        if let Some(member) = self.members.lock().unwrap().get_mut(member_key) {
+            if member.on_deliver_wake_on_cc {
+                member.on_deliver_cc_after_ms = Some(
+                    member
+                        .on_deliver_cc_after_ms
+                        .map_or(lower_bound, |current| current.max(lower_bound)),
+                );
+            }
+        }
+    }
+
     /// Mark `(member, id)` permanently unpushable (the handler reported a non-retryable failure,
     /// e.g. a message too large for the harness frame). It is skipped from further pushes and
     /// pruned once the message leaves the undelivered set; it is never marked delivered/consumed,
@@ -2354,6 +2366,7 @@ impl DaemonState {
             return;
         }
         let descriptor = on_deliver_descriptor_json(&store_key, &address, &row);
+        let notification_lower_bound = notification_only.then_some(row.created_at_ms);
         let sem = self.on_deliver.sem.clone();
         let state = self.clone();
         tokio::spawn(async move {
@@ -2380,6 +2393,11 @@ impl DaemonState {
                     outcome == RunOutcome::Ok,
                     notification_only,
                 );
+                if outcome == RunOutcome::Ok {
+                    if let Some(lower_bound) = notification_lower_bound {
+                        state.on_deliver_advance_cc_lower_bound(&member_key, lower_bound);
+                    }
+                }
                 if outcome == RunOutcome::Transient {
                     let detail = stderr.map(|s| format!(": {s}")).unwrap_or_default();
                     state.push_recent_error(
@@ -4899,6 +4917,13 @@ mod p3_tests {
         assert_eq!(
             descriptor["requires_disposition_for_current_recipient"],
             false
+        );
+        let advanced = state
+            .get_member(&store, "observer", "addr:observer")
+            .unwrap();
+        assert!(
+            advanced.on_deliver_cc_after_ms.unwrap() >= row.created_at_ms,
+            "accepted CC notification should advance push lower bound"
         );
 
         std::fs::remove_file(&descriptor_path).unwrap();
