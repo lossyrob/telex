@@ -13,7 +13,7 @@ Generic telex commands need a stable session id on each invocation, from
 `--session` or `$TELEX_SESSION_ID`. Telex fails closed rather than guessing.
 
 ```sh
-export TELEX_SESSION_ID=<stable-session-id>
+export TELEX_SESSION_ID=<stable-session-id>   # PowerShell: $env:TELEX_SESSION_ID = "<stable-session-id>"
 ```
 
 ## 2. Attach once

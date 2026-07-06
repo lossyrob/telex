@@ -48,3 +48,38 @@ The first backend added becomes the default; change it with `--default` on add o
 - Use `--schema` to place telex tables in a dedicated schema.
 - Secrets are referenced (`--entra`, `--password-env`, `--password-command`) and
   are never written to the config file. `telex backend show <name>` redacts them.
+
+## Schema and privileges
+
+Set the schema for telex tables with `--schema` when adding the backend. The
+configured database role needs privileges to create objects in that schema on
+first use (or to use an existing one). Pre-create and validate the schema:
+
+```sh
+telex init --backend <name>
+```
+
+This connects with the configured credentials, creates the schema and tables if
+they are absent, and surfaces connection or permission errors early.
+
+## TLS
+
+Request TLS in the connection string with `sslmode=require`, or a stricter mode
+such as `verify-full` with the appropriate root certificate configured for your
+environment. Azure Postgres requires TLS.
+
+## Backup
+
+A telex Postgres backend is an ordinary schema in your database. Back it up with
+standard Postgres tooling:
+
+```sh
+pg_dump --schema telex "postgresql://.../telex" > telex-backup.sql
+```
+
+## Multiple machines
+
+Point each machine's telex at the same Postgres backend (same connection string
+and schema) to share one durable store and audit trail. Each machine still runs
+its own local exchange daemon; the daemon is per user and local, while the store
+is the shared Postgres schema.

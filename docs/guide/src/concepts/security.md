@@ -32,3 +32,7 @@ file, or the Postgres schema). Treat the store as sensitive if the messages are.
 
 A Postgres backend is shared across the machines and users configured to use it.
 Scope access with database and schema grants, and use a dedicated `--schema`.
+
+---
+
+Next: [Glossary](glossary.md)

@@ -30,3 +30,7 @@ restarts, the next verb reconnects and re-registers on a `NeedsAttach` signal an
 continues against the retained buffer. A `wait` that finds no daemon exits with a
 distinct code so the caller can run `attach` (the spawning and recovery verb) and
 re-arm. See [Exit codes](../reference/exit-codes.md).
+
+---
+
+Next: [Stations and presence](presence.md)

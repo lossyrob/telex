@@ -44,3 +44,7 @@ Ack first (transport consumption), then apply the workflow disposition that
 reflects the actual outcome. A message that requires disposition
 (`--requires-disposition` on send) stays actionable until it reaches a terminal
 state.
+
+---
+
+Next: [Backends](backends.md)

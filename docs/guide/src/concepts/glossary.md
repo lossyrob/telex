@@ -20,3 +20,7 @@
 - **Backend**: the configured store (local SQLite or networked Postgres). See
   [Backends](backends.md).
 - **Thread**: a message and its replies, linked by `thread_id` and `parent_id`.
+
+---
+
+Next: [Set up an agent (pull)](../guides/agent-pull.md)

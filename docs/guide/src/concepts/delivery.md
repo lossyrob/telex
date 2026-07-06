@@ -31,3 +31,7 @@ Ack is transport consumption. Closing out the work is a separate
 [disposition](disposition.md) (`handle`, `reject`, or `close`). A message can be
 acked (consumed from the delivery buffer) while still needing a terminal workflow
 disposition.
+
+---
+
+Next: [Disposition](disposition.md)

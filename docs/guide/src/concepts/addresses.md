@@ -39,3 +39,7 @@ telex resolve --tag <tag> --scope <scope>
 
 Retire an address so it drops from normal listings with
 `telex address retire --address <addr>`.
+
+---
+
+Next: [Exchange and daemon](exchange.md)

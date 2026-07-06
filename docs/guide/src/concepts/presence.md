@@ -36,3 +36,7 @@ telex station stop --address <addr>
 
 After `station stop`, a later message to the address stays queued until a future
 attach or wait; it is not consumed by an orphaned waiter.
+
+---
+
+Next: [Messages and threads](messages.md)

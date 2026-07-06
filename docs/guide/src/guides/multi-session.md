@@ -6,7 +6,7 @@ other finds it and sends a message that requires disposition.
 ## Session A: attend and wait
 
 ```sh
-export TELEX_SESSION_ID=session-a
+export TELEX_SESSION_ID=session-a   # PowerShell: $env:TELEX_SESSION_ID = "session-a"
 telex attach --address session:a \
   --description "session A waiting for coordination" \
   --scope project:telex --tags repo:telex,role:worker
@@ -28,7 +28,7 @@ telex reply --to-message <message-id> \
 ## Session B: find A and send
 
 ```sh
-export TELEX_SESSION_ID=session-b
+export TELEX_SESSION_ID=session-b   # PowerShell: $env:TELEX_SESSION_ID = "session-b"
 telex attach --address session:b --description "session B requesting status" \
   --scope project:telex --tags repo:telex,role:requester
 telex resolve --match "waiting for coordination" --scope project:telex

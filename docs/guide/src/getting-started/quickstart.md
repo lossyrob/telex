@@ -38,7 +38,7 @@ these in two terminals.
 Session A registers an address and waits for one message:
 
 ```sh
-export TELEX_SESSION_ID=session-a
+export TELEX_SESSION_ID=session-a   # PowerShell: $env:TELEX_SESSION_ID = "session-a"
 telex attach --address session:a --description "session A waiting for coordination"
 telex wait --address session:a
 ```
@@ -46,7 +46,7 @@ telex wait --address session:a
 Session B registers, finds A by its description, and sends:
 
 ```sh
-export TELEX_SESSION_ID=session-b
+export TELEX_SESSION_ID=session-b   # PowerShell: $env:TELEX_SESSION_ID = "session-b"
 telex attach --address session:b --description "session B requesting status"
 telex resolve --match "waiting for coordination"
 telex send --to session:a --subject "Status request" --body "Please send status." --attention interrupt

@@ -30,3 +30,7 @@ Latency note: in push mode `interrupt` is seen mid-stream between the model's
 iterations; other levels wait for the turn boundary. In pull mode, agent wake
 dominates perceived latency, so `interrupt` means "handle at the next turn
 boundary."
+
+---
+
+Next: [Delivery guarantees](delivery.md)

@@ -48,3 +48,7 @@ telex backend kinds       # backend kinds compiled into this build
 The first backend added becomes the default; `--default` or
 `telex backend default <name>` changes it. See the
 [Networked Postgres backend](../guides/postgres.md) guide.
+
+---
+
+Next: [Security and data](security.md)

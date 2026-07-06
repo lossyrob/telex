@@ -26,3 +26,7 @@ A session has a stable identity (`--session` or `$TELEX_SESSION_ID`). It
 `attach`es to one or more addresses, `send`s and `receive`s messages, records
 `disposition` by message id, and detaches or stops its station when done. The
 exchange retains the durable message buffer across daemon restarts.
+
+---
+
+Next: [Addresses](addresses.md)

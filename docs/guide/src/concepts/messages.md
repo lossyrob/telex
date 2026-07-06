@@ -31,11 +31,37 @@ parent's sender:
 telex reply --to-message <message-id> --body "<body>"
 ```
 
+## CC (observers)
+
+Add `--cc <addr>` to copy observer addresses on a message. Each recipient gets
+its own delivery of the same message id, with a `delivery_role` of `to` or `cc`:
+
+```sh
+telex send --to node:worker --cc node:lead --subject "Status" --body "..."
+```
+
+The primary recipient and each CC observer see the same `id`, `thread_id`, and
+`primary_to`, but their own `delivery_role` and `delivered_to`:
+
+| Recipient | delivery_role | delivered_to | requires disposition |
+|---|---|---|---|
+| `node:worker` (to) | `to` | `node:worker` | set when the sender passes `--requires-disposition` |
+| `node:lead` (cc) | `cc` | `node:lead` | no |
+
+`--cc` may be repeated and accepts comma-separated values. Ack and disposition
+are per recipient: acking for `node:lead` does not consume the copy for
+`node:worker`. An observer reads its copy with `telex inbox --all` or
+`telex read`, and acks its own `(message_id, address)`.
+
 ## Reading
 
 ```sh
-telex inbox --address <addr>              # actionable and recent messages
+telex inbox --address <addr>              # actionable messages (add --all for recent)
 telex inbox --address <addr> --all --limit N
 telex read --id <message-id> --thread     # a message with compact thread context
 telex read --id <message-id> --full       # full history
 ```
+
+---
+
+Next: [Attention levels](attention.md)
