@@ -1,6 +1,6 @@
 ---
 name: telex
-description: Coordinate messages between AI agent sessions with telex. A bootstrap that loads version-matched instructions from the installed telex binary.
+description: Coordinate messages between AI agent sessions by attaching a session to a durable address, sending and receiving typed messages (delivered as turns in Copilot CLI), and recording auditable disposition. Use when the operator gives you a telex address or tells you to "set up telex" or run `telex skill`; when you need to message, hand off to, or receive work from another agent session; or when orchestrating worker sessions that coordinate over telex instead of polling GitHub comments. This is a bootstrap that loads the version-matched workflow and command syntax from the installed telex binary.
 ---
 
 # Telex skill (bootstrap)

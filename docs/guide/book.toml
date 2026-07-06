@@ -1,0 +1,21 @@
+[book]
+title = "Telex"
+description = "A CLI-first message fabric for AI agent sessions."
+authors = ["Rob Emanuele"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/lossyrob/telex"
+edit-url-template = "https://github.com/lossyrob/telex/edit/main/docs/guide/{path}"
+site-url = "/telex/"
+default-theme = "navy"
+preferred-dark-theme = "navy"
+
+[output.html.fold]
+enable = true
+level = 1
+
+[output.html.search]
+enable = true
+limit-results = 20

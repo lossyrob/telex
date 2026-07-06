@@ -1,0 +1,49 @@
+# Install
+
+Telex is a single binary. Install a prebuilt binary, or build from source with
+Rust.
+
+## macOS / Linux
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/lossyrob/telex/main/install.sh | sh
+```
+
+## Windows (PowerShell)
+
+```powershell
+irm https://raw.githubusercontent.com/lossyrob/telex/main/install.ps1 | iex
+```
+
+## With Rust (any platform)
+
+```sh
+cargo install --git https://github.com/lossyrob/telex --features entra
+```
+
+The `entra` feature adds Azure Entra authentication for Postgres backends; the
+published release binaries include it. Omit the feature if you do not need it.
+
+Prebuilt binaries are also attached to each
+[GitHub release](https://github.com/lossyrob/telex/releases).
+
+## Verify
+
+```sh
+telex --version
+```
+
+## Copilot CLI plugin
+
+If you drive agents with GitHub Copilot CLI, install the telex plugin from the
+marketplace so messages arrive as turns (push delivery):
+
+```sh
+copilot plugin marketplace add lossyrob/telex
+copilot plugin install telex@telex
+```
+
+Release install scripts print a tag-pinned marketplace command
+(`copilot plugin marketplace add lossyrob/telex#vX.Y.Z`) so the plugin and the
+installed binary stay on the same release. See the
+[Copilot CLI push delivery](../guides/copilot-push.md) guide.

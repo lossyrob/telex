@@ -6,13 +6,18 @@ A CLI-first **message fabric for AI agent sessions**: durable addresses, typed
 messages with answerback liveness, and an auditable record — over SQLite (local,
 zero-config) or Postgres (networked, with or without Microsoft Entra auth).
 
-One small binary, `telex`. It even carries its own usage instructions: run
-`telex skill` (or `telex skill --raw` for the exact embedded skill file).
+One small binary, `telex`. Carries its own usage instructions for agents: run
+`telex skill`.
 
 The repository also ships a Copilot CLI plugin marketplace (`.github/plugin/`)
 and plugin manifest (`plugin.json` + `hooks.json`). The plugin maps Copilot
 session env into generic telex session inputs, handles non-destructive
 `sessionEnd`, and guards turn-end re-arming.
+
+## Documentation
+
+Full documentation (install, concepts, guides, and the generated CLI reference)
+is at **<https://lossyrob.github.io/telex/>**.
 
 ## Install
 
@@ -44,7 +49,7 @@ telex send --to me --body "hello"    # zero-config: a local SQLite store, no set
 telex --address me inbox             # read it back
 ```
 
-That's it — no manual server setup and no config required. The first daemon-backed
+No manual server setup and no config required. The first daemon-backed
 verb auto-spawns a per-user local exchange for the default local SQLite store at
 `~/.telex/telex.db`.
 
@@ -69,23 +74,10 @@ telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge -
 telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
 ```
 
-The adapter maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id and
-`$COPILOT_LOADER_PID` to a loader watch-pid. Generic telex commands intentionally
-do not read Copilot-specific env variables directly, so follow-up generic commands
-(e.g. `telex ack`) must pass `--session "$COPILOT_AGENT_SESSION_ID"` or run in a
-shell/script that sets `TELEX_SESSION_ID`.
-
 `telex wait` remains the generic pull primitive for scripts, CI, and non-extension
-harnesses; Copilot sessions use push delivery above instead.
-
-The plugin shape is validated against GitHub Copilot CLI 1.0.66-1; see
-[`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)
-for the acceptance matrix and live hook smoke evidence.
-
-Marketplace install is the supported plugin channel. Release install scripts
-print a tag-pinned marketplace command, for example
-`copilot plugin marketplace add lossyrob/telex#vX.Y.Z`, so the plugin assets and
-installed binary can be kept on the same release tag.
+harnesses. See the [Copilot CLI push delivery guide](https://lossyrob.github.io/telex/guides/copilot-push.html)
+for the session-env mapping, teardown, compatibility notes, and the marketplace
+release-pinning convention.
 
 ## Networked backends
 
@@ -103,9 +95,10 @@ telex --backend prod send --to node:x --body "hi"
 ```
 
 Secrets are referenced (`--entra`, `--password-env`, `--password-command`), never
-stored in the config file.
+stored in the config file. See the
+[networked Postgres guide](https://lossyrob.github.io/telex/guides/postgres.html).
 
-## How it works (in one breath)
+## How it works
 
 A durable **address** is the responsibility being served; a per-user local
 **exchange** daemon owns SQLite presence, lease heartbeats, delivery buffering,
@@ -117,6 +110,7 @@ against the retained delivery buffer.
 
 ## Learn more
 
+- **[User guide](https://lossyrob.github.io/telex/)** — install, concepts, guides, and the CLI reference
 - **[SKILL.md](SKILL.md)** — how agents use telex (also `telex skill`)
 - **[DESIGN.md](docs/design/DESIGN.md)** — the working design
 - **[DECISIONS.md](docs/design/DECISIONS.md)** — the decision log
