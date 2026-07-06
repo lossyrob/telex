@@ -177,6 +177,10 @@ pub enum Request {
         /// address is durably committed. The daemon never interprets the argv.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         on_deliver: Option<Vec<String>>,
+        /// Optional on-deliver opt-in for live CC observer traffic. Applies only when
+        /// `on_deliver` is present; defaults false for older clients.
+        #[serde(default, skip_serializing_if = "is_false")]
+        on_deliver_wake_on_cc: bool,
     },
     Detach {
         store_key: String,
@@ -449,6 +453,11 @@ pub struct MemberStatus {
     /// Whether this member registered a daemon on-deliver push handler (bridge push is active).
     #[serde(default)]
     pub push_registered: bool,
+    /// Whether the push handler is opted into live CC observer traffic.
+    #[serde(default)]
+    pub push_wake_on_cc: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push_cc_after_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unattended_since_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

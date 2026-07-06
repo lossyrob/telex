@@ -373,6 +373,8 @@ struct MemberRecord {
     last_delivered_message_id: Option<i64>,
     /// Harness-neutral on-deliver handler argv registered for this address/session, if any.
     on_deliver: Option<Vec<String>>,
+    on_deliver_wake_on_cc: bool,
+    on_deliver_cc_after_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -1221,6 +1223,8 @@ impl MemberRecord {
             last_waiter_pid: self.last_waiter_pid,
             last_delivered_message_id: self.last_delivered_message_id,
             push_registered: self.on_deliver.is_some(),
+            push_wake_on_cc: self.on_deliver_wake_on_cc,
+            push_cc_after_ms: self.on_deliver_cc_after_ms,
             unattended_since_ms,
             unattended_for_ms,
             deaf_since_ms,
@@ -2109,6 +2113,15 @@ struct PushAttempt {
     last: Instant,
     attempts: u32,
     accepted: bool,
+    notification_only: bool,
+}
+
+#[derive(Clone)]
+struct OnDeliverCandidate {
+    member_key: MemberKey,
+    argv: Vec<String>,
+    address: String,
+    notification_only: bool,
 }
 
 /// Daemon-side liveness state for the generic on-deliver exec primitive. This is a
@@ -2141,11 +2154,7 @@ impl Default for OnDeliverState {
 
 impl DaemonState {
     /// Non-idle members attending `address` that registered an on-deliver handler.
-    fn on_deliver_candidates(
-        &self,
-        store_key: &str,
-        address: &str,
-    ) -> Vec<(MemberKey, Vec<String>)> {
+    fn on_deliver_candidates(&self, store_key: &str, address: &str) -> Vec<OnDeliverCandidate> {
         self.members
             .lock()
             .unwrap()
@@ -2156,7 +2165,39 @@ impl DaemonState {
                     && !m.idle
                     && m.on_deliver.is_some()
             })
-            .map(|(k, m)| (k.clone(), m.on_deliver.clone().unwrap_or_default()))
+            .map(|(k, m)| OnDeliverCandidate {
+                member_key: k.clone(),
+                argv: m.on_deliver.clone().unwrap_or_default(),
+                address: m.address.clone(),
+                notification_only: false,
+            })
+            .collect()
+    }
+
+    fn on_deliver_cc_candidates(
+        &self,
+        store_key: &str,
+        row: &MessageRow,
+    ) -> Vec<OnDeliverCandidate> {
+        self.members
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_k, m)| {
+                m.store_key == store_key
+                    && !m.idle
+                    && m.on_deliver.is_some()
+                    && m.on_deliver_wake_on_cc
+                    && m.on_deliver_cc_after_ms
+                        .is_some_and(|lower| row.created_at_ms > lower)
+                    && delivery_role(&m.address, &row.to_addr, row.cc.as_deref()) == "cc"
+            })
+            .map(|(k, m)| OnDeliverCandidate {
+                member_key: k.clone(),
+                argv: m.on_deliver.clone().unwrap_or_default(),
+                address: m.address.clone(),
+                notification_only: true,
+            })
             .collect()
     }
 
@@ -2181,7 +2222,10 @@ impl DaemonState {
             .unwrap()
             .get(member)
             .and_then(|m| m.get(&id))
-            .is_some_and(|a| now.saturating_duration_since(a.last) < on_deliver_redelivery_delay(a))
+            .is_some_and(|a| {
+                (a.accepted && a.notification_only)
+                    || now.saturating_duration_since(a.last) < on_deliver_redelivery_delay(a)
+            })
     }
 
     /// Record one push attempt for `(member, id)` -- its `accepted` outcome (the harness accepted
@@ -2194,6 +2238,7 @@ impl DaemonState {
         id: i64,
         now: Instant,
         accepted: bool,
+        notification_only: bool,
     ) -> u32 {
         let mut map = self.on_deliver.pushed.lock().unwrap();
         let entry = map
@@ -2204,10 +2249,12 @@ impl DaemonState {
                 last: now,
                 attempts: 0,
                 accepted: false,
+                notification_only,
             });
         entry.attempts = entry.attempts.saturating_add(1);
         entry.last = now;
         entry.accepted = accepted;
+        entry.notification_only = notification_only;
         entry.attempts
     }
 
@@ -2261,18 +2308,21 @@ impl DaemonState {
             .insert(id);
     }
 
-    /// Fast-path push on durable commit: fire the handler for the just-committed message to the
-    /// primary recipient that registered one. CC recipients are observers whose delivery rows
-    /// are inserted already-consumed (not returned by `fetch_undelivered`), so they cannot be
-    /// retried consistently; they read cc'd messages via `telex inbox`, not push.
+    /// Fast-path push on durable commit: fire the handler for the just-committed primary
+    /// recipient, plus opted-in live CC observer recipients whose lower bound admits this message.
     fn fire_on_deliver_on_commit(self: &Arc<Self>, store_key: &str, row: &MessageRow) {
-        for (member_key, argv) in self.on_deliver_candidates(store_key, &row.to_addr) {
+        for candidate in self
+            .on_deliver_candidates(store_key, &row.to_addr)
+            .into_iter()
+            .chain(self.on_deliver_cc_candidates(store_key, row))
+        {
             self.spawn_on_deliver(
-                member_key,
-                argv,
+                candidate.member_key,
+                candidate.argv,
                 store_key.to_string(),
-                row.to_addr.clone(),
+                candidate.address,
                 row.clone(),
+                candidate.notification_only,
             );
         }
     }
@@ -2286,6 +2336,7 @@ impl DaemonState {
         store_key: String,
         address: String,
         row: MessageRow,
+        notification_only: bool,
     ) {
         if argv.is_empty() {
             return;
@@ -2327,6 +2378,7 @@ impl DaemonState {
                     id,
                     Instant::now(),
                     outcome == RunOutcome::Ok,
+                    notification_only,
                 );
                 if outcome == RunOutcome::Transient {
                     let detail = stderr.map(|s| format!(": {s}")).unwrap_or_default();
@@ -2354,15 +2406,23 @@ impl DaemonState {
 /// Serialize a harness-neutral message descriptor fed to the on-deliver handler on stdin.
 /// The daemon exposes only transport facts; it never learns what the handler does with them.
 fn on_deliver_descriptor_json(store_key: &str, address: &str, row: &MessageRow) -> String {
+    let delivery_role = delivery_role(address, &row.to_addr, row.cc.as_deref());
+    let requires_disposition_for_current_recipient =
+        requires_disposition_for_recipient(row.requires_disposition, address, &row.to_addr);
     serde_json::json!({
         "message_id": row.id,
         "thread_id": row.thread_id,
         "store_key": store_key,
         "address": address,
+        "delivered_to": address,
+        "primary_to": row.to_addr,
+        "cc": cc_recipients(row.cc.as_deref()),
+        "delivery_role": delivery_role,
         "from": row.from_addr,
         "kind": row.kind,
         "attention": row.attention,
         "requires_disposition": row.requires_disposition,
+        "requires_disposition_for_current_recipient": requires_disposition_for_current_recipient,
         "subject": row.subject,
         "body": row.body,
     })
@@ -2472,13 +2532,22 @@ async fn on_deliver_sweep_member(
         Some(argv) if !argv.is_empty() => argv.clone(),
         _ => return,
     };
-    let undelivered = match backend.fetch_undelivered(&member.address).await {
+    let candidates = match backend
+        .fetch_wait_candidates(
+            &member.address,
+            WaitFetchOptions {
+                wake_on_cc: member.on_deliver_wake_on_cc,
+                cc_after_ms: member.on_deliver_cc_after_ms.unwrap_or_default(),
+            },
+        )
+        .await
+    {
         Ok(rows) => rows,
         Err(e) => {
             state.push_recent_error(
                 "OnDeliverSweep",
                 format!(
-                    "fetch_undelivered failed store={} address={}: {e:#}",
+                    "fetch_wait_candidates failed store={} address={}: {e:#}",
                     member.store_key, member.address
                 ),
             );
@@ -2490,12 +2559,15 @@ async fn on_deliver_sweep_member(
         session_id: member.session_id.clone(),
         address: member.address.clone(),
     };
-    let keep: BTreeSet<i64> = undelivered.iter().map(|r| r.id).collect();
+    let keep: BTreeSet<i64> = candidates
+        .iter()
+        .map(|candidate| candidate.message.id)
+        .collect();
     state.on_deliver_retain_pushed(&member_key, &keep);
     let now = Instant::now();
     let mut fired = 0usize;
-    for row in undelivered {
-        if state.on_deliver_should_skip(&member_key, row.id, now) {
+    for candidate in candidates {
+        if state.on_deliver_should_skip(&member_key, candidate.message.id, now) {
             continue;
         }
         state.spawn_on_deliver(
@@ -2503,7 +2575,8 @@ async fn on_deliver_sweep_member(
             argv.clone(),
             member.store_key.clone(),
             member.address.clone(),
-            row,
+            candidate.message,
+            candidate.notification_only,
         );
         fired += 1;
         if fired >= ON_DELIVER_SWEEP_BATCH {
@@ -2918,6 +2991,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             watch_pids,
             recovery,
             on_deliver,
+            on_deliver_wake_on_cc,
         } => {
             register_member(
                 state.clone(),
@@ -2931,6 +3005,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 watch_pids,
                 recovery,
                 on_deliver,
+                on_deliver_wake_on_cc,
             )
             .await
         }
@@ -3048,6 +3123,7 @@ async fn register_member(
     watch_pids: Vec<WatchPidSpec>,
     recovery: bool,
     on_deliver: Option<Vec<String>>,
+    on_deliver_wake_on_cc: bool,
 ) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
@@ -3077,6 +3153,19 @@ async fn register_member(
                 // explicit re-provision replaces it, so a pull re-attach cannot silently disarm
                 // the Copilot bridge (Namra #6).
                 refreshed.on_deliver = on_deliver.clone().or_else(|| existing.on_deliver.clone());
+                if on_deliver.is_some() {
+                    refreshed.on_deliver_wake_on_cc = on_deliver_wake_on_cc;
+                    refreshed.on_deliver_cc_after_ms =
+                        match on_deliver_cc_lower_bound(&backend, &address, on_deliver_wake_on_cc)
+                            .await
+                        {
+                            Ok(value) => value,
+                            Err(response) => return response,
+                        };
+                } else {
+                    refreshed.on_deliver_wake_on_cc = existing.on_deliver_wake_on_cc;
+                    refreshed.on_deliver_cc_after_ms = existing.on_deliver_cc_after_ms;
+                }
                 state.check_session_id_reuse_tripwire(&refreshed);
                 if !recovery {
                     state.clear_definite_session_end(&store_key, &session_id);
@@ -3233,6 +3322,22 @@ async fn register_member(
             "registering {address}: failed to clear durable detach tombstone for session {session_id}: {e:#}"
         ));
     }
+    let effective_on_deliver_wake_on_cc = on_deliver.is_some() && on_deliver_wake_on_cc;
+    let on_deliver_cc_after_ms = match on_deliver_cc_lower_bound(
+        &backend,
+        &address,
+        effective_on_deliver_wake_on_cc,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => {
+            let _ = backend
+                .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                .await;
+            return response;
+        }
+    };
     let record = MemberRecord {
         address: address.clone(),
         store_key: store_key.clone(),
@@ -3258,6 +3363,8 @@ async fn register_member(
         last_waiter_pid: None,
         last_delivered_message_id: None,
         on_deliver,
+        on_deliver_wake_on_cc: effective_on_deliver_wake_on_cc,
+        on_deliver_cc_after_ms,
     };
     state.check_session_id_reuse_tripwire(&record);
     if !recovery {
@@ -3280,6 +3387,28 @@ async fn register_member(
     Response::Registered {
         lease_epoch: claimed.lease_epoch,
         owner_instance_id: claimed.owner_instance_id,
+    }
+}
+
+async fn on_deliver_cc_lower_bound(
+    backend: &Arc<dyn Backend>,
+    address: &str,
+    wake_on_cc: bool,
+) -> std::result::Result<Option<i64>, Response> {
+    if !wake_on_cc {
+        return Ok(None);
+    }
+    if !backend.supports_wake_on_cc() {
+        return Err(proto::unsupported(format!(
+            "on-deliver wake-on-cc is not supported by the {} backend",
+            backend.kind()
+        )));
+    }
+    match backend.durable_clock_now_ms().await {
+        Ok(value) => Ok(Some(value)),
+        Err(e) => Err(proto::internal(format!(
+            "capturing on-deliver CC lower bound for {address}: {e:#}"
+        ))),
     }
 }
 
@@ -4420,6 +4549,7 @@ mod p3_tests {
             watch_pids: vec![WatchPidSpec::anchor(42)],
             recovery: false,
             on_deliver: None,
+            on_deliver_wake_on_cc: false,
         }
     }
 
@@ -4441,7 +4571,7 @@ mod p3_tests {
         let candidates = state.on_deliver_candidates(&store, "addr:a");
         assert_eq!(candidates.len(), 1);
         assert_eq!(
-            candidates[0].1,
+            candidates[0].argv,
             vec!["handler".to_string(), "--flag".to_string()]
         );
     }
@@ -4477,9 +4607,13 @@ mod p3_tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["message_id"], 5);
         assert_eq!(v["address"], "role:rcv");
+        assert_eq!(v["delivered_to"], "role:rcv");
+        assert_eq!(v["primary_to"], "role:rcv");
+        assert_eq!(v["delivery_role"], "to");
         assert_eq!(v["from"], "role:snd");
         assert_eq!(v["attention"], "interrupt");
         assert_eq!(v["requires_disposition"], true);
+        assert_eq!(v["requires_disposition_for_current_recipient"], true);
         assert_eq!(v["body"], "hello body");
     }
 
@@ -4516,7 +4650,42 @@ mod p3_tests {
         }
     }
 
+    fn record_stdin_argv(path: &std::path::Path) -> Vec<String> {
+        let path = path.to_string_lossy().to_string();
+        #[cfg(windows)]
+        {
+            let escaped = path.replace('\'', "''");
+            vec![
+                "powershell".into(),
+                "-NoProfile".into(),
+                "-Command".into(),
+                format!(
+                    "[IO.File]::WriteAllText('{escaped}', [Console]::In.ReadToEnd(), [Text.UTF8Encoding]::new($false))"
+                ),
+            ]
+        }
+        #[cfg(unix)]
+        {
+            vec![
+                "sh".into(),
+                "-c".into(),
+                "cat > \"$1\"".into(),
+                "sh".into(),
+                path,
+            ]
+        }
+    }
+
     async fn insert_to(state: &Arc<DaemonState>, store: &str, address: &str) -> i64 {
+        insert_message_to(state, store, address, None).await
+    }
+
+    async fn insert_message_to(
+        state: &Arc<DaemonState>,
+        store: &str,
+        address: &str,
+        cc: Option<&str>,
+    ) -> i64 {
         let backend = match state.backend_for(store).await {
             Ok(backend) => backend,
             Err(e) => panic!("backend_for failed: {e:?}"),
@@ -4524,6 +4693,7 @@ mod p3_tests {
         backend
             .insert_message(&NewMessage {
                 to_addr: address.to_string(),
+                cc: cc.map(str::to_string),
                 from_addr: Some("addr:snd".to_string()),
                 kind: "note".to_string(),
                 attention: Attention::Interrupt,
@@ -4534,6 +4704,17 @@ mod p3_tests {
             .await
             .expect("insert_message")
             .id
+    }
+
+    fn wait_for_file(path: &std::path::Path, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if path.exists() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        false
     }
 
     #[tokio::test]
@@ -4585,6 +4766,178 @@ mod p3_tests {
                 Instant::now() + Duration::from_secs(600)
             ),
             "an accepted-but-unacked message must be re-pushable after its backoff"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_deliver_default_does_not_push_cc_observer() {
+        let state = test_state("on-deliver-no-cc-default");
+        let store = store_key("on-deliver-no-cc-default");
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("daemon-p3-tests")
+            .join("on-deliver-no-cc-default");
+        std::fs::create_dir_all(&root).unwrap();
+        let cc_descriptor = root.join("cc.json");
+        let _ = std::fs::remove_file(&cc_descriptor);
+
+        let mut primary = register_req(&store, "primary", "addr:primary");
+        if let Request::Register { on_deliver, .. } = &mut primary {
+            *on_deliver = Some(exit_zero_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), primary).await,
+            Response::Registered { .. }
+        ));
+        let mut observer = register_req(&store, "observer", "addr:observer");
+        if let Request::Register { on_deliver, .. } = &mut observer {
+            *on_deliver = Some(record_stdin_argv(&cc_descriptor));
+        }
+        assert!(matches!(
+            request(state.clone(), observer).await,
+            Response::Registered { .. }
+        ));
+
+        let id = insert_message_to(&state, &store, "addr:primary", Some("addr:observer")).await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(id)
+            .await
+            .unwrap()
+            .unwrap();
+        state.fire_on_deliver_on_commit(&store, &row);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !cc_descriptor.exists(),
+            "CC observer should not receive push without wake-on-cc"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_deliver_wake_on_cc_pushes_live_cc_without_replay() {
+        let state = test_state("on-deliver-cc-wake");
+        let store = store_key("on-deliver-cc-wake");
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("daemon-p3-tests")
+            .join("on-deliver-cc-wake");
+        std::fs::create_dir_all(&root).unwrap();
+        let descriptor_path = root.join("cc.json");
+        let _ = std::fs::remove_file(&descriptor_path);
+
+        // Historical CC is visible but predates the push lower bound captured below.
+        let historical =
+            insert_message_to(&state, &store, "addr:primary", Some("addr:observer")).await;
+
+        let mut observer = register_req(&store, "observer", "addr:observer");
+        if let Request::Register {
+            on_deliver,
+            on_deliver_wake_on_cc,
+            ..
+        } = &mut observer
+        {
+            *on_deliver = Some(record_stdin_argv(&descriptor_path));
+            *on_deliver_wake_on_cc = true;
+        }
+        assert!(matches!(
+            request(state.clone(), observer).await,
+            Response::Registered { .. }
+        ));
+        let member = state
+            .get_member(&store, "observer", "addr:observer")
+            .unwrap();
+        assert!(member.on_deliver_wake_on_cc);
+        assert!(member.on_deliver_cc_after_ms.is_some());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !descriptor_path.exists(),
+            "historical CC {historical} should not replay after push wake registration"
+        );
+
+        let live = insert_message_to(&state, &store, "addr:primary", Some("addr:observer")).await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(live)
+            .await
+            .unwrap()
+            .unwrap();
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "observer".to_string(),
+            address: "addr:observer".to_string(),
+        };
+        let member = state
+            .get_member(&store, "observer", "addr:observer")
+            .unwrap();
+        assert!(
+            row.created_at_ms > member.on_deliver_cc_after_ms.unwrap(),
+            "live row {} must be newer than lower bound {:?}",
+            row.created_at_ms,
+            member.on_deliver_cc_after_ms
+        );
+        assert_eq!(state.on_deliver_cc_candidates(&store, &row).len(), 1);
+        state.fire_on_deliver_on_commit(&store, &row);
+        let mut attempted = false;
+        for _ in 0..100 {
+            if state.on_deliver_should_skip(&member_key, live, Instant::now()) {
+                attempted = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(attempted, "live CC should record an on-deliver attempt");
+        assert!(
+            wait_for_file(&descriptor_path, Duration::from_secs(3)),
+            "live CC should push to opted-in on-deliver handler"
+        );
+        let descriptor: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&descriptor_path).unwrap()).unwrap();
+        assert_eq!(descriptor["message_id"], live);
+        assert_eq!(descriptor["address"], "addr:observer");
+        assert_eq!(descriptor["delivery_role"], "cc");
+        assert_eq!(descriptor["primary_to"], "addr:primary");
+        assert_eq!(
+            descriptor["requires_disposition_for_current_recipient"],
+            false
+        );
+
+        std::fs::remove_file(&descriptor_path).unwrap();
+        spawn_on_deliver_backlog(
+            state.clone(),
+            state
+                .get_member(&store, "observer", "addr:observer")
+                .unwrap(),
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !descriptor_path.exists(),
+            "accepted notification-only CC must not be replayed by backlog sweep"
+        );
+
+        let mut reprovision = register_req(&store, "observer", "addr:observer");
+        if let Request::Register {
+            on_deliver,
+            on_deliver_wake_on_cc,
+            ..
+        } = &mut reprovision
+        {
+            *on_deliver = Some(record_stdin_argv(&descriptor_path));
+            *on_deliver_wake_on_cc = true;
+        }
+        assert!(matches!(
+            request(state.clone(), reprovision).await,
+            Response::Registered { .. }
+        ));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !descriptor_path.exists(),
+            "re-provision should advance lower bound and not replay old CC"
         );
     }
 
@@ -4649,7 +5002,7 @@ mod p3_tests {
             address: "addr:a".to_string(),
         };
         let now = Instant::now();
-        state.on_deliver_record_attempt(&member_key, 7, now, false);
+        state.on_deliver_record_attempt(&member_key, 7, now, false, false);
         assert!(state.on_deliver_should_skip(&member_key, 7, now));
         state.on_deliver_forget_member(&member_key);
         assert!(
@@ -4664,6 +5017,7 @@ mod p3_tests {
             last: Instant::now(),
             attempts,
             accepted,
+            notification_only: false,
         };
         // A failed push retries on the fast, growing backoff so a dead bridge recovers quickly.
         assert_eq!(
@@ -4700,7 +5054,7 @@ mod p3_tests {
         };
         let now = Instant::now();
         // Accepted push: skipped for the whole backstop window; eligible only after it elapses.
-        state.on_deliver_record_attempt(&member_key, 1, now, true);
+        state.on_deliver_record_attempt(&member_key, 1, now, true, false);
         assert!(state.on_deliver_should_skip(&member_key, 1, now + ON_DELIVER_RETRY_BASE * 4));
         assert!(!state.on_deliver_should_skip(
             &member_key,
@@ -4708,7 +5062,34 @@ mod p3_tests {
             now + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
         ));
         // Failed push: eligible again as soon as the fast backoff elapses.
-        state.on_deliver_record_attempt(&member_key, 2, now, false);
+        state.on_deliver_record_attempt(&member_key, 2, now, false, false);
+        assert!(state.on_deliver_should_skip(&member_key, 2, now));
+        assert!(!state.on_deliver_should_skip(
+            &member_key,
+            2,
+            now + ON_DELIVER_RETRY_BASE + Duration::from_secs(1)
+        ));
+    }
+
+    #[tokio::test]
+    async fn accepted_notification_only_push_is_not_replayed() {
+        let state = test_state("on-deliver-cc-accepted-once");
+        let store = store_key("on-deliver-cc-accepted-once");
+        let member_key = MemberKey {
+            store_key: store,
+            session_id: "s1".to_string(),
+            address: "addr:observer".to_string(),
+        };
+        let now = Instant::now();
+        state.on_deliver_record_attempt(&member_key, 1, now, true, true);
+        assert!(state.on_deliver_should_skip(&member_key, 1, now));
+        assert!(state.on_deliver_should_skip(
+            &member_key,
+            1,
+            now + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
+        ));
+
+        state.on_deliver_record_attempt(&member_key, 2, now, false, true);
         assert!(state.on_deliver_should_skip(&member_key, 2, now));
         assert!(!state.on_deliver_should_skip(
             &member_key,
@@ -7491,6 +7872,7 @@ pub mod test_support {
             watch_pids,
             recovery: false,
             on_deliver: None,
+            on_deliver_wake_on_cc: false,
         }
     }
 

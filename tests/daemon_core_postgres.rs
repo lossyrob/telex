@@ -8,7 +8,7 @@ use std::time::{Duration, Instant};
 use telex::backend::postgres::{make_tls, sanitize_ident, PgBackend};
 use telex::backend::Backend;
 use telex::daemon::test_support::{registered_epoch, send_request, TestDaemon};
-use telex::daemon_ipc::{self as proto, Request, Response};
+use telex::daemon_ipc::{self as proto, Request, Response, WatchPidSpec};
 use telex::model::{now_ms, Attention, DeliveryOutcome, NewMessage};
 use telex::profiles::{self, BackendProfile, ConfigFile};
 
@@ -116,6 +116,43 @@ async fn insert_cc_message(backend: &Arc<dyn Backend>, to: &str, cc: &str) -> i6
         .await
         .expect("insert cc message")
         .id
+}
+
+fn record_stdin_argv(path: &std::path::Path) -> Vec<String> {
+    let path = path.to_string_lossy().to_string();
+    #[cfg(windows)]
+    {
+        let escaped = path.replace('\'', "''");
+        vec![
+            "powershell".into(),
+            "-NoProfile".into(),
+            "-Command".into(),
+            format!(
+                "[IO.File]::WriteAllText('{escaped}', [Console]::In.ReadToEnd(), [Text.UTF8Encoding]::new($false))"
+            ),
+        ]
+    }
+    #[cfg(unix)]
+    {
+        vec![
+            "sh".into(),
+            "-c".into(),
+            "cat > \"$1\"".into(),
+            "sh".into(),
+            path,
+        ]
+    }
+}
+
+fn wait_for_file(path: &std::path::Path, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if path.exists() {
+            return true;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    false
 }
 
 #[tokio::test]
@@ -344,6 +381,136 @@ async fn postgres_wake_on_cc_delivers_live_cc_without_replay() {
         .await
         .expect("post-test schema cleanup");
     let _ = std::fs::remove_dir_all(config_path.parent().unwrap());
+    restore_env("TELEX_CONFIG", prior_config);
+}
+
+#[tokio::test]
+async fn postgres_on_deliver_wake_on_cc_pushes_live_cc_without_replay() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_on_deliver_wake_on_cc_pushes_live_cc_without_replay")
+    else {
+        return;
+    };
+
+    let prior_config = std::env::var_os("TELEX_CONFIG");
+    let schema = sanitize_ident(&format!(
+        "telex_daemon_pg_push_cc_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .expect("derived schema");
+    let cfg = pg_config(&url);
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("pre-test schema cleanup");
+
+    let profile = BackendProfile {
+        kind: "postgres".to_string(),
+        path: None,
+        url: Some(url.clone()),
+        auth: Some("password".to_string()),
+        password_env: std::env::var("TELEX_PG_PASSWORD")
+            .ok()
+            .filter(|pw| !pw.is_empty())
+            .map(|_| "TELEX_PG_PASSWORD".to_string()),
+        password_command: None,
+        schema: Some(schema.clone()),
+        entra_cred: None,
+        entra_scope: None,
+    };
+    let store_key = profiles::store_key(&profile, None);
+    let mut backends = BTreeMap::new();
+    backends.insert("pg-push-cc-test".to_string(), profile);
+    let config_path = write_temp_config(
+        "push-cc",
+        &ConfigFile {
+            default: Some("pg-push-cc-test".to_string()),
+            backends,
+        },
+    );
+    std::env::set_var("TELEX_CONFIG", &config_path);
+
+    let daemon = TestDaemon::new("pg-push-cc");
+    registered_epoch(&daemon, &store_key, "sender", "addr:sender").await;
+    let output = std::env::temp_dir().join(format!(
+        "telex-pg-push-cc-{}-{}.json",
+        std::process::id(),
+        now_ms()
+    ));
+    let _ = std::fs::remove_file(&output);
+
+    let historical = daemon
+        .request(send_request(
+            &store_key,
+            "sender",
+            Some("addr:sender"),
+            "addr:primary",
+            Some("addr:observer"),
+            "historical cc",
+        ))
+        .await;
+    assert!(
+        matches!(historical, Response::Sent { .. }),
+        "historical send failed: {historical:?}"
+    );
+
+    let register = Request::Register {
+        store_key: store_key.clone(),
+        address: "addr:observer".to_string(),
+        session_id: "observer".to_string(),
+        occupant: "observer".to_string(),
+        description: Some("observer push cc".to_string()),
+        scope: None,
+        tags: None,
+        watch_pids: vec![WatchPidSpec::anchor(std::process::id())],
+        recovery: false,
+        on_deliver: Some(record_stdin_argv(&output)),
+        on_deliver_wake_on_cc: true,
+    };
+    assert!(matches!(
+        daemon.request(register).await,
+        Response::Registered { .. }
+    ));
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        !output.exists(),
+        "historical CC must not replay after push wake registration"
+    );
+
+    let live = daemon
+        .request(send_request(
+            &store_key,
+            "sender",
+            Some("addr:sender"),
+            "addr:primary",
+            Some("addr:observer"),
+            "live cc",
+        ))
+        .await;
+    let live_id = match live {
+        Response::Sent { receipt } => receipt.id,
+        other => panic!("live send failed: {other:?}"),
+    };
+    assert!(
+        wait_for_file(&output, Duration::from_secs(5)),
+        "live CC should be pushed through on-deliver"
+    );
+    let descriptor: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&output).unwrap()).unwrap();
+    assert_eq!(descriptor["message_id"], live_id);
+    assert_eq!(descriptor["address"], "addr:observer");
+    assert_eq!(descriptor["delivery_role"], "cc");
+    assert_eq!(descriptor["primary_to"], "addr:primary");
+    assert_eq!(
+        descriptor["requires_disposition_for_current_recipient"],
+        false
+    );
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("post-test schema cleanup");
+    let _ = std::fs::remove_dir_all(config_path.parent().unwrap());
+    let _ = std::fs::remove_file(&output);
     restore_env("TELEX_CONFIG", prior_config);
 }
 

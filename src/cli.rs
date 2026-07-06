@@ -165,6 +165,9 @@ pub struct AttachArgs {
     /// Not a CLI flag; set by the Copilot bridge bind path.
     #[arg(skip)]
     pub on_deliver: Option<Vec<String>>,
+    /// Programmatic-only: opt an on-deliver push handler into live CC observer traffic.
+    #[arg(skip)]
+    pub on_deliver_wake_on_cc: bool,
 }
 
 #[derive(Args)]
@@ -536,6 +539,9 @@ pub struct CopilotAttachArgs {
     /// on-deliver push handler) so messages arrive as turns without a waiter.
     #[arg(long)]
     pub copilot_bridge: bool,
+    /// With --copilot-bridge, push live CC observer traffic to this session.
+    #[arg(long)]
+    pub wake_on_cc: bool,
 }
 
 #[derive(Args)]
@@ -854,6 +860,24 @@ mod tests {
                 description: Some(d),
                 ..
             })) if d == "work"
+        ));
+        assert!(matches!(
+            Cli::try_parse_from([
+                "telex",
+                "--address",
+                "addr:a",
+                "copilot",
+                "attach",
+                "--copilot-bridge",
+                "--wake-on-cc",
+            ])
+            .unwrap()
+            .command,
+            Command::Copilot(CopilotCmd::Attach(CopilotAttachArgs {
+                copilot_bridge: true,
+                wake_on_cc: true,
+                ..
+            }))
         ));
         assert!(matches!(
             Cli::try_parse_from(["telex", "copilot", "session-end"])

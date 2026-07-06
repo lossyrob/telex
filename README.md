@@ -93,6 +93,8 @@ messages arrive as turns (no waiter to run or re-arm):
 copilot plugin marketplace add lossyrob/telex
 copilot plugin install telex@telex
 telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --description "<work>"
+# Observer/table seats that want live CC turns opt in at bind time:
+telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --wake-on-cc --description "<work>"
 # then run the `extensions_reload` tool once; delivered telex messages arrive as turns.
 telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
 telex copilot gc --dry-run                                      # inspect stale bridge files

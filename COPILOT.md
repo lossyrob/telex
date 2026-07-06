@@ -25,6 +25,15 @@ yours to make.
    This registers your session/address with the per-user local exchange and writes the
    telex bridge extension into this session's extension dir. The plugin adapter maps
    `$COPILOT_AGENT_SESSION_ID` and `$COPILOT_LOADER_PID` for you.
+   If this station is a deliberative-table observer/relay and should receive live CC
+   traffic as turns, add `--wake-on-cc` to the bind:
+
+   ```sh
+   telex --address <addr> copilot attach --copilot-bridge --wake-on-cc --description "<what this session is doing>"
+   ```
+
+   CC push is opt-in, live-only, and notification-only: historical CC backlog is not
+   replayed, and CC messages still do not require a terminal disposition from the observer.
 
 2. **Load the bridge into the live session (one agent tool call).**
 
@@ -40,7 +49,10 @@ yours to make.
    labelled `[telex] from <addr> (<attention>)`. An `interrupt` message is delivered as
    soon as possible (Copilot `immediate`, ahead of enqueued messages); every other
    attention level is `enqueue`d and arrives after your current turn. Neither preempts a
-   turn already running. Read it, then record disposition **by id**:
+   turn already running. Read it, then record disposition **by id**. For CC observer
+   pushes, the prompt says `delivery_role: cc` and `requires_disposition: false`;
+   ack it for transport consumption/dedupe, but do not treat the primary recipient's
+   required-disposition flag as your own obligation.
 
    ```sh
    telex ack --address <addr> --id <message-id> --session "$COPILOT_AGENT_SESSION_ID"
