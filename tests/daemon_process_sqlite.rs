@@ -1971,13 +1971,21 @@ fn real_process_status_and_address_list_agree_after_attach() {
     );
     status.assert_success("status --address");
     let status_json = status.json("status --address");
+    let status_occupied = status_json
+        .get("occupancy")
+        .and_then(|o| o.get("occupied"))
+        .and_then(Value::as_bool);
+    assert_eq!(
+        status_occupied,
+        Some(false),
+        "status --address should report durable lease liveness, not daemon membership: {status_json}"
+    );
     assert_eq!(
         status_json
-            .get("occupancy")
-            .and_then(|o| o.get("occupied"))
+            .get("daemon_member_present")
             .and_then(Value::as_bool),
         Some(true),
-        "status --address should report occupied: {status_json}"
+        "status --address should report daemon member presence separately: {status_json}"
     );
     assert!(
         !status_json
@@ -2003,7 +2011,7 @@ fn real_process_status_and_address_list_agree_after_attach() {
         .expect("address listed");
     assert_eq!(
         listed.get("occupied").and_then(Value::as_bool),
-        Some(true),
+        status_occupied,
         "address list should agree with status --address: {list_json}"
     );
 }

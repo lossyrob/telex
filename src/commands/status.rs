@@ -71,11 +71,12 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
             .cloned()
             .collect();
         let deaf_warn = daemon_members.iter().any(|member| member.deaf_warn);
+        let daemon_member_present = !daemon_members.is_empty();
         info["address"] = serde_json::json!(addr);
         info["occupancy"] = serde_json::to_value(&occ)?;
-        if !daemon_members.is_empty() {
-            info["occupancy"]["occupied"] = serde_json::json!(true);
-            info["occupancy"]["occupant"] = serde_json::json!(daemon_members[0].occupant);
+        info["durable_lease_live"] = serde_json::json!(occ.occupied);
+        info["daemon_member_present"] = serde_json::json!(daemon_member_present);
+        if daemon_member_present {
             info["station_health"] = serde_json::json!(daemon_members[0].station_health);
             info["health_detail"] = serde_json::json!(daemon_members[0].health_detail);
             info["pending_unconsumed_count"] =
@@ -129,6 +130,17 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
         }
         if let Some(members) = info.get("daemon_members").and_then(|v| v.as_array()) {
             println!("daemon_members {}", members.len());
+        }
+        if info
+            .get("daemon_member_present")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+            && !info
+                .get("durable_lease_live")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+        {
+            println!("daemon_member present but durable lease is not live");
         }
         if let Some(health) = info.get("station_health").and_then(|v| v.as_str()) {
             let pending = info

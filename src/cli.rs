@@ -442,6 +442,9 @@ pub struct DaemonSessionEndArgs {
 pub enum CopilotCmd {
     /// Register a Copilot session using Copilot env vars mapped to generic telex inputs.
     Attach(CopilotAttachArgs),
+    /// Re-provision this Copilot session's push bridge and re-register the address after resume.
+    #[command(alias = "repair")]
+    Resume(CopilotResumeArgs),
     /// Handle Copilot sessionEnd by non-destructively ending this session in the daemon.
     #[command(hide = true)]
     SessionEnd(CopilotSessionEndArgs),
@@ -540,6 +543,28 @@ pub struct CopilotAttachArgs {
     #[arg(long)]
     pub copilot_bridge: bool,
     /// With --copilot-bridge, push live CC observer traffic to this session.
+    #[arg(long)]
+    pub wake_on_cc: bool,
+}
+
+#[derive(Args)]
+pub struct CopilotResumeArgs {
+    /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// One-line directory description of what this session is doing.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Project/workstream scope this address belongs to.
+    #[arg(long)]
+    pub scope: Option<String>,
+    /// Comma-separated coarse tags (e.g. issue:215,repo:telex).
+    #[arg(long)]
+    pub tags: Option<String>,
+    /// Occupant identity recorded on the lease (default: session host/pid).
+    #[arg(long)]
+    pub occupant: Option<String>,
+    /// Push live CC observer traffic to this session after reloading the bridge.
     #[arg(long)]
     pub wake_on_cc: bool,
 }

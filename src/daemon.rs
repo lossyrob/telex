@@ -1838,27 +1838,18 @@ async fn open_store_entry(
         #[cfg(feature = "postgres")]
         {
             let (profile_name, profile) = resolve_postgres_profile_for_store_key(store_key)?;
-            let (cfg, schema) = crate::profiles::pg_connect_config(&profile)
+            let backend = crate::backend::postgres::PgBackend::connect_profile(profile.clone())
                 .await
                 .map_err(|e| {
                     proto::unsupported(format!(
-                        "resolving Postgres backend profile '{profile_name}' for daemon store open: {e:#}"
+                        "opening Postgres backend profile '{profile_name}': {e:#}"
                     ))
                 })?;
-            let backend =
-                crate::backend::postgres::PgBackend::connect_with(cfg.clone(), schema.as_deref())
-                    .await
-                    .map_err(|e| {
-                        proto::unsupported(format!(
-                            "opening Postgres backend profile '{profile_name}': {e:#}"
-                        ))
-                    })?;
             backend
                 .init_schema()
                 .await
                 .map_err(|e| proto::unsupported(format!("initializing Postgres store: {e:#}")))?;
             let notify = Arc::new(Notify::new());
-            let _ = (cfg, schema);
             spawn_postgres_notify_listener(store_key.to_string(), notify.clone(), recent_errors);
             return Ok(StoreEntry {
                 kind: backend.kind().to_string(),
@@ -2710,14 +2701,18 @@ async fn heartbeat_members_once(state: Arc<DaemonState>) {
         {
             continue;
         }
+        if member.idle {
+            continue;
+        }
         if let Some(reason) = watch_pid_reap_reason(&member.watch_pids) {
-            state.mark_session_idle(
-                &member.store_key,
-                &member.session_id,
+            let _ = end_session_members(
+                state.clone(),
+                member.store_key.clone(),
+                member.session_id.clone(),
                 "WatchPidDeath",
                 &reason,
-                true,
-            );
+            )
+            .await;
             continue;
         }
         let backend = match state.backend_for(&member.store_key).await {
@@ -3303,7 +3298,7 @@ async fn register_member(
         .lock()
         .unwrap()
         .values()
-        .find(|m| m.store_key == store_key && m.address == address)
+        .find(|m| m.store_key == store_key && m.address == address && !m.idle)
         .cloned()
     {
         return proto::error_response(
@@ -3508,26 +3503,93 @@ async fn on_deliver_cc_lower_bound(
 }
 
 async fn session_end(state: Arc<DaemonState>, store_key: String, session_id: String) -> Response {
-    let affected = state.mark_session_idle(
-        &store_key,
-        &session_id,
+    end_session_members(
+        state,
+        store_key,
+        session_id,
         "SessionEnd",
         "authoritative sessionEnd hook",
-        true,
-    );
+    )
+    .await
+}
+
+async fn end_session_members(
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+    kind: &str,
+    reason: &str,
+) -> Response {
+    let active = state.session_members(&store_key, &session_id);
+    let release_error = release_definite_end_members(&state, &active, kind).await;
+    if let Some(response) = release_error {
+        return response;
+    }
+    let affected = state.mark_session_idle(&store_key, &session_id, kind, reason, true);
     if affected.is_empty() {
         state.push_recent_error(
-            "SessionEnd",
-            format!("SessionEnd no-op store={store_key} session={session_id}: no active members"),
+            kind,
+            format!("{kind} no-op store={store_key} session={session_id}: no active members"),
         );
     }
     Response::Ack {
-        message: Some("session-ended".to_string()),
+        message: Some(presence_ended_detail(kind)),
         delivery_outcome: None,
         address: None,
         message_id: None,
         lease_epoch: None,
     }
+}
+
+async fn release_definite_end_members(
+    state: &DaemonState,
+    members: &[MemberRecord],
+    reason: &str,
+) -> Option<Response> {
+    for member in members {
+        let backend = match state.backend_for(&member.store_key).await {
+            Ok(backend) => backend,
+            Err(response) => return Some(response),
+        };
+        match backend
+            .release_epoch_lease_for_detach(
+                &member.address,
+                &member.owner_instance_id,
+                member.lease_epoch,
+                &member.session_id,
+                reason,
+            )
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                state.push_recent_error(
+                    "NotOwner",
+                    format!(
+                        "{reason} durable release found non-owner for {} {} epoch {} owner {}",
+                        member.store_key,
+                        member.address,
+                        member.lease_epoch,
+                        member.owner_instance_id
+                    ),
+                );
+            }
+            Err(e) => {
+                state.push_recent_error(
+                    "BackendDisconnect",
+                    format!(
+                        "{reason} durable release failed for {} {} epoch {}: {e:#}",
+                        member.store_key, member.address, member.lease_epoch
+                    ),
+                );
+                return Some(proto::internal(format!(
+                    "{reason} durable release failed for {} at epoch {}: {e:#}",
+                    member.address, member.lease_epoch
+                )));
+            }
+        }
+    }
+    None
 }
 
 async fn reset_station(state: Arc<DaemonState>, store_key: String, address: String) -> Response {
@@ -6624,6 +6686,8 @@ mod p3_tests {
         assert!(status.recent_errors.iter().any(|e| e.kind == "SessionEnd"));
 
         let backend = state.backend_for(&store).await.unwrap();
+        let lease = backend.get_lease("addr:a").await.unwrap().unwrap();
+        assert_eq!(lease.owner_instance_id, None);
         let message_id = insert_test_message(&backend, "addr:a", None).await;
         assert!(matches!(
             request(state.clone(), register_req(&store, "s1", "addr:a")).await,
@@ -7559,6 +7623,47 @@ mod p3_tests {
             .recent_errors
             .iter()
             .any(|e| e.kind == "WatchPidDeath"));
+        let backend = state.backend_for(&store).await.unwrap();
+        let lease = backend.get_lease("addr:a").await.unwrap().unwrap();
+        assert_eq!(lease.owner_instance_id, None);
+        assert!(matches!(
+            request(state.clone(), register_req(&store, "s2", "addr:a")).await,
+            Response::Registered { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn session_end_release_failure_keeps_member_active_for_retry() {
+        let state = test_state("session-end-release-failure");
+        let store = store_key("session-end-release-failure");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let mut member = {
+            let mut members = state.members.lock().unwrap();
+            members
+                .remove(&DaemonState::member_key(&store, "s1", "addr:a"))
+                .unwrap()
+        };
+        member.store_key = "unsupported:release-failure".to_string();
+        state.insert_member(member);
+
+        let response = session_end(
+            state.clone(),
+            "unsupported:release-failure".to_string(),
+            "s1".to_string(),
+        )
+        .await;
+        assert!(matches!(
+            response,
+            Response::Error { code, .. } if code == proto::ERROR_UNSUPPORTED
+        ));
+        let status = state.status().await;
+        let member = status
+            .members
+            .iter()
+            .find(|m| m.store_key == "unsupported:release-failure")
+            .expect("member retained after failed release");
+        assert!(!member.idle);
     }
 
     #[tokio::test]

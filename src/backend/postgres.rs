@@ -4,7 +4,7 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, MutexGuard};
 use tokio_postgres::{Row, Transaction};
 
 use super::{Backend, Capabilities, WaitCandidate, WaitFetchOptions};
@@ -13,8 +13,17 @@ use crate::model::*;
 pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 pub struct PgBackend {
+    connector: PgConnector,
     client: AsyncMutex<tokio_postgres::Client>,
     notify_channel: String,
+}
+
+enum PgConnector {
+    Static {
+        config: tokio_postgres::Config,
+        schema: Option<String>,
+    },
+    Profile(crate::profiles::BackendProfile),
 }
 
 pub fn notify_channel_for_schema(schema: Option<&str>) -> Result<String> {
@@ -407,6 +416,33 @@ impl PgBackend {
         config: tokio_postgres::Config,
         schema: Option<&str>,
     ) -> Result<Self> {
+        let client = Self::open_client(&config, schema).await?;
+        let notify_channel = notify_channel_for_schema(schema)?;
+        Ok(Self {
+            connector: PgConnector::Static {
+                config,
+                schema: schema.map(str::to_string),
+            },
+            client: AsyncMutex::new(client),
+            notify_channel,
+        })
+    }
+
+    pub async fn connect_profile(profile: crate::profiles::BackendProfile) -> Result<Self> {
+        let (config, schema) = crate::profiles::pg_connect_config(&profile).await?;
+        let client = Self::open_client(&config, schema.as_deref()).await?;
+        let notify_channel = notify_channel_for_schema(schema.as_deref())?;
+        Ok(Self {
+            connector: PgConnector::Profile(profile),
+            client: AsyncMutex::new(client),
+            notify_channel,
+        })
+    }
+
+    async fn open_client(
+        config: &tokio_postgres::Config,
+        schema: Option<&str>,
+    ) -> Result<tokio_postgres::Client> {
         let (client, connection) = config
             .connect(make_tls()?)
             .await
@@ -438,11 +474,30 @@ impl PgBackend {
                 .await
                 .context("setting schema search_path")?;
         }
-        let notify_channel = notify_channel_for_schema(schema)?;
-        Ok(Self {
-            client: AsyncMutex::new(client),
-            notify_channel,
-        })
+        Ok(client)
+    }
+
+    async fn client(&self) -> Result<MutexGuard<'_, tokio_postgres::Client>> {
+        let mut client = self.client.lock().await;
+        if client.is_closed() {
+            *client = self.reconnect_client().await?;
+        }
+        Ok(client)
+    }
+
+    async fn reconnect_client(&self) -> Result<tokio_postgres::Client> {
+        match &self.connector {
+            PgConnector::Static { config, schema } => {
+                Self::open_client(config, schema.as_deref()).await
+            }
+            PgConnector::Profile(profile) => {
+                let (config, schema) = crate::profiles::pg_connect_config(profile)
+                    .await
+                    .context("resolving postgres reconnect profile")?;
+                Self::open_client(&config, schema.as_deref()).await
+            }
+        }
+        .context("reconnecting to postgres")
     }
 }
 
@@ -465,7 +520,7 @@ impl Backend for PgBackend {
     }
 
     async fn init_schema(&self) -> Result<()> {
-        let mut client = self.client.lock().await;
+        let mut client = self.client().await?;
         let schema_version = current_schema_version(&client).await?;
         if schema_version > CURRENT_SCHEMA_VERSION {
             bail!(
@@ -524,7 +579,7 @@ impl Backend for PgBackend {
         scope: Option<&str>,
         tags: Option<&str>,
     ) -> Result<()> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         client
             .execute(
                 "INSERT INTO addresses(address, description, scope, tags, status, created_at_ms) \
@@ -540,7 +595,7 @@ impl Backend for PgBackend {
     }
 
     async fn get_address(&self, address: &str) -> Result<Option<AddressRow>> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let row = client
             .query_opt(
                 "SELECT address, description, scope, tags, status, created_at_ms \
@@ -552,7 +607,7 @@ impl Backend for PgBackend {
     }
 
     async fn set_address_status(&self, address: &str, status: &str) -> Result<bool> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let n = client
             .execute(
                 "UPDATE addresses SET status=$2 WHERE address=$1",
@@ -575,18 +630,18 @@ impl Backend for PgBackend {
         }
         let rows = if let Some(s) = scope {
             sql.push_str(" AND scope=$1 ORDER BY address");
-            let client = self.client.lock().await;
+            let client = self.client().await?;
             client.query(&sql, &[&s]).await?
         } else {
             sql.push_str(" ORDER BY address");
-            let client = self.client.lock().await;
+            let client = self.client().await?;
             client.query(&sql, &[]).await?
         };
         Ok(rows.iter().map(map_address).collect())
     }
 
     async fn claim_lease(&self, claim: &LeaseClaim, window_secs: i64) -> Result<LeaseOutcome> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let now = pg_now_ms(&client).await?;
         let live_floor = now - window_secs * 1000;
         let rows = client
@@ -627,7 +682,7 @@ impl Backend for PgBackend {
     }
 
     async fn heartbeat(&self, address: &str) -> Result<()> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let now = pg_now_ms(&client).await?;
         client
             .execute(
@@ -639,7 +694,7 @@ impl Backend for PgBackend {
     }
 
     async fn release_lease(&self, address: &str, occupant: &str) -> Result<bool> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let n = client
             .execute(
                 "UPDATE leases
@@ -654,7 +709,7 @@ impl Backend for PgBackend {
     }
 
     async fn get_lease(&self, address: &str) -> Result<Option<LeaseRow>> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let row = client
             .query_opt(
                 "SELECT address, occupant, host, principal, description, tags, scope, pid, since_ms, heartbeat_at_ms, lease_epoch, owner_instance_id \
@@ -666,7 +721,7 @@ impl Backend for PgBackend {
     }
 
     async fn occupancy(&self, address: &str, window_secs: i64) -> Result<Occupancy> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let now = pg_now_ms(&client).await?;
         let row = client
             .query_opt(
@@ -700,7 +755,7 @@ impl Backend for PgBackend {
         owner_instance_id: &str,
         liveness_window_secs: i64,
     ) -> Result<EpochClaimResult> {
-        let mut client = self.client.lock().await;
+        let mut client = self.client().await?;
         let tx = client.transaction().await?;
         let current = tx
             .query_opt(
@@ -860,7 +915,7 @@ impl Backend for PgBackend {
         owner_instance_id: &str,
         lease_epoch: i64,
     ) -> Result<bool> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let now = pg_now_ms(&client).await?;
         let n = client
             .execute(
@@ -879,7 +934,7 @@ impl Backend for PgBackend {
         owner_instance_id: &str,
         lease_epoch: i64,
     ) -> Result<bool> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let n = client
             .execute(
                 "UPDATE leases
@@ -899,7 +954,7 @@ impl Backend for PgBackend {
         session_id: &str,
         reason: &str,
     ) -> Result<bool> {
-        let mut client = self.client.lock().await;
+        let mut client = self.client().await?;
         let tx = client.transaction().await?;
         let n = tx
             .execute(
@@ -926,7 +981,7 @@ impl Backend for PgBackend {
     }
 
     async fn reset_epoch_lease(&self, address: &str) -> Result<Option<i64>> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let row = client
             .query_opt(
                 "UPDATE leases
@@ -947,7 +1002,7 @@ impl Backend for PgBackend {
         lease_epoch: i64,
         message_id: i64,
     ) -> Result<DeliveryOutcome> {
-        let mut client = self.client.lock().await;
+        let mut client = self.client().await?;
         let tx = client.transaction().await?;
         let lease = tx
             .query_opt(
@@ -1007,12 +1062,12 @@ impl Backend for PgBackend {
     }
 
     async fn durable_clock_now_ms(&self) -> Result<i64> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         pg_advance_clock_hwm(&client).await
     }
 
     async fn delivery_retention_count(&self) -> Result<i64> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         Ok(client
             .query_one("SELECT COUNT(*) FROM deliveries", &[])
             .await?
@@ -1020,7 +1075,7 @@ impl Backend for PgBackend {
     }
 
     async fn pending_unconsumed_count(&self, address: &str) -> Result<i64> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         materialize_pending_delivery_rows_for_recipient(&client, address).await?;
         let sql = format!(
             "SELECT COUNT(*) FROM deliveries d
@@ -1041,7 +1096,7 @@ impl Backend for PgBackend {
         address: &str,
         reason: &str,
     ) -> Result<()> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let now = pg_now_ms(&client).await?;
         client
             .execute(
@@ -1057,7 +1112,7 @@ impl Backend for PgBackend {
     }
 
     async fn clear_detach_tombstone(&self, session_id: &str, address: &str) -> Result<()> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         client
             .execute(
                 "DELETE FROM detach_tombstones WHERE session_id=$1 AND address=$2",
@@ -1072,7 +1127,7 @@ impl Backend for PgBackend {
         session_id: &str,
         address: &str,
     ) -> Result<Option<DetachTombstone>> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let row = client
             .query_opt(
                 "SELECT session_id, address, reason, at_ms
@@ -1095,7 +1150,7 @@ impl Backend for PgBackend {
         recipient: &str,
         occupant: Option<&str>,
     ) -> Result<()> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let now = pg_now_ms(&client).await?;
         client
             .execute(
@@ -1111,7 +1166,7 @@ impl Backend for PgBackend {
     }
 
     async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         materialize_pending_delivery_rows_for_recipient(&client, address).await?;
         let sql = format!(
             "SELECT {MSG_COLS_M} FROM deliveries d
@@ -1133,7 +1188,7 @@ impl Backend for PgBackend {
         address: &str,
         options: WaitFetchOptions,
     ) -> Result<Vec<WaitCandidate>> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         materialize_pending_delivery_rows_for_recipient(&client, address).await?;
         let terminal = terminal_dispositions_sql_list();
         let primary_sql = format!(
@@ -1180,7 +1235,7 @@ impl Backend for PgBackend {
     }
 
     async fn has_delivery_for_recipient(&self, message_id: i64, recipient: &str) -> Result<bool> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         materialize_pending_delivery_rows_for_recipient(&client, recipient).await?;
         Ok(client
             .query_opt(
@@ -1192,7 +1247,7 @@ impl Backend for PgBackend {
     }
 
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow> {
-        let mut client = self.client.lock().await;
+        let mut client = self.client().await?;
         let tx = client.transaction().await?;
         let now = pg_tx_advance_clock_hwm(&tx).await?;
         // Determine the parent's thread first (NULL for a root message).
@@ -1249,7 +1304,7 @@ impl Backend for PgBackend {
     }
 
     async fn get_message(&self, id: i64) -> Result<Option<MessageRow>> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let row = client
             .query_opt(
                 &format!("SELECT {MSG_COLS} FROM messages WHERE id=$1"),
@@ -1262,7 +1317,7 @@ impl Backend for PgBackend {
     async fn thread_messages(&self, thread_id: i64) -> Result<Vec<MessageRow>> {
         let sql =
             format!("SELECT {MSG_COLS} FROM messages WHERE thread_id=$1 OR id=$1 ORDER BY id");
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let rows = client.query(&sql, &[&thread_id]).await?;
         Ok(rows.iter().map(map_message).collect())
     }
@@ -1274,7 +1329,7 @@ impl Backend for PgBackend {
                    AND d.recipient=$1 ORDER BY d.id DESC LIMIT 1) AS latest_disp \
              FROM messages WHERE to_addr=$1 OR cc LIKE '%' || $1 || '%' ORDER BY id DESC LIMIT $2"
         );
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let rows = client.query(&sql, &[&address, &limit]).await?;
         let items: Vec<InboxItem> = rows
             .iter()
@@ -1326,10 +1381,10 @@ impl Backend for PgBackend {
         }
         sql.push_str(" ORDER BY id");
         let rows = if let Some(addr) = address {
-            let client = self.client.lock().await;
+            let client = self.client().await?;
             client.query(&sql, &[&since, &addr]).await?
         } else {
-            let client = self.client.lock().await;
+            let client = self.client().await?;
             client.query(&sql, &[&since]).await?
         };
         Ok(rows.iter().map(map_message).collect())
@@ -1344,7 +1399,7 @@ impl Backend for PgBackend {
         by: Option<&str>,
     ) -> Result<DispositionRow> {
         let now = now_ms();
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let id: i64 = client
             .query_one(
                 "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms) \
@@ -1365,7 +1420,7 @@ impl Backend for PgBackend {
     }
 
     async fn dispositions_for(&self, message_id: i64) -> Result<Vec<DispositionRow>> {
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         let rows = client
             .query(
                 "SELECT id, message_id, recipient, state, note, by_principal, at_ms \
@@ -1390,7 +1445,7 @@ impl Backend for PgBackend {
     async fn notify_new(&self, address: &str, id: i64, sent_at_ms: i64) -> Result<()> {
         let payload =
             serde_json::json!({"address": address, "id": id, "sent_at_ms": sent_at_ms}).to_string();
-        let client = self.client.lock().await;
+        let client = self.client().await?;
         client
             .execute("SELECT pg_notify($1,$2)", &[&self.notify_channel, &payload])
             .await?;
