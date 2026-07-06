@@ -53,6 +53,14 @@ pub enum Command {
     Init,
     /// Show config, backend, address, station/occupancy status.
     Status,
+    /// Show telex binary, launcher, protocol, and install metadata.
+    Version(VersionArgs),
+    /// Install a versioned telex binary and optionally switch current to it.
+    Upgrade(UpgradeArgs),
+    /// Switch current back to a previously installed version.
+    Rollback(RollbackArgs),
+    /// Garbage-collect old installed telex versions.
+    Gc(GcArgs),
     /// Print the agent usage skill (how to use telex) for this build.
     Skill(SkillArgs),
 
@@ -444,6 +452,67 @@ pub enum CopilotCmd {
     Push(CopilotPushArgs),
     /// Detach a Copilot session's address and tear down its bridge if it was the last binding.
     Detach(CopilotDetachArgs),
+    /// Garbage-collect stale Copilot bridge files for unloaded sessions.
+    Gc(CopilotGcArgs),
+}
+
+#[derive(Args)]
+pub struct VersionArgs {
+    /// Inspect a specific versioned install root instead of inferring it from this executable.
+    #[arg(long)]
+    pub root: Option<PathBuf>,
+}
+
+#[derive(Args)]
+pub struct UpgradeArgs {
+    /// Local telex binary or directory containing telex(.exe) to install.
+    #[arg(long = "from", value_name = "PATH")]
+    pub from: PathBuf,
+    /// Version tag to install/switch to (defaults to this binary's package version).
+    #[arg(long)]
+    pub version: Option<String>,
+    /// Versioned install root (default: inferred install root or platform default).
+    #[arg(long)]
+    pub root: Option<PathBuf>,
+    /// Install into versions/<tag> but do not switch current.
+    #[arg(long)]
+    pub no_switch: bool,
+    /// Skip daemon drain before switching current (not recommended).
+    #[arg(long)]
+    pub skip_drain: bool,
+    /// Bound daemon drain before switching current.
+    #[arg(long, default_value_t = 10_000)]
+    pub drain_timeout_ms: u64,
+}
+
+#[derive(Args)]
+pub struct RollbackArgs {
+    /// Installed version tag to switch to (default: previous).
+    #[arg(long)]
+    pub version: Option<String>,
+    /// Versioned install root (default: inferred install root or platform default).
+    #[arg(long)]
+    pub root: Option<PathBuf>,
+    /// Skip daemon drain before switching current (not recommended).
+    #[arg(long)]
+    pub skip_drain: bool,
+    /// Bound daemon drain before switching current.
+    #[arg(long, default_value_t = 10_000)]
+    pub drain_timeout_ms: u64,
+}
+
+#[derive(Args)]
+pub struct GcArgs {
+    /// Versioned install root (default: inferred install root or platform default).
+    #[arg(long)]
+    pub root: Option<PathBuf>,
+    /// Report what would be removed without deleting anything.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Try removal of stale versions even after ordinary removal errors; never removes current,
+    /// previous, or the active process version.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args)]
@@ -496,6 +565,19 @@ pub struct CopilotDetachArgs {
     /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
     pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotGcArgs {
+    /// Stable Copilot session identity to check/remove; defaults to all known bridge files.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// Report what would be removed without deleting anything.
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Remove stale files even when liveness is uncertain. Live registry heartbeats are still kept.
+    #[arg(long)]
+    pub force: bool,
 }
 
 #[derive(Args)]
@@ -672,6 +754,10 @@ pub async fn run() -> i32 {
     let result: Result<i32> = match cli.command {
         Command::Init => crate::commands::init::run(&ctx).await,
         Command::Status => crate::commands::status::run(&ctx).await,
+        Command::Version(a) => crate::commands::upgrade::version(&ctx, a).await,
+        Command::Upgrade(a) => crate::commands::upgrade::upgrade(&ctx, a).await,
+        Command::Rollback(a) => crate::commands::upgrade::rollback(&ctx, a).await,
+        Command::Gc(a) => crate::commands::upgrade::gc(&ctx, a).await,
         Command::Skill(a) => crate::commands::skill::run(&ctx, a).await,
         Command::Attach(a) => crate::commands::attach::run(&ctx, a).await,
         Command::Detach(a) => crate::commands::detach::run(&ctx, a).await,
@@ -789,6 +875,60 @@ mod tests {
                 plugin_version: Some(v),
             })) if v == "0.1.0"
         ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "copilot", "gc", "--dry-run"])
+                .unwrap()
+                .command,
+            Command::Copilot(CopilotCmd::Gc(CopilotGcArgs { dry_run: true, .. }))
+        ));
+    }
+
+    #[test]
+    fn upgrade_surface_subcommands_parse() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "upgrade",
+            "--from",
+            "target/debug/telex",
+            "--version",
+            "v0.2.0",
+            "--no-switch",
+        ])
+        .unwrap();
+        match cli.command {
+            Command::Upgrade(UpgradeArgs {
+                from,
+                version: Some(version),
+                no_switch: true,
+                ..
+            }) => {
+                assert_eq!(from, PathBuf::from("target/debug/telex"));
+                assert_eq!(version, "v0.2.0");
+            }
+            _ => panic!("unexpected upgrade parse"),
+        }
+
+        let cli = Cli::try_parse_from(["telex", "rollback", "--version", "v0.1.0"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Rollback(RollbackArgs {
+                version: Some(_),
+                ..
+            })
+        ));
+
+        let cli = Cli::try_parse_from(["telex", "gc", "--dry-run", "--force"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Gc(GcArgs {
+                dry_run: true,
+                force: true,
+                ..
+            })
+        ));
+
+        let cli = Cli::try_parse_from(["telex", "version"]).unwrap();
+        assert!(matches!(cli.command, Command::Version(VersionArgs { .. })));
     }
 
     #[test]
@@ -798,7 +938,7 @@ mod tests {
             .find_subcommand_mut("copilot")
             .expect("copilot subcommand exists");
         let help = copilot.render_long_help().to_string();
-        for sub in ["skill", "attach", "detach"] {
+        for sub in ["skill", "attach", "detach", "gc"] {
             assert!(
                 help.contains(sub),
                 "`telex copilot --help` should list `{sub}`:\n{help}"

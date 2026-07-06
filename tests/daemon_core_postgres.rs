@@ -5,7 +5,7 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use telex::backend::postgres::{make_tls, sanitize_ident};
+use telex::backend::postgres::{make_tls, sanitize_ident, PgBackend};
 use telex::backend::Backend;
 use telex::daemon::test_support::{registered_epoch, send_request, TestDaemon};
 use telex::daemon_ipc::{self as proto, Request, Response};
@@ -116,6 +116,72 @@ async fn insert_cc_message(backend: &Arc<dyn Backend>, to: &str, cc: &str) -> i6
         .await
         .expect("insert cc message")
         .id
+}
+
+#[tokio::test]
+async fn postgres_future_schema_version_fails_closed_before_mutation() {
+    let Some(url) = pg_url_or_skip("postgres_future_schema_version_fails_closed_before_mutation")
+    else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let schema = sanitize_ident(&format!(
+        "telex_future_schema_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .expect("derived schema");
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("pre-test schema cleanup");
+    admin_exec(
+        &cfg,
+        &format!(
+            "CREATE SCHEMA {schema};
+             CREATE TABLE {schema}.telex_schema_version(
+                singleton integer NOT NULL DEFAULT 1 UNIQUE,
+                version bigint NOT NULL
+             );
+             INSERT INTO {schema}.telex_schema_version(singleton, version) VALUES (1, 999);"
+        ),
+    )
+    .await
+    .expect("seed future schema version");
+
+    let backend = PgBackend::connect_with(cfg.clone(), Some(&schema))
+        .await
+        .expect("connect future schema backend");
+    let err = backend.init_schema().await.unwrap_err();
+    assert!(
+        err.to_string().contains("newer than supported"),
+        "unexpected error: {err:#}"
+    );
+
+    let (client, connection) = cfg
+        .connect(make_tls().expect("tls"))
+        .await
+        .expect("connect");
+    let handle = tokio::spawn(async move {
+        let _ = connection.await;
+    });
+    let addresses_exists: bool = client
+        .query_one(
+            &format!("SELECT to_regclass('{schema}.addresses') IS NOT NULL"),
+            &[],
+        )
+        .await
+        .expect("query addresses table")
+        .get(0);
+    assert!(
+        !addresses_exists,
+        "future schema gate must fail before creating ordinary telex tables"
+    );
+    drop(client);
+    let _ = handle.await;
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("post-test schema cleanup");
 }
 
 #[tokio::test]

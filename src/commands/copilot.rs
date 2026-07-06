@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::cli::{
-    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotDetachArgs, CopilotPushArgs,
+    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotDetachArgs, CopilotGcArgs, CopilotPushArgs,
     CopilotSessionEndArgs, CopilotSkillArgs, CopilotTurnGuardArgs, Ctx, DetachArgs,
 };
 use crate::daemon_ipc::{
@@ -49,9 +49,9 @@ const PUSH_EXIT_PERMANENT: i32 = 3;
 const COPILOT_SKILL_MD: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/COPILOT.md"));
 /// Copilot in-session bridge protocol version (the descriptor + prompt + endpoint shape).
 /// Bump on a breaking change to the push/bridge contract.
-const COPILOT_BRIDGE_PROTOCOL: u32 = 1;
+pub const COPILOT_BRIDGE_PROTOCOL: u32 = 1;
 /// Oldest telex plugin whose bootstrap is compatible with this binary's Copilot path.
-const MIN_COMPATIBLE_PLUGIN_VERSION: &str = "0.1.0";
+pub const MIN_COMPATIBLE_PLUGIN_VERSION: &str = "0.1.0";
 
 pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
     match cmd {
@@ -61,6 +61,7 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
         CopilotCmd::Skill(args) => skill(args),
         CopilotCmd::Push(args) => push(ctx, args).await,
         CopilotCmd::Detach(args) => detach(ctx, args).await,
+        CopilotCmd::Gc(args) => gc(ctx, args),
     }
 }
 
@@ -358,6 +359,11 @@ fn bridge_registry_path(session_id: &str) -> Result<PathBuf> {
         .join(".copilot")
         .join("telex-bridge")
         .join(format!("{session_id}.json")))
+}
+
+fn bridge_root_dir() -> Result<PathBuf> {
+    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
+    Ok(home.join(".copilot").join("telex-bridge"))
 }
 
 /// Whether this session's bridge is actually live: the heartbeat-refreshed registry file exists
@@ -997,6 +1003,112 @@ fn skill(args: CopilotSkillArgs) -> Result<i32> {
     }
     print!("{}", render_copilot_skill(plugin_version.as_deref()));
     Ok(0)
+}
+
+fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
+    let sessions = match args.session {
+        Some(session) => vec![session],
+        None => discover_bridge_sessions()?,
+    };
+    let mut entries = Vec::new();
+    for session in sessions {
+        let live = bridge_is_live(&session);
+        let bindings = match read_bridge_bindings(&session) {
+            Ok(bindings) => bindings,
+            Err(e) if !args.force => {
+                entries.push(serde_json::json!({
+                    "session": session,
+                    "action": "keep",
+                    "reason": format!("bindings unreadable ({e}); treating as still shared"),
+                    "live": live,
+                    "bindings": serde_json::Value::Null,
+                }));
+                continue;
+            }
+            Err(_) => Vec::new(),
+        };
+        let keep_reason = if live {
+            Some("bridge heartbeat is live".to_string())
+        } else if !bindings.is_empty() && !args.force {
+            Some(format!(
+                "bindings still recorded ({}); use --force after verifying the session is gone",
+                bindings.join(", ")
+            ))
+        } else {
+            None
+        };
+        let (action, reason) = if let Some(reason) = keep_reason {
+            ("keep", reason)
+        } else if args.dry_run {
+            ("would_remove", "stale bridge files".to_string())
+        } else {
+            remove_bridge_extension(&session);
+            ("removed", "stale bridge files".to_string())
+        };
+        entries.push(serde_json::json!({
+            "session": session,
+            "action": action,
+            "reason": reason,
+            "live": live,
+            "bindings": bindings,
+        }));
+    }
+    let out = serde_json::json!({
+        "copilot_bridge_gc": true,
+        "dry_run": args.dry_run,
+        "force": args.force,
+        "entries": entries,
+    });
+    crate::output::emit(ctx.fmt, &out, || {
+        if let Some(entries) = out.get("entries").and_then(|v| v.as_array()) {
+            for entry in entries {
+                let session = entry
+                    .get("session")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("(unknown)");
+                let action = entry
+                    .get("action")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let reason = entry.get("reason").and_then(|v| v.as_str()).unwrap_or("");
+                println!("{action} {session} ({reason})");
+            }
+        }
+    });
+    Ok(0)
+}
+
+fn discover_bridge_sessions() -> Result<Vec<String>> {
+    let mut sessions = std::collections::BTreeSet::new();
+    if let Ok(root) = bridge_root_dir() {
+        if let Ok(entries) = std::fs::read_dir(root) {
+            for entry in entries.flatten() {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                if let Some(session) = name.strip_suffix(".bindings.json") {
+                    sessions.insert(session.to_string());
+                } else if let Some(session) = name.strip_suffix(".json") {
+                    sessions.insert(session.to_string());
+                }
+            }
+        }
+    }
+    if let Ok(home) = copilot_home_dir() {
+        let session_state = home.join("session-state");
+        if let Ok(entries) = std::fs::read_dir(session_state) {
+            for entry in entries.flatten() {
+                let session = entry.file_name().to_string_lossy().into_owned();
+                if entry
+                    .path()
+                    .join("extensions")
+                    .join(BRIDGE_EXTENSION_NAME)
+                    .exists()
+                {
+                    sessions.insert(session);
+                }
+            }
+        }
+    }
+    Ok(sessions.into_iter().collect())
 }
 
 fn read_stdin_payload() -> Option<String> {
@@ -2090,5 +2202,51 @@ mod tests {
         let got = active_session_members(&status, "sqlite:/tmp/telex.db", "s1");
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].address, "active");
+    }
+
+    #[test]
+    fn copilot_gc_keeps_corrupt_bindings_unless_forced() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let session = format!("gc-corrupt-bindings-{}", std::process::id());
+        let path = bridge_bindings_path(&session).expect("bindings path");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("create bridge root");
+        }
+        std::fs::write(&path, b"not-json").expect("write corrupt bindings");
+        let ctx = Ctx {
+            cfg: crate::config::Config {
+                backend_selector: None,
+                db_override: None,
+                default_address: None,
+                liveness_window_secs: 15,
+            },
+            fmt: crate::output::Format::Json,
+            address: None,
+        };
+
+        gc(
+            &ctx,
+            CopilotGcArgs {
+                session: Some(session.clone()),
+                dry_run: false,
+                force: false,
+            },
+        )
+        .expect("non-force gc");
+        assert!(
+            path.exists(),
+            "corrupt bindings should be treated as shared unless forced"
+        );
+
+        gc(
+            &ctx,
+            CopilotGcArgs {
+                session: Some(session),
+                dry_run: false,
+                force: true,
+            },
+        )
+        .expect("forced gc");
+        assert!(!path.exists(), "forced gc removes corrupt bindings");
     }
 }
