@@ -4666,13 +4666,7 @@ mod p3_tests {
         }
         #[cfg(unix)]
         {
-            vec![
-                "sh".into(),
-                "-c".into(),
-                "cat > \"$1\"".into(),
-                "sh".into(),
-                path,
-            ]
+            vec!["tee".into(), path]
         }
     }
 

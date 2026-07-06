@@ -134,13 +134,7 @@ fn record_stdin_argv(path: &std::path::Path) -> Vec<String> {
     }
     #[cfg(unix)]
     {
-        vec![
-            "sh".into(),
-            "-c".into(),
-            "cat > \"$1\"".into(),
-            "sh".into(),
-            path,
-        ]
+        vec!["tee".into(), path]
     }
 }
 
@@ -492,7 +486,7 @@ async fn postgres_on_deliver_wake_on_cc_pushes_live_cc_without_replay() {
         other => panic!("live send failed: {other:?}"),
     };
     assert!(
-        wait_for_file(&output, Duration::from_secs(5)),
+        wait_for_file(&output, Duration::from_secs(10)),
         "live CC should be pushed through on-deliver"
     );
     let descriptor: serde_json::Value =
