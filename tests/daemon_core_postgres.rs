@@ -138,11 +138,110 @@ fn record_stdin_argv(path: &std::path::Path) -> Vec<String> {
     }
 }
 
+fn fail_first_then_record_argv(root: &std::path::Path) -> Vec<String> {
+    std::fs::create_dir_all(root).expect("create handler root");
+    #[cfg(windows)]
+    {
+        let script = root.join("handler.ps1");
+        std::fs::write(
+            &script,
+            r#"
+param([string]$Root)
+New-Item -ItemType Directory -Force -Path $Root | Out-Null
+$inputText = [Console]::In.ReadToEnd()
+if ($inputText -match '"body":"first cc"') {
+  $countPath = Join-Path $Root 'first.count'
+  $count = 0
+  if (Test-Path -LiteralPath $countPath) {
+    $count = [int]((Get-Content -LiteralPath $countPath -Raw).Trim())
+  }
+  $count += 1
+  Set-Content -LiteralPath $countPath -Value $count -Encoding utf8
+  $attemptPath = Join-Path $Root "first-$count.json"
+  [IO.File]::WriteAllText($attemptPath, $inputText, [Text.UTF8Encoding]::new($false))
+  if ($count -eq 1) { exit 1 }
+  Copy-Item -LiteralPath $attemptPath -Destination (Join-Path $Root 'first-retry.json') -Force
+  exit 0
+}
+if ($inputText -match '"body":"second cc"') {
+  [IO.File]::WriteAllText((Join-Path $Root 'second.json'), $inputText, [Text.UTF8Encoding]::new($false))
+  exit 0
+}
+[IO.File]::WriteAllText((Join-Path $Root 'unexpected.json'), $inputText, [Text.UTF8Encoding]::new($false))
+exit 0
+"#,
+        )
+        .expect("write handler script");
+        vec![
+            "powershell".into(),
+            "-NoProfile".into(),
+            "-ExecutionPolicy".into(),
+            "Bypass".into(),
+            "-File".into(),
+            script.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+        ]
+    }
+    #[cfg(unix)]
+    {
+        let script = root.join("handler.sh");
+        std::fs::write(
+            &script,
+            r#"
+root="$1"
+mkdir -p "$root"
+input="$(cat)"
+if printf '%s' "$input" | grep -q '"body":"first cc"'; then
+  count_file="$root/first.count"
+  count=0
+  if [ -f "$count_file" ]; then
+    count="$(cat "$count_file")"
+  fi
+  count=$((count + 1))
+  printf '%s\n' "$count" > "$count_file"
+  attempt_path="$root/first-$count.json"
+  printf '%s\n' "$input" > "$attempt_path"
+  if [ "$count" -eq 1 ]; then
+    exit 1
+  fi
+  cp "$attempt_path" "$root/first-retry.json"
+  exit 0
+fi
+if printf '%s' "$input" | grep -q '"body":"second cc"'; then
+  printf '%s\n' "$input" > "$root/second.json"
+  exit 0
+fi
+printf '%s\n' "$input" > "$root/unexpected.json"
+exit 0
+"#,
+        )
+        .expect("write handler script");
+        vec![
+            "sh".into(),
+            script.to_string_lossy().to_string(),
+            root.to_string_lossy().to_string(),
+        ]
+    }
+}
+
 async fn wait_for_file(path: &std::path::Path, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if path.exists() {
             return true;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    false
+}
+
+async fn wait_for_count(path: &std::path::Path, expected: u32, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while Instant::now() < deadline {
+        if let Ok(text) = std::fs::read_to_string(path) {
+            if text.trim().parse::<u32>().unwrap_or_default() >= expected {
+                return true;
+            }
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
@@ -505,6 +604,163 @@ async fn postgres_on_deliver_wake_on_cc_pushes_live_cc_without_replay() {
         .expect("post-test schema cleanup");
     let _ = std::fs::remove_dir_all(config_path.parent().unwrap());
     let _ = std::fs::remove_file(&output);
+    restore_env("TELEX_CONFIG", prior_config);
+}
+
+#[tokio::test]
+async fn postgres_on_deliver_failed_cc_retry_survives_later_accepted_cc() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(url) =
+        pg_url_or_skip("postgres_on_deliver_failed_cc_retry_survives_later_accepted_cc")
+    else {
+        return;
+    };
+
+    let prior_config = std::env::var_os("TELEX_CONFIG");
+    let schema = sanitize_ident(&format!(
+        "telex_daemon_pg_push_cc_retry_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .expect("derived schema");
+    let cfg = pg_config(&url);
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("pre-test schema cleanup");
+
+    let profile = BackendProfile {
+        kind: "postgres".to_string(),
+        path: None,
+        url: Some(url.clone()),
+        auth: Some("password".to_string()),
+        password_env: std::env::var("TELEX_PG_PASSWORD")
+            .ok()
+            .filter(|pw| !pw.is_empty())
+            .map(|_| "TELEX_PG_PASSWORD".to_string()),
+        password_command: None,
+        schema: Some(schema.clone()),
+        entra_cred: None,
+        entra_scope: None,
+    };
+    let store_key = profiles::store_key(&profile, None);
+    let mut backends = BTreeMap::new();
+    backends.insert("pg-push-cc-retry-test".to_string(), profile);
+    let config_path = write_temp_config(
+        "push-cc-retry",
+        &ConfigFile {
+            default: Some("pg-push-cc-retry-test".to_string()),
+            backends,
+        },
+    );
+    std::env::set_var("TELEX_CONFIG", &config_path);
+
+    let daemon = TestDaemon::new("pg-push-cc-retry");
+    registered_epoch(&daemon, &store_key, "sender", "addr:sender").await;
+    let output_root = std::env::temp_dir().join(format!(
+        "telex-pg-push-cc-retry-{}-{}",
+        std::process::id(),
+        now_ms()
+    ));
+    let _ = std::fs::remove_dir_all(&output_root);
+
+    let register = Request::Register {
+        store_key: store_key.clone(),
+        address: "addr:observer".to_string(),
+        session_id: "observer".to_string(),
+        occupant: "observer".to_string(),
+        description: Some("observer push cc retry".to_string()),
+        scope: None,
+        tags: None,
+        watch_pids: vec![WatchPidSpec::anchor(std::process::id())],
+        recovery: false,
+        on_deliver: Some(fail_first_then_record_argv(&output_root)),
+        on_deliver_wake_on_cc: true,
+    };
+    assert!(matches!(
+        daemon.request(register).await,
+        Response::Registered { .. }
+    ));
+
+    let first = daemon
+        .request(send_request(
+            &store_key,
+            "sender",
+            Some("addr:sender"),
+            "addr:primary",
+            Some("addr:observer"),
+            "first cc",
+        ))
+        .await;
+    let first_id = match first {
+        Response::Sent { receipt } => receipt.id,
+        other => panic!("first live CC send failed: {other:?}"),
+    };
+    let first_count = output_root.join("first.count");
+    assert!(
+        wait_for_count(&first_count, 1, Duration::from_secs(10)).await,
+        "first CC should be attempted once and fail transiently"
+    );
+    let mut rewound = false;
+    for _ in 0..100 {
+        if daemon.rewind_on_deliver_attempt(
+            &store_key,
+            "observer",
+            "addr:observer",
+            first_id,
+            Duration::from_secs(60),
+        ) {
+            rewound = true;
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+    assert!(
+        rewound,
+        "failed first CC attempt should be recorded in push bookkeeping"
+    );
+
+    let second = daemon
+        .request(send_request(
+            &store_key,
+            "sender",
+            Some("addr:sender"),
+            "addr:primary",
+            Some("addr:observer"),
+            "second cc",
+        ))
+        .await;
+    let second_id = match second {
+        Response::Sent { receipt } => receipt.id,
+        other => panic!("second live CC send failed: {other:?}"),
+    };
+    let second_path = output_root.join("second.json");
+    assert!(
+        wait_for_file(&second_path, Duration::from_secs(10)).await,
+        "second CC should be accepted by the handler"
+    );
+    tokio::time::sleep(Duration::from_millis(200)).await;
+
+    daemon.heartbeat_once().await;
+    assert!(
+        wait_for_count(&first_count, 2, Duration::from_secs(10)).await,
+        "failed first CC should remain retryable after later CC succeeds"
+    );
+    let retry: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(output_root.join("first-retry.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(retry["message_id"], first_id);
+    assert_eq!(retry["delivery_role"], "cc");
+    let second_descriptor: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(second_path).unwrap()).unwrap();
+    assert_eq!(second_descriptor["message_id"], second_id);
+    assert_eq!(second_descriptor["delivery_role"], "cc");
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("post-test schema cleanup");
+    let _ = std::fs::remove_dir_all(config_path.parent().unwrap());
+    let _ = std::fs::remove_dir_all(&output_root);
     restore_env("TELEX_CONFIG", prior_config);
 }
 

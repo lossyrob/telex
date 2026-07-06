@@ -45,6 +45,17 @@ yours to make.
    the same session stays continuously attached, an already-accepted message is **not** re-pushed on
    the fast cadence -- a long backstop may re-check it only every few minutes if it stays unacked.
 
+   Troubleshooting CC observer turns: if CC traffic is visible in `telex inbox` but is not arriving
+   as Copilot turns, the bridge was probably bound without CC wake or the extension was not reloaded.
+   Re-run the bind with the CC flag, then run `extensions_reload`:
+
+   ```sh
+   telex --address <addr> copilot attach --copilot-bridge --wake-on-cc --description "<what this session is doing>"
+   ```
+
+   Do not start `telex wait --wake-on-cc` for a Copilot plugin session; the bridge registration above
+   is how the agent asks the daemon to watch live CC traffic.
+
 3. **Receive messages as turns.** A delivered telex message arrives as a new turn
    labelled `[telex] from <addr> (<attention>)`. An `interrupt` message is delivered as
    soon as possible (Copilot `immediate`, ahead of enqueued messages); every other

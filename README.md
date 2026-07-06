@@ -106,6 +106,11 @@ do not read Copilot-specific env variables directly, so follow-up generic comman
 (e.g. `telex ack`) must pass `--session "$COPILOT_AGENT_SESSION_ID"` or run in a
 shell/script that sets `TELEX_SESSION_ID`.
 
+If a Copilot observer sees CC messages in `telex inbox` but not as turns, re-run
+`telex --address <addr> copilot attach --copilot-bridge --wake-on-cc` and then run
+the `extensions_reload` tool. `telex wait --wake-on-cc` is only for non-Copilot
+pull waiters; Copilot asks for CC watching through the bridge bind.
+
 `telex wait` remains the generic pull primitive for scripts, CI, and non-extension
 harnesses; Copilot sessions use push delivery above instead.
 

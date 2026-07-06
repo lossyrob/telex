@@ -8028,6 +8028,26 @@ pub mod test_support {
             heartbeat_members_once(self.state.clone()).await;
         }
 
+        pub fn rewind_on_deliver_attempt(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+            message_id: i64,
+            by: Duration,
+        ) -> bool {
+            let member_key = DaemonState::member_key(store_key, session_id, address);
+            let mut pushed = self.state.on_deliver.pushed.lock().unwrap();
+            let Some(attempt) = pushed
+                .get_mut(&member_key)
+                .and_then(|attempts| attempts.get_mut(&message_id))
+            else {
+                return false;
+            };
+            attempt.last = attempt.last.checked_sub(by).unwrap_or(attempt.last);
+            true
+        }
+
         pub fn skew_first_watch_pid_start_time(
             &self,
             store_key: &str,
