@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-02T20:45:00.000Z",
+  "updatedAt": "2026-07-06T22:05:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -199,7 +199,7 @@
       "type": "task",
       "title": "Seamless upgrade (#6 / PR #56)",
       "summary": "Practical seamless-upgrade floor that closes #6 under the narrowed bar: versioned install + stable launcher, local upgrade/switch (upgrade --from is acceptable), current/previous manifests, conservative known-safe rollback (not a general downgrade guarantee), conservative GC preserving current/previous/active versions, incompatible/too-old binary fail-closed diagnostics, status/version mixed-version observability, install script migration, and current Copilot bridge version/GC needs. GitHub release discovery, full rollback/downgrade framework, Postgres live successor handoff beyond safe drain/release, stronger GC scanning, extra Unix/fsync hardening, and destructive direct-pre-epoch Postgres migrations are future hardening.",
-      "status": "ready",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -237,6 +237,26 @@
       ]
     },
     {
+      "id": "bridge-idle-drain",
+      "type": "task",
+      "title": "Copilot bridge idle drain (defer queued pushes until idle)",
+      "summary": "Fix stale queued bridge turns: for non-interrupt Copilot bridge pushes, if the agent is busy, defer delivery until session idle / turn-stop, then revalidate durable Telex state and skip messages already acked or terminally dispositioned. Interrupt/immediate messages still push immediately. Durable Telex state and daemon push bookkeeping remain authoritative; bridge memory is not the source of truth. Adds bridge busy/idle status, deferred on-deliver outcome or drain request, idle-triggered drain, pre-send revalidation, batching/ordering, and tests for manual read+ack before idle.",
+      "status": "ready",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 65
+      },
+      "dependsOn": [
+        "push-delivery"
+      ]
+    },
+    {
       "id": "validation-harness",
       "type": "task",
       "title": "Validation harness + Tier 1/2 loop (chaos + Entra-PG multi-host)",
@@ -268,7 +288,8 @@
       },
       "dependsOn": [
         "seamless-upgrade",
-        "harness-skill-layout"
+        "harness-skill-layout",
+        "bridge-idle-drain"
       ]
     },
     {
@@ -399,6 +420,7 @@
       "nodeIds": [
         "seamless-upgrade",
         "harness-skill-layout",
+        "bridge-idle-drain",
         "public-release",
         "release-upgrade"
       ]
