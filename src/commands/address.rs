@@ -85,9 +85,11 @@ async fn list(ctx: &Ctx, args: AddressListArgs) -> Result<i32> {
             "scope": a.scope,
             "tags": a.tags,
             "status": a.status,
-            "occupied": daemon_member.is_some() || occ.occupied,
-            "occupant": daemon_member.map(|m| m.occupant.clone()).or(occ.occupant),
+            "occupied": occ.occupied,
+            "occupant": occ.occupant,
             "age_secs": occ.age_secs,
+            "durable_lease_live": occ.occupied,
+            "daemon_member_present": daemon_member.is_some(),
             "station_health": daemon_member.map(|m| serde_json::json!(m.station_health)),
             "health_detail": daemon_member.and_then(|m| m.health_detail.clone()),
             "pending_unconsumed_count": daemon_member.map(|m| m.pending_unconsumed_count),
@@ -176,14 +178,17 @@ async fn show(ctx: &Ctx) -> Result<i32> {
         .cloned()
         .collect();
     let deaf_warn = daemon_members.iter().any(|m| m.deaf_warn);
+    let daemon_member_present = !daemon_members.is_empty();
     let out = json!({
         "address": addr,
         "lease": lease,
         "occupancy": {
-            "occupied": !daemon_members.is_empty() || occ.occupied,
-            "occupant": daemon_members.first().map(|m| m.occupant.clone()).or(occ.occupant),
+            "occupied": occ.occupied,
+            "occupant": occ.occupant,
             "age_secs": occ.age_secs,
         },
+        "durable_lease_live": occ.occupied,
+        "daemon_member_present": daemon_member_present,
         "station_health": daemon_members.first().map(|m| m.station_health),
         "health_detail": daemon_members.first().and_then(|m| m.health_detail.clone()),
         "pending_unconsumed_count": daemon_members.first().map(|m| m.pending_unconsumed_count),
@@ -208,6 +213,9 @@ async fn show(ctx: &Ctx) -> Result<i32> {
             addr.description.as_deref().unwrap_or("(none)")
         );
         println!("occupied     {} (age {:.1}s)", occ.occupied, occ.age_secs);
+        if daemon_member_present && !occ.occupied {
+            println!("daemon       member present, durable lease not live");
+        }
         if let Some(l) = &lease {
             println!("occupant     {}", l.occupant.as_deref().unwrap_or("?"));
         }

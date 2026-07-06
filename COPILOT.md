@@ -35,6 +35,16 @@ yours to make.
    CC push is opt-in, live-only, and notification-only: historical CC backlog is not
    replayed, and CC messages still do not require a terminal disposition from the observer.
 
+   If you resume a Copilot session and the bridge files or heartbeat are gone, repair the
+   station with the resume verb, then reload extensions:
+
+   ```sh
+   telex --address <addr> copilot resume --description "<what this session is doing>"
+   ```
+
+   `copilot resume` is an explicit re-provision of the same push bridge registration that
+   `copilot attach --copilot-bridge` creates; it also re-scans queued unacked backlog.
+
 2. **Load the bridge into the live session (one agent tool call).**
 
    Run the `extensions_reload` tool. telex cannot trigger a reload, so you do this once.
@@ -150,6 +160,7 @@ telex --version
 telex copilot skill
 telex copilot --help
 telex copilot attach --help
+telex copilot resume --help
 telex copilot detach --help
 telex copilot gc --help
 telex ack --help

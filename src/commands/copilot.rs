@@ -13,7 +13,8 @@ use std::time::Duration;
 
 use crate::cli::{
     AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotDetachArgs, CopilotGcArgs, CopilotPushArgs,
-    CopilotSessionEndArgs, CopilotSkillArgs, CopilotTurnGuardArgs, Ctx, DetachArgs,
+    CopilotResumeArgs, CopilotSessionEndArgs, CopilotSkillArgs, CopilotTurnGuardArgs, Ctx,
+    DetachArgs,
 };
 use crate::daemon_ipc::{
     DaemonStatus, MemberStatus, Request, Response, WaiterOutcome, WatchPidSpec, DAEMON_VERSION,
@@ -56,6 +57,7 @@ pub const MIN_COMPATIBLE_PLUGIN_VERSION: &str = "0.1.0";
 pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
     match cmd {
         CopilotCmd::Attach(args) => attach(ctx, args).await,
+        CopilotCmd::Resume(args) => resume(ctx, args).await,
         CopilotCmd::SessionEnd(args) => session_end(ctx, args).await,
         CopilotCmd::TurnGuard(args) => turn_guard(ctx, args).await,
         CopilotCmd::Skill(args) => skill(args),
@@ -233,32 +235,34 @@ fn store_selector_flags(cfg: &crate::config::Config) -> String {
 }
 
 /// On `--copilot-bridge` bind: materialize the bridge, record the binding, and return the
-/// on-deliver handler argv the daemon should exec for this address. Returns None (no push
-/// registration) if the bridge could not be provisioned.
-fn provision_bridge(ctx: &Ctx, session_id: &str) -> Option<Vec<String>> {
-    let address = match ctx.cfg.require_address(&ctx.address) {
-        Ok(address) => address,
-        Err(e) => {
-            eprintln!("telex copilot attach: --copilot-bridge needs an address: {e}");
-            return None;
-        }
-    };
+/// on-deliver handler argv the daemon should exec for this address. This is fail-closed:
+/// a caller that requested push must not silently downgrade to a non-push attach.
+fn provision_bridge(ctx: &Ctx, session_id: &str) -> Result<Vec<String>> {
+    let address = ctx
+        .cfg
+        .require_address(&ctx.address)
+        .map_err(|e| anyhow::anyhow!("--copilot-bridge needs an address: {e}"))?;
     if let Err(e) = write_bridge_extension(session_id) {
-        eprintln!("telex copilot attach: failed to write bridge extension: {e}");
-        return None;
+        return Err(anyhow::anyhow!("failed to write bridge extension: {e}"));
     }
     if let Err(e) = add_bridge_binding(session_id, &address) {
-        eprintln!(
-            "telex copilot attach: failed to record bridge binding: {e}; not registering push with a broken ref-count"
-        );
-        remove_bridge_extension(session_id);
-        return None;
+        if read_bridge_bindings(session_id)
+            .map(|bindings| bindings.is_empty())
+            .unwrap_or(false)
+        {
+            remove_bridge_extension(session_id);
+        }
+        return Err(anyhow::anyhow!(
+            "failed to record bridge binding: {e}; not registering push with a broken ref-count"
+        ));
     }
     match bridge_handler_argv(ctx, session_id) {
-        Ok(argv) => Some(argv),
+        Ok(argv) => Ok(argv),
         Err(e) => {
-            eprintln!("telex copilot attach: {e}");
-            None
+            if let Ok(true) = remove_bridge_binding(session_id, &address) {
+                remove_bridge_extension(session_id);
+            }
+            Err(e)
         }
     }
 }
@@ -715,7 +719,13 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
         watch_pid.push(WatchPidSpec::anchor(pid));
     }
     let on_deliver = if args.copilot_bridge {
-        provision_bridge(ctx, &session)
+        match provision_bridge(ctx, &session) {
+            Ok(argv) => Some(argv),
+            Err(e) => {
+                eprintln!("telex copilot attach: {e}");
+                return Ok(1);
+            }
+        }
     } else {
         None
     };
@@ -771,6 +781,22 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
         }
     }
     result
+}
+
+async fn resume(ctx: &Ctx, args: CopilotResumeArgs) -> Result<i32> {
+    attach(
+        ctx,
+        CopilotAttachArgs {
+            session: args.session,
+            description: args.description,
+            scope: args.scope,
+            tags: args.tags,
+            occupant: args.occupant,
+            copilot_bridge: true,
+            wake_on_cc: args.wake_on_cc,
+        },
+    )
+    .await
 }
 
 async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
@@ -834,7 +860,9 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
     }
 
     cleanup_turn_guard_state_best_effort(&session);
-    remove_bridge_extension(&session);
+    if failed.is_empty() {
+        remove_bridge_extension(&session);
+    }
     let outcome = if failed.is_empty() {
         "session_end"
     } else {
