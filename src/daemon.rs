@@ -22,7 +22,7 @@ use crate::model::{
 #[cfg(feature = "postgres")]
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -2114,6 +2114,13 @@ struct PushAttempt {
     attempts: u32,
     accepted: bool,
     notification_only: bool,
+    notification_lower_bound: Option<i64>,
+}
+
+#[derive(Clone, Copy)]
+struct InflightAttempt {
+    notification_only: bool,
+    notification_lower_bound: Option<i64>,
 }
 
 #[derive(Clone)]
@@ -2136,7 +2143,7 @@ struct OnDeliverCandidate {
 /// and a sweep-path from racing the same message.
 struct OnDeliverState {
     sem: Arc<Semaphore>,
-    inflight: Mutex<HashSet<OnDeliverKey>>,
+    inflight: Mutex<HashMap<OnDeliverKey, InflightAttempt>>,
     pushed: Mutex<HashMap<MemberKey, HashMap<i64, PushAttempt>>>,
     dead_lettered: Mutex<HashMap<MemberKey, BTreeSet<i64>>>,
 }
@@ -2145,7 +2152,7 @@ impl Default for OnDeliverState {
     fn default() -> Self {
         Self {
             sem: Arc::new(Semaphore::new(ON_DELIVER_MAX_CONCURRENCY)),
-            inflight: Mutex::new(HashSet::new()),
+            inflight: Mutex::new(HashMap::new()),
             pushed: Mutex::new(HashMap::new()),
             dead_lettered: Mutex::new(HashMap::new()),
         }
@@ -2239,6 +2246,7 @@ impl DaemonState {
         now: Instant,
         accepted: bool,
         notification_only: bool,
+        notification_lower_bound: Option<i64>,
     ) -> u32 {
         let mut map = self.on_deliver.pushed.lock().unwrap();
         let entry = map
@@ -2250,11 +2258,13 @@ impl DaemonState {
                 attempts: 0,
                 accepted: false,
                 notification_only,
+                notification_lower_bound,
             });
         entry.attempts = entry.attempts.saturating_add(1);
         entry.last = now;
         entry.accepted = accepted;
         entry.notification_only = notification_only;
+        entry.notification_lower_bound = notification_lower_bound;
         entry.attempts
     }
 
@@ -2279,8 +2289,24 @@ impl DaemonState {
         }
     }
 
-    fn on_deliver_try_begin(&self, key: OnDeliverKey) -> bool {
-        self.on_deliver.inflight.lock().unwrap().insert(key)
+    fn on_deliver_try_begin(
+        &self,
+        key: OnDeliverKey,
+        notification_only: bool,
+        notification_lower_bound: Option<i64>,
+    ) -> bool {
+        let mut inflight = self.on_deliver.inflight.lock().unwrap();
+        if inflight.contains_key(&key) {
+            return false;
+        }
+        inflight.insert(
+            key,
+            InflightAttempt {
+                notification_only,
+                notification_lower_bound,
+            },
+        );
+        true
     }
 
     fn on_deliver_end(&self, key: &OnDeliverKey) {
@@ -2295,12 +2321,61 @@ impl DaemonState {
     }
 
     fn on_deliver_advance_cc_lower_bound(&self, member_key: &MemberKey, lower_bound: i64) {
+        let safe_lower_bound = {
+            let pushed = self.on_deliver.pushed.lock().unwrap();
+            let earliest_unaccepted = pushed.get(member_key).and_then(|attempts| {
+                attempts
+                    .values()
+                    .filter_map(|attempt| {
+                        (attempt.notification_only && !attempt.accepted)
+                            .then_some(attempt.notification_lower_bound.unwrap_or(lower_bound))
+                    })
+                    .min()
+            });
+            let earliest_inflight = self
+                .on_deliver
+                .inflight
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|(key, attempt)| {
+                    (key.store_key == member_key.store_key
+                        && key.address == member_key.address
+                        && attempt.notification_only)
+                        .then_some(attempt.notification_lower_bound.unwrap_or(lower_bound))
+                })
+                .min();
+            let earliest_blocking = earliest_unaccepted
+                .into_iter()
+                .chain(earliest_inflight)
+                .min();
+            let highest_accepted = pushed.get(member_key).and_then(|attempts| {
+                attempts
+                    .values()
+                    .filter_map(|attempt| {
+                        if !attempt.notification_only || !attempt.accepted {
+                            return None;
+                        }
+                        let ts = attempt.notification_lower_bound.unwrap_or(lower_bound);
+                        if earliest_blocking.map_or(true, |blocking| ts < blocking) {
+                            Some(ts)
+                        } else {
+                            None
+                        }
+                    })
+                    .max()
+            });
+            let candidate = highest_accepted.unwrap_or(lower_bound);
+            earliest_blocking
+                .and_then(|id| id.checked_sub(1))
+                .map_or(candidate, |ceiling| candidate.min(ceiling))
+        };
         if let Some(member) = self.members.lock().unwrap().get_mut(member_key) {
             if member.on_deliver_wake_on_cc {
                 member.on_deliver_cc_after_ms = Some(
                     member
                         .on_deliver_cc_after_ms
-                        .map_or(lower_bound, |current| current.max(lower_bound)),
+                        .map_or(safe_lower_bound, |current| current.max(safe_lower_bound)),
                 );
             }
         }
@@ -2357,16 +2432,16 @@ impl DaemonState {
         if self.on_deliver_should_skip(&member_key, id, Instant::now()) {
             return;
         }
+        let notification_lower_bound = notification_only.then_some(row.created_at_ms);
         let key = OnDeliverKey {
             store_key: store_key.clone(),
             address: address.clone(),
             message_id: id,
         };
-        if !self.on_deliver_try_begin(key.clone()) {
+        if !self.on_deliver_try_begin(key.clone(), notification_only, notification_lower_bound) {
             return;
         }
         let descriptor = on_deliver_descriptor_json(&store_key, &address, &row);
-        let notification_lower_bound = notification_only.then_some(row.created_at_ms);
         let sem = self.on_deliver.sem.clone();
         let state = self.clone();
         tokio::spawn(async move {
@@ -2375,6 +2450,7 @@ impl DaemonState {
                 // Dead-letter: stop retrying a structurally unpushable message. It stays durably
                 // queued (never marked consumed) and is readable via `telex inbox`.
                 state.on_deliver_dead_letter(&member_key, id);
+                state.on_deliver_end(&key);
                 let detail = stderr.map(|s| format!(": {s}")).unwrap_or_default();
                 state.push_recent_error(
                     "OnDeliverDeadLettered",
@@ -2392,7 +2468,9 @@ impl DaemonState {
                     Instant::now(),
                     outcome == RunOutcome::Ok,
                     notification_only,
+                    notification_lower_bound,
                 );
+                state.on_deliver_end(&key);
                 if outcome == RunOutcome::Ok {
                     if let Some(lower_bound) = notification_lower_bound {
                         state.on_deliver_advance_cc_lower_bound(&member_key, lower_bound);
@@ -2416,7 +2494,6 @@ impl DaemonState {
                     );
                 }
             }
-            state.on_deliver_end(&key);
         });
     }
 }
@@ -5021,7 +5098,7 @@ mod p3_tests {
             address: "addr:a".to_string(),
         };
         let now = Instant::now();
-        state.on_deliver_record_attempt(&member_key, 7, now, false, false);
+        state.on_deliver_record_attempt(&member_key, 7, now, false, false, None);
         assert!(state.on_deliver_should_skip(&member_key, 7, now));
         state.on_deliver_forget_member(&member_key);
         assert!(
@@ -5037,6 +5114,7 @@ mod p3_tests {
             attempts,
             accepted,
             notification_only: false,
+            notification_lower_bound: None,
         };
         // A failed push retries on the fast, growing backoff so a dead bridge recovers quickly.
         assert_eq!(
@@ -5073,7 +5151,7 @@ mod p3_tests {
         };
         let now = Instant::now();
         // Accepted push: skipped for the whole backstop window; eligible only after it elapses.
-        state.on_deliver_record_attempt(&member_key, 1, now, true, false);
+        state.on_deliver_record_attempt(&member_key, 1, now, true, false, None);
         assert!(state.on_deliver_should_skip(&member_key, 1, now + ON_DELIVER_RETRY_BASE * 4));
         assert!(!state.on_deliver_should_skip(
             &member_key,
@@ -5081,7 +5159,7 @@ mod p3_tests {
             now + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
         ));
         // Failed push: eligible again as soon as the fast backoff elapses.
-        state.on_deliver_record_attempt(&member_key, 2, now, false, false);
+        state.on_deliver_record_attempt(&member_key, 2, now, false, false, None);
         assert!(state.on_deliver_should_skip(&member_key, 2, now));
         assert!(!state.on_deliver_should_skip(
             &member_key,
@@ -5100,7 +5178,7 @@ mod p3_tests {
             address: "addr:observer".to_string(),
         };
         let now = Instant::now();
-        state.on_deliver_record_attempt(&member_key, 1, now, true, true);
+        state.on_deliver_record_attempt(&member_key, 1, now, true, true, Some(1));
         assert!(state.on_deliver_should_skip(&member_key, 1, now));
         assert!(state.on_deliver_should_skip(
             &member_key,
@@ -5108,13 +5186,130 @@ mod p3_tests {
             now + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
         ));
 
-        state.on_deliver_record_attempt(&member_key, 2, now, false, true);
+        state.on_deliver_record_attempt(&member_key, 2, now, false, true, Some(2));
         assert!(state.on_deliver_should_skip(&member_key, 2, now));
         assert!(!state.on_deliver_should_skip(
             &member_key,
             2,
             now + ON_DELIVER_RETRY_BASE + Duration::from_secs(1)
         ));
+    }
+
+    #[tokio::test]
+    async fn accepted_cc_push_does_not_advance_lower_bound_past_failed_cc() {
+        let state = test_state("on-deliver-cc-failed-before-accepted");
+        let store = store_key("on-deliver-cc-failed-before-accepted");
+        let address = "addr:observer";
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: address.to_string(),
+        };
+        let mut register = register_req(&store, "s1", address);
+        if let Request::Register {
+            on_deliver,
+            on_deliver_wake_on_cc,
+            ..
+        } = &mut register
+        {
+            *on_deliver = Some(Vec::new());
+            *on_deliver_wake_on_cc = true;
+        }
+        assert!(matches!(
+            request(state.clone(), register).await,
+            Response::Registered { .. }
+        ));
+        let initial_lower = state
+            .get_member(&store, "s1", address)
+            .unwrap()
+            .on_deliver_cc_after_ms
+            .unwrap();
+        let first = insert_message_to(&state, &store, "addr:primary", Some(address)).await;
+        let second = insert_message_to(&state, &store, "addr:primary", Some(address)).await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let first_row = backend.get_message(first).await.unwrap().unwrap();
+        let second_row = backend.get_message(second).await.unwrap().unwrap();
+        assert!(first_row.created_at_ms > initial_lower);
+        assert!(second_row.created_at_ms > first_row.created_at_ms);
+
+        state.on_deliver_record_attempt(
+            &member_key,
+            first,
+            Instant::now(),
+            false,
+            true,
+            Some(first_row.created_at_ms),
+        );
+        state.on_deliver_record_attempt(
+            &member_key,
+            second,
+            Instant::now(),
+            true,
+            true,
+            Some(second_row.created_at_ms),
+        );
+        state.on_deliver_advance_cc_lower_bound(&member_key, second_row.created_at_ms);
+        let member = state.get_member(&store, "s1", address).unwrap();
+        assert!(
+            member.on_deliver_cc_after_ms.unwrap() < first_row.created_at_ms,
+            "lower bound must not advance past an outstanding failed notification"
+        );
+        let candidates = backend
+            .fetch_wait_candidates(
+                address,
+                WaitFetchOptions {
+                    wake_on_cc: true,
+                    cc_after_ms: member.on_deliver_cc_after_ms.unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        let candidate_ids: BTreeSet<i64> = candidates
+            .iter()
+            .map(|candidate| candidate.message.id)
+            .collect();
+        assert!(candidate_ids.contains(&first));
+        assert!(candidate_ids.contains(&second));
+        state.on_deliver_retain_pushed(&member_key, &candidate_ids);
+        assert!(!state.on_deliver_should_skip(
+            &member_key,
+            first,
+            Instant::now() + ON_DELIVER_RETRY_BASE + Duration::from_secs(1)
+        ));
+        assert!(state.on_deliver_should_skip(
+            &member_key,
+            second,
+            Instant::now() + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
+        ));
+
+        state.on_deliver_record_attempt(
+            &member_key,
+            first,
+            Instant::now(),
+            true,
+            true,
+            Some(first_row.created_at_ms),
+        );
+        state.on_deliver_advance_cc_lower_bound(&member_key, first_row.created_at_ms);
+        let advanced = state.get_member(&store, "s1", address).unwrap();
+        assert_eq!(
+            advanced.on_deliver_cc_after_ms,
+            Some(second_row.created_at_ms)
+        );
+        let remaining = backend
+            .fetch_wait_candidates(
+                address,
+                WaitFetchOptions {
+                    wake_on_cc: true,
+                    cc_after_ms: advanced.on_deliver_cc_after_ms.unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            remaining.is_empty(),
+            "accepted notification-only CC rows should leave the sweep set once no failed earlier row blocks advancement"
+        );
     }
 
     #[test]

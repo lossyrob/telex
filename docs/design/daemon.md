@@ -1445,9 +1445,9 @@ that member.
   **primary** recipient by default. If the member explicitly registered
   `on_deliver_wake_on_cc`, it also fires for live CC observer traffic to that member whose delivery
   timestamp is strictly after the registration lower bound. CC push remains notification-only:
-  it does not make CC ack-required. An accepted CC notification advances the member's CC lower bound,
-  so it is not re-pushed on the long accepted backstop and the per-message attempt map stays bounded
-  for long-lived busy observer sessions. A per-heartbeat **bounded** sweep re-fires still-undelivered primary rows, plus failed
+  it does not make CC ack-required. Accepted CC notifications advance the member's CC lower bound
+  only as far as the first failed or in-flight notification-only push, so accepted rows do not replay
+  and older transient failures remain retryable. A per-heartbeat **bounded** sweep re-fires still-undelivered primary rows, plus failed
   notification-only CC pushes still inside the registration window, so a push missed while the exec
   target was briefly absent is retried on the next tick, and a fresh `Register` / re-bind rescans
   from its new lower bound.
