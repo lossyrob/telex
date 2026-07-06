@@ -1443,7 +1443,7 @@ metadata.
 ## 0033 — CC deliveries are visibility-only and auto-seen
 
 - **Date:** 2026-06-26
-- **Status:** Accepted (`daemon-core` acceptance)
+- **Status:** Accepted (amended by 0039)
 
 **Context.** Dogfooding used CC as visibility-only fan-out. Under the transport ack model, CC delivery
 rows were pending like primary rows, so a CC recipient that did not manually `ack` would receive the
@@ -1493,6 +1493,37 @@ CC visibility semantics apply.
 
 **Consequences.** Threaded conversations can include observers without losing history. CC recipients of
 replies remain visibility-only under ADR 0033.
+
+## 0039 — Explicit CC wake opt-in for live observer traffic
+
+- **Date:** 2026-06-28
+- **Status:** Accepted (`cc-stream-wake` acceptance)
+
+**Context.** ADR 0033 fixed the CC redelivery wedge by making CC delivery rows auto-consumed/seen for
+transport. Dogfooding a deliberative-table workload exposed the other side of that trade-off: a seat
+that belongs to the table often receives most meaningful context as CC observer traffic. A bare pull
+waiter never wakes, and after push delivery landed for Copilot bridge sessions there may be no waiter at
+all. Without an explicit CC wake signal, the seat must poll `inbox --all` or the database to notice the
+conversation. Making all CC wake by default would undo the noise-control reason for ADR 0033.
+
+**Decision.** Add explicit CC wake opt-ins at both delivery surfaces:
+`telex wait --wake-on-cc` / IPC `Wait.wake_on_cc` for pull waiters, and
+`telex copilot attach --copilot-bridge --wake-on-cc` / IPC `Register.on_deliver_wake_on_cc` for
+daemon on-deliver push. The opt-ins wake only for live CC traffic delivered after the captured lower
+bound; they are not durable CC backlog replay and they do not make CC rows pending or ack-required. If a
+logical client wait or bridge registration is lost and re-created, CC traffic that arrived in that gap
+remains pull-only via `inbox --all` / `read`. `--min-attention` composes with the pull opt-in but does
+not imply it. CC wake frames/descriptors retain delivery-role metadata (`delivery_role: "cc"`) and
+`requires_disposition_for_current_recipient: false`; the primary `--to` path remains the only
+ack-required delivery path.
+
+**Consequences.** Observer/relay seats can be woken by the table they deliberately opted into without
+reintroducing notification churn for ordinary CC recipients. Copilot bridge seats can now opt into the
+same table/observer semantics without falling back to an agent-managed waiter. Agents that wake on CC
+should inspect `inbox --all` / thread context after the wake if they need surrounding observer traffic,
+because older CC rows remain pull-only. Full durable stream/table subscription schemas remain future
+work, to be justified by workflow evidence rather than introduced as part of this narrow daemon
+delivery-semantics change.
 
 ## 0036 — Status hints at activity on another store
 

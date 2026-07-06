@@ -26,6 +26,8 @@ The agent's entire setup is two one-time calls at bind:
 
 ```
 telex --address <addr> copilot attach --copilot-bridge   # telex writes the bridge + registers the handler
+# observer/table seats that want live CC turns opt in:
+telex --address <addr> copilot attach --copilot-bridge --wake-on-cc
 extensions_reload                                 # agent tool: loads the bridge live, same turn
 ```
 
@@ -40,14 +42,17 @@ tax at its root, because the fragile thing (the agent-managed waiter) is gone.
    (a) materializes the bridge `extension.mjs` into this session's extension
    discovery dir, and (b) registers an on-deliver handler command with the
    daemon for this address: `telex copilot push --session <id>`. Neither step
-   needs the bridge to be running yet.
+   needs the bridge to be running yet. `--wake-on-cc` is an additional per-bind opt-in:
+   the daemon records a CC lower bound and pushes only live CC observer messages after
+   that point.
 2. **Load (once).** The agent calls `extensions_reload` (a first-party Copilot
    CLI tool available to every agent). Copilot forks the bridge as a child
    process; it calls `joinSession()` to attach to the live foreground session,
    opens a private local endpoint, and writes a registry entry keyed by the
    Copilot session id.
 3. **Deliver (per message).** When a durable message is committed for the
-   address, the daemon execs the registered handler argv. `telex copilot push`
+   address (or, with `--wake-on-cc`, live CC traffic is committed for the address),
+   the daemon execs the registered handler argv. `telex copilot push`
    derives the bridge endpoint from the session id (checking the registry only for
    liveness / session ownership, not trusting its path), hands the message body to
    the bridge over the local endpoint, and the bridge calls `session.send(...)`,

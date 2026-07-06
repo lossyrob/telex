@@ -25,6 +25,7 @@ pub const CAP_LIVENESS_P5: &str = "liveness_p5";
 pub const CAP_STATUS_P5: &str = "status_p5";
 pub const CAP_STATION_LIFECYCLE_P8: &str = "station_lifecycle_p8";
 pub const CAP_WAIT_MIN_ATTENTION_P9: &str = "wait_min_attention_p9";
+pub const CAP_WAIT_WAKE_ON_CC_P10: &str = "wait_wake_on_cc_p10";
 /// Advertised (not required): the daemon honors `Register.on_deliver` and runs the generic
 /// on-deliver exec push primitive. A client provisioning push delivery checks this / the
 /// `push_registered` status to fail closed against an older daemon that would silently ignore
@@ -42,6 +43,7 @@ pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_STATUS_P5,
     CAP_STATION_LIFECYCLE_P8,
     CAP_WAIT_MIN_ATTENTION_P9,
+    CAP_WAIT_WAKE_ON_CC_P10,
 ];
 
 pub const ERROR_INCOMPATIBLE: &str = "Incompatible";
@@ -175,6 +177,10 @@ pub enum Request {
         /// address is durably committed. The daemon never interprets the argv.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         on_deliver: Option<Vec<String>>,
+        /// Optional on-deliver opt-in for live CC observer traffic. Applies only when
+        /// `on_deliver` is present; defaults false for older clients.
+        #[serde(default, skip_serializing_if = "is_false")]
+        on_deliver_wake_on_cc: bool,
     },
     Detach {
         store_key: String,
@@ -196,6 +202,8 @@ pub enum Request {
         attention: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         min_attention: Option<String>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        wake_on_cc: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         timeout_ms: Option<u64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -445,6 +453,11 @@ pub struct MemberStatus {
     /// Whether this member registered a daemon on-deliver push handler (bridge push is active).
     #[serde(default)]
     pub push_registered: bool,
+    /// Whether the push handler is opted into live CC observer traffic.
+    #[serde(default)]
+    pub push_wake_on_cc: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub push_cc_after_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unattended_since_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -505,6 +518,10 @@ pub struct LiveWaiterStatus {
     pub attention: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub min_attention: Option<String>,
+    #[serde(default)]
+    pub wake_on_cc: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cc_after_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_ms: Option<u64>,
 }
@@ -721,6 +738,10 @@ pub fn unsupported(message: impl Into<String>) -> Response {
 
 pub fn internal(message: impl Into<String>) -> Response {
     error_response(ERROR_INTERNAL, message.into())
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 pub fn redact_secrets(message: impl Into<String>, secrets: &[&str]) -> String {

@@ -59,6 +59,8 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
             "While focused, arm with `--min-attention interrupt`; at checkpoints drain inbox,"
         );
         println!("then re-arm interrupt-only or unfiltered depending on whether you are idle.");
+        println!("Observer/relay seats that explicitly want live CC traffic to wake them can add");
+        println!("`--wake-on-cc`; bare waits keep CC pull-only/visibility-only by default.");
         println!("For teardown or upgrade, run `telex station stop --address {addr}` first; it");
         println!("releases the station and waits for tracked live waiters to exit.");
         println!("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");

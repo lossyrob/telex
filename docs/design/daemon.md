@@ -230,6 +230,34 @@ ack/disposition the buffered lower-priority messages via `inbox`/`read`. Because
 is accepted per station, an agent switches modes by letting the current waiter complete or using
 `station stop` + `attach`, then arming either another interrupt-only waiter or a bare wait if idle.
 
+#### 3.2.3 `--wake-on-cc` live observer waits
+
+CC remains visibility-only by default: a bare `telex wait` does not wake for CC traffic. A station that
+is deliberately participating as an observer/relay MAY arm a per-wait opt-in with `telex wait
+--wake-on-cc`. This widens only that wait to live CC notification candidates for the current address.
+It does not create a durable stream subscription, does not make all CC traffic wake by default, and does
+not make CC ack-required.
+
+`--wake-on-cc` is a live wake, not CC backlog replay. When the daemon registers the wait, it captures a
+durable CC lower-bound timestamp for the backend. The wait may emit only CC candidates whose delivery
+timestamp is strictly after that lower bound (or an equivalent backend ordering proof). This preserves
+the auto-seen CC baseline: old observer traffic stays visible through `inbox --all` / `read`, but cannot
+be redelivered repeatedly by re-arming `--wake-on-cc`.
+
+This guarantee is scoped to the in-memory daemon waiter registration. If the logical client wait has to
+reconnect/re-register after the original daemon request is lost, CC traffic that arrived in the gap is
+still durable and visible through `inbox --all` / `read`, but remains pull-only; primary `--to`
+deliveries keep their normal durable buffered reconnect behavior.
+
+`--min-attention` composes with `--wake-on-cc` but never implies it. For example, `telex wait
+--wake-on-cc --min-attention interrupt` wakes for primary interrupt messages and live CC interrupt
+messages, while lower-attention CC traffic remains visible for checkpoint inspection. CC wake frames
+carry `delivery_role: "cc"` and
+`requires_disposition_for_current_recipient: false`; clients MAY call `ack`, but the delivery row is
+already consumed and the ack is idempotent/no-op for transport. The primary `--to` path remains
+ack-required and the unacked-primary re-arm guard must not classify consumed CC notifications as pending
+primary deliveries.
+
 ### 3.3 `wait` reconnect-on-EOF grace
 
 A daemon **restart or handoff is not a turn failure when a replacement daemon already exists**.
@@ -490,9 +518,9 @@ station it intentionally dropped (for `Ack`, the message simply redelivers to a 
 | Request | Purpose | Privileged? |
 |---|---|---|
 | `Hello` | version + capability handshake | no |
-| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[], on_deliver? }` | **explicit attach** — establishes the in-memory membership `(store_key, session_id) → address` and claims/renews the durable lease for the address. **Idempotent**: re-issuing it for an already-attended address is a no-op refresh (which also **replaces** any registered `on_deliver`). This is the **only** way membership is created; nothing implicit ever (re)creates it. The optional `on_deliver` argv registers an opt-in **push exec** ([§13.2](#132-on-deliver-push-opt-in-harness-neutral)). | no (same-trust) |
+| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[], on_deliver?, on_deliver_wake_on_cc? }` | **explicit attach** — establishes the in-memory membership `(store_key, session_id) → address` and claims/renews the durable lease for the address. **Idempotent**: re-issuing it for an already-attended address is a no-op refresh (which also **replaces** any registered `on_deliver`). This is the **only** way membership is created; nothing implicit ever (re)creates it. The optional `on_deliver` argv registers an opt-in **push exec** ([§13.2](#132-on-deliver-push-opt-in-harness-neutral)); `on_deliver_wake_on_cc` opts that push exec into live CC observer traffic after a daemon-captured lower bound. | no (same-trust) |
 | `Detach { store_key, session_id, address }` | drop one station — removes the in-memory membership entry and releases the address's waiters. Non-privileged (same-user trust): like every unprivileged op it carries **no per-session proof**, so **any same-user process can drop any same-user station** — the accepted v1 same-user-trust tradeoff ([§7.3](#73-no-intra-user-isolation-in-v1-mr6)), **not** a per-session authorization guarantee; nothing is tombstoned (a later explicit `Register` re-attaches if wanted). | no |
-| `Wait { store_key, session_id, address, attention?, timeout_ms }` | block for one delivery against the address. If the exchange has no membership for `(store_key, session_id, address)`, returns **`NeedsAttach`** (the agent re-attaches then re-waits). Waiters are **detached** ([§9](#9-liveness-model)). | no |
+| `Wait { store_key, session_id, address, attention?, min_attention?, wake_on_cc?, timeout_ms?, waiter_pid?, waiter_start_time? }` | block for one delivery against the address. `min_attention` filters eligible messages by priority; `wake_on_cc` opts this wait into live CC observer wake after the daemon-captured lower bound; waiter pid/start-time are diagnostics/liveness inputs for the live waiter registry. If the exchange has no membership for `(store_key, session_id, address)`, returns **`NeedsAttach`** (the agent re-attaches then re-waits). Waiters are **detached** ([§9](#9-liveness-model)). | no |
 | `Send { store_key, session_id, to_addr, … }` / `Reply { store_key, session_id, message_id, … }` | enqueue a message into the durable buffer. If the exchange does not know the sending session/address, returns **`NeedsAttach`** (the agent re-attaches its own address, then retries) — `from` is never silently `None` ([§14.6](#146-from-resolution-and-re-attach)). | no |
 | `Ack { store_key, session_id, address, message_id }` | **explicit agent ack**, issued immediately on read — names the **`address` the message was delivered to** (the `recipient`), so the daemon validates the session attends `address` and writes the durable, epoch-guarded **MARK-consumed** for the exact `(message_id, recipient = address)` (idempotent). A session attends multiple addresses, so `address` is **required** to disambiguate per-recipient consumption (optionally carry the delivered `lease_epoch` as an audit input). The transport flush to stdout is **not** the consumed mark ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)). | no |
 | `Status { store_key?, detail?, proof? }` | Status surface (detail requires proof) | detail: **yes** |
@@ -523,10 +551,12 @@ unacked message redelivers; consumers dedupe by `message_id`. There is **no** wa
 `DeliveryAck`, **no** per-emit `delivery_nonce`, and "delivered" is **not** the stdout flush —
 the consumed commit is the explicit agent ack, decoupled from any EMIT-time connection.
 
-CC recipients are visibility-only: their delivery rows are materialized as already seen/consumed for
-transport, so they remain visible in `inbox --all` / `read` with `delivery_role: "cc"` but do not wake
-`wait` and do not require manual `ack`. The primary `--to` recipient remains the actionable,
-ack-required delivery.
+CC recipients are visibility-only by default: their delivery rows are materialized as already
+seen/consumed for transport, so they remain visible in `inbox --all` / `read` with
+`delivery_role: "cc"` but do not wake bare `wait` and do not require manual `ack`. A per-wait
+`--wake-on-cc` opt-in can wake for live CC traffic after that wait's lower bound without changing the
+auto-consumed CC delivery row. The primary `--to` recipient remains the actionable, ack-required
+delivery.
 
 ## 7. Authorization and the trust boundary
 
@@ -1399,7 +1429,8 @@ that member.
 - **Registration.** `Register` ([§6.2](#62-request--response-frames)) carries an optional
   `on_deliver: Vec<String>` — an **argv** (program + args), **not** a shell string (no shell is
   spawned; no interpolation). It is stored on the member record and surfaced in the Status
-  projection as `push_registered: bool`. An **explicit re-provision** (`Register` with a new
+  projection as `push_registered: bool`; `on_deliver_wake_on_cc` is surfaced as
+  `push_wake_on_cc` with the captured `push_cc_after_ms` lower bound. An **explicit re-provision** (`Register` with a new
   `on_deliver`) replaces the handler and resets its per-message retry state; a **generic refresh**
   that re-registers with `on_deliver = None` (e.g. a `telex wait` re-attach) **preserves** the
   existing handler, so a pull re-attach cannot silently disarm the bridge. The handler lives on
@@ -1411,10 +1442,15 @@ that member.
 - **Fire point.** The daemon runs the argv **after** the message row and its durable
   `deliveries(message_id, recipient)` entry are committed and after in-process `wait` notification
   — i.e. strictly **off the ack critical path** and **after** durability. It fires for the
-  **primary** recipient only, **never for cc** (ADRs 0032/0033; cc is visibility-only,
-  [§6.2](#62-request--response-frames)). A per-heartbeat **bounded** sweep re-fires still-undelivered
-  rows so a push missed while the exec target was briefly absent is retried on the next tick, and a
-  fresh `Register` / re-bind rescans `fetch_undelivered`.
+  **primary** recipient by default. If the member explicitly registered
+  `on_deliver_wake_on_cc`, it also fires for live CC observer traffic to that member whose delivery
+  timestamp is strictly after the registration lower bound. CC push remains notification-only:
+  it does not make CC ack-required. Accepted CC notifications advance the member's CC lower bound
+  only as far as the first failed or in-flight notification-only push, so accepted rows do not replay
+  and older transient failures remain retryable. A per-heartbeat **bounded** sweep re-fires still-undelivered primary rows, plus failed
+  notification-only CC pushes still inside the registration window, so a push missed while the exec
+  target was briefly absent is retried on the next tick, and a fresh `Register` / re-bind rescans
+  from its new lower bound.
 - **Liveness-only — never a consume.** The exec is a **wake signal**, not a delivery or an ack. It
   **never** marks a message delivered or consumed; the durable buffer and the explicit-agent-`Ack`
   fence ([§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) are unchanged. If

@@ -1388,6 +1388,94 @@ fn real_process_delivery_role_metadata_for_primary_and_cc() {
         cc_wait.stderr
     );
 
+    let wake_out_dir = env.root.join("cc-wake-wait");
+    let mut wake_cmd = env.command_with_session(cc);
+    wake_cmd
+        .args([
+            "--json",
+            "--address",
+            cc_addr,
+            "wait",
+            "--session",
+            cc,
+            "--wake-on-cc",
+            "--timeout-ms",
+            "5000",
+            "--out-dir",
+            wake_out_dir.to_str().expect("wake out dir is utf8"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let wake_waiter = wake_cmd.spawn().expect("spawn wake-on-cc waiter");
+    wait_until_path_exists(&wake_out_dir.join("wait.pid"), Duration::from_secs(3));
+    let wake_waiter_pid: u32 = std::fs::read_to_string(wake_out_dir.join("wait.pid"))
+        .expect("wake wait.pid written")
+        .trim()
+        .parse()
+        .expect("wake wait.pid parses");
+    let status = env
+        .daemon_status()
+        .json("daemon status with wake-on-cc waiter");
+    assert!(
+        status
+            .get("live_waiters")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .any(|w| {
+                w.get("pid").and_then(Value::as_u64) == Some(wake_waiter_pid as u64)
+                    && w.get("wake_on_cc").and_then(Value::as_bool) == Some(true)
+            }),
+        "daemon status should list wake-on-cc waiter pid {wake_waiter_pid}: {status}"
+    );
+
+    let wake_sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            primary_addr,
+            "--cc",
+            cc_addr,
+            "--subject",
+            "role metadata wake",
+            "--body",
+            "role wake body",
+        ],
+        Duration::from_secs(5),
+    );
+    wake_sent.assert_success("send role metadata wake");
+    let wake_id = message_id(&wake_sent.json("send role metadata wake"));
+    let (wake_code, wake_timed_out) = wait_status_with_timeout(wake_waiter, Duration::from_secs(6));
+    assert_eq!(wake_code, Some(0), "wake-on-cc waiter should deliver");
+    assert!(!wake_timed_out, "wake-on-cc waiter timed out");
+    wait_until_path_exists(&wake_out_dir.join("exit.code"), Duration::from_secs(1));
+    let wake_message: Value = serde_json::from_str(
+        &std::fs::read_to_string(wake_out_dir.join("message.json")).expect("wake message.json"),
+    )
+    .expect("wake message json parses");
+    assert_eq!(
+        wake_message.get("id").and_then(Value::as_i64),
+        Some(wake_id)
+    );
+    assert_eq!(
+        wake_message.get("delivery_role").and_then(Value::as_str),
+        Some("cc")
+    );
+    assert_eq!(
+        wake_message
+            .get("requires_disposition_for_current_recipient")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+
     let primary_wait = wait_for_message(&env, primary, primary_addr, "role body");
     assert_eq!(
         primary_wait.get("delivery_role").and_then(Value::as_str),

@@ -93,6 +93,8 @@ messages arrive as turns (no waiter to run or re-arm):
 copilot plugin marketplace add lossyrob/telex
 copilot plugin install telex@telex
 telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --description "<work>"
+# Observer/table seats that want live CC turns opt in at bind time:
+telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --wake-on-cc --description "<work>"
 # then run the `extensions_reload` tool once; delivered telex messages arrive as turns.
 telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
 telex copilot gc --dry-run                                      # inspect stale bridge files
@@ -103,6 +105,11 @@ The adapter maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id and
 do not read Copilot-specific env variables directly, so follow-up generic commands
 (e.g. `telex ack`) must pass `--session "$COPILOT_AGENT_SESSION_ID"` or run in a
 shell/script that sets `TELEX_SESSION_ID`.
+
+If a Copilot observer sees CC messages in `telex inbox` but not as turns, re-run
+`telex --address <addr> copilot attach --copilot-bridge --wake-on-cc` and then run
+the `extensions_reload` tool. `telex wait --wake-on-cc` is only for non-Copilot
+pull waiters; Copilot asks for CC watching through the bridge bind.
 
 `telex wait` remains the generic pull primitive for scripts, CI, and non-extension
 harnesses; Copilot sessions use push delivery above instead.
