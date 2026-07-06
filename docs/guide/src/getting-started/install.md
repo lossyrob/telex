@@ -33,6 +33,23 @@ Prebuilt binaries are also attached to each
 telex --version
 ```
 
+## Initialize (optional)
+
+Telex creates its local store and schema on first use, so no init step is
+required for the default SQLite store. To pre-create and validate a backend
+(useful for Postgres, to surface connection or permission errors early):
+
+```sh
+telex init --backend <name>
+```
+
+## Shell notes
+
+Examples in this guide use POSIX shell syntax. On Windows PowerShell, set
+environment variables with `$env:` instead of `export`, for example
+`$env:TELEX_SESSION_ID = "quickstart"`. The binary is `telex.exe`, invoked as
+`telex`.
+
 ## Copilot CLI plugin
 
 If you drive agents with GitHub Copilot CLI, install the telex plugin from the

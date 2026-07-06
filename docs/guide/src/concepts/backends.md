@@ -17,11 +17,11 @@ Configure a Postgres backend once, then select it by name or make it the default
 The connection string is a libpq URI or a key=value DSN. Provide the password by
 reference, never embedded in the config:
 
-- `--entra` — Azure Entra; telex fetches the token itself (uses `az login`, or
+- `--entra`: Azure Entra; telex fetches the token itself (uses `az login`, or
   `--entra-cred managed` on a devbox or VM with a managed identity). Requires a
   build with the `entra` feature, which the release binaries include.
-- `--password-env <VAR>` — read the password from an environment variable.
-- `--password-command <cmd>` — run a command that prints the password.
+- `--password-env <VAR>`: read the password from an environment variable.
+- `--password-command <cmd>`: run a command that prints the password.
 
 ```sh
 # Postgres with a password from an env var:

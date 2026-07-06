@@ -754,3 +754,9 @@ Options:
   -h, --help               Print help
 ```
 
+## Advanced commands
+
+The `telex copilot` and `telex daemon` command families serve the plugin
+adapter and operators, and are omitted from the list above. Document them
+from the binary with `telex copilot --help` and `telex daemon --help`.
+

@@ -6,10 +6,18 @@ command auto-spawns a per-user local exchange over a SQLite store at
 
 ## Send and read a message
 
+Set a stable session id once, then send a message to yourself and read it back:
+
 ```sh
-telex send --to me --body "hello"    # zero-config local SQLite store
-telex --address me inbox             # read it back
+export TELEX_SESSION_ID=quickstart   # PowerShell: $env:TELEX_SESSION_ID = "quickstart"
+telex --address me send --to me --body "hello"
+telex --address me inbox --all
 ```
+
+`send` needs a session id (from `--session` or `$TELEX_SESSION_ID`) and a sender
+address. Here `--to me` is the recipient and the global `--address me` supplies
+the sender. `inbox --all` lists recent messages; the default `inbox` lists only
+actionable ones (messages requiring disposition).
 
 ## Print the agent usage guide
 

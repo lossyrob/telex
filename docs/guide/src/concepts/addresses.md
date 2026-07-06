@@ -25,9 +25,9 @@ rather than guessed.
 When a session attaches it can register directory metadata so other sessions can
 find it:
 
-- `--description` — a one-line statement of what the session is doing.
-- `--scope` — the project or workstream the address belongs to.
-- `--tags` — coarse comma-separated tags (for example `repo:telex,role:worker`).
+- `--description`: a one-line statement of what the session is doing.
+- `--scope`: the project or workstream the address belongs to.
+- `--tags`: coarse comma-separated tags (for example `repo:telex,role:worker`).
 
 Find addresses by description substring, scope, or tag:
 

@@ -54,6 +54,11 @@ subcommands() {
       emit_help "$cmd" "$sub"
     done
   done
+
+  printf '## Advanced commands\n\n'
+  printf 'The `telex copilot` and `telex daemon` command families serve the plugin\n'
+  printf 'adapter and operators, and are omitted from the list above. Document them\n'
+  printf 'from the binary with `telex copilot --help` and `telex daemon --help`.\n\n'
 } > "$OUT"
 
 echo "wrote $OUT"

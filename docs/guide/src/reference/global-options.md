@@ -12,10 +12,10 @@ example `telex --backend prod inbox`.
 
 ## Relevant environment variables
 
-- `TELEX_SESSION_ID` — stable session identity for daemon membership.
-- `TELEX_ADDRESS` — default address.
-- `TELEX_BACKEND` — default backend by name.
-- `TELEX_DB` — SQLite path override.
+- `TELEX_SESSION_ID`: stable session identity for daemon membership.
+- `TELEX_ADDRESS`: default address.
+- `TELEX_BACKEND`: default backend by name.
+- `TELEX_DB`: SQLite path override.
 
 Postgres connections are configured once as named backends with
 `telex backend add` (see [Backends](../concepts/backends.md)), not through

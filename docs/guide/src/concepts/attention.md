@@ -7,10 +7,10 @@ the message is and controls when the recipient sees it.
 interrupt | next-checkpoint | background | fyi
 ```
 
-- `interrupt` — deliver as soon as possible, at the next agent turn boundary.
-- `next-checkpoint` — handle after the current safe stopping point.
-- `background` — visible in the inbox, but should not derail current work.
-- `fyi` — visible and auditable, non-actionable by default.
+- `interrupt`: highest urgency; handled ahead of all other messages.
+- `next-checkpoint`: handle after the current safe stopping point.
+- `background`: visible in the inbox; does not interrupt current work.
+- `fyi`: visible and auditable, non-actionable by default.
 
 Set the level on `send` or `reply` with `--attention <level>`.
 

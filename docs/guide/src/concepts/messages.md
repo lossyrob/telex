@@ -17,9 +17,10 @@ Prefer `--body-file` for multiline or structured content (Markdown, code blocks,
 JSON) to avoid shell quoting limits. The file is read as UTF-8 and sent exactly
 as written.
 
-`send` prints a receipt: `delivered`, `queued-unoccupied`, or `rejected-retired`,
-plus the new message id. A `queued-unoccupied` receipt is durable: the message is
-persisted and delivered when a station next attends the address.
+`send` prints a receipt: `delivered` or `queued-unoccupied`, plus the new message
+id. A `queued-unoccupied` receipt is durable: the message is persisted and
+delivered when a station next attends the address. Sending to a retired address
+is an error (`address <addr> is retired`), not a receipt.
 
 ## Threads and replies
 
