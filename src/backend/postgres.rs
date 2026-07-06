@@ -2,13 +2,15 @@
 //! epoch-ms integer timestamps for parity. The daemon owns the LISTEN/NOTIFY
 //! receive side; the backend keeps poll + explicit Ack as the durable correctness path.
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio_postgres::{Row, Transaction};
 
 use super::{Backend, Capabilities};
 use crate::model::*;
+
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 pub struct PgBackend {
     client: AsyncMutex<tokio_postgres::Client>,
@@ -128,6 +130,10 @@ CREATE TABLE IF NOT EXISTS deliveries (
 CREATE TABLE IF NOT EXISTS telex_schema_meta (
     key   text PRIMARY KEY,
     value text NOT NULL
+);
+CREATE TABLE IF NOT EXISTS telex_schema_version (
+    singleton integer NOT NULL DEFAULT 1 UNIQUE,
+    version   bigint NOT NULL
 );
 CREATE TABLE IF NOT EXISTS detach_tombstones (
     session_id text NOT NULL,
@@ -306,6 +312,37 @@ async fn backfill_existing_deliveries_consumed_once(
     Ok(())
 }
 
+async fn current_schema_version(client: &tokio_postgres::Client) -> Result<i64> {
+    let exists: bool = client
+        .query_one(
+            "SELECT to_regclass('telex_schema_version') IS NOT NULL",
+            &[],
+        )
+        .await?
+        .get(0);
+    if !exists {
+        return Ok(0);
+    }
+    Ok(client
+        .query_one(
+            "SELECT COALESCE(MAX(version), 0) FROM telex_schema_version",
+            &[],
+        )
+        .await?
+        .get(0))
+}
+
+async fn publish_schema_version(client: &tokio_postgres::Client) -> Result<()> {
+    client
+        .execute(
+            "INSERT INTO telex_schema_version(singleton, version) VALUES (1, $1)
+             ON CONFLICT(singleton) DO UPDATE SET version = GREATEST(telex_schema_version.version, $1)",
+            &[&CURRENT_SCHEMA_VERSION],
+        )
+        .await?;
+    Ok(())
+}
+
 impl PgBackend {
     /// Connect using a fully-built config (host/user/db/password) and an optional schema
     /// to isolate telex tables in. The password is resolved by the caller (profile).
@@ -368,6 +405,12 @@ impl Backend for PgBackend {
 
     async fn init_schema(&self) -> Result<()> {
         let mut client = self.client.lock().await;
+        let schema_version = current_schema_version(&client).await?;
+        if schema_version > CURRENT_SCHEMA_VERSION {
+            bail!(
+                "Postgres schema version {schema_version} is newer than supported version {CURRENT_SCHEMA_VERSION}"
+            );
+        }
         client.batch_execute(SCHEMA).await?;
         client
             .batch_execute(
@@ -379,6 +422,10 @@ impl Backend for PgBackend {
                  CREATE TABLE IF NOT EXISTS telex_schema_meta (
                     key   text PRIMARY KEY,
                     value text NOT NULL
+                 );
+                 CREATE TABLE IF NOT EXISTS telex_schema_version (
+                    singleton integer NOT NULL DEFAULT 1 UNIQUE,
+                    version   bigint NOT NULL
                  );
                  CREATE TABLE IF NOT EXISTS detach_tombstones (
                     session_id text NOT NULL,
@@ -392,6 +439,7 @@ impl Backend for PgBackend {
             )
             .await?;
         backfill_existing_deliveries_consumed_once(&mut client).await?;
+        publish_schema_version(&client).await?;
         Ok(())
     }
 

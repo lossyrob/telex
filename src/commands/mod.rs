@@ -18,6 +18,7 @@ pub mod send;
 pub mod skill;
 pub mod station;
 pub mod status;
+pub mod upgrade;
 pub mod wait;
 
 /// Resolve a message body from the mutually exclusive `--body` (inline) and `--body-file`

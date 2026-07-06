@@ -11,7 +11,9 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
     let backend = ctx.backend().await?;
     let store_key = ctx.store_key()?;
     let caps = backend.capabilities();
+    let version = crate::install::version_info(None)?;
     let mut info = serde_json::json!({
+        "version": version,
         "backend": name,
         "kind": backend.kind(),
         "target": profile.target(),
@@ -104,6 +106,15 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
     }
 
     emit(ctx.fmt, &info, || {
+        println!("telex   {}", env!("CARGO_PKG_VERSION"));
+        if let Some(current) = info
+            .get("version")
+            .and_then(|v| v.get("install"))
+            .and_then(|v| v.get("current_tag"))
+            .and_then(|v| v.as_str())
+        {
+            println!("current {current}");
+        }
         println!("backend  {} ({})", name, backend.kind());
         println!("target   {}", profile.target());
         println!(

@@ -878,6 +878,151 @@ fn real_process_wait_without_daemon_does_not_spawn() {
 }
 
 #[test]
+fn versioned_launcher_dispatches_to_current_binary() {
+    let env = ProcessEnv::new("versioned-launcher");
+    let install_root = env.root.join("install");
+    let source = env.bin.to_string_lossy().into_owned();
+    let root_arg = install_root.to_string_lossy().into_owned();
+    let upgraded = env.run(
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &source,
+            "--version",
+            "vtest-launcher",
+            "--root",
+            &root_arg,
+            "--skip-drain",
+        ],
+        Duration::from_secs(8),
+    );
+    upgraded.assert_success("versioned upgrade");
+
+    let launcher = install_root
+        .join("bin")
+        .join(format!("telex{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        launcher.exists(),
+        "launcher exists at {}",
+        launcher.display()
+    );
+    let mut cmd = Command::new(&launcher);
+    cmd.env("TELEX_HOME", &env.home)
+        .env("TELEX_RUN_DIR", &env.run_dir)
+        .env("TELEX_DB", &env.db)
+        .env("TELEX_CONFIG", env.home.join("config.toml"))
+        .env("TELEX_SESSION_ID", &env.session_id)
+        .arg("--json")
+        .arg("version")
+        .arg("--root")
+        .arg(&install_root);
+    #[cfg(windows)]
+    {
+        cmd.env("LOCALAPPDATA", &env.state_dir);
+    }
+    let out = run_command_with_capture(cmd, &env.root, Duration::from_secs(8));
+    out.assert_success("launcher version");
+    let json = out.json("launcher version");
+    let version = json.get("version").expect("version field");
+    assert_eq!(
+        version
+            .get("install")
+            .and_then(|v| v.get("active_tag"))
+            .and_then(Value::as_str),
+        Some("vtest-launcher")
+    );
+    let current_exe = version
+        .get("current_exe")
+        .and_then(Value::as_str)
+        .expect("current_exe");
+    assert!(
+        current_exe.contains("versions") && current_exe.contains("vtest-launcher"),
+        "launcher should dispatch to versioned binary, got {current_exe}"
+    );
+
+    env.run(
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &source,
+            "--version",
+            "vtest-next",
+            "--root",
+            &root_arg,
+            "--skip-drain",
+        ],
+        Duration::from_secs(8),
+    )
+    .assert_success("upgrade next");
+    let rollback = env.run(
+        ["--json", "rollback", "--root", &root_arg, "--skip-drain"],
+        Duration::from_secs(8),
+    );
+    rollback.assert_success("rollback to previous");
+    let json = rollback.json("rollback");
+    assert_eq!(
+        json.get("switch")
+            .and_then(|s| s.get("switched_to"))
+            .and_then(Value::as_str),
+        Some("vtest-launcher")
+    );
+    assert_eq!(
+        std::fs::read_to_string(install_root.join("current"))
+            .unwrap()
+            .trim(),
+        "vtest-launcher"
+    );
+
+    let empty_root = env.root.join("empty-install");
+    let empty_root_arg = empty_root.to_string_lossy().into_owned();
+    let missing_previous = env.run(
+        [
+            "--json",
+            "rollback",
+            "--root",
+            &empty_root_arg,
+            "--skip-drain",
+        ],
+        Duration::from_secs(8),
+    );
+    missing_previous.assert_failure("rollback without previous");
+    assert!(
+        missing_previous
+            .stderr
+            .contains("no previous installed version"),
+        "stderr should name missing previous version: {}",
+        missing_previous.stderr
+    );
+
+    let fake = env
+        .root
+        .join(format!("not-telex{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&fake, b"not a telex binary").expect("write fake source");
+    let fake_arg = fake.to_string_lossy().into_owned();
+
+    let out = env.run(
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &fake_arg,
+            "--version",
+            "vbad",
+            "--root",
+            &empty_root_arg,
+        ],
+        Duration::from_secs(8),
+    );
+    out.assert_failure("upgrade rejects non-telex source");
+    assert!(
+        !empty_root.join("versions").join("vbad").exists(),
+        "invalid source must fail before writing versions/vbad"
+    );
+}
+
+#[test]
 fn real_process_send_without_daemon_does_not_spawn() {
     let env = ProcessEnv::new("real-send-no-spawn");
     let sender = "real-send-no-spawn-session";
