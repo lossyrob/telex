@@ -138,13 +138,13 @@ fn record_stdin_argv(path: &std::path::Path) -> Vec<String> {
     }
 }
 
-fn wait_for_file(path: &std::path::Path, timeout: Duration) -> bool {
+async fn wait_for_file(path: &std::path::Path, timeout: Duration) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
         if path.exists() {
             return true;
         }
-        std::thread::sleep(Duration::from_millis(25));
+        tokio::time::sleep(Duration::from_millis(25)).await;
     }
     false
 }
@@ -486,7 +486,7 @@ async fn postgres_on_deliver_wake_on_cc_pushes_live_cc_without_replay() {
         other => panic!("live send failed: {other:?}"),
     };
     assert!(
-        wait_for_file(&output, Duration::from_secs(10)),
+        wait_for_file(&output, Duration::from_secs(10)).await,
         "live CC should be pushed through on-deliver"
     );
     let descriptor: serde_json::Value =
