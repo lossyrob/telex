@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-06T22:05:00.000Z",
+  "updatedAt": "2026-07-07T03:50:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -257,6 +257,26 @@
       ]
     },
     {
+      "id": "bridge-liveness-hardening",
+      "type": "task",
+      "title": "Copilot bridge liveness/self-stop hardening",
+      "summary": "Fix the #66/#67 P0/P1 bridge liveness failure family: a session must be able to stop delivery to itself; bridge success/ack must clear stale deaf state; terminally dispositioned or no-disposition messages must never be re-pushed by backstop; live bridge status must not be reported as unattended/deaf; inbound local backlog must be distinguished from outbound peer-pending; suspend/resume stale bridge state must be self-evident and recoverable. Fold in #64 status wording and overlapping #62 bridge recovery issues. This is distinct from #65 (busy enqueue -> idle drain).",
+      "status": "ready",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 66
+      },
+      "dependsOn": [
+        "push-delivery"
+      ]
+    },
+    {
       "id": "validation-harness",
       "type": "task",
       "title": "Validation harness + Tier 1/2 loop (chaos + Entra-PG multi-host)",
@@ -289,7 +309,8 @@
       "dependsOn": [
         "seamless-upgrade",
         "harness-skill-layout",
-        "bridge-idle-drain"
+        "bridge-idle-drain",
+        "bridge-liveness-hardening"
       ]
     },
     {
@@ -421,6 +442,7 @@
         "seamless-upgrade",
         "harness-skill-layout",
         "bridge-idle-drain",
+        "bridge-liveness-hardening",
         "public-release",
         "release-upgrade"
       ]
