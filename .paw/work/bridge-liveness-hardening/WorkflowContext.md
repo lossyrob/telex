@@ -39,7 +39,7 @@ Issue URL: https://github.com/lossyrob/telex/issues/66
 Remote: origin
 Artifact Lifecycle: commit-and-clean
 Artifact Paths: auto-derived
-Additional Inputs: none
+Additional Inputs: streamliner-context=C:/Users/robemanuele/proj/telex/telex-bridge-liveness-hardening/.paw/work/bridge-liveness-hardening/streamliner/context.md
 
 ## Control State
 
