@@ -43,7 +43,7 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
 /// `telex skill --address <addr>`. It must stay **harness-neutral** (generic
 /// attach/wait/ack, `--out-dir` artifacts, no infinite loop) so `telex skill` output —
 /// with or without `--address` — carries no harness-specific mechanics; harness push
-/// integrations are reached via the `telex <harness> skill` pointer (ADR 0042).
+/// integrations are reached via the `telex <harness> skill` pointer (ADR 0043).
 fn assignment_preamble(addr: &str) -> String {
     let mut s = String::new();
     s.push_str("## Your assignment\n\n");
@@ -132,7 +132,7 @@ mod tests {
         assert!(p.contains("--out-dir"));
         // Routes to harness-specific skills via the neutral pointer, not inline mechanics.
         assert!(p.contains("telex <harness> skill"));
-        // Must carry NO Copilot/harness-specific mechanics (ADR 0042; the `telex skill`
+        // Must carry NO Copilot/harness-specific mechanics (ADR 0043; the `telex skill`
         // acceptance criterion covers `--address` output too).
         for forbidden in [
             "detach: true",

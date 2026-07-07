@@ -94,7 +94,7 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
         .join("SKILL.md");
     // Today the only skill files are the neutral root SKILL.md and the Copilot plugin
     // bootstrap. Rather than pin the exact 2-element snapshot (which the first sibling
-    // harness PR would have to edit — see ADR 0042), enforce the invariant the ADR states:
+    // harness PR would have to edit — see ADR 0043), enforce the invariant the ADR states:
     // the neutral root skill exists, the Copilot bootstrap exists, and every skill file is
     // either the root skill or a `<harness>/plugin/skills/<name>/SKILL.md` bootstrap. This
     // still catches a stray SKILL.md copied somewhere unexpected while allowing siblings.
@@ -122,7 +122,7 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
         assert!(
             f == &root_skill || is_harness_bootstrap,
             "unexpected SKILL.md at {rel:?}: skill files must be the neutral root skill or a \
-             <harness>/plugin/skills/<name>/SKILL.md bootstrap (see ADR 0042)"
+             <harness>/plugin/skills/<name>/SKILL.md bootstrap (see ADR 0043)"
         );
     }
 
@@ -182,7 +182,7 @@ fn root_skill_points_copilot_sessions_at_the_binary_command() {
         "root skill should route the Copilot session to `telex copilot skill`"
     );
 
-    // Regression guard (ADR 0042): the neutral root skill must NOT embed Copilot/harness
+    // Regression guard (ADR 0043): the neutral root skill must NOT embed Copilot/harness
     // mechanics. A positive pointer assertion alone would still pass if Copilot recipes
     // drifted back in, which is exactly the high-risk regression. The address-tailored
     // preamble printed for `telex skill --address` is guarded separately by
