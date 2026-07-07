@@ -76,6 +76,9 @@ yours to make.
    **by id**. For CC observer pushes, the prompt says `delivery_role: cc` and
    `requires_disposition: false`; ack it for transport consumption/dedupe, but do not
    treat the primary recipient's required-disposition flag as your own obligation.
+   (Deferred delivery runs on a turn-stop drain hook; an operator can disable it with
+   `TELEX_COPILOT_DRAIN=off`, independent of `TELEX_TURN_GUARD` — deferred messages then
+   arrive on the daemon's slower backstop instead of promptly at turn-stop.)
 
    ```sh
    telex ack --address <addr> --id <message-id> --session "$COPILOT_AGENT_SESSION_ID"

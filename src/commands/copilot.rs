@@ -43,12 +43,12 @@ const BRIDGE_MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 const BRIDGE_LIVENESS_WINDOW: Duration = Duration::from_secs(60);
 /// Exit code `telex copilot push` returns for a permanent, non-retryable failure (e.g. a message
 /// too large to ever fit the bridge frame). The daemon dead-letters the message on this code.
-const PUSH_EXIT_PERMANENT: i32 = 3;
+/// Sourced from the shared `daemon_ipc` contract so the handler and daemon cannot drift.
+const PUSH_EXIT_PERMANENT: i32 = crate::daemon_ipc::ON_DELIVER_PERMANENT_EXIT;
 /// Exit code `telex copilot push` returns when the bridge **deferred** the message because it was
 /// busy (a root turn is running -- issue #65). The message was not sent and is not a failure; the
 /// daemon holds it at the deferred backstop and re-attempts it via the idle drain on turn-stop.
-/// Kept in sync with `ON_DELIVER_DEFERRED_EXIT` in `daemon.rs`.
-const PUSH_EXIT_DEFERRED: i32 = 4;
+const PUSH_EXIT_DEFERRED: i32 = crate::daemon_ipc::ON_DELIVER_DEFERRED_EXIT;
 /// Client-side deadline for the `telex copilot drain` daemon round-trip. Kept well below the 30s
 /// `agentStop` hook timeout so a slow/hung daemon never stalls turn-stop; the drain fails open.
 const DRAIN_IPC_DEADLINE: Duration = Duration::from_secs(3);
@@ -712,6 +712,19 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
         write_hook_log_best_effort(&HookLogEvent::drain("drain_disabled", Some(&session), None));
         print_json(
             &serde_json::json!({"drain": false, "session_id": session, "outcome": "drain_disabled"}),
+        );
+        return Ok(0);
+    }
+
+    // Fast path: a session that never provisioned a bridge has no registry file and therefore no
+    // possible deferred pushes, so skip the daemon round-trip entirely. This keeps the drain a true
+    // no-op for pull-only / non-bridge sessions, which run this hook on every turn-stop too.
+    if !bridge_registry_path(&session)
+        .map(|p| p.exists())
+        .unwrap_or(false)
+    {
+        print_json(
+            &serde_json::json!({"drain": false, "session_id": session, "outcome": "no_bridge"}),
         );
         return Ok(0);
     }
@@ -1784,6 +1797,10 @@ fn cleanup_turn_guard_state_best_effort(session: &str) {
 struct HookLogEvent<'a> {
     ts_ms: i64,
     hook: &'a str,
+    /// Which subprocess emitted the row when one hook slot fans out to multiple commands (e.g. the
+    /// `agentStop` slot runs both `turn-guard` and `drain`). A one-dimensional discriminator so log
+    /// queries do not have to enumerate `reason_code` values to isolate a hook (issue #65).
+    subhook: &'a str,
     reason_code: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     session_id: Option<&'a str>,
@@ -1804,6 +1821,7 @@ impl<'a> HookLogEvent<'a> {
         Self {
             ts_ms: now_ms(),
             hook: "sessionEnd",
+            subhook: "session_end",
             reason_code,
             session_id,
             detail,
@@ -1822,6 +1840,7 @@ impl<'a> HookLogEvent<'a> {
         Self {
             ts_ms: now_ms(),
             hook: "agentStop",
+            subhook: "turn_guard",
             reason_code,
             session_id,
             detail,
@@ -1834,6 +1853,7 @@ impl<'a> HookLogEvent<'a> {
         Self {
             ts_ms: now_ms(),
             hook: "agentStop",
+            subhook: "drain",
             reason_code,
             session_id,
             detail,

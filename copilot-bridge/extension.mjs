@@ -36,12 +36,19 @@ import { randomBytes } from "node:crypto";
 const isPosix = platform() !== "win32";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024; // 8 MiB: fits a max daemon message plus JSON-escaped prompt wrapping, so large messages push as turns instead of dead-lettering
 const SEND_ACK_TIMEOUT_MS = 2_000;
-// After this long with no session activity while the bridge believes a root turn is running, assume
-// a missed/never-fired `assistant.turn_end` (agent crash/abort/abandon, or the extension loaded
-// outside any turn) and self-heal to not-busy, so non-`interrupt` messages are not deferred forever.
-// Kept generous so a legitimately long turn (which keeps emitting streaming/tool events) never
-// false-heals mid-turn; the daemon's deferred backstop + heartbeat sweep are the real no-loss net.
-const BUSY_STALE_MS = 5 * 60 * 1000;
+// Stale-busy self-heal thresholds (issue #65). Two independent bounds clear a `busy` state that no
+// `assistant.turn_end` ever cleared, so non-`interrupt` messages are not deferred forever:
+//  - IDLE: "busy" with no session activity at all for this long => no turn is actually running
+//    (extension loaded into an idle session, or a crash between turns). Kept short for prompt
+//    idle-boot recovery; a real turn emits streaming/tool events well inside it.
+//  - MAX_TURN: a hard ceiling on how long "busy" may persist even while activity continues => a
+//    missed/renamed `turn_end` (SDK drift) or sub-agent-only chatter cannot latch busy forever.
+//    Kept long so a legitimately long turn does not false-heal mid-turn (that would only degrade one
+//    message to the prior enqueue behavior, but the ceiling makes it rare).
+// Bounding on activity alone would let ongoing sub-agent/streaming events reset the timer forever
+// (a latch); bounding on turn age alone would false-heal every long turn. Both together are robust.
+const BUSY_IDLE_STALE_MS = 60 * 1000;
+const BUSY_MAX_TURN_MS = 30 * 60 * 1000;
 const pendingSends = new Set();
 
 // Busy/idle tracking (issue #65). The bridge defers non-`interrupt` pushes while a root turn is
@@ -54,12 +61,17 @@ const pendingSends = new Set();
 let busy = true;
 let busySince = Date.now();
 let lastActivityAt = Date.now();
+let busyStaleHealCount = 0;
 
 // Whether a non-interrupt push should defer right now. Applies the stale-busy self-heal first.
 function currentlyBusy() {
-  if (busy && Date.now() - lastActivityAt > BUSY_STALE_MS) {
-    busy = false;
-    busySince = null;
+  if (busy && busySince != null) {
+    const now = Date.now();
+    if (now - lastActivityAt > BUSY_IDLE_STALE_MS || now - busySince > BUSY_MAX_TURN_MS) {
+      busy = false;
+      busySince = null;
+      busyStaleHealCount += 1;
+    }
   }
   return busy;
 }
@@ -288,10 +300,15 @@ async function writeRegistry() {
         createdAt,
         heartbeatAt: new Date().toISOString(),
         // Diagnostic only (issue #65): the bridge's connect-time answer is the ONLY authoritative
-        // busy signal. This 15s-stale snapshot must never be read by `telex copilot push` as a
-        // decision input, or a stale-idle flag would reopen the mistimed-injection bug.
-        busyAtLastHeartbeat: currentlyBusy(),
-        busySince,
+        // busy signal. Nested under `diagnostics` and never read by `telex copilot push` as a
+        // decision input -- a 15s-stale flag used for scheduling would reopen the mistimed-injection
+        // bug. `busyStaleHealCount` tallies stale-busy self-heals so a missed-turn_end regression is
+        // visible in the field rather than silent.
+        diagnostics: {
+          busyAtLastHeartbeat: currentlyBusy(),
+          busySince,
+          busyStaleHealCount,
+        },
       },
       null,
       2,
