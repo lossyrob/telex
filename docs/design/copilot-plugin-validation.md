@@ -1,14 +1,22 @@
 # Copilot Plugin Validation Matrix
 
-Validation target: issue #41, local-daemon `copilot-plugin` node.
+Validation target: issue #41, local-daemon `copilot-plugin` node; extended by issue #61,
+`harness-skill-layout` node (nested Copilot plugin root).
 
-Verified with GitHub Copilot CLI 1.0.66-1 on Windows.
+Verified with GitHub Copilot CLI 1.0.66-1 (issue #41) and re-verified with GitHub Copilot
+CLI 1.0.69-2 (issue #61, nested marketplace `source`) on Windows.
+
+**Version floor for nested `source`:** nested-source marketplace install depends on the
+Copilot CLI resolving a plugin `source` subdirectory (an external CLI capability). Treat
+**1.0.69-2 as the known-good floor**. Determining the exact minimum supported version (an
+oldest-supported-version row here) and adding a release-time install smoke against the
+release tag are owned by the public-release gate (#59), which this node precedes.
 
 | Acceptance / risk | Evidence |
 |---|---|
-| Marketplace installs and exposes a plugin skill | `.github/plugin/marketplace.json` declares marketplace `telex` and plugin `telex`. Isolated verification: `copilot --config-dir <temp> plugin marketplace add <repo>` followed by `copilot --config-dir <temp> plugin install telex@telex` reports `Installed 1 skill`; `skill list --json` includes plugin skill `telex` from `skills/telex`. |
-| CLI and plugin skill stay non-divergent | The installed binary owns the version-matched instructions (`telex skill` / `telex copilot skill`); `skills/telex/SKILL.md` is a thin bootstrap that defers to the binary. `tests/copilot_plugin.rs` asserts it stays a small bootstrap (not a copy) and is the only plugin `SKILL.md`. This supersedes the former byte-identical mirror (PR #55 / ADR 0040). |
-| Hooks are contributed by a real plugin manifest | `plugin.json` declares `hooks.json`; `hooks.json` declares `sessionEnd` and `agentStop` command hooks that invoke hidden Rust adapter commands, not shell scripts. |
+| Marketplace installs and exposes a plugin skill | `.github/plugin/marketplace.json` declares marketplace `telex` and plugin `telex` with nested `"source": "copilot/plugin"`. Isolated verification: `copilot --config-dir <temp> plugin marketplace add <repo>` followed by `copilot --config-dir <temp> plugin install telex@telex` reports `Installed 1 skill`; the installed plugin skill resolves from the nested `copilot/plugin/skills/telex`. See the issue #61 evidence block below. |
+| CLI and plugin skill stay non-divergent | The installed binary owns the version-matched instructions (`telex skill` / `telex copilot skill`); `copilot/plugin/skills/telex/SKILL.md` is a thin bootstrap that defers to the binary. `tests/copilot_plugin.rs` asserts it stays a small bootstrap (not a copy) and is the only plugin `SKILL.md`. This supersedes the former byte-identical mirror (PR #55 / ADR 0040). |
+| Hooks are contributed by a real plugin manifest | `copilot/plugin/plugin.json` declares `hooks.json`; `copilot/plugin/hooks.json` declares `sessionEnd` and `agentStop` command hooks that invoke hidden Rust adapter commands, not shell scripts. |
 | Notification content enrichment is omitted | Detached waiter stdout is not delivered to the agent, so enrichment would be useful only if the notification hook could locate the completed `--out-dir`. A local spike found the notification hook payload exposes only notification metadata and not a stable `--out-dir` path; sync/agent-read shell completions already carry stdout in context. `hooks.json` intentionally does not install a notification hook. |
 | Copilot env stays at plugin boundary | `src/identity.rs` resolves only `--session` / `TELEX_SESSION_ID`; `src/commands/copilot.rs` owns `COPILOT_AGENT_SESSION_ID` and `COPILOT_LOADER_PID` mapping. |
 | Generic loop remains copy/paste executable after fallback removal | `SKILL.md`/README document that generic follow-up commands must pass `--session "$COPILOT_AGENT_SESSION_ID"` or set `TELEX_SESSION_ID`; process tests prove generic commands do not rely on the Copilot fallback. |
@@ -38,3 +46,22 @@ Live smoke summary:
 - `copilot turn-guard` blocked once, then cap-exhausted to allow when max nudges was set to 1.
 - `copilot session-end` marked the station idle and wrote hook logs.
 - Nested Copilot CLI hook smoke exited 0, returned `OK`, and logged both `agentStop` and `sessionEnd`.
+
+## Nested Copilot plugin layout (issue #61)
+
+Layout: all Copilot-specific content is nested under `copilot/` — `copilot/COPILOT.md`
+(binary-embedded skill body), `copilot/bridge/` (binary-embedded bridge source), and
+`copilot/plugin/` (the marketplace plugin root: `plugin.json`, `hooks.json`,
+`skills/telex/SKILL.md`). `.github/plugin/marketplace.json` sets the plugin
+`"source": "copilot/plugin"`. The repository root is harness-neutral (`SKILL.md` carries
+no Copilot mechanics), leaving room for future sibling harness plugin roots.
+
+Empirical verification (GitHub Copilot CLI 1.0.69-2, Windows, isolated `--config-dir`):
+
+| Check | Evidence |
+|---|---|
+| Nested `source` install (positive) | `copilot --config-dir <temp> plugin marketplace add <repo>` → `Marketplace "telex" added`; `plugin install telex@telex` → `Plugin "telex" installed successfully. Installed 1 skill.` |
+| Installed skill resolves from the nested plugin root | The installed plugin tree contains exactly `installed-plugins/telex/telex/{plugin.json, hooks.json, skills/telex/SKILL.md}` — copied from `copilot/plugin/`. |
+| Installed plugin is lean (no embedded sources shipped) | `copilot/COPILOT.md` and `copilot/bridge/` are siblings of `copilot/plugin/`, so they are NOT copied into the installed plugin — only the plugin root ships. |
+| `source` is load-bearing (negative control) | Temporarily setting `"source": "copilot/plugin-DOES-NOT-EXIST"` makes install fail with `Failed to install plugin: Error: Plugin source directory not found: <repo>\copilot\plugin-DOES-NOT-EXIST`, confirming the marketplace resolves the plugin at `<repo-root>/<source>`. |
+| GitHub-fetch install (production path) | Real `owner/repo#ref` fetch against a fresh isolated `--config-dir`: `copilot plugin marketplace add lossyrob/telex#feature/harness-skill-layout` → `Marketplace "telex" added`; `plugin install telex@telex` → `Installed 1 skill`. The installed tree is exactly `installed-plugins/telex/telex/{plugin.json, hooks.json, skills/telex/SKILL.md}` resolved from `copilot/plugin`; the shipped `hooks.json` still wires `sessionEnd`/`agentStop` to `telex --json copilot session-end`/`turn-guard`, and `COPILOT.md`/`bridge/` are not shipped. Hook *firing* is unchanged from the issue #41 validation above — the `hooks.json` commands are byte-identical; only the plugin's directory moved. |

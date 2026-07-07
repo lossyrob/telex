@@ -1752,10 +1752,10 @@ misleading an agent (see
 - **Generic skill:** root `SKILL.md` is embedded (`include_str!` in `src/commands/skill.rs`)
   and printed by `telex skill` (`--raw` for the verbatim form) — version-matched because it
   ships in the binary.
-- **Copilot skill:** `COPILOT.md` is embedded and printed by `telex copilot skill`, headed by
+- **Copilot skill:** `copilot/COPILOT.md` is embedded and printed by `telex copilot skill`, headed by
   the binary version, the Copilot bridge protocol version, and the minimum compatible plugin
   version — the version-matched source of truth for the Copilot push workflow.
-- **Plugin bootstrap:** Copilot plugin discovery reads `skills/telex/SKILL.md`, a small, stable
+- **Plugin bootstrap:** Copilot plugin discovery reads `copilot/plugin/skills/telex/SKILL.md`, a small, stable
   **bootstrap** that says what telex is and tells the agent to load the real instructions from
   the binary (`telex copilot skill` / `telex skill`) and to use `--help` for syntax. It is
   intentionally **not** a copy of the canonical skill; a test asserts it stays a thin bootstrap

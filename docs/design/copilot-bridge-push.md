@@ -275,12 +275,12 @@ The full lifecycle:
 - daemon -- the generic on-deliver exec primitive (register a handler command
   per address; exec on commit, capped, off the critical path, retried).
 - embedded bridge -- `extension.mjs` bytes carried in the binary, written on
-  bind. Prototyped under `copilot-bridge/` in this branch.
-- `skills/telex/SKILL.md` -- a small **bootstrap** that points the agent at
+  bind. Lives under `copilot/bridge/` in this repository.
+- `copilot/plugin/skills/telex/SKILL.md` -- a small **bootstrap** that points the agent at
   `telex copilot skill` (version-matched, binary-owned) and `--help` for syntax,
   rather than embedding the workflow. See
   [DECISIONS.md ADR 0040](DECISIONS.md#0040--copilot-skill-is-binary-owned-the-plugin-skill-is-a-bootstrap).
-- `COPILOT.md` + `telex copilot skill` -- the binary-owned, version-matched Copilot
+- `copilot/COPILOT.md` + `telex copilot skill` -- the binary-owned, version-matched Copilot
   workflow (bind, load bridge, pushed turns, disposition, teardown, fallback) with a
   plugin/binary compatibility header (`telex v..`, bridge protocol, minimum plugin).
 
@@ -360,7 +360,7 @@ A second review pass and builder-directed follow-ups added:
 - **Direct bridge-liveness signal.** The bridge heartbeats into its registry; the turn guard treats
   a push member whose registry heartbeat is stale as uncovered (bridge not loaded / live) and
   nudges to `extensions_reload`, rather than only inferring deafness from unacked backlog.
-- **CI JS gate.** `node --check copilot-bridge/extension.mjs` runs in CI so a broken embedded
+- **CI JS gate.** `node --check copilot/bridge/extension.mjs` runs in CI so a broken embedded
   bridge cannot ship baked into the binary.
 - **Re-delivery is re-provision-triggered, not timer-churned.** An **accepted** push (already queued
   in the live session) is no longer re-pushed on the fast failure backoff; while the same session

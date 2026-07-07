@@ -10,7 +10,10 @@ One small binary, `telex`. It even carries its own usage instructions: run
 `telex skill` (or `telex skill --raw` for the exact embedded skill file).
 
 The repository also ships a Copilot CLI plugin marketplace (`.github/plugin/`)
-and plugin manifest (`plugin.json` + `hooks.json`). The plugin maps Copilot
+whose plugin lives under `copilot/plugin/` (`plugin.json` + `hooks.json` +
+bootstrap skill). All Copilot-specific content is nested under `copilot/`
+(`COPILOT.md`, the `bridge/` source, and `plugin/`), so the repository root stays
+harness-neutral with room for future sibling harness plugins. The plugin maps Copilot
 session env into generic telex session inputs, handles non-destructive
 `sessionEnd`, and guards turn-end re-arming.
 
@@ -114,9 +117,13 @@ pull waiters; Copilot asks for CC watching through the bridge bind.
 `telex wait` remains the generic pull primitive for scripts, CI, and non-extension
 harnesses; Copilot sessions use push delivery above instead.
 
-The plugin shape is validated against GitHub Copilot CLI 1.0.66-1; see
+The plugin shape and the nested marketplace `source` (`copilot/plugin`) are validated
+against GitHub Copilot CLI 1.0.69-2; see
 [`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)
-for the acceptance matrix and live hook smoke evidence.
+for the acceptance matrix and live hook smoke evidence. Nested-source marketplace
+install requires a Copilot CLI that resolves a plugin `source` subdirectory; treat
+**1.0.69-2 as the known-good floor**. Pinning an exact minimum supported version and a
+release-time install smoke are owned by the public-release gate (#59).
 
 Marketplace install is the supported plugin channel. Release install scripts
 print a tag-pinned marketplace command, for example

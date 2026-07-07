@@ -55,7 +55,7 @@ const DRAIN_IPC_DEADLINE: Duration = Duration::from_secs(3);
 
 /// Embedded Copilot-specific workflow, shipped in the binary so `telex copilot skill` is
 /// always version-matched. The plugin skill is only a bootstrap that defers to this.
-const COPILOT_SKILL_MD: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/COPILOT.md"));
+const COPILOT_SKILL_MD: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/copilot/COPILOT.md"));
 /// Copilot in-session bridge protocol version (the descriptor + prompt + endpoint shape).
 /// Bump on a breaking change to the push/bridge contract.
 pub const COPILOT_BRIDGE_PROTOCOL: u32 = 1;
@@ -77,10 +77,10 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
 }
 
 /// The bridge extension bytes, embedded so they version with the daemon protocol.
-const BRIDGE_EXTENSION_MJS: &str = include_str!("../../copilot-bridge/extension.mjs");
+const BRIDGE_EXTENSION_MJS: &str = include_str!("../../copilot/bridge/extension.mjs");
 /// The bridge's busy/idle state machine, a sibling module `extension.mjs` imports. Embedded and
 /// materialized alongside `extension.mjs` so the relative import resolves in the session dir.
-const BRIDGE_BUSY_STATE_MJS: &str = include_str!("../../copilot-bridge/busy-state.mjs");
+const BRIDGE_BUSY_STATE_MJS: &str = include_str!("../../copilot/bridge/busy-state.mjs");
 const BRIDGE_EXTENSION_NAME: &str = "telex-bridge";
 
 fn copilot_home_dir() -> Result<PathBuf> {
@@ -536,7 +536,7 @@ fn push_display_prompt(d: &OnDeliverDescriptor) -> String {
 /// Map a bridge push response to the handler exit code: 0 on success, `PUSH_EXIT_PERMANENT`
 /// (dead-letter) when the bridge reports `request_too_large` (structurally unpushable),
 /// The exact `error` value the bridge returns for a busy-deferred push. This is a cross-language
-/// contract with `copilot-bridge/busy-state.mjs`'s `DEFERRED_UNTIL_IDLE`; a drift on either side
+/// contract with `copilot/bridge/busy-state.mjs`'s `DEFERRED_UNTIL_IDLE`; a drift on either side
 /// would silently downgrade deferral to a transient retry, so both sides pin the literal via a
 /// named constant + a test (`push_exit_dead_letters_on_request_too_large`).
 const BRIDGE_DEFERRED_ERROR: &str = "deferred_until_idle";

@@ -1621,6 +1621,10 @@ for orphaned endpoints. See
 
 - **Date:** 2026-07-01
 - **Status:** Accepted (`push-delivery` node / PR #55)
+- **Note (2026-07-07, ADR 0044):** The plugin bootstrap referenced below as
+  `skills/telex/SKILL.md` moved to `copilot/plugin/skills/telex/SKILL.md` under the
+  harness-neutral layout (ADR 0044). The ownership decision in this entry is unchanged;
+  only the file path moved.
 
 **Context.** The #53 skill rewrite risks baking a long, detailed copy of the Copilot
 workflow into the static plugin skill (`skills/telex/SKILL.md`). Because #53 moves the
@@ -1813,3 +1817,62 @@ is unchanged. The durable+ack invariant of ADR 0041 stands — the deferred axis
 crash/reload still re-delivers via re-provision. Residual risk: the bridge's busy tracking is
 liveness state, so a self-heal during a genuinely long, event-quiet turn degrades a single message
 to the prior enqueue behavior (a queued next turn), not to a mid-turn injection.
+
+## 0044 — Harness-neutral root skill; per-harness content nested under `<harness>/`
+
+- **Date:** 2026-07-07
+- **Status:** Accepted (`harness-skill-layout` node / issue #61)
+
+**Context.** Before the first public release, the repository blurred two ownership
+boundaries. (1) The root `SKILL.md` printed by `telex skill` — meant to be the generic,
+harness-neutral agent guide — still carried Copilot CLI mechanics (detached `pwsh -File`
+waiter recipe, `$COPILOT_AGENT_SESSION_ID`/`$COPILOT_LOADER_PID` env mapping,
+`telex copilot detach`, push-delivery notes). (2) The Copilot plugin files (`plugin.json`,
+`hooks.json`, `skills/`), the embedded skill body (`COPILOT.md`), and the embedded bridge
+source (`copilot-bridge/`) all sat at the repository root, so the top-level surface was
+implicitly Copilot-specific with no room for future sibling harness plugins. ADR 0040
+established that the Copilot skill is binary-owned; this entry finishes the content/layout
+separation. (Layout is normally below the ADR bar per the conventions above, but the
+*harness boundary* — and the convention future harness plugins must follow — is a
+load-bearing, release-calcifying architecture decision.)
+
+**Decision.** Make the repository root harness-neutral and nest all harness-specific
+content under a per-harness root, using this convention:
+
+- `<harness>/<HARNESS>.md` — the binary-embedded, version-matched skill body printed by
+  `telex <harness> skill`.
+- `<harness>/bridge/` — binary-embedded harness integration source (e.g. the in-session
+  bridge extension), `include_str!`-embedded, not marketplace-distributed. **Present only
+  when the harness has binary-embedded integration source; omit it for a harness that ships
+  only a marketplace plugin.**
+- `<harness>/plugin/` — the marketplace plugin root (`plugin.json`, `hooks.json`,
+  `skills/`); the marketplace entry's `source` points at `<harness>/plugin`.
+
+For Copilot this is `copilot/{COPILOT.md, bridge/, plugin/}`, with
+`.github/plugin/marketplace.json` plugin `"source": "copilot/plugin"`. The root `SKILL.md`
+keeps only harness-neutral concepts (identity, `attach`/`wait`/`ack`/send/read/disposition,
+backends, command reference, the generic pull loop) plus a neutral pointer to
+harness-specific skills (`telex <harness> skill`); all Copilot mechanics move to
+`copilot/COPILOT.md` (which now also owns the pull-mode fallback recipe). Keeping the
+embedded skill body and bridge source as **siblings** of `plugin/` (not inside it) keeps
+the installed marketplace plugin lean.
+
+**Consequences.** The repository root is harness-neutral and a future sibling harness
+(`claude/`, `gemini/`, …) pattern-follows the convention rather than relitigating layout.
+`src/commands/copilot.rs` `include_str!` paths and the CI `node --check` path point into
+`copilot/`; `tests/copilot_plugin.rs` asserts the nested plugin root, couples the
+marketplace `source` string to the on-disk plugin root, and uses a fixed thin-bootstrap
+byte ceiling. Nested marketplace `source` install was verified empirically on GitHub
+Copilot CLI 1.0.69-2 — positive install from `copilot/plugin`, a negative control proving
+`source` is load-bearing, and the installed plugin excluding the embedded siblings (see
+[copilot-plugin-validation.md](copilot-plugin-validation.md)). This entry **complements**
+ADR 0040 (it does not supersede it): 0040's binary-owned-skill ownership decision stands;
+0044 only relocates the files and neutralizes the root skill.
+
+The `<harness>/` layout is only the on-disk part of the convention. Adding a sibling
+harness also requires code/CI touchpoints outside `<harness>/`, recorded per harness in
+its own ADR: a `src/commands/<harness>.rs` module with the `include_str!` constants and a
+`telex <harness>` subcommand tree; a new plugin entry in `.github/plugin/marketplace.json`
+with `source: <harness>/plugin`; and (if the harness ships a `bridge/`) a
+`node --check <harness>/bridge/<file>` gate in `.github/workflows/ci.yml`.
+
