@@ -9,6 +9,7 @@ pub mod credential;
 pub mod daemon;
 pub mod daemon_ipc;
 pub mod identity;
+pub mod install;
 // Legacy resident-holder IPC/registry surface retained for compatibility with
 // pre-daemon commands and tests. New membership and delivery flows should use
 // `daemon`/`daemon_ipc`.

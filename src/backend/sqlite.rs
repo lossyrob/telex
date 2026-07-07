@@ -16,10 +16,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use super::{Backend, Capabilities};
+use super::{Backend, Capabilities, WaitCandidate, WaitFetchOptions};
 use crate::model::*;
 
-const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SCHEMA_VERSION: i64 = 2;
 
 // ---------------------------------------------------------------------------
 // Store advisory lock
@@ -946,6 +946,10 @@ fn ensure_v2_invariants(c: &Connection) -> Result<()> {
     c.execute_batch(
         "CREATE INDEX IF NOT EXISTS deliveries_recipient_pending_idx
              ON deliveries(recipient, consumed_at_ms, message_id);
+         CREATE TABLE IF NOT EXISTS clock_hwm (
+             id     INTEGER PRIMARY KEY CHECK (id = 1),
+             hwm_ms INTEGER NOT NULL
+         );
          CREATE TABLE IF NOT EXISTS legacy_cutover_claims (
              address       TEXT PRIMARY KEY,
              claimed_at_ms INTEGER NOT NULL
@@ -971,8 +975,31 @@ fn ensure_v2_invariants(c: &Connection) -> Result<()> {
              SELECT RAISE(ABORT, 'legacy lease update rejected: missing daemon fence token');
          END;",
     )?;
+    c.execute(
+        "INSERT INTO clock_hwm (id, hwm_ms) VALUES (1, ?1) ON CONFLICT(id) DO NOTHING",
+        params![now_ms()],
+    )?;
     backfill_delivery_rows_once(c)?;
     backfill_terminal_disposition_consumption_once(c)?;
+    raise_clock_hwm_to_existing_timestamps(c)?;
+    Ok(())
+}
+
+fn raise_clock_hwm_to_existing_timestamps(c: &Connection) -> Result<()> {
+    let mut max_existing = None;
+    for sql in [
+        "SELECT MAX(created_at_ms) FROM messages",
+        "SELECT MAX(sent_at_ms) FROM messages",
+        "SELECT MAX(delivered_at_ms) FROM deliveries",
+        "SELECT MAX(consumed_at_ms) FROM deliveries",
+        "SELECT MAX(at_ms) FROM dispositions",
+    ] {
+        let value: Option<i64> = c.query_row(sql, [], |r| r.get(0))?;
+        max_existing = max_existing.max(value);
+    }
+    if let Some(value) = max_existing {
+        persist_clock_hwm(c, value)?;
+    }
     Ok(())
 }
 
@@ -1384,6 +1411,10 @@ impl Backend for SqliteBackend {
             push: "poll",
             lease: "ttl",
         }
+    }
+
+    fn supports_wake_on_cc(&self) -> bool {
+        true
     }
 
     async fn init_schema(&self) -> Result<()> {
@@ -1899,6 +1930,62 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn inbound_actionable_count(&self, address: &str) -> Result<i64> {
+        let a = address.to_string();
+        self.run(move |c| {
+            materialize_pending_delivery_rows_for_recipient(c, &a)?;
+            // Actionable inbound = requires this recipient's disposition (primary to_addr +
+            // requires_disposition), not consumed, not terminally dispositioned.
+            let sql = format!(
+                "SELECT COUNT(*) FROM deliveries d \
+                 JOIN messages m ON m.id=d.message_id \
+                 WHERE d.recipient=?1 \
+                   AND d.consumed_at_ms IS NULL \
+                   AND m.requires_disposition=1 \
+                   AND m.to_addr=?1 \
+                   AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                  WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                  ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({})",
+                terminal_dispositions_sql_list()
+            );
+            Ok(c.query_row(&sql, params![a], |r| r.get(0))?)
+        })
+        .await
+    }
+
+    async fn pending_and_actionable_counts(&self, address: &str) -> Result<(i64, i64)> {
+        let a = address.to_string();
+        self.run(move |c| {
+            // Materialize once, then run both counts on the same connection.
+            materialize_pending_delivery_rows_for_recipient(c, &a)?;
+            let terminal = terminal_dispositions_sql_list();
+            let pending_sql = format!(
+                "SELECT COUNT(*) FROM deliveries d \
+                 JOIN messages m ON m.id=d.message_id \
+                 WHERE d.recipient=?1 \
+                   AND d.consumed_at_ms IS NULL \
+                   AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                  WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                  ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})"
+            );
+            let actionable_sql = format!(
+                "SELECT COUNT(*) FROM deliveries d \
+                 JOIN messages m ON m.id=d.message_id \
+                 WHERE d.recipient=?1 \
+                   AND d.consumed_at_ms IS NULL \
+                   AND m.requires_disposition=1 \
+                   AND m.to_addr=?1 \
+                   AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                  WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                  ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})"
+            );
+            let pending: i64 = c.query_row(&pending_sql, params![a], |r| r.get(0))?;
+            let actionable: i64 = c.query_row(&actionable_sql, params![a], |r| r.get(0))?;
+            Ok((pending, actionable))
+        })
+        .await
+    }
+
     async fn record_detach_tombstone(
         &self,
         session_id: &str,
@@ -2015,6 +2102,62 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn fetch_wait_candidates(
+        &self,
+        address: &str,
+        options: WaitFetchOptions,
+    ) -> Result<Vec<WaitCandidate>> {
+        let a = address.to_string();
+        self.run(move |c| {
+            materialize_pending_delivery_rows_for_recipient(c, &a)?;
+            let terminal = terminal_dispositions_sql_list();
+            let primary_sql = format!(
+                "SELECT {MSG_COLS_M} FROM deliveries d \
+                 JOIN messages m ON m.id=d.message_id \
+                 WHERE d.recipient=?1 \
+                  AND d.consumed_at_ms IS NULL \
+                  AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                 WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                 ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal}) \
+                 ORDER BY d.message_id"
+            );
+            let mut candidates = c
+                .prepare(&primary_sql)?
+                .query_map(params![a.as_str()], map_message)?
+                .map(|row| row.map(WaitCandidate::primary))
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+
+            if options.wake_on_cc {
+                let cc_sql = format!(
+                    "SELECT {MSG_COLS_M} FROM deliveries d \
+                     JOIN messages m ON m.id=d.message_id \
+                     WHERE d.recipient=?1 \
+                      AND d.consumed_at_ms IS NOT NULL \
+                      AND d.delivered_at_ms > ?2 \
+                      AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                     WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                     ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal}) \
+                     ORDER BY d.message_id"
+                );
+                let cc_messages = c
+                    .prepare(&cc_sql)?
+                    .query_map(params![a.as_str(), options.cc_after_ms], map_message)?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                candidates.extend(cc_messages.into_iter().filter_map(|message| {
+                    // The SQL predicate is recipient-row based; keep the parsed delivery-role
+                    // check as the authority so comma-string false positives and acked primaries
+                    // cannot become CC wake candidates.
+                    (delivery_role(&a, &message.to_addr, message.cc.as_deref()) == "cc")
+                        .then(|| WaitCandidate::cc_notification(message))
+                }));
+            }
+
+            candidates.sort_by_key(|candidate| candidate.message.id);
+            Ok(candidates)
+        })
+        .await
+    }
+
     async fn has_delivery_for_recipient(&self, message_id: i64, recipient: &str) -> Result<bool> {
         let r = recipient.to_string();
         self.run(move |c| {
@@ -2035,7 +2178,10 @@ impl Backend for SqliteBackend {
         let m = m.clone();
         self.run(move |c| {
             with_immediate_transaction(c, |c| {
-                let now = now_ms();
+                // CC live-wake lower bounds compare against delivery timestamps. Advance the
+                // durable clock inside the insert transaction so a wait boundary cannot share a
+                // timestamp with a later message.
+                let now = advance_clock_hwm(c)?;
                 c.execute(
                     "INSERT INTO messages(thread_id, parent_id, from_addr, to_addr, cc, kind, \
                      attention, requires_disposition, subject, body, metadata, sent_at_ms, \
@@ -2300,6 +2446,103 @@ mod tests {
             .join("sqlite-p6-tests");
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(format!("{label}-{}-{seq}.db", std::process::id()))
+    }
+
+    fn cc_message(to_addr: &str, cc: &str) -> NewMessage {
+        NewMessage {
+            parent_id: None,
+            from_addr: Some("sender".to_string()),
+            to_addr: to_addr.to_string(),
+            cc: Some(cc.to_string()),
+            kind: "note".to_string(),
+            attention: Attention::Background,
+            requires_disposition: false,
+            subject: None,
+            body: "body".to_string(),
+            metadata: None,
+            sent_at_ms: now_ms(),
+        }
+    }
+
+    #[tokio::test]
+    async fn wake_on_cc_lower_bound_is_strict_without_wall_clock_sleep() {
+        let path = test_db_path("wake-fencepost");
+        let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        backend.init_schema().await.unwrap();
+
+        let lower = backend.durable_clock_now_ms().await.unwrap();
+        let message = backend
+            .insert_message(&cc_message("addr:primary", "addr:cc"))
+            .await
+            .unwrap();
+        let candidates = backend
+            .fetch_wait_candidates(
+                "addr:cc",
+                WaitFetchOptions {
+                    wake_on_cc: true,
+                    cc_after_ms: lower,
+                },
+            )
+            .await
+            .unwrap();
+
+        assert!(candidates.iter().any(|candidate| {
+            candidate.notification_only && candidate.message.id == message.id
+        }));
+    }
+
+    #[tokio::test]
+    async fn init_schema_raises_clock_hwm_above_historical_cc_deliveries() {
+        let path = test_db_path("wake-hwm-history");
+        {
+            let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+            backend.init_schema().await.unwrap();
+        }
+
+        let historical = now_ms().saturating_add(1_000_000);
+        {
+            let c = Connection::open(&path).unwrap();
+            c.execute(
+                "INSERT INTO messages(id, thread_id, parent_id, from_addr, to_addr, cc, kind, attention,
+                 requires_disposition, subject, body, metadata, sent_at_ms, created_at_ms)
+                 VALUES (100, 100, NULL, 'sender', 'addr:primary', 'addr:cc', 'note', 'background',
+                 0, NULL, 'old body', NULL, ?1, ?1)",
+                params![historical],
+            )
+            .unwrap();
+            c.execute(
+                "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
+                 VALUES (100, 'addr:cc', ?1, ?1)",
+                params![historical],
+            )
+            .unwrap();
+            c.execute("UPDATE clock_hwm SET hwm_ms=1 WHERE id=1", [])
+                .unwrap();
+        }
+
+        let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        backend.init_schema().await.unwrap();
+        let lower = backend.durable_clock_now_ms().await.unwrap();
+        assert!(
+            lower > historical,
+            "clock lower bound {lower} should advance past historical {historical}"
+        );
+        let candidates = backend
+            .fetch_wait_candidates(
+                "addr:cc",
+                WaitFetchOptions {
+                    wake_on_cc: true,
+                    cc_after_ms: lower,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            candidates
+                .iter()
+                .all(|candidate| candidate.message.id != 100),
+            "historical CC row must remain pull-only after init: {candidates:?}"
+        );
     }
 
     #[tokio::test]

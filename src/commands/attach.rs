@@ -31,6 +31,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         watch_pids,
         recovery: false,
         on_deliver: args.on_deliver.clone(),
+        on_deliver_wake_on_cc: args.on_deliver_wake_on_cc,
     };
     let response = crate::daemon::request_connect_or_spawn(&store_key, &register).await?;
 

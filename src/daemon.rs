@@ -7,13 +7,13 @@ use crate::backend::postgres::{
 };
 #[cfg(feature = "sqlite")]
 use crate::backend::sqlite::SqliteBackend;
-use crate::backend::Backend;
+use crate::backend::{Backend, WaitFetchOptions};
 use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
     DeafStationStatus, EpochStatus, HandshakeError, HelloAck, IdleStationStatus, LiveWaiterStatus,
-    MemberStatus, NeedsAttachReason, RecentErrorStatus, Request, Response, RetentionStatus,
-    SentReceipt, StationHealth, StoreStatus, WaiterOutcome, WatchPidRole, WatchPidSpec,
-    WatchPidStatus,
+    MemberStatus, NeedsAttachReason, PushDeliveryHealth, RecentErrorStatus, Request, Response,
+    RetentionStatus, SentReceipt, StationHealth, StoreStatus, WaiterOutcome, WatchPidRole,
+    WatchPidSpec, WatchPidStatus, ON_DELIVER_DEFERRED_EXIT, ON_DELIVER_PERMANENT_EXIT,
 };
 use crate::model::{
     cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient, Attention,
@@ -22,7 +22,7 @@ use crate::model::{
 #[cfg(feature = "postgres")]
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, HashMap, VecDeque};
 use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -373,6 +373,8 @@ struct MemberRecord {
     last_delivered_message_id: Option<i64>,
     /// Harness-neutral on-deliver handler argv registered for this address/session, if any.
     on_deliver: Option<Vec<String>>,
+    on_deliver_wake_on_cc: bool,
+    on_deliver_cc_after_ms: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -393,6 +395,8 @@ struct WaiterRecord {
     started_at_ms: i64,
     attention: Option<String>,
     min_attention: Option<String>,
+    wake_on_cc: bool,
+    cc_after_ms: Option<i64>,
     timeout_ms: Option<u64>,
 }
 
@@ -476,30 +480,66 @@ impl DaemonState {
             .iter()
             .map(|(store_key, entry)| (store_key.clone(), entry.backend.clone()))
             .collect();
+        // Both observability counts per unique (store, address), in a single backend pass that
+        // materializes pending delivery rows once. `pending_unconsumed_count` counts all unconsumed
+        // non-terminal deliveries; `inbound_actionable_count` counts only those requiring THIS
+        // station's disposition (primary + requires_disposition), so no-disposition notes and, on a
+        // shared address, traffic this station need not act on are separated out.
         let mut pending_counts: HashMap<(String, String), i64> = HashMap::new();
+        let mut inbound_actionable_counts: HashMap<(String, String), i64> = HashMap::new();
         for member in &member_records {
             let key = (member.store_key.clone(), member.address.clone());
             if pending_counts.contains_key(&key) {
                 continue;
             }
-            let pending = match store_backends.get(&member.store_key) {
-                Some(backend) => match backend.pending_unconsumed_count(&member.address).await {
-                    Ok(count) => count,
+            let (pending, actionable) = match store_backends.get(&member.store_key) {
+                Some(backend) => match backend.pending_and_actionable_counts(&member.address).await
+                {
+                    Ok(counts) => counts,
                     Err(e) => {
                         self.push_recent_error(
                             "BackendDisconnect",
                             format!(
-                                "pending count failed for {} {}: {e:#}",
+                                "pending/actionable counts failed for {} {}: {e:#}",
                                 member.store_key, member.address
                             ),
                         );
-                        0
+                        (0, 0)
                     }
                 },
-                None => 0,
+                None => (0, 0),
             };
-            pending_counts.insert(key, pending);
+            pending_counts.insert(key.clone(), pending);
+            inbound_actionable_counts.insert(key, actionable);
         }
+        // Push-delivery health + suppressed counts per member. Computed BEFORE taking the members
+        // lock as a defensive measure: `push_delivery_health`/`push_suppressed_count` lock
+        // `on_deliver.pushed`/`dead_lettered`. There is no strict inversion today
+        // (`on_deliver_advance_cc_lower_bound` releases `pushed` before it locks `members`), but
+        // computing these outside the members lock keeps the two mutexes decoupled so a future
+        // members-then-pushed path cannot introduce one.
+        let (push_health_by_key, push_suppressed_by_key) = {
+            let now_inst = Instant::now();
+            let mut health: HashMap<MemberKey, PushDeliveryHealth> = HashMap::new();
+            let mut suppressed: HashMap<MemberKey, i64> = HashMap::new();
+            for member in &member_records {
+                let key = MemberKey {
+                    store_key: member.store_key.clone(),
+                    session_id: member.session_id.clone(),
+                    address: member.address.clone(),
+                };
+                let pending = pending_counts
+                    .get(&(member.store_key.clone(), member.address.clone()))
+                    .copied()
+                    .unwrap_or(0);
+                health.insert(
+                    key.clone(),
+                    self.push_delivery_health(&key, pending, member.on_deliver.is_some(), now_inst),
+                );
+                suppressed.insert(key.clone(), self.push_suppressed_count(&key));
+            }
+            (health, suppressed)
+        };
         let member_records: Vec<MemberRecord> = {
             let now = now_ms();
             let mut members = self.members.lock().unwrap();
@@ -516,9 +556,25 @@ impl DaemonState {
                     .get(&(member.store_key.clone(), member.address.clone()))
                     .copied()
                     .unwrap_or(0);
+                let push_health = push_health_by_key
+                    .get(&MemberKey {
+                        store_key: member.store_key.clone(),
+                        session_id: member.session_id.clone(),
+                        address: member.address.clone(),
+                    })
+                    .copied()
+                    .unwrap_or(PushDeliveryHealth::NotRegistered);
                 if !member.idle && live_waiters_count == 0 {
                     member.unattended_since_ms.get_or_insert(now);
-                    if pending > 0 {
+                    // For a push station, "uncovered backlog" means push delivery is actually
+                    // failing (bridge unreachable) — NOT merely that messages are pending while the
+                    // bridge is delivering/probing. For a pull station, any pending is backlog.
+                    let backlog_uncovered = if member.on_deliver.is_some() {
+                        push_health == PushDeliveryHealth::Failing
+                    } else {
+                        pending > 0
+                    };
+                    if backlog_uncovered {
                         member.unattended_with_backlog_since_ms.get_or_insert(now);
                     } else {
                         member.unattended_with_backlog_since_ms = None;
@@ -536,7 +592,30 @@ impl DaemonState {
                     .get(&(member.store_key.clone(), member.address.clone()))
                     .copied()
                     .unwrap_or(0);
-                member.status(&live_waiters, pending, deaf_warn_threshold_ms)
+                let key = MemberKey {
+                    store_key: member.store_key.clone(),
+                    session_id: member.session_id.clone(),
+                    address: member.address.clone(),
+                };
+                let push_health = push_health_by_key
+                    .get(&key)
+                    .copied()
+                    .unwrap_or(PushDeliveryHealth::NotRegistered);
+                let inbound_actionable = inbound_actionable_counts
+                    .get(&(member.store_key.clone(), member.address.clone()))
+                    .copied()
+                    .unwrap_or(0);
+                let push_suppressed = push_suppressed_by_key.get(&key).copied().unwrap_or(0);
+                let mut status = member.status(
+                    &live_waiters,
+                    pending,
+                    inbound_actionable,
+                    push_health,
+                    push_suppressed,
+                    deaf_warn_threshold_ms,
+                );
+                status.push_deferred_count = self.on_deliver_deferred_count(&key);
+                status
             })
             .collect();
         let epoch_by_address = members
@@ -650,6 +729,22 @@ impl DaemonState {
             .unwrap()
             .values()
             .filter(|m| m.store_key == store_key && m.session_id == session_id && !m.idle)
+            .cloned()
+            .collect()
+    }
+
+    /// Active members for a session across ALL stores. The idle drain (issue #65) uses this instead
+    /// of the store-scoped variant: the `agentStop` drain hook is static and resolves the client's
+    /// ambient store, which differs from a session attached with a named `--backend`/`--db`. Since
+    /// the daemon is a per-user singleton holding every store's members, and a Copilot `session_id`
+    /// is globally unique, matching by `session_id` alone drains the correct members regardless of
+    /// which store the drain client resolved.
+    fn session_members_any_store(&self, session_id: &str) -> Vec<MemberRecord> {
+        self.members
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|m| m.session_id == session_id && !m.idle)
             .cloned()
             .collect()
     }
@@ -1167,6 +1262,9 @@ impl MemberRecord {
         &self,
         live_waiters: &[LiveWaiterStatus],
         pending_unconsumed_count: i64,
+        inbound_actionable_count: i64,
+        push_delivery: PushDeliveryHealth,
+        push_suppressed_count: i64,
         deaf_warn_threshold_ms: i64,
     ) -> MemberStatus {
         let member_waiters: Vec<LiveWaiterStatus> = live_waiters
@@ -1180,8 +1278,12 @@ impl MemberRecord {
             .collect();
         let live_waiters_count = member_waiters.len();
         let now = now_ms();
-        let (station_health, health_detail) =
-            self.station_health(live_waiters_count, pending_unconsumed_count);
+        let (station_health, health_detail) = self.station_health(
+            live_waiters_count,
+            pending_unconsumed_count,
+            inbound_actionable_count,
+            push_delivery,
+        );
         let unattended_since_ms = if !self.idle && live_waiters_count == 0 {
             self.unattended_since_ms
                 .or(self.last_waiter_exit_at_ms)
@@ -1210,7 +1312,10 @@ impl MemberRecord {
             waiters: self.waiters,
             live_waiters_count,
             pending_unconsumed_count,
+            inbound_actionable_count,
             station_health,
+            push_delivery,
+            push_suppressed_count,
             health_detail,
             last_waiter_exit_at_ms: self.last_waiter_exit_at_ms,
             last_waiter_outcome: self.last_waiter_outcome.clone(),
@@ -1219,6 +1324,11 @@ impl MemberRecord {
             last_waiter_pid: self.last_waiter_pid,
             last_delivered_message_id: self.last_delivered_message_id,
             push_registered: self.on_deliver.is_some(),
+            push_wake_on_cc: self.on_deliver_wake_on_cc,
+            push_cc_after_ms: self.on_deliver_cc_after_ms,
+            // Filled in by the status builder, which has the deferred-attempt map; a bare
+            // MemberRecord cannot see it.
+            push_deferred_count: 0,
             unattended_since_ms,
             unattended_for_ms,
             deaf_since_ms,
@@ -1239,6 +1349,8 @@ impl MemberRecord {
         &self,
         live_waiters_count: usize,
         pending_unconsumed_count: i64,
+        inbound_actionable_count: i64,
+        push_delivery: PushDeliveryHealth,
     ) -> (StationHealth, Option<String>) {
         if self.idle {
             return (
@@ -1263,6 +1375,49 @@ impl MemberRecord {
                     );
                 }
             }
+        }
+        // A registered on-deliver push station has no `telex wait` waiter by design, so waiter
+        // presence cannot decide its health. Use the daemon's own push-delivery health instead: it
+        // is only "deaf" (unattended-with-backlog) when pushes are actually FAILING (bridge
+        // unreachable). A delivering/probing/stale-accepted bridge is attended-via-push, never
+        // reported `unattended`. Folds in #64 and the persistent false-deaf of #66.
+        if self.on_deliver.is_some() {
+            return match push_delivery {
+                PushDeliveryHealth::Failing => (
+                    StationHealth::UnattendedWithBacklog,
+                    Some(format!(
+                        "push bridge is not accepting delivery (unreachable); {pending_unconsumed_count} unconsumed, {inbound_actionable_count} awaiting this station's disposition"
+                    )),
+                ),
+                PushDeliveryHealth::StaleAccepted => (
+                    StationHealth::AttendedPush,
+                    Some(format!(
+                        "attended via push bridge (no waiter; expected in push mode); last push accepted but its backstop has elapsed with no fresh accept — bridge may have gone away (probing on next sweep); {inbound_actionable_count} awaiting disposition"
+                    )),
+                ),
+                PushDeliveryHealth::Probing => (
+                    StationHealth::AttendedPush,
+                    Some(
+                        "attended via push bridge (no waiter; expected in push mode); push delivery is being (re)attempted — health not yet confirmed".to_string(),
+                    ),
+                ),
+                PushDeliveryHealth::Delivering | PushDeliveryHealth::NoBacklog => (
+                    StationHealth::AttendedPush,
+                    Some(format!(
+                        "attended via push bridge (no waiter; expected in push mode); {inbound_actionable_count} awaiting this station's disposition"
+                    )),
+                ),
+                // `on_deliver.is_some()` means push is registered, so these are not expected here;
+                // match them explicitly so a future `PushDeliveryHealth` variant forces a decision
+                // rather than silently inheriting `attended_push`.
+                PushDeliveryHealth::NotRegistered | PushDeliveryHealth::Unknown => (
+                    StationHealth::AttendedPush,
+                    Some(
+                        "registered push station; see push_delivery for delivery confidence"
+                            .to_string(),
+                    ),
+                ),
+            };
         }
         if pending_unconsumed_count > 0 {
             (
@@ -1305,6 +1460,8 @@ impl WaiterRecord {
             start_time: self.start_time,
             attention: self.attention.clone(),
             min_attention: self.min_attention.clone(),
+            wake_on_cc: self.wake_on_cc,
+            cc_after_ms: self.cc_after_ms,
             timeout_ms: self.timeout_ms,
         }
     }
@@ -1329,6 +1486,8 @@ impl WaiterGuard {
         start_time: Option<u64>,
         attention: Option<String>,
         min_attention: Option<String>,
+        wake_on_cc: bool,
+        cc_after_ms: Option<i64>,
         timeout_ms: Option<u64>,
     ) -> Self {
         let pid = pid.unwrap_or(0);
@@ -1342,6 +1501,8 @@ impl WaiterGuard {
             started_at_ms: now_ms(),
             attention,
             min_attention,
+            wake_on_cc,
+            cc_after_ms,
             timeout_ms,
         });
         Self {
@@ -1826,27 +1987,18 @@ async fn open_store_entry(
         #[cfg(feature = "postgres")]
         {
             let (profile_name, profile) = resolve_postgres_profile_for_store_key(store_key)?;
-            let (cfg, schema) = crate::profiles::pg_connect_config(&profile)
+            let backend = crate::backend::postgres::PgBackend::connect_profile(profile.clone())
                 .await
                 .map_err(|e| {
                     proto::unsupported(format!(
-                        "resolving Postgres backend profile '{profile_name}' for daemon store open: {e:#}"
+                        "opening Postgres backend profile '{profile_name}': {e:#}"
                     ))
                 })?;
-            let backend =
-                crate::backend::postgres::PgBackend::connect_with(cfg.clone(), schema.as_deref())
-                    .await
-                    .map_err(|e| {
-                        proto::unsupported(format!(
-                            "opening Postgres backend profile '{profile_name}': {e:#}"
-                        ))
-                    })?;
             backend
                 .init_schema()
                 .await
                 .map_err(|e| proto::unsupported(format!("initializing Postgres store: {e:#}")))?;
             let notify = Arc::new(Notify::new());
-            let _ = (cfg, schema);
             spawn_postgres_notify_listener(store_key.to_string(), notify.clone(), recent_errors);
             return Ok(StoreEntry {
                 kind: backend.kind().to_string(),
@@ -2050,10 +2202,21 @@ const ON_DELIVER_RETRY_MAX: Duration = Duration::from_secs(300);
 const ON_DELIVER_ACCEPTED_BACKSTOP: Duration = Duration::from_secs(300);
 /// After this many attempts on the same still-unacked message, surface a degraded status.
 const ON_DELIVER_DEGRADED_AFTER: u32 = 6;
-/// Exit code the on-deliver handler returns for a permanent, non-retryable failure (e.g. a
-/// message too large to ever fit the harness frame). The message is dead-lettered rather than
-/// retried; it stays durably queued.
-const ON_DELIVER_PERMANENT_EXIT: i32 = 3;
+/// Re-attempt cooldown for a message the harness **deferred** (busy -- issue #65). The idle drain
+/// is the prompt re-delivery trigger; this backstop only bounds the latency if the drain signal is
+/// missed (hook did not fire / raced), so a busy bridge is not re-hit every heartbeat while the
+/// turn runs. Invariant: `HEARTBEAT_INTERVAL <= ON_DELIVER_DEFERRED_BACKSTOP <
+/// ON_DELIVER_ACCEPTED_BACKSTOP` (fallback re-attempt is bounded, but deferred is re-checked sooner
+/// than a genuinely-queued accepted turn). Enforced by `on_deliver_backstop_invariants` in tests.
+/// The permanent (dead-letter) and deferred exit codes are defined in `daemon_ipc` as the single
+/// source of truth for the handler<->daemon contract.
+const ON_DELIVER_DEFERRED_BACKSTOP: Duration = Duration::from_secs(30);
+/// Hard cap on total push attempts for one still-unacked message. Past this, re-push is suppressed
+/// (the message stays durably queued and readable via `telex inbox`; surfaced as a suppressed
+/// count in status) so a never-acked message cannot be re-pushed forever. An explicit re-provision
+/// (reattach/reload -> `on_deliver_forget_member`) resets the budget and re-delivers the backlog.
+/// With the 300s accepted backstop this is ~2h of a live-but-never-acking session before suppression.
+const ON_DELIVER_MAX_REPUSH: u32 = 24;
 
 /// Backoff before re-pushing a still-undelivered message that has already been attempted
 /// `attempts` times: `ON_DELIVER_RETRY_BASE` doubling per attempt, capped at
@@ -2073,7 +2236,9 @@ fn on_deliver_backoff(attempts: u32) -> Duration {
 /// re-provision (reattach/reload clears the push record and re-delivers the backlog), so this
 /// timer only needs to backstop the rare accept-but-silently-dropped-while-held case.
 fn on_deliver_redelivery_delay(attempt: &PushAttempt) -> Duration {
-    if attempt.accepted {
+    if attempt.deferred {
+        ON_DELIVER_DEFERRED_BACKSTOP
+    } else if attempt.accepted {
         ON_DELIVER_ACCEPTED_BACKSTOP
     } else {
         on_deliver_backoff(attempt.attempts)
@@ -2101,6 +2266,31 @@ struct PushAttempt {
     last: Instant,
     attempts: u32,
     accepted: bool,
+    /// The harness deferred this push because it was busy (issue #65). Mutually exclusive with
+    /// `accepted`: a deferred message was not sent, so it is neither queued-in-session nor a
+    /// failure. It uses `ON_DELIVER_DEFERRED_BACKSTOP` and is cleared by the idle drain.
+    deferred: bool,
+    notification_only: bool,
+    notification_lower_bound: Option<i64>,
+    /// Once this message has been accepted, it needs no further delivery: it is a CC notification
+    /// or a primary message that does not require this recipient's disposition (an informational
+    /// note). Such a message is skipped forever after a single accepted push, exactly like an
+    /// accepted CC notification, so no-disposition traffic never enters an unbounded re-push pool.
+    skip_after_accept: bool,
+}
+
+#[derive(Clone, Copy)]
+struct InflightAttempt {
+    notification_only: bool,
+    notification_lower_bound: Option<i64>,
+}
+
+#[derive(Clone)]
+struct OnDeliverCandidate {
+    member_key: MemberKey,
+    argv: Vec<String>,
+    address: String,
+    notification_only: bool,
 }
 
 /// Daemon-side liveness state for the generic on-deliver exec primitive. This is a
@@ -2112,32 +2302,41 @@ struct PushAttempt {
 /// currently-undelivered set on each sweep; `dead_lettered`
 /// holds messages a handler reported as permanently unpushable (skipped from further pushes,
 /// surfaced via a degraded status, still durably queued); `inflight` prevents a commit-path
-/// and a sweep-path from racing the same message.
+/// and a sweep-path from racing the same message. `generations` fences lifecycle resets: each
+/// member has a generation that is bumped on re-provision (`on_deliver_forget_member`), captured
+/// when a push is spawned, and re-checked on completion, so an in-flight push launched before a
+/// reset cannot write its stale outcome into the fresh generation's attempt map.
 struct OnDeliverState {
     sem: Arc<Semaphore>,
-    inflight: Mutex<HashSet<OnDeliverKey>>,
+    inflight: Mutex<HashMap<OnDeliverKey, InflightAttempt>>,
     pushed: Mutex<HashMap<MemberKey, HashMap<i64, PushAttempt>>>,
     dead_lettered: Mutex<HashMap<MemberKey, BTreeSet<i64>>>,
+    /// Per-member idle-drain generation (issue #65). Bumped each time `DrainDeferred` runs for a
+    /// member. A push captures the generation when it begins; if the generation advances while the
+    /// push is inflight, a drain fired before the deferred attempt was recorded and could not clear
+    /// or re-sweep it (nothing was recorded yet, and the inflight guard blocked the drain's sweep).
+    /// The push then clears + re-sweeps itself so the message is re-attempted promptly instead of
+    /// waiting for the deferred backstop. Distinct from `generations` (which fences lifecycle resets).
+    drain_gen: Mutex<HashMap<MemberKey, u64>>,
+    generations: Mutex<HashMap<MemberKey, u64>>,
 }
 
 impl Default for OnDeliverState {
     fn default() -> Self {
         Self {
             sem: Arc::new(Semaphore::new(ON_DELIVER_MAX_CONCURRENCY)),
-            inflight: Mutex::new(HashSet::new()),
+            inflight: Mutex::new(HashMap::new()),
             pushed: Mutex::new(HashMap::new()),
             dead_lettered: Mutex::new(HashMap::new()),
+            drain_gen: Mutex::new(HashMap::new()),
+            generations: Mutex::new(HashMap::new()),
         }
     }
 }
 
 impl DaemonState {
     /// Non-idle members attending `address` that registered an on-deliver handler.
-    fn on_deliver_candidates(
-        &self,
-        store_key: &str,
-        address: &str,
-    ) -> Vec<(MemberKey, Vec<String>)> {
+    fn on_deliver_candidates(&self, store_key: &str, address: &str) -> Vec<OnDeliverCandidate> {
         self.members
             .lock()
             .unwrap()
@@ -2148,14 +2347,48 @@ impl DaemonState {
                     && !m.idle
                     && m.on_deliver.is_some()
             })
-            .map(|(k, m)| (k.clone(), m.on_deliver.clone().unwrap_or_default()))
+            .map(|(k, m)| OnDeliverCandidate {
+                member_key: k.clone(),
+                argv: m.on_deliver.clone().unwrap_or_default(),
+                address: m.address.clone(),
+                notification_only: false,
+            })
+            .collect()
+    }
+
+    fn on_deliver_cc_candidates(
+        &self,
+        store_key: &str,
+        row: &MessageRow,
+    ) -> Vec<OnDeliverCandidate> {
+        self.members
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|(_k, m)| {
+                m.store_key == store_key
+                    && !m.idle
+                    && m.on_deliver.is_some()
+                    && m.on_deliver_wake_on_cc
+                    && m.on_deliver_cc_after_ms
+                        .is_some_and(|lower| row.created_at_ms >= lower)
+                    && delivery_role(&m.address, &row.to_addr, row.cc.as_deref()) == "cc"
+            })
+            .map(|(k, m)| OnDeliverCandidate {
+                member_key: k.clone(),
+                argv: m.on_deliver.clone().unwrap_or_default(),
+                address: m.address.clone(),
+                notification_only: true,
+            })
             .collect()
     }
 
     /// Whether a re-push of `(member, id)` should be skipped right now: true if the message was
-    /// dead-lettered (permanent failure), or while its last attempt is still inside its re-delivery
-    /// delay (`on_deliver_redelivery_delay`: fast backoff after a failed push, long backstop after
-    /// an accepted one). A never-attempted or delay-elapsed message is eligible.
+    /// dead-lettered (permanent failure), has hit the `ON_DELIVER_MAX_REPUSH` attempt cap
+    /// (suppressed), was accepted and needs no further delivery (`skip_after_accept`), or while its
+    /// last attempt is still inside its re-delivery delay (`on_deliver_redelivery_delay`: fast
+    /// backoff after a failed push, long backstop after an accepted one). A never-attempted or
+    /// delay-elapsed message under the cap is eligible.
     fn on_deliver_should_skip(&self, member: &MemberKey, id: i64, now: Instant) -> bool {
         if self
             .on_deliver
@@ -2173,20 +2406,35 @@ impl DaemonState {
             .unwrap()
             .get(member)
             .and_then(|m| m.get(&id))
-            .is_some_and(|a| now.saturating_duration_since(a.last) < on_deliver_redelivery_delay(a))
+            .is_some_and(|a| {
+                a.attempts >= ON_DELIVER_MAX_REPUSH
+                    || (a.accepted && (a.notification_only || a.skip_after_accept))
+                    || now.saturating_duration_since(a.last) < on_deliver_redelivery_delay(a)
+            })
     }
 
-    /// Record one push attempt for `(member, id)` -- its `accepted` outcome (the harness accepted
-    /// the turn vs a failed push) and time -- and return the new attempt count. The outcome selects
-    /// the re-delivery delay: a failed push retries fast to recover a dead bridge; an accepted push
-    /// waits on the long backstop (re-delivery is otherwise re-provision-driven).
+    /// Record one push attempt for `(member, id)` -- its outcome (accepted / deferred-busy / failed)
+    /// and time -- and return the current attempt count. The outcome selects the re-delivery delay:
+    /// a failed push retries fast to recover a dead bridge; an accepted push waits on the long
+    /// backstop (re-delivery is otherwise re-provision-driven); a **deferred** push waits on the
+    /// deferred backstop and is cleared promptly by the idle drain. A deferred attempt does **not**
+    /// increment `attempts`, so it never inflates the failed-backoff or trips the degraded-status
+    /// threshold -- deferring while a long turn runs is normal, not degradation (issue #65).
     fn on_deliver_record_attempt(
         &self,
         member: &MemberKey,
         id: i64,
         now: Instant,
         accepted: bool,
+        deferred: bool,
+        notification_only: bool,
+        notification_lower_bound: Option<i64>,
+        skip_after_accept: bool,
     ) -> u32 {
+        debug_assert!(
+            !(accepted && deferred),
+            "a push attempt cannot be both accepted and deferred; they are mutually exclusive outcomes"
+        );
         let mut map = self.on_deliver.pushed.lock().unwrap();
         let entry = map
             .entry(member.clone())
@@ -2196,11 +2444,147 @@ impl DaemonState {
                 last: now,
                 attempts: 0,
                 accepted: false,
+                deferred: false,
+                notification_only,
+                notification_lower_bound,
+                skip_after_accept,
             });
-        entry.attempts = entry.attempts.saturating_add(1);
+        if !deferred {
+            entry.attempts = entry.attempts.saturating_add(1);
+        }
         entry.last = now;
         entry.accepted = accepted;
+        entry.deferred = deferred;
+        entry.notification_only = notification_only;
+        entry.notification_lower_bound = notification_lower_bound;
+        entry.skip_after_accept = skip_after_accept;
         entry.attempts
+    }
+
+    /// Clear the deferred-until-idle skip for a member's messages so the next sweep re-attempts them
+    /// (issue #65 idle drain). Only **deferred** attempts are removed; accepted attempts (genuinely
+    /// queued turns) are left untouched so the drain never re-injects a duplicate of a queued turn.
+    /// Returns the number of deferred entries cleared -- 0 is the common no-work fast path.
+    fn on_deliver_clear_deferred(&self, member: &MemberKey) -> usize {
+        let mut map = self.on_deliver.pushed.lock().unwrap();
+        let Some(attempts) = map.get_mut(member) else {
+            return 0;
+        };
+        let before = attempts.len();
+        attempts.retain(|_id, a| !a.deferred);
+        let cleared = before - attempts.len();
+        if attempts.is_empty() {
+            map.remove(member);
+        }
+        cleared
+    }
+
+    /// Count of a member's messages currently deferred-until-idle (for `telex status` diagnosis).
+    fn on_deliver_deferred_count(&self, member: &MemberKey) -> i64 {
+        self.on_deliver
+            .pushed
+            .lock()
+            .unwrap()
+            .get(member)
+            .map(|attempts| attempts.values().filter(|a| a.deferred).count() as i64)
+            .unwrap_or(0)
+    }
+
+    /// Current idle-drain generation for a member (0 if never drained). A push captures this at
+    /// start; if it advances before the push records its outcome, a drain raced the inflight push.
+    fn on_deliver_drain_gen(&self, member: &MemberKey) -> u64 {
+        self.on_deliver
+            .drain_gen
+            .lock()
+            .unwrap()
+            .get(member)
+            .copied()
+            .unwrap_or(0)
+    }
+
+    /// Advance a member's idle-drain generation (called by `DrainDeferred` per member).
+    fn on_deliver_bump_drain_gen(&self, member: &MemberKey) {
+        let mut map = self.on_deliver.drain_gen.lock().unwrap();
+        let entry = map.entry(member.clone()).or_insert(0);
+        *entry = entry.saturating_add(1);
+    }
+
+    /// Push-delivery health for a member with a registered on-deliver handler, derived only from
+    /// the daemon's own push-attempt outcomes (harness-neutral: never reads the bridge registry).
+    /// `pending` is the member's undelivered/unconsumed count. See `PushDeliveryHealth`.
+    fn push_delivery_health(
+        &self,
+        member: &MemberKey,
+        pending: i64,
+        on_deliver_registered: bool,
+        now: Instant,
+    ) -> PushDeliveryHealth {
+        if !on_deliver_registered {
+            return PushDeliveryHealth::NotRegistered;
+        }
+        if pending <= 0 {
+            return PushDeliveryHealth::NoBacklog;
+        }
+        let pushed = self.on_deliver.pushed.lock().unwrap();
+        let member_attempts = match pushed.get(member) {
+            Some(attempts) if !attempts.is_empty() => attempts,
+            // Backlog exists but nothing attempted yet (e.g. just after a daemon restart, before
+            // the next sweep, or between commit and first push). Not confidently attended, not deaf.
+            _ => return PushDeliveryHealth::Probing,
+        };
+        // Consider only push-relevant attempts: a message that was accepted and needs no further
+        // delivery (`skip_after_accept`: a CC notification or a no-disposition note) is done, not
+        // current work, so it must not keep the station looking `stale_accepted`/`delivering` once
+        // its backstop elapses. If the only attempts are such completed ones, there is no live push
+        // work outstanding -> attended, no backlog.
+        let mut relevant = member_attempts
+            .values()
+            .filter(|a| !(a.accepted && a.skip_after_accept))
+            .peekable();
+        if relevant.peek().is_none() {
+            return PushDeliveryHealth::NoBacklog;
+        }
+        // Classify by the FRESHEST relevant attempt, not "any accept in the window": otherwise a
+        // stale accept on message A (still inside its 300s backstop) would mask a fresh failure on
+        // message B, reporting `delivering` while the bridge is actually unreachable and delaying
+        // deaf detection by up to a backstop. Ties on `last` are broken toward a failure
+        // (`!accepted` sorts high), so equal-timestamp completions never flip health nondeterministically
+        // from the unordered attempt map.
+        let freshest = relevant.max_by_key(|a| (a.last, !a.accepted));
+        match freshest {
+            Some(attempt) if attempt.accepted => {
+                if now.saturating_duration_since(attempt.last) < ON_DELIVER_ACCEPTED_BACKSTOP {
+                    PushDeliveryHealth::Delivering
+                } else {
+                    PushDeliveryHealth::StaleAccepted
+                }
+            }
+            Some(_) => PushDeliveryHealth::Failing,
+            None => PushDeliveryHealth::Probing,
+        }
+    }
+
+    /// Count of a member's on-deliver messages whose re-push is currently suppressed: dead-lettered
+    /// (permanently unpushable) plus those that have hit the `ON_DELIVER_MAX_REPUSH` attempt cap.
+    /// They stay durably queued/readable; this is the persistent operator-visible signal. Counts by
+    /// distinct message id so a message that is both dead-lettered and capped is not double-counted.
+    fn push_suppressed_count(&self, member: &MemberKey) -> i64 {
+        let mut suppressed: BTreeSet<i64> = self
+            .on_deliver
+            .dead_lettered
+            .lock()
+            .unwrap()
+            .get(member)
+            .cloned()
+            .unwrap_or_default();
+        if let Some(attempts) = self.on_deliver.pushed.lock().unwrap().get(member) {
+            for (id, attempt) in attempts {
+                if attempt.attempts >= ON_DELIVER_MAX_REPUSH {
+                    suppressed.insert(*id);
+                }
+            }
+        }
+        suppressed.len() as i64
     }
 
     /// Prune a member's push-attempt and dead-letter records to only ids still in `keep` (the
@@ -2224,19 +2608,114 @@ impl DaemonState {
         }
     }
 
-    fn on_deliver_try_begin(&self, key: OnDeliverKey) -> bool {
-        self.on_deliver.inflight.lock().unwrap().insert(key)
+    fn on_deliver_try_begin(
+        &self,
+        key: OnDeliverKey,
+        notification_only: bool,
+        notification_lower_bound: Option<i64>,
+    ) -> bool {
+        let mut inflight = self.on_deliver.inflight.lock().unwrap();
+        if inflight.contains_key(&key) {
+            return false;
+        }
+        inflight.insert(
+            key,
+            InflightAttempt {
+                notification_only,
+                notification_lower_bound,
+            },
+        );
+        true
     }
 
     fn on_deliver_end(&self, key: &OnDeliverKey) {
         self.on_deliver.inflight.lock().unwrap().remove(key);
     }
 
+    /// Current push generation for a member (0 if never reset). Captured when a push is spawned so
+    /// a completion from before a re-provision reset can be detected and discarded.
+    fn on_deliver_generation(&self, member: &MemberKey) -> u64 {
+        self.on_deliver
+            .generations
+            .lock()
+            .unwrap()
+            .get(member)
+            .copied()
+            .unwrap_or(0)
+    }
+
     /// Drop a member's push dedup state so a later re-bind re-pushes still-undelivered messages
-    /// (lifecycle-scoped dedup). Called on member removal and on (re-)register.
+    /// (lifecycle-scoped dedup). Called on member removal and on (re-)register. Bumps the member's
+    /// push generation so any in-flight push spawned before this reset is fenced: its later
+    /// completion is ignored instead of writing stale outcome/backoff into the fresh attempt map.
     fn on_deliver_forget_member(&self, member: &MemberKey) {
         self.on_deliver.pushed.lock().unwrap().remove(member);
         self.on_deliver.dead_lettered.lock().unwrap().remove(member);
+        self.on_deliver.drain_gen.lock().unwrap().remove(member);
+        let mut generations = self.on_deliver.generations.lock().unwrap();
+        let generation = generations.entry(member.clone()).or_insert(0);
+        *generation = generation.wrapping_add(1);
+    }
+
+    fn on_deliver_advance_cc_lower_bound(&self, member_key: &MemberKey, lower_bound: i64) {
+        let safe_lower_bound = {
+            let pushed = self.on_deliver.pushed.lock().unwrap();
+            let earliest_unaccepted = pushed.get(member_key).and_then(|attempts| {
+                attempts
+                    .values()
+                    .filter_map(|attempt| {
+                        (attempt.notification_only && !attempt.accepted)
+                            .then_some(attempt.notification_lower_bound.unwrap_or(lower_bound))
+                    })
+                    .min()
+            });
+            let earliest_inflight = self
+                .on_deliver
+                .inflight
+                .lock()
+                .unwrap()
+                .iter()
+                .filter_map(|(key, attempt)| {
+                    (key.store_key == member_key.store_key
+                        && key.address == member_key.address
+                        && attempt.notification_only)
+                        .then_some(attempt.notification_lower_bound.unwrap_or(lower_bound))
+                })
+                .min();
+            let earliest_blocking = earliest_unaccepted
+                .into_iter()
+                .chain(earliest_inflight)
+                .min();
+            let highest_accepted = pushed.get(member_key).and_then(|attempts| {
+                attempts
+                    .values()
+                    .filter_map(|attempt| {
+                        if !attempt.notification_only || !attempt.accepted {
+                            return None;
+                        }
+                        let ts = attempt.notification_lower_bound.unwrap_or(lower_bound);
+                        if earliest_blocking.map_or(true, |blocking| ts < blocking) {
+                            Some(ts)
+                        } else {
+                            None
+                        }
+                    })
+                    .max()
+            });
+            let candidate = highest_accepted.unwrap_or(lower_bound);
+            earliest_blocking
+                .and_then(|id| id.checked_sub(1))
+                .map_or(candidate, |ceiling| candidate.min(ceiling))
+        };
+        if let Some(member) = self.members.lock().unwrap().get_mut(member_key) {
+            if member.on_deliver_wake_on_cc {
+                member.on_deliver_cc_after_ms = Some(
+                    member
+                        .on_deliver_cc_after_ms
+                        .map_or(safe_lower_bound, |current| current.max(safe_lower_bound)),
+                );
+            }
+        }
     }
 
     /// Mark `(member, id)` permanently unpushable (the handler reported a non-retryable failure,
@@ -2253,18 +2732,21 @@ impl DaemonState {
             .insert(id);
     }
 
-    /// Fast-path push on durable commit: fire the handler for the just-committed message to the
-    /// primary recipient that registered one. CC recipients are observers whose delivery rows
-    /// are inserted already-consumed (not returned by `fetch_undelivered`), so they cannot be
-    /// retried consistently; they read cc'd messages via `telex inbox`, not push.
+    /// Fast-path push on durable commit: fire the handler for the just-committed primary
+    /// recipient, plus opted-in live CC observer recipients whose lower bound admits this message.
     fn fire_on_deliver_on_commit(self: &Arc<Self>, store_key: &str, row: &MessageRow) {
-        for (member_key, argv) in self.on_deliver_candidates(store_key, &row.to_addr) {
+        for candidate in self
+            .on_deliver_candidates(store_key, &row.to_addr)
+            .into_iter()
+            .chain(self.on_deliver_cc_candidates(store_key, row))
+        {
             self.spawn_on_deliver(
-                member_key,
-                argv,
+                candidate.member_key,
+                candidate.argv,
                 store_key.to_string(),
-                row.to_addr.clone(),
+                candidate.address,
                 row.clone(),
+                candidate.notification_only,
             );
         }
     }
@@ -2278,6 +2760,7 @@ impl DaemonState {
         store_key: String,
         address: String,
         row: MessageRow,
+        notification_only: bool,
     ) {
         if argv.is_empty() {
             return;
@@ -2286,23 +2769,49 @@ impl DaemonState {
         if self.on_deliver_should_skip(&member_key, id, Instant::now()) {
             return;
         }
+        let notification_lower_bound = notification_only.then_some(row.created_at_ms);
+        // A CC notification, or a primary message that does not require this recipient's
+        // disposition, needs no re-delivery once accepted: one push is enough. This keeps
+        // no-disposition traffic out of the unbounded re-push pool (mirrors the accepted-CC rule).
+        let skip_after_accept = notification_only
+            || !requires_disposition_for_recipient(
+                row.requires_disposition,
+                &address,
+                &row.to_addr,
+            );
         let key = OnDeliverKey {
             store_key: store_key.clone(),
             address: address.clone(),
             message_id: id,
         };
-        if !self.on_deliver_try_begin(key.clone()) {
+        if !self.on_deliver_try_begin(key.clone(), notification_only, notification_lower_bound) {
             return;
         }
+        // Capture the member's drain generation before spawning. If a `DrainDeferred` runs while
+        // this push is inflight, the generation advances; the deferred outcome below detects that
+        // and self-re-sweeps, since the drain could neither clear (nothing recorded yet) nor sweep
+        // (the inflight guard blocked it) this message.
+        let drain_gen_at_start = self.on_deliver_drain_gen(&member_key);
         let descriptor = on_deliver_descriptor_json(&store_key, &address, &row);
         let sem = self.on_deliver.sem.clone();
         let state = self.clone();
+        // Capture the member's push generation at spawn. If a re-provision resets the member
+        // (bumping the generation) while this push is in flight, its completion is discarded below
+        // rather than writing stale outcome/backoff into the fresh generation's attempt map.
+        let spawn_generation = self.on_deliver_generation(&member_key);
         tokio::spawn(async move {
             let (outcome, stderr) = run_on_deliver(sem, argv, descriptor).await;
+            if state.on_deliver_generation(&member_key) != spawn_generation {
+                // A re-provision reset this member's push state after we started; discard this
+                // stale completion (free the in-flight slot so the fresh generation re-pushes).
+                state.on_deliver_end(&key);
+                return;
+            }
             if outcome == RunOutcome::Permanent {
                 // Dead-letter: stop retrying a structurally unpushable message. It stays durably
                 // queued (never marked consumed) and is readable via `telex inbox`.
                 state.on_deliver_dead_letter(&member_key, id);
+                state.on_deliver_end(&key);
                 let detail = stderr.map(|s| format!(": {s}")).unwrap_or_default();
                 state.push_recent_error(
                     "OnDeliverDeadLettered",
@@ -2312,14 +2821,26 @@ impl DaemonState {
                 );
             } else {
                 // Record the attempt with its outcome so the next re-push uses the right delay
-                // (accepted -> long backstop; failed -> fast backoff). The message leaves the
-                // attempt map only once it is acked (retain sweep).
+                // (accepted -> long backstop; deferred-busy -> deferred backstop, cleared by the
+                // idle drain; failed -> fast backoff). The message leaves the attempt map only once
+                // it is acked (retain sweep).
+                let deferred = outcome == RunOutcome::Deferred;
                 let attempts = state.on_deliver_record_attempt(
                     &member_key,
                     id,
                     Instant::now(),
                     outcome == RunOutcome::Ok,
+                    deferred,
+                    notification_only,
+                    notification_lower_bound,
+                    skip_after_accept,
                 );
+                state.on_deliver_end(&key);
+                if outcome == RunOutcome::Ok {
+                    if let Some(lower_bound) = notification_lower_bound {
+                        state.on_deliver_advance_cc_lower_bound(&member_key, lower_bound);
+                    }
+                }
                 if outcome == RunOutcome::Transient {
                     let detail = stderr.map(|s| format!(": {s}")).unwrap_or_default();
                     state.push_recent_error(
@@ -2329,7 +2850,9 @@ impl DaemonState {
                         ),
                     );
                 }
-                if attempts == ON_DELIVER_DEGRADED_AFTER {
+                // A deferred push is normal scheduling, not degradation: it did not increment
+                // `attempts`, so it cannot trip the degraded threshold or spam recent errors.
+                if !deferred && attempts == ON_DELIVER_DEGRADED_AFTER {
                     state.push_recent_error(
                         "OnDeliverDegraded",
                         format!(
@@ -2337,8 +2860,35 @@ impl DaemonState {
                         ),
                     );
                 }
+                // A never-acked message must not be re-pushed forever. A deferred outcome does not
+                // increment `attempts`, so only real (accepted/failed) attempts can hit the cap.
+                if !deferred && attempts == ON_DELIVER_MAX_REPUSH {
+                    // Hard cap reached: suppress further re-push (the message stays durable/readable
+                    // and is surfaced as a suppressed count in status). A re-provision resets it.
+                    state.push_recent_error(
+                        "OnDeliverSuppressed",
+                        format!(
+                            "on-deliver re-push suppressed after {attempts} attempts store={store_key} address={address} message_id={id}; it stays durable/readable via `telex inbox` and re-delivers on reattach/reload"
+                        ),
+                    );
+                }
+                // Inflight/drain race (issue #65): if a `DrainDeferred` ran while this push was
+                // inflight, it saw no deferred entry (recorded just now) and its sweep hit the
+                // inflight guard, so the drain missed this message. Now that the push has ended and
+                // the deferred skip is set, self-re-sweep so the message is re-attempted promptly
+                // instead of waiting out `ON_DELIVER_DEFERRED_BACKSTOP`. A subsequent re-defer
+                // records no new drain, so this fires at most once per drain (no busy-loop).
+                if deferred && state.on_deliver_drain_gen(&member_key) != drain_gen_at_start {
+                    state.on_deliver_clear_deferred(&member_key);
+                    if let Some(member) = state.get_member(
+                        &member_key.store_key,
+                        &member_key.session_id,
+                        &member_key.address,
+                    ) {
+                        spawn_on_deliver_backlog(state.clone(), member);
+                    }
+                }
             }
-            state.on_deliver_end(&key);
         });
     }
 }
@@ -2346,15 +2896,23 @@ impl DaemonState {
 /// Serialize a harness-neutral message descriptor fed to the on-deliver handler on stdin.
 /// The daemon exposes only transport facts; it never learns what the handler does with them.
 fn on_deliver_descriptor_json(store_key: &str, address: &str, row: &MessageRow) -> String {
+    let delivery_role = delivery_role(address, &row.to_addr, row.cc.as_deref());
+    let requires_disposition_for_current_recipient =
+        requires_disposition_for_recipient(row.requires_disposition, address, &row.to_addr);
     serde_json::json!({
         "message_id": row.id,
         "thread_id": row.thread_id,
         "store_key": store_key,
         "address": address,
+        "delivered_to": address,
+        "primary_to": row.to_addr,
+        "cc": cc_recipients(row.cc.as_deref()),
+        "delivery_role": delivery_role,
         "from": row.from_addr,
         "kind": row.kind,
         "attention": row.attention,
         "requires_disposition": row.requires_disposition,
+        "requires_disposition_for_current_recipient": requires_disposition_for_current_recipient,
         "subject": row.subject,
         "body": row.body,
     })
@@ -2366,6 +2924,9 @@ fn on_deliver_descriptor_json(store_key: &str, address: &str, row: &MessageRow) 
 enum RunOutcome {
     /// The handler accepted the push (exit 0).
     Ok,
+    /// The harness deferred the push because it was busy (`ON_DELIVER_DEFERRED_EXIT`) -- not sent,
+    /// not a failure; held at the deferred backstop and re-attempted by the idle drain.
+    Deferred,
     /// A retryable failure (nonzero exit, spawn error, timeout) -- retried on backoff.
     Transient,
     /// A permanent, non-retryable failure (`ON_DELIVER_PERMANENT_EXIT`) -- dead-lettered.
@@ -2407,10 +2968,10 @@ async fn run_on_deliver(
     match tokio::time::timeout(ON_DELIVER_TIMEOUT, child.wait()).await {
         Ok(Ok(status)) if status.success() => (RunOutcome::Ok, None),
         Ok(Ok(status)) => {
-            let outcome = if status.code() == Some(ON_DELIVER_PERMANENT_EXIT) {
-                RunOutcome::Permanent
-            } else {
-                RunOutcome::Transient
+            let outcome = match status.code() {
+                Some(ON_DELIVER_PERMANENT_EXIT) => RunOutcome::Permanent,
+                Some(ON_DELIVER_DEFERRED_EXIT) => RunOutcome::Deferred,
+                _ => RunOutcome::Transient,
             };
             (outcome, read_bounded_stderr(stderr_pipe).await)
         }
@@ -2464,13 +3025,22 @@ async fn on_deliver_sweep_member(
         Some(argv) if !argv.is_empty() => argv.clone(),
         _ => return,
     };
-    let undelivered = match backend.fetch_undelivered(&member.address).await {
+    let candidates = match backend
+        .fetch_wait_candidates(
+            &member.address,
+            WaitFetchOptions {
+                wake_on_cc: member.on_deliver_wake_on_cc,
+                cc_after_ms: member.on_deliver_cc_after_ms.unwrap_or_default(),
+            },
+        )
+        .await
+    {
         Ok(rows) => rows,
         Err(e) => {
             state.push_recent_error(
                 "OnDeliverSweep",
                 format!(
-                    "fetch_undelivered failed store={} address={}: {e:#}",
+                    "fetch_wait_candidates failed store={} address={}: {e:#}",
                     member.store_key, member.address
                 ),
             );
@@ -2482,12 +3052,15 @@ async fn on_deliver_sweep_member(
         session_id: member.session_id.clone(),
         address: member.address.clone(),
     };
-    let keep: BTreeSet<i64> = undelivered.iter().map(|r| r.id).collect();
+    let keep: BTreeSet<i64> = candidates
+        .iter()
+        .map(|candidate| candidate.message.id)
+        .collect();
     state.on_deliver_retain_pushed(&member_key, &keep);
     let now = Instant::now();
     let mut fired = 0usize;
-    for row in undelivered {
-        if state.on_deliver_should_skip(&member_key, row.id, now) {
+    for candidate in candidates {
+        if state.on_deliver_should_skip(&member_key, candidate.message.id, now) {
             continue;
         }
         state.spawn_on_deliver(
@@ -2495,7 +3068,8 @@ async fn on_deliver_sweep_member(
             argv.clone(),
             member.store_key.clone(),
             member.address.clone(),
-            row,
+            candidate.message,
+            candidate.notification_only,
         );
         fired += 1;
         if fired >= ON_DELIVER_SWEEP_BATCH {
@@ -2534,14 +3108,18 @@ async fn heartbeat_members_once(state: Arc<DaemonState>) {
         {
             continue;
         }
+        if member.idle {
+            continue;
+        }
         if let Some(reason) = watch_pid_reap_reason(&member.watch_pids) {
-            state.mark_session_idle(
-                &member.store_key,
-                &member.session_id,
+            let _ = end_session_members(
+                state.clone(),
+                member.store_key.clone(),
+                member.session_id.clone(),
                 "WatchPidDeath",
                 &reason,
-                true,
-            );
+            )
+            .await;
             continue;
         }
         let backend = match state.backend_for(&member.store_key).await {
@@ -2881,6 +3459,16 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             }
             reset_station(state.clone(), store_key, address).await
         }
+        Request::DrainDeferred {
+            store_key,
+            session_id,
+            proof,
+        } => {
+            if let Err(response) = state.check_admin_cap(proof.as_deref()) {
+                return (response, ClientAction::Continue);
+            }
+            drain_deferred(state.clone(), store_key, session_id).await
+        }
         Request::Drain { proof } => {
             if let Err(response) = state.check_admin_cap(proof.as_deref()) {
                 return (response, ClientAction::Continue);
@@ -2910,6 +3498,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             watch_pids,
             recovery,
             on_deliver,
+            on_deliver_wake_on_cc,
         } => {
             register_member(
                 state.clone(),
@@ -2923,6 +3512,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 watch_pids,
                 recovery,
                 on_deliver,
+                on_deliver_wake_on_cc,
             )
             .await
         }
@@ -2943,6 +3533,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             address,
             attention,
             min_attention,
+            wake_on_cc,
             timeout_ms,
             waiter_pid,
             waiter_start_time,
@@ -2954,6 +3545,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 address,
                 attention,
                 min_attention,
+                wake_on_cc,
                 timeout_ms,
                 waiter_pid,
                 waiter_start_time,
@@ -3038,6 +3630,7 @@ async fn register_member(
     watch_pids: Vec<WatchPidSpec>,
     recovery: bool,
     on_deliver: Option<Vec<String>>,
+    on_deliver_wake_on_cc: bool,
 ) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
@@ -3067,6 +3660,19 @@ async fn register_member(
                 // explicit re-provision replaces it, so a pull re-attach cannot silently disarm
                 // the Copilot bridge (Namra #6).
                 refreshed.on_deliver = on_deliver.clone().or_else(|| existing.on_deliver.clone());
+                if on_deliver.is_some() {
+                    refreshed.on_deliver_wake_on_cc = on_deliver_wake_on_cc;
+                    refreshed.on_deliver_cc_after_ms =
+                        match on_deliver_cc_lower_bound(&backend, &address, on_deliver_wake_on_cc)
+                            .await
+                        {
+                            Ok(value) => value,
+                            Err(response) => return response,
+                        };
+                } else {
+                    refreshed.on_deliver_wake_on_cc = existing.on_deliver_wake_on_cc;
+                    refreshed.on_deliver_cc_after_ms = existing.on_deliver_cc_after_ms;
+                }
                 state.check_session_id_reuse_tripwire(&refreshed);
                 if !recovery {
                     state.clear_definite_session_end(&store_key, &session_id);
@@ -3109,7 +3715,7 @@ async fn register_member(
         .lock()
         .unwrap()
         .values()
-        .find(|m| m.store_key == store_key && m.address == address)
+        .find(|m| m.store_key == store_key && m.address == address && !m.idle)
         .cloned()
     {
         return proto::error_response(
@@ -3223,6 +3829,22 @@ async fn register_member(
             "registering {address}: failed to clear durable detach tombstone for session {session_id}: {e:#}"
         ));
     }
+    let effective_on_deliver_wake_on_cc = on_deliver.is_some() && on_deliver_wake_on_cc;
+    let on_deliver_cc_after_ms = match on_deliver_cc_lower_bound(
+        &backend,
+        &address,
+        effective_on_deliver_wake_on_cc,
+    )
+    .await
+    {
+        Ok(value) => value,
+        Err(response) => {
+            let _ = backend
+                .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                .await;
+            return response;
+        }
+    };
     let record = MemberRecord {
         address: address.clone(),
         store_key: store_key.clone(),
@@ -3248,6 +3870,8 @@ async fn register_member(
         last_waiter_pid: None,
         last_delivered_message_id: None,
         on_deliver,
+        on_deliver_wake_on_cc: effective_on_deliver_wake_on_cc,
+        on_deliver_cc_after_ms,
     };
     state.check_session_id_reuse_tripwire(&record);
     if !recovery {
@@ -3273,27 +3897,167 @@ async fn register_member(
     }
 }
 
+async fn on_deliver_cc_lower_bound(
+    backend: &Arc<dyn Backend>,
+    address: &str,
+    wake_on_cc: bool,
+) -> std::result::Result<Option<i64>, Response> {
+    if !wake_on_cc {
+        return Ok(None);
+    }
+    if !backend.supports_wake_on_cc() {
+        return Err(proto::unsupported(format!(
+            "on-deliver wake-on-cc is not supported by the {} backend",
+            backend.kind()
+        )));
+    }
+    match backend.durable_clock_now_ms().await {
+        Ok(value) => Ok(Some(value)),
+        Err(e) => Err(proto::internal(format!(
+            "capturing on-deliver CC lower bound for {address}: {e:#}"
+        ))),
+    }
+}
+
 async fn session_end(state: Arc<DaemonState>, store_key: String, session_id: String) -> Response {
-    let affected = state.mark_session_idle(
-        &store_key,
-        &session_id,
+    end_session_members(
+        state,
+        store_key,
+        session_id,
         "SessionEnd",
         "authoritative sessionEnd hook",
-        true,
-    );
-    if affected.is_empty() {
-        state.push_recent_error(
-            "SessionEnd",
-            format!("SessionEnd no-op store={store_key} session={session_id}: no active members"),
-        );
+    )
+    .await
+}
+
+/// Idle-drain (issue #65): the harness reports (via `telex copilot drain` on turn-stop) that a root
+/// turn ended, so re-attempt any messages this session deferred while it was busy. Clears the
+/// deferred skip for each of the session's on-deliver members and queues a backlog re-sweep; the
+/// sweep revalidates durable state (`fetch_wait_candidates`), so a message acked before the drain
+/// is no longer a candidate and is not re-injected. Non-blocking: it queues the sweeps and returns.
+/// The sweep is queued for **every** on-deliver member (not only those with a cleared deferred
+/// entry) so it (a) closes the race where the deferred attempt is recorded just after the drain
+/// arrives, and (b) opportunistically re-attempts any message whose backstop elapsed now that the
+/// bridge is idle. The client (`telex copilot drain`) already skips this call for sessions with no
+/// bridge, so the per-member sweep only runs for real bridge sessions.
+/// The sweep is queued for **every** on-deliver member (not only those with a cleared deferred
+/// entry) so it (a) closes the race where the deferred attempt is recorded just after the drain
+/// arrives, and (b) opportunistically re-attempts any message whose backstop elapsed now that the
+/// bridge is idle. The client (`telex copilot drain`) already skips this call for sessions with no
+/// bridge, so the per-member sweep only runs for real bridge sessions. Members are matched by
+/// `session_id` across all stores (not the client's ambient store) so a session on a named
+/// `--backend`/`--db` -- whose static drain hook resolves a different store -- still drains.
+async fn drain_deferred(
+    state: Arc<DaemonState>,
+    _store_key: String,
+    session_id: String,
+) -> Response {
+    let mut cleared = 0usize;
+    let mut swept_members = 0usize;
+    for member in state.session_members_any_store(&session_id) {
+        if member.on_deliver.is_none() {
+            continue;
+        }
+        let member_key = MemberKey {
+            store_key: member.store_key.clone(),
+            session_id: member.session_id.clone(),
+            address: member.address.clone(),
+        };
+        // Advance the drain generation so a push that is inflight right now (its deferred attempt
+        // not yet recorded) detects this drain on completion and self-re-sweeps.
+        state.on_deliver_bump_drain_gen(&member_key);
+        cleared += state.on_deliver_clear_deferred(&member_key);
+        swept_members += 1;
+        spawn_on_deliver_backlog(state.clone(), member);
     }
     Response::Ack {
-        message: Some("session-ended".to_string()),
+        message: Some(format!(
+            "drain deferred: cleared {cleared} deferred message(s), re-swept {swept_members} member(s)"
+        )),
         delivery_outcome: None,
         address: None,
         message_id: None,
         lease_epoch: None,
     }
+}
+
+async fn end_session_members(
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+    kind: &str,
+    reason: &str,
+) -> Response {
+    let active = state.session_members(&store_key, &session_id);
+    let release_error = release_definite_end_members(&state, &active, kind).await;
+    if let Some(response) = release_error {
+        return response;
+    }
+    let affected = state.mark_session_idle(&store_key, &session_id, kind, reason, true);
+    if affected.is_empty() {
+        state.push_recent_error(
+            kind,
+            format!("{kind} no-op store={store_key} session={session_id}: no active members"),
+        );
+    }
+    Response::Ack {
+        message: Some(presence_ended_detail(kind)),
+        delivery_outcome: None,
+        address: None,
+        message_id: None,
+        lease_epoch: None,
+    }
+}
+
+async fn release_definite_end_members(
+    state: &DaemonState,
+    members: &[MemberRecord],
+    reason: &str,
+) -> Option<Response> {
+    for member in members {
+        let backend = match state.backend_for(&member.store_key).await {
+            Ok(backend) => backend,
+            Err(response) => return Some(response),
+        };
+        match backend
+            .release_epoch_lease_for_detach(
+                &member.address,
+                &member.owner_instance_id,
+                member.lease_epoch,
+                &member.session_id,
+                reason,
+            )
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => {
+                state.push_recent_error(
+                    "NotOwner",
+                    format!(
+                        "{reason} durable release found non-owner for {} {} epoch {} owner {}",
+                        member.store_key,
+                        member.address,
+                        member.lease_epoch,
+                        member.owner_instance_id
+                    ),
+                );
+            }
+            Err(e) => {
+                state.push_recent_error(
+                    "BackendDisconnect",
+                    format!(
+                        "{reason} durable release failed for {} {} epoch {}: {e:#}",
+                        member.store_key, member.address, member.lease_epoch
+                    ),
+                );
+                return Some(proto::internal(format!(
+                    "{reason} durable release failed for {} at epoch {}: {e:#}",
+                    member.address, member.lease_epoch
+                )));
+            }
+        }
+    }
+    None
 }
 
 async fn reset_station(state: Arc<DaemonState>, store_key: String, address: String) -> Response {
@@ -3336,6 +4100,13 @@ async fn station_stop(
     let waiters_before = state
         .live_waiter_statuses_for(&store_key, &session_id, &address)
         .len();
+    // Snapshot whether this station had a registered on-deliver push handler BEFORE detach removes
+    // the member — station stop releases membership + tombstones but does NOT unload the in-session
+    // bridge, so the CLI warns and points at `telex copilot detach`.
+    let push_registered = state
+        .get_member(&store_key, &session_id, &address)
+        .map(|m| m.on_deliver.is_some())
+        .unwrap_or(false);
 
     // Let any blocked wait request return PresenceEnded instead of an error. Once the waiter
     // guard drops, we can remove membership durably via detach without racing an orphan waiter
@@ -3372,6 +4143,7 @@ async fn station_stop(
             waiters_before,
             waiters_after,
             live_waiters: waiters_after_status,
+            push_registered,
             message,
             lease_epoch,
         },
@@ -3440,6 +4212,11 @@ async fn detach_member(
                     "Detach",
                     &[member.clone()],
                 );
+                // Do NOT record the durable tombstone again here: `release_epoch_lease_for_detach`
+                // above already wrote it atomically inside the lease-release transaction (see the
+                // backend contract). A second, non-atomic write can race a concurrent explicit
+                // re-attach's tombstone clear and recreate a stale tombstone for a freshly-live
+                // station, which `telex copilot push` would then refuse permanently.
             }
             Ok(false) => {
                 self_demote_member(
@@ -3509,6 +4286,7 @@ async fn wait_for_message(
     address: String,
     attention: Option<String>,
     min_attention: Option<String>,
+    wake_on_cc: bool,
     timeout_ms: Option<u64>,
     waiter_pid: Option<u32>,
     waiter_start_time: Option<u64>,
@@ -3520,6 +4298,7 @@ async fn wait_for_message(
         address,
         attention,
         min_attention,
+        wake_on_cc,
         timeout_ms,
         waiter_pid,
         waiter_start_time,
@@ -3535,6 +4314,7 @@ async fn wait_for_message_with_idle_ttl(
     address: String,
     attention: Option<String>,
     min_attention: Option<String>,
+    wake_on_cc: bool,
     timeout_ms: Option<u64>,
     waiter_pid: Option<u32>,
     waiter_start_time: Option<u64>,
@@ -3566,6 +4346,22 @@ async fn wait_for_message_with_idle_ttl(
         Ok(backend) => backend,
         Err(response) => return response,
     };
+    if wake_on_cc && !backend.supports_wake_on_cc() {
+        return proto::unsupported(format!(
+            "wake-on-cc wait candidates are not supported by the {} backend",
+            backend.kind()
+        ));
+    }
+    let cc_after_ms = if wake_on_cc {
+        match backend.durable_clock_now_ms().await {
+            Ok(value) => Some(value),
+            Err(e) => {
+                return proto::internal(format!("capturing CC lower bound for {address}: {e:#}"))
+            }
+        }
+    } else {
+        None
+    };
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let idle_deadline = Instant::now() + idle_ttl;
     if state.has_live_waiter_for(&store_key, &session_id, &address) {
@@ -3596,6 +4392,8 @@ async fn wait_for_message_with_idle_ttl(
         waiter_start_time,
         attention.clone(),
         min_attention.clone(),
+        wake_on_cc,
+        cc_after_ms,
         timeout_ms,
     );
     let parsed_min_attention = match min_attention.as_deref().map(Attention::parse).transpose() {
@@ -3634,16 +4432,30 @@ async fn wait_for_message_with_idle_ttl(
         if current.idle {
             return Response::PresenceEnded;
         }
-        let rows = match backend.fetch_undelivered(&address).await {
+        let candidates = match backend
+            .fetch_wait_candidates(
+                &address,
+                WaitFetchOptions {
+                    wake_on_cc,
+                    cc_after_ms: cc_after_ms.unwrap_or_default(),
+                },
+            )
+            .await
+        {
             Ok(rows) => rows,
             Err(e) => {
+                let detail = format!("{e:#}");
                 waiter_guard.suppress_abnormal_on_drop();
-                return proto::internal(format!("fetching undelivered for {address}: {e:#}"));
+                return proto::internal(format!(
+                    "fetching wait candidates for {address}: {detail}"
+                ));
             }
         };
         if let Some(last_id) = current.last_delivered_message_id {
             if current.last_waiter_outcome == Some(WaiterOutcome::Message)
-                && rows.iter().any(|row| row.id == last_id)
+                && candidates.iter().any(|candidate| {
+                    !candidate.notification_only && candidate.message.id == last_id
+                })
             {
                 state.push_recent_error(
                     "UnackedDelivery",
@@ -3664,13 +4476,14 @@ async fn wait_for_message_with_idle_ttl(
                 return Response::PresenceEnded;
             }
         }
-        if let Some(row) = rows.into_iter().find(|row| {
+        if let Some(candidate) = candidates.into_iter().find(|candidate| {
             wait_attention_matches(
-                row.attention.as_str(),
+                candidate.message.attention.as_str(),
                 attention.as_deref(),
                 parsed_min_attention,
             )
         }) {
+            let row = candidate.message;
             let current = match state.get_member(&store_key, &session_id, &address) {
                 Some(member) => member,
                 None => {
@@ -4374,6 +5187,7 @@ mod p3_tests {
             watch_pids: vec![WatchPidSpec::anchor(42)],
             recovery: false,
             on_deliver: None,
+            on_deliver_wake_on_cc: false,
         }
     }
 
@@ -4395,7 +5209,7 @@ mod p3_tests {
         let candidates = state.on_deliver_candidates(&store, "addr:a");
         assert_eq!(candidates.len(), 1);
         assert_eq!(
-            candidates[0].1,
+            candidates[0].argv,
             vec!["handler".to_string(), "--flag".to_string()]
         );
     }
@@ -4431,9 +5245,13 @@ mod p3_tests {
         let v: serde_json::Value = serde_json::from_str(&json).unwrap();
         assert_eq!(v["message_id"], 5);
         assert_eq!(v["address"], "role:rcv");
+        assert_eq!(v["delivered_to"], "role:rcv");
+        assert_eq!(v["primary_to"], "role:rcv");
+        assert_eq!(v["delivery_role"], "to");
         assert_eq!(v["from"], "role:snd");
         assert_eq!(v["attention"], "interrupt");
         assert_eq!(v["requires_disposition"], true);
+        assert_eq!(v["requires_disposition_for_current_recipient"], true);
         assert_eq!(v["body"], "hello body");
     }
 
@@ -4470,7 +5288,47 @@ mod p3_tests {
         }
     }
 
+    fn exit_four_argv() -> Vec<String> {
+        #[cfg(windows)]
+        {
+            vec!["cmd".into(), "/c".into(), "exit".into(), "4".into()]
+        }
+        #[cfg(unix)]
+        {
+            vec!["sh".into(), "-c".into(), "exit 4".into()]
+        }
+    }
+
+    fn record_stdin_argv(path: &std::path::Path) -> Vec<String> {
+        let path = path.to_string_lossy().to_string();
+        #[cfg(windows)]
+        {
+            let escaped = path.replace('\'', "''");
+            vec![
+                "powershell".into(),
+                "-NoProfile".into(),
+                "-Command".into(),
+                format!(
+                    "[IO.File]::WriteAllText('{escaped}', [Console]::In.ReadToEnd(), [Text.UTF8Encoding]::new($false))"
+                ),
+            ]
+        }
+        #[cfg(unix)]
+        {
+            vec!["tee".into(), path]
+        }
+    }
+
     async fn insert_to(state: &Arc<DaemonState>, store: &str, address: &str) -> i64 {
+        insert_message_to(state, store, address, None).await
+    }
+
+    async fn insert_message_to(
+        state: &Arc<DaemonState>,
+        store: &str,
+        address: &str,
+        cc: Option<&str>,
+    ) -> i64 {
         let backend = match state.backend_for(store).await {
             Ok(backend) => backend,
             Err(e) => panic!("backend_for failed: {e:?}"),
@@ -4478,6 +5336,7 @@ mod p3_tests {
         backend
             .insert_message(&NewMessage {
                 to_addr: address.to_string(),
+                cc: cc.map(str::to_string),
                 from_addr: Some("addr:snd".to_string()),
                 kind: "note".to_string(),
                 attention: Attention::Interrupt,
@@ -4488,6 +5347,17 @@ mod p3_tests {
             .await
             .expect("insert_message")
             .id
+    }
+
+    fn wait_for_file(path: &std::path::Path, timeout: Duration) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if path.exists() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        false
     }
 
     #[tokio::test]
@@ -4502,7 +5372,11 @@ mod p3_tests {
             request(state.clone(), req).await,
             Response::Registered { .. }
         ));
-        let id = insert_to(&state, &store, "addr:rcv").await;
+        // A message that requires this recipient's disposition: an accepted-but-unacked push of it
+        // stays re-pushable (Namra #1) so disposition-required work is not stranded within a
+        // lifecycle. (No-disposition notes instead skip forever after accept — see
+        // `no_disposition_message_skipped_forever_after_accept`.)
+        let id = insert_requires_disposition_to(&state, &store, "addr:rcv").await;
         let row = state
             .backend_for(&store)
             .await
@@ -4539,6 +5413,185 @@ mod p3_tests {
                 Instant::now() + Duration::from_secs(600)
             ),
             "an accepted-but-unacked message must be re-pushable after its backoff"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_deliver_default_does_not_push_cc_observer() {
+        let state = test_state("on-deliver-no-cc-default");
+        let store = store_key("on-deliver-no-cc-default");
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("daemon-p3-tests")
+            .join("on-deliver-no-cc-default");
+        std::fs::create_dir_all(&root).unwrap();
+        let cc_descriptor = root.join("cc.json");
+        let _ = std::fs::remove_file(&cc_descriptor);
+
+        let mut primary = register_req(&store, "primary", "addr:primary");
+        if let Request::Register { on_deliver, .. } = &mut primary {
+            *on_deliver = Some(exit_zero_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), primary).await,
+            Response::Registered { .. }
+        ));
+        let mut observer = register_req(&store, "observer", "addr:observer");
+        if let Request::Register { on_deliver, .. } = &mut observer {
+            *on_deliver = Some(record_stdin_argv(&cc_descriptor));
+        }
+        assert!(matches!(
+            request(state.clone(), observer).await,
+            Response::Registered { .. }
+        ));
+
+        let id = insert_message_to(&state, &store, "addr:primary", Some("addr:observer")).await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(id)
+            .await
+            .unwrap()
+            .unwrap();
+        state.fire_on_deliver_on_commit(&store, &row);
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !cc_descriptor.exists(),
+            "CC observer should not receive push without wake-on-cc"
+        );
+    }
+
+    #[tokio::test]
+    async fn on_deliver_wake_on_cc_pushes_live_cc_without_replay() {
+        let state = test_state("on-deliver-cc-wake");
+        let store = store_key("on-deliver-cc-wake");
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("daemon-p3-tests")
+            .join("on-deliver-cc-wake");
+        std::fs::create_dir_all(&root).unwrap();
+        let descriptor_path = root.join("cc.json");
+        let _ = std::fs::remove_file(&descriptor_path);
+
+        // Historical CC is visible but predates the push lower bound captured below.
+        let historical =
+            insert_message_to(&state, &store, "addr:primary", Some("addr:observer")).await;
+
+        let mut observer = register_req(&store, "observer", "addr:observer");
+        if let Request::Register {
+            on_deliver,
+            on_deliver_wake_on_cc,
+            ..
+        } = &mut observer
+        {
+            *on_deliver = Some(record_stdin_argv(&descriptor_path));
+            *on_deliver_wake_on_cc = true;
+        }
+        assert!(matches!(
+            request(state.clone(), observer).await,
+            Response::Registered { .. }
+        ));
+        let member = state
+            .get_member(&store, "observer", "addr:observer")
+            .unwrap();
+        assert!(member.on_deliver_wake_on_cc);
+        assert!(member.on_deliver_cc_after_ms.is_some());
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !descriptor_path.exists(),
+            "historical CC {historical} should not replay after push wake registration"
+        );
+
+        let live = insert_message_to(&state, &store, "addr:primary", Some("addr:observer")).await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(live)
+            .await
+            .unwrap()
+            .unwrap();
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "observer".to_string(),
+            address: "addr:observer".to_string(),
+        };
+        let member = state
+            .get_member(&store, "observer", "addr:observer")
+            .unwrap();
+        assert!(
+            row.created_at_ms > member.on_deliver_cc_after_ms.unwrap(),
+            "live row {} must be newer than lower bound {:?}",
+            row.created_at_ms,
+            member.on_deliver_cc_after_ms
+        );
+        assert_eq!(state.on_deliver_cc_candidates(&store, &row).len(), 1);
+        state.fire_on_deliver_on_commit(&store, &row);
+        let mut attempted = false;
+        for _ in 0..100 {
+            if state.on_deliver_should_skip(&member_key, live, Instant::now()) {
+                attempted = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(attempted, "live CC should record an on-deliver attempt");
+        assert!(
+            wait_for_file(&descriptor_path, Duration::from_secs(3)),
+            "live CC should push to opted-in on-deliver handler"
+        );
+        let descriptor: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&descriptor_path).unwrap()).unwrap();
+        assert_eq!(descriptor["message_id"], live);
+        assert_eq!(descriptor["address"], "addr:observer");
+        assert_eq!(descriptor["delivery_role"], "cc");
+        assert_eq!(descriptor["primary_to"], "addr:primary");
+        assert_eq!(
+            descriptor["requires_disposition_for_current_recipient"],
+            false
+        );
+        let advanced = state
+            .get_member(&store, "observer", "addr:observer")
+            .unwrap();
+        assert!(
+            advanced.on_deliver_cc_after_ms.unwrap() >= row.created_at_ms,
+            "accepted CC notification should advance push lower bound"
+        );
+
+        std::fs::remove_file(&descriptor_path).unwrap();
+        spawn_on_deliver_backlog(
+            state.clone(),
+            state
+                .get_member(&store, "observer", "addr:observer")
+                .unwrap(),
+        );
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !descriptor_path.exists(),
+            "accepted notification-only CC must not be replayed by backlog sweep"
+        );
+
+        let mut reprovision = register_req(&store, "observer", "addr:observer");
+        if let Request::Register {
+            on_deliver,
+            on_deliver_wake_on_cc,
+            ..
+        } = &mut reprovision
+        {
+            *on_deliver = Some(record_stdin_argv(&descriptor_path));
+            *on_deliver_wake_on_cc = true;
+        }
+        assert!(matches!(
+            request(state.clone(), reprovision).await,
+            Response::Registered { .. }
+        ));
+        tokio::time::sleep(Duration::from_millis(200)).await;
+        assert!(
+            !descriptor_path.exists(),
+            "re-provision should advance lower bound and not replay old CC"
         );
     }
 
@@ -4603,12 +5656,530 @@ mod p3_tests {
             address: "addr:a".to_string(),
         };
         let now = Instant::now();
-        state.on_deliver_record_attempt(&member_key, 7, now, false);
+        state.on_deliver_record_attempt(&member_key, 7, now, false, false, false, None, false);
         assert!(state.on_deliver_should_skip(&member_key, 7, now));
         state.on_deliver_forget_member(&member_key);
         assert!(
             !state.on_deliver_should_skip(&member_key, 7, now),
             "forgetting a member must clear its push attempt state so a rebind re-pushes"
+        );
+    }
+
+    // ---- #66 bridge-liveness / self-stop hardening regression tests ----------------------------
+
+    async fn register_push_member(
+        state: &Arc<DaemonState>,
+        store: &str,
+        session: &str,
+        addr: &str,
+    ) {
+        let mut req = register_req(store, session, addr);
+        if let Request::Register { on_deliver, .. } = &mut req {
+            // Empty argv: the member is push_registered (on_deliver.is_some()) but the daemon never
+            // execs a handler, so the register-time backlog sweep records no attempt and the test
+            // fully controls the push-attempt map via `on_deliver_record_attempt`.
+            *on_deliver = Some(Vec::new());
+        }
+        assert!(
+            matches!(
+                request(state.clone(), req).await,
+                Response::Registered { .. }
+            ),
+            "push member should register"
+        );
+    }
+
+    async fn insert_requires_disposition_to(
+        state: &Arc<DaemonState>,
+        store: &str,
+        addr: &str,
+    ) -> i64 {
+        let backend = state.backend_for(store).await.unwrap();
+        backend
+            .insert_message(&NewMessage {
+                to_addr: addr.to_string(),
+                from_addr: Some("addr:peer".to_string()),
+                kind: "note".to_string(),
+                attention: Attention::Interrupt,
+                requires_disposition: true,
+                body: "please handle".to_string(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .expect("insert requires_disposition message")
+            .id
+    }
+
+    fn member_status<'a>(status: &'a DaemonStatus, addr: &str) -> &'a MemberStatus {
+        status
+            .members
+            .iter()
+            .find(|m| m.address == addr && !m.idle)
+            .expect("member present in status")
+    }
+
+    fn mk(store: &str, session: &str, addr: &str) -> MemberKey {
+        MemberKey {
+            store_key: store.to_string(),
+            session_id: session.to_string(),
+            address: addr.to_string(),
+        }
+    }
+
+    /// A live push bridge (recent accepted push) with backlog is reported attended-via-push, never
+    /// `unattended`/deaf. Folds in #64 and the persistent false-deaf of #66.
+    #[tokio::test]
+    async fn live_push_bridge_is_attended_not_deaf() {
+        let state = test_state("push-attended");
+        let store = store_key("push-attended");
+        register_push_member(&state, &store, "s1", "addr:a").await;
+        let id = insert_requires_disposition_to(&state, &store, "addr:a").await;
+        state.on_deliver_record_attempt(
+            &mk(&store, "s1", "addr:a"),
+            id,
+            Instant::now(),
+            true,
+            false,
+            false,
+            None,
+            false,
+        );
+
+        let status = state.status().await;
+        let m = member_status(&status, "addr:a");
+        assert!(m.push_registered);
+        assert_eq!(m.push_delivery, PushDeliveryHealth::Delivering);
+        assert_eq!(m.station_health, StationHealth::AttendedPush);
+        assert!(!m.deaf_warn, "a live push bridge must not be flagged deaf");
+        assert!(m.deaf_since_ms.is_none());
+        assert_eq!(m.pending_unconsumed_count, 1);
+        assert_eq!(m.inbound_actionable_count, 1);
+    }
+
+    /// A push bridge whose pushes are failing (bridge unreachable) with backlog is deaf-eligible
+    /// (the genuine dead-bridge / #62 case), and warns once past the threshold.
+    #[tokio::test]
+    async fn failing_push_bridge_becomes_deaf() {
+        let state = test_state("push-failing");
+        let store = store_key("push-failing");
+        register_push_member(&state, &store, "s1", "addr:a").await;
+        let id = insert_requires_disposition_to(&state, &store, "addr:a").await;
+        state.on_deliver_record_attempt(
+            &mk(&store, "s1", "addr:a"),
+            id,
+            Instant::now(),
+            false,
+            false,
+            false,
+            None,
+            false,
+        );
+
+        let status = state.status().await;
+        let m = member_status(&status, "addr:a");
+        assert_eq!(m.push_delivery, PushDeliveryHealth::Failing);
+        assert_eq!(m.station_health, StationHealth::UnattendedWithBacklog);
+        assert!(
+            m.deaf_since_ms.is_some(),
+            "failing push sets the backlog timer"
+        );
+
+        // Backdate the backlog timer past the deaf threshold; still failing -> deaf_warn fires.
+        {
+            let mut members = state.members.lock().unwrap();
+            let member = members.get_mut(&mk(&store, "s1", "addr:a")).unwrap();
+            member.unattended_with_backlog_since_ms =
+                Some(now_ms() - deaf_warn_threshold_ms() - 1_000);
+        }
+        let status2 = state.status().await;
+        assert!(
+            member_status(&status2, "addr:a").deaf_warn,
+            "failing push past threshold is deaf"
+        );
+    }
+
+    /// Bridge success is answerback: after a failing state, a subsequent accepted push clears the
+    /// stale deaf/failing state and returns the station to attended-via-push.
+    #[tokio::test]
+    async fn accepted_push_clears_stale_failing_answerback() {
+        let state = test_state("push-answerback");
+        let store = store_key("push-answerback");
+        register_push_member(&state, &store, "s1", "addr:a").await;
+        let id = insert_requires_disposition_to(&state, &store, "addr:a").await;
+        let key = mk(&store, "s1", "addr:a");
+        state.on_deliver_record_attempt(&key, id, Instant::now(), false, false, false, None, false);
+        // Backdate so it is deaf, then answerback.
+        {
+            let mut members = state.members.lock().unwrap();
+            members
+                .get_mut(&key)
+                .unwrap()
+                .unattended_with_backlog_since_ms =
+                Some(now_ms() - deaf_warn_threshold_ms() - 1_000);
+        }
+        assert!(member_status(&state.status().await, "addr:a").deaf_warn);
+
+        state.on_deliver_record_attempt(&key, id, Instant::now(), true, false, false, None, false);
+        let status = state.status().await;
+        let m = member_status(&status, "addr:a");
+        assert_eq!(m.push_delivery, PushDeliveryHealth::Delivering);
+        assert_eq!(m.station_health, StationHealth::AttendedPush);
+        assert!(
+            !m.deaf_warn,
+            "an accepted push is answerback that clears stale deaf"
+        );
+        assert!(m.deaf_since_ms.is_none());
+    }
+
+    /// After a daemon restart the in-memory attempt map is empty, so a push station with backlog but
+    /// no attempts yet reports `probing` (not confidently attended, not deaf) until the next sweep.
+    #[tokio::test]
+    async fn push_bridge_probing_when_no_attempts_recorded() {
+        let state = test_state("push-probing");
+        let store = store_key("push-probing");
+        register_push_member(&state, &store, "s1", "addr:a").await;
+        insert_requires_disposition_to(&state, &store, "addr:a").await;
+
+        let status = state.status().await;
+        let m = member_status(&status, "addr:a");
+        assert_eq!(m.push_delivery, PushDeliveryHealth::Probing);
+        assert_eq!(m.station_health, StationHealth::AttendedPush);
+        assert!(
+            !m.deaf_warn,
+            "an un-probed push bridge must not be flagged deaf"
+        );
+        assert!(m.deaf_since_ms.is_none());
+    }
+
+    /// Regression: a pull station (no push handler) with backlog is unchanged — still
+    /// `unattended_with_backlog`, and its push_delivery reports `not_registered`.
+    #[tokio::test]
+    async fn pull_station_backlog_unchanged() {
+        let state = test_state("pull-backlog");
+        let store = store_key("pull-backlog");
+        assert!(matches!(
+            request(state.clone(), register_req(&store, "s1", "addr:a")).await,
+            Response::Registered { .. }
+        ));
+        insert_requires_disposition_to(&state, &store, "addr:a").await;
+
+        let status = state.status().await;
+        let m = member_status(&status, "addr:a");
+        assert!(!m.push_registered);
+        assert_eq!(m.push_delivery, PushDeliveryHealth::NotRegistered);
+        assert_eq!(m.station_health, StationHealth::UnattendedWithBacklog);
+        assert_eq!(m.pending_unconsumed_count, 1);
+        assert_eq!(m.inbound_actionable_count, 1);
+    }
+
+    /// Status separates actionable inbound (requires this station's disposition) from raw pending,
+    /// which also counts no-disposition notes.
+    #[tokio::test]
+    async fn status_distinguishes_actionable_inbound_from_pending() {
+        let state = test_state("actionable-split");
+        let store = store_key("actionable-split");
+        register_push_member(&state, &store, "s1", "addr:a").await;
+        insert_requires_disposition_to(&state, &store, "addr:a").await; // actionable + pending
+        insert_to(&state, &store, "addr:a").await; // no-disposition note: pending only
+
+        let status = state.status().await;
+        let m = member_status(&status, "addr:a");
+        assert_eq!(m.pending_unconsumed_count, 2);
+        assert_eq!(m.inbound_actionable_count, 1);
+    }
+
+    /// A no-disposition (or CC) message is pushed once and never re-pushed once accepted, so
+    /// informational traffic never enters an unbounded re-push pool.
+    #[tokio::test]
+    async fn no_disposition_message_skipped_forever_after_accept() {
+        let state = test_state("no-disp-skip");
+        let store = store_key("no-disp-skip");
+        let key = mk(&store, "s1", "addr:a");
+        let now = Instant::now();
+        state.on_deliver_record_attempt(&key, 1, now, true, false, false, None, true);
+        assert!(
+            state.on_deliver_should_skip(
+                &key,
+                1,
+                now + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(30)
+            ),
+            "an accepted no-disposition message is skipped forever, not re-pushed on the backstop"
+        );
+    }
+
+    /// A still-unacked message is suppressed after the hard cap so it cannot be re-pushed forever;
+    /// it is surfaced as a suppressed count, and a re-provision (forget) resets the budget.
+    #[tokio::test]
+    async fn repush_hard_cap_suppresses_and_resets_on_reprovision() {
+        let state = test_state("repush-cap");
+        let store = store_key("repush-cap");
+        let key = mk(&store, "s1", "addr:a");
+        let now = Instant::now();
+        // One below the cap: still eligible once its backoff elapses.
+        for _ in 0..(ON_DELIVER_MAX_REPUSH - 1) {
+            state.on_deliver_record_attempt(&key, 5, now, false, false, false, None, false);
+        }
+        assert!(
+            !state.on_deliver_should_skip(&key, 5, now + ON_DELIVER_ACCEPTED_BACKSTOP * 100),
+            "one attempt below the hard cap should still be eligible after backoff"
+        );
+        assert_eq!(state.push_suppressed_count(&key), 0);
+        // Reaching the cap suppresses further re-push.
+        state.on_deliver_record_attempt(&key, 5, now, false, false, false, None, false);
+        assert!(
+            state.on_deliver_should_skip(&key, 5, now + ON_DELIVER_ACCEPTED_BACKSTOP * 100),
+            "past the hard cap a message is suppressed regardless of elapsed time"
+        );
+        assert_eq!(state.push_suppressed_count(&key), 1);
+
+        state.on_deliver_forget_member(&key);
+        assert!(
+            !state.on_deliver_should_skip(&key, 5, now),
+            "a re-provision resets the attempt budget so the backlog re-delivers"
+        );
+        assert_eq!(state.push_suppressed_count(&key), 0);
+    }
+
+    /// Self-stop persistence: a deliberate detach (member present) writes the DURABLE tombstone the
+    /// `telex copilot push` helper preflights, so self-stop survives a restart and is honored by a
+    /// separate helper process — not just the in-memory definite-end.
+    #[tokio::test]
+    async fn deliberate_detach_writes_durable_tombstone() {
+        let state = test_state("detach-durable-tombstone");
+        let store = store_key("detach-durable-tombstone");
+        register_push_member(&state, &store, "s1", "addr:a").await;
+        let resp = request(
+            state.clone(),
+            Request::Detach {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+            },
+        )
+        .await;
+        assert!(
+            matches!(resp, Response::Ack { .. }),
+            "detach should ack, got {resp:?}"
+        );
+        let backend = state.backend_for(&store).await.unwrap();
+        assert!(
+            backend
+                .detach_tombstone("s1", "addr:a")
+                .await
+                .unwrap()
+                .is_some(),
+            "a deliberate detach must durably tombstone the session/address for the push helper"
+        );
+    }
+
+    /// Station stop reports whether the stopped station had a push bridge so the CLI can warn that
+    /// the in-session bridge is still loaded (membership released != bridge unloaded).
+    #[tokio::test]
+    async fn station_stop_reports_push_registered_for_bridge_station() {
+        let state = test_state("stop-warn-push");
+        let store = store_key("stop-warn-push");
+        register_push_member(&state, &store, "s1", "addr:a").await;
+        let resp = request(
+            state.clone(),
+            Request::StationStop {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                wait_grace_ms: 100,
+            },
+        )
+        .await;
+        match resp {
+            Response::StationStopped {
+                detached,
+                push_registered,
+                ..
+            } => {
+                assert!(detached);
+                assert!(
+                    push_registered,
+                    "station stop must report the bridge was registered"
+                );
+            }
+            other => panic!("expected StationStopped, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn station_stop_reports_no_push_for_pull_station() {
+        let state = test_state("stop-warn-pull");
+        let store = store_key("stop-warn-pull");
+        assert!(matches!(
+            request(state.clone(), register_req(&store, "s1", "addr:a")).await,
+            Response::Registered { .. }
+        ));
+        let resp = request(
+            state.clone(),
+            Request::StationStop {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                wait_grace_ms: 100,
+            },
+        )
+        .await;
+        match resp {
+            Response::StationStopped {
+                push_registered, ..
+            } => {
+                assert!(
+                    !push_registered,
+                    "a pull station has no push bridge to warn about"
+                )
+            }
+            other => panic!("expected StationStopped, got {other:?}"),
+        }
+    }
+
+    /// `push_delivery_health` classifies by the FRESHEST attempt across the member's messages, so a
+    /// stale accept on one message cannot mask a fresh failure on another (deaf-detection latency).
+    #[tokio::test]
+    async fn push_delivery_health_uses_freshest_attempt() {
+        let state = test_state("push-freshest");
+        let store = store_key("push-freshest");
+        let key = mk(&store, "s1", "addr:a");
+        let base = Instant::now();
+        // id 1 accepted at base; id 2 failed 1s later (fresher). Freshest is a failure -> Failing,
+        // even though id 1's accept is still within its backstop.
+        state.on_deliver_record_attempt(&key, 1, base, true, false, false, None, false);
+        state.on_deliver_record_attempt(
+            &key,
+            2,
+            base + Duration::from_secs(1),
+            false,
+            false,
+            false,
+            None,
+            false,
+        );
+        assert_eq!(
+            state.push_delivery_health(&key, 2, true, base + Duration::from_secs(2)),
+            PushDeliveryHealth::Failing,
+            "a fresh failure must not be masked by an older accept still inside its backstop"
+        );
+        // A newer accept on id 1 makes the freshest attempt an accept again -> Delivering.
+        state.on_deliver_record_attempt(
+            &key,
+            1,
+            base + Duration::from_secs(3),
+            true,
+            false,
+            false,
+            None,
+            false,
+        );
+        assert_eq!(
+            state.push_delivery_health(&key, 2, true, base + Duration::from_secs(4)),
+            PushDeliveryHealth::Delivering
+        );
+    }
+
+    /// Equal-timestamp attempts break the freshest tie toward a failure, so push health cannot flip
+    /// nondeterministically from the unordered attempt map.
+    #[tokio::test]
+    async fn push_delivery_health_tie_breaks_toward_failure() {
+        let state = test_state("push-tie");
+        let store = store_key("push-tie");
+        let key = mk(&store, "s1", "addr:a");
+        let t = Instant::now();
+        state.on_deliver_record_attempt(&key, 1, t, true, false, false, None, false);
+        state.on_deliver_record_attempt(&key, 2, t, false, false, false, None, false);
+        assert_eq!(
+            state.push_delivery_health(&key, 2, true, t + Duration::from_secs(1)),
+            PushDeliveryHealth::Failing,
+            "a same-timestamp accept and failure must resolve to Failing deterministically"
+        );
+    }
+
+    /// Push health ignores completed no-disposition/CC deliveries (accepted + skip_after_accept):
+    /// a station whose only pending rows are such informational notes is not stale/probing, it has
+    /// no outstanding push work.
+    #[tokio::test]
+    async fn push_delivery_health_ignores_completed_no_disposition() {
+        let state = test_state("push-ignore-notes");
+        let store = store_key("push-ignore-notes");
+        let key = mk(&store, "s1", "addr:a");
+        let base = Instant::now();
+        // Accepted no-disposition note (skip_after_accept=true) is done work.
+        state.on_deliver_record_attempt(&key, 1, base, true, false, false, None, true);
+        // Even long after the backstop, it must NOT read as stale_accepted; there is no live work.
+        assert_eq!(
+            state.push_delivery_health(
+                &key,
+                1,
+                true,
+                base + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(30)
+            ),
+            PushDeliveryHealth::NoBacklog
+        );
+    }
+
+    /// A re-provision bumps the member's push generation so a stale in-flight completion can be
+    /// fenced (RD-2).
+    #[tokio::test]
+    async fn on_deliver_forget_member_bumps_generation() {
+        let state = test_state("push-generation");
+        let store = store_key("push-generation");
+        let key = mk(&store, "s1", "addr:a");
+        assert_eq!(state.on_deliver_generation(&key), 0);
+        state.on_deliver_forget_member(&key);
+        assert_eq!(state.on_deliver_generation(&key), 1);
+        state.on_deliver_forget_member(&key);
+        assert_eq!(state.on_deliver_generation(&key), 2);
+    }
+
+    /// End-to-end through `spawn_on_deliver`: a no-disposition note fired via the real on-deliver
+    /// path is accepted once and then skipped forever (exercises the `skip_after_accept` computation
+    /// in `spawn_on_deliver`, complementing the `on_deliver_record_attempt`-level unit test).
+    #[tokio::test]
+    async fn no_disposition_push_via_spawn_skips_forever() {
+        let state = test_state("no-disp-spawn");
+        let store = store_key("no-disp-spawn");
+        let mut req = register_req(&store, "rcv", "addr:rcv");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_zero_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        // insert_to inserts a requires_disposition:false note.
+        let id = insert_to(&state, &store, "addr:rcv").await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(id)
+            .await
+            .unwrap()
+            .unwrap();
+        state.fire_on_deliver_on_commit(&store, &row);
+        let member_key = mk(&store, "rcv", "addr:rcv");
+        let mut accepted = false;
+        for _ in 0..100 {
+            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
+                accepted = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            accepted,
+            "the no-disposition note should be pushed and recorded accepted"
+        );
+        assert!(
+            state.on_deliver_should_skip(
+                &member_key,
+                id,
+                Instant::now() + Duration::from_secs(600)
+            ),
+            "an accepted no-disposition note is skipped forever, not re-pushed on the backstop"
         );
     }
 
@@ -4618,6 +6189,10 @@ mod p3_tests {
             last: Instant::now(),
             attempts,
             accepted,
+            deferred: false,
+            notification_only: false,
+            notification_lower_bound: None,
+            skip_after_accept: false,
         };
         // A failed push retries on the fast, growing backoff so a dead bridge recovers quickly.
         assert_eq!(
@@ -4654,7 +6229,7 @@ mod p3_tests {
         };
         let now = Instant::now();
         // Accepted push: skipped for the whole backstop window; eligible only after it elapses.
-        state.on_deliver_record_attempt(&member_key, 1, now, true);
+        state.on_deliver_record_attempt(&member_key, 1, now, true, false, false, None, false);
         assert!(state.on_deliver_should_skip(&member_key, 1, now + ON_DELIVER_RETRY_BASE * 4));
         assert!(!state.on_deliver_should_skip(
             &member_key,
@@ -4662,13 +6237,163 @@ mod p3_tests {
             now + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
         ));
         // Failed push: eligible again as soon as the fast backoff elapses.
-        state.on_deliver_record_attempt(&member_key, 2, now, false);
+        state.on_deliver_record_attempt(&member_key, 2, now, false, false, false, None, false);
         assert!(state.on_deliver_should_skip(&member_key, 2, now));
         assert!(!state.on_deliver_should_skip(
             &member_key,
             2,
             now + ON_DELIVER_RETRY_BASE + Duration::from_secs(1)
         ));
+    }
+
+    #[tokio::test]
+    async fn accepted_notification_only_push_is_not_replayed() {
+        let state = test_state("on-deliver-cc-accepted-once");
+        let store = store_key("on-deliver-cc-accepted-once");
+        let member_key = MemberKey {
+            store_key: store,
+            session_id: "s1".to_string(),
+            address: "addr:observer".to_string(),
+        };
+        let now = Instant::now();
+        state.on_deliver_record_attempt(&member_key, 1, now, true, false, true, Some(1), true);
+        assert!(state.on_deliver_should_skip(&member_key, 1, now));
+        assert!(state.on_deliver_should_skip(
+            &member_key,
+            1,
+            now + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
+        ));
+
+        state.on_deliver_record_attempt(&member_key, 2, now, false, false, true, Some(2), true);
+        assert!(state.on_deliver_should_skip(&member_key, 2, now));
+        assert!(!state.on_deliver_should_skip(
+            &member_key,
+            2,
+            now + ON_DELIVER_RETRY_BASE + Duration::from_secs(1)
+        ));
+    }
+
+    #[tokio::test]
+    async fn accepted_cc_push_does_not_advance_lower_bound_past_failed_cc() {
+        let state = test_state("on-deliver-cc-failed-before-accepted");
+        let store = store_key("on-deliver-cc-failed-before-accepted");
+        let address = "addr:observer";
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: address.to_string(),
+        };
+        let mut register = register_req(&store, "s1", address);
+        if let Request::Register {
+            on_deliver,
+            on_deliver_wake_on_cc,
+            ..
+        } = &mut register
+        {
+            *on_deliver = Some(Vec::new());
+            *on_deliver_wake_on_cc = true;
+        }
+        assert!(matches!(
+            request(state.clone(), register).await,
+            Response::Registered { .. }
+        ));
+        let initial_lower = state
+            .get_member(&store, "s1", address)
+            .unwrap()
+            .on_deliver_cc_after_ms
+            .unwrap();
+        let first = insert_message_to(&state, &store, "addr:primary", Some(address)).await;
+        let second = insert_message_to(&state, &store, "addr:primary", Some(address)).await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let first_row = backend.get_message(first).await.unwrap().unwrap();
+        let second_row = backend.get_message(second).await.unwrap().unwrap();
+        assert!(first_row.created_at_ms > initial_lower);
+        assert!(second_row.created_at_ms > first_row.created_at_ms);
+
+        state.on_deliver_record_attempt(
+            &member_key,
+            first,
+            Instant::now(),
+            false,
+            false,
+            true,
+            Some(first_row.created_at_ms),
+            true,
+        );
+        state.on_deliver_record_attempt(
+            &member_key,
+            second,
+            Instant::now(),
+            true,
+            false,
+            true,
+            Some(second_row.created_at_ms),
+            true,
+        );
+        state.on_deliver_advance_cc_lower_bound(&member_key, second_row.created_at_ms);
+        let member = state.get_member(&store, "s1", address).unwrap();
+        assert!(
+            member.on_deliver_cc_after_ms.unwrap() < first_row.created_at_ms,
+            "lower bound must not advance past an outstanding failed notification"
+        );
+        let candidates = backend
+            .fetch_wait_candidates(
+                address,
+                WaitFetchOptions {
+                    wake_on_cc: true,
+                    cc_after_ms: member.on_deliver_cc_after_ms.unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        let candidate_ids: BTreeSet<i64> = candidates
+            .iter()
+            .map(|candidate| candidate.message.id)
+            .collect();
+        assert!(candidate_ids.contains(&first));
+        assert!(candidate_ids.contains(&second));
+        state.on_deliver_retain_pushed(&member_key, &candidate_ids);
+        assert!(!state.on_deliver_should_skip(
+            &member_key,
+            first,
+            Instant::now() + ON_DELIVER_RETRY_BASE + Duration::from_secs(1)
+        ));
+        assert!(state.on_deliver_should_skip(
+            &member_key,
+            second,
+            Instant::now() + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
+        ));
+
+        state.on_deliver_record_attempt(
+            &member_key,
+            first,
+            Instant::now(),
+            true,
+            false,
+            true,
+            Some(first_row.created_at_ms),
+            true,
+        );
+        state.on_deliver_advance_cc_lower_bound(&member_key, first_row.created_at_ms);
+        let advanced = state.get_member(&store, "s1", address).unwrap();
+        assert_eq!(
+            advanced.on_deliver_cc_after_ms,
+            Some(second_row.created_at_ms)
+        );
+        let remaining = backend
+            .fetch_wait_candidates(
+                address,
+                WaitFetchOptions {
+                    wake_on_cc: true,
+                    cc_after_ms: advanced.on_deliver_cc_after_ms.unwrap(),
+                },
+            )
+            .await
+            .unwrap();
+        assert!(
+            remaining.is_empty(),
+            "accepted notification-only CC rows should leave the sweep set once no failed earlier row blocks advancement"
+        );
     }
 
     #[test]
@@ -4732,6 +6457,420 @@ mod p3_tests {
         );
     }
 
+    // ---- issue #65: defer-until-idle daemon accounting + idle drain ----
+
+    #[test]
+    fn on_deliver_backstop_invariants() {
+        // A deferred (busy) message is re-checked no faster than the heartbeat sweep (so a busy
+        // bridge is not re-hit every tick) and sooner than a genuinely-queued accepted turn.
+        assert!(ON_DELIVER_DEFERRED_BACKSTOP >= HEARTBEAT_INTERVAL);
+        assert!(ON_DELIVER_DEFERRED_BACKSTOP < ON_DELIVER_ACCEPTED_BACKSTOP);
+    }
+
+    #[test]
+    fn deferred_redelivery_delay_is_the_deferred_backstop() {
+        let deferred = PushAttempt {
+            last: Instant::now(),
+            attempts: 0,
+            accepted: false,
+            deferred: true,
+            notification_only: false,
+            notification_lower_bound: None,
+            skip_after_accept: false,
+        };
+        assert_eq!(
+            on_deliver_redelivery_delay(&deferred),
+            ON_DELIVER_DEFERRED_BACKSTOP
+        );
+    }
+
+    #[tokio::test]
+    async fn deferred_attempt_holds_at_backstop_and_stays_off_degraded_counter() {
+        let state = test_state("on-deliver-deferred-acct");
+        let store = store_key("on-deliver-deferred-acct");
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        let now = Instant::now();
+        // Re-deferring across a long busy turn must not accumulate the attempt counter (so the
+        // degraded-status threshold never trips) -- deferring while a turn runs is normal.
+        let mut attempts_seen = 0u32;
+        for _ in 0..(ON_DELIVER_DEGRADED_AFTER + 3) {
+            attempts_seen = state.on_deliver_record_attempt(
+                &member_key,
+                1,
+                now,
+                false,
+                true,
+                false,
+                None,
+                false,
+            );
+        }
+        assert_eq!(
+            attempts_seen, 0,
+            "a deferred push must not increment the degraded-status attempt counter"
+        );
+        assert_eq!(state.on_deliver_deferred_count(&member_key), 1);
+        // Held within the deferred backstop; eligible after it (bounded fallback if drain missed).
+        assert!(state.on_deliver_should_skip(&member_key, 1, now + Duration::from_secs(5)));
+        assert!(!state.on_deliver_should_skip(
+            &member_key,
+            1,
+            now + ON_DELIVER_DEFERRED_BACKSTOP + Duration::from_secs(1)
+        ));
+    }
+
+    #[tokio::test]
+    async fn deferred_exit_records_deferred_outcome() {
+        let state = test_state("on-deliver-deferred-exit");
+        let store = store_key("on-deliver-deferred-exit");
+        let mut req = register_req(&store, "rcv", "addr:rcv");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_four_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        let id = insert_to(&state, &store, "addr:rcv").await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(id)
+            .await
+            .unwrap()
+            .unwrap();
+        state.fire_on_deliver_on_commit(&store, &row);
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "rcv".to_string(),
+            address: "addr:rcv".to_string(),
+        };
+        let mut deferred = false;
+        for _ in 0..100 {
+            if state.on_deliver_deferred_count(&member_key) == 1 {
+                deferred = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            deferred,
+            "an ON_DELIVER_DEFERRED_EXIT handler must record a deferred push attempt"
+        );
+        // Deferred is neither accepted (long backstop) nor a failure (fast backoff): it holds for
+        // exactly the deferred backstop and is not treated as degraded.
+        assert!(state.on_deliver_should_skip(&member_key, id, Instant::now()));
+        assert!(!state.on_deliver_should_skip(
+            &member_key,
+            id,
+            Instant::now() + ON_DELIVER_DEFERRED_BACKSTOP + Duration::from_secs(1)
+        ));
+    }
+
+    #[tokio::test]
+    async fn drain_clears_deferred_only_not_accepted() {
+        let state = test_state("drain-clears-deferred");
+        let store = store_key("drain-clears-deferred");
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        let now = Instant::now();
+        // id 1 deferred (bridge was busy), id 2 accepted (a genuinely queued turn).
+        state.on_deliver_record_attempt(&member_key, 1, now, false, true, false, None, false);
+        state.on_deliver_record_attempt(&member_key, 2, now, true, false, false, None, false);
+        assert!(state.on_deliver_should_skip(&member_key, 1, now));
+        assert!(state.on_deliver_should_skip(&member_key, 2, now));
+
+        let cleared = state.on_deliver_clear_deferred(&member_key);
+        assert_eq!(cleared, 1, "only the deferred attempt should be cleared");
+        // The deferred message becomes eligible for immediate re-push; the accepted (queued) turn
+        // is left untouched so the drain never re-injects a duplicate of a queued turn.
+        assert!(
+            !state.on_deliver_should_skip(&member_key, 1, now),
+            "a cleared deferred message must be eligible for re-push"
+        );
+        assert!(
+            state.on_deliver_should_skip(&member_key, 2, now),
+            "an accepted queued turn must NOT be re-pushed by the drain"
+        );
+        assert_eq!(state.on_deliver_deferred_count(&member_key), 0);
+    }
+
+    // Repro for the discovered bug (issue #65 acceptance): a message deferred while busy, then
+    // manually read + acked before the turn stops, must NOT be re-injected by the idle drain.
+    // Deterministic: the drain's re-sweep re-derives the pushable set from durable state via
+    // `fetch_wait_candidates`, so the guarantee is that after ack + drain the acked message is not a
+    // candidate (cannot be pushed) while a still-unacked one is. This avoids racing the async
+    // subprocess sweep (whose completion is covered end-to-end by the repushes-unacked test).
+    #[tokio::test]
+    async fn drain_deferred_skips_message_acked_before_idle() {
+        let state = test_state("drain-skips-acked");
+        let store = store_key("drain-skips-acked");
+
+        let mut req = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_zero_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        // Two messages arrive while busy and are deferred; `acked_id` is manually read + acked
+        // before the turn stops, `live_id` stays unacked.
+        let acked_id = insert_to(&state, &store, "addr:a").await;
+        let live_id = insert_to(&state, &store, "addr:a").await;
+        let now = Instant::now();
+        state.on_deliver_record_attempt(
+            &member_key,
+            acked_id,
+            now,
+            false,
+            true,
+            false,
+            None,
+            false,
+        );
+        state.on_deliver_record_attempt(&member_key, live_id, now, false, true, false, None, false);
+        let acked = request(state.clone(), ack_req(&store, "s1", "addr:a", acked_id)).await;
+        assert!(
+            matches!(
+                acked,
+                Response::Ack {
+                    delivery_outcome: Some(DeliveryOutcome::Marked),
+                    ..
+                }
+            ),
+            "ack must durably consume the message, got {acked:?}"
+        );
+        // Turn stops -> idle drain: clears the deferred skip and queues the revalidating re-sweep.
+        let drained = request(
+            state.clone(),
+            Request::DrainDeferred {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                proof: Some(state.admin_cap.clone()),
+            },
+        )
+        .await;
+        assert!(matches!(drained, Response::Ack { .. }));
+        assert_eq!(
+            state.on_deliver_deferred_count(&member_key),
+            0,
+            "the drain must clear the deferred skip for both messages"
+        );
+        // The re-sweep's source of truth: the acked message is no longer a pushable candidate, so it
+        // can never be re-injected as a stale turn; the still-unacked one remains eligible.
+        let backend = state.backend_for(&store).await.unwrap();
+        let candidates = backend
+            .fetch_wait_candidates(
+                "addr:a",
+                WaitFetchOptions {
+                    wake_on_cc: false,
+                    cc_after_ms: 0,
+                },
+            )
+            .await
+            .unwrap();
+        let candidate_ids: BTreeSet<i64> = candidates.iter().map(|c| c.message.id).collect();
+        assert!(
+            !candidate_ids.contains(&acked_id),
+            "a message acked before turn-stop must not be a drain re-sweep candidate"
+        );
+        assert!(
+            candidate_ids.contains(&live_id),
+            "a still-unacked deferred message must remain a drain re-sweep candidate"
+        );
+    }
+
+    // A message deferred while busy and NOT consumed is delivered after the turn stops (idle drain).
+    #[tokio::test]
+    async fn drain_deferred_repushes_unacked_after_turn_stop() {
+        let state = test_state("drain-repushes-unacked");
+        let store = store_key("drain-repushes-unacked");
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("daemon-p3-tests")
+            .join("drain-repushes-unacked-marker");
+        std::fs::create_dir_all(&root).unwrap();
+        let marker = root.join("pushed.json");
+        let _ = std::fs::remove_file(&marker);
+
+        let mut req = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(record_stdin_argv(&marker));
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        let id = insert_to(&state, &store, "addr:a").await;
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        // Deferred while busy, never manually consumed.
+        state.on_deliver_record_attempt(
+            &member_key,
+            id,
+            Instant::now(),
+            false,
+            true,
+            false,
+            None,
+            false,
+        );
+        assert!(
+            state.on_deliver_should_skip(&member_key, id, Instant::now()),
+            "a freshly-deferred message is held until the drain (or the deferred backstop)"
+        );
+        // Turn stops -> idle drain clears the deferred skip and re-sweeps; the bridge is idle now,
+        // so the message is pushed.
+        let drained = request(
+            state.clone(),
+            Request::DrainDeferred {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                proof: Some(state.admin_cap.clone()),
+            },
+        )
+        .await;
+        assert!(matches!(drained, Response::Ack { .. }));
+        // Async poll (yields to the runtime so the spawned sweep/child-process can progress; a
+        // blocking wait would starve the current-thread executor).
+        let mut pushed = false;
+        for _ in 0..100 {
+            if marker.exists() {
+                pushed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            pushed,
+            "idle drain must re-push a still-unacked deferred message after the turn stops"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_deferred_requires_admin_cap() {
+        let state = test_state("drain-cap");
+        let store = store_key("drain-cap");
+        let denied = request(
+            state.clone(),
+            Request::DrainDeferred {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                proof: Some("wrong-cap".to_string()),
+            },
+        )
+        .await;
+        assert!(
+            matches!(denied, Response::Error { .. }),
+            "DrainDeferred must reject a bad admin cap"
+        );
+    }
+
+    // A session attached with a named --backend/--db resolves a store the static drain hook does not
+    // know; drain must still find its members by session id across stores (PAW review should-fix).
+    #[tokio::test]
+    async fn drain_deferred_matches_members_across_stores() {
+        let state = test_state("drain-cross-store");
+        let store = store_key("drain-cross-store");
+        let mut req = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_zero_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        let id = insert_to(&state, &store, "addr:a").await;
+        state.on_deliver_record_attempt(
+            &member_key,
+            id,
+            Instant::now(),
+            false,
+            true,
+            false,
+            None,
+            false,
+        );
+        assert_eq!(state.on_deliver_deferred_count(&member_key), 1);
+
+        // Drain with a DIFFERENT store_key (as the ambient default would be for a named-backend
+        // session). The daemon matches by session id across stores, so the member is still drained.
+        let drained = request(
+            state.clone(),
+            Request::DrainDeferred {
+                store_key: "sqlite:/some/other/store.db".to_string(),
+                session_id: "s1".to_string(),
+                proof: Some(state.admin_cap.clone()),
+            },
+        )
+        .await;
+        assert!(matches!(drained, Response::Ack { .. }));
+        assert_eq!(
+            state.on_deliver_deferred_count(&member_key),
+            0,
+            "drain must clear the member's deferred skip even when resolved via a different store"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_deferred_bumps_generation_and_forget_clears_it() {
+        let state = test_state("drain-gen");
+        let store = store_key("drain-gen");
+        let mut req = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_zero_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        assert_eq!(state.on_deliver_drain_gen(&member_key), 0);
+        // Each drain advances the generation so an inflight push can detect a drain it raced.
+        for expected in 1..=2u64 {
+            let _ = request(
+                state.clone(),
+                Request::DrainDeferred {
+                    store_key: store.clone(),
+                    session_id: "s1".to_string(),
+                    proof: Some(state.admin_cap.clone()),
+                },
+            )
+            .await;
+            assert_eq!(state.on_deliver_drain_gen(&member_key), expected);
+        }
+        // Re-provision forgets the generation along with the rest of the member's push state.
+        state.on_deliver_forget_member(&member_key);
+        assert_eq!(state.on_deliver_drain_gen(&member_key), 0);
+    }
+
     #[tokio::test]
     async fn register_refresh_with_none_preserves_push_handler() {
         let state = test_state("on-deliver-preserve");
@@ -4774,6 +6913,7 @@ mod p3_tests {
             address: address.to_string(),
             attention: None,
             min_attention: None,
+            wake_on_cc: false,
             timeout_ms: Some(timeout_ms),
             waiter_pid: Some(std::process::id()),
             waiter_start_time: crate::session_watch::capture_process_start_time(std::process::id()),
@@ -5755,6 +7895,212 @@ mod p3_tests {
     }
 
     #[tokio::test]
+    async fn wake_on_cc_delivers_live_cc_without_ack_requirement_or_replay() {
+        let state = test_state("wake-on-cc");
+        let store = store_key("wake-on-cc");
+        registered_epoch(state.clone(), &store, "s1", "addr:primary").await;
+        registered_epoch(state.clone(), &store, "s1", "addr:cc").await;
+        let backend = state.backend_for(&store).await.unwrap();
+
+        let waiter_state = state.clone();
+        let waiter_store = store.clone();
+        let waiter = tokio::spawn(async move {
+            request(
+                waiter_state,
+                Request::Wait {
+                    store_key: waiter_store,
+                    session_id: "s1".to_string(),
+                    address: "addr:cc".to_string(),
+                    attention: None,
+                    min_attention: None,
+                    wake_on_cc: true,
+                    timeout_ms: Some(1_000),
+                    waiter_pid: Some(std::process::id()),
+                    waiter_start_time: crate::session_watch::capture_process_start_time(
+                        std::process::id(),
+                    ),
+                },
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let message_id = insert_test_message(&backend, "addr:primary", Some("addr:cc")).await;
+
+        let delivered = waiter.await.expect("waiter");
+        assert!(matches!(
+            delivered,
+            Response::Message {
+                id,
+                delivery_role,
+                requires_disposition_for_current_recipient,
+                ..
+            } if id == message_id
+                && delivery_role == "cc"
+                && !requires_disposition_for_current_recipient
+        ));
+        let ack_cc = request(state.clone(), ack_req(&store, "s1", "addr:cc", message_id)).await;
+        assert!(matches!(
+            ack_cc,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::AlreadyConsumed),
+                ..
+            }
+        ));
+
+        let rearm = request(
+            state,
+            Request::Wait {
+                store_key: store,
+                session_id: "s1".to_string(),
+                address: "addr:cc".to_string(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: true,
+                timeout_ms: Some(1),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: crate::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
+            },
+        )
+        .await;
+        assert!(matches!(rearm, Response::Timeout));
+    }
+
+    #[tokio::test]
+    async fn wake_on_cc_does_not_weaken_primary_unacked_rearm_guard() {
+        let state = test_state("wake-on-cc-primary-guard");
+        let store = store_key("wake-on-cc-primary-guard");
+        registered_epoch(state.clone(), &store, "s1", "addr:primary").await;
+        registered_epoch(state.clone(), &store, "s1", "addr:cc").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let cc_message = insert_test_message(&backend, "addr:primary", Some("addr:cc")).await;
+
+        let cc_wait = request(
+            state.clone(),
+            Request::Wait {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                address: "addr:cc".to_string(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: true,
+                timeout_ms: Some(1),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: crate::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
+            },
+        )
+        .await;
+        assert!(
+            matches!(cc_wait, Response::Timeout),
+            "historical CC {cc_message} must not replay after the wait lower bound"
+        );
+
+        let primary_id = insert_test_message(&backend, "addr:cc", None).await;
+        let primary_wait = request(state.clone(), wait_req(&store, "s1", "addr:cc", 1_000)).await;
+        assert!(matches!(primary_wait, Response::Message { id, .. } if id == primary_id));
+        let rearm_before_ack =
+            request(state.clone(), wait_req(&store, "s1", "addr:cc", 1_000)).await;
+        assert!(matches!(rearm_before_ack, Response::PresenceEnded));
+
+        let ack = request(state.clone(), ack_req(&store, "s1", "addr:cc", primary_id)).await;
+        assert!(matches!(
+            ack,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
+        let after_ack = request(state, wait_req(&store, "s1", "addr:cc", 1)).await;
+        assert!(matches!(after_ack, Response::Timeout));
+    }
+
+    #[tokio::test]
+    async fn wake_on_cc_composes_with_min_attention() {
+        let state = test_state("wake-on-cc-min-attention");
+        let store = store_key("wake-on-cc-min-attention");
+        registered_epoch(state.clone(), &store, "s1", "addr:primary").await;
+        registered_epoch(state.clone(), &store, "s1", "addr:cc").await;
+        let backend = state.backend_for(&store).await.unwrap();
+
+        let waiter_state = state.clone();
+        let waiter_store = store.clone();
+        let waiter = tokio::spawn(async move {
+            request(
+                waiter_state,
+                Request::Wait {
+                    store_key: waiter_store,
+                    session_id: "s1".to_string(),
+                    address: "addr:cc".to_string(),
+                    attention: None,
+                    min_attention: Some("interrupt".to_string()),
+                    wake_on_cc: true,
+                    timeout_ms: Some(1_000),
+                    waiter_pid: Some(std::process::id()),
+                    waiter_start_time: crate::session_watch::capture_process_start_time(
+                        std::process::id(),
+                    ),
+                },
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let background = insert_test_message(&backend, "addr:primary", Some("addr:cc")).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let interrupt = backend
+            .insert_message(&NewMessage {
+                parent_id: None,
+                from_addr: Some("sender".to_string()),
+                to_addr: "addr:primary".to_string(),
+                cc: Some("addr:cc".to_string()),
+                kind: "note".to_string(),
+                attention: Attention::Interrupt,
+                requires_disposition: false,
+                subject: Some("interrupt cc".to_string()),
+                body: "interrupt body".to_string(),
+                metadata: None,
+                sent_at_ms: now_ms(),
+            })
+            .await
+            .unwrap()
+            .id;
+
+        let delivered = waiter.await.expect("waiter");
+        assert!(
+            matches!(delivered, Response::Message { id, delivery_role, .. } if id == interrupt && delivery_role == "cc"),
+            "interrupt CC should wake, background CC {background} should be skipped by min-attention"
+        );
+    }
+
+    #[tokio::test]
+    async fn wake_on_cc_non_sqlite_store_is_typed_unsupported() {
+        let state = test_state("wake-on-cc-non-sqlite");
+        let response = request(
+            state,
+            Request::Wait {
+                store_key: "postgres:unavailable-for-daemon-core".to_string(),
+                session_id: "s1".to_string(),
+                address: "addr:cc".to_string(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: true,
+                timeout_ms: Some(1),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: crate::session_watch::capture_process_start_time(
+                    std::process::id(),
+                ),
+            },
+        )
+        .await;
+        assert!(matches!(
+            response,
+            Response::Error { code, .. } if code == proto::ERROR_UNSUPPORTED
+        ));
+    }
+
+    #[tokio::test]
     async fn session_end_marks_idle_releases_waiter_and_rearm_receives_message() {
         let state = test_state("session-end");
         let store = store_key("session-end");
@@ -5776,6 +8122,8 @@ mod p3_tests {
         assert!(status.recent_errors.iter().any(|e| e.kind == "SessionEnd"));
 
         let backend = state.backend_for(&store).await.unwrap();
+        let lease = backend.get_lease("addr:a").await.unwrap().unwrap();
+        assert_eq!(lease.owner_instance_id, None);
         let message_id = insert_test_message(&backend, "addr:a", None).await;
         assert!(matches!(
             request(state.clone(), register_req(&store, "s1", "addr:a")).await,
@@ -5848,6 +8196,7 @@ mod p3_tests {
             address: "addr:a".to_string(),
             attention: None,
             min_attention: None,
+            wake_on_cc: false,
             timeout_ms: Some(5_000),
             waiter_pid: None,
             waiter_start_time: None,
@@ -5906,6 +8255,8 @@ mod p3_tests {
                 started_at_ms: now_ms(),
                 attention: None,
                 min_attention: None,
+                wake_on_cc: false,
+                cc_after_ms: None,
                 timeout_ms: Some(5_000),
             },
         );
@@ -5953,6 +8304,8 @@ mod p3_tests {
                 started_at_ms: now_ms(),
                 attention: None,
                 min_attention: None,
+                wake_on_cc: false,
+                cc_after_ms: None,
                 timeout_ms: Some(5_000),
             },
         );
@@ -6210,6 +8563,7 @@ mod p3_tests {
                 address: "addr:a".to_string(),
                 attention: None,
                 min_attention: Some("not-an-attention".to_string()),
+                wake_on_cc: false,
                 timeout_ms: Some(1_000),
                 waiter_pid: Some(std::process::id()),
                 waiter_start_time: crate::session_watch::capture_process_start_time(
@@ -6516,6 +8870,7 @@ mod p3_tests {
                 address: "addr:a".to_string(),
                 attention: None,
                 min_attention: Some("interrupt".to_string()),
+                wake_on_cc: false,
                 timeout_ms: Some(1_000),
                 waiter_pid: Some(std::process::id()),
                 waiter_start_time: crate::session_watch::capture_process_start_time(
@@ -6554,6 +8909,7 @@ mod p3_tests {
                 address: "addr:a".to_string(),
                 attention: None,
                 min_attention: Some("interrupt".to_string()),
+                wake_on_cc: false,
                 timeout_ms: Some(1),
                 waiter_pid: Some(std::process::id()),
                 waiter_start_time: crate::session_watch::capture_process_start_time(
@@ -6703,6 +9059,47 @@ mod p3_tests {
             .recent_errors
             .iter()
             .any(|e| e.kind == "WatchPidDeath"));
+        let backend = state.backend_for(&store).await.unwrap();
+        let lease = backend.get_lease("addr:a").await.unwrap().unwrap();
+        assert_eq!(lease.owner_instance_id, None);
+        assert!(matches!(
+            request(state.clone(), register_req(&store, "s2", "addr:a")).await,
+            Response::Registered { .. }
+        ));
+    }
+
+    #[tokio::test]
+    async fn session_end_release_failure_keeps_member_active_for_retry() {
+        let state = test_state("session-end-release-failure");
+        let store = store_key("session-end-release-failure");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let mut member = {
+            let mut members = state.members.lock().unwrap();
+            members
+                .remove(&DaemonState::member_key(&store, "s1", "addr:a"))
+                .unwrap()
+        };
+        member.store_key = "unsupported:release-failure".to_string();
+        state.insert_member(member);
+
+        let response = session_end(
+            state.clone(),
+            "unsupported:release-failure".to_string(),
+            "s1".to_string(),
+        )
+        .await;
+        assert!(matches!(
+            response,
+            Response::Error { code, .. } if code == proto::ERROR_UNSUPPORTED
+        ));
+        let status = state.status().await;
+        let member = status
+            .members
+            .iter()
+            .find(|m| m.store_key == "unsupported:release-failure")
+            .expect("member retained after failed release");
+        assert!(!member.idle);
     }
 
     #[tokio::test]
@@ -6718,6 +9115,7 @@ mod p3_tests {
             "addr:a".to_string(),
             None,
             None,
+            false,
             Some(5_000),
             Some(std::process::id()),
             crate::session_watch::capture_process_start_time(std::process::id()),
@@ -7096,6 +9494,7 @@ pub mod test_support {
                 address.to_string(),
                 None,
                 None,
+                false,
                 Some(timeout_ms),
                 Some(std::process::id()),
                 crate::session_watch::capture_process_start_time(std::process::id()),
@@ -7170,6 +9569,26 @@ pub mod test_support {
             heartbeat_members_once(self.state.clone()).await;
         }
 
+        pub fn rewind_on_deliver_attempt(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+            message_id: i64,
+            by: Duration,
+        ) -> bool {
+            let member_key = DaemonState::member_key(store_key, session_id, address);
+            let mut pushed = self.state.on_deliver.pushed.lock().unwrap();
+            let Some(attempt) = pushed
+                .get_mut(&member_key)
+                .and_then(|attempts| attempts.get_mut(&message_id))
+            else {
+                return false;
+            };
+            attempt.last = attempt.last.checked_sub(by).unwrap_or(attempt.last);
+            true
+        }
+
         pub fn skew_first_watch_pid_start_time(
             &self,
             store_key: &str,
@@ -7228,6 +9647,7 @@ pub mod test_support {
             watch_pids,
             recovery: false,
             on_deliver: None,
+            on_deliver_wake_on_cc: false,
         }
     }
 
@@ -7243,6 +9663,7 @@ pub mod test_support {
             address: address.to_string(),
             attention: None,
             min_attention: None,
+            wake_on_cc: false,
             timeout_ms: Some(timeout_ms),
             waiter_pid: Some(std::process::id()),
             waiter_start_time: crate::session_watch::capture_process_start_time(std::process::id()),

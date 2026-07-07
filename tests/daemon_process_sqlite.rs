@@ -878,6 +878,151 @@ fn real_process_wait_without_daemon_does_not_spawn() {
 }
 
 #[test]
+fn versioned_launcher_dispatches_to_current_binary() {
+    let env = ProcessEnv::new("versioned-launcher");
+    let install_root = env.root.join("install");
+    let source = env.bin.to_string_lossy().into_owned();
+    let root_arg = install_root.to_string_lossy().into_owned();
+    let upgraded = env.run(
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &source,
+            "--version",
+            "vtest-launcher",
+            "--root",
+            &root_arg,
+            "--skip-drain",
+        ],
+        Duration::from_secs(8),
+    );
+    upgraded.assert_success("versioned upgrade");
+
+    let launcher = install_root
+        .join("bin")
+        .join(format!("telex{}", std::env::consts::EXE_SUFFIX));
+    assert!(
+        launcher.exists(),
+        "launcher exists at {}",
+        launcher.display()
+    );
+    let mut cmd = Command::new(&launcher);
+    cmd.env("TELEX_HOME", &env.home)
+        .env("TELEX_RUN_DIR", &env.run_dir)
+        .env("TELEX_DB", &env.db)
+        .env("TELEX_CONFIG", env.home.join("config.toml"))
+        .env("TELEX_SESSION_ID", &env.session_id)
+        .arg("--json")
+        .arg("version")
+        .arg("--root")
+        .arg(&install_root);
+    #[cfg(windows)]
+    {
+        cmd.env("LOCALAPPDATA", &env.state_dir);
+    }
+    let out = run_command_with_capture(cmd, &env.root, Duration::from_secs(8));
+    out.assert_success("launcher version");
+    let json = out.json("launcher version");
+    let version = json.get("version").expect("version field");
+    assert_eq!(
+        version
+            .get("install")
+            .and_then(|v| v.get("active_tag"))
+            .and_then(Value::as_str),
+        Some("vtest-launcher")
+    );
+    let current_exe = version
+        .get("current_exe")
+        .and_then(Value::as_str)
+        .expect("current_exe");
+    assert!(
+        current_exe.contains("versions") && current_exe.contains("vtest-launcher"),
+        "launcher should dispatch to versioned binary, got {current_exe}"
+    );
+
+    env.run(
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &source,
+            "--version",
+            "vtest-next",
+            "--root",
+            &root_arg,
+            "--skip-drain",
+        ],
+        Duration::from_secs(8),
+    )
+    .assert_success("upgrade next");
+    let rollback = env.run(
+        ["--json", "rollback", "--root", &root_arg, "--skip-drain"],
+        Duration::from_secs(8),
+    );
+    rollback.assert_success("rollback to previous");
+    let json = rollback.json("rollback");
+    assert_eq!(
+        json.get("switch")
+            .and_then(|s| s.get("switched_to"))
+            .and_then(Value::as_str),
+        Some("vtest-launcher")
+    );
+    assert_eq!(
+        std::fs::read_to_string(install_root.join("current"))
+            .unwrap()
+            .trim(),
+        "vtest-launcher"
+    );
+
+    let empty_root = env.root.join("empty-install");
+    let empty_root_arg = empty_root.to_string_lossy().into_owned();
+    let missing_previous = env.run(
+        [
+            "--json",
+            "rollback",
+            "--root",
+            &empty_root_arg,
+            "--skip-drain",
+        ],
+        Duration::from_secs(8),
+    );
+    missing_previous.assert_failure("rollback without previous");
+    assert!(
+        missing_previous
+            .stderr
+            .contains("no previous installed version"),
+        "stderr should name missing previous version: {}",
+        missing_previous.stderr
+    );
+
+    let fake = env
+        .root
+        .join(format!("not-telex{}", std::env::consts::EXE_SUFFIX));
+    std::fs::write(&fake, b"not a telex binary").expect("write fake source");
+    let fake_arg = fake.to_string_lossy().into_owned();
+
+    let out = env.run(
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &fake_arg,
+            "--version",
+            "vbad",
+            "--root",
+            &empty_root_arg,
+        ],
+        Duration::from_secs(8),
+    );
+    out.assert_failure("upgrade rejects non-telex source");
+    assert!(
+        !empty_root.join("versions").join("vbad").exists(),
+        "invalid source must fail before writing versions/vbad"
+    );
+}
+
+#[test]
 fn real_process_send_without_daemon_does_not_spawn() {
     let env = ProcessEnv::new("real-send-no-spawn");
     let sender = "real-send-no-spawn-session";
@@ -1243,6 +1388,94 @@ fn real_process_delivery_role_metadata_for_primary_and_cc() {
         cc_wait.stderr
     );
 
+    let wake_out_dir = env.root.join("cc-wake-wait");
+    let mut wake_cmd = env.command_with_session(cc);
+    wake_cmd
+        .args([
+            "--json",
+            "--address",
+            cc_addr,
+            "wait",
+            "--session",
+            cc,
+            "--wake-on-cc",
+            "--timeout-ms",
+            "5000",
+            "--out-dir",
+            wake_out_dir.to_str().expect("wake out dir is utf8"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let wake_waiter = wake_cmd.spawn().expect("spawn wake-on-cc waiter");
+    wait_until_path_exists(&wake_out_dir.join("wait.pid"), Duration::from_secs(3));
+    let wake_waiter_pid: u32 = std::fs::read_to_string(wake_out_dir.join("wait.pid"))
+        .expect("wake wait.pid written")
+        .trim()
+        .parse()
+        .expect("wake wait.pid parses");
+    let status = env
+        .daemon_status()
+        .json("daemon status with wake-on-cc waiter");
+    assert!(
+        status
+            .get("live_waiters")
+            .and_then(Value::as_array)
+            .unwrap()
+            .iter()
+            .any(|w| {
+                w.get("pid").and_then(Value::as_u64) == Some(wake_waiter_pid as u64)
+                    && w.get("wake_on_cc").and_then(Value::as_bool) == Some(true)
+            }),
+        "daemon status should list wake-on-cc waiter pid {wake_waiter_pid}: {status}"
+    );
+
+    let wake_sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            primary_addr,
+            "--cc",
+            cc_addr,
+            "--subject",
+            "role metadata wake",
+            "--body",
+            "role wake body",
+        ],
+        Duration::from_secs(5),
+    );
+    wake_sent.assert_success("send role metadata wake");
+    let wake_id = message_id(&wake_sent.json("send role metadata wake"));
+    let (wake_code, wake_timed_out) = wait_status_with_timeout(wake_waiter, Duration::from_secs(6));
+    assert_eq!(wake_code, Some(0), "wake-on-cc waiter should deliver");
+    assert!(!wake_timed_out, "wake-on-cc waiter timed out");
+    wait_until_path_exists(&wake_out_dir.join("exit.code"), Duration::from_secs(1));
+    let wake_message: Value = serde_json::from_str(
+        &std::fs::read_to_string(wake_out_dir.join("message.json")).expect("wake message.json"),
+    )
+    .expect("wake message json parses");
+    assert_eq!(
+        wake_message.get("id").and_then(Value::as_i64),
+        Some(wake_id)
+    );
+    assert_eq!(
+        wake_message.get("delivery_role").and_then(Value::as_str),
+        Some("cc")
+    );
+    assert_eq!(
+        wake_message
+            .get("requires_disposition_for_current_recipient")
+            .and_then(Value::as_bool),
+        Some(false)
+    );
+
     let primary_wait = wait_for_message(&env, primary, primary_addr, "role body");
     assert_eq!(
         primary_wait.get("delivery_role").and_then(Value::as_str),
@@ -1587,6 +1820,11 @@ fn real_process_station_stop_drains_waiter_and_preserves_next_message() {
         stopped_json.get("waiters_after").and_then(Value::as_u64),
         Some(0)
     );
+    assert_eq!(
+        stopped_json.get("push_registered").and_then(Value::as_bool),
+        Some(false),
+        "a pull station reports push_registered=false in station stop JSON (no push-bridge warning)"
+    );
 
     let (wait_code, wait_timed_out) = wait_status_with_timeout(waiter, Duration::from_secs(3));
     assert_eq!(wait_code, Some(5), "waiter should exit presence-ended");
@@ -1738,13 +1976,21 @@ fn real_process_status_and_address_list_agree_after_attach() {
     );
     status.assert_success("status --address");
     let status_json = status.json("status --address");
+    let status_occupied = status_json
+        .get("occupancy")
+        .and_then(|o| o.get("occupied"))
+        .and_then(Value::as_bool);
+    assert_eq!(
+        status_occupied,
+        Some(false),
+        "status --address should report durable lease liveness, not daemon membership: {status_json}"
+    );
     assert_eq!(
         status_json
-            .get("occupancy")
-            .and_then(|o| o.get("occupied"))
+            .get("daemon_member_present")
             .and_then(Value::as_bool),
         Some(true),
-        "status --address should report occupied: {status_json}"
+        "status --address should report daemon member presence separately: {status_json}"
     );
     assert!(
         !status_json
@@ -1770,7 +2016,7 @@ fn real_process_status_and_address_list_agree_after_attach() {
         .expect("address listed");
     assert_eq!(
         listed.get("occupied").and_then(Value::as_bool),
-        Some(true),
+        status_occupied,
         "address list should agree with status --address: {list_json}"
     );
 }
@@ -2060,6 +2306,75 @@ fn real_process_copilot_attach_maps_session_and_loader_pid() {
             .and_then(Value::as_u64),
         Some(std::process::id() as u64)
     );
+}
+
+/// #66 self-stop: a deliberate `copilot detach` durably tombstones the session/address, and the
+/// `telex copilot push` helper preflights that tombstone and refuses (permanent exit 3) — so a
+/// session can stop delivery to itself and it sticks even against a racing/late push, without
+/// killing the session.
+#[test]
+fn real_process_copilot_push_refuses_after_detach_tombstone() {
+    let env = ProcessEnv::new("real-push-tombstone-stop");
+    let session = "real-push-stop-session";
+    let address = "addr:real-push-stop";
+
+    let attach = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "attach",
+            "--session",
+            session,
+            "--description",
+            "push-stop test",
+        ],
+        Duration::from_secs(8),
+    );
+    attach.assert_success("attach before push-stop");
+
+    // Deliberate detach writes the durable tombstone the push helper honors.
+    let _detach = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "copilot",
+            "detach",
+            "--session",
+            session,
+        ],
+        Duration::from_secs(8),
+    );
+
+    // `telex copilot push` with a descriptor on stdin must refuse with the permanent exit code.
+    let mut cmd = env.command_with_session(session);
+    cmd.args(["copilot", "push", "--session", session])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn copilot push");
+    {
+        use std::io::Write;
+        let descriptor = format!(r#"{{"message_id":1,"address":"{address}"}}"#);
+        child
+            .stdin
+            .take()
+            .expect("push stdin")
+            .write_all(descriptor.as_bytes())
+            .expect("write push descriptor");
+    }
+    let out = child.wait_with_output().expect("wait copilot push");
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "copilot push must refuse with permanent exit 3 when a detach tombstone exists; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    env.stop_daemon_best_effort();
 }
 
 #[test]

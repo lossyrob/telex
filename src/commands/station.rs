@@ -142,6 +142,7 @@ async fn stop(ctx: &Ctx, args: StationStopArgs) -> Result<i32> {
             waiters_before,
             waiters_after,
             live_waiters,
+            push_registered,
             message,
             lease_epoch,
             ..
@@ -156,6 +157,7 @@ async fn stop(ctx: &Ctx, args: StationStopArgs) -> Result<i32> {
                 "waiters_before": waiters_before,
                 "waiters_after": waiters_after,
                 "live_waiters": live_waiters,
+                "push_registered": push_registered,
             });
             emit(ctx.fmt, &out, || {
                 if waiters_after == 0 {
@@ -165,6 +167,11 @@ async fn stop(ctx: &Ctx, args: StationStopArgs) -> Result<i32> {
                 } else {
                     println!(
                         "station stopped {address} session={session_id} waiters={waiters_before}->{waiters_after}"
+                    );
+                }
+                if push_registered {
+                    println!(
+                        "warning: this station had a registered push handler; membership was released but the in-session push producer may still be loaded. Use the harness-specific detach/unload command (e.g. `telex copilot detach` for a Copilot bridge) to fully stop delivery."
                     );
                 }
             });

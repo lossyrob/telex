@@ -12,7 +12,7 @@
       "name": "telex",
       "description": "Telex Copilot CLI plugin: session lifecycle hooks, turn-end waiter guard, and the canonical Telex skill.",
       "version": "0.1.0",
-      "source": ".",
+      "source": "copilot/plugin",
       "author": {
         "name": "Rob Emanuele"
       },
