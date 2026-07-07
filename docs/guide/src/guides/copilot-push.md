@@ -45,6 +45,20 @@ telex handle --address <addr> --id <message-id> --session "$COPILOT_AGENT_SESSIO
 
 Sending is not push: `telex send` and `telex reply` also need `--session`.
 
+## CC observers
+
+A session that should receive CC (observer) copies as turns opts in at bind time
+with `--wake-on-cc`:
+
+```sh
+telex --address <addr> copilot attach --copilot-bridge --wake-on-cc --description "<work>"
+```
+
+Then run `extensions_reload` as usual. Without `--wake-on-cc`, CC copies are still
+buffered and visible in `telex inbox --all`, but are not delivered as turns.
+(`telex wait --wake-on-cc` is the separate pull-mode equivalent for non-Copilot
+harnesses.)
+
 ## Tear down
 
 ```sh
@@ -53,6 +67,8 @@ telex --address <addr> copilot detach
 
 This detaches the address and, when it was the last binding, removes the bridge
 files so nothing reloads on a later resume. Session end also removes them.
+
+Inspect stale bridge files left by other sessions with `telex copilot gc --dry-run`.
 
 ## Fallback
 

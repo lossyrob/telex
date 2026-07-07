@@ -44,33 +44,10 @@ cargo install --git https://github.com/lossyrob/telex --features entra
 
 Or grab a prebuilt binary from [Releases](https://github.com/lossyrob/telex/releases).
 
-Release install scripts use a versioned layout instead of overwriting the PATH
-binary in place. A stable launcher lives under the install root's `bin/`
-directory, while immutable binaries live under `versions/<tag>/` and `current`
-selects the version new invocations use. This keeps old in-flight Telex
-processes running while new shells use the selected version.
-
-```text
-<install-root>/
-  bin/telex(.exe)
-  versions/<tag>/telex(.exe)
-  current
-  previous
-```
-
-Useful upgrade commands:
-
-```sh
-telex version --json
-telex upgrade --from <path-to-telex-binary> --version vX.Y.Z
-telex rollback
-telex gc --dry-run
-```
-
-`telex upgrade` and `telex rollback` drain the current local daemon before
-switching `current` unless `--skip-drain` is explicitly passed. Rollback refuses
-installed versions whose manifest is incompatible with this build's
-protocol/schema floor.
+Release installs use a versioned layout with a stable launcher, so upgrades and
+rollback do not disrupt in-flight processes. See
+[Upgrading the binary](https://lossyrob.github.io/telex/guides/operating.html#upgrading-the-binary)
+in the guide.
 
 ## Quickstart
 
@@ -83,7 +60,9 @@ telex --address me inbox --all                   # read it back
 
 No manual server setup and no config required. The first daemon-backed
 verb auto-spawns a per-user local exchange for the default local SQLite store at
-`~/.telex/telex.db`.
+`~/.telex/telex.db`. See the
+[Quickstart](https://lossyrob.github.io/telex/getting-started/quickstart.html)
+for a two-session walkthrough.
 
 ## For agents
 
@@ -102,25 +81,16 @@ messages arrive as turns (no waiter to run or re-arm):
 copilot plugin marketplace add lossyrob/telex
 copilot plugin install telex@telex
 telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --description "<work>"
-# Observer/table seats that want live CC turns opt in at bind time:
-telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --wake-on-cc --description "<work>"
 # then run the `extensions_reload` tool once; delivered telex messages arrive as turns.
 telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
-telex copilot gc --dry-run                                      # inspect stale bridge files
 ```
 
 `telex wait` remains the generic pull primitive for scripts, CI, and non-extension
-harnesses. See the [Copilot CLI push delivery guide](https://lossyrob.github.io/telex/guides/copilot-push.html)
-for the session-env mapping, teardown, compatibility notes, and the marketplace
-release-pinning convention.
-
-Marketplace install is the supported plugin channel; the plugin lives under
-`copilot/plugin` (nested marketplace `source`), validated against GitHub Copilot
-CLI 1.0.69-2 as the known-good floor (see
-[`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)).
-Release install scripts print a tag-pinned marketplace command
-(`copilot plugin marketplace add lossyrob/telex#vX.Y.Z`) so the plugin and binary
-stay on the same release.
+harnesses. Marketplace install is the supported plugin channel (the plugin lives
+under `copilot/plugin`). See the
+[Copilot CLI push delivery guide](https://lossyrob.github.io/telex/guides/copilot-push.html)
+for CC-observer opt-in (`--wake-on-cc`), the session-env mapping, teardown, and
+compatibility notes.
 
 ## Networked backends
 

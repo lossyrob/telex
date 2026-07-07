@@ -50,7 +50,34 @@ retained buffer.
 
 ## Upgrading the binary
 
-On a local upgrade, drain and replace in this order:
+Release installs use a versioned layout instead of overwriting the binary on
+`PATH` in place. A stable launcher lives under the install root's `bin/`, immutable
+binaries live under `versions/<tag>/`, and `current` selects the version new
+invocations use. Old in-flight processes keep running on their version while new
+shells use the selected one.
+
+```text
+<install-root>/
+  bin/telex(.exe)
+  versions/<tag>/telex(.exe)
+  current
+  previous
+```
+
+Upgrade, roll back, and inspect versions:
+
+```sh
+telex version --json
+telex upgrade --from <path-to-telex-binary> --version vX.Y.Z
+telex rollback
+telex gc --dry-run
+```
+
+`telex upgrade` and `telex rollback` drain the current local daemon before
+switching `current`, unless `--skip-drain` is passed. Rollback refuses installed
+versions whose manifest is incompatible with this build's protocol/schema floor.
+
+For a manual in-place replacement, drain and replace in this order:
 
 ```sh
 telex station stop --address <addr>
