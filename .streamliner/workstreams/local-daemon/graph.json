@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-07T17:35:00.000Z",
+  "updatedAt": "2026-07-07T19:05:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -241,7 +241,7 @@
       "type": "task",
       "title": "Copilot bridge idle drain (defer queued pushes until idle)",
       "summary": "Fix stale queued bridge turns: for non-interrupt Copilot bridge pushes, if the agent is busy, defer delivery until session idle / turn-stop, then revalidate durable Telex state and skip messages already acked or terminally dispositioned. Interrupt/immediate messages still push immediately. Durable Telex state and daemon push bookkeeping remain authoritative; bridge memory is not the source of truth. Adds bridge busy/idle status, deferred on-deliver outcome or drain request, idle-triggered drain, pre-send revalidation, batching/ordering, and tests for manual read+ack before idle.",
-      "status": "ready",
+      "status": "completed",
       "attention": "watch",
       "repoIds": [
         "telex"
