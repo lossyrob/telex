@@ -83,7 +83,7 @@ as proof — not a half-remembered fragment of a context window.
 
 ### 4. Answerback: automatic identity, provided by the line — not the operator
 
-Telex's most quietly brilliant feature was **answerback**. Before sending, the
+Telex had a feature called **answerback**: before sending, the
 operator could transmit a WRU signal — *Who are you?* — and the receiving machine
 would automatically reply with its own encoded identity, set physically on a
 rotating drum of pegs like a music box. The same exchange could run again at the
@@ -112,16 +112,11 @@ the end — and that maps onto two useful grades of liveness:
   acknowledged and handled, closed, or deferred by the occupant. This is the
   end-of-message confirmation that the exchange completed intact.
 
-> **Vocabulary note.** The original per-session holder process has been
-> superseded by the auto-spawned per-user **local exchange** (daemon) in
-> [docs/design/daemon.md](docs/design/daemon.md). The metaphor is unchanged:
-> answerback is infrastructure-supplied liveness; only the mechanism moved.
-
 How faithfully Telex can answer depends on the backend, and we are honest about
 that: on a local SQLite store the loop's heartbeat gives "last seen within its
 lease window"; on Postgres a connection-bound lease can release the instant a
 session dies, giving true real-time liveness. The mechanism that holds the lease
-may also change as agent platforms evolve — today it is a background loop — but the
+may also change as agent platforms evolve but the
 concept is durable: **answerback is identity supplied by the line, decoupled from
 the agent's attention.**
 
@@ -137,8 +132,9 @@ chat that came later.
 We are in our own transitional moment. Coordination between AI agents today looks
 a lot like the world *before* telex: messages are carried by hand.
 
-In practice that means a developer asks one session to write a file, commits it,
-pushes it, pulls it on another machine, and asks a second session to read it.
+In practice that means a developer doess message routing manually - for example, 
+asking one session to write a file, committing it,
+pushing it, pulling it on another machine, and asking a second session to read it.
 Context is shuttled manually between ephemeral workers. Git history and scratch
 notes become an improvised runtime coordination layer they were never designed to
 be. It works, barely, and only because a human is standing in the relay center
@@ -170,7 +166,7 @@ Telex is the operational text network that carries the coordination *between* th
 agents working on them: questions, handoffs, field reports, blockers, evidence,
 map corrections, and decisions that require disposition.
 
-## The metaphor, in one table
+## Historical telex vs `telex`
 
 | Historical telex | Telex for agents | The problem it solves |
 |---|---|---|
@@ -185,21 +181,3 @@ map corrections, and decisions that require disposition.
 | Standard signaling (ITA2) | Thin semantic core: kinds, attention, disposition, receipts | Interoperable meaning across every backend |
 | Operator discipline | Agent protocol: acknowledge, handle, defer, close, escalate | Messages get dispositioned, not just read |
 | Expensive line time | Context-budget pressure | Read the new message first; expand history only on demand |
-
-## The thesis
-
-**Telex makes agent sessions addressable without making them permanent.**
-
-A session attaches to a role, node, or workstream for the duration of its mission
-and holds that address by a lease. Other sessions message the *address*, never
-needing to know which terminal, machine, or process currently occupies it. If the
-occupant is live, the message can wake an actionable waiter. If none is live, the
-message queues, warns, or bounces according to the address's policy. If the
-address has been retired, the sender learns so immediately rather than shouting
-into a closed line.
-
-That is the whole idea, and it is an old one: a durable, typed, machine-addressable
-text network with answerback identity, store-and-forward delivery, and a record you
-can trust.
-
-In short — **Telex is a modern answerback network for AI agents.**

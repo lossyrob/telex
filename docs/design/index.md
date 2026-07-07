@@ -3,8 +3,7 @@
 The **system spec** for telex: the architecture, the normative contracts, and the
 decision record that implementation is built against. This is the rigorous,
 node-worker-edited design layer (distinct from the root-level vision/direction docs —
-[`PRODUCT-THESIS.md`](../../PRODUCT-THESIS.md), [`TELEX.md`](../../TELEX.md),
-[`DISPATCH.md`](../../DISPATCH.md)).
+[`PRODUCT-THESIS.md`](../../PRODUCT-THESIS.md) and [`TELEX.md`](../../TELEX.md)).
 
 ## Documents
 
@@ -34,6 +33,10 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   nested under `copilot/`) is
   [DECISIONS.md ADR 0044](DECISIONS.md#0044--harness-neutral-root-skill-per-harness-content-nested-under-harness);
   see also [copilot-plugin-validation.md](copilot-plugin-validation.md).
+- **[proposals/](proposals/)** — forward-looking design proposals not yet part of the
+  normative spec: [DISPATCH.md](proposals/DISPATCH.md) (discovery and dispatch: broadcast,
+  Contract-Net) and [EXTENSIONS.md](proposals/EXTENSIONS.md) (extensions and capability
+  cards).
 
 ## Reading order
 
