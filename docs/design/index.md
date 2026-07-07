@@ -32,7 +32,7 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   [DECISIONS.md ADR 0040](DECISIONS.md#0040--copilot-skill-is-binary-owned-the-plugin-skill-is-a-bootstrap).
   The harness-neutral content/layout boundary (root `SKILL.md` neutral; Copilot content
   nested under `copilot/`) is
-  [DECISIONS.md ADR 0043](DECISIONS.md#0043--harness-neutral-root-skill-per-harness-content-nested-under-harness);
+  [DECISIONS.md ADR 0044](DECISIONS.md#0044--harness-neutral-root-skill-per-harness-content-nested-under-harness);
   see also [copilot-plugin-validation.md](copilot-plugin-validation.md).
 
 ## Reading order

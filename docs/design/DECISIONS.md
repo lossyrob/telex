@@ -1621,9 +1621,9 @@ for orphaned endpoints. See
 
 - **Date:** 2026-07-01
 - **Status:** Accepted (`push-delivery` node / PR #55)
-- **Note (2026-07-07, ADR 0043):** The plugin bootstrap referenced below as
+- **Note (2026-07-07, ADR 0044):** The plugin bootstrap referenced below as
   `skills/telex/SKILL.md` moved to `copilot/plugin/skills/telex/SKILL.md` under the
-  harness-neutral layout (ADR 0043). The ownership decision in this entry is unchanged;
+  harness-neutral layout (ADR 0044). The ownership decision in this entry is unchanged;
   only the file path moved.
 
 **Context.** The #53 skill rewrite risks baking a long, detailed copy of the Copilot
@@ -1761,7 +1761,64 @@ re-provision, preserving the durable+ack invariant. The daemon stays harness-neu
 inferred from generic push outcomes, not Copilot bridge state. A lighter in-session `mute` (stay
 attached, stop push) and auto-expiry of stale leases remain deferred.
 
-## 0043 — Harness-neutral root skill; per-harness content nested under `<harness>/`
+## 0043 — Copilot bridge defers non-interrupt pushes until turn-stop, drained by an ungated agentStop hook
+
+- **Date:** 2026-07-07
+- **Status:** Accepted (`bridge-idle-drain` node / issue #65)
+
+**Context.** ADR 0041 kept the bridge's busy path as `accepted:"pending"`: when a root turn was
+running, the bridge still called `session.send(...)` for a non-`interrupt` message and, if the send
+RPC did not settle within the short window, reported `pending` success. That queues the turn behind
+the current one. In tight multi-agent use the agent often inspects Telex and acks/handles the
+message manually during the current turn, before the queued pushed turn is read; when the turn ends
+the queued turn is delivered as stale, already-handled work. The durable Telex state was already
+correct; the defect was scheduling — a turn was queued while the agent was busy instead of after it
+was free to receive one.
+
+**Decision.** For non-`interrupt` pushes, defer until the session is at a turn boundary, revalidate
+durable state, then send:
+- **Busy is the root-agent turn boundary, not full `session.idle`.** The bridge subscribes to
+  `assistant.turn_start`/`assistant.turn_end` and tracks busy from those, **filtering to root-agent
+  events** (`agentId` absent). Sub-agent turn events are ignored: a sub-agent's inner `turn_end`
+  must not clear the gate while the parent turn is still running, or the stale-injection it is meant
+  to prevent returns. Full `session.idle` would additionally wait for background shells/sub-agents,
+  which is stronger than #65 needs and risks starving delivery after a long tool run. The bridge
+  default is busy (deferring is the safe action; injecting a stale turn is the risk) and self-heals
+  to not-busy after a bound of no activity, so a missed/never-fired `turn_end` (crash/abort, or a
+  load outside any turn) does not defer forever.
+- **The bridge defers, it does not send.** A non-`interrupt` push arriving while busy returns
+  `deferred_until_idle` **without** calling `session.send`. `interrupt` (`immediate`) still sends
+  immediately. A one-tick yield before answering collapses the common drain-vs-`turn_end` race into
+  a single non-deferred attempt.
+- **Deferred is a distinct daemon outcome.** `telex copilot push` maps `deferred_until_idle` to a
+  new exit code; the daemon records a **deferred** `PushAttempt` that is neither accepted (no CC
+  lower-bound advance, not treated as queued) nor a transient failure (no fast re-push, no error
+  log), does not increment the degraded-status attempt counter, and is held for a
+  deferred backstop. Invariant: `HEARTBEAT_INTERVAL <= deferred backstop < accepted backstop`.
+- **Turn-stop drains via an ungated `agentStop` hook.** A dedicated `agentStop` hook entry runs
+  `telex copilot drain --session <id>`, independent of `TELEX_TURN_GUARD` and its nudge cap, with
+  its own `TELEX_COPILOT_DRAIN` off-switch. It sends a `DrainDeferred` request; the daemon clears
+  the deferred skip for the session's on-deliver members (leaving accepted attempts untouched) and
+  re-runs the existing on-deliver sweep. The sweep re-fetches `fetch_wait_candidates`, so a message
+  acked before the drain is no longer a candidate and is skipped. The drain re-sweeps every
+  on-deliver member of the session (matched by `session_id` across stores, so a named-backend
+  session still drains), which closes a deferred-vs-drain inflight race and opportunistically
+  re-attempts backstop-elapsed messages; the only zero-work fast path is the client-side no-bridge
+  check. It returns before the sweeps complete and has a client-side IPC deadline below the hook
+  timeout, so running it on every turn-stop never blocks the turn. The daemon stays harness-neutral:
+  it re-runs a generic sweep on request; "busy/idle" lives entirely in the bridge.
+
+**Consequences.** The stale queued-turn class is removed: a busy non-`interrupt` message is not
+queued behind the current turn, and if it is consumed before turn-stop the drain's durable
+revalidation skips it. Delivery of a still-unacked deferred message is prompt (the turn-stop drain)
+with a bounded fallback (the deferred backstop + heartbeat sweep) if the hook is missed. `interrupt`
+is unchanged. The durable+ack invariant of ADR 0041 stands — the deferred axis refines that ADR's
+`accepted:"pending"` busy path rather than replacing its accepted-vs-failed backoff split — and
+crash/reload still re-delivers via re-provision. Residual risk: the bridge's busy tracking is
+liveness state, so a self-heal during a genuinely long, event-quiet turn degrades a single message
+to the prior enqueue behavior (a queued next turn), not to a mid-turn injection.
+
+## 0044 — Harness-neutral root skill; per-harness content nested under `<harness>/`
 
 - **Date:** 2026-07-07
 - **Status:** Accepted (`harness-skill-layout` node / issue #61)
@@ -1810,7 +1867,7 @@ Copilot CLI 1.0.69-2 — positive install from `copilot/plugin`, a negative cont
 `source` is load-bearing, and the installed plugin excluding the embedded siblings (see
 [copilot-plugin-validation.md](copilot-plugin-validation.md)). This entry **complements**
 ADR 0040 (it does not supersede it): 0040's binary-owned-skill ownership decision stands;
-0043 only relocates the files and neutralizes the root skill.
+0044 only relocates the files and neutralizes the root skill.
 
 The `<harness>/` layout is only the on-disk part of the convention. Adding a sibling
 harness also requires code/CI touchpoints outside `<harness>/`, recorded per harness in

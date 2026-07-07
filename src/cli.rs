@@ -456,6 +456,9 @@ pub enum CopilotCmd {
     /// Deliver one telex message (descriptor on stdin) into a session via its bridge.
     #[command(hide = true)]
     Push(CopilotPushArgs),
+    /// Handle Copilot agentStop by draining messages deferred while the session was busy.
+    #[command(hide = true)]
+    Drain(CopilotDrainArgs),
     /// Detach a Copilot session's address and tear down its bridge if it was the last binding.
     Detach(CopilotDetachArgs),
     /// Garbage-collect stale Copilot bridge files for unloaded sessions.
@@ -587,6 +590,13 @@ pub struct CopilotTurnGuardArgs {
 pub struct CopilotPushArgs {
     /// Stable Copilot session identity whose bridge should receive the message;
     /// defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotDrainArgs {
+    /// Stable Copilot session identity to drain; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
     pub session: Option<String>,
 }
