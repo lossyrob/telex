@@ -213,6 +213,7 @@ pub async fn build(
 /// SQLite, a read-only connection with no journal/synchronous pragmas — so pointing an inspector
 /// at a store never mutates it. Postgres skips `init_schema` (no DDL); enforce a `SELECT`-only
 /// role at the connection string for a hard guarantee there.
+#[allow(unused_variables)]
 pub async fn build_readonly(
     profile: &BackendProfile,
     db_override: Option<&str>,
