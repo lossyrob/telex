@@ -582,6 +582,39 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
         }
     };
 
+    // Self-stop honor: if this session was deliberately detached from the delivered-to address, a
+    // durable detach tombstone exists. Refuse to push and return the permanent exit code so the
+    // daemon dead-letters and stops re-pushing — even if an in-flight push races member removal
+    // (the commit-to-helper-exec window; steady-state stop is the daemon dropping the member).
+    // Fail-open on a transient tombstone-query error: the check is defense-in-depth, not the
+    // primary stop, so a backend blip must not block all delivery.
+    match ctx.backend().await {
+        Ok(backend) => match backend
+            .detach_tombstone(&session, &descriptor.address)
+            .await
+        {
+            Ok(Some(_)) => {
+                eprintln!(
+                    "telex copilot push: session {session} was deliberately detached from {}; not pushing (message stays durable, read it via `telex inbox`)",
+                    descriptor.address
+                );
+                return Ok(PUSH_EXIT_PERMANENT);
+            }
+            Ok(None) => {}
+            Err(e) => {
+                eprintln!(
+                    "telex copilot push: detach-tombstone check failed for {}: {e}; proceeding (fail-open)",
+                    descriptor.address
+                );
+            }
+        },
+        Err(e) => {
+            eprintln!(
+                "telex copilot push: backend unavailable for detach-tombstone check: {e}; proceeding (fail-open)"
+            );
+        }
+    }
+
     let registry_path = bridge_registry_path(&session)?;
     let registry: BridgeRegistry = match std::fs::read_to_string(&registry_path)
         .ok()
@@ -2212,11 +2245,14 @@ mod tests {
             waiters: live_waiters_count,
             live_waiters_count,
             pending_unconsumed_count: pending,
+            inbound_actionable_count: 0,
             station_health: if live_waiters_count > 0 {
                 StationHealth::Armed
             } else {
                 StationHealth::Unattended
             },
+            push_delivery: crate::daemon_ipc::PushDeliveryHealth::NotRegistered,
+            push_suppressed_count: 0,
             health_detail: None,
             last_waiter_exit_at_ms: None,
             last_waiter_outcome: None,

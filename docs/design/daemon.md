@@ -332,8 +332,16 @@ Frozen Status fields:
   `idle` (bool — no waiter currently attended/blocked).
 - **`members`** — for each in-memory membership record: `address`, `session_id` (opaque),
   `occupant`, `waiters` (count of blocked waiters), `live_waiters` (pid/start-time/alive,
-  attention, timeout), `pending_unconsumed_count`, `station_health`
-  (`armed` / `recently_delivered` / `unattended` / `unattended_with_backlog` / `idle`),
+  attention, timeout), `pending_unconsumed_count`, `inbound_actionable_count` (messages requiring
+  THIS station's disposition — primary recipient + `requires_disposition`, non-terminal, unconsumed
+  — distinct from `pending_unconsumed_count`, which also counts no-disposition notes and, on a
+  shared address, traffic this station is not responsible for dispositioning), `station_health`
+  (`armed` / `recently_delivered` / `unattended` / `unattended_with_backlog` / `attended_push` /
+  `idle`), `push_delivery` (push-delivery health for a registered on-deliver station, derived from
+  the daemon's own push-attempt outcomes: `not_registered` / `no_backlog` / `delivering` /
+  `probing` / `stale_accepted` / `failing`), `push_suppressed_count` (on-deliver messages whose
+  re-push is suppressed — dead-lettered as unpushable, or past the `ON_DELIVER_MAX_REPUSH` attempt
+  cap — still durably queued and readable),
   thresholded deaf-station fields (`unattended_since_ms`, `unattended_for_ms`, `deaf_since_ms`,
   `deaf_for_ms`, `deaf_warn`),
   daemon-authored terminal waiter fields (`last_waiter_exit_at_ms`, `last_waiter_outcome`,
@@ -346,6 +354,26 @@ Frozen Status fields:
   have not (re-)attached since the last daemon start.)
   `presence-ended` detail tokens are `session-end`, `station-stop`, `idle-ttl-reap`, `reset`,
   and `watch-pid-death`.
+- **Push-bridge station health.** A registered on-deliver (push-bridge) station has **no** `telex
+  wait` waiter by design, so its health is **not** decided by waiter presence — a live push station
+  must never be reported `unattended`/`unattended_with_backlog` merely for lacking a waiter. Instead
+  the daemon derives `push_delivery` from its own push-attempt outcomes (harness-neutral: it never
+  reads the Copilot bridge registry): a recent **accepted** push -> `delivering` (station_health
+  `attended_push`). "Accepted" here means the harness **accepted/queued** the push request (the
+  bridge returned ok, including its `pending` enqueue-ack), **not** that the agent has confirmed
+  seeing the turn — `delivering` therefore attests bridge transport, not confirmed agent enqueue.
+  An **accepted** push whose 300s backstop has elapsed with no fresh accept ->
+  `stale_accepted` (an earlier-than-deaf hint that a previously-live bridge may have gone away, e.g.
+  a suspended session — still `attended_push`); backlog with no attempt yet (e.g. just after a
+  daemon restart, since the attempt map is an in-memory lifecycle fast-path) -> `probing` (still
+  `attended_push`, not confidently attended and not deaf, resolved on the next sweep); **failing**
+  pushes (bridge unreachable) -> `failing`, which sets the backlog timer and drives
+  `unattended_with_backlog`/`deaf`. Attempts for messages that need no further delivery (accepted CC
+  notifications and no-disposition notes) are excluded from this classification, so purely
+  informational backlog does not make a station look `stale_accepted`. **A successful push is
+  answerback**: it clears a stale failing/deaf state. So a push station is deaf **only** when pushes
+  are actually failing, not while the bridge is delivering; a suspended-after-accepted bridge is
+  detected after roughly backstop + sweep + deaf-threshold when its backstop re-push fails.
 - **`live_waiters`** — the top-level live waiter registry, keyed by daemon-assigned
   `waiter_id`, including waiters that are in the small teardown interval between
   membership release and process exit. At most one live waiter is accepted for a
@@ -359,7 +387,10 @@ Frozen Status fields:
   **warn flag** when it crosses the frozen v1 budget.
 - **`deaf_stations`** — daemon-wide summary of stations currently past the configured
   `unattended_with_backlog` warning threshold (`count`, `warn`, `warn_threshold_ms`). The default
-  threshold is 120000 ms and local operators/tests can override it with `TELEX_DEAF_WARN_MS`.
+  threshold is 120000 ms and local operators/tests can override it with `TELEX_DEAF_WARN_MS`. This
+  count includes both pull stations with an un-drained backlog and push stations whose delivery is
+  `failing`; the per-member `push_delivery` field distinguishes the two (transport-broken vs
+  agent-absent).
 - **`stores`** — the set of stores this exchange currently serves.
 
 `telex station status` remains session-scoped by default. `telex station status --all-sessions`
@@ -441,7 +472,12 @@ respawn. There is **no** durable `session_incarnation`, **no** `tombstoned_at`, 
 column on the lease row, and **no `sessions` currency table** — identity is the unique, stable
 `session_id` ([§14.1](#141-identity-and-in-memory-membership)). When the exchange does not know a
 session/address, the relevant op returns **`NeedsAttach`** and the agent explicitly re-attaches;
-nothing is ever resurrected from durable history, so no tombstones are needed.
+membership is never *implicitly* resurrected from durable history. The one durable record in this
+space is the explicit **detach tombstone** (`detach_tombstones`, written atomically with the lease
+release on a deliberate `Detach`/`station stop`): it does not resurrect membership — it records that
+a session/address was *deliberately* detached, so a recovery re-register is refused (`NeedsAttach`
+with `DeliberatelyDetached`) and the `telex copilot push` helper stops delivering, until an explicit
+re-attach clears it. See [§13.2](#132-on-deliver-push-opt-in-harness-neutral).
 
 Greenfield: the new lease columns and the per-message consumed state are created **together
 in one schema-version migration** via `CREATE TABLE IF NOT EXISTS` / additive column add,
@@ -1468,10 +1504,50 @@ that member.
   in-session drop of a queued turn. While the bridge heartbeat is fresh, an unacked backlog is not
   itself a turn-guard issue: enqueue-mode turns may already be queued behind the current turn, and
   `telex inbox` is a diagnostics/recovery path rather than the normal live push receive path. After
-  a small attempt ceiling the daemon surfaces a **degraded** status. The attempt map is a
+  a small attempt ceiling the daemon surfaces a **degraded** status, and after a **hard cap**
+  (`ON_DELIVER_MAX_REPUSH`, 24 total attempts on the same still-unacked message) it **suppresses**
+  further re-push so a never-acked message cannot be re-pushed forever — the message stays durably
+  queued/readable and is surfaced via `push_suppressed_count`; a re-provision resets the budget and
+  re-delivers. A message that needs **no** disposition for the recipient (a CC notification, or a
+  primary `requires_disposition:false` note) is delivered **once** and then skipped forever after an
+  accepted push — informational traffic never enters the re-push pool — while a message that
+  **requires** disposition stays re-pushable on the backstop until acked so disposition-required
+  work is not stranded within a lifecycle. The attempt map is a
   lifecycle-scoped in-memory fast-path keyed per member — pruned to the still-undelivered set each
   sweep, reset on explicit re-provision, and reclaimed on the next `Register` after a plain
   `Detach` — never the authority.
+- **Self-stop honored durably.** A deliberate `Detach` (including `station stop`) records a
+  **durable detach tombstone** for `(session, address)` — written **atomically with the lease
+  release** by `release_epoch_lease_for_detach` (the daemon does not issue a second, non-atomic
+  tombstone write, which could race a concurrent re-attach's clear). The tombstone survives a daemon
+  restart and is visible to a separate process. The `telex copilot push` helper **preflights** it
+  (via its baked store selector) and, if present, refuses with the permanent exit code so the daemon
+  dead-letters instead of re-pushing to a deliberately-stopped session. This closes the
+  commit-to-helper-exec race (an in-flight push spawned around member removal); the steady-state stop
+  is member removal itself (no live member -> no on-deliver candidate). The preflight **fails open**
+  on a transient tombstone-query/backend error: it is defense-in-depth, and the primary stop is
+  member removal, so a backend blip must not block all delivery — **the consequence is a weaker
+  guarantee under backend faults: a push that raced member removal can still be delivered once if the
+  tombstone lookup itself fails.** An explicit re-attach clears the tombstone. `station stop`
+  releases membership + records the tombstone but does **not** unload the in-session push producer,
+  so its response reports `push_registered` and the (harness-neutral) CLI warns, pointing at the
+  harness-specific detach (e.g. `telex copilot detach`).
+- **Detach-tombstone trust model.** Tombstones are keyed only by `(session_id, address)` and, on the
+  no-active-member path, can be created from a caller-supplied session/address without an ownership
+  proof (the member-present path proves ownership via the current lease epoch). telex treats
+  `session_id` as an **identity, not a security principal**, and assumes all processes that can reach
+  the daemon/backend for a store are mutually trusted to administer that store's sessions (the
+  same-user local-exchange model). In a shared-backend deployment where that assumption does not
+  hold, a caller who knows another session/address could suppress its pushes until an explicit
+  re-attach; requiring an ownership proof for no-member tombstone creation is a possible future
+  hardening.
+- **Wire compatibility of `attended_push`.** `station_health` gains the `attended_push` value and a
+  new structured `push_delivery` field. Updated clients parse unknown future values via a
+  `#[serde(other)]` catch-all, but a **pre-change** client cannot parse `attended_push`. This
+  enum expansion is not gated by a new required handshake capability, so the release invariant is
+  that a pre-change status **consumer** must not be paired against a newer daemon; telex ships the
+  daemon and CLI together, and this node gates the first public release, so no such pairing exists in
+  practice. A future cross-version pairing would need a capability gate or a downgraded emitted value.
 - **Deferred outcome + on-request drain (harness-neutral).** Beyond accepted / failed / permanent
   dead-letter, the exec may report a **deferred** outcome (a distinct exit code): the harness was
   busy and did not deliver, so it is neither accepted (not queued) nor a failure (not fast-retried).
@@ -1484,7 +1560,7 @@ that member.
   busy/idle; it only re-runs a generic sweep on request. The Copilot mapping (busy = root-agent turn
   boundary, drained by an `agentStop` hook) lives entirely in the `telex copilot` verbs. See
   [copilot-bridge-push.md](copilot-bridge-push.md) and
-  [DECISIONS.md ADR 0042](DECISIONS.md#0042--copilot-bridge-defers-non-interrupt-pushes-until-turn-stop-drained-by-an-ungated-agentstop-hook).
+  [DECISIONS.md ADR 0043](DECISIONS.md#0043--copilot-bridge-defers-non-interrupt-pushes-until-turn-stop-drained-by-an-ungated-agentstop-hook).
 - **Version compatibility.** Because the daemon is persistent, a new client can meet an **older**
   daemon that predates `on_deliver`. The daemon advertises an `on_deliver_exec_v1` capability in
   its handshake, and a `--copilot-bridge` bind **verifies `push_registered` after registering**; if
@@ -1535,18 +1611,23 @@ ran a one-off `telex attach` → `Register{store_key, session_id, address}`
 `(store_key, session_id) → {addresses}` entry. The exchange **never** rebuilds membership
 implicitly from history, the durable buffer, or a hook. Consequently:
 
-- There are **no tombstones** — nothing implicit ever resurrects a removed address, so there is
-  nothing to suppress. `Detach{store_key, session_id, address}` simply drops the in-memory
-  entry; a removed address stays gone until an explicit `Register` re-adds it.
+- There are **no implicit resurrection tombstones** — nothing implicit ever resurrects a removed
+  address, so there is nothing to suppress. `Detach{store_key, session_id, address}` drops the
+  in-memory entry; a removed address stays gone until an explicit `Register` re-adds it. (There is
+  one *explicit* durable record — the **detach tombstone** written atomically with the lease release
+  on a deliberate detach — but it does not resurrect anything: it marks a deliberate detach so a
+  recovery re-register is refused and push delivery stops until an explicit re-attach clears it. See
+  [§5](#5-membership-model-and-record-shapes) and [§13.2](#132-on-deliver-push-opt-in-harness-neutral).)
 - For any `Wait`/`Send`/`Reply`/`Ack` naming a `(session_id[, address])` the exchange does not
   currently know, the op returns the typed **`NeedsAttach`** error
   ([§6.2](#62-request--response-frames)) — terminal for that op — and the agent **explicitly
   re-attaches** the addresses it wants. The exchange never guesses.
 
-The durable layer therefore holds **only** lease-ownership (the epoch fence,
-[§11](#11-lease-epoch-fence-the-spine)) and the **message/ack buffer**
-(`deliveries(message_id, recipient)`, [§5.1](#51-durable-lease-row-columns-new)). Membership
-lives in memory; identity lives in the ambient `session_id`.
+The durable layer therefore holds lease-ownership (the epoch fence,
+[§11](#11-lease-epoch-fence-the-spine)), the **message/ack buffer**
+(`deliveries(message_id, recipient)`, [§5.1](#51-durable-lease-row-columns-new)), and the explicit
+**detach tombstones** noted above. Membership itself lives in memory; identity lives in the ambient
+`session_id`.
 
 ### 14.2 The sessionEnd hook
 
