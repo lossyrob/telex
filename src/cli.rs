@@ -442,6 +442,9 @@ pub struct DaemonSessionEndArgs {
 pub enum CopilotCmd {
     /// Register a Copilot session using Copilot env vars mapped to generic telex inputs.
     Attach(CopilotAttachArgs),
+    /// Re-provision this Copilot session's push bridge and re-register the address after resume.
+    #[command(alias = "repair")]
+    Resume(CopilotResumeArgs),
     /// Handle Copilot sessionEnd by non-destructively ending this session in the daemon.
     #[command(hide = true)]
     SessionEnd(CopilotSessionEndArgs),
@@ -453,6 +456,9 @@ pub enum CopilotCmd {
     /// Deliver one telex message (descriptor on stdin) into a session via its bridge.
     #[command(hide = true)]
     Push(CopilotPushArgs),
+    /// Handle Copilot agentStop by draining messages deferred while the session was busy.
+    #[command(hide = true)]
+    Drain(CopilotDrainArgs),
     /// Detach a Copilot session's address and tear down its bridge if it was the last binding.
     Detach(CopilotDetachArgs),
     /// Garbage-collect stale Copilot bridge files for unloaded sessions.
@@ -545,6 +551,28 @@ pub struct CopilotAttachArgs {
 }
 
 #[derive(Args)]
+pub struct CopilotResumeArgs {
+    /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// One-line directory description of what this session is doing.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Project/workstream scope this address belongs to.
+    #[arg(long)]
+    pub scope: Option<String>,
+    /// Comma-separated coarse tags (e.g. issue:215,repo:telex).
+    #[arg(long)]
+    pub tags: Option<String>,
+    /// Occupant identity recorded on the lease (default: session host/pid).
+    #[arg(long)]
+    pub occupant: Option<String>,
+    /// Push live CC observer traffic to this session after reloading the bridge.
+    #[arg(long)]
+    pub wake_on_cc: bool,
+}
+
+#[derive(Args)]
 pub struct CopilotSessionEndArgs {
     /// Stable Copilot session identity; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
@@ -562,6 +590,13 @@ pub struct CopilotTurnGuardArgs {
 pub struct CopilotPushArgs {
     /// Stable Copilot session identity whose bridge should receive the message;
     /// defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+}
+
+#[derive(Args)]
+pub struct CopilotDrainArgs {
+    /// Stable Copilot session identity to drain; defaults to hook stdin or COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
     pub session: Option<String>,
 }

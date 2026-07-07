@@ -1820,6 +1820,11 @@ fn real_process_station_stop_drains_waiter_and_preserves_next_message() {
         stopped_json.get("waiters_after").and_then(Value::as_u64),
         Some(0)
     );
+    assert_eq!(
+        stopped_json.get("push_registered").and_then(Value::as_bool),
+        Some(false),
+        "a pull station reports push_registered=false in station stop JSON (no push-bridge warning)"
+    );
 
     let (wait_code, wait_timed_out) = wait_status_with_timeout(waiter, Duration::from_secs(3));
     assert_eq!(wait_code, Some(5), "waiter should exit presence-ended");
@@ -1971,13 +1976,21 @@ fn real_process_status_and_address_list_agree_after_attach() {
     );
     status.assert_success("status --address");
     let status_json = status.json("status --address");
+    let status_occupied = status_json
+        .get("occupancy")
+        .and_then(|o| o.get("occupied"))
+        .and_then(Value::as_bool);
+    assert_eq!(
+        status_occupied,
+        Some(false),
+        "status --address should report durable lease liveness, not daemon membership: {status_json}"
+    );
     assert_eq!(
         status_json
-            .get("occupancy")
-            .and_then(|o| o.get("occupied"))
+            .get("daemon_member_present")
             .and_then(Value::as_bool),
         Some(true),
-        "status --address should report occupied: {status_json}"
+        "status --address should report daemon member presence separately: {status_json}"
     );
     assert!(
         !status_json
@@ -2003,7 +2016,7 @@ fn real_process_status_and_address_list_agree_after_attach() {
         .expect("address listed");
     assert_eq!(
         listed.get("occupied").and_then(Value::as_bool),
-        Some(true),
+        status_occupied,
         "address list should agree with status --address: {list_json}"
     );
 }
@@ -2293,6 +2306,75 @@ fn real_process_copilot_attach_maps_session_and_loader_pid() {
             .and_then(Value::as_u64),
         Some(std::process::id() as u64)
     );
+}
+
+/// #66 self-stop: a deliberate `copilot detach` durably tombstones the session/address, and the
+/// `telex copilot push` helper preflights that tombstone and refuses (permanent exit 3) — so a
+/// session can stop delivery to itself and it sticks even against a racing/late push, without
+/// killing the session.
+#[test]
+fn real_process_copilot_push_refuses_after_detach_tombstone() {
+    let env = ProcessEnv::new("real-push-tombstone-stop");
+    let session = "real-push-stop-session";
+    let address = "addr:real-push-stop";
+
+    let attach = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "attach",
+            "--session",
+            session,
+            "--description",
+            "push-stop test",
+        ],
+        Duration::from_secs(8),
+    );
+    attach.assert_success("attach before push-stop");
+
+    // Deliberate detach writes the durable tombstone the push helper honors.
+    let _detach = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "copilot",
+            "detach",
+            "--session",
+            session,
+        ],
+        Duration::from_secs(8),
+    );
+
+    // `telex copilot push` with a descriptor on stdin must refuse with the permanent exit code.
+    let mut cmd = env.command_with_session(session);
+    cmd.args(["copilot", "push", "--session", session])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = cmd.spawn().expect("spawn copilot push");
+    {
+        use std::io::Write;
+        let descriptor = format!(r#"{{"message_id":1,"address":"{address}"}}"#);
+        child
+            .stdin
+            .take()
+            .expect("push stdin")
+            .write_all(descriptor.as_bytes())
+            .expect("write push descriptor");
+    }
+    let out = child.wait_with_output().expect("wait copilot push");
+    assert_eq!(
+        out.status.code(),
+        Some(3),
+        "copilot push must refuse with permanent exit 3 when a detach tombstone exists; stderr={}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    env.stop_daemon_best_effort();
 }
 
 #[test]

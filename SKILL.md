@@ -11,25 +11,24 @@ Telex is a CLI-first message fabric for AI agent sessions. Ephemeral sessions at
 
 Your operator will tell you which address to attach to. You can reload these instructions anytime with `telex skill`, or `telex skill --address <addr>` for instructions tailored to your assigned address.
 
-## Copilot CLI: push delivery
+## Harness-specific delivery
 
-In Copilot CLI, telex delivers messages to you as **turns** -- you do not run, re-arm, or
-babysit a `telex wait` waiter. The full, version-matched Copilot workflow (bind, load the
-in-session bridge, receive pushed turns, record disposition, tear down, and fallback) is
-printed by the installed binary so it never drifts from a static copy:
+Some agent harnesses have a native telex integration that delivers messages to you
+as **turns** (push delivery) instead of requiring you to run a pull waiter. If your
+harness has one, load its version-matched instructions from the installed binary and
+follow those instead of the generic pull loop below:
 
 ```sh
-telex copilot skill
+telex <harness> skill      # e.g. in Copilot CLI: telex copilot skill
 ```
 
-Run that first when you are in Copilot CLI. The pull workflow below is the generic fallback
-for non-Copilot harnesses (and for Copilot sessions where the bridge cannot load).
+The pull workflow below is the generic path for harnesses without a native
+integration (scripts, CI, and any harness where a push bridge is unavailable).
 
-## Pull mode: `telex wait` (generic / non-Copilot harnesses)
+## Pull mode: `telex wait`
 
 `telex wait` is the generic pull primitive for scripts, CI, and harnesses
-without an in-session extension. **Copilot CLI sessions use push delivery above
-instead**; reach for `wait` only when the bridge is unavailable.
+without an in-session push integration.
 
 Use Telex as a **one-shot command loop** backed by an auto-spawned per-user local
 exchange (daemon). Sessions no longer run a resident holder process. `attach`
@@ -38,9 +37,8 @@ as one daemon client for one delivery and exits; `ack` is the explicit durable
 consumed mark for the message you just received.
 
 Before attaching, make sure the session has a stable identity. Generic telex
-commands use `--session` or `$TELEX_SESSION_ID`; Copilot-specific env names are
-mapped by the telex Copilot plugin adapter. Telex fails closed rather than
-guessing.
+commands use `--session` or `$TELEX_SESSION_ID`; harness-specific integrations may
+map the harness's own session id for you. Telex fails closed rather than guessing.
 
 1. Register your session's address once:
 
@@ -49,19 +47,15 @@ guessing.
    telex attach --address <addr> --description "<what this session is doing>"
    ```
 
-   In Copilot CLI with the telex plugin installed, the adapter maps
-   `$COPILOT_AGENT_SESSION_ID` to the generic session id and `$COPILOT_LOADER_PID`
-   to the loader `--watch-pid` backstop. Generic telex commands still need the
-   generic session id on each invocation, so pass
-   `--session "$COPILOT_AGENT_SESSION_ID"` (or set `TELEX_SESSION_ID` in the same
-   shell command that invokes telex). In Copilot, prefer push delivery (above);
-   use pull only as a fallback when the bridge is unavailable:
+   Generic telex commands need the session id on each invocation, so either set
+   `TELEX_SESSION_ID` in the shell that invokes telex or pass `--session <id>`
+   explicitly:
 
    ```sh
-   telex --address <addr> wait --session "$COPILOT_AGENT_SESSION_ID" --out-dir <dir>
+   telex --address <addr> wait --session <id> --out-dir <dir>
    ```
 
-   Detached waiter stdout is not delivered to the agent, so read `message.json` /
+   Detached waiter stdout may not be delivered to the agent, so read `message.json` /
    `delivery.json` from `--out-dir` after the completion wake.
 
    Optional metadata:
@@ -74,14 +68,12 @@ guessing.
    `anchor` pid with a start-time reuse guard; when it dies, blocked waits return
    `PresenceEnded` but the station and durable message buffer remain.
 
-2. Wait for one message with a single-shot **fully detached** background
-   `telex wait` (`detach: true` in Copilot CLI). This is for **UX**, not just
-   shutdown survival: a session-attached async waiter keeps the terminal busy /
-   spinner-like and competes with normal user-agent interaction. A fully detached
-   background task still wakes the session when it completes; that completion
-   notification is the waiter loop's wake signal. Pass `--out-dir <dir>` so the
-   waiter writes its result to files; the woken agent reads those instead of
-   relying on captured stdout:
+2. Wait for one message with a single-shot background `telex wait`. Prefer a
+   backgrounded/detached wait for **UX**: a foreground waiter ties up the session,
+   while a background task that wakes the session on completion lets normal work
+   continue. Pass `--out-dir <dir>` so the waiter writes its result to files; read
+   those instead of relying on captured stdout, since some harnesses do not return
+   background stdout to the agent:
 
    ```sh
    telex wait --address <addr> --session <session-id> --out-dir <dir>
@@ -93,15 +85,11 @@ guessing.
    - `status.json` — `{ outcome, exit_code, detail, address, written_at_ms }`, always;
    - `exit.code` — the integer exit code, written **last** as the completion marker.
 
-   This matters because some runtimes (e.g. Copilot CLI) do not return fully
-   detached shell stdout, and the detached task's reported exit code may describe
-   only the launcher/wrapper. Do not fall back to `detach:false` just to recover
-   stdout; that regresses the waiter into foreground-ish UX. Trust the artifact
-   `exit.code`, not the shell task exit code. The detached completion notification
-   is the wake signal; after it arrives, read
-   `exit.code` (then `delivery.json` or `message.json` if it is `0`), `ack` the delivered message
-   with the same session id, dedupe by id, then re-arm a fresh detached `wait`
-   with the same session id before longer processing.
+   Trust the artifact `exit.code` as the completion marker rather than a background
+   task's reported exit code, which may describe only a launcher/wrapper. On the
+   completion wake, read `exit.code` (then `delivery.json` or `message.json` if it is
+   `0`), `ack` the delivered message with the same session id, dedupe by id, then
+   re-arm a fresh `wait` with the same session id before longer processing.
    Do not hide `wait` inside an infinite shell loop.
    `wait` does **not** spawn the daemon. If the daemon is gone, `wait` exits 3 so
    the agent can run `telex attach` (the spawning/recovery verb) and then re-arm.
@@ -156,10 +144,6 @@ then repeat:
 
 ### Two-phase attention loop
 
-> Pull mode only. In **push delivery** the daemon maps attention to send mode
-> automatically (interrupt -> immediate steering, everything else -> enqueue), so
-> you never manage waiter phases -- messages just arrive as turns.
-
 When you are actively working, arm a phase-1 waiter with
 `--min-attention interrupt`. It wakes only for urgent messages; `next-checkpoint`,
 `background`, and `fyi` messages stay durably buffered for your next checkpoint.
@@ -183,93 +167,31 @@ and arm the new mode.
 > runtimes surface output only when the command completes; an internal loop hides
 > delivered messages in a background buffer.
 
-### Detached waiter pattern (pull-mode fallback)
+### Tearing down a waiter
 
-> This is the pull-mode fallback for Copilot sessions when the push bridge is
-> unavailable. The default Copilot path is push delivery -- no waiter.
+`wait` writes `<dir>/wait.pid` at startup. To tear down the station before a
+message arrives, prefer `telex station stop --address <addr>`: it releases the
+station and waits for the live waiter to exit. The PID file is a diagnostic
+fallback only; do not hunt OS process lists unless `station stop` reports a
+still-live waiter after its grace window.
 
-Use a fully detached shell task (`detach: true`) for the waiter UX. This is the
-standard pull pattern: it does **not** spin the terminal like foreground work, and
-the Copilot CLI session is still notified when the detached task exits. Do **not** use
-session-attached async (`detach:false`) as the normal waiter mode just because it
-returns stdout; use `--out-dir` artifacts instead. Let `telex wait --out-dir
-<dir>` write the result to files you read after the detached completion
-notification. Name the background task **`TELEX MESSAGE WAITER`** so it is
-obvious in `/tasks`.
-
-On Windows/Copilot CLI, use a small `.ps1` file and detach `pwsh -File ...` as
-the primary reliable pattern. Some Copilot CLI versions silently no-op when a
-detached task is a bare external executable (`telex wait ...`) even though the
-same command works attached; wrapping the same call in `pwsh -File` preserves
-PATH/environment and reliably runs the child. Keep the detached command itself
-variable-free: pass concrete literal paths/addresses as script arguments.
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\telex-wait-once.ps1" `
-  -Telex "telex" `
-  -Address "<addr>" `
-  -Session "<session-id>" `
-  -OutDir "C:\path\to\telex-wait-<unique>"
-```
-
-The script body can be minimal:
-
-```powershell
-param(
-  [Parameter(Mandatory)] [string]$Telex,
-  [Parameter(Mandatory)] [string]$Address,
-  [Parameter(Mandatory)] [string]$Session,
-  [Parameter(Mandatory)] [string]$OutDir,
-  [string]$MinAttention
-)
-if ([string]::IsNullOrWhiteSpace($MinAttention)) {
-  & $Telex --json --address $Address wait --session $Session --timeout-ms 1800000 --out-dir $OutDir
-} else {
-  & $Telex --json --address $Address wait --session $Session --timeout-ms 1800000 --min-attention $MinAttention --out-dir $OutDir
-}
-exit $LASTEXITCODE
-```
-
-If you see a detached completion notification but `<dir>\exit.code` is missing,
-the waiter process did not actually run (or the harness failed before launching
-it); do not infer a Telex idle timeout. Re-arm using the `.ps1 -File` wrapper and
-inspect the task/stdout log if your runtime exposes one.
-
-On the detached completion notification:
-
-1. Read `<dir>\exit.code` (the completion marker); do not trust the Copilot detached task's exit code.
-2. If it is `0`, parse `<dir>\delivery.json` (or `<dir>\message.json` for the flat legacy shape). Otherwise read `<dir>\status.json` and the exit-code table.
-3. Run `telex ack --address <addr> --id <message-id>` and dedupe by `message_id`.
-4. Arm the next detached wait in the right mode: interrupt-only if resuming focused work, unfiltered if idle/ready for anything.
-
-`wait` also writes `<dir>\wait.pid` at startup. If you need to tear down the
-station before a message arrives, prefer `telex station stop --address <addr>`:
-it releases the station and waits for the live waiter to exit. The PID file is a
-diagnostic fallback only; do not hunt OS process lists unless `station stop`
-reports a still-live waiter after its grace window.
+Do **not** use a task-list/status view as the source of truth for whether the
+waiter is armed or finished — a background command can show as `completed` while
+its child is still alive. The completion wake plus the `exit.code` artifact are the
+authoritative signal.
 
 Shape note: `wait --out-dir/message.json` is the flat delivery message for
 back-compat. `delivery.json` is the envelope form (`message`, `delivery`,
 `status`) and is closer to `read --id`, which returns an enveloped
 `{ message, dispositions, ... }` shape.
 
-Do **not** use `list_powershell` (or any task-list status) as the source of truth
-for whether the waiter is armed or finished — a detached command can show as
-`completed` while its child is still alive. The runtime completion notification
-plus the `exit.code` artifact are the wake signal.
-
 ### Teardown and upgrade
 
-For a **push** (bridge) session, tear down with
-`telex --address <addr> copilot detach`: it detaches the address and removes the
-bridge extension when it was the last binding (session end also removes it), so
-nothing reloads on a later resume.
-
-For **pull mode**, use `telex station stop --address <addr>` as the symmetric
-inverse of the `attach` + detached-wait loop. It marks the station non-attending,
-releases membership durably, and waits for tracked live waiters to exit. After it
-returns with `waiters_after: 0`, a later message to the address remains queued
-until a future attach/wait; it is not consumed by an orphan waiter.
+Use `telex station stop --address <addr>` as the symmetric inverse of the
+`attach` + wait loop. It marks the station non-attending, releases membership
+durably, and waits for tracked live waiters to exit. After it returns with
+`waiters_after: 0`, a later message to the address remains queued until a future
+attach/wait; it is not consumed by an orphan waiter.
 
 For turn-end guards or resume reconciliation, use
 `telex station status --session <id>` to get a compact JSON projection of the
@@ -495,15 +417,15 @@ acknowledged | handled | deferred | rejected | closed | escalated
 Terminal states, removed from the actionable inbox: `handled`, `rejected`, `closed`.
 Non-terminal states, still needing final disposition: `acknowledged`, `deferred`, `escalated`.
 
-## Latency: interrupt steers now, others wait for the turn boundary
+## Latency
 
-In **push delivery**, an `interrupt` message is sent as an *immediate* steering
-interjection into the running turn -- the model sees it mid-stream, between its
-own iterations (not a hard preemption, but not next-turn-only either). Every
-other attention level is enqueued and delivered at the next turn boundary. In
-**pull mode**, agent wake dominates perceived latency (measured
-waiter-exit-to-agent-turn time is roughly 6-26 seconds, while backend delivery is
-sub-second), and `interrupt` only means "handle at the next turn boundary."
+In pull mode, agent wake dominates perceived latency: the time from a waiter exiting
+to the agent acting on the delivered message (harness-dependent, typically seconds to
+tens of seconds) far exceeds backend delivery, which is sub-second. `interrupt` raises a
+message above `--min-attention interrupt` filtering so a focused waiter wakes for it, but
+it still resolves at the next wait completion / turn boundary rather than preempting
+in-flight work. Harnesses with a native push integration may map attention onto
+lower-latency delivery -- see that harness's skill (`telex <harness> skill`).
 
 ## Backends
 

@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-02T20:45:00.000Z",
+  "updatedAt": "2026-07-07T19:05:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -199,7 +199,7 @@
       "type": "task",
       "title": "Seamless upgrade (#6 / PR #56)",
       "summary": "Practical seamless-upgrade floor that closes #6 under the narrowed bar: versioned install + stable launcher, local upgrade/switch (upgrade --from is acceptable), current/previous manifests, conservative known-safe rollback (not a general downgrade guarantee), conservative GC preserving current/previous/active versions, incompatible/too-old binary fail-closed diagnostics, status/version mixed-version observability, install script migration, and current Copilot bridge version/GC needs. GitHub release discovery, full rollback/downgrade framework, Postgres live successor handoff beyond safe drain/release, stronger GC scanning, extra Unix/fsync hardening, and destructive direct-pre-epoch Postgres migrations are future hardening.",
-      "status": "ready",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -237,6 +237,46 @@
       ]
     },
     {
+      "id": "bridge-idle-drain",
+      "type": "task",
+      "title": "Copilot bridge idle drain (defer queued pushes until idle)",
+      "summary": "Fix stale queued bridge turns: for non-interrupt Copilot bridge pushes, if the agent is busy, defer delivery until session idle / turn-stop, then revalidate durable Telex state and skip messages already acked or terminally dispositioned. Interrupt/immediate messages still push immediately. Durable Telex state and daemon push bookkeeping remain authoritative; bridge memory is not the source of truth. Adds bridge busy/idle status, deferred on-deliver outcome or drain request, idle-triggered drain, pre-send revalidation, batching/ordering, and tests for manual read+ack before idle.",
+      "status": "completed",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 65
+      },
+      "dependsOn": [
+        "push-delivery"
+      ]
+    },
+    {
+      "id": "bridge-liveness-hardening",
+      "type": "task",
+      "title": "Copilot bridge liveness/self-stop hardening",
+      "summary": "Fix the #66/#67 P0/P1 bridge liveness failure family: a session must be able to stop delivery to itself; bridge success/ack must clear stale deaf state; terminally dispositioned or no-disposition messages must never be re-pushed by backstop; live bridge status must not be reported as unattended/deaf; inbound local backlog must be distinguished from outbound peer-pending; suspend/resume stale bridge state must be self-evident and recoverable. Fold in #64 status wording and overlapping #62 bridge recovery issues. This is distinct from #65 (busy enqueue -> idle drain).",
+      "status": "completed",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 66
+      },
+      "dependsOn": [
+        "push-delivery"
+      ]
+    },
+    {
       "id": "validation-harness",
       "type": "task",
       "title": "Validation harness + Tier 1/2 loop (chaos + Entra-PG multi-host)",
@@ -268,7 +308,9 @@
       },
       "dependsOn": [
         "seamless-upgrade",
-        "harness-skill-layout"
+        "harness-skill-layout",
+        "bridge-idle-drain",
+        "bridge-liveness-hardening"
       ]
     },
     {
@@ -399,6 +441,8 @@
       "nodeIds": [
         "seamless-upgrade",
         "harness-skill-layout",
+        "bridge-idle-drain",
+        "bridge-liveness-hardening",
         "public-release",
         "release-upgrade"
       ]
@@ -433,12 +477,12 @@
     "requiredTracker": "github-issue"
   },
   "launchDefaults": {
-    "promptProfileId": "paw-lite-loop-v8",
+    "promptProfileId": "paw-lite-loop-v8-lossyrob",
     "terminal": {
       "titleTemplate": "TLX-D {githubIssue}"
     },
     "launchAfterInit": true,
     "reviewCompanion": true,
-    "reviewPromptTemplateId": "paw-review-loop-v2-copy"
+    "reviewPromptTemplateId": "paw-review-loop-v2-nomatt-lossrob"
   }
 }

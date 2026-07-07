@@ -100,6 +100,8 @@ where
     //   insert_message / get_message /
     //     thread_messages ....................... messages_threading
     //   inbox ................................... inbox_derivation
+    //   pending_unconsumed_count / inbound_actionable_count /
+    //     pending_and_actionable_counts ......... actionable_and_pending_counts
     //   claim_epoch_lease / heartbeat_epoch /
     //     release_epoch_lease / reset_epoch_lease
     //     / mark_consumed_if_current_owner ...... epoch_leases_and_ack_fence
@@ -117,6 +119,7 @@ where
     detach_tombstones(make_store().await).await;
     messages_threading(make_store().await).await;
     inbox_derivation(make_store().await).await;
+    actionable_and_pending_counts(make_store().await).await;
     dispositions(make_store().await).await;
     export_filters(make_store().await).await;
     concurrency(make_store().await).await;
@@ -798,6 +801,70 @@ async fn dispositions(store: Store) {
     );
     assert_eq!(inbox[0].message.id, m2.id);
     assert!(inbox[0].latest_disposition.is_none());
+}
+
+/// Observability counts: `pending_unconsumed_count` counts all unconsumed non-terminal deliveries
+/// to a recipient, while `inbound_actionable_count` counts only messages requiring THIS recipient's
+/// disposition (primary + requires_disposition, non-terminal, unconsumed). A no-disposition note is
+/// pending but not actionable; a terminally-dispositioned message is neither.
+async fn actionable_and_pending_counts(store: Store) {
+    let b = store.connect().await;
+    let addr = "count:1";
+
+    // A requires_disposition message to addr: pending AND actionable-inbound.
+    let mut needs = new_msg(addr);
+    needs.requires_disposition = true;
+    let a = b.insert_message(&needs).await.unwrap();
+    // A no-disposition note to addr: pending but NOT actionable-inbound.
+    let note = b.insert_message(&new_msg(addr)).await.unwrap();
+
+    assert_eq!(
+        b.pending_unconsumed_count(addr).await.unwrap(),
+        2,
+        "both the note and the requires-disposition message are pending/unconsumed"
+    );
+    assert_eq!(
+        b.inbound_actionable_count(addr).await.unwrap(),
+        1,
+        "only the requires-disposition message is actionable inbound; the note is not"
+    );
+
+    // Terminally disposition the actionable one: it leaves both counts (consumed + terminal).
+    b.insert_disposition(a.id, addr, "handled", None, None)
+        .await
+        .unwrap();
+    assert_eq!(
+        b.pending_unconsumed_count(addr).await.unwrap(),
+        1,
+        "the handled message is consumed; only the note remains pending"
+    );
+    assert_eq!(
+        b.inbound_actionable_count(addr).await.unwrap(),
+        0,
+        "no actionable inbound remains once the requires-disposition message is handled"
+    );
+
+    // The no-disposition note never contributes to actionable inbound.
+    assert_ne!(note.id, a.id);
+
+    // A requires_disposition message where `other` is the primary recipient and `addr` is only a
+    // CC recipient must NOT count as `addr`'s actionable inbound (the `m.to_addr = recipient`
+    // primary-recipient predicate), even though it is delivered to `addr`.
+    let other = "count:other";
+    let mut cc = new_msg(other);
+    cc.cc = Some(addr.to_string());
+    cc.requires_disposition = true;
+    b.insert_message(&cc).await.unwrap();
+    assert_eq!(
+        b.inbound_actionable_count(addr).await.unwrap(),
+        0,
+        "a requires_disposition message where addr is only a CC recipient is not actionable for addr"
+    );
+
+    // The batched single-pass counts agree with the individual counts.
+    let (pending, actionable) = b.pending_and_actionable_counts(addr).await.unwrap();
+    assert_eq!(pending, b.pending_unconsumed_count(addr).await.unwrap());
+    assert_eq!(actionable, b.inbound_actionable_count(addr).await.unwrap());
 }
 
 /// Export: address (to or from), thread, and since-cursor filters.

@@ -198,9 +198,7 @@ pub async fn build(
         }
         #[cfg(feature = "postgres")]
         "postgres" => {
-            let (cfg, schema) = pg_connect_config(profile).await?;
-            let b =
-                crate::backend::postgres::PgBackend::connect_with(cfg, schema.as_deref()).await?;
+            let b = crate::backend::postgres::PgBackend::connect_profile(profile.clone()).await?;
             b.init_schema().await?;
             Ok(Arc::new(b))
         }

@@ -35,6 +35,16 @@ yours to make.
    CC push is opt-in, live-only, and notification-only: historical CC backlog is not
    replayed, and CC messages still do not require a terminal disposition from the observer.
 
+   If you resume a Copilot session and the bridge files or heartbeat are gone, repair the
+   station with the resume verb, then reload extensions:
+
+   ```sh
+   telex --address <addr> copilot resume --description "<what this session is doing>"
+   ```
+
+   `copilot resume` is an explicit re-provision of the same push bridge registration that
+   `copilot attach --copilot-bridge` creates; it also re-scans queued unacked backlog.
+
 2. **Load the bridge into the live session (one agent tool call).**
 
    Run the `extensions_reload` tool. telex cannot trigger a reload, so you do this once.
@@ -58,12 +68,17 @@ yours to make.
 
 3. **Receive messages as turns.** A delivered telex message arrives as a new turn
    labelled `[telex] from <addr> (<attention>)`. An `interrupt` message is delivered as
-   soon as possible (Copilot `immediate`, ahead of enqueued messages); every other
-   attention level is `enqueue`d and arrives after your current turn. Neither preempts a
-   turn already running. Read it, then record disposition **by id**. For CC observer
-   pushes, the prompt says `delivery_role: cc` and `requires_disposition: false`;
-   ack it for transport consumption/dedupe, but do not treat the primary recipient's
-   required-disposition flag as your own obligation.
+   soon as possible (Copilot `immediate`, ahead of enqueued messages). Every other
+   attention level is **deferred** while a turn is running and delivered **after your turn
+   stops** — it is not queued behind the current turn, so a message you read and
+   disposition manually mid-turn is not re-injected as a stale turn later. Neither
+   preempts a turn already running. Read it, then record disposition
+   **by id**. For CC observer pushes, the prompt says `delivery_role: cc` and
+   `requires_disposition: false`; ack it for transport consumption/dedupe, but do not
+   treat the primary recipient's required-disposition flag as your own obligation.
+   (Deferred delivery runs on a turn-stop drain hook; an operator can disable it with
+   `TELEX_COPILOT_DRAIN=off`, independent of `TELEX_TURN_GUARD` — deferred messages then
+   arrive on the daemon's slower backstop instead of promptly at turn-stop.)
 
    ```sh
    telex ack --address <addr> --id <message-id> --session "$COPILOT_AGENT_SESSION_ID"
@@ -121,12 +136,64 @@ On PowerShell use `$env:COPILOT_AGENT_SESSION_ID`. `telex reply` takes the same 
 (run `telex reply --help` for its exact flags). Only `telex copilot attach`/`detach` map the
 Copilot session id for you; the generic verbs do not.
 
-## Fallback: no bridge
+## Fallback: no bridge (pull mode)
 
 If the bridge cannot be loaded (extensions disabled), telex push is unavailable.
-**Surface that plainly** or fall back to generic pull mode (`telex wait`) -- do **not**
-silently spin a waiter. `telex skill` documents the generic pull workflow, and
-`telex wait --help` documents the waiter.
+**Surface that plainly** rather than silently spinning a waiter. If you must keep
+receiving, fall back to generic pull mode with `telex wait`. `telex skill` documents
+the generic pull workflow; the Copilot-specific mechanics for running that fallback
+are below.
+
+**Session id for pull commands.** Generic `telex wait`/`ack` do not read Copilot env
+vars, so pass `--session "$COPILOT_AGENT_SESSION_ID"` (PowerShell:
+`$env:COPILOT_AGENT_SESSION_ID`) on every invocation, or set `TELEX_SESSION_ID` in the
+same shell. `telex copilot attach` maps `$COPILOT_AGENT_SESSION_ID` to the telex
+session id and `$COPILOT_LOADER_PID` to the loader `--watch-pid` backstop for you; the
+generic verbs do not.
+
+**Detached waiter pattern (Copilot CLI / Windows).** Run the waiter as a single-shot,
+**fully detached** background task (`detach: true`) so it does not spin the terminal
+like foreground work; the Copilot session is still notified when the detached task
+exits. Pass `--out-dir <dir>` and read the artifacts (`exit.code`, then
+`delivery.json`/`message.json`) after the completion wake — detached stdout is not
+returned to the agent. On Windows/Copilot CLI, wrap the call in a small `.ps1` and
+detach `pwsh -File ...`: some Copilot CLI versions silently no-op a detached bare
+external executable, while `pwsh -File` preserves PATH/environment. Keep the detached
+command variable-free (pass literal paths/addresses as script arguments):
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\telex-wait-once.ps1" `
+  -Telex "telex" -Address "<addr>" -Session "<session-id>" `
+  -OutDir "C:\path\to\telex-wait-<unique>"
+```
+
+```powershell
+param(
+  [Parameter(Mandatory)] [string]$Telex,
+  [Parameter(Mandatory)] [string]$Address,
+  [Parameter(Mandatory)] [string]$Session,
+  [Parameter(Mandatory)] [string]$OutDir,
+  [string]$MinAttention
+)
+if ([string]::IsNullOrWhiteSpace($MinAttention)) {
+  & $Telex --json --address $Address wait --session $Session --timeout-ms 1800000 --out-dir $OutDir
+} else {
+  & $Telex --json --address $Address wait --session $Session --timeout-ms 1800000 --min-attention $MinAttention --out-dir $OutDir
+}
+exit $LASTEXITCODE
+```
+
+On the completion wake, read `<dir>\exit.code` (the completion marker — do **not**
+trust the Copilot detached task's reported exit code). If it is `0`, parse
+`<dir>\delivery.json` (or `<dir>\message.json`), then
+`telex ack --address <addr> --id <message-id> --session "$env:COPILOT_AGENT_SESSION_ID"`
+and dedupe by id before re-arming a fresh detached wait. If you see a completion
+notification but `<dir>\exit.code` is missing, the waiter did not actually run — re-arm
+via the `.ps1 -File` wrapper; do not infer an idle timeout. Do **not** use
+`list_powershell` (or any task-list status) to decide whether the waiter is armed or
+finished — a detached command can show `completed` while its child is still alive; the
+completion wake plus the `exit.code` artifact are the signal. Never wrap `telex wait`
+in an infinite shell loop. `telex wait --help` documents the waiter flags.
 
 ## Version and compatibility
 
@@ -150,6 +217,7 @@ telex --version
 telex copilot skill
 telex copilot --help
 telex copilot attach --help
+telex copilot resume --help
 telex copilot detach --help
 telex copilot gc --help
 telex ack --help

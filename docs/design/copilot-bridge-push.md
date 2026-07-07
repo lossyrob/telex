@@ -275,12 +275,12 @@ The full lifecycle:
 - daemon -- the generic on-deliver exec primitive (register a handler command
   per address; exec on commit, capped, off the critical path, retried).
 - embedded bridge -- `extension.mjs` bytes carried in the binary, written on
-  bind. Prototyped under `copilot-bridge/` in this branch.
-- `skills/telex/SKILL.md` -- a small **bootstrap** that points the agent at
+  bind. Lives under `copilot/bridge/` in this repository.
+- `copilot/plugin/skills/telex/SKILL.md` -- a small **bootstrap** that points the agent at
   `telex copilot skill` (version-matched, binary-owned) and `--help` for syntax,
   rather than embedding the workflow. See
   [DECISIONS.md ADR 0040](DECISIONS.md#0040--copilot-skill-is-binary-owned-the-plugin-skill-is-a-bootstrap).
-- `COPILOT.md` + `telex copilot skill` -- the binary-owned, version-matched Copilot
+- `copilot/COPILOT.md` + `telex copilot skill` -- the binary-owned, version-matched Copilot
   workflow (bind, load bridge, pushed turns, disposition, teardown, fallback) with a
   plugin/binary compatibility header (`telex v..`, bridge protocol, minimum plugin).
 
@@ -360,7 +360,7 @@ A second review pass and builder-directed follow-ups added:
 - **Direct bridge-liveness signal.** The bridge heartbeats into its registry; the turn guard treats
   a push member whose registry heartbeat is stale as uncovered (bridge not loaded / live) and
   nudges to `extensions_reload`, rather than only inferring deafness from unacked backlog.
-- **CI JS gate.** `node --check copilot-bridge/extension.mjs` runs in CI so a broken embedded
+- **CI JS gate.** `node --check copilot/bridge/extension.mjs` runs in CI so a broken embedded
   bridge cannot ship baked into the binary.
 - **Re-delivery is re-provision-triggered, not timer-churned.** An **accepted** push (already queued
   in the live session) is no longer re-pushed on the fast failure backoff; while the same session
@@ -388,3 +388,80 @@ A second review pass and builder-directed follow-ups added:
   before the already-queued turn arrives, making that later turn look like a duplicate. `telex inbox`
   remains the diagnostic/recovery path for stale bridge, reload/re-provision, degraded/backstop, or
   explicit operator intervention.
+
+## Liveness / self-stop hardening (issue #66; folds in #62/#64/#67)
+
+A later node hardened the liveness and stop edges of this push path (see DECISIONS ADR 0042):
+
+- **A live push bridge reports live, not `unattended`/`deaf`.** Station health for a registered
+  push station is derived from the daemon's own push-attempt outcomes (harness-neutral — the daemon
+  never reads the bridge registry): a recent accepted push -> `attended_push` (structured
+  `push_delivery: delivering`), a backlog with no attempt yet (e.g. post-restart) -> `probing`, an
+  accepted push whose 300s backstop elapsed with no fresh accept -> `stale_accepted` (an
+  earlier-than-deaf hint), and only actually-**failing** pushes -> `unattended_with_backlog`/`deaf`.
+  A successful push is answerback that clears a stale deaf state. This fixes #64 (a live bridge was
+  called `unattended`) and the persistent false-deaf of #66 without coupling the daemon to Copilot.
+- **Actionable-inbound is reported distinctly from raw pending** (`inbound_actionable_count` vs
+  `pending_unconsumed_count`), so a station whose only "pending" is no-disposition notes or
+  shared-address traffic is not mistaken for having actionable backlog.
+- **The re-push pool is bounded.** No-disposition notes are delivered once and skipped forever after
+  accept; a still-unacked disposition-required message is re-pushed until a hard cap
+  (`ON_DELIVER_MAX_REPUSH`) then suppressed (durable/readable, surfaced via `push_suppressed_count`).
+  Consumed / terminally-dispositioned messages were already excluded from re-push.
+- **Self-stop is durable and honored by the push helper.** A deliberate `telex copilot detach` (and
+  `station stop`) records a **durable** detach tombstone, written atomically with the lease release
+  (no separate follow-up write that could race a re-attach's clear). `telex copilot push` preflights
+  the tombstone (via its baked `--backend`/`--db` selector) and refuses with the permanent exit code
+  if the session was detached, so delivery stops and sticks — across a daemon restart and against a
+  push racing member removal. The check is **fail-open** on a transient backend error (defense-in-depth;
+  member removal is the primary steady-state stop), so the honored guarantee is weaker under backend
+  faults: a push that raced member removal can still be delivered once if the tombstone lookup itself
+  fails. `station stop` does **not** unload the in-session bridge extension, so its response reports
+  `push_registered` and the CLI warns, pointing the operator at `telex copilot detach`.
+
+## Idle drain: defer non-interrupt pushes until turn-stop (issue #65)
+
+> This section is the authoritative narrative for the push scheduling state machine (deferred /
+> accepted / failed). [DECISIONS.md ADR 0043](DECISIONS.md#0043--copilot-bridge-defers-non-interrupt-pushes-until-turn-stop-drained-by-an-ungated-agentstop-hook)
+> is the decision record; it supersedes-and-links ADR 0041 where the busy path now differs.
+
+ADR 0041's `accepted:"pending"` busy path still queued a non-`interrupt` turn behind the current
+one. If the agent inspected Telex and acked/handled the message manually during that turn, the
+queued turn arrived later as stale, already-handled work. Issue #65 replaces "queue while busy" with
+"defer until the turn stops, then revalidate durable state and push."
+
+- **Busy = the root-agent turn boundary.** The bridge tracks busy from `assistant.turn_start` /
+  `assistant.turn_end`, **only for root-agent events** (`agentId` absent). A sub-agent's inner
+  `turn_end` must not clear the gate while the parent turn runs. Full `session.idle` is intentionally
+  not used: it also waits for background shells/sub-agents, which is stronger than #65 needs and can
+  starve delivery after a long tool run. The bridge defaults to busy and self-heals to not-busy after
+  a bound of no activity, so a missed `turn_end` (crash/abort, or a load outside any turn) does not
+  defer forever.
+- **Defer, don't send.** A non-`interrupt` push arriving while busy returns `deferred_until_idle`
+  **without** calling `session.send`. `interrupt` (`immediate`) still sends immediately. A one-tick
+  yield before answering lets a just-arrived `turn_end` settle, collapsing the drain-vs-`turn_end`
+  race into a single non-deferred attempt.
+- **Deferred is a distinct daemon outcome.** `telex copilot push` maps `deferred_until_idle` to
+  `PUSH_EXIT_DEFERRED`; the daemon records a **deferred** attempt that is neither accepted (not
+  queued, no CC lower-bound advance) nor a transient failure (no fast re-push, no error log), does
+  not count toward the degraded-status threshold, and is held for `ON_DELIVER_DEFERRED_BACKSTOP`
+  (invariant `HEARTBEAT_INTERVAL <= deferred < accepted backstop`). `telex status` reports a
+  member's `push_deferred_count`, so deferred is diagnosable distinctly from accepted-unacked and
+  failed-transient.
+- **Turn-stop drains it.** A dedicated `agentStop` hook entry runs `telex copilot drain --session
+  <id>`, independent of `TELEX_TURN_GUARD` / its nudge cap, with its own `TELEX_COPILOT_DRAIN`
+  off-switch. It sends `DrainDeferred`; the daemon clears the deferred skip for the session's
+  on-deliver members (leaving accepted attempts untouched, so a genuinely queued turn is not
+  duplicated) and re-runs the on-deliver sweep. The sweep re-fetches `fetch_wait_candidates`, so a
+  message acked before the drain is no longer a candidate and is skipped — the repro guarantee. The
+  drain re-sweeps **every** on-deliver member of the session (matched by `session_id` across stores,
+  so a named-`--backend`/`--db` session still drains), which closes a deferred-vs-drain inflight race
+  and opportunistically re-attempts messages whose backstop elapsed; the only zero-work fast path is
+  client-side (`telex copilot drain` skips the daemon round-trip when the session has no bridge
+  registry). The drain returns before the sweeps complete and has a client-side deadline below the
+  hook timeout, so it never blocks turn-stop. The daemon stays harness-neutral: it re-runs a generic
+  sweep on request; "busy/idle" lives only in the bridge.
+- **No loss.** If the drain hook is missed or races a still-busy bridge, the deferred backstop +
+  heartbeat sweep re-attempt within a bounded delay (a re-defer while busy is cheap and injects no
+  stale turn); re-provision (reattach / `/clear` reload) still re-delivers unacked backlog. Durable
+  Telex state remains authoritative throughout.
