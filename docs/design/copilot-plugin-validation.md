@@ -6,6 +6,12 @@ Validation target: issue #41, local-daemon `copilot-plugin` node; extended by is
 Verified with GitHub Copilot CLI 1.0.66-1 (issue #41) and re-verified with GitHub Copilot
 CLI 1.0.69-2 (issue #61, nested marketplace `source`) on Windows.
 
+**Version floor for nested `source`:** nested-source marketplace install depends on the
+Copilot CLI resolving a plugin `source` subdirectory (an external CLI capability). Treat
+**1.0.69-2 as the known-good floor**. Determining the exact minimum supported version (an
+oldest-supported-version row here) and adding a release-time install smoke against the
+release tag are owned by the public-release gate (#59), which this node precedes.
+
 | Acceptance / risk | Evidence |
 |---|---|
 | Marketplace installs and exposes a plugin skill | `.github/plugin/marketplace.json` declares marketplace `telex` and plugin `telex` with nested `"source": "copilot/plugin"`. Isolated verification: `copilot --config-dir <temp> plugin marketplace add <repo>` followed by `copilot --config-dir <temp> plugin install telex@telex` reports `Installed 1 skill`; the installed plugin skill resolves from the nested `copilot/plugin/skills/telex`. See the issue #61 evidence block below. |

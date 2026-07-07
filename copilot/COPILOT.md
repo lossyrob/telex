@@ -181,7 +181,7 @@ exit $LASTEXITCODE
 On the completion wake, read `<dir>\exit.code` (the completion marker — do **not**
 trust the Copilot detached task's reported exit code). If it is `0`, parse
 `<dir>\delivery.json` (or `<dir>\message.json`), then
-`telex ack --address <addr> --id <message-id> --session "$COPILOT_AGENT_SESSION_ID"`
+`telex ack --address <addr> --id <message-id> --session "$env:COPILOT_AGENT_SESSION_ID"`
 and dedupe by id before re-arming a fresh detached wait. If you see a completion
 notification but `<dir>\exit.code` is missing, the waiter did not actually run — re-arm
 via the `.ps1 -File` wrapper; do not infer an idle timeout. Do **not** use

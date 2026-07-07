@@ -121,8 +121,9 @@ The plugin shape and the nested marketplace `source` (`copilot/plugin`) are vali
 against GitHub Copilot CLI 1.0.69-2; see
 [`docs/design/copilot-plugin-validation.md`](docs/design/copilot-plugin-validation.md)
 for the acceptance matrix and live hook smoke evidence. Nested-source marketplace
-install requires a Copilot CLI new enough to resolve a plugin `source` subdirectory
-(verified on 1.0.69-2).
+install requires a Copilot CLI that resolves a plugin `source` subdirectory; treat
+**1.0.69-2 as the known-good floor**. Pinning an exact minimum supported version and a
+release-time install smoke are owned by the public-release gate (#59).
 
 Marketplace install is the supported plugin channel. Release install scripts
 print a tag-pinned marketplace command, for example

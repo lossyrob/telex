@@ -280,7 +280,7 @@ The full lifecycle:
   `telex copilot skill` (version-matched, binary-owned) and `--help` for syntax,
   rather than embedding the workflow. See
   [DECISIONS.md ADR 0040](DECISIONS.md#0040--copilot-skill-is-binary-owned-the-plugin-skill-is-a-bootstrap).
-- `COPILOT.md` + `telex copilot skill` -- the binary-owned, version-matched Copilot
+- `copilot/COPILOT.md` + `telex copilot skill` -- the binary-owned, version-matched Copilot
   workflow (bind, load bridge, pushed turns, disposition, teardown, fallback) with a
   plugin/binary compatibility header (`telex v..`, bridge protocol, minimum plugin).
 

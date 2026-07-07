@@ -98,6 +98,8 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
     // the neutral root skill exists, the Copilot bootstrap exists, and every skill file is
     // either the root skill or a `<harness>/plugin/skills/<name>/SKILL.md` bootstrap. This
     // still catches a stray SKILL.md copied somewhere unexpected while allowing siblings.
+    // NOTE: this is a stray-file / layout-shape guard, not a full sibling-harness contract
+    // check — the first sibling-harness PR should add its own manifest/skill assertions.
     assert!(
         skill_files.contains(&root_skill),
         "the canonical root SKILL.md must exist"
@@ -178,6 +180,58 @@ fn root_skill_points_copilot_sessions_at_the_binary_command() {
     assert!(
         root_skill.contains("telex copilot skill"),
         "root skill should route the Copilot session to `telex copilot skill`"
+    );
+
+    // Regression guard (ADR 0042): the neutral root skill must NOT embed Copilot/harness
+    // mechanics. A positive pointer assertion alone would still pass if Copilot recipes
+    // drifted back in, which is exactly the high-risk regression. The address-tailored
+    // preamble printed for `telex skill --address` is guarded separately by
+    // `commands::skill::tests::assignment_preamble_is_harness_neutral`.
+    for forbidden in [
+        "$COPILOT_AGENT_SESSION_ID",
+        "COPILOT_LOADER_PID",
+        "telex copilot detach",
+        "copilot attach --copilot-bridge",
+        "extensions_reload",
+        "pwsh -File",
+        "list_powershell",
+        "detach: true",
+    ] {
+        assert!(
+            !root_skill.contains(forbidden),
+            "root SKILL.md must stay harness-neutral; found Copilot mechanic {forbidden:?}"
+        );
+    }
+}
+
+#[test]
+fn plugin_version_is_consistent_across_manifest_marketplace_and_bootstrap() {
+    let manifest: Value =
+        serde_json::from_str(include_str!("../copilot/plugin/plugin.json")).expect("plugin.json");
+    let marketplace: Value =
+        serde_json::from_str(include_str!("../.github/plugin/marketplace.json"))
+            .expect("marketplace.json");
+    let manifest_version = manifest["version"].as_str().expect("manifest version");
+    let marketplace_version = marketplace["plugins"][0]["version"]
+        .as_str()
+        .expect("marketplace plugin version");
+    assert_eq!(
+        manifest_version, marketplace_version,
+        "plugin.json and marketplace.json plugin versions must match"
+    );
+    // The bootstrap's compatibility-check example pins the same version.
+    let bootstrap = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("copilot")
+            .join("plugin")
+            .join("skills")
+            .join("telex")
+            .join("SKILL.md"),
+    )
+    .expect("read bootstrap");
+    assert!(
+        bootstrap.contains(&format!("--plugin-version {manifest_version}")),
+        "bootstrap `--plugin-version` example must match plugin.json version {manifest_version}"
     );
 }
 
