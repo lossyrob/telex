@@ -1,0 +1,71 @@
+name: Docs
+
+# Build the mdBook user guide and deploy it to GitHub Pages. The CLI reference
+# page is generated from the freshly built binary so it never drifts from the
+# shipped commands (see docs/design/DECISIONS.md ADR 0040).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/guide/**'
+      - 'src/**'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow one concurrent deployment; do not cancel an in-progress deploy.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build user guide
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Install Linux TLS dependencies
+        run: sudo apt-get update && sudo apt-get install -y pkg-config libssl-dev
+
+      - name: Build telex
+        run: cargo build --release
+
+      - name: Install mdBook
+        run: cargo install mdbook --locked --version 0.5.3
+
+      - name: Generate CLI reference from the binary
+        run: bash docs/guide/generate-reference.sh ./target/release/telex
+
+      - name: Build the book
+        run: mdbook build docs/guide
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: docs/guide/book
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4
