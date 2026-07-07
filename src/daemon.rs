@@ -531,10 +531,12 @@ impl DaemonState {
             };
             inbound_actionable_counts.insert(key, actionable);
         }
-        // Push-delivery health + suppressed counts per member, computed BEFORE taking the members
-        // lock: `push_delivery_health`/`push_suppressed_count` lock `on_deliver.pushed`, and
-        // `on_deliver_advance_cc_lower_bound` locks pushed->members, so computing these under the
-        // members lock would invert lock order.
+        // Push-delivery health + suppressed counts per member. Computed BEFORE taking the members
+        // lock as a defensive measure: `push_delivery_health`/`push_suppressed_count` lock
+        // `on_deliver.pushed`/`dead_lettered`. There is no strict inversion today
+        // (`on_deliver_advance_cc_lower_bound` releases `pushed` before it locks `members`), but
+        // computing these outside the members lock keeps the two mutexes decoupled so a future
+        // members-then-pushed path cannot introduce one.
         let (push_health_by_key, push_suppressed_by_key) = {
             let now_inst = Instant::now();
             let mut health: HashMap<MemberKey, PushDeliveryHealth> = HashMap::new();
@@ -2434,57 +2436,46 @@ impl DaemonState {
             // the next sweep, or between commit and first push). Not confidently attended, not deaf.
             _ => return PushDeliveryHealth::Probing,
         };
-        let mut has_recent_accept = false;
-        let mut has_stale_accept = false;
-        let mut has_failing = false;
-        for attempt in attempts.values() {
-            if attempt.accepted {
+        // Classify by the FRESHEST attempt across the member's messages, not "any accept in the
+        // window": otherwise a stale accept on message A (still inside its 300s backstop) would mask
+        // a fresh failure on message B, reporting `delivering` while the bridge is actually
+        // unreachable and delaying deaf detection by up to a backstop. The most recent attempt
+        // outcome is the truest current bridge signal.
+        let freshest = attempts.values().max_by_key(|a| a.last);
+        match freshest {
+            Some(attempt) if attempt.accepted => {
                 if now.saturating_duration_since(attempt.last) < ON_DELIVER_ACCEPTED_BACKSTOP {
-                    has_recent_accept = true;
+                    PushDeliveryHealth::Delivering
                 } else {
-                    has_stale_accept = true;
+                    PushDeliveryHealth::StaleAccepted
                 }
-            } else {
-                has_failing = true;
             }
-        }
-        if has_recent_accept {
-            PushDeliveryHealth::Delivering
-        } else if has_failing {
-            PushDeliveryHealth::Failing
-        } else if has_stale_accept {
-            PushDeliveryHealth::StaleAccepted
-        } else {
-            PushDeliveryHealth::Probing
+            Some(_) => PushDeliveryHealth::Failing,
+            None => PushDeliveryHealth::Probing,
         }
     }
 
     /// Count of a member's on-deliver messages whose re-push is currently suppressed: dead-lettered
     /// (permanently unpushable) plus those that have hit the `ON_DELIVER_MAX_REPUSH` attempt cap.
-    /// They stay durably queued/readable; this is the persistent operator-visible signal.
+    /// They stay durably queued/readable; this is the persistent operator-visible signal. Counts by
+    /// distinct message id so a message that is both dead-lettered and capped is not double-counted.
     fn push_suppressed_count(&self, member: &MemberKey) -> i64 {
-        let dead = self
+        let mut suppressed: BTreeSet<i64> = self
             .on_deliver
             .dead_lettered
             .lock()
             .unwrap()
             .get(member)
-            .map(|s| s.len())
-            .unwrap_or(0);
-        let capped = self
-            .on_deliver
-            .pushed
-            .lock()
-            .unwrap()
-            .get(member)
-            .map(|attempts| {
-                attempts
-                    .values()
-                    .filter(|a| a.attempts >= ON_DELIVER_MAX_REPUSH)
-                    .count()
-            })
-            .unwrap_or(0);
-        (dead + capped) as i64
+            .cloned()
+            .unwrap_or_default();
+        if let Some(attempts) = self.on_deliver.pushed.lock().unwrap().get(member) {
+            for (id, attempt) in attempts {
+                if attempt.attempts >= ON_DELIVER_MAX_REPUSH {
+                    suppressed.insert(*id);
+                }
+            }
+        }
+        suppressed.len() as i64
     }
 
     /// Prune a member's push-attempt and dead-letter records to only ids still in `keep` (the
@@ -5806,6 +5797,96 @@ mod p3_tests {
             }
             other => panic!("expected StationStopped, got {other:?}"),
         }
+    }
+
+    /// `push_delivery_health` classifies by the FRESHEST attempt across the member's messages, so a
+    /// stale accept on one message cannot mask a fresh failure on another (deaf-detection latency).
+    #[tokio::test]
+    async fn push_delivery_health_uses_freshest_attempt() {
+        let state = test_state("push-freshest");
+        let store = store_key("push-freshest");
+        let key = mk(&store, "s1", "addr:a");
+        let base = Instant::now();
+        // id 1 accepted at base; id 2 failed 1s later (fresher). Freshest is a failure -> Failing,
+        // even though id 1's accept is still within its backstop.
+        state.on_deliver_record_attempt(&key, 1, base, true, false, None, false);
+        state.on_deliver_record_attempt(
+            &key,
+            2,
+            base + Duration::from_secs(1),
+            false,
+            false,
+            None,
+            false,
+        );
+        assert_eq!(
+            state.push_delivery_health(&key, 2, true, base + Duration::from_secs(2)),
+            PushDeliveryHealth::Failing,
+            "a fresh failure must not be masked by an older accept still inside its backstop"
+        );
+        // A newer accept on id 1 makes the freshest attempt an accept again -> Delivering.
+        state.on_deliver_record_attempt(
+            &key,
+            1,
+            base + Duration::from_secs(3),
+            true,
+            false,
+            None,
+            false,
+        );
+        assert_eq!(
+            state.push_delivery_health(&key, 2, true, base + Duration::from_secs(4)),
+            PushDeliveryHealth::Delivering
+        );
+    }
+
+    /// End-to-end through `spawn_on_deliver`: a no-disposition note fired via the real on-deliver
+    /// path is accepted once and then skipped forever (exercises the `skip_after_accept` computation
+    /// in `spawn_on_deliver`, complementing the `on_deliver_record_attempt`-level unit test).
+    #[tokio::test]
+    async fn no_disposition_push_via_spawn_skips_forever() {
+        let state = test_state("no-disp-spawn");
+        let store = store_key("no-disp-spawn");
+        let mut req = register_req(&store, "rcv", "addr:rcv");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_zero_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        // insert_to inserts a requires_disposition:false note.
+        let id = insert_to(&state, &store, "addr:rcv").await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(id)
+            .await
+            .unwrap()
+            .unwrap();
+        state.fire_on_deliver_on_commit(&store, &row);
+        let member_key = mk(&store, "rcv", "addr:rcv");
+        let mut accepted = false;
+        for _ in 0..100 {
+            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
+                accepted = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            accepted,
+            "the no-disposition note should be pushed and recorded accepted"
+        );
+        assert!(
+            state.on_deliver_should_skip(
+                &member_key,
+                id,
+                Instant::now() + Duration::from_secs(600)
+            ),
+            "an accepted no-disposition note is skipped forever, not re-pushed on the backstop"
+        );
     }
 
     #[test]

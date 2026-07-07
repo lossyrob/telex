@@ -158,7 +158,6 @@ async fn stop(ctx: &Ctx, args: StationStopArgs) -> Result<i32> {
                 "waiters_after": waiters_after,
                 "live_waiters": live_waiters,
                 "push_registered": push_registered,
-                "bridge_still_loaded": push_registered,
             });
             emit(ctx.fmt, &out, || {
                 if waiters_after == 0 {

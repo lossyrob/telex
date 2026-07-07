@@ -924,6 +924,67 @@ mod tests {
     use tokio::io::{AsyncWrite, BufReader};
 
     #[test]
+    fn station_health_serde_roundtrip_and_forward_compat() {
+        // Wire values are stable snake_case.
+        assert_eq!(
+            serde_json::to_value(StationHealth::AttendedPush).unwrap(),
+            serde_json::json!("attended_push")
+        );
+        for h in [
+            StationHealth::Armed,
+            StationHealth::RecentlyDelivered,
+            StationHealth::Unattended,
+            StationHealth::UnattendedWithBacklog,
+            StationHealth::AttendedPush,
+            StationHealth::Idle,
+        ] {
+            let s = serde_json::to_value(h).unwrap();
+            assert_eq!(serde_json::from_value::<StationHealth>(s).unwrap(), h);
+        }
+        // Forward-compat: an older client meeting a newer daemon's unknown value degrades to
+        // `Unknown` instead of failing to deserialize the whole status.
+        assert_eq!(
+            serde_json::from_value::<StationHealth>(serde_json::json!("some_future_state"))
+                .unwrap(),
+            StationHealth::Unknown
+        );
+    }
+
+    #[test]
+    fn push_delivery_health_serde_roundtrip_and_forward_compat() {
+        assert_eq!(
+            serde_json::to_value(PushDeliveryHealth::StaleAccepted).unwrap(),
+            serde_json::json!("stale_accepted")
+        );
+        for h in [
+            PushDeliveryHealth::NotRegistered,
+            PushDeliveryHealth::NoBacklog,
+            PushDeliveryHealth::Delivering,
+            PushDeliveryHealth::Probing,
+            PushDeliveryHealth::StaleAccepted,
+            PushDeliveryHealth::Failing,
+        ] {
+            let s = serde_json::to_value(h).unwrap();
+            assert_eq!(serde_json::from_value::<PushDeliveryHealth>(s).unwrap(), h);
+        }
+        assert_eq!(
+            serde_json::from_value::<PushDeliveryHealth>(serde_json::json!("future_push_state"))
+                .unwrap(),
+            PushDeliveryHealth::Unknown
+        );
+        // A member status missing the new fields deserializes with defaults (older daemon).
+        let member: MemberStatus = serde_json::from_value(serde_json::json!({
+            "store_key": "s", "backend": "sqlite", "session_id": "x", "address": "a",
+            "occupant": "o", "host": "h", "waiters": 0, "lease_epoch": 1,
+            "owner_instance_id": "i", "idle": false
+        }))
+        .unwrap();
+        assert_eq!(member.push_delivery, PushDeliveryHealth::NotRegistered);
+        assert_eq!(member.inbound_actionable_count, 0);
+        assert_eq!(member.push_suppressed_count, 0);
+    }
+
+    #[test]
     fn compatibility_table_explicitly_names_current_major_and_required_caps() {
         let row = COMPATIBILITY_TABLE
             .iter()
