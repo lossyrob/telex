@@ -21,6 +21,8 @@
 //   {"prompt": "...", "displayPrompt": "[telex] FROM: <addr> SUBJECT: <subject>", "mode": "enqueue"}
 // Response, newline-terminated:
 //   {"ok": true, "sessionId": "...", "mode": "enqueue", "accepted": "queued"|"pending"}
+// or, when a non-`interrupt` push arrives while a root turn is running (issue #65):
+//   {"ok": false, "sessionId": "...", "mode": "enqueue", "error": "deferred_until_idle"}
 // The bridge forwards `mode` verbatim; the attention->mode decision
 // (interrupt -> immediate, else -> enqueue) is made by `telex copilot push`.
 
@@ -34,7 +36,34 @@ import { randomBytes } from "node:crypto";
 const isPosix = platform() !== "win32";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024; // 8 MiB: fits a max daemon message plus JSON-escaped prompt wrapping, so large messages push as turns instead of dead-lettering
 const SEND_ACK_TIMEOUT_MS = 2_000;
+// After this long with no session activity while the bridge believes a root turn is running, assume
+// a missed/never-fired `assistant.turn_end` (agent crash/abort/abandon, or the extension loaded
+// outside any turn) and self-heal to not-busy, so non-`interrupt` messages are not deferred forever.
+// Kept generous so a legitimately long turn (which keeps emitting streaming/tool events) never
+// false-heals mid-turn; the daemon's deferred backstop + heartbeat sweep are the real no-loss net.
+const BUSY_STALE_MS = 5 * 60 * 1000;
 const pendingSends = new Set();
+
+// Busy/idle tracking (issue #65). The bridge defers non-`interrupt` pushes while a root turn is
+// running so a queued turn cannot land behind (and duplicate) work the agent handles manually
+// mid-turn. Busy is gated on the ROOT-agent turn boundary only: sub-agent turn events carry an
+// `agentId` and must NOT clear busy, or a sub-agent's inner `turn_end` would flip the gate while the
+// parent turn is still in flight and reintroduce the stale-injection bug. Default: busy (deferring
+// is the safe action; injecting a stale turn is the risk); self-corrects on the first root
+// `turn_end`. This is liveness/scheduling state only -- durable Telex state stays authoritative.
+let busy = true;
+let busySince = Date.now();
+let lastActivityAt = Date.now();
+
+// Whether a non-interrupt push should defer right now. Applies the stale-busy self-heal first.
+function currentlyBusy() {
+  if (busy && Date.now() - lastActivityAt > BUSY_STALE_MS) {
+    busy = false;
+    busySince = null;
+  }
+  return busy;
+}
+
 const registryDir = join(homedir(), ".copilot", "telex-bridge");
 await mkdir(registryDir, { recursive: true, mode: 0o700 });
 if (isPosix) {
@@ -63,6 +92,22 @@ const session = await joinSession({
 });
 
 const sessionId = session.sessionId;
+
+// Track the ROOT-agent turn boundary to drive busy/idle. Sub-agent turn events (which carry an
+// `agentId`) are ignored on purpose. `lastActivityAt` is refreshed on every event so a legitimately
+// long turn (streaming deltas, tool events) never trips the stale-busy self-heal.
+session.on((event) => {
+  lastActivityAt = Date.now();
+  if (event && event.agentId) return; // sub-agent event: not the root turn boundary
+  if (event && event.type === "assistant.turn_start") {
+    busy = true;
+    busySince = Date.now();
+  } else if (event && event.type === "assistant.turn_end") {
+    busy = false;
+    busySince = null;
+  }
+});
+
 // Per-session shared secret: an application-layer capability so only a client that can read
 // the owner-only registry (i.e. `telex copilot push`) may inject a turn. Defense-in-depth
 // over the OS ACL, needed because the default Windows named-pipe DACL grants Everyone READ.
@@ -143,6 +188,24 @@ async function handleConnection(socket) {
       return;
     }
     const mode = input.mode === "immediate" ? "immediate" : "enqueue";
+    // Defer-until-idle (issue #65): a non-`interrupt` push while a root turn is running must NOT be
+    // sent yet, or it queues behind the current turn and can duplicate work the agent handles
+    // manually mid-turn. Yield once first so a just-arrived root `turn_end` event settles before we
+    // decide -- this collapses the common `agentStop`-drain-vs-`turn_end` race into a single
+    // non-deferred attempt instead of a re-defer. `immediate` (interrupt) is never deferred.
+    if (mode === "enqueue" && currentlyBusy()) {
+      await new Promise((r) => setImmediate(r));
+      if (currentlyBusy()) {
+        writeResponse(socket, {
+          ok: false,
+          error: "deferred_until_idle",
+          sessionId,
+          mode,
+        });
+        socket.end();
+        return;
+      }
+    }
     const options = { prompt: input.prompt, mode };
     if (typeof input.displayPrompt === "string" && input.displayPrompt) {
       options.displayPrompt = input.displayPrompt;
@@ -224,6 +287,11 @@ async function writeRegistry() {
         maxRequestBytes: MAX_REQUEST_BYTES,
         createdAt,
         heartbeatAt: new Date().toISOString(),
+        // Diagnostic only (issue #65): the bridge's connect-time answer is the ONLY authoritative
+        // busy signal. This 15s-stale snapshot must never be read by `telex copilot push` as a
+        // decision input, or a stale-idle flag would reopen the mistimed-injection bug.
+        busyAtLastHeartbeat: currentlyBusy(),
+        busySince,
       },
       null,
       2,

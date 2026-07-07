@@ -60,6 +60,18 @@ fn hook_manifest_wires_session_end_and_agent_stop_to_hidden_rust_adapter() {
         .unwrap()
         .contains("telex --json copilot turn-guard"));
 
+    // The idle-drain trigger (issue #65) is a dedicated agentStop hook alongside the turn guard.
+    let agent_stop_drain = &hooks["hooks"]["agentStop"][1];
+    assert_eq!(agent_stop_drain["type"], "command");
+    assert!(agent_stop_drain["powershell"]
+        .as_str()
+        .unwrap()
+        .contains("telex --json copilot drain"));
+    assert!(agent_stop_drain["bash"]
+        .as_str()
+        .unwrap()
+        .contains("telex --json copilot drain"));
+
     assert!(
         hooks["hooks"].get("notification").is_none(),
         "notification hook is intentionally not installed by default; content enrichment is spike-gated"

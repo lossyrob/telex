@@ -388,3 +388,47 @@ A second review pass and builder-directed follow-ups added:
   before the already-queued turn arrives, making that later turn look like a duplicate. `telex inbox`
   remains the diagnostic/recovery path for stale bridge, reload/re-provision, degraded/backstop, or
   explicit operator intervention.
+
+## Idle drain: defer non-interrupt pushes until turn-stop (issue #65)
+
+> This section is the authoritative narrative for the push scheduling state machine (deferred /
+> accepted / failed). [DECISIONS.md ADR 0042](DECISIONS.md#0042--copilot-bridge-defers-non-interrupt-pushes-until-turn-stop-drained-by-an-ungated-agentstop-hook)
+> is the decision record; it supersedes-and-links ADR 0041 where the busy path now differs.
+
+ADR 0041's `accepted:"pending"` busy path still queued a non-`interrupt` turn behind the current
+one. If the agent inspected Telex and acked/handled the message manually during that turn, the
+queued turn arrived later as stale, already-handled work. Issue #65 replaces "queue while busy" with
+"defer until the turn stops, then revalidate durable state and push."
+
+- **Busy = the root-agent turn boundary.** The bridge tracks busy from `assistant.turn_start` /
+  `assistant.turn_end`, **only for root-agent events** (`agentId` absent). A sub-agent's inner
+  `turn_end` must not clear the gate while the parent turn runs. Full `session.idle` is intentionally
+  not used: it also waits for background shells/sub-agents, which is stronger than #65 needs and can
+  starve delivery after a long tool run. The bridge defaults to busy and self-heals to not-busy after
+  a bound of no activity, so a missed `turn_end` (crash/abort, or a load outside any turn) does not
+  defer forever.
+- **Defer, don't send.** A non-`interrupt` push arriving while busy returns `deferred_until_idle`
+  **without** calling `session.send`. `interrupt` (`immediate`) still sends immediately. A one-tick
+  yield before answering lets a just-arrived `turn_end` settle, collapsing the drain-vs-`turn_end`
+  race into a single non-deferred attempt.
+- **Deferred is a distinct daemon outcome.** `telex copilot push` maps `deferred_until_idle` to
+  `PUSH_EXIT_DEFERRED`; the daemon records a **deferred** attempt that is neither accepted (not
+  queued, no CC lower-bound advance) nor a transient failure (no fast re-push, no error log), does
+  not count toward the degraded-status threshold, and is held for `ON_DELIVER_DEFERRED_BACKSTOP`
+  (invariant `HEARTBEAT_INTERVAL <= deferred < accepted backstop`). `telex status` reports a
+  member's `push_deferred_count`, so deferred is diagnosable distinctly from accepted-unacked and
+  failed-transient.
+- **Turn-stop drains it.** A dedicated `agentStop` hook entry runs `telex copilot drain --session
+  <id>`, independent of `TELEX_TURN_GUARD` / its nudge cap, with its own `TELEX_COPILOT_DRAIN`
+  off-switch. It sends `DrainDeferred`; the daemon clears the deferred skip for the session's
+  on-deliver members (leaving accepted attempts untouched, so a genuinely queued turn is not
+  duplicated) and re-runs the on-deliver sweep. The sweep re-fetches `fetch_wait_candidates`, so a
+  message acked before the drain is no longer a candidate and is skipped — the repro guarantee. The
+  drain is O(deferred entries) with an in-memory zero-deferred fast path, returns before the sweep
+  completes, and has a client-side deadline below the hook timeout, so it never blocks turn-stop.
+  The daemon stays harness-neutral: it re-runs a generic sweep on request; "busy/idle" lives only in
+  the bridge.
+- **No loss.** If the drain hook is missed or races a still-busy bridge, the deferred backstop +
+  heartbeat sweep re-attempt within a bounded delay (a re-defer while busy is cheap and injects no
+  stale turn); re-provision (reattach / `/clear` reload) still re-delivers unacked backlog. Durable
+  Telex state remains authoritative throughout.

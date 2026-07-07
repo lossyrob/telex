@@ -526,6 +526,7 @@ station it intentionally dropped (for `Ack`, the message simply redelivers to a 
 | `Status { store_key?, detail?, proof? }` | Status surface (detail requires proof) | detail: **yes** |
 | `Reset { store_key, address, proof }` | operator **reset** of a station: release its waiters and mark it idle (non-destructive). Replaces the former force-takeover; it mints **no** epoch for session eviction and rotates **no** nonce — there is nothing to invalidate ([§10.2](#102-operator-reset)). | **yes** |
 | `Drain { proof }` | quiesce + flush + ordered transfer/exit (upgrade/stop) | **yes** |
+| `DrainDeferred { store_key, session_id, proof }` | idle-drain trigger ([§13.2](#132-on-deliver-push-opt-in-harness-neutral)): clear the deferred-push skip for the session's on-deliver members and re-run the sweep, so messages the harness deferred while busy are re-attempted now the turn stopped; durable state is revalidated so an already-consumed message is skipped. Harness-neutral (no busy/idle concept in the core). | **yes** |
 
 Responses:
 
@@ -1471,6 +1472,19 @@ that member.
   lifecycle-scoped in-memory fast-path keyed per member — pruned to the still-undelivered set each
   sweep, reset on explicit re-provision, and reclaimed on the next `Register` after a plain
   `Detach` — never the authority.
+- **Deferred outcome + on-request drain (harness-neutral).** Beyond accepted / failed / permanent
+  dead-letter, the exec may report a **deferred** outcome (a distinct exit code): the harness was
+  busy and did not deliver, so it is neither accepted (not queued) nor a failure (not fast-retried).
+  A deferred attempt is held for a **deferred backstop** (`HEARTBEAT_INTERVAL <= deferred <
+  accepted backstop`), does not count toward the degraded threshold, and is surfaced as a per-member
+  `push_deferred_count`. A `DrainDeferred { store_key, session_id }` request (admin-capped) clears
+  the deferred skip for that session's on-deliver members (leaving accepted attempts untouched) and
+  re-runs the sweep, which revalidates durable state via `fetch_wait_candidates` — a message
+  consumed before the drain is no longer a candidate. The daemon holds **no** notion of harness
+  busy/idle; it only re-runs a generic sweep on request. The Copilot mapping (busy = root-agent turn
+  boundary, drained by an `agentStop` hook) lives entirely in the `telex copilot` verbs. See
+  [copilot-bridge-push.md](copilot-bridge-push.md) and
+  [DECISIONS.md ADR 0042](DECISIONS.md#0042--copilot-bridge-defers-non-interrupt-pushes-until-turn-stop-drained-by-an-ungated-agentstop-hook).
 - **Version compatibility.** Because the daemon is persistent, a new client can meet an **older**
   daemon that predates `on_deliver`. The daemon advertises an `on_deliver_exec_v1` capability in
   its handshake, and a `--copilot-bridge` bind **verifies `push_registered` after registering**; if

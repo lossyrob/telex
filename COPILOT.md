@@ -68,12 +68,14 @@ yours to make.
 
 3. **Receive messages as turns.** A delivered telex message arrives as a new turn
    labelled `[telex] from <addr> (<attention>)`. An `interrupt` message is delivered as
-   soon as possible (Copilot `immediate`, ahead of enqueued messages); every other
-   attention level is `enqueue`d and arrives after your current turn. Neither preempts a
-   turn already running. Read it, then record disposition **by id**. For CC observer
-   pushes, the prompt says `delivery_role: cc` and `requires_disposition: false`;
-   ack it for transport consumption/dedupe, but do not treat the primary recipient's
-   required-disposition flag as your own obligation.
+   soon as possible (Copilot `immediate`, ahead of enqueued messages). Every other
+   attention level is **deferred** while a turn is running and delivered **after your turn
+   stops** — it is not queued behind the current turn, so a message you read and
+   disposition manually mid-turn is not re-injected as a stale turn later. Neither
+   preempts a turn already running. Read it, then record disposition
+   **by id**. For CC observer pushes, the prompt says `delivery_role: cc` and
+   `requires_disposition: false`; ack it for transport consumption/dedupe, but do not
+   treat the primary recipient's required-disposition flag as your own obligation.
 
    ```sh
    telex ack --address <addr> --id <message-id> --session "$COPILOT_AGENT_SESSION_ID"

@@ -540,7 +540,13 @@ impl DaemonState {
                     .get(&(member.store_key.clone(), member.address.clone()))
                     .copied()
                     .unwrap_or(0);
-                member.status(&live_waiters, pending, deaf_warn_threshold_ms)
+                let mut status = member.status(&live_waiters, pending, deaf_warn_threshold_ms);
+                status.push_deferred_count = self.on_deliver_deferred_count(&MemberKey {
+                    store_key: member.store_key.clone(),
+                    session_id: member.session_id.clone(),
+                    address: member.address.clone(),
+                });
+                status
             })
             .collect();
         let epoch_by_address = members
@@ -1225,6 +1231,9 @@ impl MemberRecord {
             push_registered: self.on_deliver.is_some(),
             push_wake_on_cc: self.on_deliver_wake_on_cc,
             push_cc_after_ms: self.on_deliver_cc_after_ms,
+            // Filled in by the status builder, which has the deferred-attempt map; a bare
+            // MemberRecord cannot see it.
+            push_deferred_count: 0,
             unattended_since_ms,
             unattended_for_ms,
             deaf_since_ms,
@@ -2057,6 +2066,18 @@ const ON_DELIVER_DEGRADED_AFTER: u32 = 6;
 /// message too large to ever fit the harness frame). The message is dead-lettered rather than
 /// retried; it stays durably queued.
 const ON_DELIVER_PERMANENT_EXIT: i32 = 3;
+/// Exit code the on-deliver handler returns when the harness **deferred** the push because it was
+/// busy (a root turn is running). The message was NOT sent; it is neither accepted nor a failure.
+/// It is held at `ON_DELIVER_DEFERRED_BACKSTOP` and re-attempted promptly by the idle drain
+/// (`DrainDeferred`) when the turn stops. Kept in sync with `PUSH_EXIT_DEFERRED` in `copilot.rs`.
+const ON_DELIVER_DEFERRED_EXIT: i32 = 4;
+/// Re-attempt cooldown for a message the harness **deferred** (busy). The idle drain is the prompt
+/// re-delivery trigger; this backstop only bounds the latency if the drain signal is missed (hook
+/// did not fire / raced), so a busy bridge is not re-hit every heartbeat while the turn runs.
+/// Invariant: `HEARTBEAT_INTERVAL <= ON_DELIVER_DEFERRED_BACKSTOP < ON_DELIVER_ACCEPTED_BACKSTOP`
+/// (fallback re-attempt is bounded, but deferred is re-checked sooner than a genuinely-queued
+/// accepted turn). Enforced by `on_deliver_backstop_invariants` in tests.
+const ON_DELIVER_DEFERRED_BACKSTOP: Duration = Duration::from_secs(30);
 
 /// Backoff before re-pushing a still-undelivered message that has already been attempted
 /// `attempts` times: `ON_DELIVER_RETRY_BASE` doubling per attempt, capped at
@@ -2076,7 +2097,9 @@ fn on_deliver_backoff(attempts: u32) -> Duration {
 /// re-provision (reattach/reload clears the push record and re-delivers the backlog), so this
 /// timer only needs to backstop the rare accept-but-silently-dropped-while-held case.
 fn on_deliver_redelivery_delay(attempt: &PushAttempt) -> Duration {
-    if attempt.accepted {
+    if attempt.deferred {
+        ON_DELIVER_DEFERRED_BACKSTOP
+    } else if attempt.accepted {
         ON_DELIVER_ACCEPTED_BACKSTOP
     } else {
         on_deliver_backoff(attempt.attempts)
@@ -2104,6 +2127,10 @@ struct PushAttempt {
     last: Instant,
     attempts: u32,
     accepted: bool,
+    /// The harness deferred this push because it was busy (issue #65). Mutually exclusive with
+    /// `accepted`: a deferred message was not sent, so it is neither queued-in-session nor a
+    /// failure. It uses `ON_DELIVER_DEFERRED_BACKSTOP` and is cleared by the idle drain.
+    deferred: bool,
     notification_only: bool,
     notification_lower_bound: Option<i64>,
 }
@@ -2226,16 +2253,20 @@ impl DaemonState {
             })
     }
 
-    /// Record one push attempt for `(member, id)` -- its `accepted` outcome (the harness accepted
-    /// the turn vs a failed push) and time -- and return the new attempt count. The outcome selects
-    /// the re-delivery delay: a failed push retries fast to recover a dead bridge; an accepted push
-    /// waits on the long backstop (re-delivery is otherwise re-provision-driven).
+    /// Record one push attempt for `(member, id)` -- its outcome (accepted / deferred-busy / failed)
+    /// and time -- and return the current attempt count. The outcome selects the re-delivery delay:
+    /// a failed push retries fast to recover a dead bridge; an accepted push waits on the long
+    /// backstop (re-delivery is otherwise re-provision-driven); a **deferred** push waits on the
+    /// deferred backstop and is cleared promptly by the idle drain. A deferred attempt does **not**
+    /// increment `attempts`, so it never inflates the failed-backoff or trips the degraded-status
+    /// threshold -- deferring while a long turn runs is normal, not degradation (issue #65).
     fn on_deliver_record_attempt(
         &self,
         member: &MemberKey,
         id: i64,
         now: Instant,
         accepted: bool,
+        deferred: bool,
         notification_only: bool,
         notification_lower_bound: Option<i64>,
     ) -> u32 {
@@ -2248,15 +2279,48 @@ impl DaemonState {
                 last: now,
                 attempts: 0,
                 accepted: false,
+                deferred: false,
                 notification_only,
                 notification_lower_bound,
             });
-        entry.attempts = entry.attempts.saturating_add(1);
+        if !deferred {
+            entry.attempts = entry.attempts.saturating_add(1);
+        }
         entry.last = now;
         entry.accepted = accepted;
+        entry.deferred = deferred;
         entry.notification_only = notification_only;
         entry.notification_lower_bound = notification_lower_bound;
         entry.attempts
+    }
+
+    /// Clear the deferred-until-idle skip for a member's messages so the next sweep re-attempts them
+    /// (issue #65 idle drain). Only **deferred** attempts are removed; accepted attempts (genuinely
+    /// queued turns) are left untouched so the drain never re-injects a duplicate of a queued turn.
+    /// Returns the number of deferred entries cleared -- 0 is the common no-work fast path.
+    fn on_deliver_clear_deferred(&self, member: &MemberKey) -> usize {
+        let mut map = self.on_deliver.pushed.lock().unwrap();
+        let Some(attempts) = map.get_mut(member) else {
+            return 0;
+        };
+        let before = attempts.len();
+        attempts.retain(|_id, a| !a.deferred);
+        let cleared = before - attempts.len();
+        if attempts.is_empty() {
+            map.remove(member);
+        }
+        cleared
+    }
+
+    /// Count of a member's messages currently deferred-until-idle (for `telex status` diagnosis).
+    fn on_deliver_deferred_count(&self, member: &MemberKey) -> i64 {
+        self.on_deliver
+            .pushed
+            .lock()
+            .unwrap()
+            .get(member)
+            .map(|attempts| attempts.values().filter(|a| a.deferred).count() as i64)
+            .unwrap_or(0)
     }
 
     /// Prune a member's push-attempt and dead-letter records to only ids still in `keep` (the
@@ -2451,13 +2515,16 @@ impl DaemonState {
                 );
             } else {
                 // Record the attempt with its outcome so the next re-push uses the right delay
-                // (accepted -> long backstop; failed -> fast backoff). The message leaves the
-                // attempt map only once it is acked (retain sweep).
+                // (accepted -> long backstop; deferred-busy -> deferred backstop, cleared by the
+                // idle drain; failed -> fast backoff). The message leaves the attempt map only once
+                // it is acked (retain sweep).
+                let deferred = outcome == RunOutcome::Deferred;
                 let attempts = state.on_deliver_record_attempt(
                     &member_key,
                     id,
                     Instant::now(),
                     outcome == RunOutcome::Ok,
+                    deferred,
                     notification_only,
                     notification_lower_bound,
                 );
@@ -2476,7 +2543,9 @@ impl DaemonState {
                         ),
                     );
                 }
-                if attempts == ON_DELIVER_DEGRADED_AFTER {
+                // A deferred push is normal scheduling, not degradation: it did not increment
+                // `attempts`, so it cannot trip the degraded threshold or spam recent errors.
+                if !deferred && attempts == ON_DELIVER_DEGRADED_AFTER {
                     state.push_recent_error(
                         "OnDeliverDegraded",
                         format!(
@@ -2520,6 +2589,9 @@ fn on_deliver_descriptor_json(store_key: &str, address: &str, row: &MessageRow) 
 enum RunOutcome {
     /// The handler accepted the push (exit 0).
     Ok,
+    /// The harness deferred the push because it was busy (`ON_DELIVER_DEFERRED_EXIT`) -- not sent,
+    /// not a failure; held at the deferred backstop and re-attempted by the idle drain.
+    Deferred,
     /// A retryable failure (nonzero exit, spawn error, timeout) -- retried on backoff.
     Transient,
     /// A permanent, non-retryable failure (`ON_DELIVER_PERMANENT_EXIT`) -- dead-lettered.
@@ -2561,10 +2633,10 @@ async fn run_on_deliver(
     match tokio::time::timeout(ON_DELIVER_TIMEOUT, child.wait()).await {
         Ok(Ok(status)) if status.success() => (RunOutcome::Ok, None),
         Ok(Ok(status)) => {
-            let outcome = if status.code() == Some(ON_DELIVER_PERMANENT_EXIT) {
-                RunOutcome::Permanent
-            } else {
-                RunOutcome::Transient
+            let outcome = match status.code() {
+                Some(ON_DELIVER_PERMANENT_EXIT) => RunOutcome::Permanent,
+                Some(ON_DELIVER_DEFERRED_EXIT) => RunOutcome::Deferred,
+                _ => RunOutcome::Transient,
             };
             (outcome, read_bounded_stderr(stderr_pipe).await)
         }
@@ -3052,6 +3124,16 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             }
             reset_station(state.clone(), store_key, address).await
         }
+        Request::DrainDeferred {
+            store_key,
+            session_id,
+            proof,
+        } => {
+            if let Err(response) = state.check_admin_cap(proof.as_deref()) {
+                return (response, ClientAction::Continue);
+            }
+            drain_deferred(state.clone(), store_key, session_id).await
+        }
         Request::Drain { proof } => {
             if let Err(response) = state.check_admin_cap(proof.as_deref()) {
                 return (response, ClientAction::Continue);
@@ -3511,6 +3593,47 @@ async fn session_end(state: Arc<DaemonState>, store_key: String, session_id: Str
         "authoritative sessionEnd hook",
     )
     .await
+}
+
+/// Idle-drain (issue #65): the harness reports (via `telex copilot drain` on turn-stop) that a root
+/// turn ended, so re-attempt any messages this session deferred while it was busy. Clears the
+/// deferred skip for each of the session's on-deliver members and queues a backlog re-sweep; the
+/// sweep revalidates durable state (`fetch_wait_candidates`), so a message acked before the drain
+/// is no longer a candidate and is not re-injected. Non-blocking: it queues the sweeps and returns.
+/// O(deferred entries) with an in-memory-only zero-deferred fast path (no DB I/O when nothing is
+/// deferred), so running it on every turn-stop is cheap.
+async fn drain_deferred(
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+) -> Response {
+    let mut cleared = 0usize;
+    let mut swept_members = 0usize;
+    for member in state.session_members(&store_key, &session_id) {
+        if member.on_deliver.is_none() {
+            continue;
+        }
+        let member_key = MemberKey {
+            store_key: member.store_key.clone(),
+            session_id: member.session_id.clone(),
+            address: member.address.clone(),
+        };
+        let n = state.on_deliver_clear_deferred(&member_key);
+        if n > 0 {
+            cleared += n;
+            swept_members += 1;
+            spawn_on_deliver_backlog(state.clone(), member);
+        }
+    }
+    Response::Ack {
+        message: Some(format!(
+            "drain deferred: cleared {cleared} deferred message(s) across {swept_members} member(s)"
+        )),
+        delivery_outcome: None,
+        address: None,
+        message_id: None,
+        lease_epoch: None,
+    }
 }
 
 async fn end_session_members(
@@ -4807,6 +4930,17 @@ mod p3_tests {
         }
     }
 
+    fn exit_four_argv() -> Vec<String> {
+        #[cfg(windows)]
+        {
+            vec!["cmd".into(), "/c".into(), "exit".into(), "4".into()]
+        }
+        #[cfg(unix)]
+        {
+            vec!["sh".into(), "-c".into(), "exit 4".into()]
+        }
+    }
+
     fn record_stdin_argv(path: &std::path::Path) -> Vec<String> {
         let path = path.to_string_lossy().to_string();
         #[cfg(windows)]
@@ -5160,7 +5294,7 @@ mod p3_tests {
             address: "addr:a".to_string(),
         };
         let now = Instant::now();
-        state.on_deliver_record_attempt(&member_key, 7, now, false, false, None);
+        state.on_deliver_record_attempt(&member_key, 7, now, false, false, false, None);
         assert!(state.on_deliver_should_skip(&member_key, 7, now));
         state.on_deliver_forget_member(&member_key);
         assert!(
@@ -5175,6 +5309,7 @@ mod p3_tests {
             last: Instant::now(),
             attempts,
             accepted,
+            deferred: false,
             notification_only: false,
             notification_lower_bound: None,
         };
@@ -5213,7 +5348,7 @@ mod p3_tests {
         };
         let now = Instant::now();
         // Accepted push: skipped for the whole backstop window; eligible only after it elapses.
-        state.on_deliver_record_attempt(&member_key, 1, now, true, false, None);
+        state.on_deliver_record_attempt(&member_key, 1, now, true, false, false, None);
         assert!(state.on_deliver_should_skip(&member_key, 1, now + ON_DELIVER_RETRY_BASE * 4));
         assert!(!state.on_deliver_should_skip(
             &member_key,
@@ -5221,7 +5356,7 @@ mod p3_tests {
             now + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
         ));
         // Failed push: eligible again as soon as the fast backoff elapses.
-        state.on_deliver_record_attempt(&member_key, 2, now, false, false, None);
+        state.on_deliver_record_attempt(&member_key, 2, now, false, false, false, None);
         assert!(state.on_deliver_should_skip(&member_key, 2, now));
         assert!(!state.on_deliver_should_skip(
             &member_key,
@@ -5240,7 +5375,7 @@ mod p3_tests {
             address: "addr:observer".to_string(),
         };
         let now = Instant::now();
-        state.on_deliver_record_attempt(&member_key, 1, now, true, true, Some(1));
+        state.on_deliver_record_attempt(&member_key, 1, now, true, false, true, Some(1));
         assert!(state.on_deliver_should_skip(&member_key, 1, now));
         assert!(state.on_deliver_should_skip(
             &member_key,
@@ -5248,7 +5383,7 @@ mod p3_tests {
             now + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(1)
         ));
 
-        state.on_deliver_record_attempt(&member_key, 2, now, false, true, Some(2));
+        state.on_deliver_record_attempt(&member_key, 2, now, false, false, true, Some(2));
         assert!(state.on_deliver_should_skip(&member_key, 2, now));
         assert!(!state.on_deliver_should_skip(
             &member_key,
@@ -5299,6 +5434,7 @@ mod p3_tests {
             first,
             Instant::now(),
             false,
+            false,
             true,
             Some(first_row.created_at_ms),
         );
@@ -5307,6 +5443,7 @@ mod p3_tests {
             second,
             Instant::now(),
             true,
+            false,
             true,
             Some(second_row.created_at_ms),
         );
@@ -5349,6 +5486,7 @@ mod p3_tests {
             first,
             Instant::now(),
             true,
+            false,
             true,
             Some(first_row.created_at_ms),
         );
@@ -5432,6 +5570,281 @@ mod p3_tests {
                 Instant::now() + Duration::from_secs(86400)
             ),
             "a dead-lettered message must stay skipped (not retried) indefinitely"
+        );
+    }
+
+    // ---- issue #65: defer-until-idle daemon accounting + idle drain ----
+
+    #[test]
+    fn on_deliver_backstop_invariants() {
+        // A deferred (busy) message is re-checked no faster than the heartbeat sweep (so a busy
+        // bridge is not re-hit every tick) and sooner than a genuinely-queued accepted turn.
+        assert!(ON_DELIVER_DEFERRED_BACKSTOP >= HEARTBEAT_INTERVAL);
+        assert!(ON_DELIVER_DEFERRED_BACKSTOP < ON_DELIVER_ACCEPTED_BACKSTOP);
+    }
+
+    #[test]
+    fn deferred_redelivery_delay_is_the_deferred_backstop() {
+        let deferred = PushAttempt {
+            last: Instant::now(),
+            attempts: 0,
+            accepted: false,
+            deferred: true,
+            notification_only: false,
+            notification_lower_bound: None,
+        };
+        assert_eq!(
+            on_deliver_redelivery_delay(&deferred),
+            ON_DELIVER_DEFERRED_BACKSTOP
+        );
+    }
+
+    #[tokio::test]
+    async fn deferred_attempt_holds_at_backstop_and_stays_off_degraded_counter() {
+        let state = test_state("on-deliver-deferred-acct");
+        let store = store_key("on-deliver-deferred-acct");
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        let now = Instant::now();
+        // Re-deferring across a long busy turn must not accumulate the attempt counter (so the
+        // degraded-status threshold never trips) -- deferring while a turn runs is normal.
+        let mut attempts_seen = 0u32;
+        for _ in 0..(ON_DELIVER_DEGRADED_AFTER + 3) {
+            attempts_seen =
+                state.on_deliver_record_attempt(&member_key, 1, now, false, true, false, None);
+        }
+        assert_eq!(
+            attempts_seen, 0,
+            "a deferred push must not increment the degraded-status attempt counter"
+        );
+        assert_eq!(state.on_deliver_deferred_count(&member_key), 1);
+        // Held within the deferred backstop; eligible after it (bounded fallback if drain missed).
+        assert!(state.on_deliver_should_skip(&member_key, 1, now + Duration::from_secs(5)));
+        assert!(!state.on_deliver_should_skip(
+            &member_key,
+            1,
+            now + ON_DELIVER_DEFERRED_BACKSTOP + Duration::from_secs(1)
+        ));
+    }
+
+    #[tokio::test]
+    async fn deferred_exit_records_deferred_outcome() {
+        let state = test_state("on-deliver-deferred-exit");
+        let store = store_key("on-deliver-deferred-exit");
+        let mut req = register_req(&store, "rcv", "addr:rcv");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(exit_four_argv());
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        let id = insert_to(&state, &store, "addr:rcv").await;
+        let row = state
+            .backend_for(&store)
+            .await
+            .unwrap()
+            .get_message(id)
+            .await
+            .unwrap()
+            .unwrap();
+        state.fire_on_deliver_on_commit(&store, &row);
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "rcv".to_string(),
+            address: "addr:rcv".to_string(),
+        };
+        let mut deferred = false;
+        for _ in 0..100 {
+            if state.on_deliver_deferred_count(&member_key) == 1 {
+                deferred = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            deferred,
+            "an ON_DELIVER_DEFERRED_EXIT handler must record a deferred push attempt"
+        );
+        // Deferred is neither accepted (long backstop) nor a failure (fast backoff): it holds for
+        // exactly the deferred backstop and is not treated as degraded.
+        assert!(state.on_deliver_should_skip(&member_key, id, Instant::now()));
+        assert!(!state.on_deliver_should_skip(
+            &member_key,
+            id,
+            Instant::now() + ON_DELIVER_DEFERRED_BACKSTOP + Duration::from_secs(1)
+        ));
+    }
+
+    #[tokio::test]
+    async fn drain_clears_deferred_only_not_accepted() {
+        let state = test_state("drain-clears-deferred");
+        let store = store_key("drain-clears-deferred");
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        let now = Instant::now();
+        // id 1 deferred (bridge was busy), id 2 accepted (a genuinely queued turn).
+        state.on_deliver_record_attempt(&member_key, 1, now, false, true, false, None);
+        state.on_deliver_record_attempt(&member_key, 2, now, true, false, false, None);
+        assert!(state.on_deliver_should_skip(&member_key, 1, now));
+        assert!(state.on_deliver_should_skip(&member_key, 2, now));
+
+        let cleared = state.on_deliver_clear_deferred(&member_key);
+        assert_eq!(cleared, 1, "only the deferred attempt should be cleared");
+        // The deferred message becomes eligible for immediate re-push; the accepted (queued) turn
+        // is left untouched so the drain never re-injects a duplicate of a queued turn.
+        assert!(
+            !state.on_deliver_should_skip(&member_key, 1, now),
+            "a cleared deferred message must be eligible for re-push"
+        );
+        assert!(
+            state.on_deliver_should_skip(&member_key, 2, now),
+            "an accepted queued turn must NOT be re-pushed by the drain"
+        );
+        assert_eq!(state.on_deliver_deferred_count(&member_key), 0);
+    }
+
+    // Repro for the discovered bug (issue #65 acceptance): a message deferred while busy, then
+    // manually read + acked before the turn stops, must NOT be re-injected by the idle drain.
+    #[tokio::test]
+    async fn drain_deferred_skips_message_acked_before_idle() {
+        let state = test_state("drain-skips-acked");
+        let store = store_key("drain-skips-acked");
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("daemon-p3-tests")
+            .join("drain-skips-acked-marker");
+        std::fs::create_dir_all(&root).unwrap();
+        let marker = root.join("pushed.json");
+        let _ = std::fs::remove_file(&marker);
+
+        let mut req = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(record_stdin_argv(&marker));
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        // Message arrives; seed a deferred attempt (the bridge was busy, so it was not sent).
+        let id = insert_to(&state, &store, "addr:a").await;
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        state.on_deliver_record_attempt(&member_key, id, Instant::now(), false, true, false, None);
+        // The agent manually reads + acks it before the turn stops.
+        assert!(matches!(
+            request(state.clone(), ack_req(&store, "s1", "addr:a", id)).await,
+            Response::Ack { .. }
+        ));
+        // Turn stops -> idle drain.
+        let drained = request(
+            state.clone(),
+            Request::DrainDeferred {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                proof: Some(state.admin_cap.clone()),
+            },
+        )
+        .await;
+        assert!(matches!(drained, Response::Ack { .. }));
+        // The drain re-sweep revalidates durable state: the acked message is no longer a candidate,
+        // so the push handler is never invoked -- no stale turn is resurrected.
+        tokio::time::sleep(Duration::from_millis(750)).await;
+        assert!(
+            !marker.exists(),
+            "idle drain must NOT re-push a message that was acked before the turn stopped"
+        );
+        assert_eq!(state.on_deliver_deferred_count(&member_key), 0);
+    }
+
+    // A message deferred while busy and NOT consumed is delivered after the turn stops (idle drain).
+    #[tokio::test]
+    async fn drain_deferred_repushes_unacked_after_turn_stop() {
+        let state = test_state("drain-repushes-unacked");
+        let store = store_key("drain-repushes-unacked");
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("daemon-p3-tests")
+            .join("drain-repushes-unacked-marker");
+        std::fs::create_dir_all(&root).unwrap();
+        let marker = root.join("pushed.json");
+        let _ = std::fs::remove_file(&marker);
+
+        let mut req = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut req {
+            *on_deliver = Some(record_stdin_argv(&marker));
+        }
+        assert!(matches!(
+            request(state.clone(), req).await,
+            Response::Registered { .. }
+        ));
+        let id = insert_to(&state, &store, "addr:a").await;
+        let member_key = MemberKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        // Deferred while busy, never manually consumed.
+        state.on_deliver_record_attempt(&member_key, id, Instant::now(), false, true, false, None);
+        assert!(
+            state.on_deliver_should_skip(&member_key, id, Instant::now()),
+            "a freshly-deferred message is held until the drain (or the deferred backstop)"
+        );
+        // Turn stops -> idle drain clears the deferred skip and re-sweeps; the bridge is idle now,
+        // so the message is pushed.
+        let drained = request(
+            state.clone(),
+            Request::DrainDeferred {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                proof: Some(state.admin_cap.clone()),
+            },
+        )
+        .await;
+        assert!(matches!(drained, Response::Ack { .. }));
+        // Async poll (yields to the runtime so the spawned sweep/child-process can progress; a
+        // blocking wait would starve the current-thread executor).
+        let mut pushed = false;
+        for _ in 0..100 {
+            if marker.exists() {
+                pushed = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(
+            pushed,
+            "idle drain must re-push a still-unacked deferred message after the turn stops"
+        );
+    }
+
+    #[tokio::test]
+    async fn drain_deferred_requires_admin_cap() {
+        let state = test_state("drain-cap");
+        let store = store_key("drain-cap");
+        let denied = request(
+            state.clone(),
+            Request::DrainDeferred {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                proof: Some("wrong-cap".to_string()),
+            },
+        )
+        .await;
+        assert!(
+            matches!(denied, Response::Error { .. }),
+            "DrainDeferred must reject a bad admin cap"
         );
     }
 

@@ -273,6 +273,17 @@ pub enum Request {
         #[serde(default)]
         proof: Option<String>,
     },
+    /// Idle-drain trigger (issue #65): clear the deferred-push skip for the session's on-deliver
+    /// members and re-sweep their backlog, so messages deferred while the bridge was busy are
+    /// re-attempted now that a root turn has stopped. Harness-neutral: the daemon only knows it
+    /// should re-run the generic on-deliver sweep; the "busy/idle" concept lives entirely in the
+    /// bridge. Durable state is revalidated by the sweep, so an already-acked message is skipped.
+    DrainDeferred {
+        store_key: String,
+        session_id: String,
+        #[serde(default)]
+        proof: Option<String>,
+    },
     Ping,
 }
 
@@ -458,6 +469,11 @@ pub struct MemberStatus {
     pub push_wake_on_cc: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub push_cc_after_ms: Option<i64>,
+    /// Count of this member's messages currently deferred-until-idle (bridge was busy). Distinct
+    /// from accepted-unacked and failed-transient push state, so `telex status` can diagnose why a
+    /// message has not arrived as a turn yet (issue #65).
+    #[serde(default)]
+    pub push_deferred_count: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unattended_since_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

@@ -15,6 +15,12 @@
         "powershell": "telex --json copilot turn-guard",
         "bash": "telex --json copilot turn-guard",
         "timeoutSec": 30
+      },
+      {
+        "type": "command",
+        "powershell": "telex --json copilot drain",
+        "bash": "telex --json copilot drain",
+        "timeoutSec": 30
       }
     ]
   }
