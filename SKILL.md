@@ -419,13 +419,13 @@ Non-terminal states, still needing final disposition: `acknowledged`, `deferred`
 
 ## Latency
 
-In pull mode, agent wake dominates perceived latency: measured
-waiter-exit-to-agent-turn time is roughly 6-26 seconds, while backend delivery is
-sub-second. `interrupt` raises a message above `--min-attention interrupt`
-filtering so a focused waiter wakes for it, but it still resolves at the next wait
-completion / turn boundary rather than preempting in-flight work. Harnesses with a
-native push integration may map attention onto lower-latency delivery -- see that
-harness's skill (`telex <harness> skill`).
+In pull mode, agent wake dominates perceived latency: the time from a waiter exiting
+to the agent acting on the delivered message (harness-dependent, typically seconds to
+tens of seconds) far exceeds backend delivery, which is sub-second. `interrupt` raises a
+message above `--min-attention interrupt` filtering so a focused waiter wakes for it, but
+it still resolves at the next wait completion / turn boundary rather than preempting
+in-flight work. Harnesses with a native push integration may map attention onto
+lower-latency delivery -- see that harness's skill (`telex <harness> skill`).
 
 ## Backends
 

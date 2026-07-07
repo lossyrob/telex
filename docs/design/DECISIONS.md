@@ -1732,7 +1732,9 @@ content under a per-harness root, using this convention:
 - `<harness>/<HARNESS>.md` — the binary-embedded, version-matched skill body printed by
   `telex <harness> skill`.
 - `<harness>/bridge/` — binary-embedded harness integration source (e.g. the in-session
-  bridge extension), `include_str!`-embedded, not marketplace-distributed.
+  bridge extension), `include_str!`-embedded, not marketplace-distributed. **Present only
+  when the harness has binary-embedded integration source; omit it for a harness that ships
+  only a marketplace plugin.**
 - `<harness>/plugin/` — the marketplace plugin root (`plugin.json`, `hooks.json`,
   `skills/`); the marketplace entry's `source` points at `<harness>/plugin`.
 
@@ -1756,3 +1758,10 @@ Copilot CLI 1.0.69-2 — positive install from `copilot/plugin`, a negative cont
 [copilot-plugin-validation.md](copilot-plugin-validation.md)). This entry **complements**
 ADR 0040 (it does not supersede it): 0040's binary-owned-skill ownership decision stands;
 0042 only relocates the files and neutralizes the root skill.
+
+The `<harness>/` layout is only the on-disk part of the convention. Adding a sibling
+harness also requires code/CI touchpoints outside `<harness>/`, recorded per harness in
+its own ADR: a `src/commands/<harness>.rs` module with the `include_str!` constants and a
+`telex <harness>` subcommand tree; a new plugin entry in `.github/plugin/marketplace.json`
+with `source: <harness>/plugin`; and (if the harness ships a `bridge/`) a
+`node --check <harness>/bridge/<file>` gate in `.github/workflows/ci.yml`.

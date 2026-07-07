@@ -2,6 +2,9 @@ use serde_json::Value;
 use std::path::Path;
 
 #[test]
+// "root skill source" here means the repository-root `SKILL.md` (the canonical embedded
+// skill source), which stays at the root; the plugin manifest itself now lives under
+// `copilot/plugin/`.
 fn plugin_manifest_declares_hooks_and_root_skill_source() {
     let manifest: Value =
         serde_json::from_str(include_str!("../copilot/plugin/plugin.json")).expect("plugin.json parses");
@@ -89,11 +92,37 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
         .join("skills")
         .join("telex")
         .join("SKILL.md");
-    assert_eq!(
-        skill_files,
-        vec![root_skill.clone(), plugin_skill.clone()],
-        "only the canonical root skill and the plugin bootstrap skill should exist"
+    // Today the only skill files are the neutral root SKILL.md and the Copilot plugin
+    // bootstrap. Rather than pin the exact 2-element snapshot (which the first sibling
+    // harness PR would have to edit — see ADR 0042), enforce the invariant the ADR states:
+    // the neutral root skill exists, the Copilot bootstrap exists, and every skill file is
+    // either the root skill or a `<harness>/plugin/skills/<name>/SKILL.md` bootstrap. This
+    // still catches a stray SKILL.md copied somewhere unexpected while allowing siblings.
+    assert!(
+        skill_files.contains(&root_skill),
+        "the canonical root SKILL.md must exist"
     );
+    assert!(
+        skill_files.contains(&plugin_skill),
+        "the Copilot plugin bootstrap must exist at copilot/plugin/skills/telex/SKILL.md"
+    );
+    for f in &skill_files {
+        let rel = f.strip_prefix(root).unwrap_or(f);
+        let comps: Vec<String> = rel
+            .components()
+            .map(|c| c.as_os_str().to_string_lossy().into_owned())
+            .collect();
+        // `<harness>/plugin/skills/<name>/SKILL.md`
+        let is_harness_bootstrap = comps.len() == 5
+            && comps[1] == "plugin"
+            && comps[2] == "skills"
+            && comps[4] == "SKILL.md";
+        assert!(
+            f == &root_skill || is_harness_bootstrap,
+            "unexpected SKILL.md at {rel:?}: skill files must be the neutral root skill or a \
+             <harness>/plugin/skills/<name>/SKILL.md bootstrap (see ADR 0042)"
+        );
+    }
 
     let plugin_text = std::fs::read_to_string(&plugin_skill).expect("read plugin skill");
 
@@ -127,6 +156,8 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
         "Detached waiter pattern",
         "## Attention levels",
         "## Disposition states",
+        "pwsh -File",
+        "list_powershell",
     ] {
         assert!(
             !plugin_text.contains(forbidden),
@@ -156,7 +187,13 @@ fn collect_skill_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
         let path = entry.path();
         if path.components().any(|c| {
             let c = c.as_os_str();
-            c == "target" || c == ".git" || c == ".paw"
+            c == "target"
+                || c == ".git"
+                || c == ".paw"
+                || c == ".streamliner"
+                || c == "node_modules"
+                || c == ".venv"
+                || c == "dist"
         }) {
             continue;
         }
