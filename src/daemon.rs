@@ -480,55 +480,36 @@ impl DaemonState {
             .iter()
             .map(|(store_key, entry)| (store_key.clone(), entry.backend.clone()))
             .collect();
+        // Both observability counts per unique (store, address), in a single backend pass that
+        // materializes pending delivery rows once. `pending_unconsumed_count` counts all unconsumed
+        // non-terminal deliveries; `inbound_actionable_count` counts only those requiring THIS
+        // station's disposition (primary + requires_disposition), so no-disposition notes and, on a
+        // shared address, traffic this station need not act on are separated out.
         let mut pending_counts: HashMap<(String, String), i64> = HashMap::new();
+        let mut inbound_actionable_counts: HashMap<(String, String), i64> = HashMap::new();
         for member in &member_records {
             let key = (member.store_key.clone(), member.address.clone());
             if pending_counts.contains_key(&key) {
                 continue;
             }
-            let pending = match store_backends.get(&member.store_key) {
-                Some(backend) => match backend.pending_unconsumed_count(&member.address).await {
-                    Ok(count) => count,
+            let (pending, actionable) = match store_backends.get(&member.store_key) {
+                Some(backend) => match backend.pending_and_actionable_counts(&member.address).await
+                {
+                    Ok(counts) => counts,
                     Err(e) => {
                         self.push_recent_error(
                             "BackendDisconnect",
                             format!(
-                                "pending count failed for {} {}: {e:#}",
+                                "pending/actionable counts failed for {} {}: {e:#}",
                                 member.store_key, member.address
                             ),
                         );
-                        0
+                        (0, 0)
                     }
                 },
-                None => 0,
+                None => (0, 0),
             };
-            pending_counts.insert(key, pending);
-        }
-        // Actionable inbound backlog per address (requires_disposition to this station, non-terminal,
-        // unconsumed) — distinct from raw pending, which also counts no-disposition notes and, on a
-        // shared address, traffic this station is not responsible for dispositioning.
-        let mut inbound_actionable_counts: HashMap<(String, String), i64> = HashMap::new();
-        for member in &member_records {
-            let key = (member.store_key.clone(), member.address.clone());
-            if inbound_actionable_counts.contains_key(&key) {
-                continue;
-            }
-            let actionable = match store_backends.get(&member.store_key) {
-                Some(backend) => match backend.inbound_actionable_count(&member.address).await {
-                    Ok(count) => count,
-                    Err(e) => {
-                        self.push_recent_error(
-                            "BackendDisconnect",
-                            format!(
-                                "inbound actionable count failed for {} {}: {e:#}",
-                                member.store_key, member.address
-                            ),
-                        );
-                        0
-                    }
-                },
-                None => 0,
-            };
+            pending_counts.insert(key.clone(), pending);
             inbound_actionable_counts.insert(key, actionable);
         }
         // Push-delivery health + suppressed counts per member. Computed BEFORE taking the members
@@ -1399,11 +1380,21 @@ impl MemberRecord {
                         "attended via push bridge (no waiter; expected in push mode); push delivery is being (re)attempted — health not yet confirmed".to_string(),
                     ),
                 ),
-                _ => (
+                PushDeliveryHealth::Delivering | PushDeliveryHealth::NoBacklog => (
                     StationHealth::AttendedPush,
                     Some(format!(
                         "attended via push bridge (no waiter; expected in push mode); {inbound_actionable_count} awaiting this station's disposition"
                     )),
+                ),
+                // `on_deliver.is_some()` means push is registered, so these are not expected here;
+                // match them explicitly so a future `PushDeliveryHealth` variant forces a decision
+                // rather than silently inheriting `attended_push`.
+                PushDeliveryHealth::NotRegistered | PushDeliveryHealth::Unknown => (
+                    StationHealth::AttendedPush,
+                    Some(
+                        "registered push station; see push_delivery for delivery confidence"
+                            .to_string(),
+                    ),
                 ),
             };
         }
@@ -2279,12 +2270,16 @@ struct OnDeliverCandidate {
 /// currently-undelivered set on each sweep; `dead_lettered`
 /// holds messages a handler reported as permanently unpushable (skipped from further pushes,
 /// surfaced via a degraded status, still durably queued); `inflight` prevents a commit-path
-/// and a sweep-path from racing the same message.
+/// and a sweep-path from racing the same message. `generations` fences lifecycle resets: each
+/// member has a generation that is bumped on re-provision (`on_deliver_forget_member`), captured
+/// when a push is spawned, and re-checked on completion, so an in-flight push launched before a
+/// reset cannot write its stale outcome into the fresh generation's attempt map.
 struct OnDeliverState {
     sem: Arc<Semaphore>,
     inflight: Mutex<HashMap<OnDeliverKey, InflightAttempt>>,
     pushed: Mutex<HashMap<MemberKey, HashMap<i64, PushAttempt>>>,
     dead_lettered: Mutex<HashMap<MemberKey, BTreeSet<i64>>>,
+    generations: Mutex<HashMap<MemberKey, u64>>,
 }
 
 impl Default for OnDeliverState {
@@ -2294,6 +2289,7 @@ impl Default for OnDeliverState {
             inflight: Mutex::new(HashMap::new()),
             pushed: Mutex::new(HashMap::new()),
             dead_lettered: Mutex::new(HashMap::new()),
+            generations: Mutex::new(HashMap::new()),
         }
     }
 }
@@ -2430,18 +2426,31 @@ impl DaemonState {
             return PushDeliveryHealth::NoBacklog;
         }
         let pushed = self.on_deliver.pushed.lock().unwrap();
-        let attempts = match pushed.get(member) {
+        let member_attempts = match pushed.get(member) {
             Some(attempts) if !attempts.is_empty() => attempts,
             // Backlog exists but nothing attempted yet (e.g. just after a daemon restart, before
             // the next sweep, or between commit and first push). Not confidently attended, not deaf.
             _ => return PushDeliveryHealth::Probing,
         };
-        // Classify by the FRESHEST attempt across the member's messages, not "any accept in the
-        // window": otherwise a stale accept on message A (still inside its 300s backstop) would mask
-        // a fresh failure on message B, reporting `delivering` while the bridge is actually
-        // unreachable and delaying deaf detection by up to a backstop. The most recent attempt
-        // outcome is the truest current bridge signal.
-        let freshest = attempts.values().max_by_key(|a| a.last);
+        // Consider only push-relevant attempts: a message that was accepted and needs no further
+        // delivery (`skip_after_accept`: a CC notification or a no-disposition note) is done, not
+        // current work, so it must not keep the station looking `stale_accepted`/`delivering` once
+        // its backstop elapses. If the only attempts are such completed ones, there is no live push
+        // work outstanding -> attended, no backlog.
+        let mut relevant = member_attempts
+            .values()
+            .filter(|a| !(a.accepted && a.skip_after_accept))
+            .peekable();
+        if relevant.peek().is_none() {
+            return PushDeliveryHealth::NoBacklog;
+        }
+        // Classify by the FRESHEST relevant attempt, not "any accept in the window": otherwise a
+        // stale accept on message A (still inside its 300s backstop) would mask a fresh failure on
+        // message B, reporting `delivering` while the bridge is actually unreachable and delaying
+        // deaf detection by up to a backstop. Ties on `last` are broken toward a failure
+        // (`!accepted` sorts high), so equal-timestamp completions never flip health nondeterministically
+        // from the unordered attempt map.
+        let freshest = relevant.max_by_key(|a| (a.last, !a.accepted));
         match freshest {
             Some(attempt) if attempt.accepted => {
                 if now.saturating_duration_since(attempt.last) < ON_DELIVER_ACCEPTED_BACKSTOP {
@@ -2523,11 +2532,28 @@ impl DaemonState {
         self.on_deliver.inflight.lock().unwrap().remove(key);
     }
 
+    /// Current push generation for a member (0 if never reset). Captured when a push is spawned so
+    /// a completion from before a re-provision reset can be detected and discarded.
+    fn on_deliver_generation(&self, member: &MemberKey) -> u64 {
+        self.on_deliver
+            .generations
+            .lock()
+            .unwrap()
+            .get(member)
+            .copied()
+            .unwrap_or(0)
+    }
+
     /// Drop a member's push dedup state so a later re-bind re-pushes still-undelivered messages
-    /// (lifecycle-scoped dedup). Called on member removal and on (re-)register.
+    /// (lifecycle-scoped dedup). Called on member removal and on (re-)register. Bumps the member's
+    /// push generation so any in-flight push spawned before this reset is fenced: its later
+    /// completion is ignored instead of writing stale outcome/backoff into the fresh attempt map.
     fn on_deliver_forget_member(&self, member: &MemberKey) {
         self.on_deliver.pushed.lock().unwrap().remove(member);
         self.on_deliver.dead_lettered.lock().unwrap().remove(member);
+        let mut generations = self.on_deliver.generations.lock().unwrap();
+        let generation = generations.entry(member.clone()).or_insert(0);
+        *generation = generation.wrapping_add(1);
     }
 
     fn on_deliver_advance_cc_lower_bound(&self, member_key: &MemberKey, lower_bound: i64) {
@@ -2663,8 +2689,18 @@ impl DaemonState {
         let descriptor = on_deliver_descriptor_json(&store_key, &address, &row);
         let sem = self.on_deliver.sem.clone();
         let state = self.clone();
+        // Capture the member's push generation at spawn. If a re-provision resets the member
+        // (bumping the generation) while this push is in flight, its completion is discarded below
+        // rather than writing stale outcome/backoff into the fresh generation's attempt map.
+        let spawn_generation = self.on_deliver_generation(&member_key);
         tokio::spawn(async move {
             let (outcome, stderr) = run_on_deliver(sem, argv, descriptor).await;
+            if state.on_deliver_generation(&member_key) != spawn_generation {
+                // A re-provision reset this member's push state after we started; discard this
+                // stale completion (free the in-flight slot so the fresh generation re-pushes).
+                state.on_deliver_end(&key);
+                return;
+            }
             if outcome == RunOutcome::Permanent {
                 // Dead-letter: stop retrying a structurally unpushable message. It stays durably
                 // queued (never marked consumed) and is readable via `telex inbox`.
@@ -3983,23 +4019,11 @@ async fn detach_member(
                     "Detach",
                     &[member.clone()],
                 );
-                // Also record the DURABLE detach tombstone (not just the in-memory definite-end) so
-                // the persisted "detached / not-a-delivery-target" signal survives a daemon restart
-                // and is visible to a separate process — specifically the `telex copilot push`
-                // helper, which preflights it to honor self-stop even if an in-flight push races
-                // member removal. Best-effort: the detach itself already succeeded, so a tombstone
-                // write failure is logged, not fatal. An explicit re-attach clears it.
-                if let Err(e) = backend
-                    .record_detach_tombstone(&session_id, &address, "Detach")
-                    .await
-                {
-                    state.push_recent_error(
-                        "Detach",
-                        format!(
-                            "detach succeeded but durable tombstone write failed store={store_key} session={session_id} address={address}: {e:#}"
-                        ),
-                    );
-                }
+                // Do NOT record the durable tombstone again here: `release_epoch_lease_for_detach`
+                // above already wrote it atomically inside the lease-release transaction (see the
+                // backend contract). A second, non-atomic write can race a concurrent explicit
+                // re-attach's tombstone clear and recreate a stale tombstone for a freshly-live
+                // station, which `telex copilot push` would then refuse permanently.
             }
             Ok(false) => {
                 self_demote_member(
@@ -5686,9 +5710,17 @@ mod p3_tests {
         let store = store_key("repush-cap");
         let key = mk(&store, "s1", "addr:a");
         let now = Instant::now();
-        for _ in 0..ON_DELIVER_MAX_REPUSH {
+        // One below the cap: still eligible once its backoff elapses.
+        for _ in 0..(ON_DELIVER_MAX_REPUSH - 1) {
             state.on_deliver_record_attempt(&key, 5, now, false, false, None, false);
         }
+        assert!(
+            !state.on_deliver_should_skip(&key, 5, now + ON_DELIVER_ACCEPTED_BACKSTOP * 100),
+            "one attempt below the hard cap should still be eligible after backoff"
+        );
+        assert_eq!(state.push_suppressed_count(&key), 0);
+        // Reaching the cap suppresses further re-push.
+        state.on_deliver_record_attempt(&key, 5, now, false, false, None, false);
         assert!(
             state.on_deliver_should_skip(&key, 5, now + ON_DELIVER_ACCEPTED_BACKSTOP * 100),
             "past the hard cap a message is suppressed regardless of elapsed time"
@@ -5838,6 +5870,60 @@ mod p3_tests {
             state.push_delivery_health(&key, 2, true, base + Duration::from_secs(4)),
             PushDeliveryHealth::Delivering
         );
+    }
+
+    /// Equal-timestamp attempts break the freshest tie toward a failure, so push health cannot flip
+    /// nondeterministically from the unordered attempt map.
+    #[tokio::test]
+    async fn push_delivery_health_tie_breaks_toward_failure() {
+        let state = test_state("push-tie");
+        let store = store_key("push-tie");
+        let key = mk(&store, "s1", "addr:a");
+        let t = Instant::now();
+        state.on_deliver_record_attempt(&key, 1, t, true, false, None, false);
+        state.on_deliver_record_attempt(&key, 2, t, false, false, None, false);
+        assert_eq!(
+            state.push_delivery_health(&key, 2, true, t + Duration::from_secs(1)),
+            PushDeliveryHealth::Failing,
+            "a same-timestamp accept and failure must resolve to Failing deterministically"
+        );
+    }
+
+    /// Push health ignores completed no-disposition/CC deliveries (accepted + skip_after_accept):
+    /// a station whose only pending rows are such informational notes is not stale/probing, it has
+    /// no outstanding push work.
+    #[tokio::test]
+    async fn push_delivery_health_ignores_completed_no_disposition() {
+        let state = test_state("push-ignore-notes");
+        let store = store_key("push-ignore-notes");
+        let key = mk(&store, "s1", "addr:a");
+        let base = Instant::now();
+        // Accepted no-disposition note (skip_after_accept=true) is done work.
+        state.on_deliver_record_attempt(&key, 1, base, true, false, None, true);
+        // Even long after the backstop, it must NOT read as stale_accepted; there is no live work.
+        assert_eq!(
+            state.push_delivery_health(
+                &key,
+                1,
+                true,
+                base + ON_DELIVER_ACCEPTED_BACKSTOP + Duration::from_secs(30)
+            ),
+            PushDeliveryHealth::NoBacklog
+        );
+    }
+
+    /// A re-provision bumps the member's push generation so a stale in-flight completion can be
+    /// fenced (RD-2).
+    #[tokio::test]
+    async fn on_deliver_forget_member_bumps_generation() {
+        let state = test_state("push-generation");
+        let store = store_key("push-generation");
+        let key = mk(&store, "s1", "addr:a");
+        assert_eq!(state.on_deliver_generation(&key), 0);
+        state.on_deliver_forget_member(&key);
+        assert_eq!(state.on_deliver_generation(&key), 1);
+        state.on_deliver_forget_member(&key);
+        assert_eq!(state.on_deliver_generation(&key), 2);
     }
 
     /// End-to-end through `spawn_on_deliver`: a no-disposition note fired via the real on-deliver

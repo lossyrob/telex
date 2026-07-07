@@ -1704,7 +1704,7 @@ is realized as re-provision events (lease-epoch bump + re-`Register`), not a bri
 plumbed through the core. Residual risk — an accepted turn silently dropped while the same session
 stays attached without a reload — is covered by the 5-min backstop and the existing degraded status.
 
-## 0042 ? Bridge-aware station health and durable self-stop for the push bridge
+## 0042 - Bridge-aware station health and durable self-stop for the push bridge
 
 - **Date:** 2026-07-07
 - **Status:** Accepted (`bridge-liveness-hardening` node / issue #66; folds in #62/#64/#67)
@@ -1712,7 +1712,7 @@ stays attached without a reload — is covered by the 5-min backstop and the exi
 **Context.** Station health and the `deaf`/`unattended_with_backlog` signals were computed purely
 from `telex wait` **waiter** presence. A Copilot push-bridge station has **no** waiter by design, so
 a fully live, delivering bridge was reported `unattended` / `unattended_with_backlog` and, past the
-threshold, false-`deaf` ? contradicting `copilot gc`'s own live heartbeat (#64, and the persistent
+threshold, false-`deaf` - contradicting `copilot gc`'s own live heartbeat (#64, and the persistent
 false-deaf of #66). Separately, a session had no way to durably stop delivery to itself that a
 separate helper process could honor: `station stop` released membership but left the in-session
 bridge loaded and did not warn, and `telex copilot push` did not honor any stop signal, so a push
@@ -1728,7 +1728,7 @@ harness-neutral, so it cannot read the Copilot bridge registry to learn liveness
   failing/deaf state; a suspended-after-accepted bridge (#62) is detected when its 300s backstop
   re-push fails. The attempt map is an in-memory lifecycle fast-path, so after a daemon restart a
   backlogged push station reports `probing` (not confidently attended, not deaf) until the next
-  sweep resolves it ? a documented, self-correcting window rather than a persisted contract.
+  sweep resolves it - a documented, self-correcting window rather than a persisted contract.
 - **Separate actionable-inbound from raw pending.** Status reports `inbound_actionable_count`
   (requires this station's disposition) distinctly from `pending_unconsumed_count`; on a shared
   address per-session "outbound" is not distinguishable by address, so we report actionable-inbound
@@ -1738,10 +1738,15 @@ harness-neutral, so it cannot read the Copilot bridge registry to learn liveness
   (`ON_DELIVER_MAX_REPUSH`) then suppressed (durable/readable, surfaced via `push_suppressed_count`,
   reset on re-provision).
 - **Durable self-stop.** A deliberate `Detach`/`station stop` records a durable detach tombstone
-  (not just the in-memory definite-end). `telex copilot push` preflights it (fail-open on a
-  transient error) and refuses with the permanent exit code, so self-stop sticks across restart and
-  against a racing push; `station stop` reports `push_registered` so the CLI warns that the
-  in-session bridge is still loaded and points at `telex copilot detach`.
+  **atomically with the lease release** (`release_epoch_lease_for_detach`; no separate non-atomic
+  write that could race a concurrent re-attach's clear and recreate a stale tombstone for a live
+  station). `telex copilot push` preflights it (fail-open on a transient backend error - the weaker
+  guarantee under faults is documented) and refuses with the permanent exit code, so self-stop
+  sticks across restart and against a racing push; `station stop` reports `push_registered` so the
+  CLI emits a harness-neutral warning that the push producer may still be loaded. Tombstones are
+  keyed by `(session_id, address)` and treat `session_id` as an identity, not a security principal:
+  the local exchange assumes all backend peers for a store are mutually trusted; requiring an
+  ownership proof for no-member tombstone creation is deferred.
 
 **Consequences.** A live push bridge is reported live/attended, `deaf` becomes honest (only when
 pushes are failing), consumed/terminally-dispositioned messages are already excluded from re-push

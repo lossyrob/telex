@@ -409,11 +409,13 @@ A later node hardened the liveness and stop edges of this push path (see DECISIO
   (`ON_DELIVER_MAX_REPUSH`) then suppressed (durable/readable, surfaced via `push_suppressed_count`).
   Consumed / terminally-dispositioned messages were already excluded from re-push.
 - **Self-stop is durable and honored by the push helper.** A deliberate `telex copilot detach` (and
-  `station stop`) records a **durable** detach tombstone. `telex copilot push` preflights the
-  tombstone (via its baked `--backend`/`--db` selector) and refuses with the permanent exit code if
-  the session was detached, so delivery stops and sticks — across a daemon restart and against a
-  push racing member removal. The check is **fail-open** on a transient backend error (it is
-  defense-in-depth; member removal is the primary steady-state stop). `station stop` does **not**
-  unload the in-session bridge extension, so its response reports `push_registered` and the CLI
-  warns, pointing the operator at `telex copilot detach`.
+  `station stop`) records a **durable** detach tombstone, written atomically with the lease release
+  (no separate follow-up write that could race a re-attach's clear). `telex copilot push` preflights
+  the tombstone (via its baked `--backend`/`--db` selector) and refuses with the permanent exit code
+  if the session was detached, so delivery stops and sticks — across a daemon restart and against a
+  push racing member removal. The check is **fail-open** on a transient backend error (defense-in-depth;
+  member removal is the primary steady-state stop), so the honored guarantee is weaker under backend
+  faults: a push that raced member removal can still be delivered once if the tombstone lookup itself
+  fails. `station stop` does **not** unload the in-session bridge extension, so its response reports
+  `push_registered` and the CLI warns, pointing the operator at `telex copilot detach`.
 

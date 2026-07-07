@@ -194,6 +194,16 @@ pub trait Backend: Send + Sync {
         bail!("inbound_actionable_count: not supported by this backend")
     }
 
+    /// Both observability counts for one recipient in a single pass. The default calls the two
+    /// methods separately; durable backends override to materialize pending delivery rows once and
+    /// run both counts on one connection, avoiding duplicate materialization on the status/turn-guard
+    /// hot path.
+    async fn pending_and_actionable_counts(&self, address: &str) -> Result<(i64, i64)> {
+        let pending = self.pending_unconsumed_count(address).await?;
+        let actionable = self.inbound_actionable_count(address).await?;
+        Ok((pending, actionable))
+    }
+
     async fn record_detach_tombstone(
         &self,
         _session_id: &str,

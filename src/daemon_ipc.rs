@@ -519,8 +519,10 @@ pub enum StationHealth {
     #[default]
     Unattended,
     UnattendedWithBacklog,
-    /// A registered on-deliver push station whose delivery is healthy (bridge accepting turns, or
-    /// no backlog). Has no `telex wait` waiter by design, so it must not be reported `unattended`.
+    /// A registered on-deliver push station: covered by a push path rather than a `telex wait`
+    /// waiter, so it must not be reported `unattended`. Delivery *confidence* is carried separately
+    /// by `push_delivery` (delivering / probing / stale_accepted) — this value only asserts the
+    /// station is push-covered, not that a turn was confirmed seen.
     AttendedPush,
     Idle,
     /// Forward-compat catch-all so an older client deserializing a newer daemon's status does not

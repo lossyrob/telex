@@ -100,8 +100,8 @@ where
     //   insert_message / get_message /
     //     thread_messages ....................... messages_threading
     //   inbox ................................... inbox_derivation
-    //   pending_unconsumed_count /
-    //     inbound_actionable_count .............. actionable_and_pending_counts
+    //   pending_unconsumed_count / inbound_actionable_count /
+    //     pending_and_actionable_counts ......... actionable_and_pending_counts
     //   claim_epoch_lease / heartbeat_epoch /
     //     release_epoch_lease / reset_epoch_lease
     //     / mark_consumed_if_current_owner ...... epoch_leases_and_ack_fence
@@ -846,6 +846,25 @@ async fn actionable_and_pending_counts(store: Store) {
 
     // The no-disposition note never contributes to actionable inbound.
     assert_ne!(note.id, a.id);
+
+    // A requires_disposition message where `other` is the primary recipient and `addr` is only a
+    // CC recipient must NOT count as `addr`'s actionable inbound (the `m.to_addr = recipient`
+    // primary-recipient predicate), even though it is delivered to `addr`.
+    let other = "count:other";
+    let mut cc = new_msg(other);
+    cc.cc = Some(addr.to_string());
+    cc.requires_disposition = true;
+    b.insert_message(&cc).await.unwrap();
+    assert_eq!(
+        b.inbound_actionable_count(addr).await.unwrap(),
+        0,
+        "a requires_disposition message where addr is only a CC recipient is not actionable for addr"
+    );
+
+    // The batched single-pass counts agree with the individual counts.
+    let (pending, actionable) = b.pending_and_actionable_counts(addr).await.unwrap();
+    assert_eq!(pending, b.pending_unconsumed_count(addr).await.unwrap());
+    assert_eq!(actionable, b.inbound_actionable_count(addr).await.unwrap());
 }
 
 /// Export: address (to or from), thread, and since-cursor filters.

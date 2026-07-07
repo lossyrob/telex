@@ -1820,6 +1820,11 @@ fn real_process_station_stop_drains_waiter_and_preserves_next_message() {
         stopped_json.get("waiters_after").and_then(Value::as_u64),
         Some(0)
     );
+    assert_eq!(
+        stopped_json.get("push_registered").and_then(Value::as_bool),
+        Some(false),
+        "a pull station reports push_registered=false in station stop JSON (no push-bridge warning)"
+    );
 
     let (wait_code, wait_timed_out) = wait_status_with_timeout(waiter, Duration::from_secs(3));
     assert_eq!(wait_code, Some(5), "waiter should exit presence-ended");

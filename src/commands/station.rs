@@ -171,7 +171,7 @@ async fn stop(ctx: &Ctx, args: StationStopArgs) -> Result<i32> {
                 }
                 if push_registered {
                     println!(
-                        "warning: this station had a Copilot push bridge; membership was released but the in-session bridge is still loaded. Run `telex copilot detach --address {address}` to unload it (or it will remain a delivery target for this session)."
+                        "warning: this station had a registered push handler; membership was released but the in-session push producer may still be loaded. Use the harness-specific detach/unload command (e.g. `telex copilot detach` for a Copilot bridge) to fully stop delivery."
                     );
                 }
             });

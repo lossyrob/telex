@@ -1953,6 +1953,39 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn pending_and_actionable_counts(&self, address: &str) -> Result<(i64, i64)> {
+        let a = address.to_string();
+        self.run(move |c| {
+            // Materialize once, then run both counts on the same connection.
+            materialize_pending_delivery_rows_for_recipient(c, &a)?;
+            let terminal = terminal_dispositions_sql_list();
+            let pending_sql = format!(
+                "SELECT COUNT(*) FROM deliveries d \
+                 JOIN messages m ON m.id=d.message_id \
+                 WHERE d.recipient=?1 \
+                   AND d.consumed_at_ms IS NULL \
+                   AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                  WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                  ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})"
+            );
+            let actionable_sql = format!(
+                "SELECT COUNT(*) FROM deliveries d \
+                 JOIN messages m ON m.id=d.message_id \
+                 WHERE d.recipient=?1 \
+                   AND d.consumed_at_ms IS NULL \
+                   AND m.requires_disposition=1 \
+                   AND m.to_addr=?1 \
+                   AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                  WHERE disp.message_id=m.id AND disp.recipient=?1 \
+                                  ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})"
+            );
+            let pending: i64 = c.query_row(&pending_sql, params![a], |r| r.get(0))?;
+            let actionable: i64 = c.query_row(&actionable_sql, params![a], |r| r.get(0))?;
+            Ok((pending, actionable))
+        })
+        .await
+    }
+
     async fn record_detach_tombstone(
         &self,
         session_id: &str,

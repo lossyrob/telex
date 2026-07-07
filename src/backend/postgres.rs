@@ -1110,6 +1110,36 @@ impl Backend for PgBackend {
         Ok(client.query_one(&sql, &[&address]).await?.get(0))
     }
 
+    async fn pending_and_actionable_counts(&self, address: &str) -> Result<(i64, i64)> {
+        let client = self.client().await?;
+        // Materialize once, then run both counts on the same connection.
+        materialize_pending_delivery_rows_for_recipient(&client, address).await?;
+        let terminal = terminal_dispositions_sql_list();
+        let pending_sql = format!(
+            "SELECT COUNT(*) FROM deliveries d
+             JOIN messages m ON m.id=d.message_id
+             WHERE d.recipient=$1
+               AND d.consumed_at_ms IS NULL
+               AND COALESCE((SELECT disp.state FROM dispositions disp
+                              WHERE disp.message_id=m.id AND disp.recipient=$1
+                              ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})"
+        );
+        let actionable_sql = format!(
+            "SELECT COUNT(*) FROM deliveries d
+             JOIN messages m ON m.id=d.message_id
+             WHERE d.recipient=$1
+               AND d.consumed_at_ms IS NULL
+               AND m.requires_disposition = TRUE
+               AND m.to_addr=$1
+               AND COALESCE((SELECT disp.state FROM dispositions disp
+                              WHERE disp.message_id=m.id AND disp.recipient=$1
+                              ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})"
+        );
+        let pending: i64 = client.query_one(&pending_sql, &[&address]).await?.get(0);
+        let actionable: i64 = client.query_one(&actionable_sql, &[&address]).await?.get(0);
+        Ok((pending, actionable))
+    }
+
     async fn record_detach_tombstone(
         &self,
         session_id: &str,
