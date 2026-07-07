@@ -1621,9 +1621,9 @@ for orphaned endpoints. See
 
 - **Date:** 2026-07-01
 - **Status:** Accepted (`push-delivery` node / PR #55)
-- **Note (2026-07-07, ADR 0042):** The plugin bootstrap referenced below as
+- **Note (2026-07-07, ADR 0043):** The plugin bootstrap referenced below as
   `skills/telex/SKILL.md` moved to `copilot/plugin/skills/telex/SKILL.md` under the
-  harness-neutral layout (ADR 0042). The ownership decision in this entry is unchanged;
+  harness-neutral layout (ADR 0043). The ownership decision in this entry is unchanged;
   only the file path moved.
 
 **Context.** The #53 skill rewrite risks baking a long, detailed copy of the Copilot
@@ -1708,7 +1708,60 @@ is realized as re-provision events (lease-epoch bump + re-`Register`), not a bri
 plumbed through the core. Residual risk — an accepted turn silently dropped while the same session
 stays attached without a reload — is covered by the 5-min backstop and the existing degraded status.
 
-## 0042 — Harness-neutral root skill; per-harness content nested under `<harness>/`
+## 0042 - Bridge-aware station health and durable self-stop for the push bridge
+
+- **Date:** 2026-07-07
+- **Status:** Accepted (`bridge-liveness-hardening` node / issue #66; folds in #62/#64/#67)
+
+**Context.** Station health and the `deaf`/`unattended_with_backlog` signals were computed purely
+from `telex wait` **waiter** presence. A Copilot push-bridge station has **no** waiter by design, so
+a fully live, delivering bridge was reported `unattended` / `unattended_with_backlog` and, past the
+threshold, false-`deaf` - contradicting `copilot gc`'s own live heartbeat (#64, and the persistent
+false-deaf of #66). Separately, a session had no way to durably stop delivery to itself that a
+separate helper process could honor: `station stop` released membership but left the in-session
+bridge loaded and did not warn, and `telex copilot push` did not honor any stop signal, so a push
+racing member removal could still inject a turn (#67 P0). The daemon core must stay
+harness-neutral, so it cannot read the Copilot bridge registry to learn liveness.
+
+**Decision.**
+- **Derive push-delivery health from the daemon's own on-deliver push-attempt outcomes**, never the
+  Copilot registry. A registered push station reports a structured `push_delivery`
+  (`delivering` / `probing` / `stale_accepted` / `failing` / `no_backlog`) and a `station_health` of
+  `attended_push` unless pushes are actually **failing**, in which case it is
+  `unattended_with_backlog`/deaf. A successful push is **answerback** that clears a stale
+  failing/deaf state; a suspended-after-accepted bridge (#62) is detected when its 300s backstop
+  re-push fails. The attempt map is an in-memory lifecycle fast-path, so after a daemon restart a
+  backlogged push station reports `probing` (not confidently attended, not deaf) until the next
+  sweep resolves it - a documented, self-correcting window rather than a persisted contract.
+- **Separate actionable-inbound from raw pending.** Status reports `inbound_actionable_count`
+  (requires this station's disposition) distinctly from `pending_unconsumed_count`; on a shared
+  address per-session "outbound" is not distinguishable by address, so we report actionable-inbound
+  precisely rather than inventing an unreliable outbound-from-me count.
+- **Bound the re-push pool.** A no-disposition message is delivered once and skipped forever after
+  accept; a still-unacked disposition-required message is re-pushed until a hard cap
+  (`ON_DELIVER_MAX_REPUSH`) then suppressed (durable/readable, surfaced via `push_suppressed_count`,
+  reset on re-provision).
+- **Durable self-stop.** A deliberate `Detach`/`station stop` records a durable detach tombstone
+  **atomically with the lease release** (`release_epoch_lease_for_detach`; no separate non-atomic
+  write that could race a concurrent re-attach's clear and recreate a stale tombstone for a live
+  station). `telex copilot push` preflights it (fail-open on a transient backend error - the weaker
+  guarantee under faults is documented) and refuses with the permanent exit code, so self-stop
+  sticks across restart and against a racing push; `station stop` reports `push_registered` so the
+  CLI emits a harness-neutral warning that the push producer may still be loaded. Tombstones are
+  keyed by `(session_id, address)` and treat `session_id` as an identity, not a security principal:
+  the local exchange assumes all backend peers for a store are mutually trusted; requiring an
+  ownership proof for no-member tombstone creation is deferred.
+
+**Consequences.** A live push bridge is reported live/attended, `deaf` becomes honest (only when
+pushes are failing), consumed/terminally-dispositioned messages are already excluded from re-push
+(#46) and no message is re-pushed forever, and a session can durably stop delivery to itself without
+killing it. This narrows ADR 0041's within-lifecycle re-push guarantee to **disposition-required**
+messages (no-disposition notes now stop after one accepted delivery); both still re-deliver on
+re-provision, preserving the durable+ack invariant. The daemon stays harness-neutral: liveness is
+inferred from generic push outcomes, not Copilot bridge state. A lighter in-session `mute` (stay
+attached, stop push) and auto-expiry of stale leases remain deferred.
+
+## 0043 — Harness-neutral root skill; per-harness content nested under `<harness>/`
 
 - **Date:** 2026-07-07
 - **Status:** Accepted (`harness-skill-layout` node / issue #61)
@@ -1757,7 +1810,7 @@ Copilot CLI 1.0.69-2 — positive install from `copilot/plugin`, a negative cont
 `source` is load-bearing, and the installed plugin excluding the embedded siblings (see
 [copilot-plugin-validation.md](copilot-plugin-validation.md)). This entry **complements**
 ADR 0040 (it does not supersede it): 0040's binary-owned-skill ownership decision stands;
-0042 only relocates the files and neutralizes the root skill.
+0043 only relocates the files and neutralizes the root skill.
 
 The `<harness>/` layout is only the on-disk part of the convention. Adding a sibling
 harness also requires code/CI touchpoints outside `<harness>/`, recorded per harness in
@@ -1765,3 +1818,4 @@ its own ADR: a `src/commands/<harness>.rs` module with the `include_str!` consta
 `telex <harness>` subcommand tree; a new plugin entry in `.github/plugin/marketplace.json`
 with `source: <harness>/plugin`; and (if the harness ships a `bridge/`) a
 `node --check <harness>/bridge/<file>` gate in `.github/workflows/ci.yml`.
+

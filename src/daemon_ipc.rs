@@ -349,6 +349,11 @@ pub enum Response {
         waiters_after: usize,
         #[serde(default)]
         live_waiters: Vec<LiveWaiterStatus>,
+        /// Whether the stopped station had a registered on-deliver push handler. Station stop
+        /// releases address membership + records a detach tombstone, but does NOT unload the
+        /// in-session bridge extension; the CLI warns and points at `telex copilot detach`.
+        #[serde(default)]
+        push_registered: bool,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         message: Option<String>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -434,8 +439,22 @@ pub struct MemberStatus {
     pub live_waiters_count: usize,
     #[serde(default)]
     pub pending_unconsumed_count: i64,
+    /// Inbound messages that require THIS station's disposition (primary recipient,
+    /// `requires_disposition`, not terminal, unconsumed) — the actionable backlog, distinct from
+    /// `pending_unconsumed_count` which also counts no-disposition notes and, on a shared address,
+    /// traffic this station is not responsible for dispositioning.
+    #[serde(default)]
+    pub inbound_actionable_count: i64,
     #[serde(default)]
     pub station_health: StationHealth,
+    /// Structured push-delivery health for a registered push station (see `PushDeliveryHealth`).
+    #[serde(default)]
+    pub push_delivery: PushDeliveryHealth,
+    /// On-deliver messages whose re-push is currently suppressed (dead-lettered as unpushable, or
+    /// past the `ON_DELIVER_MAX_REPUSH` attempt cap). They stay durable/readable via `telex inbox`;
+    /// surfaced here as a persistent signal (not only in the rolling recent-errors buffer).
+    #[serde(default)]
+    pub push_suppressed_count: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health_detail: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -500,7 +519,42 @@ pub enum StationHealth {
     #[default]
     Unattended,
     UnattendedWithBacklog,
+    /// A registered on-deliver push station: covered by a push path rather than a `telex wait`
+    /// waiter, so it must not be reported `unattended`. Delivery *confidence* is carried separately
+    /// by `push_delivery` (delivering / probing / stale_accepted) — this value only asserts the
+    /// station is push-covered, not that a turn was confirmed seen.
+    AttendedPush,
     Idle,
+    /// Forward-compat catch-all so an older client deserializing a newer daemon's status does not
+    /// fail on a value it does not know. Never produced intentionally.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Push-delivery health for a member with a registered on-deliver handler, derived from the
+/// daemon's own push-attempt outcomes (never from harness-specific bridge state). Reported as a
+/// structured field so consumers read push health from a typed value rather than free-text detail.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PushDeliveryHealth {
+    /// No on-deliver push handler registered (pull station or plain member).
+    #[default]
+    NotRegistered,
+    /// Push handler registered and there is no undelivered backlog.
+    NoBacklog,
+    /// Backlog exists and a recent push attempt was accepted by the harness (bridge live).
+    Delivering,
+    /// Backlog exists but no push attempt is recorded yet (e.g. just after a daemon restart, before
+    /// the next sweep). Not confidently attended and not deaf; resolves on the next sweep.
+    Probing,
+    /// The last accepted push's backstop has elapsed with no fresh accept and no failure yet — an
+    /// earlier-than-deaf hint that a previously-live bridge may have gone away (e.g. session suspend).
+    StaleAccepted,
+    /// Backlog exists and push attempts are failing (bridge unreachable) — drives the deaf signal.
+    Failing,
+    /// Forward-compat catch-all (see `StationHealth::Unknown`).
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -870,6 +924,67 @@ mod tests {
     };
     use std::task::{Context, Poll};
     use tokio::io::{AsyncWrite, BufReader};
+
+    #[test]
+    fn station_health_serde_roundtrip_and_forward_compat() {
+        // Wire values are stable snake_case.
+        assert_eq!(
+            serde_json::to_value(StationHealth::AttendedPush).unwrap(),
+            serde_json::json!("attended_push")
+        );
+        for h in [
+            StationHealth::Armed,
+            StationHealth::RecentlyDelivered,
+            StationHealth::Unattended,
+            StationHealth::UnattendedWithBacklog,
+            StationHealth::AttendedPush,
+            StationHealth::Idle,
+        ] {
+            let s = serde_json::to_value(h).unwrap();
+            assert_eq!(serde_json::from_value::<StationHealth>(s).unwrap(), h);
+        }
+        // Forward-compat: an older client meeting a newer daemon's unknown value degrades to
+        // `Unknown` instead of failing to deserialize the whole status.
+        assert_eq!(
+            serde_json::from_value::<StationHealth>(serde_json::json!("some_future_state"))
+                .unwrap(),
+            StationHealth::Unknown
+        );
+    }
+
+    #[test]
+    fn push_delivery_health_serde_roundtrip_and_forward_compat() {
+        assert_eq!(
+            serde_json::to_value(PushDeliveryHealth::StaleAccepted).unwrap(),
+            serde_json::json!("stale_accepted")
+        );
+        for h in [
+            PushDeliveryHealth::NotRegistered,
+            PushDeliveryHealth::NoBacklog,
+            PushDeliveryHealth::Delivering,
+            PushDeliveryHealth::Probing,
+            PushDeliveryHealth::StaleAccepted,
+            PushDeliveryHealth::Failing,
+        ] {
+            let s = serde_json::to_value(h).unwrap();
+            assert_eq!(serde_json::from_value::<PushDeliveryHealth>(s).unwrap(), h);
+        }
+        assert_eq!(
+            serde_json::from_value::<PushDeliveryHealth>(serde_json::json!("future_push_state"))
+                .unwrap(),
+            PushDeliveryHealth::Unknown
+        );
+        // A member status missing the new fields deserializes with defaults (older daemon).
+        let member: MemberStatus = serde_json::from_value(serde_json::json!({
+            "store_key": "s", "backend": "sqlite", "session_id": "x", "address": "a",
+            "occupant": "o", "host": "h", "waiters": 0, "lease_epoch": 1,
+            "owner_instance_id": "i", "idle": false
+        }))
+        .unwrap();
+        assert_eq!(member.push_delivery, PushDeliveryHealth::NotRegistered);
+        assert_eq!(member.inbound_actionable_count, 0);
+        assert_eq!(member.push_suppressed_count, 0);
+    }
 
     #[test]
     fn compatibility_table_explicitly_names_current_major_and_required_caps() {

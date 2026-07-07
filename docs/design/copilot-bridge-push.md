@@ -388,3 +388,34 @@ A second review pass and builder-directed follow-ups added:
   before the already-queued turn arrives, making that later turn look like a duplicate. `telex inbox`
   remains the diagnostic/recovery path for stale bridge, reload/re-provision, degraded/backstop, or
   explicit operator intervention.
+
+## Liveness / self-stop hardening (issue #66; folds in #62/#64/#67)
+
+A later node hardened the liveness and stop edges of this push path (see DECISIONS ADR 0042):
+
+- **A live push bridge reports live, not `unattended`/`deaf`.** Station health for a registered
+  push station is derived from the daemon's own push-attempt outcomes (harness-neutral — the daemon
+  never reads the bridge registry): a recent accepted push -> `attended_push` (structured
+  `push_delivery: delivering`), a backlog with no attempt yet (e.g. post-restart) -> `probing`, an
+  accepted push whose 300s backstop elapsed with no fresh accept -> `stale_accepted` (an
+  earlier-than-deaf hint), and only actually-**failing** pushes -> `unattended_with_backlog`/`deaf`.
+  A successful push is answerback that clears a stale deaf state. This fixes #64 (a live bridge was
+  called `unattended`) and the persistent false-deaf of #66 without coupling the daemon to Copilot.
+- **Actionable-inbound is reported distinctly from raw pending** (`inbound_actionable_count` vs
+  `pending_unconsumed_count`), so a station whose only "pending" is no-disposition notes or
+  shared-address traffic is not mistaken for having actionable backlog.
+- **The re-push pool is bounded.** No-disposition notes are delivered once and skipped forever after
+  accept; a still-unacked disposition-required message is re-pushed until a hard cap
+  (`ON_DELIVER_MAX_REPUSH`) then suppressed (durable/readable, surfaced via `push_suppressed_count`).
+  Consumed / terminally-dispositioned messages were already excluded from re-push.
+- **Self-stop is durable and honored by the push helper.** A deliberate `telex copilot detach` (and
+  `station stop`) records a **durable** detach tombstone, written atomically with the lease release
+  (no separate follow-up write that could race a re-attach's clear). `telex copilot push` preflights
+  the tombstone (via its baked `--backend`/`--db` selector) and refuses with the permanent exit code
+  if the session was detached, so delivery stops and sticks — across a daemon restart and against a
+  push racing member removal. The check is **fail-open** on a transient backend error (defense-in-depth;
+  member removal is the primary steady-state stop), so the honored guarantee is weaker under backend
+  faults: a push that raced member removal can still be delivered once if the tombstone lookup itself
+  fails. `station stop` does **not** unload the in-session bridge extension, so its response reports
+  `push_registered` and the CLI warns, pointing the operator at `telex copilot detach`.
+
