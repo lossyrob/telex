@@ -6,8 +6,8 @@ use std::path::Path;
 // skill source), which stays at the root; the plugin manifest itself now lives under
 // `copilot/plugin/`.
 fn plugin_manifest_declares_hooks_and_root_skill_source() {
-    let manifest: Value =
-        serde_json::from_str(include_str!("../copilot/plugin/plugin.json")).expect("plugin.json parses");
+    let manifest: Value = serde_json::from_str(include_str!("../copilot/plugin/plugin.json"))
+        .expect("plugin.json parses");
     assert_eq!(manifest["name"], "telex");
     assert_eq!(manifest["hooks"], "hooks.json");
     assert_eq!(
@@ -49,8 +49,8 @@ fn marketplace_manifest_advertises_telex_plugin() {
 
 #[test]
 fn hook_manifest_wires_session_end_and_agent_stop_to_hidden_rust_adapter() {
-    let hooks: Value =
-        serde_json::from_str(include_str!("../copilot/plugin/hooks.json")).expect("hooks.json parses");
+    let hooks: Value = serde_json::from_str(include_str!("../copilot/plugin/hooks.json"))
+        .expect("hooks.json parses");
     assert_eq!(hooks["version"], 1);
     let session_end = &hooks["hooks"]["sessionEnd"][0];
     assert_eq!(session_end["type"], "command");

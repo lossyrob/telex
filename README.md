@@ -92,6 +92,24 @@ under `copilot/plugin`). See the
 for CC-observer opt-in (`--wake-on-cc`), the session-env mapping, teardown, and
 compatibility notes.
 
+## Watch the line (TUI)
+
+`telex-console` is a separate, read-only terminal UI for *watching* the fabric live — a
+feed of every message, an address directory with occupancy, and threaded transcripts
+with dispositions. It reuses the core library in-process, so the `telex` binary itself
+stays dependency-light.
+
+```sh
+cargo install --git https://github.com/lossyrob/telex telex-console
+telex-console                         # the configured default backend
+telex-console --backend local         # a configured backend, by name
+telex-console --db ~/.telex/telex.db  # or point at a specific SQLite store
+```
+
+For an Entra Postgres backend, build the console with `--features entra` (like the core
+binary). Read-only by design — it never holds a lease or changes state. See
+**[telex-console/README.md](telex-console/README.md)**.
+
 ## Networked backends
 
 Add a Postgres backend once; then select it by name (or make it the default):
@@ -125,6 +143,7 @@ against the retained delivery buffer.
 
 - **[User guide](https://lossyrob.github.io/telex/)**: install, concepts, guides, and the CLI reference
 - **[SKILL.md](SKILL.md)**: how agents use telex (also `telex skill`)
+- **[telex-console/](telex-console/README.md)**: the read-only, live-tail TUI for watching messages
 - **[DESIGN.md](docs/design/DESIGN.md)**: the working design
 - **[DECISIONS.md](docs/design/DECISIONS.md)**: the decision log
 - **[DISPATCH.md](docs/design/proposals/DISPATCH.md)**: forward-looking discovery & dispatch (broadcast, Contract-Net)

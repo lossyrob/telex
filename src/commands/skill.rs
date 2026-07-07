@@ -60,10 +60,10 @@ fn assignment_preamble(addr: &str) -> String {
     s.push_str(
         "wakes the session on completion, so it does not tie up the terminal like foreground work.\n",
     );
-    s.push_str("It writes message.json/status.json/exit.code into <dir>. When the task completes,\n");
     s.push_str(
-        "read the artifact exit.code (not the task's own reported exit code); on 0 parse\n",
+        "It writes message.json/status.json/exit.code into <dir>. When the task completes,\n",
     );
+    s.push_str("read the artifact exit.code (not the task's own reported exit code); on 0 parse\n");
     s.push_str("message.json, `telex ack`, dedupe by id, then re-arm a fresh `wait`\n");
     s.push_str("before longer processing.\n");
     s.push_str(
@@ -80,7 +80,9 @@ fn assignment_preamble(addr: &str) -> String {
     s.push_str(
         "If your harness has a native telex integration, prefer it: run `telex <harness> skill`\n",
     );
-    s.push_str("(e.g. in Copilot CLI, `telex copilot skill`) for the harness-specific workflow.\n\n");
+    s.push_str(
+        "(e.g. in Copilot CLI, `telex copilot skill`) for the harness-specific workflow.\n\n",
+    );
     s.push_str("```sh\n");
     s.push_str(&format!(
         "telex attach --address {addr} --description \"<what you are working on>\"\n"

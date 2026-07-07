@@ -7,9 +7,11 @@ license = "MIT"
 repository = "https://github.com/lossyrob/telex"
 default-run = "telex"
 
-# Keep the throwaway feasibility crate in spike/ out of this package's workspace so
-# `cargo build` at the repo root builds only the real telex binary.
+# The workspace has two members: the root `telex` package (lib + `telex` binary) and the
+# `telex-console` TUI crate. `spike/` (a throwaway feasibility crate) stays excluded so a plain
+# `cargo build` at the repo root builds only `telex`; build the console with `-p telex-console`.
 [workspace]
+members = ["telex-console"]
 exclude = ["spike"]
 
 [[bin]]

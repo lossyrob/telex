@@ -634,6 +634,26 @@ impl SqliteBackend {
         })
     }
 
+    /// Open the SQLite store at `path` **read-only**: opens with `SQLITE_OPEN_READ_ONLY` and
+    /// runs no schema creation and none of the journal-mode / synchronous pragmas that would
+    /// write to the file. For read-only inspectors (e.g. the console) that must never mutate the
+    /// store and should work against a read-only file. `busy_timeout` is a runtime setting only
+    /// (no file write) and smooths transient WAL locks.
+    pub fn open_readonly(path: &str) -> Result<Self> {
+        use rusqlite::OpenFlags;
+        let conn = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY
+                | OpenFlags::SQLITE_OPEN_URI
+                | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        conn.busy_timeout(std::time::Duration::from_millis(5000))?;
+        Ok(Self {
+            conn: Arc::new(Mutex::new(conn)),
+            _store_lock: None,
+        })
+    }
+
     fn open_conn(path: &str) -> Result<Connection> {
         if let Some(parent) = std::path::Path::new(path).parent() {
             if !parent.as_os_str().is_empty() {
@@ -2420,6 +2440,72 @@ impl Backend for SqliteBackend {
                         at_ms: r.get(6)?,
                     })
                 })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    async fn max_message_id(&self) -> Result<i64> {
+        self.run(move |c| {
+            Ok(c.query_row("SELECT COALESCE(MAX(id),0) FROM messages", [], |r| r.get(0))?)
+        })
+        .await
+    }
+
+    async fn deliveries_for(&self, message_id: i64) -> Result<Vec<DeliveryRow>> {
+        self.run(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT id, message_id, recipient, occupant, delivered_at_ms, consumed_at_ms \
+                 FROM deliveries WHERE message_id=?1 ORDER BY id",
+            )?;
+            let rows = stmt
+                .query_map(params![message_id], |r| {
+                    Ok(DeliveryRow {
+                        id: r.get(0)?,
+                        message_id: r.get(1)?,
+                        recipient: r.get(2)?,
+                        occupant: r.get(3)?,
+                        delivered_at_ms: r.get(4)?,
+                        consumed_at_ms: r.get(5)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    async fn undelivered_counts(&self) -> Result<Vec<(String, i64)>> {
+        self.run(move |c| {
+            // Pure read: per primary recipient, count messages with no *consumed* delivery row
+            // and a non-terminal latest disposition. Never materializes (no writes).
+            let sql = format!(
+                "SELECT m.to_addr, COUNT(*) AS n FROM messages m \
+                 WHERE NOT EXISTS (SELECT 1 FROM deliveries d \
+                                   WHERE d.message_id=m.id AND d.recipient=m.to_addr \
+                                     AND d.consumed_at_ms IS NOT NULL) \
+                   AND COALESCE((SELECT disp.state FROM dispositions disp \
+                                 WHERE disp.message_id=m.id AND disp.recipient=m.to_addr \
+                                 ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({}) \
+                 GROUP BY m.to_addr",
+                terminal_dispositions_sql_list()
+            );
+            let mut stmt = c.prepare(&sql)?;
+            let rows = stmt
+                .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
+    async fn feed_page(&self, after_id: i64, limit: i64) -> Result<Vec<MessageRow>> {
+        self.run(move |c| {
+            let sql = format!("SELECT {MSG_COLS} FROM messages WHERE id>?1 ORDER BY id LIMIT ?2");
+            let mut stmt = c.prepare(&sql)?;
+            let rows = stmt
+                .query_map(params![after_id, limit], map_message)?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
         })
