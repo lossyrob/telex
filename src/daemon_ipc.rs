@@ -36,12 +36,12 @@ pub const CAP_ON_DELIVER_EXEC: &str = "on_deliver_exec_v1";
 /// Single source of truth for the handler<->daemon contract so the two sides cannot drift: exit 0 =
 /// accepted, `ON_DELIVER_PERMANENT_EXIT` = permanent (dead-letter, e.g. too large),
 /// `ON_DELIVER_DEFERRED_EXIT` = harness deferred because busy (held for the deferred backstop,
-/// re-attempted by the idle drain -- issue #65 / ADR 0042), any other nonzero = transient retry.
+/// re-attempted by the idle drain -- issue #65 / ADR 0043), any other nonzero = transient retry.
 pub const ON_DELIVER_PERMANENT_EXIT: i32 = 3;
 pub const ON_DELIVER_DEFERRED_EXIT: i32 = 4;
 
 /// Advertised (not required): the daemon understands the deferred on-deliver outcome (exit code
-/// `ON_DELIVER_DEFERRED_EXIT`) and the `DrainDeferred` request (issue #65 / ADR 0042). Advertised
+/// `ON_DELIVER_DEFERRED_EXIT`) and the `DrainDeferred` request (issue #65 / ADR 0043). Advertised
 /// optionally so it never breaks the required-capability handshake with an older peer; a client can
 /// check it to detect version skew (an older daemon maps exit 4 to a transient retry and ignores
 /// `DrainDeferred`, which is bounded and self-resolves on daemon restart).
