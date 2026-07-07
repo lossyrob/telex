@@ -1743,11 +1743,13 @@ durable state, then send:
   its own `TELEX_COPILOT_DRAIN` off-switch. It sends a `DrainDeferred` request; the daemon clears
   the deferred skip for the session's on-deliver members (leaving accepted attempts untouched) and
   re-runs the existing on-deliver sweep. The sweep re-fetches `fetch_wait_candidates`, so a message
-  acked before the drain is no longer a candidate and is skipped. The drain is O(deferred entries)
-  with an in-memory zero-deferred fast path, returns before the sweep completes, and has a
-  client-side IPC deadline below the hook timeout, so running it on every turn-stop is cheap and
-  never blocks the turn. The daemon stays harness-neutral: it re-runs a generic sweep on request;
-  "busy/idle" lives entirely in the bridge.
+  acked before the drain is no longer a candidate and is skipped. The drain re-sweeps every
+  on-deliver member of the session (matched by `session_id` across stores, so a named-backend
+  session still drains), which closes a deferred-vs-drain inflight race and opportunistically
+  re-attempts backstop-elapsed messages; the only zero-work fast path is the client-side no-bridge
+  check. It returns before the sweeps complete and has a client-side IPC deadline below the hook
+  timeout, so running it on every turn-stop never blocks the turn. The daemon stays harness-neutral:
+  it re-runs a generic sweep on request; "busy/idle" lives entirely in the bridge.
 
 **Consequences.** The stale queued-turn class is removed: a busy non-`interrupt` message is not
 queued behind the current turn, and if it is consumed before turn-stop the drain's durable

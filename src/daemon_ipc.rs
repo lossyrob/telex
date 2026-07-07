@@ -40,6 +40,13 @@ pub const CAP_ON_DELIVER_EXEC: &str = "on_deliver_exec_v1";
 pub const ON_DELIVER_PERMANENT_EXIT: i32 = 3;
 pub const ON_DELIVER_DEFERRED_EXIT: i32 = 4;
 
+/// Advertised (not required): the daemon understands the deferred on-deliver outcome (exit code
+/// `ON_DELIVER_DEFERRED_EXIT`) and the `DrainDeferred` request (issue #65 / ADR 0042). Advertised
+/// optionally so it never breaks the required-capability handshake with an older peer; a client can
+/// check it to detect version skew (an older daemon maps exit 4 to a transient retry and ignores
+/// `DrainDeferred`, which is bounded and self-resolves on daemon restart).
+pub const CAP_ON_DELIVER_DEFERRED: &str = "on_deliver_deferred_v1";
+
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
     CAP_ADMIN_CAP,
@@ -666,6 +673,9 @@ pub fn daemon_capabilities() -> Vec<String> {
     // Advertised-but-optional so it never breaks the required-capability handshake with an
     // older peer; provisioning code gates on it (and on `push_registered`) explicitly.
     caps.push(CAP_ON_DELIVER_EXEC.to_string());
+    // Advertised-but-optional (issue #65): lets a client detect a daemon that understands the
+    // deferred outcome + `DrainDeferred`, so version skew against an older daemon is diagnosable.
+    caps.push(CAP_ON_DELIVER_DEFERRED.to_string());
     caps
 }
 

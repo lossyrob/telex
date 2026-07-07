@@ -78,6 +78,9 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
 
 /// The bridge extension bytes, embedded so they version with the daemon protocol.
 const BRIDGE_EXTENSION_MJS: &str = include_str!("../../copilot-bridge/extension.mjs");
+/// The bridge's busy/idle state machine, a sibling module `extension.mjs` imports. Embedded and
+/// materialized alongside `extension.mjs` so the relative import resolves in the session dir.
+const BRIDGE_BUSY_STATE_MJS: &str = include_str!("../../copilot-bridge/busy-state.mjs");
 const BRIDGE_EXTENSION_NAME: &str = "telex-bridge";
 
 fn copilot_home_dir() -> Result<PathBuf> {
@@ -106,6 +109,8 @@ fn write_bridge_extension(session_id: &str) -> Result<()> {
     let dir = bridge_extension_dir(session_id)?;
     std::fs::create_dir_all(&dir)?;
     std::fs::write(dir.join("extension.mjs"), BRIDGE_EXTENSION_MJS)?;
+    // The busy/idle state machine `extension.mjs` imports as `./busy-state.mjs`.
+    std::fs::write(dir.join("busy-state.mjs"), BRIDGE_BUSY_STATE_MJS)?;
     Ok(())
 }
 
@@ -530,6 +535,12 @@ fn push_display_prompt(d: &OnDeliverDescriptor) -> String {
 
 /// Map a bridge push response to the handler exit code: 0 on success, `PUSH_EXIT_PERMANENT`
 /// (dead-letter) when the bridge reports `request_too_large` (structurally unpushable),
+/// The exact `error` value the bridge returns for a busy-deferred push. This is a cross-language
+/// contract with `copilot-bridge/busy-state.mjs`'s `DEFERRED_UNTIL_IDLE`; a drift on either side
+/// would silently downgrade deferral to a transient retry, so both sides pin the literal via a
+/// named constant + a test (`push_exit_dead_letters_on_request_too_large`).
+const BRIDGE_DEFERRED_ERROR: &str = "deferred_until_idle";
+
 /// `PUSH_EXIT_DEFERRED` when the bridge deferred a busy enqueue (not sent, not a failure -- the
 /// idle drain re-attempts it), else a transient nonzero the daemon retries.
 fn push_exit_for_response(ok: bool, error: Option<&str>) -> i32 {
@@ -537,7 +548,7 @@ fn push_exit_for_response(ok: bool, error: Option<&str>) -> i32 {
         0
     } else if error == Some("request_too_large") {
         PUSH_EXIT_PERMANENT
-    } else if error == Some("deferred_until_idle") {
+    } else if error == Some(BRIDGE_DEFERRED_ERROR) {
         PUSH_EXIT_DEFERRED
     } else {
         1
@@ -754,7 +765,7 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
                 Some(&e),
             ));
             print_json(
-                &serde_json::json!({"drain": false, "session_id": session, "store_key": store_key, "outcome": "daemon_unavailable"}),
+                &serde_json::json!({"drain": false, "session_id": session, "outcome": "daemon_unavailable"}),
             );
             return Ok(0);
         }
@@ -773,7 +784,7 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
                 Some(&session),
                 Some(&detail),
             ));
-            serde_json::json!({"drain": true, "session_id": session, "store_key": store_key, "outcome": "drained", "detail": detail})
+            serde_json::json!({"drain": true, "session_id": session, "outcome": "drained", "detail": detail})
         }
         Ok(Ok(Response::Error { code, message, .. })) => {
             let detail = format!("{code}: {message}");
@@ -782,7 +793,7 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
                 Some(&session),
                 Some(&detail),
             ));
-            serde_json::json!({"drain": false, "session_id": session, "store_key": store_key, "outcome": "daemon_error", "detail": detail})
+            serde_json::json!({"drain": false, "session_id": session, "outcome": "daemon_error", "detail": detail})
         }
         Ok(Ok(other)) => {
             let detail = format!("unexpected {other:?}");
@@ -2049,8 +2060,9 @@ mod tests {
         );
         // A busy-defer is neither success nor a retryable failure: its own exit code so the daemon
         // holds it for the idle drain (issue #65), distinct from permanent and transient.
+        assert_eq!(BRIDGE_DEFERRED_ERROR, "deferred_until_idle");
         assert_eq!(
-            push_exit_for_response(false, Some("deferred_until_idle")),
+            push_exit_for_response(false, Some(BRIDGE_DEFERRED_ERROR)),
             PUSH_EXIT_DEFERRED
         );
         assert_ne!(PUSH_EXIT_DEFERRED, PUSH_EXIT_PERMANENT);

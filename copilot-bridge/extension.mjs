@@ -32,49 +32,19 @@ import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { randomBytes } from "node:crypto";
+import { createBusyTracker, DEFERRED_UNTIL_IDLE } from "./busy-state.mjs";
 
 const isPosix = platform() !== "win32";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024; // 8 MiB: fits a max daemon message plus JSON-escaped prompt wrapping, so large messages push as turns instead of dead-lettering
 const SEND_ACK_TIMEOUT_MS = 2_000;
-// Stale-busy self-heal thresholds (issue #65). Two independent bounds clear a `busy` state that no
-// `assistant.turn_end` ever cleared, so non-`interrupt` messages are not deferred forever:
-//  - IDLE: "busy" with no session activity at all for this long => no turn is actually running
-//    (extension loaded into an idle session, or a crash between turns). Kept short for prompt
-//    idle-boot recovery; a real turn emits streaming/tool events well inside it.
-//  - MAX_TURN: a hard ceiling on how long "busy" may persist even while activity continues => a
-//    missed/renamed `turn_end` (SDK drift) or sub-agent-only chatter cannot latch busy forever.
-//    Kept long so a legitimately long turn does not false-heal mid-turn (that would only degrade one
-//    message to the prior enqueue behavior, but the ceiling makes it rare).
-// Bounding on activity alone would let ongoing sub-agent/streaming events reset the timer forever
-// (a latch); bounding on turn age alone would false-heal every long turn. Both together are robust.
-const BUSY_IDLE_STALE_MS = 60 * 1000;
-const BUSY_MAX_TURN_MS = 30 * 60 * 1000;
 const pendingSends = new Set();
 
-// Busy/idle tracking (issue #65). The bridge defers non-`interrupt` pushes while a root turn is
-// running so a queued turn cannot land behind (and duplicate) work the agent handles manually
-// mid-turn. Busy is gated on the ROOT-agent turn boundary only: sub-agent turn events carry an
-// `agentId` and must NOT clear busy, or a sub-agent's inner `turn_end` would flip the gate while the
-// parent turn is still in flight and reintroduce the stale-injection bug. Default: busy (deferring
-// is the safe action; injecting a stale turn is the risk); self-corrects on the first root
-// `turn_end`. This is liveness/scheduling state only -- durable Telex state stays authoritative.
-let busy = true;
-let busySince = Date.now();
-let lastActivityAt = Date.now();
-let busyStaleHealCount = 0;
-
-// Whether a non-interrupt push should defer right now. Applies the stale-busy self-heal first.
-function currentlyBusy() {
-  if (busy && busySince != null) {
-    const now = Date.now();
-    if (now - lastActivityAt > BUSY_IDLE_STALE_MS || now - busySince > BUSY_MAX_TURN_MS) {
-      busy = false;
-      busySince = null;
-      busyStaleHealCount += 1;
-    }
-  }
-  return busy;
-}
+// Busy/idle tracking (issue #65) lives in the side-effect-free `busy-state.mjs` module so its
+// contract is unit-tested (busy-state.test.mjs). The bridge defers non-`interrupt` pushes while a
+// root turn is running so a queued turn cannot land behind (and duplicate) work the agent handles
+// manually mid-turn. This is liveness/scheduling state only -- durable Telex state stays authoritative.
+const busyTracker = createBusyTracker();
+const currentlyBusy = () => busyTracker.currentlyBusy();
 
 const registryDir = join(homedir(), ".copilot", "telex-bridge");
 await mkdir(registryDir, { recursive: true, mode: 0o700 });
@@ -105,20 +75,9 @@ const session = await joinSession({
 
 const sessionId = session.sessionId;
 
-// Track the ROOT-agent turn boundary to drive busy/idle. Sub-agent turn events (which carry an
-// `agentId`) are ignored on purpose. `lastActivityAt` is refreshed on every event so a legitimately
-// long turn (streaming deltas, tool events) never trips the stale-busy self-heal.
-session.on((event) => {
-  lastActivityAt = Date.now();
-  if (event && event.agentId) return; // sub-agent event: not the root turn boundary
-  if (event && event.type === "assistant.turn_start") {
-    busy = true;
-    busySince = Date.now();
-  } else if (event && event.type === "assistant.turn_end") {
-    busy = false;
-    busySince = null;
-  }
-});
+// Feed every session event to the busy tracker; it filters to root-agent turn boundaries and
+// maintains the self-heal timers (see busy-state.mjs for the contract).
+session.on((event) => busyTracker.onEvent(event));
 
 // Per-session shared secret: an application-layer capability so only a client that can read
 // the owner-only registry (i.e. `telex copilot push`) may inject a turn. Defense-in-depth
@@ -210,7 +169,7 @@ async function handleConnection(socket) {
       if (currentlyBusy()) {
         writeResponse(socket, {
           ok: false,
-          error: "deferred_until_idle",
+          error: DEFERRED_UNTIL_IDLE,
           sessionId,
           mode,
         });
@@ -305,9 +264,9 @@ async function writeRegistry() {
         // bug. `busyStaleHealCount` tallies stale-busy self-heals so a missed-turn_end regression is
         // visible in the field rather than silent.
         diagnostics: {
-          busyAtLastHeartbeat: currentlyBusy(),
-          busySince,
-          busyStaleHealCount,
+          busyAtLastHeartbeat: busyTracker.currentlyBusy(),
+          busySince: busyTracker.snapshot().busySince,
+          busyStaleHealCount: busyTracker.snapshot().staleHealCount,
         },
       },
       null,

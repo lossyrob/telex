@@ -424,10 +424,13 @@ queued turn arrived later as stale, already-handled work. Issue #65 replaces "qu
   on-deliver members (leaving accepted attempts untouched, so a genuinely queued turn is not
   duplicated) and re-runs the on-deliver sweep. The sweep re-fetches `fetch_wait_candidates`, so a
   message acked before the drain is no longer a candidate and is skipped — the repro guarantee. The
-  drain is O(deferred entries) with an in-memory zero-deferred fast path, returns before the sweep
-  completes, and has a client-side deadline below the hook timeout, so it never blocks turn-stop.
-  The daemon stays harness-neutral: it re-runs a generic sweep on request; "busy/idle" lives only in
-  the bridge.
+  drain re-sweeps **every** on-deliver member of the session (matched by `session_id` across stores,
+  so a named-`--backend`/`--db` session still drains), which closes a deferred-vs-drain inflight race
+  and opportunistically re-attempts messages whose backstop elapsed; the only zero-work fast path is
+  client-side (`telex copilot drain` skips the daemon round-trip when the session has no bridge
+  registry). The drain returns before the sweeps complete and has a client-side deadline below the
+  hook timeout, so it never blocks turn-stop. The daemon stays harness-neutral: it re-runs a generic
+  sweep on request; "busy/idle" lives only in the bridge.
 - **No loss.** If the drain hook is missed or races a still-busy bridge, the deferred backstop +
   heartbeat sweep re-attempt within a bounded delay (a re-defer while busy is cheap and injects no
   stale turn); re-provision (reattach / `/clear` reload) still re-delivers unacked backlog. Durable
