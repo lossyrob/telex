@@ -142,6 +142,7 @@ async fn stop(ctx: &Ctx, args: StationStopArgs) -> Result<i32> {
             waiters_before,
             waiters_after,
             live_waiters,
+            push_registered,
             message,
             lease_epoch,
             ..
@@ -156,6 +157,8 @@ async fn stop(ctx: &Ctx, args: StationStopArgs) -> Result<i32> {
                 "waiters_before": waiters_before,
                 "waiters_after": waiters_after,
                 "live_waiters": live_waiters,
+                "push_registered": push_registered,
+                "bridge_still_loaded": push_registered,
             });
             emit(ctx.fmt, &out, || {
                 if waiters_after == 0 {
@@ -165,6 +168,11 @@ async fn stop(ctx: &Ctx, args: StationStopArgs) -> Result<i32> {
                 } else {
                     println!(
                         "station stopped {address} session={session_id} waiters={waiters_before}->{waiters_after}"
+                    );
+                }
+                if push_registered {
+                    println!(
+                        "warning: this station had a Copilot push bridge; membership was released but the in-session bridge is still loaded. Run `telex copilot detach --address {address}` to unload it (or it will remain a delivery target for this session)."
                     );
                 }
             });

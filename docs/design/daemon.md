@@ -332,8 +332,16 @@ Frozen Status fields:
   `idle` (bool — no waiter currently attended/blocked).
 - **`members`** — for each in-memory membership record: `address`, `session_id` (opaque),
   `occupant`, `waiters` (count of blocked waiters), `live_waiters` (pid/start-time/alive,
-  attention, timeout), `pending_unconsumed_count`, `station_health`
-  (`armed` / `recently_delivered` / `unattended` / `unattended_with_backlog` / `idle`),
+  attention, timeout), `pending_unconsumed_count`, `inbound_actionable_count` (messages requiring
+  THIS station's disposition — primary recipient + `requires_disposition`, non-terminal, unconsumed
+  — distinct from `pending_unconsumed_count`, which also counts no-disposition notes and, on a
+  shared address, traffic this station is not responsible for dispositioning), `station_health`
+  (`armed` / `recently_delivered` / `unattended` / `unattended_with_backlog` / `attended_push` /
+  `idle`), `push_delivery` (push-delivery health for a registered on-deliver station, derived from
+  the daemon's own push-attempt outcomes: `not_registered` / `no_backlog` / `delivering` /
+  `probing` / `stale_accepted` / `failing`), `push_suppressed_count` (on-deliver messages whose
+  re-push is suppressed — dead-lettered as unpushable, or past the `ON_DELIVER_MAX_REPUSH` attempt
+  cap — still durably queued and readable),
   thresholded deaf-station fields (`unattended_since_ms`, `unattended_for_ms`, `deaf_since_ms`,
   `deaf_for_ms`, `deaf_warn`),
   daemon-authored terminal waiter fields (`last_waiter_exit_at_ms`, `last_waiter_outcome`,
@@ -346,6 +354,21 @@ Frozen Status fields:
   have not (re-)attached since the last daemon start.)
   `presence-ended` detail tokens are `session-end`, `station-stop`, `idle-ttl-reap`, `reset`,
   and `watch-pid-death`.
+- **Push-bridge station health.** A registered on-deliver (push-bridge) station has **no** `telex
+  wait` waiter by design, so its health is **not** decided by waiter presence — a live push station
+  must never be reported `unattended`/`unattended_with_backlog` merely for lacking a waiter. Instead
+  the daemon derives `push_delivery` from its own push-attempt outcomes (harness-neutral: it never
+  reads the Copilot bridge registry): a recent **accepted** push -> `delivering` (station_health
+  `attended_push`); an **accepted** push whose 300s backstop has elapsed with no fresh accept ->
+  `stale_accepted` (an earlier-than-deaf hint that a previously-live bridge may have gone away, e.g.
+  a suspended session — still `attended_push`); backlog with no attempt yet (e.g. just after a
+  daemon restart, since the attempt map is an in-memory lifecycle fast-path) -> `probing` (still
+  `attended_push`, not confidently attended and not deaf, resolved on the next sweep); **failing**
+  pushes (bridge unreachable) -> `failing`, which sets the backlog timer and drives
+  `unattended_with_backlog`/`deaf`. **A successful push is answerback**: it clears a stale
+  failing/deaf state. So a push station is deaf **only** when pushes are actually failing, not while
+  the bridge is delivering; a suspended-after-accepted bridge is detected after roughly backstop +
+  sweep + deaf-threshold when its backstop re-push fails.
 - **`live_waiters`** — the top-level live waiter registry, keyed by daemon-assigned
   `waiter_id`, including waiters that are in the small teardown interval between
   membership release and process exit. At most one live waiter is accepted for a
@@ -359,7 +382,10 @@ Frozen Status fields:
   **warn flag** when it crosses the frozen v1 budget.
 - **`deaf_stations`** — daemon-wide summary of stations currently past the configured
   `unattended_with_backlog` warning threshold (`count`, `warn`, `warn_threshold_ms`). The default
-  threshold is 120000 ms and local operators/tests can override it with `TELEX_DEAF_WARN_MS`.
+  threshold is 120000 ms and local operators/tests can override it with `TELEX_DEAF_WARN_MS`. This
+  count includes both pull stations with an un-drained backlog and push stations whose delivery is
+  `failing`; the per-member `push_delivery` field distinguishes the two (transport-broken vs
+  agent-absent).
 - **`stores`** — the set of stores this exchange currently serves.
 
 `telex station status` remains session-scoped by default. `telex station status --all-sessions`
@@ -1467,10 +1493,30 @@ that member.
   in-session drop of a queued turn. While the bridge heartbeat is fresh, an unacked backlog is not
   itself a turn-guard issue: enqueue-mode turns may already be queued behind the current turn, and
   `telex inbox` is a diagnostics/recovery path rather than the normal live push receive path. After
-  a small attempt ceiling the daemon surfaces a **degraded** status. The attempt map is a
+  a small attempt ceiling the daemon surfaces a **degraded** status, and after a **hard cap**
+  (`ON_DELIVER_MAX_REPUSH`, 24 total attempts on the same still-unacked message) it **suppresses**
+  further re-push so a never-acked message cannot be re-pushed forever — the message stays durably
+  queued/readable and is surfaced via `push_suppressed_count`; a re-provision resets the budget and
+  re-delivers. A message that needs **no** disposition for the recipient (a CC notification, or a
+  primary `requires_disposition:false` note) is delivered **once** and then skipped forever after an
+  accepted push — informational traffic never enters the re-push pool — while a message that
+  **requires** disposition stays re-pushable on the backstop until acked so disposition-required
+  work is not stranded within a lifecycle. The attempt map is a
   lifecycle-scoped in-memory fast-path keyed per member — pruned to the still-undelivered set each
   sweep, reset on explicit re-provision, and reclaimed on the next `Register` after a plain
   `Detach` — never the authority.
+- **Self-stop honored durably.** A deliberate `Detach` (including `station stop`) records a
+  **durable detach tombstone** for `(session, address)` — not just the in-memory definite-end — so
+  the stop survives a daemon restart and is visible to a separate process. The `telex copilot push`
+  helper **preflights** that tombstone (via its baked store selector) and, if present, refuses with
+  the permanent exit code so the daemon dead-letters instead of re-pushing to a deliberately-stopped
+  session. This closes the commit-to-helper-exec race (an in-flight push spawned around member
+  removal); the steady-state stop is member removal itself (no live member -> no on-deliver
+  candidate). The preflight is **fail-open** on a transient tombstone-query error: it is
+  defense-in-depth, so a backend blip must not block all delivery. An explicit re-attach clears the
+  tombstone. `station stop` releases membership + tombstones but does **not** unload the in-session
+  bridge extension, so its response reports `push_registered` and the CLI warns, pointing at
+  `telex copilot detach`.
 - **Version compatibility.** Because the daemon is persistent, a new client can meet an **older**
   daemon that predates `on_deliver`. The daemon advertises an `on_deliver_exec_v1` capability in
   its handshake, and a `--copilot-bridge` bind **verifies `push_registered` after registering**; if

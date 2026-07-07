@@ -184,6 +184,16 @@ pub trait Backend: Send + Sync {
         bail!("pending_unconsumed_count: not supported by this backend")
     }
 
+    /// Count inbound messages that require THIS recipient's disposition and are still actionable:
+    /// the recipient is the primary `to_addr`, `requires_disposition` is set, the delivery is not
+    /// consumed, and the latest disposition for the recipient is not terminal. This is the
+    /// actionable backlog — distinct from `pending_unconsumed_count`, which also counts
+    /// no-disposition notes and, on a shared address, traffic this recipient did not need to act on.
+    /// Health/status observability only.
+    async fn inbound_actionable_count(&self, _address: &str) -> Result<i64> {
+        bail!("inbound_actionable_count: not supported by this backend")
+    }
+
     async fn record_detach_tombstone(
         &self,
         _session_id: &str,
