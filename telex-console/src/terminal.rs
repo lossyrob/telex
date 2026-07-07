@@ -34,10 +34,13 @@ pub fn init() -> Result<Tui> {
     }
 }
 
-/// Best-effort restore of the terminal to its normal state.
+/// Best-effort restore of the terminal to its normal state. Both steps are attempted even if the
+/// first fails, so a failed `LeaveAlternateScreen` never leaves the shell stuck in raw mode; the
+/// first error (if any) is returned.
 pub fn restore() -> io::Result<()> {
-    execute!(io::stdout(), LeaveAlternateScreen)?;
-    disable_raw_mode()
+    let leave = execute!(io::stdout(), LeaveAlternateScreen);
+    let raw = disable_raw_mode();
+    leave.and(raw)
 }
 
 fn install_panic_hook() {

@@ -98,7 +98,7 @@ pub(crate) fn build_lines(
     if let Some(s) = &m.subject {
         lines.push(Line::from(vec![
             Span::styled("subject: ", Style::default().fg(Color::Gray)),
-            Span::raw(s.clone()),
+            Span::raw(sanitize(s)),
         ]));
     }
 
@@ -114,32 +114,39 @@ pub(crate) fn build_lines(
         push_text(&mut lines, &pretty_json(meta), wrap);
     }
 
-    // Delivery badge. "Delivered" means a waiter actually consumed the message (a delivery
-    // row with consumed_at_ms set); the exchange also materializes *pending* rows for
-    // backlog accounting, which we surface as "pending", not delivered.
+    // Delivery/consume badge. In the local-exchange model a message is fanned out to one delivery
+    // row per recipient at insert; `consumed_at_ms` is set when a row is consumed — by a waiter
+    // handoff, a cc auto-consume, or a terminal disposition. The daemon consume path records no
+    // occupant (that column is written only by the legacy `mark_delivered` path), so we can't
+    // reliably single out a real waiter handoff: we show the honest consumed/pending split and
+    // surface an `occupant` only on the rare row that carries one.
     lines.push(Line::from(""));
-    let consumed: Vec<&DeliveryRow> = dels.iter().filter(|d| d.consumed_at_ms.is_some()).collect();
-    let pending = dels.iter().filter(|d| d.consumed_at_ms.is_none()).count();
+    let (consumed, pending): (Vec<&DeliveryRow>, Vec<&DeliveryRow>) =
+        dels.iter().partition(|d| d.consumed_at_ms.is_some());
     if !consumed.is_empty() {
         lines.push(Line::from(vec![Span::styled(
-            format!("{} delivered", theme::delivered_symbol(true)),
+            format!("{} consumed", theme::delivered_symbol(true)),
             Style::default().fg(theme::delivered_color(true)),
         )]));
         for d in &consumed {
             lines.push(delivery_line(d));
         }
-    } else {
-        let note = if pending > 0 {
-            " (queued; not yet consumed by a waiter)"
+    }
+    if !pending.is_empty() || consumed.is_empty() {
+        let label = if pending.is_empty() {
+            " pending (no delivery rows yet)".to_string()
         } else {
-            " (not yet queued to a waiter)"
+            format!(" {} pending", pending.len())
         };
         lines.push(Line::from(vec![
             Span::styled(
-                format!("{} undelivered", theme::delivered_symbol(false)),
+                format!("{}{}", theme::delivered_symbol(false), label),
                 Style::default().fg(theme::delivered_color(false)),
             ),
-            Span::styled(note, Style::default().fg(Color::DarkGray)),
+            Span::styled(
+                " (queued; not yet consumed)",
+                Style::default().fg(Color::DarkGray),
+            ),
         ]));
     }
 
@@ -157,7 +164,8 @@ pub(crate) fn build_lines(
     lines
 }
 
-/// Push plain text into `lines`, hard word-wrapping to `wrap` width when set.
+/// Push plain text into `lines`, hard word-wrapping to `wrap` width when set. In both modes the
+/// text is sanitized of terminal-control characters so raw content bytes can't drive the terminal.
 fn push_text(lines: &mut Vec<Line<'static>>, text: &str, wrap: Option<usize>) {
     match wrap {
         Some(w) => {
@@ -167,19 +175,41 @@ fn push_text(lines: &mut Vec<Line<'static>>, text: &str, wrap: Option<usize>) {
         }
         None => {
             for raw in text.lines() {
-                lines.push(Line::from(raw.to_string()));
+                lines.push(Line::from(sanitize(raw)));
             }
         }
     }
 }
 
-/// Word-wrap `text` (honoring existing newlines) to `width` columns, hard-breaking any
-/// single word longer than the width. Width is measured in `char`s — close enough for the
-/// mostly-ASCII operational text telex carries.
+/// Strip terminal-control characters from a display string: tabs become spaces and other control
+/// characters (ESC, C0/C1, DEL) are dropped, so untrusted message bytes can never emit terminal
+/// control sequences. (ratatui renders into a cell buffer, but this is cheap defense-in-depth.)
+pub(crate) fn sanitize(line: &str) -> String {
+    line.chars()
+        .map(|c| if c == '\t' { ' ' } else { c })
+        .filter(|c| !c.is_control())
+        .collect()
+}
+
+/// Display width of a `char` in terminal columns (0 for combining/zero-width).
+fn char_width(c: char) -> usize {
+    unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)
+}
+
+/// Display width of a string in terminal columns.
+fn str_width(s: &str) -> usize {
+    unicode_width::UnicodeWidthStr::width(s)
+}
+
+/// Word-wrap `text` (honoring existing newlines) to `width` **display columns**, hard-breaking any
+/// single word wider than the width. Sanitizes control characters first. Measuring by display
+/// width (not `char` count) keeps "one returned line == one rendered row" for wide/CJK/emoji, which
+/// the reader relies on for exact scroll bounds.
 fn wrap_text(text: &str, width: usize) -> Vec<String> {
     let width = width.max(1);
     let mut out = Vec::new();
     for raw in text.split('\n') {
+        let raw = sanitize(raw);
         if raw.is_empty() {
             out.push(String::new());
             continue;
@@ -187,7 +217,7 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
         let mut cur = String::new();
         let mut cur_w = 0usize;
         for word in raw.split(' ') {
-            let wlen = word.chars().count();
+            let wlen = str_width(word);
             if wlen > width {
                 if cur_w > 0 {
                     out.push(std::mem::take(&mut cur));
@@ -196,12 +226,13 @@ fn wrap_text(text: &str, width: usize) -> Vec<String> {
                 let mut chunk = String::new();
                 let mut cw = 0usize;
                 for ch in word.chars() {
-                    chunk.push(ch);
-                    cw += 1;
-                    if cw == width {
+                    let cwch = char_width(ch);
+                    if cw + cwch > width && cw > 0 {
                         out.push(std::mem::take(&mut chunk));
                         cw = 0;
                     }
+                    chunk.push(ch);
+                    cw += cwch;
                 }
                 if cw > 0 {
                     cur = chunk;
@@ -250,12 +281,14 @@ fn disposition_line(d: &DispositionRow) -> Line<'static> {
 }
 
 fn delivery_line(d: &DeliveryRow) -> Line<'static> {
-    let mut spans = vec![Span::raw(format!(
-        "  → {}",
-        d.occupant.as_deref().unwrap_or("?")
-    ))];
+    let mut label = format!("  {}", d.recipient);
+    if let Some(occ) = d.occupant.as_deref() {
+        label.push_str(&format!(" → {occ}"));
+    }
+    let mut spans = vec![Span::raw(label)];
+    let ts = d.consumed_at_ms.unwrap_or(d.delivered_at_ms);
     spans.push(Span::styled(
-        format!(" @{}", theme::hms(d.delivered_at_ms)),
+        format!(" @{}", theme::hms(ts)),
         Style::default().fg(Color::Gray),
     ));
     Line::from(spans)

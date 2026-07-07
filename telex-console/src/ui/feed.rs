@@ -47,10 +47,11 @@ fn render_list(f: &mut Frame, area: Rect, rows: &[&MessageRow], sel: usize) {
 /// Build a single feed row: `HH:MM:SS A* from → to [kind] subject`.
 pub fn row_line(m: &MessageRow) -> Line<'static> {
     let needs = if m.requires_disposition { "*" } else { " " };
-    let subject = m
-        .subject
-        .clone()
-        .unwrap_or_else(|| m.body.lines().next().unwrap_or("").to_string());
+    let subject = crate::ui::detail::sanitize(
+        &m.subject
+            .clone()
+            .unwrap_or_else(|| m.body.lines().next().unwrap_or("").to_string()),
+    );
     Line::from(vec![
         Span::styled(
             theme::hms(m.sent_at_ms),

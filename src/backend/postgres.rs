@@ -1522,6 +1522,33 @@ impl Backend for PgBackend {
             .collect())
     }
 
+    async fn undelivered_counts(&self) -> Result<Vec<(String, i64)>> {
+        let client = self.client().await?;
+        let sql = format!(
+            "SELECT m.to_addr, COUNT(*) AS n FROM messages m \
+             WHERE NOT EXISTS (SELECT 1 FROM deliveries d \
+                               WHERE d.message_id=m.id AND d.recipient=m.to_addr \
+                                 AND d.consumed_at_ms IS NOT NULL) \
+               AND COALESCE((SELECT disp.state FROM dispositions disp \
+                             WHERE disp.message_id=m.id AND disp.recipient=m.to_addr \
+                             ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({}) \
+             GROUP BY m.to_addr",
+            terminal_dispositions_sql_list()
+        );
+        let rows = client.query(sql.as_str(), &[]).await?;
+        Ok(rows
+            .iter()
+            .map(|r| (r.get::<_, String>("to_addr"), r.get::<_, i64>("n")))
+            .collect())
+    }
+
+    async fn feed_page(&self, after_id: i64, limit: i64) -> Result<Vec<MessageRow>> {
+        let client = self.client().await?;
+        let sql = format!("SELECT {MSG_COLS} FROM messages WHERE id>$1 ORDER BY id LIMIT $2");
+        let rows = client.query(sql.as_str(), &[&after_id, &limit]).await?;
+        Ok(rows.iter().map(map_message).collect())
+    }
+
     async fn notify_new(&self, address: &str, id: i64, sent_at_ms: i64) -> Result<()> {
         let payload =
             serde_json::json!({"address": address, "id": id, "sent_at_ms": sent_at_ms}).to_string();

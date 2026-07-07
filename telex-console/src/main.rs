@@ -85,6 +85,6 @@ async fn open_backend(
     } else {
         telex::profiles::resolve(None, None)?
     };
-    let backend = telex::profiles::build(&profile, args.db.as_deref()).await?;
+    let backend = telex::profiles::build_readonly(&profile, args.db.as_deref()).await?;
     Ok((name, backend))
 }

@@ -80,6 +80,15 @@ jobs:
       - name: Build default (all backends)
         run: cargo build
 
+      - name: Core stays lean (no TUI deps in `telex`)
+        run: |
+          if cargo tree -p telex -e normal | grep -Eq 'ratatui|crossterm'; then
+            echo "ERROR: core telex crate pulled in a TUI dependency (ratatui/crossterm)"
+            cargo tree -p telex -e normal | grep -E 'ratatui|crossterm'
+            exit 1
+          fi
+          echo "ok: core telex has no ratatui/crossterm"
+
   postgres-live:
     name: Live Postgres parity tests
     runs-on: ubuntu-latest

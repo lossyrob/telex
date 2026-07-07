@@ -63,18 +63,19 @@ pub fn occ_color(occ: Occ) -> Color {
     }
 }
 
-/// Delivered-state badge symbol: a message either has a delivery record (reached a waiter)
-/// or is still queued. "Delivered" is distinct from "dispositioned/acted-on".
-pub fn delivered_symbol(delivered: bool) -> char {
-    if delivered {
+/// Consume-state badge symbol: a delivery row is either consumed (`consumed_at_ms` set) or still
+/// pending. `true` = consumed (✓), `false` = pending (⧗). Consumption is distinct from
+/// "dispositioned/acted-on".
+pub fn delivered_symbol(consumed: bool) -> char {
+    if consumed {
         '✓'
     } else {
         '⧗'
     }
 }
 
-pub fn delivered_color(delivered: bool) -> Color {
-    if delivered {
+pub fn delivered_color(consumed: bool) -> Color {
+    if consumed {
         Color::Green
     } else {
         Color::Yellow

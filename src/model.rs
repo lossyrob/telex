@@ -317,20 +317,25 @@ pub struct DispositionRow {
     pub at_ms: i64,
 }
 
-/// A durable record that a message was handed to a waiter for `recipient`. Distinct from a
-/// disposition: delivery is "reached a live `wait`", not "acted on". `occupant` is the holder
-/// that performed the handoff. (Schema: `deliveries`, added in DECISIONS 0010.)
+/// A per-recipient delivery record. In the local-exchange model a message is fanned out to one
+/// `deliveries` row per recipient at insert time (`insert_message` fan-out); the row is *pending*
+/// until consumed. Distinct from a disposition: consumption is "reached a live `wait` / was
+/// auto-consumed", not "acted on". (Schema: `deliveries`, added in DECISIONS 0010.)
 #[derive(Clone, Debug, Serialize)]
 pub struct DeliveryRow {
     pub id: i64,
     pub message_id: i64,
     pub recipient: String,
+    /// Legacy: the holder that performed a handoff. Written only by the old `mark_delivered`
+    /// fresh-insert path; the daemon consume path (`mark_consumed_if_current_owner`) does not
+    /// set it, and fan-out pre-creates the row, so on live stores this is normally `None`.
     pub occupant: Option<String>,
     pub delivered_at_ms: i64,
-    /// When a waiter consumed this delivery, if it has been consumed. A row with
-    /// `consumed_at_ms = None` is a *pending* fan-out row (queued, not yet handed to a
-    /// waiter); `Some` means it actually reached a waiter. Distinguishes real delivery
-    /// from the pending rows the exchange materializes for backlog accounting.
+    /// When this row was consumed, if it has been. `None` = a *pending* fan-out row (queued,
+    /// not yet consumed); `Some` = consumed. A consumed row is not proof of a real waiter
+    /// handoff: cc fan-out rows are auto-consumed (NULL `occupant`) and a terminal disposition
+    /// also marks an unconsumed row consumed. Because `occupant` is effectively always NULL,
+    /// treat `consumed_at_ms.is_some()` as "consumed", not necessarily "delivered to a waiter".
     pub consumed_at_ms: Option<i64>,
 }
 

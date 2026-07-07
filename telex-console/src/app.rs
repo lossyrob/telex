@@ -288,8 +288,9 @@ impl AppState {
                     self.clamp_selection();
                     // The selected address may have changed; reconcile its message pane.
                     if self.view == View::Addresses {
-                        if let Some(addr) = self.selected_address() {
-                            return vec![Cmd::LoadAddressMessages(addr)];
+                        match self.selected_address() {
+                            Some(addr) => return vec![Cmd::LoadAddressMessages(addr)],
+                            None => self.clear_addr_pane(),
                         }
                     }
                 }
@@ -310,8 +311,9 @@ impl AppState {
                 self.mode = Mode::Normal;
                 self.clamp_selection();
                 if self.view == View::Addresses {
-                    if let Some(addr) = self.selected_address() {
-                        return vec![Cmd::LoadAddressMessages(addr)];
+                    match self.selected_address() {
+                        Some(addr) => return vec![Cmd::LoadAddressMessages(addr)],
+                        None => self.clear_addr_pane(),
                     }
                 }
             }
@@ -611,9 +613,30 @@ impl AppState {
                 return;
             }
         }
-        match store.feed_since(self.feed_cursor).await {
-            Ok(rows) => self.apply_feed(rows),
-            Err(e) => self.status = Some(format!("feed poll failed: {e}")),
+        // Drain new messages in bounded pages so a large backlog (e.g. `--backfill all`) is never
+        // materialized as one unbounded result. Each `apply_feed` advances the cursor; cap total
+        // ingest per tick (the ring trims to FEED_CAP anyway) — the rest arrives next tick.
+        const PAGE: i64 = 1000;
+        const MAX_PER_TICK: usize = 5000;
+        let mut ingested = 0usize;
+        loop {
+            match store.feed_page(self.feed_cursor, PAGE).await {
+                Ok(rows) => {
+                    let n = rows.len();
+                    if n == 0 {
+                        break;
+                    }
+                    self.apply_feed(rows);
+                    ingested += n;
+                    if (n as i64) < PAGE || ingested >= MAX_PER_TICK {
+                        break;
+                    }
+                }
+                Err(e) => {
+                    self.status = Some(format!("feed poll failed: {e}"));
+                    break;
+                }
+            }
         }
     }
 
@@ -622,14 +645,24 @@ impl AppState {
     pub fn apply_addresses(&mut self, addrs: Vec<AddressEntry>) -> Option<Cmd> {
         self.addresses = addrs;
         self.clamp_selection();
-        if self.view == View::Addresses && !self.addresses.is_empty() {
-            if let Some(addr) = self.selected_address() {
-                if self.addr_msgs_for.as_deref() != Some(addr.as_str()) {
-                    return Some(Cmd::LoadAddressMessages(addr));
-                }
+        if let Some(addr) = self.selected_address() {
+            if self.view == View::Addresses && self.addr_msgs_for.as_deref() != Some(addr.as_str())
+            {
+                return Some(Cmd::LoadAddressMessages(addr));
             }
+        } else {
+            // No address is currently selectable (empty directory or zero-match filter): drop the
+            // stale inbox so old messages don't stay selectable while the address pane shows none.
+            self.clear_addr_pane();
         }
         None
+    }
+
+    /// Drop the address message pane (used when no address is selectable).
+    fn clear_addr_pane(&mut self) {
+        self.addr_msgs.clear();
+        self.addr_msgs_for = None;
+        self.addr_msg_sel = 0;
     }
 
     /// Lazily load dispositions for the currently selected message (only when changed).

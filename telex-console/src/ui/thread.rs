@@ -61,10 +61,11 @@ fn transcript_item(
     st: &AppState,
 ) -> ListItem<'static> {
     let indent = "  ".repeat(reply_depth(m, by_id));
-    let subject = m
-        .subject
-        .clone()
-        .unwrap_or_else(|| m.body.lines().next().unwrap_or("").to_string());
+    let subject = crate::ui::detail::sanitize(
+        &m.subject
+            .clone()
+            .unwrap_or_else(|| m.body.lines().next().unwrap_or("").to_string()),
+    );
     let mut line = vec![
         Span::raw(indent),
         Span::styled(

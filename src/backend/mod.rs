@@ -292,6 +292,22 @@ pub trait Backend: Send + Sync {
     /// `mark_delivered`; the source of truth for "was this delivered, when, to which holder."
     async fn deliveries_for(&self, message_id: i64) -> Result<Vec<DeliveryRow>>;
 
+    /// Per-primary-recipient count of undelivered backlog, as `(to_addr, count)` pairs. A message
+    /// counts when it has no *consumed* delivery row for its `to_addr` and its latest disposition
+    /// for that recipient is not terminal. **Read-only**: a pure `SELECT`/`GROUP BY` that never
+    /// materializes delivery rows (unlike `pending_unconsumed_count`), so read-only consumers such
+    /// as the console can poll it without mutating the store. Addresses with no backlog are omitted.
+    async fn undelivered_counts(&self) -> Result<Vec<(String, i64)>> {
+        bail!("undelivered_counts: not supported by this backend")
+    }
+
+    /// A bounded page of the global feed: up to `limit` messages with `id > after_id`, ordered by
+    /// id. Read-only paging primitive so consumers can drain a large backlog in chunks instead of
+    /// materializing an unbounded `export` result in memory.
+    async fn feed_page(&self, _after_id: i64, _limit: i64) -> Result<Vec<MessageRow>> {
+        bail!("feed_page: not supported by this backend")
+    }
+
     /// Best-effort push signal (Postgres LISTEN/NOTIFY); a no-op where unsupported.
     async fn notify_new(&self, address: &str, id: i64, sent_at_ms: i64) -> Result<()>;
 }

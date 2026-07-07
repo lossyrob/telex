@@ -103,10 +103,11 @@ fn render_messages(f: &mut Frame, area: Rect, msgs: &[InboxItem], sel: usize, fo
         .iter()
         .map(|it| {
             let m = &it.message;
-            let subject = m
-                .subject
-                .clone()
-                .unwrap_or_else(|| m.body.lines().next().unwrap_or("").to_string());
+            let subject = crate::ui::detail::sanitize(
+                &m.subject
+                    .clone()
+                    .unwrap_or_else(|| m.body.lines().next().unwrap_or("").to_string()),
+            );
             let disp = theme::disp_label(it.latest_disposition.as_deref()).to_string();
             ListItem::new(Line::from(vec![
                 Span::styled(

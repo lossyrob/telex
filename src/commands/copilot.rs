@@ -55,7 +55,8 @@ const DRAIN_IPC_DEADLINE: Duration = Duration::from_secs(3);
 
 /// Embedded Copilot-specific workflow, shipped in the binary so `telex copilot skill` is
 /// always version-matched. The plugin skill is only a bootstrap that defers to this.
-const COPILOT_SKILL_MD: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/copilot/COPILOT.md"));
+const COPILOT_SKILL_MD: &str =
+    include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/copilot/COPILOT.md"));
 /// Copilot in-session bridge protocol version (the descriptor + prompt + endpoint shape).
 /// Bump on a breaking change to the push/bridge contract.
 pub const COPILOT_BRIDGE_PROTOCOL: u32 = 1;

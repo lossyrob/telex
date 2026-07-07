@@ -32,7 +32,7 @@ pub enum Occ {
 pub struct AddressEntry {
     pub address: AddressRow,
     pub occupancy: Occ,
-    /// Count of messages queued to this address that have not been delivered to a waiter
+    /// Count of messages queued to this address that have not yet been consumed
     /// and are not terminally dispositioned. `None` when the lookup failed.
     pub undelivered: Option<usize>,
 }
@@ -58,16 +58,27 @@ impl Store {
         self.backend.max_message_id().await
     }
 
-    /// Global feed: all messages with `id > cursor`, oldest first.
-    pub async fn feed_since(&self, cursor: i64) -> Result<Vec<MessageRow>> {
-        self.backend.export(None, None, cursor).await
+    /// Global feed page: up to `limit` messages with `id > cursor`, oldest first. Bounded so a
+    /// large backlog (e.g. `--backfill all`) is drained in chunks rather than materialized whole.
+    pub async fn feed_page(&self, cursor: i64, limit: i64) -> Result<Vec<MessageRow>> {
+        self.backend.feed_page(cursor, limit).await
     }
 
-    /// Address directory with per-address occupancy and undelivered backlog count. A failed
-    /// occupancy or backlog lookup degrades that field rather than failing the whole call.
+    /// Address directory with per-address occupancy and undelivered backlog count. The backlog
+    /// counts come from a single **read-only** bulk query (`undelivered_counts`), so the inspector
+    /// never mutates the store. A failed occupancy lookup degrades that entry to `Unknown`.
     pub async fn addresses(&self) -> Result<Vec<AddressEntry>> {
         let window = liveness_window_secs();
         let rows = self.backend.list_addresses(None, false).await?;
+        // One pure-SELECT query for all addresses' backlog (never materializes delivery rows).
+        let counts: std::collections::HashMap<String, usize> = self
+            .backend
+            .undelivered_counts()
+            .await
+            .unwrap_or_default()
+            .into_iter()
+            .map(|(addr, n)| (addr, n.max(0) as usize))
+            .collect();
         let mut out = Vec::with_capacity(rows.len());
         for address in rows {
             let occupancy = match self.backend.occupancy(&address.address, window).await {
@@ -75,14 +86,7 @@ impl Store {
                 Ok(_) => Occ::Idle,
                 Err(_) => Occ::Unknown,
             };
-            // Undelivered backlog: messages queued to this address that no waiter has
-            // consumed yet (the local-exchange model's per-recipient pending count).
-            let undelivered = self
-                .backend
-                .pending_unconsumed_count(&address.address)
-                .await
-                .ok()
-                .map(|n| n.max(0) as usize);
+            let undelivered = Some(counts.get(&address.address).copied().unwrap_or(0));
             out.push(AddressEntry {
                 address,
                 occupancy,
@@ -158,12 +162,16 @@ mod tests {
     async fn feed_and_max_id() {
         let (store, _b) = seeded_store().await;
         assert_eq!(store.max_message_id().await.unwrap(), 2);
-        let feed = store.feed_since(0).await.unwrap();
+        let feed = store.feed_page(0, 1000).await.unwrap();
         assert_eq!(feed.len(), 2);
         // cursor past the first message yields only the second
-        let tail = store.feed_since(1).await.unwrap();
+        let tail = store.feed_page(1, 1000).await.unwrap();
         assert_eq!(tail.len(), 1);
         assert_eq!(tail[0].id, 2);
+        // limit bounds the page
+        let one = store.feed_page(0, 1).await.unwrap();
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].id, 1);
     }
 
     #[tokio::test]
@@ -185,7 +193,7 @@ mod tests {
     #[tokio::test]
     async fn undelivered_count_and_deliveries() {
         let (store, backend) = seeded_store().await;
-        // Both messages are queued and undelivered.
+        // Fan-out creates one pending delivery row per message at insert; both are undelivered.
         let addrs = store.addresses().await.unwrap();
         let demo = addrs
             .iter()
@@ -193,7 +201,15 @@ mod tests {
             .unwrap();
         assert_eq!(demo.undelivered, Some(2));
 
-        // Mark message 1 delivered; the backlog drops and the delivery record is readable.
+        // Read-only: computing the backlog (addresses -> undelivered_counts / list_addresses /
+        // occupancy) must not consume or add delivery rows. Both fan-out rows stay pending.
+        let d1 = store.deliveries(1).await.unwrap();
+        assert_eq!(d1.len(), 1);
+        assert_eq!(d1[0].recipient, "node:demo");
+        assert!(d1[0].consumed_at_ms.is_none());
+        assert_eq!(store.deliveries(2).await.unwrap().len(), 1);
+
+        // Consume message 1 via the backend; the backlog drops and the row reads back consumed.
         backend
             .mark_delivered(1, "node:demo", Some("holderA"))
             .await
@@ -204,15 +220,8 @@ mod tests {
             .find(|a| a.address.address == "node:demo")
             .unwrap();
         assert_eq!(demo.undelivered, Some(1));
-
         let dels = store.deliveries(1).await.unwrap();
         assert_eq!(dels.len(), 1);
-        assert_eq!(dels[0].recipient, "node:demo");
-        // message 1 was actually delivered/consumed
         assert!(dels[0].consumed_at_ms.is_some());
-        // message 2 has only a materialized *pending* row (from the backlog count above),
-        // so it is present but not yet consumed.
-        let dels2 = store.deliveries(2).await.unwrap();
-        assert!(dels2.iter().all(|d| d.consumed_at_ms.is_none()));
     }
 }

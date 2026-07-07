@@ -127,27 +127,30 @@ bottom) to resume tailing — the footer shows a `t/G resume-tail` hint while pa
 
 ## How it reads
 
-The feed is a cursor poll over the core `Backend::export(None, None, cursor)` (global,
-id-ordered); the cursor advances past the greatest message id seen, and the in-memory feed
-is bounded to the most recent ~2000 messages. The address directory and occupancy refresh
-on a slower cadence than the feed, and a single failed address lookup degrades to
-"unknown" rather than breaking the view. Dispositions and delivery records are loaded lazily
-for the selected message; the per-address undelivered count comes from
-`Backend::undelivered_backlog`, refreshed on the directory cadence.
+The feed is a **bounded** cursor poll: each tick drains new messages (`id > cursor`) in pages
+via `Backend::feed_page`, advancing the cursor, so even `--backfill all` or a large burst never
+materializes an unbounded result; the in-memory feed is capped at the most recent ~2000 messages.
+The address directory refreshes on a slower cadence than the feed. Per-address occupancy is read
+per address; the per-address **undelivered backlog** counts come from a single **read-only** bulk
+query (`Backend::undelivered_counts`, a pure `SELECT`/`GROUP BY` that never materializes delivery
+rows). Dispositions and delivery records are loaded lazily for the selected message.
+
+The console opens the backend **read-only** (`profiles::build_readonly`): it never creates schema,
+and for SQLite it uses a read-only connection with no journal/synchronous pragmas — so pointing the
+inspector at a store never mutates it. Reader text is word-wrapped by terminal **display width**
+(`unicode-width`), so wide/CJK/emoji content scrolls correctly; message bytes are stripped of
+terminal-control characters before display.
 
 ## Limitations
 
 - Address filtering only (substring on `from`/`to`); attention/kind filters and free-text
   search are not yet implemented.
-- No write actions (send, reply, disposition) — read-only.
+- No write actions (send, reply, disposition), and the store is opened read-only — the
+  inspector never mutates the fabric.
 - The delivered/undelivered badge is shown in the detail pane for the selected message
   (loaded lazily) and as a per-address count; there is no per-row feed badge yet (it would
   cost a delivery lookup per visible row each poll).
-- SQLite is the primary tested backend; Postgres is supported through the same trait.
-- The backend is opened like the CLI (which runs `CREATE TABLE IF NOT EXISTS` and, for
-  SQLite, sets WAL mode). This is a no-op on an existing telex store and the console issues
-  no message/lease/disposition writes, but it is not yet strictly read-only against a
-  read-only file or a `SELECT`-only Postgres role — a dedicated read-only open path is a
-  planned follow-up.
+- SQLite is the primary tested backend; Postgres is supported through the same trait. For a
+  hard read-only guarantee on Postgres, connect with a `SELECT`-only role.
 - The feed retains the most recent ~2000 messages in memory; when paused with more than
   that arriving, selection tracks position rather than a pinned message id.
