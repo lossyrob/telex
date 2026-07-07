@@ -22,7 +22,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Check embedded bridge JS syntax
-        run: node --check copilot-bridge/extension.mjs
+        run: node --check copilot/bridge/extension.mjs
 
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1

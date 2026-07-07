@@ -4,7 +4,7 @@ use std::path::Path;
 #[test]
 fn plugin_manifest_declares_hooks_and_root_skill_source() {
     let manifest: Value =
-        serde_json::from_str(include_str!("../plugin.json")).expect("plugin.json parses");
+        serde_json::from_str(include_str!("../copilot/plugin/plugin.json")).expect("plugin.json parses");
     assert_eq!(manifest["name"], "telex");
     assert_eq!(manifest["hooks"], "hooks.json");
     assert_eq!(
@@ -29,14 +29,25 @@ fn marketplace_manifest_advertises_telex_plugin() {
     assert_eq!(plugins.len(), 1);
     let plugin = &plugins[0];
     assert_eq!(plugin["name"], "telex");
-    assert_eq!(plugin["source"], ".");
+    assert_eq!(plugin["source"], "copilot/plugin");
     assert_eq!(plugin["repository"], "https://github.com/lossyrob/telex");
+    // Couple the marketplace source string to the on-disk plugin root so a future
+    // rename that touches only one side fails at repo-test time, not at a user's
+    // `copilot plugin install`.
+    let source = plugin["source"].as_str().expect("source is a string");
+    assert!(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join(source)
+            .join("plugin.json")
+            .exists(),
+        "marketplace source {source:?} must contain the plugin manifest"
+    );
 }
 
 #[test]
 fn hook_manifest_wires_session_end_and_agent_stop_to_hidden_rust_adapter() {
     let hooks: Value =
-        serde_json::from_str(include_str!("../hooks.json")).expect("hooks.json parses");
+        serde_json::from_str(include_str!("../copilot/plugin/hooks.json")).expect("hooks.json parses");
     assert_eq!(hooks["version"], 1);
     let session_end = &hooks["hooks"]["sessionEnd"][0];
     assert_eq!(session_end["type"], "command");
@@ -72,22 +83,28 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
     let mut skill_files = Vec::new();
     collect_skill_files(root, &mut skill_files);
     let root_skill = root.join("SKILL.md");
-    let plugin_skill = root.join("skills").join("telex").join("SKILL.md");
+    let plugin_skill = root
+        .join("copilot")
+        .join("plugin")
+        .join("skills")
+        .join("telex")
+        .join("SKILL.md");
     assert_eq!(
         skill_files,
         vec![root_skill.clone(), plugin_skill.clone()],
         "only the canonical root skill and the plugin bootstrap skill should exist"
     );
 
-    let root_bytes = std::fs::read(&root_skill).expect("read root skill");
     let plugin_text = std::fs::read_to_string(&plugin_skill).expect("read plugin skill");
 
     // The bootstrap is deliberately small and is NOT a copy of the canonical skill.
+    // A fixed byte ceiling expresses the "thin bootstrap" intent directly, rather than a
+    // ratio against the (also-edited) root skill whose denominator can drift.
+    const BOOTSTRAP_MAX_BYTES: usize = 4096;
     assert!(
-        plugin_text.len() < root_bytes.len() / 3,
-        "plugin skill should be a thin bootstrap, not a mirror of root SKILL.md ({} vs {} bytes)",
-        plugin_text.len(),
-        root_bytes.len()
+        plugin_text.len() < BOOTSTRAP_MAX_BYTES,
+        "plugin skill should be a thin bootstrap (< {BOOTSTRAP_MAX_BYTES} bytes), got {} bytes",
+        plugin_text.len()
     );
 
     // It defers to the installed binary as the source of truth.
@@ -123,9 +140,13 @@ fn root_skill_points_copilot_sessions_at_the_binary_command() {
     let root_skill =
         std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("SKILL.md"))
             .expect("read root skill");
+    // The harness-neutral root skill names `telex copilot skill` as the example of the
+    // generic `telex <harness> skill` pointer. When a second harness ships, extend this
+    // to assert its `telex <harness> skill` pointer too — keep the root skill neutral:
+    // it should route to the binary, not embed per-harness mechanics.
     assert!(
         root_skill.contains("telex copilot skill"),
-        "root skill should route the Copilot push path to `telex copilot skill`"
+        "root skill should route the Copilot session to `telex copilot skill`"
     );
 }
 
@@ -133,10 +154,10 @@ fn collect_skill_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     let entries = std::fs::read_dir(dir).expect("read dir");
     for entry in entries.flatten() {
         let path = entry.path();
-        if path
-            .components()
-            .any(|c| c.as_os_str() == "target" || c.as_os_str() == ".git")
-        {
+        if path.components().any(|c| {
+            let c = c.as_os_str();
+            c == "target" || c == ".git" || c == ".paw"
+        }) {
             continue;
         }
         if path.is_dir() {
