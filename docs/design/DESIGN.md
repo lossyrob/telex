@@ -349,7 +349,7 @@ workstream:telex/node:directory        unoccupied   passive directory design (qu
 A simple substring or tag filter (for example `telex address list --match 215` or
 `--tag issue:215`) is enough for V0 resolution. Anything richer — natural-language
 matching, broadcast "who can handle this?" enquiries, or capability bidding — is
-deliberately deferred to active dispatch (see [DISPATCH.md](../../DISPATCH.md)).
+deliberately deferred to active dispatch (see [DISPATCH.md](proposals/DISPATCH.md)).
 
 Directory listings should respect the same scoping and lifecycle rules as the rest
 of the address model: retired addresses drop out of normal listings, and on a
@@ -614,7 +614,7 @@ The agent's job is therefore to **supervise**, not to **be**, the waiter — but
 supervision is now lighter, because there is no resident holder to launch and babysit. A
 supervising sub-agent runs the `telex wait` delivery loop, relays actionable payloads to
 the foreground, and refreshes the work-scope brief — the Plane A control role described in
-[../../DISPATCH.md](../../DISPATCH.md). The exchange auto-spawns on first use; the agent
+[proposals/DISPATCH.md](proposals/DISPATCH.md). The exchange auto-spawns on first use; the agent
 does not start it. Generic loop/skill mechanisms remain appropriate for dynamic,
 agent-invented checks; they are simply not how Telex message-waiting and answerback are
 implemented.
@@ -900,4 +900,4 @@ Deferred questions:
 - directory visibility and scoping on a shared backend.
 
 Active discovery, broadcast enquiries, and Contract-Net dispatch are explored
-separately in [DISPATCH.md](../../DISPATCH.md), which carries its own open questions.
+separately in [DISPATCH.md](proposals/DISPATCH.md), which carries its own open questions.

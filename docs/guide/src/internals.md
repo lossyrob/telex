@@ -15,5 +15,5 @@ documented separately in the repository:
   Copilot CLI push delivery.
 
 The forward-looking discovery and dispatch proposals live in
-[DISPATCH.md](https://github.com/lossyrob/telex/blob/main/DISPATCH.md) and
-[EXTENSIONS.md](https://github.com/lossyrob/telex/blob/main/EXTENSIONS.md).
+[DISPATCH.md](https://github.com/lossyrob/telex/blob/main/docs/design/proposals/DISPATCH.md) and
+[EXTENSIONS.md](https://github.com/lossyrob/telex/blob/main/docs/design/proposals/EXTENSIONS.md).
