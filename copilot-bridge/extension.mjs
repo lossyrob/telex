@@ -21,6 +21,8 @@
 //   {"prompt": "...", "displayPrompt": "[telex] FROM: <addr> SUBJECT: <subject>", "mode": "enqueue"}
 // Response, newline-terminated:
 //   {"ok": true, "sessionId": "...", "mode": "enqueue", "accepted": "queued"|"pending"}
+// or, when a non-`interrupt` push arrives while a root turn is running (issue #65):
+//   {"ok": false, "sessionId": "...", "mode": "enqueue", "error": "deferred_until_idle"}
 // The bridge forwards `mode` verbatim; the attention->mode decision
 // (interrupt -> immediate, else -> enqueue) is made by `telex copilot push`.
 
@@ -30,11 +32,20 @@ import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { randomBytes } from "node:crypto";
+import { createBusyTracker, DEFERRED_UNTIL_IDLE } from "./busy-state.mjs";
 
 const isPosix = platform() !== "win32";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024; // 8 MiB: fits a max daemon message plus JSON-escaped prompt wrapping, so large messages push as turns instead of dead-lettering
 const SEND_ACK_TIMEOUT_MS = 2_000;
 const pendingSends = new Set();
+
+// Busy/idle tracking (issue #65) lives in the side-effect-free `busy-state.mjs` module so its
+// contract is unit-tested (busy-state.test.mjs). The bridge defers non-`interrupt` pushes while a
+// root turn is running so a queued turn cannot land behind (and duplicate) work the agent handles
+// manually mid-turn. This is liveness/scheduling state only -- durable Telex state stays authoritative.
+const busyTracker = createBusyTracker();
+const currentlyBusy = () => busyTracker.currentlyBusy();
+
 const registryDir = join(homedir(), ".copilot", "telex-bridge");
 await mkdir(registryDir, { recursive: true, mode: 0o700 });
 if (isPosix) {
@@ -63,6 +74,11 @@ const session = await joinSession({
 });
 
 const sessionId = session.sessionId;
+
+// Feed every session event to the busy tracker; it filters to root-agent turn boundaries and
+// maintains the self-heal timers (see busy-state.mjs for the contract).
+session.on((event) => busyTracker.onEvent(event));
+
 // Per-session shared secret: an application-layer capability so only a client that can read
 // the owner-only registry (i.e. `telex copilot push`) may inject a turn. Defense-in-depth
 // over the OS ACL, needed because the default Windows named-pipe DACL grants Everyone READ.
@@ -143,6 +159,24 @@ async function handleConnection(socket) {
       return;
     }
     const mode = input.mode === "immediate" ? "immediate" : "enqueue";
+    // Defer-until-idle (issue #65): a non-`interrupt` push while a root turn is running must NOT be
+    // sent yet, or it queues behind the current turn and can duplicate work the agent handles
+    // manually mid-turn. Yield once first so a just-arrived root `turn_end` event settles before we
+    // decide -- this collapses the common `agentStop`-drain-vs-`turn_end` race into a single
+    // non-deferred attempt instead of a re-defer. `immediate` (interrupt) is never deferred.
+    if (mode === "enqueue" && currentlyBusy()) {
+      await new Promise((r) => setImmediate(r));
+      if (currentlyBusy()) {
+        writeResponse(socket, {
+          ok: false,
+          error: DEFERRED_UNTIL_IDLE,
+          sessionId,
+          mode,
+        });
+        socket.end();
+        return;
+      }
+    }
     const options = { prompt: input.prompt, mode };
     if (typeof input.displayPrompt === "string" && input.displayPrompt) {
       options.displayPrompt = input.displayPrompt;
@@ -224,6 +258,16 @@ async function writeRegistry() {
         maxRequestBytes: MAX_REQUEST_BYTES,
         createdAt,
         heartbeatAt: new Date().toISOString(),
+        // Diagnostic only (issue #65): the bridge's connect-time answer is the ONLY authoritative
+        // busy signal. Nested under `diagnostics` and never read by `telex copilot push` as a
+        // decision input -- a 15s-stale flag used for scheduling would reopen the mistimed-injection
+        // bug. `busyStaleHealCount` tallies stale-busy self-heals so a missed-turn_end regression is
+        // visible in the field rather than silent.
+        diagnostics: {
+          busyAtLastHeartbeat: busyTracker.currentlyBusy(),
+          busySince: busyTracker.snapshot().busySince,
+          busyStaleHealCount: busyTracker.snapshot().staleHealCount,
+        },
       },
       null,
       2,

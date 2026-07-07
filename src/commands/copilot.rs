@@ -12,9 +12,9 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::cli::{
-    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotDetachArgs, CopilotGcArgs, CopilotPushArgs,
-    CopilotResumeArgs, CopilotSessionEndArgs, CopilotSkillArgs, CopilotTurnGuardArgs, Ctx,
-    DetachArgs,
+    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotDetachArgs, CopilotDrainArgs, CopilotGcArgs,
+    CopilotPushArgs, CopilotResumeArgs, CopilotSessionEndArgs, CopilotSkillArgs,
+    CopilotTurnGuardArgs, Ctx, DetachArgs,
 };
 use crate::daemon_ipc::{
     DaemonStatus, MemberStatus, Request, Response, WaiterOutcome, WatchPidSpec, DAEMON_VERSION,
@@ -43,7 +43,15 @@ const BRIDGE_MAX_REQUEST_BYTES: usize = 8 * 1024 * 1024;
 const BRIDGE_LIVENESS_WINDOW: Duration = Duration::from_secs(60);
 /// Exit code `telex copilot push` returns for a permanent, non-retryable failure (e.g. a message
 /// too large to ever fit the bridge frame). The daemon dead-letters the message on this code.
-const PUSH_EXIT_PERMANENT: i32 = 3;
+/// Sourced from the shared `daemon_ipc` contract so the handler and daemon cannot drift.
+const PUSH_EXIT_PERMANENT: i32 = crate::daemon_ipc::ON_DELIVER_PERMANENT_EXIT;
+/// Exit code `telex copilot push` returns when the bridge **deferred** the message because it was
+/// busy (a root turn is running -- issue #65). The message was not sent and is not a failure; the
+/// daemon holds it at the deferred backstop and re-attempts it via the idle drain on turn-stop.
+const PUSH_EXIT_DEFERRED: i32 = crate::daemon_ipc::ON_DELIVER_DEFERRED_EXIT;
+/// Client-side deadline for the `telex copilot drain` daemon round-trip. Kept well below the 30s
+/// `agentStop` hook timeout so a slow/hung daemon never stalls turn-stop; the drain fails open.
+const DRAIN_IPC_DEADLINE: Duration = Duration::from_secs(3);
 
 /// Embedded Copilot-specific workflow, shipped in the binary so `telex copilot skill` is
 /// always version-matched. The plugin skill is only a bootstrap that defers to this.
@@ -62,6 +70,7 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
         CopilotCmd::TurnGuard(args) => turn_guard(ctx, args).await,
         CopilotCmd::Skill(args) => skill(args),
         CopilotCmd::Push(args) => push(ctx, args).await,
+        CopilotCmd::Drain(args) => drain(ctx, args).await,
         CopilotCmd::Detach(args) => detach(ctx, args).await,
         CopilotCmd::Gc(args) => gc(ctx, args),
     }
@@ -69,6 +78,9 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
 
 /// The bridge extension bytes, embedded so they version with the daemon protocol.
 const BRIDGE_EXTENSION_MJS: &str = include_str!("../../copilot-bridge/extension.mjs");
+/// The bridge's busy/idle state machine, a sibling module `extension.mjs` imports. Embedded and
+/// materialized alongside `extension.mjs` so the relative import resolves in the session dir.
+const BRIDGE_BUSY_STATE_MJS: &str = include_str!("../../copilot-bridge/busy-state.mjs");
 const BRIDGE_EXTENSION_NAME: &str = "telex-bridge";
 
 fn copilot_home_dir() -> Result<PathBuf> {
@@ -97,6 +109,8 @@ fn write_bridge_extension(session_id: &str) -> Result<()> {
     let dir = bridge_extension_dir(session_id)?;
     std::fs::create_dir_all(&dir)?;
     std::fs::write(dir.join("extension.mjs"), BRIDGE_EXTENSION_MJS)?;
+    // The busy/idle state machine `extension.mjs` imports as `./busy-state.mjs`.
+    std::fs::write(dir.join("busy-state.mjs"), BRIDGE_BUSY_STATE_MJS)?;
     Ok(())
 }
 
@@ -520,13 +534,22 @@ fn push_display_prompt(d: &OnDeliverDescriptor) -> String {
 }
 
 /// Map a bridge push response to the handler exit code: 0 on success, `PUSH_EXIT_PERMANENT`
-/// (dead-letter) when the bridge reports `request_too_large` (structurally unpushable), else a
-/// transient nonzero the daemon retries.
+/// (dead-letter) when the bridge reports `request_too_large` (structurally unpushable),
+/// The exact `error` value the bridge returns for a busy-deferred push. This is a cross-language
+/// contract with `copilot-bridge/busy-state.mjs`'s `DEFERRED_UNTIL_IDLE`; a drift on either side
+/// would silently downgrade deferral to a transient retry, so both sides pin the literal via a
+/// named constant + a test (`push_exit_dead_letters_on_request_too_large`).
+const BRIDGE_DEFERRED_ERROR: &str = "deferred_until_idle";
+
+/// `PUSH_EXIT_DEFERRED` when the bridge deferred a busy enqueue (not sent, not a failure -- the
+/// idle drain re-attempts it), else a transient nonzero the daemon retries.
 fn push_exit_for_response(ok: bool, error: Option<&str>) -> i32 {
     if ok {
         0
     } else if error == Some("request_too_large") {
         PUSH_EXIT_PERMANENT
+    } else if error == Some(BRIDGE_DEFERRED_ERROR) {
+        PUSH_EXIT_DEFERRED
     } else {
         1
     }
@@ -679,6 +702,13 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
             "telex copilot push: message {} exceeds the bridge frame cap; it stays in the durable buffer -- read it with `telex inbox` / `telex read` and disposition normally.",
             descriptor.message_id
         );
+    } else if exit == PUSH_EXIT_DEFERRED {
+        // Not an error: the bridge is busy (a root turn is running), so the message was NOT sent.
+        // The daemon holds it and the idle drain (agentStop) re-attempts it when the turn stops.
+        eprintln!(
+            "telex copilot push: message {} deferred until idle (bridge busy); the idle drain will re-attempt it after the current turn stops.",
+            descriptor.message_id
+        );
     } else if exit != 0 {
         eprintln!(
             "telex copilot push: bridge rejected message {}: {}",
@@ -687,6 +717,142 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
         );
     }
     Ok(exit)
+}
+
+/// `TELEX_COPILOT_DRAIN=off|0|false` disables the idle-drain hook (operator escape hatch for a
+/// misbehaving drain). Independent of `TELEX_TURN_GUARD` so the two hooks are separately gated.
+fn drain_enabled() -> bool {
+    !matches!(
+        env_nonempty("TELEX_COPILOT_DRAIN")
+            .map(|value| value.to_ascii_lowercase())
+            .as_deref(),
+        Some("off" | "0" | "false")
+    )
+}
+
+/// `telex copilot drain`: the dedicated, ungated `agentStop` drain trigger (issue #65). On turn
+/// stop it asks the daemon to re-attempt messages this session deferred while the bridge was busy.
+/// Independent of `TELEX_TURN_GUARD`/nudge caps, but honors its own `TELEX_COPILOT_DRAIN`
+/// off-switch. **Always fail-open (exit 0)**: a drain failure must never block turn-stop or error
+/// the hook. A bounded client-side deadline (`DRAIN_IPC_DEADLINE`) keeps a slow daemon from
+/// stalling the turn.
+async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
+    let payload = read_stdin_payload();
+    let session = match resolve_copilot_session(args.session.as_deref(), payload.as_deref()) {
+        Some(session) => session,
+        None => {
+            let reason_code = if payload.is_some() {
+                "payload_unknown_shape"
+            } else {
+                "missing_session"
+            };
+            write_hook_log_best_effort(&HookLogEvent::drain(reason_code, None, None));
+            print_json(&serde_json::json!({"drain": false, "outcome": reason_code}));
+            return Ok(0);
+        }
+    };
+
+    if !drain_enabled() {
+        write_hook_log_best_effort(&HookLogEvent::drain("drain_disabled", Some(&session), None));
+        print_json(
+            &serde_json::json!({"drain": false, "session_id": session, "outcome": "drain_disabled"}),
+        );
+        return Ok(0);
+    }
+
+    // Fast path: a session that never provisioned a bridge has no registry file and therefore no
+    // possible deferred pushes, so skip the daemon round-trip entirely. This keeps the drain a true
+    // no-op for pull-only / non-bridge sessions, which run this hook on every turn-stop too.
+    if !bridge_registry_path(&session)
+        .map(|p| p.exists())
+        .unwrap_or(false)
+    {
+        print_json(
+            &serde_json::json!({"drain": false, "session_id": session, "outcome": "no_bridge"}),
+        );
+        return Ok(0);
+    }
+
+    let store_key = match ctx.store_key() {
+        Ok(store_key) => store_key,
+        Err(e) => {
+            let detail = e.to_string();
+            write_hook_log_best_effort(&HookLogEvent::drain(
+                "store_key_error",
+                Some(&session),
+                Some(&detail),
+            ));
+            print_json(
+                &serde_json::json!({"drain": false, "session_id": session, "outcome": "store_key_error"}),
+            );
+            return Ok(0);
+        }
+    };
+
+    let (mut client, cap) = match connect_existing_with_cap(&store_key).await {
+        Ok(connection) => connection,
+        Err(e) => {
+            write_hook_log_best_effort(&HookLogEvent::drain(
+                "daemon_unavailable",
+                Some(&session),
+                Some(&e),
+            ));
+            print_json(
+                &serde_json::json!({"drain": false, "session_id": session, "outcome": "daemon_unavailable"}),
+            );
+            return Ok(0);
+        }
+    };
+
+    let request = Request::DrainDeferred {
+        store_key: store_key.clone(),
+        session_id: session.clone(),
+        proof: Some(cap.admin_cap),
+    };
+    let outcome = match tokio::time::timeout(DRAIN_IPC_DEADLINE, client.request(&request)).await {
+        Ok(Ok(Response::Ack { message, .. })) => {
+            let detail = message.unwrap_or_default();
+            write_hook_log_best_effort(&HookLogEvent::drain(
+                "drained",
+                Some(&session),
+                Some(&detail),
+            ));
+            serde_json::json!({"drain": true, "session_id": session, "outcome": "drained", "detail": detail})
+        }
+        Ok(Ok(Response::Error { code, message, .. })) => {
+            let detail = format!("{code}: {message}");
+            write_hook_log_best_effort(&HookLogEvent::drain(
+                "daemon_error",
+                Some(&session),
+                Some(&detail),
+            ));
+            serde_json::json!({"drain": false, "session_id": session, "outcome": "daemon_error", "detail": detail})
+        }
+        Ok(Ok(other)) => {
+            let detail = format!("unexpected {other:?}");
+            write_hook_log_best_effort(&HookLogEvent::drain(
+                "unexpected_response",
+                Some(&session),
+                Some(&detail),
+            ));
+            serde_json::json!({"drain": false, "session_id": session, "outcome": "unexpected_response"})
+        }
+        Ok(Err(e)) => {
+            let detail = e.to_string();
+            write_hook_log_best_effort(&HookLogEvent::drain(
+                "transport_error",
+                Some(&session),
+                Some(&detail),
+            ));
+            serde_json::json!({"drain": false, "session_id": session, "outcome": "transport_error"})
+        }
+        Err(_) => {
+            write_hook_log_best_effort(&HookLogEvent::drain("timeout", Some(&session), None));
+            serde_json::json!({"drain": false, "session_id": session, "outcome": "timeout"})
+        }
+    };
+    print_json(&outcome);
+    Ok(0)
 }
 
 /// Connect to the in-session bridge endpoint, send one JSON request line, read one JSON
@@ -1675,6 +1841,10 @@ fn cleanup_turn_guard_state_best_effort(session: &str) {
 struct HookLogEvent<'a> {
     ts_ms: i64,
     hook: &'a str,
+    /// Which subprocess emitted the row when one hook slot fans out to multiple commands (e.g. the
+    /// `agentStop` slot runs both `turn-guard` and `drain`). A one-dimensional discriminator so log
+    /// queries do not have to enumerate `reason_code` values to isolate a hook (issue #65).
+    subhook: &'a str,
     reason_code: &'a str,
     #[serde(skip_serializing_if = "Option::is_none")]
     session_id: Option<&'a str>,
@@ -1695,6 +1865,7 @@ impl<'a> HookLogEvent<'a> {
         Self {
             ts_ms: now_ms(),
             hook: "sessionEnd",
+            subhook: "session_end",
             reason_code,
             session_id,
             detail,
@@ -1713,11 +1884,25 @@ impl<'a> HookLogEvent<'a> {
         Self {
             ts_ms: now_ms(),
             hook: "agentStop",
+            subhook: "turn_guard",
             reason_code,
             session_id,
             detail,
             nudges: Some(nudges),
             cap: Some(cap),
+        }
+    }
+
+    fn drain(reason_code: &'a str, session_id: Option<&'a str>, detail: Option<&'a str>) -> Self {
+        Self {
+            ts_ms: now_ms(),
+            hook: "agentStop",
+            subhook: "drain",
+            reason_code,
+            session_id,
+            detail,
+            nudges: None,
+            cap: None,
         }
     }
 }
@@ -1906,9 +2091,37 @@ mod tests {
             push_exit_for_response(false, Some("request_too_large")),
             PUSH_EXIT_PERMANENT
         );
+        // A busy-defer is neither success nor a retryable failure: its own exit code so the daemon
+        // holds it for the idle drain (issue #65), distinct from permanent and transient.
+        assert_eq!(BRIDGE_DEFERRED_ERROR, "deferred_until_idle");
+        assert_eq!(
+            push_exit_for_response(false, Some(BRIDGE_DEFERRED_ERROR)),
+            PUSH_EXIT_DEFERRED
+        );
+        assert_ne!(PUSH_EXIT_DEFERRED, PUSH_EXIT_PERMANENT);
+        assert_ne!(PUSH_EXIT_DEFERRED, 0);
         // Other rejections stay transient (retryable).
         assert_eq!(push_exit_for_response(false, Some("bad_json")), 1);
         assert_eq!(push_exit_for_response(false, None), 1);
+    }
+
+    #[test]
+    fn drain_off_switch_disables_via_env() {
+        // Default (unset) is enabled; explicit off values disable. Uses a process-global env, so
+        // this test sets and restores it and does not run in parallel with other env readers.
+        let restore = std::env::var("TELEX_COPILOT_DRAIN").ok();
+        std::env::remove_var("TELEX_COPILOT_DRAIN");
+        assert!(drain_enabled(), "default (unset) must be enabled");
+        for off in ["off", "0", "false", "OFF"] {
+            std::env::set_var("TELEX_COPILOT_DRAIN", off);
+            assert!(!drain_enabled(), "TELEX_COPILOT_DRAIN={off} must disable");
+        }
+        std::env::set_var("TELEX_COPILOT_DRAIN", "on");
+        assert!(drain_enabled(), "a non-off value keeps it enabled");
+        match restore {
+            Some(v) => std::env::set_var("TELEX_COPILOT_DRAIN", v),
+            None => std::env::remove_var("TELEX_COPILOT_DRAIN"),
+        }
     }
 
     #[test]
@@ -2050,6 +2263,7 @@ mod tests {
             push_registered: false,
             push_wake_on_cc: false,
             push_cc_after_ms: None,
+            push_deferred_count: 0,
             unattended_since_ms: None,
             unattended_for_ms: None,
             deaf_since_ms: None,

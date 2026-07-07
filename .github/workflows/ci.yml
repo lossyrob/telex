@@ -24,6 +24,9 @@ jobs:
       - name: Check embedded bridge JS syntax
         run: node --check copilot-bridge/extension.mjs
 
+      - name: Test embedded bridge busy/idle contract
+        run: node --test copilot-bridge/busy-state.test.mjs
+
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
