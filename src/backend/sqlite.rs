@@ -123,18 +123,34 @@ fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
         bail!("store lock directory {:?} is not a local path", path);
     }
 
-    if path.exists() {
-        let meta = std::fs::symlink_metadata(path)
-            .with_context(|| format!("checking store lock directory {:?}", path))?;
-        if !meta.is_dir() {
-            bail!("store lock directory {:?} is not a directory", path);
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) => {
+            if !meta.is_dir() {
+                bail!("store lock directory {:?} is not a directory", path);
+            }
+            if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                bail!("store lock directory {:?} is a reparse point", path);
+            }
         }
-        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            bail!("store lock directory {:?} is a reparse point", path);
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            create_windows_owner_only_dir(path).with_context(|| {
+                format!("creating owner-private store lock directory {:?}", path)
+            })?;
+            // A concurrent creator may race the NotFound path; CreateDirectoryW reports
+            // ERROR_ALREADY_EXISTS for files and reparse points too, so validate the object that
+            // actually won the race before trusting it as the lock namespace.
+            let meta = std::fs::symlink_metadata(path)
+                .with_context(|| format!("checking store lock directory {:?}", path))?;
+            if !meta.is_dir() {
+                bail!("store lock directory {:?} is not a directory", path);
+            }
+            if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                bail!("store lock directory {:?} is a reparse point", path);
+            }
         }
-    } else {
-        create_windows_owner_only_dir(path)
-            .with_context(|| format!("creating owner-private store lock directory {:?}", path))?;
+        Err(e) => {
+            return Err(e).with_context(|| format!("checking store lock directory {:?}", path));
+        }
     }
 
     let sid = windows_current_user_sid()?;

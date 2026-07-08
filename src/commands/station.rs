@@ -60,6 +60,11 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                         "station_health": member.station_health,
                         "health_detail": member.health_detail,
                         "waiters": member.waiters,
+                        "push_registered": member.push_registered,
+                        "push_delivery": member.push_delivery,
+                        "push_wake_on_cc": member.push_wake_on_cc,
+                        "push_deferred_count": member.push_deferred_count,
+                        "push_suppressed_count": member.push_suppressed_count,
                         "live_waiters_count": member.live_waiters_count,
                         "pending_unconsumed_count": member.pending_unconsumed_count,
                         "unattended_since_ms": member.unattended_since_ms,
@@ -75,6 +80,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                         "last_delivered_message_id": member.last_delivered_message_id,
                         "idle": member.idle,
                         "live_waiters": member.live_waiters,
+                        "watch_pids": member.watch_pids,
                     })
                 })
                 .collect();
@@ -91,8 +97,16 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                     println!("(no stations for session {session_label})");
                 } else {
                     for station in &stations {
+                        let push = if station["push_registered"].as_bool().unwrap_or(false) {
+                            format!(
+                                " push={}",
+                                station["push_delivery"].as_str().unwrap_or("registered")
+                            )
+                        } else {
+                            String::new()
+                        };
                         println!(
-                            "{} session={}{} waiters={} pending={} health={}{}",
+                            "{} session={}{} waiters={} pending={} health={}{}{}",
                             station["address"].as_str().unwrap_or("?"),
                             station["session_id"].as_str().unwrap_or("?"),
                             if station["foreign_session"].as_bool().unwrap_or(false) {
@@ -103,6 +117,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                             station["live_waiters_count"],
                             station["pending_unconsumed_count"],
                             station["station_health"].as_str().unwrap_or("?"),
+                            push,
                             if station["deaf_warn"].as_bool().unwrap_or(false) {
                                 " DEAF"
                             } else {

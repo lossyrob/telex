@@ -87,6 +87,13 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
             info["deaf_since_ms"] = serde_json::json!(daemon_members[0].deaf_since_ms);
             info["deaf_for_ms"] = serde_json::json!(daemon_members[0].deaf_for_ms);
             info["deaf_warn"] = serde_json::json!(deaf_warn);
+            info["push_registered"] = serde_json::json!(daemon_members[0].push_registered);
+            info["push_delivery"] = serde_json::json!(daemon_members[0].push_delivery);
+            info["push_wake_on_cc"] = serde_json::json!(daemon_members[0].push_wake_on_cc);
+            info["push_deferred_count"] = serde_json::json!(daemon_members[0].push_deferred_count);
+            info["push_suppressed_count"] =
+                serde_json::json!(daemon_members[0].push_suppressed_count);
+            info["watch_pids"] = serde_json::to_value(&daemon_members[0].watch_pids)?;
             info["last_waiter_outcome"] = serde_json::json!(daemon_members[0].last_waiter_outcome);
             info["last_waiter_exit_code"] =
                 serde_json::json!(daemon_members[0].last_waiter_exit_code);
@@ -147,10 +154,25 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
                 .get("pending_unconsumed_count")
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "null".to_string());
+            let push = if info
+                .get("push_registered")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                format!(
+                    " push={}",
+                    info.get("push_delivery")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("registered")
+                )
+            } else {
+                String::new()
+            };
             println!(
-                "station_health {} pending={}{}",
+                "station_health {} pending={}{}{}",
                 health,
                 pending,
+                push,
                 if info
                     .get("deaf_warn")
                     .and_then(|v| v.as_bool())

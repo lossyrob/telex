@@ -24,7 +24,8 @@ yours to make.
 
    This registers your session/address with the per-user local exchange and writes the
    telex bridge extension into this session's extension dir. The plugin adapter maps
-   `$COPILOT_AGENT_SESSION_ID` and `$COPILOT_LOADER_PID` for you.
+   `$COPILOT_AGENT_SESSION_ID` for you; in bridge mode the extension heartbeat, not
+   `$COPILOT_LOADER_PID`, is the push liveness signal.
    If this station is a deliberative-table observer/relay and should receive live CC
    traffic as turns, add `--wake-on-cc` to the bind:
 

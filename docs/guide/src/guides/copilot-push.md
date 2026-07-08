@@ -19,8 +19,8 @@ copilot plugin install telex@telex
 ```
 
 The plugin contributes session lifecycle hooks and provisions the push bridge. It
-maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id and
-`$COPILOT_LOADER_PID` to a loader watch-pid.
+maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id. In bridge mode,
+the extension heartbeat, not `$COPILOT_LOADER_PID`, is the push liveness signal.
 
 ## Bind and provision the bridge
 

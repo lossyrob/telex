@@ -106,7 +106,11 @@ fn installer_targets_are_a_subset_of_the_release_matrix() {
     // Pin the specific targets each installer must be able to fetch. This catches a
     // *single dropped arm* (e.g. removing the macOS Intel case), which the non-empty
     // guard above alone would miss.
-    for expected in ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-apple-darwin"] {
+    for expected in [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+    ] {
         assert!(
             sh.iter().any(|t| t == expected),
             "install.sh no longer resolves target `{expected}`; a platform arm was dropped"
@@ -349,8 +353,8 @@ fn awk_style_package_version(cargo_toml: &str) -> String {
         }
         // awk match: /^version[[:space:]]*=/
         let trimmed_key = line.trim_start_matches("version");
-        let is_version_line = line.starts_with("version")
-            && trimmed_key.trim_start().starts_with('=');
+        let is_version_line =
+            line.starts_with("version") && trimmed_key.trim_start().starts_with('=');
         if in_pkg && is_version_line {
             // gsub(/["[:space:]]/,"") then sub(/^version=/,"")
             let collapsed: String = line
@@ -373,7 +377,10 @@ fn workflow_awk_and_rust_version_parsers_agree() {
     let cargo = read("Cargo.toml");
     let rust = package_version(&cargo);
     let awk = awk_style_package_version(&cargo);
-    assert!(!rust.is_empty(), "Rust package_version parser resolved nothing");
+    assert!(
+        !rust.is_empty(),
+        "Rust package_version parser resolved nothing"
+    );
     assert_eq!(
         rust, awk,
         "the awk gate in release.yml and the Rust parser disagree on [package].version \
@@ -388,7 +395,10 @@ fn plugin_versions_track_the_crate_version() {
     // lists bumping these as a pre-cut step; enforce it here so a Cargo.toml bump
     // that forgets the plugin fails in CI, not at a user's `copilot plugin install`.
     let crate_version = package_version(&read("Cargo.toml"));
-    assert!(!crate_version.is_empty(), "could not read [package].version from Cargo.toml");
+    assert!(
+        !crate_version.is_empty(),
+        "could not read [package].version from Cargo.toml"
+    );
 
     let plugin: Value =
         serde_json::from_str(&read("copilot/plugin/plugin.json")).expect("plugin.json parses");

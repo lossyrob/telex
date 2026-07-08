@@ -2378,6 +2378,225 @@ fn real_process_copilot_push_refuses_after_detach_tombstone() {
 }
 
 #[test]
+fn real_process_copilot_bridge_attach_does_not_watch_loader_pid() {
+    let env = ProcessEnv::new("real-copilot-bridge-attach");
+    let session = "real-copilot-bridge-session";
+    let address = "addr:real-copilot-bridge-attach";
+    let mut cmd = env.command_with_session("ignored");
+    cmd.env_remove("TELEX_SESSION_ID")
+        .env("HOME", &env.home)
+        .env("USERPROFILE", &env.home)
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .env("COPILOT_LOADER_PID", u32::MAX.to_string())
+        .env("TELEX_SESSION_PID", u32::MAX.to_string())
+        .args([
+            "--json",
+            "--address",
+            address,
+            "copilot",
+            "attach",
+            "--copilot-bridge",
+            "--description",
+            "copilot bridge process test",
+        ]);
+    let attach = run_command_with_capture(cmd, &env.root, Duration::from_secs(8));
+    attach.assert_success("copilot bridge attach");
+    let attach_json = attach.json("copilot bridge attach");
+    assert_eq!(
+        attach_json.get("session_id").and_then(Value::as_str),
+        Some(session)
+    );
+
+    let status = env.daemon_status();
+    status.assert_success("daemon status after copilot bridge attach");
+    let status_json = status.json("daemon status after copilot bridge attach");
+    let member = status_json
+        .get("members")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|member| member.get("address").and_then(Value::as_str) == Some(address))
+        .expect("copilot bridge-attached member");
+    assert_eq!(
+        member.get("session_id").and_then(Value::as_str),
+        Some(session)
+    );
+    assert_eq!(
+        member
+            .get("watch_pids")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0),
+        "bridge attach must not bind station liveness to the transient Copilot loader pid"
+    );
+    assert_eq!(
+        member.get("push_registered").and_then(Value::as_bool),
+        Some(true)
+    );
+
+    let status = env.run(
+        ["--json", "--address", address, "status"],
+        Duration::from_secs(4),
+    );
+    status.assert_success("status after copilot bridge attach");
+    let status_json = status.json("status after copilot bridge attach");
+    assert_eq!(
+        status_json
+            .get("daemon_members")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        status_json.get("push_registered").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        status_json
+            .get("watch_pids")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0),
+        "bridge status must not inherit ambient TELEX_SESSION_PID watch anchors"
+    );
+
+    let station = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "station",
+            "status",
+            "--session",
+            session,
+        ],
+        Duration::from_secs(4),
+    );
+    station.assert_success("station status after copilot bridge attach");
+    let station_json = station.json("station status after copilot bridge attach");
+    let station = &station_json
+        .get("stations")
+        .and_then(Value::as_array)
+        .unwrap()[0];
+    assert_eq!(
+        station.get("push_registered").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        station
+            .get("watch_pids")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0),
+        "station status should expose that bridge membership has no watch-pid anchors"
+    );
+
+    let status_text = env.run(
+        ["--text", "--address", address, "status"],
+        Duration::from_secs(4),
+    );
+    status_text.assert_success("text status after copilot bridge attach");
+    assert!(
+        status_text.stdout.contains("push="),
+        "text status should identify registered push state: {}",
+        status_text.stdout
+    );
+
+    let station_text = env.run_with_session(
+        session,
+        [
+            "--text",
+            "--address",
+            address,
+            "station",
+            "status",
+            "--session",
+            session,
+        ],
+        Duration::from_secs(4),
+    );
+    station_text.assert_success("text station status after copilot bridge attach");
+    assert!(
+        station_text.stdout.contains("push="),
+        "text station status should identify registered push state: {}",
+        station_text.stdout
+    );
+}
+
+#[test]
+fn real_process_copilot_bridge_refresh_keeps_push_liveness_unanchored() {
+    let env = ProcessEnv::new("real-copilot-bridge-refresh");
+    let session = "real-copilot-bridge-refresh-session";
+    let address = "addr:real-copilot-bridge-refresh";
+
+    let mut bridge = env.command_with_session("ignored");
+    bridge
+        .env_remove("TELEX_SESSION_ID")
+        .env("HOME", &env.home)
+        .env("USERPROFILE", &env.home)
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .env("COPILOT_LOADER_PID", u32::MAX.to_string())
+        .env("TELEX_SESSION_PID", u32::MAX.to_string())
+        .args([
+            "--json",
+            "--address",
+            address,
+            "copilot",
+            "attach",
+            "--copilot-bridge",
+            "--description",
+            "copilot bridge refresh setup",
+        ]);
+    let bridge = run_command_with_capture(bridge, &env.root, Duration::from_secs(8));
+    bridge.assert_success("initial copilot bridge attach");
+
+    let mut plain = env.command_with_session("ignored");
+    plain
+        .env_remove("TELEX_SESSION_ID")
+        .env("HOME", &env.home)
+        .env("USERPROFILE", &env.home)
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .env("COPILOT_LOADER_PID", std::process::id().to_string())
+        .env("TELEX_SESSION_PID", std::process::id().to_string())
+        .args([
+            "--json",
+            "--address",
+            address,
+            "copilot",
+            "attach",
+            "--description",
+            "plain copilot refresh should not process-anchor preserved bridge push",
+        ]);
+    let plain = run_command_with_capture(plain, &env.root, Duration::from_secs(8));
+    plain.assert_success("plain copilot refresh after bridge attach");
+
+    let status = env.daemon_status();
+    status.assert_success("daemon status after copilot bridge refresh");
+    let status_json = status.json("daemon status after copilot bridge refresh");
+    let member = status_json
+        .get("members")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|member| member.get("address").and_then(Value::as_str) == Some(address))
+        .expect("refreshed copilot bridge member");
+    assert_eq!(
+        member.get("push_registered").and_then(Value::as_bool),
+        Some(true),
+        "plain refresh preserves the existing bridge push handler"
+    );
+    assert_eq!(
+        member
+            .get("watch_pids")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0),
+        "plain refresh must not add loader/session watch-pid anchors to preserved bridge push"
+    );
+}
+
+#[test]
 fn real_process_address_surfaces_report_deaf_and_foreign_state() {
     let env = ProcessEnv::new("real-visibility-surfaces");
     let receiver = "real-visibility-surfaces-receiver";
