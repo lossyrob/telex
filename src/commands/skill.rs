@@ -32,44 +32,64 @@ pub async fn run(_ctx: &Ctx, args: SkillArgs) -> Result<i32> {
     );
 
     if let Some(addr) = &args.address {
-        println!("## Your assignment\n");
-        println!(
-            "You are assigned the telex address `{addr}`. Serve it by registering a station with"
-        );
-        println!(
-            "one-shot `telex attach`; the auto-spawned per-user local exchange owns the lease,"
-        );
-        println!("delivery buffer, and liveness. Then loop one delivery at a time: run a SINGLE");
-        println!(
-            "fully detached background `telex wait --out-dir <dir>` task named TELEX MESSAGE WAITER."
-        );
-        println!(
-            "Use Copilot CLI `detach: true`: detached tasks do wake the session on completion"
-        );
-        println!("without keeping the terminal in foreground/spinner-like waiter UX.");
-        println!("It writes message.json/status.json/exit.code into <dir>. When the detached task");
-        println!(
-            "completes, read the artifact exit.code (not the shell task exit code); on 0 parse"
-        );
-        println!("message.json, `telex ack`, dedupe by id, then re-arm a fresh detached `wait`");
-        println!("before longer processing. In Copilot CLI on Windows, prefer detaching a");
-        println!("variable-free `pwsh -File <wait-once.ps1> ...` wrapper; bare external");
-        println!("`telex wait ...` detached launches may silently no-op in some harnesses.");
-        println!(
-            "While focused, arm with `--min-attention interrupt`; at checkpoints drain inbox,"
-        );
-        println!("then re-arm interrupt-only or unfiltered depending on whether you are idle.");
-        println!("For teardown or upgrade, run `telex station stop --address {addr}` first; it");
-        println!("releases the station and waits for tracked live waiters to exit.");
-        println!("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");
-        println!("```sh");
-        println!("telex attach --address {addr} --description \"<what you are working on>\"");
-        println!("telex wait --address {addr} --out-dir <dir>");
-        println!("```\n");
+        print!("{}", assignment_preamble(addr));
     }
 
     print!("{}", strip_frontmatter(raw_skill()));
     Ok(0)
+}
+
+/// The address-tailored assignment preamble printed before the neutral `SKILL.md` for
+/// `telex skill --address <addr>`. It must stay **harness-neutral** (generic
+/// attach/wait/ack, `--out-dir` artifacts, no infinite loop) so `telex skill` output —
+/// with or without `--address` — carries no harness-specific mechanics; harness push
+/// integrations are reached via the `telex <harness> skill` pointer (ADR 0044).
+fn assignment_preamble(addr: &str) -> String {
+    let mut s = String::new();
+    s.push_str("## Your assignment\n\n");
+    s.push_str(&format!(
+        "You are assigned the telex address `{addr}`. Serve it by registering a station with\n"
+    ));
+    s.push_str(
+        "one-shot `telex attach`; the auto-spawned per-user local exchange owns the lease,\n",
+    );
+    s.push_str("delivery buffer, and liveness. Then loop one delivery at a time: run a SINGLE\n");
+    s.push_str(
+        "backgrounded `telex wait --out-dir <dir>` task. Prefer a detached/background task that\n",
+    );
+    s.push_str(
+        "wakes the session on completion, so it does not tie up the terminal like foreground work.\n",
+    );
+    s.push_str(
+        "It writes message.json/status.json/exit.code into <dir>. When the task completes,\n",
+    );
+    s.push_str("read the artifact exit.code (not the task's own reported exit code); on 0 parse\n");
+    s.push_str("message.json, `telex ack`, dedupe by id, then re-arm a fresh `wait`\n");
+    s.push_str("before longer processing.\n");
+    s.push_str(
+        "While focused, arm with `--min-attention interrupt`; at checkpoints drain inbox,\n",
+    );
+    s.push_str("then re-arm interrupt-only or unfiltered depending on whether you are idle.\n");
+    s.push_str("Observer/relay seats that explicitly want live CC traffic to wake them can add\n");
+    s.push_str("`--wake-on-cc`; bare waits keep CC pull-only/visibility-only by default.\n");
+    s.push_str(&format!(
+        "For teardown or upgrade, run `telex station stop --address {addr}` first; it\n"
+    ));
+    s.push_str("releases the station and waits for tracked live waiters to exit.\n");
+    s.push_str("Don't wrap wait in an infinite shell loop (it hides deliveries).\n");
+    s.push_str(
+        "If your harness has a native telex integration, prefer it: run `telex <harness> skill`\n",
+    );
+    s.push_str(
+        "(e.g. in Copilot CLI, `telex copilot skill`) for the harness-specific workflow.\n\n",
+    );
+    s.push_str("```sh\n");
+    s.push_str(&format!(
+        "telex attach --address {addr} --description \"<what you are working on>\"\n"
+    ));
+    s.push_str(&format!("telex wait --address {addr} --out-dir <dir>\n"));
+    s.push_str("```\n\n");
+    s
 }
 
 /// Drop a leading YAML frontmatter block (`--- ... ---`) so the printed output reads as
@@ -102,5 +122,37 @@ mod tests {
     fn strip_is_noop_without_frontmatter() {
         let s = "# Title\n\nbody";
         assert_eq!(strip_frontmatter(s), s);
+    }
+
+    #[test]
+    fn assignment_preamble_is_harness_neutral() {
+        let p = assignment_preamble("workstream:proj/node:issue-1");
+        // Includes the assigned address and the generic loop.
+        assert!(p.contains("workstream:proj/node:issue-1"));
+        assert!(p.contains("telex attach"));
+        assert!(p.contains("telex wait"));
+        assert!(p.contains("--out-dir"));
+        // Routes to harness-specific skills via the neutral pointer, not inline mechanics.
+        assert!(p.contains("telex <harness> skill"));
+        // Must carry NO Copilot/harness-specific mechanics (ADR 0044; the `telex skill`
+        // acceptance criterion covers `--address` output too).
+        for forbidden in [
+            "detach: true",
+            "detach:true",
+            "pwsh -File",
+            "pwsh -NoProfile",
+            "list_powershell",
+            "COPILOT_AGENT_SESSION_ID",
+            "COPILOT_LOADER_PID",
+            "copilot attach",
+            "copilot detach",
+            "--copilot-bridge",
+            "extensions_reload",
+        ] {
+            assert!(
+                !p.contains(forbidden),
+                "address preamble must be harness-neutral; found {forbidden:?}"
+            );
+        }
     }
 }

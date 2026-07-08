@@ -198,9 +198,7 @@ pub async fn build(
         }
         #[cfg(feature = "postgres")]
         "postgres" => {
-            let (cfg, schema) = pg_connect_config(profile).await?;
-            let b =
-                crate::backend::postgres::PgBackend::connect_with(cfg, schema.as_deref()).await?;
+            let b = crate::backend::postgres::PgBackend::connect_profile(profile.clone()).await?;
             b.init_schema().await?;
             Ok(Arc::new(b))
         }
@@ -211,9 +209,37 @@ pub async fn build(
     }
 }
 
-/// Build the `tokio_postgres::Config` (with resolved password) plus optional schema
-/// for a postgres profile. Used both to build the backend and to open the holder's
-/// LISTEN connection for push.
+/// Build a backend for **read-only** consumers (e.g. the console): no schema creation and, for
+/// SQLite, a read-only connection with no journal/synchronous pragmas — so pointing an inspector
+/// at a store never mutates it. Postgres skips `init_schema` (no DDL); enforce a `SELECT`-only
+/// role at the connection string for a hard guarantee there.
+#[allow(unused_variables)]
+pub async fn build_readonly(
+    profile: &BackendProfile,
+    db_override: Option<&str>,
+) -> Result<Arc<dyn Backend>> {
+    match profile.kind.as_str() {
+        #[cfg(feature = "sqlite")]
+        "sqlite" => {
+            let path = db_override
+                .map(str::to_string)
+                .or_else(|| profile.path.clone())
+                .map(|p| expand_tilde(&p))
+                .unwrap_or_else(default_sqlite_path);
+            let b = crate::backend::sqlite::SqliteBackend::open_readonly(&path)?;
+            Ok(Arc::new(b))
+        }
+        #[cfg(feature = "postgres")]
+        "postgres" => {
+            let b = crate::backend::postgres::PgBackend::connect_profile(profile.clone()).await?;
+            Ok(Arc::new(b))
+        }
+        other => bail!(
+            "backend kind '{other}' is not available in this build of telex. \
+             Reinstall with `cargo install telex --features {other}`."
+        ),
+    }
+}
 #[cfg(feature = "postgres")]
 pub async fn pg_connect_config(
     profile: &BackendProfile,

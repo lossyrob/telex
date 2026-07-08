@@ -22,10 +22,41 @@ pub struct Capabilities {
     pub lease: &'static str,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub struct WaitFetchOptions {
+    pub wake_on_cc: bool,
+    pub cc_after_ms: i64,
+}
+
+#[derive(Clone, Debug)]
+pub struct WaitCandidate {
+    pub message: MessageRow,
+    pub notification_only: bool,
+}
+
+impl WaitCandidate {
+    pub fn primary(message: MessageRow) -> Self {
+        Self {
+            message,
+            notification_only: false,
+        }
+    }
+
+    pub fn cc_notification(message: MessageRow) -> Self {
+        Self {
+            message,
+            notification_only: true,
+        }
+    }
+}
+
 #[async_trait]
 pub trait Backend: Send + Sync {
     fn kind(&self) -> &'static str;
     fn capabilities(&self) -> Capabilities;
+    fn supports_wake_on_cc(&self) -> bool {
+        false
+    }
 
     async fn init_schema(&self) -> Result<()>;
 
@@ -153,6 +184,26 @@ pub trait Backend: Send + Sync {
         bail!("pending_unconsumed_count: not supported by this backend")
     }
 
+    /// Count inbound messages that require THIS recipient's disposition and are still actionable:
+    /// the recipient is the primary `to_addr`, `requires_disposition` is set, the delivery is not
+    /// consumed, and the latest disposition for the recipient is not terminal. This is the
+    /// actionable backlog — distinct from `pending_unconsumed_count`, which also counts
+    /// no-disposition notes and, on a shared address, traffic this recipient did not need to act on.
+    /// Health/status observability only.
+    async fn inbound_actionable_count(&self, _address: &str) -> Result<i64> {
+        bail!("inbound_actionable_count: not supported by this backend")
+    }
+
+    /// Both observability counts for one recipient in a single pass. The default calls the two
+    /// methods separately; durable backends override to materialize pending delivery rows once and
+    /// run both counts on one connection, avoiding duplicate materialization on the status/turn-guard
+    /// hot path.
+    async fn pending_and_actionable_counts(&self, address: &str) -> Result<(i64, i64)> {
+        let pending = self.pending_unconsumed_count(address).await?;
+        let actionable = self.inbound_actionable_count(address).await?;
+        Ok((pending, actionable))
+    }
+
     async fn record_detach_tombstone(
         &self,
         _session_id: &str,
@@ -175,6 +226,9 @@ pub trait Backend: Send + Sync {
     }
 
     // ---- messages ----
+    /// The greatest message id across all addresses (0 if empty). Used by read-only
+    /// consumers (e.g. the console) to seed a bounded backfill cursor for the global feed.
+    async fn max_message_id(&self) -> Result<i64>;
     /// Record that `message_id` was handed to a waiter for `recipient` (the served address), so no
     /// holder redelivers it. Durable: this is the per-recipient delivery fact that makes delivery
     /// state survive holder restarts. `occupant` is optional audit context (which holder).
@@ -193,6 +247,23 @@ pub trait Backend: Send + Sync {
     /// The two do-not-deliver signals are a consumed delivery record (primary) and a terminal
     /// disposition (secondary, for messages recovered out-of-band via `telex inbox`); see DECISIONS 0013.
     async fn fetch_undelivered(&self, address: &str) -> Result<Vec<MessageRow>>;
+    async fn fetch_wait_candidates(
+        &self,
+        address: &str,
+        options: WaitFetchOptions,
+    ) -> Result<Vec<WaitCandidate>> {
+        let mut candidates: Vec<WaitCandidate> = self
+            .fetch_undelivered(address)
+            .await?
+            .into_iter()
+            .map(WaitCandidate::primary)
+            .collect();
+        if options.wake_on_cc {
+            bail!("wake-on-cc wait candidates are not supported by this backend")
+        }
+        candidates.sort_by_key(|candidate| candidate.message.id);
+        Ok(candidates)
+    }
     async fn has_delivery_for_recipient(&self, _message_id: i64, _recipient: &str) -> Result<bool> {
         Ok(false)
     }
@@ -217,6 +288,25 @@ pub trait Backend: Send + Sync {
         by: Option<&str>,
     ) -> Result<DispositionRow>;
     async fn dispositions_for(&self, message_id: i64) -> Result<Vec<DispositionRow>>;
+    /// Delivery records for a message (one per recipient that received it). Read side of
+    /// `mark_delivered`; the source of truth for "was this delivered, when, to which holder."
+    async fn deliveries_for(&self, message_id: i64) -> Result<Vec<DeliveryRow>>;
+
+    /// Per-primary-recipient count of undelivered backlog, as `(to_addr, count)` pairs. A message
+    /// counts when it has no *consumed* delivery row for its `to_addr` and its latest disposition
+    /// for that recipient is not terminal. **Read-only**: a pure `SELECT`/`GROUP BY` that never
+    /// materializes delivery rows (unlike `pending_unconsumed_count`), so read-only consumers such
+    /// as the console can poll it without mutating the store. Addresses with no backlog are omitted.
+    async fn undelivered_counts(&self) -> Result<Vec<(String, i64)>> {
+        bail!("undelivered_counts: not supported by this backend")
+    }
+
+    /// A bounded page of the global feed: up to `limit` messages with `id > after_id`, ordered by
+    /// id. Read-only paging primitive so consumers can drain a large backlog in chunks instead of
+    /// materializing an unbounded `export` result in memory.
+    async fn feed_page(&self, _after_id: i64, _limit: i64) -> Result<Vec<MessageRow>> {
+        bail!("feed_page: not supported by this backend")
+    }
 
     /// Best-effort push signal (Postgres LISTEN/NOTIFY); a no-op where unsupported.
     async fn notify_new(&self, address: &str, id: i64, sent_at_ms: i64) -> Result<()>;

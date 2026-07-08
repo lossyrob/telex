@@ -8,3 +8,6 @@
 *.db-wal
 *.db-shm
 /.e2e
+
+# mdBook build output (user guide site)
+/docs/guide/book/

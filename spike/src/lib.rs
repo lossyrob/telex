@@ -32,8 +32,8 @@ pub struct NotifyPayload {
 /// be either an Entra access token or a SQL password — the spike treats them the
 /// same so we can compare both auth paths without code changes.
 pub fn pg_config() -> Result<tokio_postgres::Config> {
-    let host = env_or("TELEX_PG_HOST", "pg-rde-telex.postgres.database.azure.com");
-    let user = env_or("TELEX_PG_USER", "robemanuele@microsoft.com");
+    let host = env_or("TELEX_PG_HOST", "your-server.postgres.database.azure.com");
+    let user = env_or("TELEX_PG_USER", "you@example.com");
     let db = env_or("TELEX_PG_DB", "postgres");
     let password = std::env::var("TELEX_PG_PASSWORD")
         .context("TELEX_PG_PASSWORD must be set (Entra token or SQL password)")?;

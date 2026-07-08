@@ -1,6 +1,13 @@
-# telex copilot bridge (prototype)
+# telex copilot bridge
 
-Proof-of-code for the **load-on-bind push delivery** path described in
+> **Status: shipped.** `extension.mjs` is the canonical bridge source embedded into the
+> `telex` binary via `include_str!` in `src/commands/copilot.rs` and written into a
+> session's extension dir on `telex copilot attach --copilot-bridge`. This directory
+> (`copilot/bridge/`) is binary-embedded source, not a marketplace-distributed plugin
+> file. `push.mjs` remains a wire-protocol reference/debug tool; the shipped Rust
+> `telex copilot push` handler supersedes it. See `docs/design/copilot-bridge-push.md`.
+
+Describes the **load-on-bind push delivery** path in
 `docs/design/copilot-bridge-push.md` (issue #53). It lets the telex daemon push
 a message into a live Copilot CLI session as a real turn, with no agent-managed
 `telex wait` waiter and no `--ui-server` flag.

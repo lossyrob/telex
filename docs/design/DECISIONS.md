@@ -1443,7 +1443,7 @@ metadata.
 ## 0033 — CC deliveries are visibility-only and auto-seen
 
 - **Date:** 2026-06-26
-- **Status:** Accepted (`daemon-core` acceptance)
+- **Status:** Accepted (amended by 0039)
 
 **Context.** Dogfooding used CC as visibility-only fan-out. Under the transport ack model, CC delivery
 rows were pending like primary rows, so a CC recipient that did not manually `ack` would receive the
@@ -1493,6 +1493,37 @@ CC visibility semantics apply.
 
 **Consequences.** Threaded conversations can include observers without losing history. CC recipients of
 replies remain visibility-only under ADR 0033.
+
+## 0039 — Explicit CC wake opt-in for live observer traffic
+
+- **Date:** 2026-06-28
+- **Status:** Accepted (`cc-stream-wake` acceptance)
+
+**Context.** ADR 0033 fixed the CC redelivery wedge by making CC delivery rows auto-consumed/seen for
+transport. Dogfooding a deliberative-table workload exposed the other side of that trade-off: a seat
+that belongs to the table often receives most meaningful context as CC observer traffic. A bare pull
+waiter never wakes, and after push delivery landed for Copilot bridge sessions there may be no waiter at
+all. Without an explicit CC wake signal, the seat must poll `inbox --all` or the database to notice the
+conversation. Making all CC wake by default would undo the noise-control reason for ADR 0033.
+
+**Decision.** Add explicit CC wake opt-ins at both delivery surfaces:
+`telex wait --wake-on-cc` / IPC `Wait.wake_on_cc` for pull waiters, and
+`telex copilot attach --copilot-bridge --wake-on-cc` / IPC `Register.on_deliver_wake_on_cc` for
+daemon on-deliver push. The opt-ins wake only for live CC traffic delivered after the captured lower
+bound; they are not durable CC backlog replay and they do not make CC rows pending or ack-required. If a
+logical client wait or bridge registration is lost and re-created, CC traffic that arrived in that gap
+remains pull-only via `inbox --all` / `read`. `--min-attention` composes with the pull opt-in but does
+not imply it. CC wake frames/descriptors retain delivery-role metadata (`delivery_role: "cc"`) and
+`requires_disposition_for_current_recipient: false`; the primary `--to` path remains the only
+ack-required delivery path.
+
+**Consequences.** Observer/relay seats can be woken by the table they deliberately opted into without
+reintroducing notification churn for ordinary CC recipients. Copilot bridge seats can now opt into the
+same table/observer semantics without falling back to an agent-managed waiter. Agents that wake on CC
+should inspect `inbox --all` / thread context after the wake if they need surrounding observer traffic,
+because older CC rows remain pull-only. Full durable stream/table subscription schemas remain future
+work, to be justified by workflow evidence rather than introduced as part of this narrow daemon
+delivery-semantics change.
 
 ## 0036 — Status hints at activity on another store
 
@@ -1590,6 +1621,10 @@ for orphaned endpoints. See
 
 - **Date:** 2026-07-01
 - **Status:** Accepted (`push-delivery` node / PR #55)
+- **Note (2026-07-07, ADR 0044):** The plugin bootstrap referenced below as
+  `skills/telex/SKILL.md` moved to `copilot/plugin/skills/telex/SKILL.md` under the
+  harness-neutral layout (ADR 0044). The ownership decision in this entry is unchanged;
+  only the file path moved.
 
 **Context.** The #53 skill rewrite risks baking a long, detailed copy of the Copilot
 workflow into the static plugin skill (`skills/telex/SKILL.md`). Because #53 moves the
@@ -1672,3 +1707,172 @@ attachment is the safe direction). The daemon stays **harness-neutral**: "attach
 is realized as re-provision events (lease-epoch bump + re-`Register`), not a bridge-specific token
 plumbed through the core. Residual risk — an accepted turn silently dropped while the same session
 stays attached without a reload — is covered by the 5-min backstop and the existing degraded status.
+
+## 0042 - Bridge-aware station health and durable self-stop for the push bridge
+
+- **Date:** 2026-07-07
+- **Status:** Accepted (`bridge-liveness-hardening` node / issue #66; folds in #62/#64/#67)
+
+**Context.** Station health and the `deaf`/`unattended_with_backlog` signals were computed purely
+from `telex wait` **waiter** presence. A Copilot push-bridge station has **no** waiter by design, so
+a fully live, delivering bridge was reported `unattended` / `unattended_with_backlog` and, past the
+threshold, false-`deaf` - contradicting `copilot gc`'s own live heartbeat (#64, and the persistent
+false-deaf of #66). Separately, a session had no way to durably stop delivery to itself that a
+separate helper process could honor: `station stop` released membership but left the in-session
+bridge loaded and did not warn, and `telex copilot push` did not honor any stop signal, so a push
+racing member removal could still inject a turn (#67 P0). The daemon core must stay
+harness-neutral, so it cannot read the Copilot bridge registry to learn liveness.
+
+**Decision.**
+- **Derive push-delivery health from the daemon's own on-deliver push-attempt outcomes**, never the
+  Copilot registry. A registered push station reports a structured `push_delivery`
+  (`delivering` / `probing` / `stale_accepted` / `failing` / `no_backlog`) and a `station_health` of
+  `attended_push` unless pushes are actually **failing**, in which case it is
+  `unattended_with_backlog`/deaf. A successful push is **answerback** that clears a stale
+  failing/deaf state; a suspended-after-accepted bridge (#62) is detected when its 300s backstop
+  re-push fails. The attempt map is an in-memory lifecycle fast-path, so after a daemon restart a
+  backlogged push station reports `probing` (not confidently attended, not deaf) until the next
+  sweep resolves it - a documented, self-correcting window rather than a persisted contract.
+- **Separate actionable-inbound from raw pending.** Status reports `inbound_actionable_count`
+  (requires this station's disposition) distinctly from `pending_unconsumed_count`; on a shared
+  address per-session "outbound" is not distinguishable by address, so we report actionable-inbound
+  precisely rather than inventing an unreliable outbound-from-me count.
+- **Bound the re-push pool.** A no-disposition message is delivered once and skipped forever after
+  accept; a still-unacked disposition-required message is re-pushed until a hard cap
+  (`ON_DELIVER_MAX_REPUSH`) then suppressed (durable/readable, surfaced via `push_suppressed_count`,
+  reset on re-provision).
+- **Durable self-stop.** A deliberate `Detach`/`station stop` records a durable detach tombstone
+  **atomically with the lease release** (`release_epoch_lease_for_detach`; no separate non-atomic
+  write that could race a concurrent re-attach's clear and recreate a stale tombstone for a live
+  station). `telex copilot push` preflights it (fail-open on a transient backend error - the weaker
+  guarantee under faults is documented) and refuses with the permanent exit code, so self-stop
+  sticks across restart and against a racing push; `station stop` reports `push_registered` so the
+  CLI emits a harness-neutral warning that the push producer may still be loaded. Tombstones are
+  keyed by `(session_id, address)` and treat `session_id` as an identity, not a security principal:
+  the local exchange assumes all backend peers for a store are mutually trusted; requiring an
+  ownership proof for no-member tombstone creation is deferred.
+
+**Consequences.** A live push bridge is reported live/attended, `deaf` becomes honest (only when
+pushes are failing), consumed/terminally-dispositioned messages are already excluded from re-push
+(#46) and no message is re-pushed forever, and a session can durably stop delivery to itself without
+killing it. This narrows ADR 0041's within-lifecycle re-push guarantee to **disposition-required**
+messages (no-disposition notes now stop after one accepted delivery); both still re-deliver on
+re-provision, preserving the durable+ack invariant. The daemon stays harness-neutral: liveness is
+inferred from generic push outcomes, not Copilot bridge state. A lighter in-session `mute` (stay
+attached, stop push) and auto-expiry of stale leases remain deferred.
+
+## 0043 — Copilot bridge defers non-interrupt pushes until turn-stop, drained by an ungated agentStop hook
+
+- **Date:** 2026-07-07
+- **Status:** Accepted (`bridge-idle-drain` node / issue #65)
+
+**Context.** ADR 0041 kept the bridge's busy path as `accepted:"pending"`: when a root turn was
+running, the bridge still called `session.send(...)` for a non-`interrupt` message and, if the send
+RPC did not settle within the short window, reported `pending` success. That queues the turn behind
+the current one. In tight multi-agent use the agent often inspects Telex and acks/handles the
+message manually during the current turn, before the queued pushed turn is read; when the turn ends
+the queued turn is delivered as stale, already-handled work. The durable Telex state was already
+correct; the defect was scheduling — a turn was queued while the agent was busy instead of after it
+was free to receive one.
+
+**Decision.** For non-`interrupt` pushes, defer until the session is at a turn boundary, revalidate
+durable state, then send:
+- **Busy is the root-agent turn boundary, not full `session.idle`.** The bridge subscribes to
+  `assistant.turn_start`/`assistant.turn_end` and tracks busy from those, **filtering to root-agent
+  events** (`agentId` absent). Sub-agent turn events are ignored: a sub-agent's inner `turn_end`
+  must not clear the gate while the parent turn is still running, or the stale-injection it is meant
+  to prevent returns. Full `session.idle` would additionally wait for background shells/sub-agents,
+  which is stronger than #65 needs and risks starving delivery after a long tool run. The bridge
+  default is busy (deferring is the safe action; injecting a stale turn is the risk) and self-heals
+  to not-busy after a bound of no activity, so a missed/never-fired `turn_end` (crash/abort, or a
+  load outside any turn) does not defer forever.
+- **The bridge defers, it does not send.** A non-`interrupt` push arriving while busy returns
+  `deferred_until_idle` **without** calling `session.send`. `interrupt` (`immediate`) still sends
+  immediately. A one-tick yield before answering collapses the common drain-vs-`turn_end` race into
+  a single non-deferred attempt.
+- **Deferred is a distinct daemon outcome.** `telex copilot push` maps `deferred_until_idle` to a
+  new exit code; the daemon records a **deferred** `PushAttempt` that is neither accepted (no CC
+  lower-bound advance, not treated as queued) nor a transient failure (no fast re-push, no error
+  log), does not increment the degraded-status attempt counter, and is held for a
+  deferred backstop. Invariant: `HEARTBEAT_INTERVAL <= deferred backstop < accepted backstop`.
+- **Turn-stop drains via an ungated `agentStop` hook.** A dedicated `agentStop` hook entry runs
+  `telex copilot drain --session <id>`, independent of `TELEX_TURN_GUARD` and its nudge cap, with
+  its own `TELEX_COPILOT_DRAIN` off-switch. It sends a `DrainDeferred` request; the daemon clears
+  the deferred skip for the session's on-deliver members (leaving accepted attempts untouched) and
+  re-runs the existing on-deliver sweep. The sweep re-fetches `fetch_wait_candidates`, so a message
+  acked before the drain is no longer a candidate and is skipped. The drain re-sweeps every
+  on-deliver member of the session (matched by `session_id` across stores, so a named-backend
+  session still drains), which closes a deferred-vs-drain inflight race and opportunistically
+  re-attempts backstop-elapsed messages; the only zero-work fast path is the client-side no-bridge
+  check. It returns before the sweeps complete and has a client-side IPC deadline below the hook
+  timeout, so running it on every turn-stop never blocks the turn. The daemon stays harness-neutral:
+  it re-runs a generic sweep on request; "busy/idle" lives entirely in the bridge.
+
+**Consequences.** The stale queued-turn class is removed: a busy non-`interrupt` message is not
+queued behind the current turn, and if it is consumed before turn-stop the drain's durable
+revalidation skips it. Delivery of a still-unacked deferred message is prompt (the turn-stop drain)
+with a bounded fallback (the deferred backstop + heartbeat sweep) if the hook is missed. `interrupt`
+is unchanged. The durable+ack invariant of ADR 0041 stands — the deferred axis refines that ADR's
+`accepted:"pending"` busy path rather than replacing its accepted-vs-failed backoff split — and
+crash/reload still re-delivers via re-provision. Residual risk: the bridge's busy tracking is
+liveness state, so a self-heal during a genuinely long, event-quiet turn degrades a single message
+to the prior enqueue behavior (a queued next turn), not to a mid-turn injection.
+
+## 0044 — Harness-neutral root skill; per-harness content nested under `<harness>/`
+
+- **Date:** 2026-07-07
+- **Status:** Accepted (`harness-skill-layout` node / issue #61)
+
+**Context.** Before the first public release, the repository blurred two ownership
+boundaries. (1) The root `SKILL.md` printed by `telex skill` — meant to be the generic,
+harness-neutral agent guide — still carried Copilot CLI mechanics (detached `pwsh -File`
+waiter recipe, `$COPILOT_AGENT_SESSION_ID`/`$COPILOT_LOADER_PID` env mapping,
+`telex copilot detach`, push-delivery notes). (2) The Copilot plugin files (`plugin.json`,
+`hooks.json`, `skills/`), the embedded skill body (`COPILOT.md`), and the embedded bridge
+source (`copilot-bridge/`) all sat at the repository root, so the top-level surface was
+implicitly Copilot-specific with no room for future sibling harness plugins. ADR 0040
+established that the Copilot skill is binary-owned; this entry finishes the content/layout
+separation. (Layout is normally below the ADR bar per the conventions above, but the
+*harness boundary* — and the convention future harness plugins must follow — is a
+load-bearing, release-calcifying architecture decision.)
+
+**Decision.** Make the repository root harness-neutral and nest all harness-specific
+content under a per-harness root, using this convention:
+
+- `<harness>/<HARNESS>.md` — the binary-embedded, version-matched skill body printed by
+  `telex <harness> skill`.
+- `<harness>/bridge/` — binary-embedded harness integration source (e.g. the in-session
+  bridge extension), `include_str!`-embedded, not marketplace-distributed. **Present only
+  when the harness has binary-embedded integration source; omit it for a harness that ships
+  only a marketplace plugin.**
+- `<harness>/plugin/` — the marketplace plugin root (`plugin.json`, `hooks.json`,
+  `skills/`); the marketplace entry's `source` points at `<harness>/plugin`.
+
+For Copilot this is `copilot/{COPILOT.md, bridge/, plugin/}`, with
+`.github/plugin/marketplace.json` plugin `"source": "copilot/plugin"`. The root `SKILL.md`
+keeps only harness-neutral concepts (identity, `attach`/`wait`/`ack`/send/read/disposition,
+backends, command reference, the generic pull loop) plus a neutral pointer to
+harness-specific skills (`telex <harness> skill`); all Copilot mechanics move to
+`copilot/COPILOT.md` (which now also owns the pull-mode fallback recipe). Keeping the
+embedded skill body and bridge source as **siblings** of `plugin/` (not inside it) keeps
+the installed marketplace plugin lean.
+
+**Consequences.** The repository root is harness-neutral and a future sibling harness
+(`claude/`, `gemini/`, …) pattern-follows the convention rather than relitigating layout.
+`src/commands/copilot.rs` `include_str!` paths and the CI `node --check` path point into
+`copilot/`; `tests/copilot_plugin.rs` asserts the nested plugin root, couples the
+marketplace `source` string to the on-disk plugin root, and uses a fixed thin-bootstrap
+byte ceiling. Nested marketplace `source` install was verified empirically on GitHub
+Copilot CLI 1.0.69-2 — positive install from `copilot/plugin`, a negative control proving
+`source` is load-bearing, and the installed plugin excluding the embedded siblings (see
+[copilot-plugin-validation.md](copilot-plugin-validation.md)). This entry **complements**
+ADR 0040 (it does not supersede it): 0040's binary-owned-skill ownership decision stands;
+0044 only relocates the files and neutralizes the root skill.
+
+The `<harness>/` layout is only the on-disk part of the convention. Adding a sibling
+harness also requires code/CI touchpoints outside `<harness>/`, recorded per harness in
+its own ADR: a `src/commands/<harness>.rs` module with the `include_str!` constants and a
+`telex <harness>` subcommand tree; a new plugin entry in `.github/plugin/marketplace.json`
+with `source: <harness>/plugin`; and (if the harness ships a `bridge/`) a
+`node --check <harness>/bridge/<file>` gate in `.github/workflows/ci.yml`.
+
