@@ -6,16 +6,17 @@ on:
       - v*
   workflow_dispatch:
 
-permissions:
-  contents: write
+# No workflow-level write permission: only the publish job needs `contents: write`
+# (least privilege). build/verify-version run with the default read-only token.
 
 jobs:
   verify-version:
     name: Verify tag matches Cargo.toml version
     # Guards the #1 predicted release incident: a vX.Y.Z tag shipping a binary that
     # self-identifies as a different version (breaks upgrade tooling / the downstream
-    # release-upgrade node). Only runs on tag pushes; skipped on workflow_dispatch.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # release-upgrade node). Only runs on real tag pushes; a workflow_dispatch (even
+    # if pointed at a tag ref) is a build-only dry-run and never reaches publish.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -130,11 +131,15 @@ jobs:
     name: Publish GitHub Release
     needs: [verify-version, build]
     runs-on: ubuntu-latest
-    # Atomic publish: only after ALL matrix legs succeed, and only for version tags.
-    # This prevents a partial, publicly-visible "Latest" release missing a platform's
-    # assets (which would break that platform's installer). workflow_dispatch runs
-    # the build matrix for validation but never reaches this job.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # Only this job needs write access to create the release (least privilege).
+    permissions:
+      contents: write
+    # Atomic publish: only after ALL matrix legs succeed, and only on a real version
+    # tag PUSH. This prevents a partial, publicly-visible "Latest" release missing a
+    # platform's assets (which would break that platform's installer). A
+    # workflow_dispatch runs the build matrix for validation but never reaches this
+    # job -- even if it is pointed at a tag ref -- because of the event_name guard.
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     steps:
       - name: Download all build artifacts
         uses: actions/download-artifact@v4

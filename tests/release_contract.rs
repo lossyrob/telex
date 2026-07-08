@@ -103,6 +103,21 @@ fn installer_targets_are_a_subset_of_the_release_matrix() {
         !ps1.is_empty(),
         "install.ps1 target extraction returned nothing; the parser drifted from the file"
     );
+    // Pin the specific targets each installer must be able to fetch. This catches a
+    // *single dropped arm* (e.g. removing the macOS Intel case), which the non-empty
+    // guard above alone would miss.
+    for expected in ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-apple-darwin"] {
+        assert!(
+            sh.iter().any(|t| t == expected),
+            "install.sh no longer resolves target `{expected}`; a platform arm was dropped"
+        );
+    }
+    for expected in ["x86_64-pc-windows-msvc", "aarch64-pc-windows-msvc"] {
+        assert!(
+            ps1.iter().any(|t| t == expected),
+            "install.ps1 no longer resolves target `{expected}`; a platform arm was dropped"
+        );
+    }
     for t in sh.iter().chain(ps1.iter()) {
         assert!(
             matrix.contains(t),
@@ -214,13 +229,29 @@ fn version_json_exposes_the_upgrade_contract_surface() {
         v["version"]["package_version"].is_string(),
         "version.package_version must be a string"
     );
-    // Versioned-install layout the launcher/upgrade tooling reads.
-    for key in ["root", "current_tag", "previous_tag", "active_tag"] {
+    // The install root is always a concrete path; assert a non-null string, not mere
+    // key presence (a JSON null would satisfy is_some but break upgrade tooling).
+    assert!(
+        v["version"]["install"]["root"].is_string(),
+        "version.install.root must be a non-null string"
+    );
+    // These tag/binary fields are legitimately null before the first versioned
+    // install, so assert presence only.
+    for key in ["current_tag", "previous_tag", "active_tag"] {
         assert!(
             v["version"]["install"].get(key).is_some(),
             "version.install.{key} must be present for upgrade tooling"
         );
     }
+    // Schema-compatibility window the upgrade path checks before switching binaries.
+    assert!(
+        v["version"]["supported_schema_min"].is_number(),
+        "version.supported_schema_min must be a number for upgrade compatibility checks"
+    );
+    assert!(
+        v["version"]["supported_schema_max"].is_number(),
+        "version.supported_schema_max must be a number for upgrade compatibility checks"
+    );
     // Daemon protocol handshake surface.
     assert!(
         v["daemon_metadata"]["protocol_version"]["major"].is_number(),
@@ -229,6 +260,12 @@ fn version_json_exposes_the_upgrade_contract_surface() {
     assert!(
         v["daemon_metadata"]["protocol_version"]["minor"].is_number(),
         "daemon_metadata.protocol_version.minor must be a number"
+    );
+    assert!(
+        v["daemon_metadata"]["required_capabilities"]
+            .as_array()
+            .is_some_and(|c| !c.is_empty()),
+        "daemon_metadata.required_capabilities must be a non-empty array (upgrade compat)"
     );
     // Copilot bridge compatibility surface.
     assert!(
@@ -272,6 +309,15 @@ fn release_workflow_enforces_the_version_and_publish_guards() {
         "exactly the verify-version and publish jobs must be gated with {tag_guard:?}"
     );
 
+    // Both gates must also require a push event, so a workflow_dispatch pointed at a
+    // tag ref stays a build-only dry-run and never publishes.
+    assert_eq!(
+        release.matches("github.event_name == 'push'").count(),
+        2,
+        "verify-version and publish must also require github.event_name == 'push' \
+         so a workflow_dispatch on a tag ref cannot publish"
+    );
+
     // publish must run only after verify-version AND the whole build matrix, so a
     // mismatched or partial build cannot publish.
     assert!(
@@ -287,6 +333,51 @@ fn release_workflow_enforces_the_version_and_publish_guards() {
         pkg.split('.').count(),
         3,
         "Cargo.toml [package].version should be X.Y.Z, got {pkg:?}"
+    );
+}
+
+/// Replicates the release.yml `awk` extraction of `[package].version` in Rust:
+/// section-scoped, then strip quotes/whitespace and the `version=` prefix. Kept
+/// deliberately separate from `package_version` so the parser-agreement test can
+/// prove the two independent parsers resolve the same value on the real Cargo.toml.
+fn awk_style_package_version(cargo_toml: &str) -> String {
+    let mut in_pkg = false;
+    for line in cargo_toml.lines() {
+        if line.starts_with('[') {
+            in_pkg = line.starts_with("[package]");
+            continue;
+        }
+        // awk match: /^version[[:space:]]*=/
+        let trimmed_key = line.trim_start_matches("version");
+        let is_version_line = line.starts_with("version")
+            && trimmed_key.trim_start().starts_with('=');
+        if in_pkg && is_version_line {
+            // gsub(/["[:space:]]/,"") then sub(/^version=/,"")
+            let collapsed: String = line
+                .chars()
+                .filter(|c| *c != '"' && !c.is_whitespace())
+                .collect();
+            return collapsed.trim_start_matches("version=").to_string();
+        }
+    }
+    String::new()
+}
+
+#[test]
+fn workflow_awk_and_rust_version_parsers_agree() {
+    // The release.yml awk gate and the Rust `package_version` helper are two
+    // independent parsers of the same fact. If they diverge, the CI gate and this
+    // test would disagree -- false confidence. Assert they resolve identically on the
+    // real Cargo.toml, and that the result is non-empty (workspace-inheritance drift
+    // would empty both).
+    let cargo = read("Cargo.toml");
+    let rust = package_version(&cargo);
+    let awk = awk_style_package_version(&cargo);
+    assert!(!rust.is_empty(), "Rust package_version parser resolved nothing");
+    assert_eq!(
+        rust, awk,
+        "the awk gate in release.yml and the Rust parser disagree on [package].version \
+         ({awk:?} vs {rust:?}); keep the two extractions equivalent"
     );
 }
 
@@ -318,5 +409,14 @@ fn plugin_versions_track_the_crate_version() {
         market["plugins"][0]["version"].as_str(),
         Some(crate_version.as_str()),
         "marketplace.json plugin version must match Cargo.toml [package].version"
+    );
+
+    // The bootstrap skill's `--plugin-version <X>` example is a user-facing version
+    // string; keep it in lockstep so a bump cannot leave a stale example behind.
+    let skill = read("copilot/plugin/skills/telex/SKILL.md");
+    assert!(
+        skill.contains(&format!("--plugin-version {crate_version}")),
+        "copilot/plugin/skills/telex/SKILL.md `--plugin-version` example must match \
+         Cargo.toml [package].version ({crate_version})"
     );
 }

@@ -26,8 +26,10 @@ format are defined in `release.yml` and asserted by `tests/release_contract.rs` 
 consult those rather than a copy here.
 
 `workflow_dispatch` runs the same build matrix **without publishing** (the
-`verify-version` and `publish` jobs are gated to `refs/tags/v*`). Use it to
-validate builds on a branch before tagging.
+`verify-version` and `publish` jobs require a `refs/tags/v*` **push**, so a manual
+dispatch never publishes -- even if pointed at a tag ref). Asset names are derived
+from a slash-sanitized ref, so a dispatch works against any pushed branch, including
+`release/vX.Y.Z`. Use it to validate builds before tagging.
 
 ## Supported platforms
 
