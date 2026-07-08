@@ -27,6 +27,13 @@ published release binaries include it. Omit the feature if you do not need it.
 Prebuilt binaries are also attached to each
 [GitHub release](https://github.com/lossyrob/telex/releases).
 
+## Supported platforms
+
+Prebuilt release binaries are published for Windows (x86_64 and ARM64), Linux
+(x86_64), and macOS (Apple Silicon and Intel). On other platforms — including ARM
+Linux (Raspberry Pi, Graviton, ARM WSL) — install from source with `cargo install`
+(the install script points ARM-Linux users there automatically).
+
 ## Verify
 
 ```sh

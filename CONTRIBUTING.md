@@ -43,3 +43,11 @@ TELEX_PG_URL='postgresql://user@host:5432/telex?sslmode=disable' \
   creates a per-run schema under it and drops it when finished.
 - `TELEX_PG_REQUIRE=1` — fail instead of skipping when `TELEX_PG_URL` is unset/empty, so a CI
   job that intends to exercise the Postgres leg can't pass by silently skipping it.
+
+## Releasing
+
+Maintainers cut public releases by pushing a `vX.Y.Z` tag, which triggers the
+release workflow to build, checksum, and publish platform assets. The full
+procedure — tag/version conventions, the pre-cut checklist, first-release notes,
+post-cut verification, and rollback — is in
+[docs/developing/releasing.md](docs/developing/releasing.md).
