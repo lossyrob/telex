@@ -58,12 +58,9 @@ pub type Result<T> = std::result::Result<T, DaemonError>;
 const WINDOWS_ELEVATION_MISMATCH_HINT: &str = "On Windows, this usually means the telex daemon and this process are running at different elevations (Administrator vs non-Administrator), so they cannot authenticate over the daemon named pipe. Stop the existing daemon from a matching-elevation terminal, or restart/attach from the same elevation as this session (for an elevated session, start telex from an Administrator terminal).";
 
 fn daemon_handshake_eof_message() -> String {
-    let mut message = "daemon closed the connection during handshake".to_string();
+    let message = "daemon closed the connection during handshake".to_string();
     #[cfg(windows)]
-    {
-        message.push_str("; ");
-        message.push_str(WINDOWS_ELEVATION_MISMATCH_HINT);
-    }
+    let message = format!("{message}; {WINDOWS_ELEVATION_MISMATCH_HINT}");
     message
 }
 
