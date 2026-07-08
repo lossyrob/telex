@@ -119,6 +119,6 @@ cargo run --bin initdb
 .\send.ps1 -To "workstream:spike/node:a" -Body "hello" -Attention next-checkpoint
 ```
 
-Connection target defaults to the author's Flex Server and can be overridden with
+Connection target defaults to placeholder values and can be overridden with
 `TELEX_PG_HOST`, `TELEX_PG_USER`, `TELEX_PG_DB`, and `TELEX_PG_PASSWORD` (an Entra
 token or a SQL password — the spike treats them the same).

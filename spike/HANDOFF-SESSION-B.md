@@ -14,11 +14,11 @@ decompose the end-to-end latency.
 - **Your address:** `workstream:spike/session:B`
 - **Your local holder port:** `47702`
 - **Peer (Session A) address:** `workstream:spike/session:A`
-- Work from: `cd C:\Users\robemanuele\proj\telex\telex\spike`
+- Work from: `cd <repo>\spike`
 
 ## Prerequisites (already true on this machine)
 
-- `az` is logged in as `robemanuele@microsoft.com`. The scripts cache the Entra
+- `az` is logged in as a principal with access to the target server. The scripts cache the Entra
   token in TEMP, so only the first call pays the fetch cost.
 - The spike binaries are already built at `...\spike\target\debug`.
 
@@ -52,7 +52,7 @@ When you are notified that the waiter task completed, do these IN THIS ORDER:
 
 1. Start your holder as an attached background task (no `-Push`):
    ```powershell
-   cd C:\Users\robemanuele\proj\telex\telex\spike
+   cd <repo>\spike
    .\attach.ps1 -Address "workstream:spike/session:B" -Port 47702
    ```
    Confirm `[holder] ... push=false` and `listening on 127.0.0.1:47702`.
