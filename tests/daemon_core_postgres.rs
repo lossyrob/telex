@@ -745,10 +745,13 @@ async fn postgres_on_deliver_failed_cc_retry_survives_later_accepted_cc() {
         wait_for_count(&first_count, 2, Duration::from_secs(10)).await,
         "failed first CC should remain retryable after later CC succeeds"
     );
-    let retry: serde_json::Value = serde_json::from_str(
-        &std::fs::read_to_string(output_root.join("first-retry.json")).unwrap(),
-    )
-    .unwrap();
+    let first_retry_path = output_root.join("first-retry.json");
+    assert!(
+        wait_for_file(&first_retry_path, Duration::from_secs(10)).await,
+        "first CC retry descriptor should be written after the retry count advances"
+    );
+    let retry: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(first_retry_path).unwrap()).unwrap();
     assert_eq!(retry["message_id"], first_id);
     assert_eq!(retry["delivery_role"], "cc");
     let second_descriptor: serde_json::Value =
