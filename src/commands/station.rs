@@ -61,6 +61,10 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                         "health_detail": member.health_detail,
                         "waiters": member.waiters,
                         "push_registered": member.push_registered,
+                        "push_delivery": member.push_delivery,
+                        "push_wake_on_cc": member.push_wake_on_cc,
+                        "push_deferred_count": member.push_deferred_count,
+                        "push_suppressed_count": member.push_suppressed_count,
                         "live_waiters_count": member.live_waiters_count,
                         "pending_unconsumed_count": member.pending_unconsumed_count,
                         "unattended_since_ms": member.unattended_since_ms,
@@ -76,6 +80,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                         "last_delivered_message_id": member.last_delivered_message_id,
                         "idle": member.idle,
                         "live_waiters": member.live_waiters,
+                        "watch_pids": member.watch_pids,
                     })
                 })
                 .collect();

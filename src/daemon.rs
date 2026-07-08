@@ -3652,13 +3652,18 @@ async fn register_member(
                 refreshed.description = description;
                 refreshed.scope = scope;
                 refreshed.tags = tags;
-                refreshed.watch_pids = watch_pids;
+                let preserving_on_deliver = on_deliver.is_none() && existing.on_deliver.is_some();
+                refreshed.watch_pids = if preserving_on_deliver {
+                    existing.watch_pids.clone()
+                } else {
+                    watch_pids
+                };
                 refreshed.idle = false;
                 refreshed.idle_rearmable = false;
-                // Preserve an already-registered push handler when a generic recovery/refresh
-                // re-registers with `on_deliver = None` (e.g. a `telex wait` re-attach); only an
-                // explicit re-provision replaces it, so a pull re-attach cannot silently disarm
-                // the Copilot bridge (Namra #6).
+                // Preserve an already-registered push handler and its liveness predicates when a
+                // generic recovery/refresh re-registers with `on_deliver = None` (e.g. a `telex
+                // wait` re-attach); only an explicit re-provision replaces them, so a pull
+                // re-attach cannot silently disarm or process-anchor the Copilot bridge.
                 refreshed.on_deliver = on_deliver.clone().or_else(|| existing.on_deliver.clone());
                 if on_deliver.is_some() {
                     refreshed.on_deliver_wake_on_cc = on_deliver_wake_on_cc;
