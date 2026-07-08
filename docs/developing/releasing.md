@@ -64,10 +64,14 @@ Run through this before pushing a tag:
       updates; commit.
 - [ ] Bump the plugin/marketplace version strings listed above to match.
 - [ ] `cargo test --workspace` is green (includes `tests/release_contract.rs`).
-- [ ] Trigger a `workflow_dispatch` run of **Release** on the release commit and
-      confirm all matrix legs build/package/checksum/upload artifacts — pay
-      attention to the `aarch64-pc-windows-msvc` leg (`--features entra` on ARM
-      Windows). Nothing is published by a dispatch run.
+- [ ] Trigger a `workflow_dispatch` run of **Release** and confirm all matrix legs
+      build/package/checksum/upload artifacts — pay attention to the
+      `aarch64-pc-windows-msvc` leg (`--features entra` on ARM Windows).
+      `workflow_dispatch` runs against a **pushed ref**, so push the release commit
+      to `main` (or a `release/vX.Y.Z` branch) first, then dispatch against it. A
+      dispatch run exercises **build + package + checksum + upload only** — the
+      `verify-version` and `publish` jobs are tag-gated and run only on the real
+      `git push origin vX.Y.Z`, so nothing is published by a dispatch run.
 - [ ] Prepare release notes (see below); skim `git log --oneline` for the range
       since the last tag.
 - [ ] One-time: confirm **Settings > Code security > Private vulnerability

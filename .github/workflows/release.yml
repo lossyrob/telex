@@ -25,7 +25,13 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME#v}"
-          crate="$(grep -m1 '^version = ' Cargo.toml | sed -E 's/^version = "(.*)"/\1/')"
+          # Read [package].version specifically, so a future [workspace.package]
+          # block cannot shadow it.
+          crate="$(awk '/^\[/{inpkg=0} /^\[package\]/{inpkg=1} inpkg && /^version[[:space:]]*=/{gsub(/["[:space:]]/,"",$0); sub(/^version=/,""); print; exit}' Cargo.toml)"
+          if [ -z "${crate}" ]; then
+            echo "::error::could not read [package].version from Cargo.toml"
+            exit 1
+          fi
           if [ "${tag}" != "${crate}" ]; then
             echo "::error::release tag v${tag} does not match Cargo.toml version ${crate}; bump Cargo.toml (and Cargo.lock) before tagging"
             exit 1
@@ -35,6 +41,9 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    # Runs in parallel with verify-version (and on workflow_dispatch, where
+    # verify-version is skipped). A mismatched tag still cannot publish because the
+    # publish job needs verify-version to succeed; the only cost is a wasted build.
     strategy:
       fail-fast: false
       matrix:

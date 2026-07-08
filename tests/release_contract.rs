@@ -10,7 +10,7 @@
 //! See `docs/developing/releasing.md` for the human-facing contract description.
 
 use serde_json::Value;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 
 fn repo_root() -> PathBuf {
@@ -34,9 +34,32 @@ fn release_matrix_targets() -> Vec<String> {
     }
     assert!(
         !targets.is_empty(),
-        "release.yml build matrix should declare at least one target"
+        "release.yml build matrix should declare at least one `- target:` entry; \
+         parser drift (e.g. a switch to YAML flow style) would zero this out"
     );
     targets
+}
+
+/// Extract `[package].version` from a Cargo.toml string, scoped to the `[package]`
+/// section (robust to a future `[workspace.package]` block). Returns "" if absent,
+/// which callers assert against so workspace-inheritance drift fails loudly.
+fn package_version(cargo_toml: &str) -> String {
+    let mut in_pkg = false;
+    for line in cargo_toml.lines() {
+        let t = line.trim_start();
+        if t.starts_with('[') {
+            in_pkg = t.starts_with("[package]");
+            continue;
+        }
+        if in_pkg {
+            if let Some(rest) = t.strip_prefix("version") {
+                if let Some(val) = rest.trim_start().strip_prefix('=') {
+                    return val.trim().trim_matches('"').to_string();
+                }
+            }
+        }
+    }
+    String::new()
 }
 
 /// Extract the literal `target="<triple>"` assignments from install.sh case arms.
@@ -68,13 +91,19 @@ fn extract_all(haystack: &str, marker: &str, close: char) -> Vec<String> {
 #[test]
 fn installer_targets_are_a_subset_of_the_release_matrix() {
     let matrix = release_matrix_targets();
-    let mut installer_targets = install_sh_targets();
-    installer_targets.extend(install_ps1_targets());
+    let sh = install_sh_targets();
+    let ps1 = install_ps1_targets();
+    // Fail loudly if either extractor stops matching (e.g. a quoting reformat in an
+    // installer) instead of silently degrading the subset check into a no-op.
     assert!(
-        !installer_targets.is_empty(),
-        "installers should reference at least one target triple"
+        !sh.is_empty(),
+        "install.sh target extraction returned nothing; the parser drifted from the file"
     );
-    for t in &installer_targets {
+    assert!(
+        !ps1.is_empty(),
+        "install.ps1 target extraction returned nothing; the parser drifted from the file"
+    );
+    for t in sh.iter().chain(ps1.iter()) {
         assert!(
             matrix.contains(t),
             "installer target `{t}` is not built by release.yml matrix {matrix:?}; \
@@ -110,6 +139,18 @@ fn archive_name_grammar_is_consistent_across_workflow_and_installers() {
         install_ps1.contains("telex-$tag-$target.zip"),
         "install.ps1 should download telex-$tag-$target.zip"
     );
+
+    // The publish job's upload path and release `files:` glob must key off the same
+    // telex-<ref_name>-<target> prefix, so the build->publish artifact hand-off can
+    // never silently ship an empty/partial asset set past fail_on_unmatched_files.
+    assert!(
+        release.contains("path: dist/telex-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}*"),
+        "build must upload artifacts under the telex-<ref_name>-<target> prefix"
+    );
+    assert!(
+        release.contains("dist/telex-${{ github.ref_name }}-*"),
+        "publish must select release assets by the telex-<ref_name>- prefix"
+    );
 }
 
 #[test]
@@ -136,18 +177,11 @@ fn checksum_sidecar_format_is_the_contracted_shape() {
 }
 
 fn telex_bin() -> PathBuf {
-    if let Some(path) = option_env!("CARGO_BIN_EXE_telex") {
-        return PathBuf::from(path);
-    }
-    let exe = std::env::current_exe().expect("current test exe");
-    let dir = exe.parent().expect("test exe dir");
-    let target_dir = if dir.file_name().and_then(|n| n.to_str()) == Some("deps") {
-        dir.parent().expect("target profile dir")
-    } else {
-        dir
-    };
-    let name = if cfg!(windows) { "telex.exe" } else { "telex" };
-    target_dir.join(name)
+    // Cargo builds the `telex` binary before running integration tests and sets this
+    // env var at compile time. Using env! (not option_env!) means a missing bin
+    // target fails to compile rather than letting the runtime contract check
+    // silently skip.
+    PathBuf::from(env!("CARGO_BIN_EXE_telex"))
 }
 
 #[test]
@@ -156,12 +190,6 @@ fn version_json_exposes_the_upgrade_contract_surface() {
     // consumes. Renaming or dropping one of these is a breaking change to that
     // contract and must be caught here, not by the future upgrade implementer.
     let bin = telex_bin();
-    if !bin.exists() {
-        // Binary not built in this test context (e.g. `cargo test` on a crate-only
-        // filter). The static checks above still run; skip the runtime check.
-        eprintln!("skipping version --json check: {} not built", bin.display());
-        return;
-    }
     let output = Command::new(&bin)
         .args(["--json", "version"])
         .output()
@@ -207,17 +235,81 @@ fn version_json_exposes_the_upgrade_contract_surface() {
 }
 
 #[test]
-fn workflow_and_cargo_agree_on_the_tag_convention() {
-    // The release workflow derives asset versions from the git tag (github.ref_name)
-    // and guards that the tag matches Cargo.toml's version. Assert the guard exists so
-    // a future edit that removes it is caught here.
+fn release_workflow_enforces_the_version_and_publish_guards() {
+    // Assert the guard BEHAVIOR, not just a job display name: a flipped condition,
+    // a broken extraction, or a dropped tag-gate must fail this test.
     let release = read(".github/workflows/release.yml");
+
+    // The version-consistency guard derives the version from the tag and fails on
+    // mismatch.
     assert!(
-        release.contains("Verify tag matches Cargo.toml version"),
-        "release.yml must retain the tag<->Cargo.toml version-consistency guard"
+        release.contains("GITHUB_REF_NAME#v"),
+        "version guard must derive the release version from the tag (GITHUB_REF_NAME#v)"
     );
     assert!(
-        Path::new(&repo_root().join("Cargo.toml")).exists(),
-        "Cargo.toml must exist for the version guard to read"
+        release.contains(r#"[ "${tag}" != "${crate}" ]"#),
+        "version guard must fail-branch when the tag does not equal the crate version \
+         (a flipped `!=`->`=` would defeat the guard)"
+    );
+    assert!(
+        release.contains("exit 1"),
+        "version guard must exit non-zero on mismatch"
+    );
+
+    // verify-version and publish must both be gated to version tags, so a branch
+    // workflow_dispatch never publishes a branch-named release.
+    let tag_guard = "startsWith(github.ref, 'refs/tags/v')";
+    assert_eq!(
+        release.matches(tag_guard).count(),
+        2,
+        "exactly the verify-version and publish jobs must be gated with {tag_guard:?}"
+    );
+
+    // publish must run only after verify-version AND the whole build matrix, so a
+    // mismatched or partial build cannot publish.
+    assert!(
+        release.contains("needs: [verify-version, build]"),
+        "publish must depend on [verify-version, build]"
+    );
+
+    // The [package].version the guard reads must be present and semver-shaped; if a
+    // future refactor moved it to workspace inheritance this extraction would empty
+    // out and fail here.
+    let pkg = package_version(&read("Cargo.toml"));
+    assert_eq!(
+        pkg.split('.').count(),
+        3,
+        "Cargo.toml [package].version should be X.Y.Z, got {pkg:?}"
+    );
+}
+
+#[test]
+fn plugin_versions_track_the_crate_version() {
+    // The Copilot plugin advertises a version that must move in lockstep with the
+    // binary (version-matched plugin/binary compatibility). The release runbook
+    // lists bumping these as a pre-cut step; enforce it here so a Cargo.toml bump
+    // that forgets the plugin fails in CI, not at a user's `copilot plugin install`.
+    let crate_version = package_version(&read("Cargo.toml"));
+    assert!(!crate_version.is_empty(), "could not read [package].version from Cargo.toml");
+
+    let plugin: Value =
+        serde_json::from_str(&read("copilot/plugin/plugin.json")).expect("plugin.json parses");
+    assert_eq!(
+        plugin["version"].as_str(),
+        Some(crate_version.as_str()),
+        "copilot/plugin/plugin.json version must match Cargo.toml [package].version"
+    );
+
+    let market: Value = serde_json::from_str(&read(".github/plugin/marketplace.json"))
+        .expect("marketplace.json parses");
+    assert_eq!(
+        market["metadata"]["version"].as_str(),
+        Some(crate_version.as_str()),
+        "marketplace.json metadata.version must match Cargo.toml [package].version"
+    );
+    assert_eq!(
+        market["plugins"][0]["version"].as_str(),
+        Some(crate_version.as_str()),
+        "marketplace.json plugin version must match Cargo.toml [package].version"
     );
 }
