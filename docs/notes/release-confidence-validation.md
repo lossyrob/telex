@@ -15,15 +15,21 @@ harness + AKS scale rig (see issue #78).
 | Acceptance criterion | Result |
 | --- | --- |
 | Release install/upgrade works on Windows from published assets | PASS |
-| Copilot bridge push works end-to-end in a real session | PASS (with an environment caveat, see below) |
+| Copilot bridge push works end-to-end in a real session | PASS |
 | The #65 / #66 regressions do not reproduce | PASS |
 | Daemon restart/kill does not lose messages | PASS (via gating tests) |
 | Postgres / Entra smoke passes | PASS |
 | Remaining gaps filed or accepted | Done (see "Gaps found") |
 
-One environment gap was found (a stale locally-installed binary silently disables the
-agentStop idle-drain hook). It is not a defect in the published release; it is filed as a
-hardening follow-up. Two lower-severity items are also filed/recorded.
+One environment gap was found (a stale locally-installed binary makes the `agentStop copilot
+drain` hook error and hides the version skew). It is not a defect in the published release,
+and it did not cause message loss here (the pushed message still delivered); it is filed as a
+hardening / observability follow-up. Two lower-severity items are also filed/recorded.
+
+> Update (same session): after this validation session went idle, the deferred bridge test
+> message (id 125) arrived as a pushed turn carrying the telex on-deliver framing - so
+> end-to-end Copilot bridge push is confirmed in a real session, and Gap 1's impact is
+> narrower than "messages never drain" (see Gap 1). This report was corrected accordingly.
 
 ## Gating test suite (source build, default + entra features)
 
@@ -104,12 +110,22 @@ Proven live:
   registry + bindings, and `extensions_reload` dropped it (0 extensions running). Detach /
   stop-delivery sticks.
 
-Caveat (see Gap 1): the actual turn injection (message surfacing as a pushed turn) could not
-be completed in this environment because the operator's PATH `telex` binary is stale and does
-not support the `copilot drain` subcommand that the plugin's `agentStop` hook invokes, so the
-idle-drain-on-turn-stop path errors. The published v0.1.0 binary does support `drain`. Turn
-injection itself is covered by prior dogfooding (#45, #53, #65, #66, #67) and the plugin /
-busy-state tests. Root cause of local non-delivery is the stale binary, not a release defect.
+Turn injection confirmed: after this session went idle, message id 125 arrived as a pushed
+turn carrying the telex on-deliver framing ("This was pushed by telex ... record consumption
+with `telex ack`"), which proves end-to-end bridge push (daemon on-deliver -> `telex copilot
+push` -> `session.send`) in a real Copilot session. It surfaced only at the next turn boundary
+because the orchestration session had been continuously busy for ~19 minutes and `enqueue`
+delivery waits for idle - consistent with the busy-defer behavior above. (By the time it
+surfaced the address had already been detached and the pending message closed during cleanup,
+so re-ack returned `NeedsAttach`; the enqueued turn had been injected earlier, while the bridge
+was live.)
+
+Note (see Gap 1): the operator's PATH `telex` binary is stale and does not support the
+`copilot drain` subcommand that the plugin's `agentStop` hook invokes, so the explicit
+turn-stop drain path errors. This did not prevent delivery here - the message still arrived via
+the push/enqueue path - so the impact is a broken hook + undetectable skew, not proven message
+loss. The published v0.1.0 binary does support `drain`; the stale local install is not a
+release defect.
 
 ## 3. Idle-drain / duplicate prevention
 
@@ -125,12 +141,11 @@ busy-state tests. Root cause of local non-delivery is the stale binary, not a re
 - Liveness intent is gated by `live_push_bridge_is_attended_not_deaf` and
   `failing_push_bridge_becomes_deaf` (a live/delivering bridge is `attended_push`, only a
   failing/non-draining one is flagged deaf).
-- Observation: in this stale-binary environment the live bridge was reported
-  `unattended_with_backlog` / `deaf_warn = true` because its backlog could not drain (Gap 1).
-  This could not be cleanly attributed to a false-deaf regression versus correct behavior
-  given a broken drain, because the daemon and hook binary here predate the shipped fix.
-  Re-check against a matching (current) binary + daemon is recommended before drawing a
-  liveness conclusion.
+- Observation: while the test message was deferred/undrained the live bridge was briefly
+  reported `unattended_with_backlog` / `deaf_warn = true`, but the message ultimately delivered
+  as a pushed turn, so no persistent false-deaf was observed. Because the daemon and hook binary
+  here predate the shipped fix, a definitive false-deaf conclusion should still be drawn against
+  a matching (current) binary + daemon.
 
 ## 5. Durability and daemon lifecycle
 
@@ -161,20 +176,25 @@ Lease / reclaim / delivery / disposition / durability align with the SQLite sema
 
 ## Gaps found
 
-### Gap 1 (hardening follow-up, issue #79) - stale PATH binary silently disables the agentStop idle-drain hook; version skew is not detectable
+### Gap 1 (hardening / observability, issue #79) - stale PATH binary makes the agentStop drain hook error; version skew is not detectable
 
 The Copilot plugin (main) wires `agentStop -> telex copilot drain` (plus `turn-guard`) in
 `copilot/plugin/hooks.json`. The hook invokes `telex` from PATH. On this machine the PATH
 binary (`~/.cargo/bin/telex.exe`, built 2026-07-06) predates the `copilot drain` subcommand
-and returns "unrecognized subcommand 'drain'", so the idle-drain-on-turn-stop path errors on
-every turn-stop and deferred bridge messages never drain. Both the stale binary and the
-published v0.1.0 binary report `package_version 0.1.0`, so `telex version --json` does not
-surface the skew. The published release is fine; the risk is that upgrading the plugin (or
-pulling new hooks) without upgrading the installed binary silently breaks a load-bearing hook.
-Suggested hardening: a plugin/binary compatibility check and/or a build/commit identifier in
-`version --json` so the skew is detectable, and a visible error when a hook subcommand is
-missing. Remediation for the operator: reinstall/upgrade the PATH `telex` to the published
-v0.1.0.
+and returns "unrecognized subcommand 'drain'", so the explicit turn-stop drain path errors on
+every turn-stop. Both the stale binary and the published v0.1.0 binary report
+`package_version 0.1.0`, so `telex version --json` does not surface the skew.
+
+Impact: this is a broken hook + undetectable version skew, not proven message loss. In this
+run the deferred bridge message still delivered as a pushed turn via the on-deliver
+push/enqueue path (delivery does not strictly depend on the client-side drain hook), so the
+observable effect is a load-bearing hook silently erroring and a skew the operator cannot see -
+a robustness / observability gap rather than a delivery-loss bug. The published release is
+fine; the risk is upgrading the plugin (or pulling new hooks) without upgrading the installed
+binary. Suggested hardening: a plugin/binary compatibility check and/or a build/commit
+identifier in `version --json` so the skew is detectable, and a visible error when a hook
+subcommand is missing. Remediation for the operator: reinstall/upgrade the PATH `telex` to the
+published v0.1.0.
 
 ### Gap 2 (low, issue #80) - `real_process_idle_wait_timeout_is_not_hung` flakes under heavy load
 
@@ -198,7 +218,7 @@ arise. Suggested: a clearer, actionable message and/or a graceful drain fallback
   contract-tested).
 - Daemon kill/restart during an in-flight send/push not hand-run; covered by the
   `daemon_process_sqlite` crash-recovery gating tests.
-- Live bridge turn-injection not visually captured in this session (busy orchestration + Gap 1
-  stale binary); covered by prior dogfooding and tests. A re-check on a machine whose PATH
-  binary matches the plugin is recommended to close the turn-injection + liveness (deaf)
-  observation.
+- Live bridge turn-injection was confirmed in this session (message id 125 arrived as a pushed
+  turn once idle). The daemon and hook binary here predate the shipped fix, so a definitive
+  false-deaf (liveness) conclusion should still be drawn against a matching (current) binary +
+  daemon.
