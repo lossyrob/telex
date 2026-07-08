@@ -39,7 +39,7 @@ Issue URL: https://github.com/lossyrob/telex/issues/60
 Remote: origin
 Artifact Lifecycle: commit-and-clean
 Artifact Paths: auto-derived
-Additional Inputs: none
+Additional Inputs: streamliner-context=C:/Users/robemanuele/proj/telex/telex-release-upgrade/.paw/work/release-upgrade/streamliner/context.md
 
 ## Control State
 
