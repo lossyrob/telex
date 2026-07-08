@@ -133,32 +133,32 @@ fn installer_targets_are_a_subset_of_the_release_matrix() {
 
 #[cfg(feature = "self-update")]
 #[test]
-fn in_binary_upgrade_targets_are_a_subset_of_the_release_matrix() {
-    // The in-binary `telex upgrade` release path hard-codes the platform target triples it
-    // knows how to fetch (telex::release::SUPPORTED_TARGETS). Couple that set to the release
-    // workflow build matrix exactly like the shell installers, so adding/removing a matrix
-    // target breaks this test rather than a user's `telex upgrade`.
-    let matrix = release_matrix_targets();
-    for t in telex::release::SUPPORTED_TARGETS {
-        assert!(
-            matrix.contains(&t.to_string()),
-            "self-update target `{t}` is not built by release.yml matrix {matrix:?}; \
-             every platform telex can self-upgrade to must be produced by the release workflow"
-        );
-    }
-    // The in-binary target set must also cover exactly the installer-fetched targets, so the
-    // in-binary path and the shell installers never diverge on platform support.
-    let installers: std::collections::BTreeSet<String> = install_sh_targets()
+fn in_binary_upgrade_targets_equal_the_release_matrix() {
+    // Assert SET EQUALITY between telex::release::SUPPORTED_TARGETS and the release.yml build
+    // matrix, so a matrix change in EITHER direction (a new or removed target) breaks this repo
+    // test rather than a user's `telex upgrade`.
+    use std::collections::BTreeSet;
+    let matrix: BTreeSet<String> = release_matrix_targets().into_iter().collect();
+    let supported: BTreeSet<String> = telex::release::SUPPORTED_TARGETS
+        .iter()
+        .map(|t| t.triple.to_string())
+        .collect();
+    assert_eq!(
+        supported, matrix,
+        "telex::release::SUPPORTED_TARGETS and the release.yml build matrix must be identical; \
+         a target present in one but not the other means `telex upgrade` and the release workflow \
+         disagree on platform support"
+    );
+    // Every installer-fetched target must be a self-update target too.
+    let installers: BTreeSet<String> = install_sh_targets()
         .into_iter()
         .chain(install_ps1_targets())
         .collect();
-    for t in &installers {
-        assert!(
-            telex::release::SUPPORTED_TARGETS.contains(&t.as_str()),
-            "installer fetches target `{t}` but the in-binary self-update target set does not \
-             include it; keep telex::release::SUPPORTED_TARGETS in sync with the installers"
-        );
-    }
+    assert!(
+        installers.is_subset(&supported),
+        "installers fetch targets not covered by the in-binary self-update set: {:?}",
+        installers.difference(&supported).collect::<Vec<_>>()
+    );
 }
 
 #[test]
@@ -172,6 +172,11 @@ fn release_publish_verifies_a_checksum_sidecar_for_every_archive() {
         release.contains("missing checksum sidecar for"),
         "release.yml must fail the publish job when an archive lacks a .sha256 sidecar; the \
          fail-closed in-binary upgrader depends on this guarantee"
+    );
+    assert!(
+        release.contains("archive for orphan sidecar"),
+        "release.yml must also fail publish on a lone .sha256 with no matching archive \
+         (bidirectional pairing), so a packaging slip cannot strand a platform"
     );
     assert!(
         release.contains("${archive}.sha256"),

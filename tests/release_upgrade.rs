@@ -24,7 +24,9 @@ use telex::install;
 use telex::release::{asset_name, current_target, ArchiveKind};
 
 const REPO: &str = "test/telex";
-const TAG: &str = "v9.9.9";
+// The fixture serves the test's own telex binary, so the release tag must match that binary's
+// self-reported version (the release path asserts tag == probed package_version, SF-8).
+const TAG: &str = concat!("v", env!("CARGO_PKG_VERSION"));
 
 fn telex_bin() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_telex"))
@@ -183,16 +185,22 @@ fn temp_root(name: &str) -> PathBuf {
 }
 
 fn run_upgrade(port: u16, root: &PathBuf) -> std::process::Output {
+    run_upgrade_args(port, root, &[])
+}
+
+fn run_upgrade_args(port: u16, root: &PathBuf, extra: &[&str]) -> std::process::Output {
+    let mut args: Vec<String> = vec![
+        "--json".into(),
+        "upgrade".into(),
+        "--repo".into(),
+        REPO.into(),
+        "--root".into(),
+        root.to_string_lossy().into_owned(),
+        "--skip-drain".into(),
+    ];
+    args.extend(extra.iter().map(|s| s.to_string()));
     Command::new(telex_bin())
-        .args([
-            "--json",
-            "upgrade",
-            "--repo",
-            REPO,
-            "--root",
-            &root.to_string_lossy(),
-            "--skip-drain",
-        ])
+        .args(&args)
         .env("TELEX_UPGRADE_API_BASE", format!("http://127.0.0.1:{port}"))
         .env(
             "TELEX_UPGRADE_DOWNLOAD_BASE",
@@ -204,6 +212,26 @@ fn run_upgrade(port: u16, root: &PathBuf) -> std::process::Output {
         .env("TELEX_INSTALL_ROOT", root.to_string_lossy().to_string())
         .output()
         .expect("run telex upgrade")
+}
+
+/// Routes for a full, valid release of the test's own binary (archive + sidecar + release JSON).
+fn happy_routes() -> (Routes, String, ArchiveKind) {
+    let (target, kind) = current_target().expect("current platform is a supported release target");
+    let binary = std::fs::read(telex_bin()).unwrap();
+    let archive = pack(kind, &binary);
+    let archive_name = asset_name(TAG, target, kind);
+    let sidecar_name = format!("{archive_name}.sha256");
+    let sidecar = format!("{}  {archive_name}", sha256_hex(&archive)).into_bytes();
+    let mut routes = base_routes_for(&[archive_name.clone(), sidecar_name.clone()]);
+    routes.insert(
+        format!("/{REPO}/releases/download/{TAG}/{archive_name}"),
+        ("application/octet-stream", archive),
+    );
+    routes.insert(
+        format!("/{REPO}/releases/download/{TAG}/{sidecar_name}"),
+        ("text/plain", sidecar),
+    );
+    (routes, archive_name, kind)
 }
 
 #[test]
@@ -373,6 +401,116 @@ fn release_upgrade_times_out_on_a_hanging_server() {
     assert!(
         elapsed < std::time::Duration::from_secs(20),
         "upgrade should fail fast on a hanging server, took {elapsed:?}"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn release_upgrade_explicit_version_installs_by_tag() {
+    // `telex upgrade --version <tag>` resolves via /releases/tags and installs that release.
+    let (routes, archive_name, _kind) = happy_routes();
+    let port = spawn_server(routes);
+    let root = temp_root("explicit-version");
+    let output = run_upgrade_args(port, &root, &["--version", TAG]);
+    assert!(
+        output.status.success(),
+        "explicit-version upgrade failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let v: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(v["release"]["tag"], TAG);
+    assert_eq!(v["release"]["asset"], archive_name);
+    assert_eq!(v["switch"]["switched_to"], TAG);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn release_upgrade_already_current_then_force_reinstalls() {
+    let (routes, _archive_name, _kind) = happy_routes();
+    let port = spawn_server(routes);
+    let root = temp_root("already-current");
+
+    // First install succeeds and switches.
+    let first = run_upgrade(port, &root);
+    assert!(first.status.success(), "first upgrade should succeed");
+
+    // Second run resolves the same latest tag -> already current, no reinstall, distinct shape.
+    let second = run_upgrade(port, &root);
+    assert!(second.status.success(), "already-current run should exit 0");
+    let v: Value = serde_json::from_slice(&second.stdout).unwrap();
+    assert_eq!(v["upgrade"], false);
+    assert_eq!(v["status"], "already_current");
+    assert_eq!(v["tag"], TAG);
+    assert!(
+        v.get("release").is_none(),
+        "already-current output omits the release envelope"
+    );
+
+    // --force reinstalls even though it is already current.
+    let forced = run_upgrade_args(port, &root, &["--force"]);
+    assert!(forced.status.success(), "forced reinstall should succeed");
+    let fv: Value = serde_json::from_slice(&forced.stdout).unwrap();
+    assert_eq!(fv["upgrade"], true);
+    assert_eq!(fv["switch"]["switched_to"], TAG);
+    std::fs::remove_dir_all(&root).ok();
+}
+
+#[test]
+fn release_upgrade_times_out_on_a_slow_drip_server() {
+    // A server that dribbles the discovery body one byte at a time, never finishing, must be
+    // bounded by the total request timeout (overridden low), not kept alive indefinitely.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            thread::spawn(move || {
+                // Read the request, then send headers promising a large body but never finish it.
+                let mut buf = [0u8; 512];
+                let _ = stream.read(&mut buf);
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 1000000\r\n\r\n",
+                );
+                let _ = stream.flush();
+                loop {
+                    if stream.write_all(b" ").is_err() {
+                        break;
+                    }
+                    let _ = stream.flush();
+                    thread::sleep(std::time::Duration::from_millis(50));
+                }
+            });
+        }
+    });
+
+    let root = temp_root("slow-drip");
+    let start = std::time::Instant::now();
+    let output = Command::new(telex_bin())
+        .args([
+            "--json",
+            "upgrade",
+            "--repo",
+            REPO,
+            "--root",
+            &root.to_string_lossy(),
+            "--skip-drain",
+        ])
+        .env("TELEX_UPGRADE_API_BASE", format!("http://127.0.0.1:{port}"))
+        .env(
+            "TELEX_UPGRADE_DOWNLOAD_BASE",
+            format!("http://127.0.0.1:{port}"),
+        )
+        // Total request deadline low enough that a slow-drip transfer is cut off quickly.
+        .env("TELEX_UPGRADE_TIMEOUT_MS", "1500")
+        .env(install::LAUNCHER_GUARD_ENV, "1")
+        .env("TELEX_INSTALL_ROOT", root.to_string_lossy().to_string())
+        .output()
+        .expect("run telex upgrade against a slow-drip server");
+    let elapsed = start.elapsed();
+    assert!(!output.status.success(), "upgrade should fail on slow drip");
+    assert!(
+        elapsed < std::time::Duration::from_secs(20),
+        "upgrade should be bounded by the total timeout, took {elapsed:?}"
     );
     std::fs::remove_dir_all(&root).ok();
 }

@@ -63,6 +63,10 @@ struct InstallPlan {
     source: PathBuf,
     source_label: String,
     release: Option<serde_json::Value>,
+    /// When set (release path), assert the probed binary self-reports this version before
+    /// installing, so a mislabeled release asset cannot be installed under the wrong tag.
+    #[cfg_attr(not(feature = "self-update"), allow(dead_code))]
+    expected_version: Option<String>,
 }
 
 /// Local/manual upgrade path (`telex upgrade --from <binary>`).
@@ -82,6 +86,7 @@ async fn upgrade_local(
         source,
         source_label: format!("local:{}", from.display()),
         release: None,
+        expected_version: None,
     };
     perform_upgrade(ctx, layout, plan, args).await
 }
@@ -122,23 +127,28 @@ async fn upgrade_release(
     let rel = release::discover_release(&cfg, requested.as_deref()).await?;
     let tag = rel.tag_name.clone();
 
-    // Already-current short-circuit — normalize both sides so a `v` prefix can't mismatch.
+    // Already-current short-circuit — only when BOTH tags normalize successfully and are equal,
+    // so two un-normalizable tags are never treated as "the same".
     if !args.force {
         let current = install::version_info(Some(layout.root.clone()))?
             .install
             .current_tag;
         if let Some(cur) = &current {
-            if release::normalize_tag(cur).ok() == release::normalize_tag(&tag).ok() {
-                let out = json!({
-                    "upgrade": false,
-                    "status": "already_current",
-                    "tag": tag,
-                    "current": cur,
-                });
-                emit(ctx.fmt, &out, || {
-                    println!("already current {tag} (use --force to reinstall)");
-                });
-                return Ok(0);
+            if let (Ok(cur_norm), Ok(tag_norm)) =
+                (release::normalize_tag(cur), release::normalize_tag(&tag))
+            {
+                if cur_norm == tag_norm {
+                    let out = json!({
+                        "upgrade": false,
+                        "status": "already_current",
+                        "tag": tag,
+                        "current": cur,
+                    });
+                    emit(ctx.fmt, &out, || {
+                        println!("already current {tag} (use --force to reinstall)");
+                    });
+                    return Ok(0);
+                }
             }
         }
     }
@@ -179,6 +189,7 @@ async fn upgrade_release(
             "verified": true,
             "prerelease": rel.prerelease,
         })),
+        expected_version: Some(tag.clone()),
     };
     perform_upgrade(ctx, layout, plan, args).await
     // `staging` is dropped here (after install copies the staged binary), removing the temp dir.
@@ -208,6 +219,20 @@ async fn perform_upgrade(
     args: &UpgradeArgs,
 ) -> Result<i32> {
     let source_metadata = source_metadata(&plan.source, &layout.root)?;
+    // Release path only: the asset's self-reported version must match the tag it was published
+    // under, so a mislabeled/renamed release asset cannot be installed under the wrong tag.
+    #[cfg(feature = "self-update")]
+    if let Some(expected) = &plan.expected_version {
+        let probed = crate::release::normalize_tag(&source_metadata.package_version)?;
+        let want = crate::release::normalize_tag(expected)?;
+        if probed != want {
+            bail!(
+                "release {expected} contains a binary that reports version {} (tag/binary \
+                 mismatch); refusing to install",
+                source_metadata.package_version
+            );
+        }
+    }
     let installed = install::install_binary(
         layout,
         &plan.tag,
@@ -296,15 +321,24 @@ fn staging_dir(layout: &install::InstallLayout) -> Result<Staging> {
     Ok(Staging { path: dir })
 }
 
-/// Remove staging entries older than one hour (best-effort; never touches a fresh dir a
-/// concurrent upgrade may be using).
+/// Remove staging entries older than one hour (best-effort). Never removes this process's own
+/// staging dirs (name prefix `upgrade-<pid>-`), so a long-running upgrade under clock skew
+/// cannot delete its own in-flight staging.
 #[cfg(feature = "self-update")]
 fn sweep_stale_staging(base: &Path) {
     let Ok(entries) = std::fs::read_dir(base) else {
         return;
     };
+    let own_prefix = format!("upgrade-{}-", std::process::id());
     let now = std::time::SystemTime::now();
     for entry in entries.flatten() {
+        if entry
+            .file_name()
+            .to_str()
+            .is_some_and(|n| n.starts_with(&own_prefix))
+        {
+            continue;
+        }
         let stale = entry
             .metadata()
             .and_then(|m| m.modified())
@@ -374,6 +408,18 @@ fn resolve_source_binary(path: &Path) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
+/// Environment variables stripped from the version-probe child. The release path forks a
+/// freshly downloaded binary (checksum-verified against its sidecar, but not authenticated) to
+/// read its metadata before install; it must not inherit the user's credentials, since a
+/// compromised release or download mirror could otherwise execute code with the token in-env.
+const SENSITIVE_PROBE_ENV: &[&str] = &["GITHUB_TOKEN", "GH_TOKEN"];
+
+fn strip_sensitive_env(cmd: &mut Command) {
+    for var in SENSITIVE_PROBE_ENV {
+        cmd.env_remove(var);
+    }
+}
+
 fn source_metadata(source: &Path, root: &Path) -> Result<install::SourceMetadata> {
     if !source.is_file() {
         bail!("upgrade source is not a file: {}", source.display());
@@ -388,14 +434,17 @@ fn source_metadata(source: &Path, root: &Path) -> Result<install::SourceMetadata
     }
 
     fn source_version_output(source: &Path, root: &Path, timeout: Duration) -> Result<Output> {
-        let mut child = Command::new(source)
+        let mut command = Command::new(source);
+        command
             .arg("--json")
             .arg("version")
             .arg("--root")
             .arg(root)
             .env(install::LAUNCHER_GUARD_ENV, "1")
             .stdout(std::process::Stdio::piped())
-            .stderr(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        strip_sensitive_env(&mut command);
+        let mut child = command
             .spawn()
             .map_err(|e| anyhow!("running source telex binary {}: {e}", source.display()))?;
         let deadline = Instant::now() + timeout;
@@ -522,5 +571,36 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         }
         Response::Error { code, message, .. } => bail!("daemon drain failed: {code}: {message}"),
         other => bail!("unexpected daemon drain response: {other:?}"),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn strip_sensitive_env_hides_github_token_from_child() {
+        // MF-1: the version probe must not leak the user's token to the forked candidate binary.
+        std::env::set_var("GITHUB_TOKEN", "SENTINEL_LEAK_9x7q");
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut c = Command::new("cmd");
+            c.args(["/c", "echo", "%GITHUB_TOKEN%"]);
+            c
+        };
+        #[cfg(unix)]
+        let mut cmd = {
+            let mut c = Command::new("sh");
+            c.args(["-c", "printf %s \"${GITHUB_TOKEN:-}\""]);
+            c
+        };
+        strip_sensitive_env(&mut cmd);
+        let output = cmd.output().expect("run env-echo child");
+        std::env::remove_var("GITHUB_TOKEN");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !stdout.contains("SENTINEL_LEAK_9x7q"),
+            "GITHUB_TOKEN leaked to the probe child: {stdout:?}"
+        );
     }
 }

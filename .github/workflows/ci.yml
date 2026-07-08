@@ -85,10 +85,15 @@ jobs:
 
       - name: Release-upgrade fallback error when self-update is compiled out
         # A build without `self-update` must reject `telex upgrade` (no --from) with an
-        # actionable error instead of silently doing nothing. Exercises the compiled-out stub.
+        # actionable error AND a non-zero exit. Assert both, so a regression where the stub
+        # prints the message but returns Ok(0) fails CI instead of silently defeating fail-closed.
         run: |
           set -o pipefail
-          out="$(cargo run --no-default-features --features sqlite -- upgrade 2>&1 || true)"
+          if out="$(cargo run --no-default-features --features sqlite -- upgrade 2>&1)"; then
+            echo "$out"
+            echo "::error::compiled-out telex upgrade unexpectedly exited 0 (should fail closed)"
+            exit 1
+          fi
           echo "$out"
           echo "$out" | grep -q "compiled without release-upgrade support" || {
             echo "::error::sqlite-only build did not emit the compiled-out upgrade fallback error"
