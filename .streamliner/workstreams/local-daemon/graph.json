@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-08T18:50:00.000Z",
+  "updatedAt": "2026-07-08T22:25:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -281,8 +281,8 @@
       "type": "task",
       "title": "Release confidence validation (install, upgrade, Copilot bridge, Postgres smoke)",
       "summary": "Practical validation pass over the real release and completed local-daemon/Copilot bridge path, replacing the oversized validation harness + AKS scale rig for this workstream. Validate release install/upgrade, Copilot bridge push, idle-drain duplicate prevention, bridge liveness/self-stop, daemon restart durability, status/gc/export observability, and a real Postgres/Entra two-session smoke. Produce a concise validation report for the hardening gate; file/fix any gaps found.",
-      "status": "ready",
-      "attention": "focus",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -344,7 +344,7 @@
       "type": "gate",
       "title": "Hardening gate (validation report)",
       "summary": "Demonstration gate: builder consumes the full validation report (Tier 1/2 chaos + Entra-PG multi-host + AKS scale) - scenario exercised, evidence, gaps found, repairs + reruns, remaining accepted risk - and judges whether the system has earned rollout confidence. Blocks closure-gate.",
-      "status": "planned",
+      "status": "ready",
       "attention": "focus",
       "repoIds": [
         "telex"
