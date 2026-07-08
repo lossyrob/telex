@@ -807,7 +807,9 @@ impl Backend for PgBackend {
                     }
                 }
             } else {
-                let lease_epoch = lease_epoch.unwrap();
+                let Some(lease_epoch) = lease_epoch else {
+                    unreachable!("lease_epoch is Some in the non-legacy branch");
+                };
                 let now = pg_tx_now_ms(&tx).await?;
                 let stale_cutoff = now - liveness_window_secs.max(0) * 1000;
                 if current_owner.is_none() || heartbeat_at_ms < stale_cutoff {

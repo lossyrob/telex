@@ -553,6 +553,7 @@ fn acquire_store_lock(db_path: &str) -> Result<StoreLock> {
     let lock_file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
+        .truncate(false)
         .open(&lock_path)
         .map_err(|e| anyhow!("cannot open store lock {:?}: {}", lock_path, e))?;
 
@@ -1454,7 +1455,7 @@ impl Backend for SqliteBackend {
     }
 
     async fn init_schema(&self) -> Result<()> {
-        self.run(|c| init_schema_inner(c)).await
+        self.run(init_schema_inner).await
     }
 
     async fn ensure_address(

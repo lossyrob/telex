@@ -74,7 +74,7 @@ async fn list(ctx: &Ctx, args: AddressListArgs) -> Result<i32> {
             .filter(|member| {
                 current_session_id
                     .as_ref()
-                    .map_or(true, |session_id| member.session_id != *session_id)
+                    .is_none_or(|session_id| member.session_id != *session_id)
             })
             .cloned()
             .collect();
@@ -173,7 +173,7 @@ async fn show(ctx: &Ctx) -> Result<i32> {
         .filter(|member| {
             current_session_id
                 .as_ref()
-                .map_or(true, |session_id| member.session_id != *session_id)
+                .is_none_or(|session_id| member.session_id != *session_id)
         })
         .cloned()
         .collect();

@@ -45,12 +45,12 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                 .filter(|member| {
                     ctx.address
                         .as_ref()
-                        .map_or(true, |addr| member.address == *addr)
+                        .is_none_or(|addr| member.address == *addr)
                 })
                 .map(|member| {
                     let foreign_session = current_session_id
                         .as_ref()
-                        .map_or(true, |session_id| member.session_id != *session_id);
+                        .is_none_or(|session_id| member.session_id != *session_id);
                     json!({
                         "store_key": member.store_key,
                         "backend": member.backend,

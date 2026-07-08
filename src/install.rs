@@ -4,6 +4,8 @@ use anyhow::{anyhow, bail, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeSet;
 use std::fs;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
@@ -532,6 +534,9 @@ fn make_tree_writable(path: &Path) -> Result<()> {
     }
     let mut perms = std::fs::metadata(path)?.permissions();
     if perms.readonly() {
+        #[cfg(unix)]
+        perms.set_mode(perms.mode() | 0o200);
+        #[cfg(not(unix))]
         perms.set_readonly(false);
         std::fs::set_permissions(path, perms)?;
     }

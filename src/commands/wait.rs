@@ -88,6 +88,7 @@ struct WaitLoopConfig {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 enum WaitTerminal {
     Response(Response),
     DaemonGone(String),

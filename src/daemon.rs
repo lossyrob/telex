@@ -1,5 +1,6 @@
 //! Hidden daemon singleton foundation: singleton identity, endpoint naming, capability
 //! file handling, connect-or-spawn, and a P2 JSONL server loop.
+#![allow(clippy::result_large_err, clippy::too_many_arguments)]
 
 #[cfg(feature = "postgres")]
 use crate::backend::postgres::{
@@ -1318,7 +1319,7 @@ impl MemberRecord {
             push_suppressed_count,
             health_detail,
             last_waiter_exit_at_ms: self.last_waiter_exit_at_ms,
-            last_waiter_outcome: self.last_waiter_outcome.clone(),
+            last_waiter_outcome: self.last_waiter_outcome,
             last_waiter_exit_code: self.last_waiter_exit_code,
             last_waiter_detail: self.last_waiter_detail.clone(),
             last_waiter_pid: self.last_waiter_pid,
@@ -1917,7 +1918,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         singleton_hash: paths.singleton_hash.clone(),
         protocol_major: paths.singleton.protocol_major,
         server_pid: Some(std::process::id()),
-        server_start_time: server_start_time,
+        server_start_time,
     };
     write_cap_file(&paths.cap_path, &cap)?;
     Ok(DaemonState {
@@ -2090,6 +2091,7 @@ fn spawn_postgres_notify_listener(
 }
 
 #[cfg(feature = "postgres")]
+#[allow(clippy::large_enum_variant)]
 enum PgListenEvent {
     Message(AsyncMessage),
     Error(tokio_postgres::Error),
@@ -2694,7 +2696,7 @@ impl DaemonState {
                             return None;
                         }
                         let ts = attempt.notification_lower_bound.unwrap_or(lower_bound);
-                        if earliest_blocking.map_or(true, |blocking| ts < blocking) {
+                        if earliest_blocking.is_none_or(|blocking| ts < blocking) {
                             Some(ts)
                         } else {
                             None
@@ -4215,7 +4217,7 @@ async fn detach_member(
                     &store_key,
                     &session_id,
                     "Detach",
-                    &[member.clone()],
+                    std::slice::from_ref(&member),
                 );
                 // Do NOT record the durable tombstone again here: `release_epoch_lease_for_detach`
                 // above already wrote it atomically inside the lease-release transaction (see the
@@ -9822,9 +9824,7 @@ mod platform {
 
     impl Listener {
         pub fn bind(endpoint: &Endpoint) -> Result<Self> {
-            let path = match endpoint {
-                Endpoint::UnixSocket(path) => path,
-            };
+            let Endpoint::UnixSocket(path) = endpoint;
             if let Some(parent) = path.parent() {
                 ensure_owner_private_dir(parent)?;
             }
@@ -9892,6 +9892,7 @@ mod platform {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .mode(0o600)
             .open(&lock_path)
             .map_err(|e| io_err("opening daemon endpoint lock", e))?;
@@ -9942,9 +9943,7 @@ mod platform {
     }
 
     pub async fn connect(endpoint: &Endpoint) -> Result<ClientConn> {
-        let path = match endpoint {
-            Endpoint::UnixSocket(path) => path,
-        };
+        let Endpoint::UnixSocket(path) = endpoint;
         UnixStream::connect(path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 DaemonError::NotRunning(format!("endpoint {} does not exist", path.display()))
