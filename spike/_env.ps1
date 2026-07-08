@@ -21,6 +21,6 @@ if ($useCache) {
     $env:TELEX_PG_PASSWORD = $tok
     Write-Host "[env] token: fetched in $($sw.ElapsedMilliseconds)ms"
 }
-$env:TELEX_PG_HOST = "pg-rde-telex.postgres.database.azure.com"
-$env:TELEX_PG_USER = "robemanuele@microsoft.com"
+$env:TELEX_PG_HOST = "your-server.postgres.database.azure.com"
+$env:TELEX_PG_USER = "you@example.com"
 $env:TELEX_PG_DB   = "postgres"
