@@ -14,7 +14,9 @@
 
 use anyhow::{anyhow, bail, Context, Result};
 use serde::Deserialize;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
 
 use crate::install;
 
@@ -24,7 +26,18 @@ const DEFAULT_API_BASE: &str = "https://api.github.com";
 const DEFAULT_DOWNLOAD_BASE: &str = "https://github.com";
 const API_BASE_ENV: &str = "TELEX_UPGRADE_API_BASE";
 const DOWNLOAD_BASE_ENV: &str = "TELEX_UPGRADE_DOWNLOAD_BASE";
+const CONNECT_TIMEOUT_ENV: &str = "TELEX_UPGRADE_CONNECT_TIMEOUT_MS";
+const READ_TIMEOUT_ENV: &str = "TELEX_UPGRADE_READ_TIMEOUT_MS";
 const USER_AGENT: &str = concat!("telex/", env!("CARGO_PKG_VERSION"));
+
+/// Upper bound on a downloaded archive (defends against a hostile/misbehaving mirror
+/// OOMing telex before the checksum is even computed). Release archives are a few MB.
+pub const MAX_ARCHIVE_BYTES: usize = 256 * 1024 * 1024;
+/// Upper bound on a checksum sidecar (a single hex line).
+pub const MAX_SIDECAR_BYTES: usize = 64 * 1024;
+/// Upper bound on the extracted binary (defends against a zip/gzip bomb or an accidentally
+/// huge asset filling the disk during extraction).
+const MAX_EXTRACTED_BYTES: u64 = 256 * 1024 * 1024;
 
 /// Archive container used by a platform's release asset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -252,7 +265,20 @@ fn require_secure(url: &reqwest::Url) -> Result<()> {
     }
 }
 
+fn env_timeout_ms(key: &str, default_ms: u64) -> u64 {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .filter(|v| *v > 0)
+        .unwrap_or(default_ms)
+}
+
 fn http_client() -> Result<reqwest::Client> {
+    // Bound every request so a stalled/slow-loris mirror or half-open socket cannot hang
+    // `telex upgrade` forever. connect_timeout bounds the TCP/TLS handshake; read_timeout
+    // fails a request that stops making progress (overridable for tests via env).
+    let connect_ms = env_timeout_ms(CONNECT_TIMEOUT_ENV, 15_000);
+    let read_ms = env_timeout_ms(READ_TIMEOUT_ENV, 30_000);
     // Follow redirects but never downgrade https -> http for non-loopback hosts.
     let redirect = reqwest::redirect::Policy::custom(|attempt| {
         if attempt.previous().len() >= 10 {
@@ -270,6 +296,8 @@ fn http_client() -> Result<reqwest::Client> {
     });
     reqwest::Client::builder()
         .user_agent(USER_AGENT)
+        .connect_timeout(Duration::from_millis(connect_ms))
+        .read_timeout(Duration::from_millis(read_ms))
         .redirect(redirect)
         .build()
         .map_err(|e| anyhow!("building HTTP client: {e}"))
@@ -328,25 +356,58 @@ pub async fn discover_release(cfg: &FetchConfig, tag: Option<&str>) -> Result<Re
     let body = resp.bytes().await.map_err(map_network_err)?;
     let release: Release =
         serde_json::from_slice(&body).context("parsing GitHub release JSON response")?;
+    ensure_publishable(&release)?;
     Ok(release)
 }
 
-/// Download a named release asset for `tag`. No auth header is attached (public assets),
-/// which also avoids leaking a token across the download redirect.
-pub async fn download_asset(cfg: &FetchConfig, tag: &str, asset: &str) -> Result<Vec<u8>> {
+/// Refuse to install from a draft release (only reachable via an explicit tag with a token;
+/// `/releases/latest` already excludes drafts). Drafts are not published artifacts.
+fn ensure_publishable(rel: &Release) -> Result<()> {
+    if rel.draft {
+        bail!(
+            "release {} is a draft, not a published release; refusing to install",
+            rel.tag_name
+        );
+    }
+    Ok(())
+}
+
+/// Download a named release asset for `tag`, bounded by `max_bytes`. No auth header is
+/// attached (public assets), which also avoids leaking a token across the download redirect.
+pub async fn download_asset(
+    cfg: &FetchConfig,
+    tag: &str,
+    asset: &str,
+    max_bytes: usize,
+) -> Result<Vec<u8>> {
     let client = http_client()?;
     let base = cfg.download_base.trim_end_matches('/');
     let url = format!("{base}/{}/releases/download/{tag}/{asset}", cfg.repo);
     let parsed =
         reqwest::Url::parse(&url).with_context(|| format!("invalid download URL {url}"))?;
     require_secure(&parsed)?;
-    let resp = client.get(parsed).send().await.map_err(map_network_err)?;
+    let mut resp = client.get(parsed).send().await.map_err(map_network_err)?;
     let status = resp.status();
     if !status.is_success() {
         bail!("failed to download {asset}: HTTP {status}");
     }
-    let bytes = resp.bytes().await.map_err(map_network_err)?;
-    Ok(bytes.to_vec())
+    if let Some(len) = resp.content_length() {
+        if len > max_bytes as u64 {
+            bail!(
+                "{asset} advertises {len} bytes, exceeding the {max_bytes}-byte limit; \
+                 refusing to download"
+            );
+        }
+    }
+    // Stream with a running cap so a server that lies about Content-Length still can't OOM us.
+    let mut buf: Vec<u8> = Vec::new();
+    while let Some(chunk) = resp.chunk().await.map_err(map_network_err)? {
+        if buf.len() + chunk.len() > max_bytes {
+            bail!("{asset} exceeded the {max_bytes}-byte download limit; refusing to continue");
+        }
+        buf.extend_from_slice(&chunk);
+    }
+    Ok(buf)
 }
 
 /// Extract exactly the expected `telex(.exe)` entry from an in-memory archive into `out_dir`,
@@ -378,6 +439,17 @@ fn path_component_is_unsafe(path: &Path) -> bool {
     })
 }
 
+/// Copy at most `cap` bytes from `reader` to `writer`, failing closed if the source exceeds
+/// the cap (defends against a zip/gzip bomb or an accidentally huge asset).
+fn copy_capped<R: Read, W: std::io::Write>(reader: R, writer: &mut W, cap: u64) -> Result<u64> {
+    let mut limited = reader.take(cap + 1);
+    let written = std::io::copy(&mut limited, writer).context("writing extracted binary")?;
+    if written > cap {
+        bail!("extracted entry exceeds the {cap}-byte size limit; refusing to install");
+    }
+    Ok(written)
+}
+
 fn extract_zip(archive: &[u8], expected: &str, dest: &Path) -> Result<()> {
     let reader = std::io::Cursor::new(archive);
     let mut zip = zip::ZipArchive::new(reader).context("opening downloaded zip archive")?;
@@ -395,7 +467,7 @@ fn extract_zip(archive: &[u8], expected: &str, dest: &Path) -> Result<()> {
         if is_top_level_binary {
             let mut out = std::fs::File::create(dest)
                 .with_context(|| format!("creating staged binary {}", dest.display()))?;
-            std::io::copy(&mut entry, &mut out).context("writing extracted binary")?;
+            copy_capped(&mut entry, &mut out, MAX_EXTRACTED_BYTES)?;
             return Ok(());
         }
     }
@@ -422,7 +494,7 @@ fn extract_tar_gz(archive: &[u8], expected: &str, dest: &Path) -> Result<()> {
             }
             let mut out = std::fs::File::create(dest)
                 .with_context(|| format!("creating staged binary {}", dest.display()))?;
-            std::io::copy(&mut entry, &mut out).context("writing extracted binary")?;
+            copy_capped(&mut entry, &mut out, MAX_EXTRACTED_BYTES)?;
             return Ok(());
         }
     }
@@ -624,5 +696,33 @@ mod tests {
         assert!(path_component_is_unsafe(Path::new("a/../../telex")));
         assert!(!path_component_is_unsafe(Path::new("telex")));
         assert!(!path_component_is_unsafe(Path::new("sub/telex")));
+    }
+
+    #[test]
+    fn copy_capped_rejects_oversized_source() {
+        let mut out = Vec::new();
+        // Under the cap: ok.
+        assert!(copy_capped(&b"hello"[..], &mut out, 10).is_ok());
+        assert_eq!(out, b"hello");
+        // Over the cap: fail closed.
+        let mut out2 = Vec::new();
+        let err = copy_capped(&[0u8; 20][..], &mut out2, 10).unwrap_err();
+        assert!(format!("{err}").contains("exceeds"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn ensure_publishable_rejects_drafts() {
+        let draft = Release {
+            tag_name: "v9.9.9".into(),
+            draft: true,
+            prerelease: false,
+            assets: vec![],
+        };
+        assert!(ensure_publishable(&draft).is_err());
+        let published = Release {
+            draft: false,
+            ..draft
+        };
+        assert!(ensure_publishable(&published).is_ok());
     }
 }

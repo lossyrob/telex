@@ -330,3 +330,49 @@ fn release_upgrade_reports_unsupported_platform_asset() {
     );
     std::fs::remove_dir_all(&root).ok();
 }
+
+#[test]
+fn release_upgrade_times_out_on_a_hanging_server() {
+    // A server that accepts the connection but never responds must not hang telex forever:
+    // the read timeout (overridden low for the test) makes `telex upgrade` fail fast.
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let port = listener.local_addr().unwrap().port();
+    thread::spawn(move || {
+        for stream in listener.incoming() {
+            if let Ok(s) = stream {
+                // Hold the connection open without ever writing a response.
+                std::mem::forget(s);
+            }
+        }
+    });
+
+    let root = temp_root("timeout");
+    let start = std::time::Instant::now();
+    let output = Command::new(telex_bin())
+        .args([
+            "--json",
+            "upgrade",
+            "--repo",
+            REPO,
+            "--root",
+            &root.to_string_lossy(),
+            "--skip-drain",
+        ])
+        .env("TELEX_UPGRADE_API_BASE", format!("http://127.0.0.1:{port}"))
+        .env(
+            "TELEX_UPGRADE_DOWNLOAD_BASE",
+            format!("http://127.0.0.1:{port}"),
+        )
+        .env("TELEX_UPGRADE_READ_TIMEOUT_MS", "500")
+        .env(install::LAUNCHER_GUARD_ENV, "1")
+        .env("TELEX_INSTALL_ROOT", root.to_string_lossy().to_string())
+        .output()
+        .expect("run telex upgrade against a hanging server");
+    let elapsed = start.elapsed();
+    assert!(!output.status.success(), "upgrade should fail on timeout");
+    assert!(
+        elapsed < std::time::Duration::from_secs(20),
+        "upgrade should fail fast on a hanging server, took {elapsed:?}"
+    );
+    std::fs::remove_dir_all(&root).ok();
+}

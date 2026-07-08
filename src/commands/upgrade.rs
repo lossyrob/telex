@@ -145,21 +145,28 @@ async fn upgrade_release(
 
     let selected = release::select_asset(&rel.asset_names(), &tag, target, kind)?;
     progress(ctx, &format!("Downloading {}...", selected.archive_name));
-    let archive = release::download_asset(&cfg, &tag, &selected.archive_name).await?;
-    let sidecar = release::download_asset(&cfg, &tag, &selected.sidecar_name).await?;
+    let archive = release::download_asset(
+        &cfg,
+        &tag,
+        &selected.archive_name,
+        release::MAX_ARCHIVE_BYTES,
+    )
+    .await?;
+    let sidecar = release::download_asset(
+        &cfg,
+        &tag,
+        &selected.sidecar_name,
+        release::MAX_SIDECAR_BYTES,
+    )
+    .await?;
     let expected = release::parse_sha256_sidecar(&String::from_utf8_lossy(&sidecar))?;
     release::verify_checksum(&archive, &expected)?;
     progress(ctx, "Checksum verified.");
 
-    // Stage the verified binary before promoting it through the versioned installer.
+    // Stage the verified binary before promoting it through the versioned installer. `Staging`
+    // cleans itself up on drop (including the early-return path below).
     let staging = staging_dir(layout)?;
-    let staged = match release::safe_extract(kind, &archive, &staging.path) {
-        Ok(path) => path,
-        Err(e) => {
-            staging.cleanup();
-            return Err(e);
-        }
-    };
+    let staged = release::safe_extract(kind, &archive, &staging.path)?;
     let plan = InstallPlan {
         tag: tag.clone(),
         source: staged,
@@ -173,9 +180,8 @@ async fn upgrade_release(
             "prerelease": rel.prerelease,
         })),
     };
-    let result = perform_upgrade(ctx, layout, plan, args).await;
-    staging.cleanup();
-    result
+    perform_upgrade(ctx, layout, plan, args).await
+    // `staging` is dropped here (after install copies the staged binary), removing the temp dir.
 }
 
 /// Release path stub for builds compiled without the `self-update` feature.
@@ -257,15 +263,16 @@ fn progress(ctx: &Ctx, msg: &str) {
     }
 }
 
-/// A controlled staging directory under the install root, removed after install completes.
+/// A controlled staging directory under the install root, removed on drop (RAII) so an
+/// early return, `?`, or panic cannot leak multi-MB temp dirs under `<root>/.staging`.
 #[cfg(feature = "self-update")]
 struct Staging {
     path: PathBuf,
 }
 
 #[cfg(feature = "self-update")]
-impl Staging {
-    fn cleanup(&self) {
+impl Drop for Staging {
+    fn drop(&mut self) {
         let _ = std::fs::remove_dir_all(&self.path);
     }
 }
@@ -274,6 +281,11 @@ impl Staging {
 fn staging_dir(layout: &install::InstallLayout) -> Result<Staging> {
     use anyhow::Context;
     let base = layout.root.join(".staging");
+    std::fs::create_dir_all(&base)
+        .with_context(|| format!("creating staging base {}", base.display()))?;
+    // Best-effort sweep of orphaned staging dirs from earlier aborted upgrades (crash, SIGKILL,
+    // power loss) so they cannot accumulate under the install root.
+    sweep_stale_staging(&base);
     let dir = base.join(format!(
         "upgrade-{}-{}",
         std::process::id(),
@@ -282,6 +294,28 @@ fn staging_dir(layout: &install::InstallLayout) -> Result<Staging> {
     std::fs::create_dir_all(&dir)
         .with_context(|| format!("creating staging dir {}", dir.display()))?;
     Ok(Staging { path: dir })
+}
+
+/// Remove staging entries older than one hour (best-effort; never touches a fresh dir a
+/// concurrent upgrade may be using).
+#[cfg(feature = "self-update")]
+fn sweep_stale_staging(base: &Path) {
+    let Ok(entries) = std::fs::read_dir(base) else {
+        return;
+    };
+    let now = std::time::SystemTime::now();
+    for entry in entries.flatten() {
+        let stale = entry
+            .metadata()
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|modified| now.duration_since(modified).ok())
+            .map(|age| age.as_secs() > 3600)
+            .unwrap_or(false);
+        if stale {
+            let _ = std::fs::remove_dir_all(entry.path());
+        }
+    }
 }
 
 pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
