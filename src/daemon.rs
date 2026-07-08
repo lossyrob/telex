@@ -54,6 +54,19 @@ const DEFAULT_DEAF_WARN_MS: i64 = 2 * 60 * 1000;
 
 pub type Result<T> = std::result::Result<T, DaemonError>;
 
+#[cfg(windows)]
+const WINDOWS_ELEVATION_MISMATCH_HINT: &str = "On Windows, this usually means the telex daemon and this process are running at different elevations (Administrator vs non-Administrator), so they cannot authenticate over the daemon named pipe. Stop the existing daemon from a matching-elevation terminal, or restart/attach from the same elevation as this session (for an elevated session, start telex from an Administrator terminal).";
+
+fn daemon_handshake_eof_message() -> String {
+    let mut message = "daemon closed the connection during handshake".to_string();
+    #[cfg(windows)]
+    {
+        message.push_str("; ");
+        message.push_str(WINDOWS_ELEVATION_MISMATCH_HINT);
+    }
+    message
+}
+
 #[derive(Debug)]
 pub enum DaemonError {
     Io {
@@ -154,9 +167,7 @@ impl From<HandshakeError> for DaemonError {
                 DaemonError::Protocol(format!("daemon IPC frame exceeded {max_bytes} bytes"))
             }
             HandshakeError::MalformedFrame(e) => DaemonError::Protocol(e),
-            HandshakeError::Eof => {
-                DaemonError::Protocol("daemon closed the connection".to_string())
-            }
+            HandshakeError::Eof => DaemonError::Protocol(daemon_handshake_eof_message()),
             HandshakeError::Rejected(reason) => DaemonError::Incompatible(reason),
         }
     }
@@ -10223,6 +10234,12 @@ mod platform {
                         "endpoint {pipe_name} does not exist"
                     )));
                 }
+                Err(e) if is_access_denied(&e) => {
+                    return Err(access_denied_elevation_error(
+                        format!("connecting to daemon named pipe {pipe_name}"),
+                        e,
+                    ));
+                }
                 Err(e) => return Err(io_err("connecting to daemon named pipe", e)),
             }
         }
@@ -10709,10 +10726,14 @@ mod platform {
     fn process_identity(pid: u32, expected_exe: Option<&Path>) -> Result<ProcessIdentity> {
         let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
         if process == 0 {
-            return Err(io_err(
-                "opening peer process",
-                std::io::Error::last_os_error(),
-            ));
+            let err = std::io::Error::last_os_error();
+            if is_access_denied(&err) {
+                return Err(access_denied_elevation_error(
+                    format!("opening peer process {pid}"),
+                    err,
+                ));
+            }
+            return Err(io_err("opening peer process", err));
         }
         let process = Handle(process);
         let token = process_token(process.0)?;
@@ -10773,12 +10794,27 @@ mod platform {
         let mut token = 0isize;
         let ok = unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) };
         if ok == 0 {
-            return Err(io_err(
-                "opening process token",
-                std::io::Error::last_os_error(),
-            ));
+            let err = std::io::Error::last_os_error();
+            if is_access_denied(&err) {
+                return Err(access_denied_elevation_error(
+                    "opening peer process token".to_string(),
+                    err,
+                ));
+            }
+            return Err(io_err("opening process token", err));
         }
         Ok(Handle(token))
+    }
+
+    fn is_access_denied(err: &std::io::Error) -> bool {
+        err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32)
+            || err.kind() == std::io::ErrorKind::PermissionDenied
+    }
+
+    fn access_denied_elevation_error(context: String, source: std::io::Error) -> DaemonError {
+        DaemonError::Unauthorized(format!(
+            "{context}: {source}. {WINDOWS_ELEVATION_MISMATCH_HINT}"
+        ))
     }
 
     struct LocalAllocGuard(*mut c_void);
@@ -11156,6 +11192,17 @@ mod tests {
             cap_required_peer_identity(&missing_start),
             Err(DaemonError::Unauthorized(_))
         ));
+    }
+
+    #[test]
+    fn handshake_eof_message_names_handshake_and_windows_elevation() {
+        let message = daemon_handshake_eof_message();
+        assert!(message.contains("closed the connection during handshake"));
+        #[cfg(windows)]
+        {
+            assert!(message.contains("different elevations"));
+            assert!(message.contains("Administrator"));
+        }
     }
 
     #[cfg(windows)]
