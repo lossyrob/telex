@@ -154,19 +154,25 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
                 .get("pending_unconsumed_count")
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "null".to_string());
+            let push = if info
+                .get("push_registered")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false)
+            {
+                format!(
+                    " push={}",
+                    info.get("push_delivery")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("registered")
+                )
+            } else {
+                String::new()
+            };
             println!(
                 "station_health {} pending={}{}{}",
                 health,
                 pending,
-                if info
-                    .get("push_registered")
-                    .and_then(|v| v.as_bool())
-                    .unwrap_or(false)
-                {
-                    " push"
-                } else {
-                    ""
-                },
+                push,
                 if info
                     .get("deaf_warn")
                     .and_then(|v| v.as_bool())

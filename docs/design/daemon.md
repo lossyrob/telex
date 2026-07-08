@@ -554,7 +554,7 @@ station it intentionally dropped (for `Ack`, the message simply redelivers to a 
 | Request | Purpose | Privileged? |
 |---|---|---|
 | `Hello` | version + capability handshake | no |
-| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[], on_deliver?, on_deliver_wake_on_cc? }` | **explicit attach** — establishes the in-memory membership `(store_key, session_id) → address` and claims/renews the durable lease for the address. **Idempotent**: re-issuing it for an already-attended address is a no-op refresh (which also **replaces** any registered `on_deliver`). This is the **only** way membership is created; nothing implicit ever (re)creates it. The optional `on_deliver` argv registers an opt-in **push exec** ([§13.2](#132-on-deliver-push-opt-in-harness-neutral)); `on_deliver_wake_on_cc` opts that push exec into live CC observer traffic after a daemon-captured lower bound. | no (same-trust) |
+| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[], on_deliver?, on_deliver_wake_on_cc? }` | **explicit attach** — establishes the in-memory membership `(store_key, session_id) → address` and claims/renews the durable lease for the address. **Idempotent**: re-issuing it for an already-attended address is a refresh. A refresh with explicit `on_deliver` replaces the push handler and its liveness predicates; a refresh with `on_deliver = None` preserves any existing push handler and its liveness predicates. This is the **only** way membership is created; nothing implicit ever (re)creates it. The optional `on_deliver` argv registers an opt-in **push exec** ([§13.2](#132-on-deliver-push-opt-in-harness-neutral)); `on_deliver_wake_on_cc` opts that push exec into live CC observer traffic after a daemon-captured lower bound. | no (same-trust) |
 | `Detach { store_key, session_id, address }` | drop one station — removes the in-memory membership entry and releases the address's waiters. Non-privileged (same-user trust): like every unprivileged op it carries **no per-session proof**, so **any same-user process can drop any same-user station** — the accepted v1 same-user-trust tradeoff ([§7.3](#73-no-intra-user-isolation-in-v1-mr6)), **not** a per-session authorization guarantee; nothing is tombstoned (a later explicit `Register` re-attaches if wanted). | no |
 | `Wait { store_key, session_id, address, attention?, min_attention?, wake_on_cc?, timeout_ms?, waiter_pid?, waiter_start_time? }` | block for one delivery against the address. `min_attention` filters eligible messages by priority; `wake_on_cc` opts this wait into live CC observer wake after the daemon-captured lower bound; waiter pid/start-time are diagnostics/liveness inputs for the live waiter registry. If the exchange has no membership for `(store_key, session_id, address)`, returns **`NeedsAttach`** (the agent re-attaches then re-waits). Waiters are **detached** ([§9](#9-liveness-model)). | no |
 | `Send { store_key, session_id, to_addr, … }` / `Reply { store_key, session_id, message_id, … }` | enqueue a message into the durable buffer. If the exchange does not know the sending session/address, returns **`NeedsAttach`** (the agent re-attaches its own address, then retries) — `from` is never silently `None` ([§14.6](#146-from-resolution-and-re-attach)). | no |
@@ -888,9 +888,11 @@ The singular `--session-pid` (issues #5/#17) generalizes to **typed predicates**
   liveness check is insufficient — it admits a pid-reuse false-positive — so the start-time
   guard is required.
 
-**v1 floor = a single loader `anchor` + start-time.** The `required`/`anchor` flag
-surface is exposed **only where a real consumer/test exists**: in v1 the only populated
-predicate is the loader anchor.
+**Non-bridge v1 floor = a single loader `anchor` + start-time.** The `required`/`anchor`
+flag surface is exposed **only where a real consumer/test exists**: for pull/non-bridge
+sessions, the populated predicate is the loader anchor. Bridge attach is intentionally
+process-unanchored: the Copilot adapter registers push delivery and does not populate
+daemon `watch_pids` from `COPILOT_LOADER_PID` or ambient `TELEX_SESSION_PID`.
 
 ### 9.2 Loader-pid: the sufficient negative signal (OQ4)
 
@@ -899,7 +901,8 @@ Empirically grounded (live probe, Copilot CLI 1.0.64-1, Windows): the harness ex
 re-execs an identical-argv inner worker**; the inner worker's PID is **not** exposed as an
 env var and spawns lazily. We **do not need** a per-session inner pid: liveness here is a
 **non-destructive UX dial, not a correctness gate**, so a coarse cohort signal is exactly
-right. The watched **loader pid (anchor + start-time)** is precisely the right and sufficient
+right for non-bridge/pull sessions. The watched **loader pid (anchor + start-time)** is
+precisely the right and sufficient
 **negative** signal — when the loader is gone the whole session tree is gone, so the exchange
 reaps that session's waiters and marks its stations idle. Loader-**alive** is never positive
 presence (a lingering loader after a dismiss is not "live"); the negative-only reading is what

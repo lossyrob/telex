@@ -2491,6 +2491,37 @@ fn real_process_copilot_bridge_attach_does_not_watch_loader_pid() {
         Some(0),
         "station status should expose that bridge membership has no watch-pid anchors"
     );
+
+    let status_text = env.run(
+        ["--text", "--address", address, "status"],
+        Duration::from_secs(4),
+    );
+    status_text.assert_success("text status after copilot bridge attach");
+    assert!(
+        status_text.stdout.contains("push="),
+        "text status should identify registered push state: {}",
+        status_text.stdout
+    );
+
+    let station_text = env.run_with_session(
+        session,
+        [
+            "--text",
+            "--address",
+            address,
+            "station",
+            "status",
+            "--session",
+            session,
+        ],
+        Duration::from_secs(4),
+    );
+    station_text.assert_success("text station status after copilot bridge attach");
+    assert!(
+        station_text.stdout.contains("push="),
+        "text station status should identify registered push state: {}",
+        station_text.stdout
+    );
 }
 
 #[test]

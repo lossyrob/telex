@@ -136,6 +136,17 @@ fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
             create_windows_owner_only_dir(path).with_context(|| {
                 format!("creating owner-private store lock directory {:?}", path)
             })?;
+            // A concurrent creator may race the NotFound path; CreateDirectoryW reports
+            // ERROR_ALREADY_EXISTS for files and reparse points too, so validate the object that
+            // actually won the race before trusting it as the lock namespace.
+            let meta = std::fs::symlink_metadata(path)
+                .with_context(|| format!("checking store lock directory {:?}", path))?;
+            if !meta.is_dir() {
+                bail!("store lock directory {:?} is not a directory", path);
+            }
+            if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+                bail!("store lock directory {:?} is a reparse point", path);
+            }
         }
         Err(e) => {
             return Err(e).with_context(|| format!("checking store lock directory {:?}", path));
