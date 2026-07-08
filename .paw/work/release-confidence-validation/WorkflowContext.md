@@ -44,13 +44,13 @@ Additional Inputs: streamliner-context=C:/Users/robemanuele/proj/telex/telex-rel
 ## Control State
 
 TODO Mirror: active-required-items
-Reconciliation: not_run
+Reconciliation: current
 
 ### Required Workflow Items
 - `init` | `resolved` | `activity`
-- `planning` | `pending` | `activity`
+- `planning` | `resolved` | `activity`
 - `planning-docs-review` | `not_applicable` | `activity`
-- `implementation` | `pending` | `activity`
+- `implementation` | `resolved` | `activity`
 - `final-review` | `not_applicable` | `activity`
 - `final-pr` | `pending` | `activity`
 
