@@ -68,6 +68,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Compute asset version
+        id: ver
+        shell: bash
+        run: |
+          # github.ref_name is the tag on a release (vX.Y.Z) or the branch on a
+          # workflow_dispatch dry-run (which may contain '/'). Sanitize '/' -> '-' so
+          # asset paths are always valid; on a real tag push this is a no-op.
+          echo "v=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
@@ -86,7 +95,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $tag = "${{ github.ref_name }}"
+          $tag = "${{ steps.ver.outputs.v }}"
           $target = "${{ matrix.target }}"
           $archive = "telex-$tag-$target.zip"
           New-Item -ItemType Directory -Force -Path dist, package | Out-Null
@@ -101,7 +110,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="${{ github.ref_name }}"
+          tag="${{ steps.ver.outputs.v }}"
           target="${{ matrix.target }}"
           archive="telex-${tag}-${target}.tar.gz"
           mkdir -p dist package
@@ -113,8 +122,8 @@ jobs:
       - name: Upload archive artifact
         uses: actions/upload-artifact@v4
         with:
-          name: telex-${{ github.ref_name }}-${{ matrix.target }}
-          path: dist/telex-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}*
+          name: telex-${{ steps.ver.outputs.v }}-${{ matrix.target }}
+          path: dist/telex-${{ steps.ver.outputs.v }}-${{ matrix.target }}.${{ matrix.archive }}*
           if-no-files-found: error
 
   publish:

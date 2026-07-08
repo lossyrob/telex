@@ -141,15 +141,22 @@ fn archive_name_grammar_is_consistent_across_workflow_and_installers() {
     );
 
     // The publish job's upload path and release `files:` glob must key off the same
-    // telex-<ref_name>-<target> prefix, so the build->publish artifact hand-off can
+    // telex-<version>-<target> prefix, so the build->publish artifact hand-off can
     // never silently ship an empty/partial asset set past fail_on_unmatched_files.
+    // The build job sanitizes the ref (slash-safe for workflow_dispatch dry-runs);
+    // on a real tag the sanitized version equals github.ref_name that publish uses.
     assert!(
-        release.contains("path: dist/telex-${{ github.ref_name }}-${{ matrix.target }}.${{ matrix.archive }}*"),
-        "build must upload artifacts under the telex-<ref_name>-<target> prefix"
+        release.contains("path: dist/telex-${{ steps.ver.outputs.v }}-${{ matrix.target }}.${{ matrix.archive }}*"),
+        "build must upload artifacts under the sanitized telex-<version>-<target> prefix"
     );
     assert!(
         release.contains("dist/telex-${{ github.ref_name }}-*"),
         "publish must select release assets by the telex-<ref_name>- prefix"
+    );
+    assert!(
+        release.contains(r#"echo "v=${GITHUB_REF_NAME//\//-}""#),
+        "build must sanitize '/' out of the ref for asset naming so workflow_dispatch \
+         dry-runs on slash-containing branches still package correctly"
     );
 }
 
