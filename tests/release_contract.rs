@@ -106,7 +106,11 @@ fn installer_targets_are_a_subset_of_the_release_matrix() {
     // Pin the specific targets each installer must be able to fetch. This catches a
     // *single dropped arm* (e.g. removing the macOS Intel case), which the non-empty
     // guard above alone would miss.
-    for expected in ["x86_64-unknown-linux-gnu", "aarch64-apple-darwin", "x86_64-apple-darwin"] {
+    for expected in [
+        "x86_64-unknown-linux-gnu",
+        "aarch64-apple-darwin",
+        "x86_64-apple-darwin",
+    ] {
         assert!(
             sh.iter().any(|t| t == expected),
             "install.sh no longer resolves target `{expected}`; a platform arm was dropped"
@@ -125,6 +129,86 @@ fn installer_targets_are_a_subset_of_the_release_matrix() {
              every platform an installer can request must be produced by the release workflow"
         );
     }
+}
+
+#[cfg(feature = "self-update")]
+#[test]
+fn in_binary_upgrade_targets_are_a_subset_of_the_release_matrix() {
+    // The in-binary `telex upgrade` release path hard-codes the platform target triples it
+    // knows how to fetch (telex::release::SUPPORTED_TARGETS). Couple that set to the release
+    // workflow build matrix exactly like the shell installers, so adding/removing a matrix
+    // target breaks this test rather than a user's `telex upgrade`.
+    let matrix = release_matrix_targets();
+    for t in telex::release::SUPPORTED_TARGETS {
+        assert!(
+            matrix.contains(&t.to_string()),
+            "self-update target `{t}` is not built by release.yml matrix {matrix:?}; \
+             every platform telex can self-upgrade to must be produced by the release workflow"
+        );
+    }
+    // The in-binary target set must also cover exactly the installer-fetched targets, so the
+    // in-binary path and the shell installers never diverge on platform support.
+    let installers: std::collections::BTreeSet<String> = install_sh_targets()
+        .into_iter()
+        .chain(install_ps1_targets())
+        .collect();
+    for t in &installers {
+        assert!(
+            telex::release::SUPPORTED_TARGETS.contains(&t.as_str()),
+            "installer fetches target `{t}` but the in-binary self-update target set does not \
+             include it; keep telex::release::SUPPORTED_TARGETS in sync with the installers"
+        );
+    }
+}
+
+#[test]
+fn release_publish_verifies_a_checksum_sidecar_for_every_archive() {
+    // The in-binary `telex upgrade` release path is fail-closed on a missing checksum. That
+    // stance depends on every published archive actually having a `.sha256` sibling.
+    // `fail_on_unmatched_files` only asserts the publish glob matched >=1 file, so the release
+    // workflow must have an explicit sidecar-presence guard before publish. Assert its behavior.
+    let release = read(".github/workflows/release.yml");
+    assert!(
+        release.contains("missing checksum sidecar for"),
+        "release.yml must fail the publish job when an archive lacks a .sha256 sidecar; the \
+         fail-closed in-binary upgrader depends on this guarantee"
+    );
+    assert!(
+        release.contains("${archive}.sha256"),
+        "the sidecar guard must check for a same-name `${{archive}}.sha256` sibling"
+    );
+}
+
+#[test]
+fn source_metadata_invocation_grammar_is_stable() {
+    // `telex upgrade` reads the downloaded binary's metadata by spawning
+    // `telex --json version --root <path>`. That invocation grammar is a cross-version
+    // contract (an older telex installs a newer one this way); assert it stays valid and
+    // exposes every field the upgrade path reads.
+    let bin = telex_bin();
+    let tmp = std::env::temp_dir().join(format!("telex-argv-contract-{}", std::process::id()));
+    let output = Command::new(&bin)
+        .args(["--json", "version", "--root"])
+        .arg(&tmp)
+        .env("TELEX_LAUNCHER_ACTIVE", "1")
+        .output()
+        .expect("run telex --json version --root <path>");
+    assert!(
+        output.status.success(),
+        "`telex --json version --root <path>` must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let v: Value = serde_json::from_slice(&output.stdout).expect("valid version JSON");
+    // Fields consumed by src/commands/upgrade.rs::source_metadata.
+    assert!(v["version"]["package_version"].is_string());
+    assert!(v["version"]["supported_schema_min"].is_number());
+    assert!(v["version"]["supported_schema_max"].is_number());
+    assert!(v["daemon_metadata"]["protocol_version"]["major"].is_number());
+    assert!(v["daemon_metadata"]["protocol_version"]["minor"].is_number());
+    assert!(v["daemon_metadata"]["required_capabilities"].is_array());
+    assert!(v["copilot"]["bridge_protocol"].is_number());
+    assert!(v["copilot"]["min_compatible_plugin_version"].is_string());
+    std::fs::remove_dir_all(&tmp).ok();
 }
 
 #[test]
@@ -349,8 +433,8 @@ fn awk_style_package_version(cargo_toml: &str) -> String {
         }
         // awk match: /^version[[:space:]]*=/
         let trimmed_key = line.trim_start_matches("version");
-        let is_version_line = line.starts_with("version")
-            && trimmed_key.trim_start().starts_with('=');
+        let is_version_line =
+            line.starts_with("version") && trimmed_key.trim_start().starts_with('=');
         if in_pkg && is_version_line {
             // gsub(/["[:space:]]/,"") then sub(/^version=/,"")
             let collapsed: String = line
@@ -373,7 +457,10 @@ fn workflow_awk_and_rust_version_parsers_agree() {
     let cargo = read("Cargo.toml");
     let rust = package_version(&cargo);
     let awk = awk_style_package_version(&cargo);
-    assert!(!rust.is_empty(), "Rust package_version parser resolved nothing");
+    assert!(
+        !rust.is_empty(),
+        "Rust package_version parser resolved nothing"
+    );
     assert_eq!(
         rust, awk,
         "the awk gate in release.yml and the Rust parser disagree on [package].version \
@@ -388,7 +475,10 @@ fn plugin_versions_track_the_crate_version() {
     // lists bumping these as a pre-cut step; enforce it here so a Cargo.toml bump
     // that forgets the plugin fails in CI, not at a user's `copilot plugin install`.
     let crate_version = package_version(&read("Cargo.toml"));
-    assert!(!crate_version.is_empty(), "could not read [package].version from Cargo.toml");
+    assert!(
+        !crate_version.is_empty(),
+        "could not read [package].version from Cargo.toml"
+    );
 
     let plugin: Value =
         serde_json::from_str(&read("copilot/plugin/plugin.json")).expect("plugin.json parses");

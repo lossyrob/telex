@@ -49,22 +49,169 @@ pub async fn version(ctx: &Ctx, args: VersionArgs) -> Result<i32> {
 }
 
 pub async fn upgrade(ctx: &Ctx, args: UpgradeArgs) -> Result<i32> {
-    let layout = install::layout_from_optional_root(args.root)?;
+    let layout = install::layout_from_optional_root(args.root.clone())?;
+    match args.from.clone() {
+        Some(from) => upgrade_local(ctx, &args, &layout, &from).await,
+        None => upgrade_release(ctx, &args, &layout).await,
+    }
+}
+
+/// A resolved binary ready to install through the versioned layout, plus optional
+/// release metadata for JSON transparency.
+struct InstallPlan {
+    tag: String,
+    source: PathBuf,
+    source_label: String,
+    release: Option<serde_json::Value>,
+}
+
+/// Local/manual upgrade path (`telex upgrade --from <binary>`).
+async fn upgrade_local(
+    ctx: &Ctx,
+    args: &UpgradeArgs,
+    layout: &install::InstallLayout,
+    from: &Path,
+) -> Result<i32> {
     let tag = args
         .version
+        .clone()
         .unwrap_or_else(|| format!("v{}", env!("CARGO_PKG_VERSION")));
-    let source = resolve_source_binary(&args.from)?;
-    let source_metadata = source_metadata(&source, &layout.root)?;
+    let source = resolve_source_binary(from)?;
+    let plan = InstallPlan {
+        tag,
+        source,
+        source_label: format!("local:{}", from.display()),
+        release: None,
+    };
+    perform_upgrade(ctx, layout, plan, args).await
+}
+
+/// Release upgrade path (`telex upgrade` with no --from): discover a public GitHub release,
+/// download + verify + extract the platform asset, then install through the versioned layout.
+#[cfg(feature = "self-update")]
+async fn upgrade_release(
+    ctx: &Ctx,
+    args: &UpgradeArgs,
+    layout: &install::InstallLayout,
+) -> Result<i32> {
+    use crate::release;
+
+    let requested = args
+        .version
+        .as_deref()
+        .map(release::normalize_tag)
+        .transpose()?;
+    let (target, kind) = release::current_target().ok_or_else(|| {
+        anyhow!(
+            "self-update is not supported on this platform ({}/{}); install from source with \
+             `cargo install --git https://github.com/lossyrob/telex --features entra`",
+            std::env::consts::OS,
+            std::env::consts::ARCH
+        )
+    })?;
+    let cfg = release::FetchConfig::from_repo(&args.repo);
+
+    progress(
+        ctx,
+        &format!(
+            "Resolving {} release from {}...",
+            requested.as_deref().unwrap_or("latest"),
+            cfg.repo
+        ),
+    );
+    let rel = release::discover_release(&cfg, requested.as_deref()).await?;
+    let tag = rel.tag_name.clone();
+
+    // Already-current short-circuit — normalize both sides so a `v` prefix can't mismatch.
+    if !args.force {
+        let current = install::version_info(Some(layout.root.clone()))?
+            .install
+            .current_tag;
+        if let Some(cur) = &current {
+            if release::normalize_tag(cur).ok() == release::normalize_tag(&tag).ok() {
+                let out = json!({
+                    "upgrade": false,
+                    "status": "already_current",
+                    "tag": tag,
+                    "current": cur,
+                });
+                emit(ctx.fmt, &out, || {
+                    println!("already current {tag} (use --force to reinstall)");
+                });
+                return Ok(0);
+            }
+        }
+    }
+
+    let selected = release::select_asset(&rel.asset_names(), &tag, target, kind)?;
+    progress(ctx, &format!("Downloading {}...", selected.archive_name));
+    let archive = release::download_asset(&cfg, &tag, &selected.archive_name).await?;
+    let sidecar = release::download_asset(&cfg, &tag, &selected.sidecar_name).await?;
+    let expected = release::parse_sha256_sidecar(&String::from_utf8_lossy(&sidecar))?;
+    release::verify_checksum(&archive, &expected)?;
+    progress(ctx, "Checksum verified.");
+
+    // Stage the verified binary before promoting it through the versioned installer.
+    let staging = staging_dir(layout)?;
+    let staged = match release::safe_extract(kind, &archive, &staging.path) {
+        Ok(path) => path,
+        Err(e) => {
+            staging.cleanup();
+            return Err(e);
+        }
+    };
+    let plan = InstallPlan {
+        tag: tag.clone(),
+        source: staged,
+        source_label: format!("github-release:{}@{}", cfg.repo, tag),
+        release: Some(json!({
+            "repo": cfg.repo,
+            "tag": tag,
+            "asset": selected.archive_name,
+            "sidecar": selected.sidecar_name,
+            "verified": true,
+            "prerelease": rel.prerelease,
+        })),
+    };
+    let result = perform_upgrade(ctx, layout, plan, args).await;
+    staging.cleanup();
+    result
+}
+
+/// Release path stub for builds compiled without the `self-update` feature.
+#[cfg(not(feature = "self-update"))]
+async fn upgrade_release(
+    _ctx: &Ctx,
+    _args: &UpgradeArgs,
+    _layout: &install::InstallLayout,
+) -> Result<i32> {
+    bail!(
+        "this telex build was compiled without release-upgrade support (the `self-update` \
+         feature is disabled). Install a specific local build with `telex upgrade --from \
+         <binary>`, reinstall the published binary (which includes self-update), or run \
+         `cargo install --git https://github.com/lossyrob/telex --features entra`."
+    )
+}
+
+/// Install a resolved binary through the versioned layout and switch/drain as requested.
+/// Shared by the local and release upgrade paths.
+async fn perform_upgrade(
+    ctx: &Ctx,
+    layout: &install::InstallLayout,
+    plan: InstallPlan,
+    args: &UpgradeArgs,
+) -> Result<i32> {
+    let source_metadata = source_metadata(&plan.source, &layout.root)?;
     let installed = install::install_binary(
-        &layout,
-        &tag,
-        &source,
-        &format!("local:{}", args.from.display()),
+        layout,
+        &plan.tag,
+        &plan.source,
+        &plan.source_label,
         false,
         Some(source_metadata),
     )?;
     if !args.no_switch {
-        let manifest = install::read_manifest(&layout, &tag)?;
+        let manifest = install::read_manifest(layout, &plan.tag)?;
         install::validate_manifest_for_current(&manifest)?;
     }
     let drain = if args.no_switch || args.skip_drain {
@@ -78,20 +225,21 @@ pub async fn upgrade(ctx: &Ctx, args: UpgradeArgs) -> Result<i32> {
     let switched = if args.no_switch {
         None
     } else {
-        Some(install::switch_to(&layout, &tag)?)
+        Some(install::switch_to(layout, &plan.tag)?)
     };
     let out = json!({
         "upgrade": true,
         "installed": installed,
         "drain": drain,
         "switch": switched,
+        "release": plan.release,
     });
     emit(ctx.fmt, &out, || {
-        println!("installed {}", tag);
+        println!("installed {}", plan.tag);
         for warning in &installed.warnings {
             println!("warning {warning}");
         }
-        if let Some(switched) = switched {
+        if let Some(switched) = &switched {
             println!("current {}", switched.switched_to);
             println!("binary {}", switched.current_binary);
         } else {
@@ -99,6 +247,41 @@ pub async fn upgrade(ctx: &Ctx, args: UpgradeArgs) -> Result<i32> {
         }
     });
     Ok(0)
+}
+
+/// Emit progress to stderr in text mode only (JSON consumers get the structured result).
+#[cfg(feature = "self-update")]
+fn progress(ctx: &Ctx, msg: &str) {
+    if ctx.fmt == crate::output::Format::Text {
+        eprintln!("{msg}");
+    }
+}
+
+/// A controlled staging directory under the install root, removed after install completes.
+#[cfg(feature = "self-update")]
+struct Staging {
+    path: PathBuf,
+}
+
+#[cfg(feature = "self-update")]
+impl Staging {
+    fn cleanup(&self) {
+        let _ = std::fs::remove_dir_all(&self.path);
+    }
+}
+
+#[cfg(feature = "self-update")]
+fn staging_dir(layout: &install::InstallLayout) -> Result<Staging> {
+    use anyhow::Context;
+    let base = layout.root.join(".staging");
+    let dir = base.join(format!(
+        "upgrade-{}-{}",
+        std::process::id(),
+        crate::model::now_ms()
+    ));
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("creating staging dir {}", dir.display()))?;
+    Ok(Staging { path: dir })
 }
 
 pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {

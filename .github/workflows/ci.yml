@@ -80,6 +80,21 @@ jobs:
       - name: Build default (all backends)
         run: cargo build
 
+      - name: Build sqlite + self-update (lean self-updater combo)
+        run: cargo build --no-default-features --features "sqlite,self-update"
+
+      - name: Release-upgrade fallback error when self-update is compiled out
+        # A build without `self-update` must reject `telex upgrade` (no --from) with an
+        # actionable error instead of silently doing nothing. Exercises the compiled-out stub.
+        run: |
+          set -o pipefail
+          out="$(cargo run --no-default-features --features sqlite -- upgrade 2>&1 || true)"
+          echo "$out"
+          echo "$out" | grep -q "compiled without release-upgrade support" || {
+            echo "::error::sqlite-only build did not emit the compiled-out upgrade fallback error"
+            exit 1
+          }
+
       - name: Core stays lean (no TUI deps in `telex`)
         run: |
           if cargo tree -p telex -e normal | grep -Eq 'ratatui|crossterm'; then

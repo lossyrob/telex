@@ -17,6 +17,10 @@ pub mod ipc;
 pub mod model;
 pub mod output;
 pub mod profiles;
+// In-binary release upgrade (`telex upgrade` with no --from): discover a GitHub release,
+// download + verify + extract the platform asset. Compiled only with the `self-update` feature.
+#[cfg(feature = "self-update")]
+pub mod release;
 // Legacy address-keyed holder registry; daemon singleton status is exposed via
 // `daemon`.
 pub mod registry;
