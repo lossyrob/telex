@@ -133,11 +133,24 @@ release defect.
   filter, deferred-contract string).
 - Observed live: a message arriving while busy is parked (`pending_unconsumed`), not pushed -
   no stale-queued-turn duplicate. No duplicate storm observed.
+- At-least-once + dedupe confirmed: the on-deliver push is at-least-once (the daemon re-pushes
+  an unacked message and the framing instructs "Dedupe by id if you have already seen it"). The
+  test message (id 125) re-arrived as a turn twice after the session went idle (bounded
+  enqueues from the long busy/unacked window draining out of the Copilot session queue); dedupe
+  by id handled it. Crucially, after the message was terminally dispositioned (`closed`) and the
+  session detached, the daemon has no member for the address and the bridge pipe is dead, so it
+  is verifiably not re-pushing - the #66 "re-pushed indefinitely" behavior does not reproduce at
+  the daemon level.
 
 ## 4. Bridge liveness / self-stop
 
 - `telex copilot detach` + `extensions_reload` tears the bridge down and it stays down
   (self-stop / stop-delivery sticks; the in-session escape hatch works).
+- `telex copilot gc` reclaims a stale post-detach registry entry (detach removed the registry,
+  but the still-live bridge re-wrote it once on its ~15s heartbeat before it was unloaded,
+  leaving a stale file; `gc` removed it because the session had no recorded bindings, while
+  conservatively keeping entries that still have bindings - "use --force after verifying the
+  session is gone"). So the post-detach stale registry is self-healing via the shipped gc path.
 - Liveness intent is gated by `live_push_bridge_is_attended_not_deaf` and
   `failing_push_bridge_becomes_deaf` (a live/delivering bridge is `attended_push`, only a
   failing/non-draining one is flagged deaf).
