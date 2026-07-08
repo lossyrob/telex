@@ -40,6 +40,21 @@ Linux (Raspberry Pi, Graviton, ARM WSL) — install from source with `cargo inst
 telex --version
 ```
 
+## Updating
+
+Once telex is installed, update in place to the latest compatible public release:
+
+```sh
+telex upgrade
+```
+
+This discovers the latest GitHub release, downloads this platform's asset, verifies its
+SHA-256 checksum, and installs it through the versioned layout (keeping the previous version
+for `telex rollback`). Pin an explicit release with `telex upgrade --version vX.Y.Z`, or
+install a local build with `telex upgrade --from <binary>`. See
+[Operating telex](../guides/operating.md) for details, including the fail-closed behavior and
+`GITHUB_TOKEN` for higher API rate limits.
+
 ## Initialize (optional)
 
 Telex creates its local store and schema on first use, so no init step is

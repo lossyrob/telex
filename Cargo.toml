@@ -47,6 +47,18 @@ futures-util = { version = "0.3", optional = true }
 azure_identity = { version = "1", optional = true }
 azure_core = { version = "1", optional = true }
 
+# Self-update (feature: self-update) — in-binary `telex upgrade` release fetch:
+# discover a GitHub release, download the platform asset + checksum, verify SHA-256,
+# and extract telex(.exe) before installing through the versioned layout.
+# reqwest pins native-tls (reusing the postgres/native-tls stack) so default builds do
+# not gain a second active TLS stack; sha2 is already in the tree via postgres-protocol.
+# flate2 uses its pure-Rust miniz_oxide backend (no system zlib); zip only needs deflate.
+reqwest = { version = "0.13", default-features = false, features = ["native-tls"], optional = true }
+sha2 = { version = "0.11", optional = true }
+zip = { version = "2", default-features = false, features = ["deflate"], optional = true }
+tar = { version = "0.4", optional = true }
+flate2 = { version = "1", optional = true }
+
 # Vendor OpenSSL on Linux only when the Postgres backend (native-tls) is enabled, so
 # Linux release builds are self-contained. Windows uses schannel, macOS Security.framework.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -64,11 +76,24 @@ windows-sys = { version = "0.52", features = ["Win32_Foundation", "Win32_Securit
 [features]
 # Batteries-included default. Build a leaner binary with e.g.
 #   cargo install telex --no-default-features --features sqlite
-default = ["sqlite", "postgres"]
+default = ["sqlite", "postgres", "self-update"]
 sqlite = ["dep:rusqlite"]
 postgres = ["dep:tokio-postgres", "dep:postgres-native-tls", "dep:native-tls", "dep:futures-util", "dep:openssl"]
 entra = ["postgres", "dep:azure_identity", "dep:azure_core"]
+# In-binary release upgrade path (`telex upgrade` with no --from). Default-on so every
+# shipped binary can self-update; omit it (e.g. `--no-default-features --features sqlite`)
+# for a lean build, where `telex upgrade` without --from returns an actionable error.
+self-update = ["dep:reqwest", "dep:sha2", "dep:zip", "dep:tar", "dep:flate2"]
 
 [profile.release]
 strip = true
 lto = "thin"
+
+[dev-dependencies]
+# Archive builders + hashing for the release-upgrade integration test: package the built
+# telex binary into a fixture zip/tar.gz + sha256 sidecar served by a local HTTP server.
+# Already present in the self-update dependency tree; declared here for the test crate.
+zip = { version = "2", default-features = false, features = ["deflate"] }
+tar = "0.4"
+flate2 = "1"
+sha2 = "0.11"

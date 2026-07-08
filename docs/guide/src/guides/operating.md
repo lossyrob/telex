@@ -68,10 +68,36 @@ Upgrade, roll back, and inspect versions:
 
 ```sh
 telex version --json
+
+# Fetch, verify, and install the latest compatible public release:
+telex upgrade
+
+# Install a specific public release by tag:
+telex upgrade --version vX.Y.Z
+
+# Install a local/manual build (no download):
 telex upgrade --from <path-to-telex-binary> --version vX.Y.Z
+
 telex rollback
 telex gc --dry-run
 ```
+
+Without `--from`, `telex upgrade` discovers a GitHub release (the latest full release by
+default, or `--version <tag>`), selects this platform's asset, downloads the archive and its
+`.sha256` sidecar, and **verifies the checksum before installing** — then installs through the
+same versioned layout as the local path. It is **fail-closed**: a missing or mismatched
+checksum, a missing platform asset, an unsupported platform, an incompatible version, or a
+network/rate-limit error aborts without changing `current`. Set `GITHUB_TOKEN` to raise the API
+rate limit. Prebuilt binaries are published for Windows (x86_64, ARM64), Linux (x86_64), and
+macOS (Apple Silicon, Intel); on other platforms install from source with
+`cargo install --git https://github.com/lossyrob/telex --features entra`. If telex is already on
+the resolved release it reports "already current" and does nothing (override with `--force`).
+
+`telex upgrade` reads the downloaded (checksum-verified) binary's own metadata by running it
+once (`telex --json version`) before installing; in locked-down environments an OS quarantine
+prompt (macOS Gatekeeper, Windows SmartScreen) on that step is the likely cause if an upgrade
+stalls. The checksum verifies **integrity**, not authenticity — it protects against a corrupted
+or truncated download, and the trust root is the GitHub repository the asset comes from.
 
 `telex upgrade` and `telex rollback` drain the current local daemon before
 switching `current`, unless `--skip-drain` is passed. Rollback refuses installed

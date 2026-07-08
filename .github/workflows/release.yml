@@ -147,6 +147,41 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Verify every archive has a checksum sidecar (and no orphan sidecars)
+        # The in-binary `telex upgrade` release path is fail-closed: it refuses to install an
+        # asset without a verified checksum. `fail_on_unmatched_files` below only asserts the
+        # publish glob matched >=1 file; it does NOT guarantee every archive has a paired
+        # .sha256, nor that every .sha256 has a matching archive. This step enforces both
+        # directions so a packaging slip fails the release rather than stranding self-update users.
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          missing=0
+          archives=(dist/telex-*.zip dist/telex-*.tar.gz)
+          if [ "${#archives[@]}" -eq 0 ]; then
+            echo "::error::no release archives found under dist/"
+            exit 1
+          fi
+          for archive in "${archives[@]}"; do
+            if [ ! -f "${archive}.sha256" ]; then
+              echo "::error::missing checksum sidecar for ${archive}"
+              missing=1
+            fi
+          done
+          for sidecar in dist/telex-*.sha256; do
+            archive="${sidecar%.sha256}"
+            if [ ! -f "${archive}" ]; then
+              echo "::error::missing archive for orphan sidecar ${sidecar}"
+              missing=1
+            fi
+          done
+          if [ "${missing}" -ne 0 ]; then
+            echo "::error::release archive/sidecar pairing is incomplete; refusing to publish"
+            exit 1
+          fi
+          echo "ok: every release archive and its .sha256 sidecar are paired"
+
       - name: Publish release with all assets
         uses: softprops/action-gh-release@v2
         with:

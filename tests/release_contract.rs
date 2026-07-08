@@ -131,6 +131,91 @@ fn installer_targets_are_a_subset_of_the_release_matrix() {
     }
 }
 
+#[cfg(feature = "self-update")]
+#[test]
+fn in_binary_upgrade_targets_equal_the_release_matrix() {
+    // Assert SET EQUALITY between telex::release::SUPPORTED_TARGETS and the release.yml build
+    // matrix, so a matrix change in EITHER direction (a new or removed target) breaks this repo
+    // test rather than a user's `telex upgrade`.
+    use std::collections::BTreeSet;
+    let matrix: BTreeSet<String> = release_matrix_targets().into_iter().collect();
+    let supported: BTreeSet<String> = telex::release::SUPPORTED_TARGETS
+        .iter()
+        .map(|t| t.triple.to_string())
+        .collect();
+    assert_eq!(
+        supported, matrix,
+        "telex::release::SUPPORTED_TARGETS and the release.yml build matrix must be identical; \
+         a target present in one but not the other means `telex upgrade` and the release workflow \
+         disagree on platform support"
+    );
+    // Every installer-fetched target must be a self-update target too.
+    let installers: BTreeSet<String> = install_sh_targets()
+        .into_iter()
+        .chain(install_ps1_targets())
+        .collect();
+    assert!(
+        installers.is_subset(&supported),
+        "installers fetch targets not covered by the in-binary self-update set: {:?}",
+        installers.difference(&supported).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn release_publish_verifies_a_checksum_sidecar_for_every_archive() {
+    // The in-binary `telex upgrade` release path is fail-closed on a missing checksum. That
+    // stance depends on every published archive actually having a `.sha256` sibling.
+    // `fail_on_unmatched_files` only asserts the publish glob matched >=1 file, so the release
+    // workflow must have an explicit sidecar-presence guard before publish. Assert its behavior.
+    let release = read(".github/workflows/release.yml");
+    assert!(
+        release.contains("missing checksum sidecar for"),
+        "release.yml must fail the publish job when an archive lacks a .sha256 sidecar; the \
+         fail-closed in-binary upgrader depends on this guarantee"
+    );
+    assert!(
+        release.contains("archive for orphan sidecar"),
+        "release.yml must also fail publish on a lone .sha256 with no matching archive \
+         (bidirectional pairing), so a packaging slip cannot strand a platform"
+    );
+    assert!(
+        release.contains("${archive}.sha256"),
+        "the sidecar guard must check for a same-name `${{archive}}.sha256` sibling"
+    );
+}
+
+#[test]
+fn source_metadata_invocation_grammar_is_stable() {
+    // `telex upgrade` reads the downloaded binary's metadata by spawning
+    // `telex --json version --root <path>`. That invocation grammar is a cross-version
+    // contract (an older telex installs a newer one this way); assert it stays valid and
+    // exposes every field the upgrade path reads.
+    let bin = telex_bin();
+    let tmp = std::env::temp_dir().join(format!("telex-argv-contract-{}", std::process::id()));
+    let output = Command::new(&bin)
+        .args(["--json", "version", "--root"])
+        .arg(&tmp)
+        .env("TELEX_LAUNCHER_ACTIVE", "1")
+        .output()
+        .expect("run telex --json version --root <path>");
+    assert!(
+        output.status.success(),
+        "`telex --json version --root <path>` must succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let v: Value = serde_json::from_slice(&output.stdout).expect("valid version JSON");
+    // Fields consumed by src/commands/upgrade.rs::source_metadata.
+    assert!(v["version"]["package_version"].is_string());
+    assert!(v["version"]["supported_schema_min"].is_number());
+    assert!(v["version"]["supported_schema_max"].is_number());
+    assert!(v["daemon_metadata"]["protocol_version"]["major"].is_number());
+    assert!(v["daemon_metadata"]["protocol_version"]["minor"].is_number());
+    assert!(v["daemon_metadata"]["required_capabilities"].is_array());
+    assert!(v["copilot"]["bridge_protocol"].is_number());
+    assert!(v["copilot"]["min_compatible_plugin_version"].is_string());
+    std::fs::remove_dir_all(&tmp).ok();
+}
+
 #[test]
 fn archive_name_grammar_is_consistent_across_workflow_and_installers() {
     // The asset grammar is telex-<tag>-<target>.{zip,tar.gz}. Couple the grammar

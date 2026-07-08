@@ -474,12 +474,28 @@ pub struct VersionArgs {
 
 #[derive(Args)]
 pub struct UpgradeArgs {
-    /// Local telex binary or directory containing telex(.exe) to install.
+    /// Local telex binary or directory containing telex(.exe) to install (manual/local
+    /// upgrade path). Omit to discover, download, verify, and install the latest
+    /// compatible public GitHub release.
     #[arg(long = "from", value_name = "PATH")]
-    pub from: PathBuf,
-    /// Version tag to install/switch to (defaults to this binary's package version).
+    pub from: Option<PathBuf>,
+    /// Release tag to install/switch to. Without --from this selects an explicit public
+    /// release (e.g. v0.2.0); with --from it labels the local install (defaults to this
+    /// binary's package version).
     #[arg(long)]
     pub version: Option<String>,
+    /// Reinstall/switch even when the resolved release is already the current version.
+    #[arg(long)]
+    pub force: bool,
+    /// GitHub repository (owner/name) to fetch releases from. Hidden: for tests and
+    /// enterprise mirrors only — changing it changes which source telex trusts.
+    #[arg(
+        long,
+        hide = true,
+        env = "TELEX_UPGRADE_REPO",
+        default_value = "lossyrob/telex"
+    )]
+    pub repo: String,
     /// Versioned install root (default: inferred install root or platform default).
     #[arg(long)]
     pub root: Option<PathBuf>,
@@ -956,16 +972,38 @@ mod tests {
         .unwrap();
         match cli.command {
             Command::Upgrade(UpgradeArgs {
-                from,
+                from: Some(from),
                 version: Some(version),
                 no_switch: true,
+                repo,
                 ..
             }) => {
                 assert_eq!(from, PathBuf::from("target/debug/telex"));
                 assert_eq!(version, "v0.2.0");
+                assert_eq!(repo, "lossyrob/telex");
             }
             _ => panic!("unexpected upgrade parse"),
         }
+
+        // Release path: no --from is now valid and selects the GitHub release flow.
+        let cli =
+            Cli::try_parse_from(["telex", "upgrade", "--version", "v0.2.0", "--force"]).unwrap();
+        match cli.command {
+            Command::Upgrade(UpgradeArgs {
+                from: None,
+                version: Some(version),
+                force: true,
+                ..
+            }) => assert_eq!(version, "v0.2.0"),
+            _ => panic!("unexpected release-path upgrade parse"),
+        }
+
+        // Bare `telex upgrade` (latest release) parses with all defaults.
+        let cli = Cli::try_parse_from(["telex", "upgrade"]).unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Upgrade(UpgradeArgs { from: None, .. })
+        ));
 
         let cli = Cli::try_parse_from(["telex", "rollback", "--version", "v0.1.0"]).unwrap();
         assert!(matches!(

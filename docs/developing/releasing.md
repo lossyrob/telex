@@ -18,7 +18,9 @@ Pushing a `v*` tag triggers `release.yml`, which:
    the build matrix.
 3. Packages each build as `telex-<tag>-<target>.{zip,tar.gz}` with a sibling
    `<asset>.sha256` checksum.
-4. After **all** matrix legs succeed, a single `publish` job creates the GitHub
+4. After **all** matrix legs succeed, a single `publish` job verifies that every
+   archive has a paired `.sha256` sidecar (so the fail-closed in-binary
+   `telex upgrade` never meets a sidecar-less release), then creates the GitHub
    release and uploads every asset at once.
 
 The build matrix (the supported targets), the archive grammar, and the checksum
