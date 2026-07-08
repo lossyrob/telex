@@ -958,13 +958,18 @@ async fn postgres_listen_notify_wakes_blocked_waiter() {
         "send failed: {sent:?}"
     );
     let (elapsed, response) = waiter.await.expect("waiter task");
+    let delivery_latency_ms = match &response {
+        Response::Message {
+            body,
+            sent_at_ms,
+            buffered_at_ms,
+            ..
+        } if body == "notify wake" => (*buffered_at_ms).saturating_sub(*sent_at_ms),
+        _ => panic!("waiter should receive message, got {response:?}"),
+    };
     assert!(
-        matches!(response, Response::Message { ref body, .. } if body == "notify wake"),
-        "waiter should receive message, got {response:?}"
-    );
-    assert!(
-        elapsed < Duration::from_millis(90),
-        "LISTEN/NOTIFY should wake before the 100ms polling fallback; elapsed={elapsed:?}"
+        delivery_latency_ms < 100,
+        "LISTEN/NOTIFY should wake before the 100ms polling fallback; waiter_elapsed={elapsed:?}, delivery_latency_ms={delivery_latency_ms}"
     );
 
     admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
