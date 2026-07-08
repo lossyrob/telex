@@ -2063,6 +2063,81 @@ fn real_process_copilot_attach_maps_session_and_loader_pid() {
 }
 
 #[test]
+fn real_process_copilot_bridge_attach_does_not_watch_loader_pid() {
+    let env = ProcessEnv::new("real-copilot-bridge-attach");
+    let session = "real-copilot-bridge-session";
+    let address = "addr:real-copilot-bridge-attach";
+    let mut cmd = env.command_with_session("ignored");
+    cmd.env_remove("TELEX_SESSION_ID")
+        .env("HOME", &env.home)
+        .env("USERPROFILE", &env.home)
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .env("COPILOT_LOADER_PID", u32::MAX.to_string())
+        .args([
+            "--json",
+            "--address",
+            address,
+            "copilot",
+            "attach",
+            "--copilot-bridge",
+            "--description",
+            "copilot bridge process test",
+        ]);
+    let attach = run_command_with_capture(cmd, &env.root, Duration::from_secs(8));
+    attach.assert_success("copilot bridge attach");
+    let attach_json = attach.json("copilot bridge attach");
+    assert_eq!(
+        attach_json.get("session_id").and_then(Value::as_str),
+        Some(session)
+    );
+
+    let status = env.daemon_status();
+    status.assert_success("daemon status after copilot bridge attach");
+    let status_json = status.json("daemon status after copilot bridge attach");
+    let member = status_json
+        .get("members")
+        .and_then(Value::as_array)
+        .unwrap()
+        .iter()
+        .find(|member| member.get("address").and_then(Value::as_str) == Some(address))
+        .expect("copilot bridge-attached member");
+    assert_eq!(
+        member.get("session_id").and_then(Value::as_str),
+        Some(session)
+    );
+    assert_eq!(
+        member
+            .get("watch_pids")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(0),
+        "bridge attach must not bind station liveness to the transient Copilot loader pid"
+    );
+    assert_eq!(
+        member.get("push_registered").and_then(Value::as_bool),
+        Some(true)
+    );
+
+    let status = env.run(
+        ["--json", "--address", address, "status"],
+        Duration::from_secs(4),
+    );
+    status.assert_success("status after copilot bridge attach");
+    let status_json = status.json("status after copilot bridge attach");
+    assert_eq!(
+        status_json
+            .get("daemon_members")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(1)
+    );
+    assert_eq!(
+        status_json.get("push_registered").and_then(Value::as_bool),
+        Some(true)
+    );
+}
+
+#[test]
 fn real_process_address_surfaces_report_deaf_and_foreign_state() {
     let env = ProcessEnv::new("real-visibility-surfaces");
     let receiver = "real-visibility-surfaces-receiver";

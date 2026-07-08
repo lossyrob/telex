@@ -84,6 +84,7 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
             info["deaf_since_ms"] = serde_json::json!(daemon_members[0].deaf_since_ms);
             info["deaf_for_ms"] = serde_json::json!(daemon_members[0].deaf_for_ms);
             info["deaf_warn"] = serde_json::json!(deaf_warn);
+            info["push_registered"] = serde_json::json!(daemon_members[0].push_registered);
             info["last_waiter_outcome"] = serde_json::json!(daemon_members[0].last_waiter_outcome);
             info["last_waiter_exit_code"] =
                 serde_json::json!(daemon_members[0].last_waiter_exit_code);
@@ -125,9 +126,18 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
                 .map(|v| v.to_string())
                 .unwrap_or_else(|| "null".to_string());
             println!(
-                "station_health {} pending={}{}",
+                "station_health {} pending={}{}{}",
                 health,
                 pending,
+                if info
+                    .get("push_registered")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false)
+                {
+                    " push"
+                } else {
+                    ""
+                },
                 if info
                     .get("deaf_warn")
                     .and_then(|v| v.as_bool())

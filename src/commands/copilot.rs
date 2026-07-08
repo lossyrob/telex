@@ -680,8 +680,14 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
         }
     };
     let mut watch_pid = Vec::new();
-    if let Some(pid) = copilot_loader_pid() {
-        watch_pid.push(WatchPidSpec::anchor(pid));
+    if !args.copilot_bridge {
+        if let Some(pid) = copilot_loader_pid() {
+            watch_pid.push(WatchPidSpec::anchor(pid));
+        }
+    } else if let Some(pid) = copilot_loader_pid() {
+        eprintln!(
+            "telex copilot attach: ignoring COPILOT_LOADER_PID={pid} for bridge mode; bridge heartbeat is the push liveness signal"
+        );
     }
     let on_deliver = if args.copilot_bridge {
         provision_bridge(ctx, &session)

@@ -60,6 +60,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                         "station_health": member.station_health,
                         "health_detail": member.health_detail,
                         "waiters": member.waiters,
+                        "push_registered": member.push_registered,
                         "live_waiters_count": member.live_waiters_count,
                         "pending_unconsumed_count": member.pending_unconsumed_count,
                         "unattended_since_ms": member.unattended_since_ms,
@@ -92,7 +93,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                 } else {
                     for station in &stations {
                         println!(
-                            "{} session={}{} waiters={} pending={} health={}{}",
+                            "{} session={}{} waiters={} pending={} health={}{}{}",
                             station["address"].as_str().unwrap_or("?"),
                             station["session_id"].as_str().unwrap_or("?"),
                             if station["foreign_session"].as_bool().unwrap_or(false) {
@@ -103,6 +104,11 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                             station["live_waiters_count"],
                             station["pending_unconsumed_count"],
                             station["station_health"].as_str().unwrap_or("?"),
+                            if station["push_registered"].as_bool().unwrap_or(false) {
+                                " push"
+                            } else {
+                                ""
+                            },
                             if station["deaf_warn"].as_bool().unwrap_or(false) {
                                 " DEAF"
                             } else {
