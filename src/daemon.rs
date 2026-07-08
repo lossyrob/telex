@@ -4409,6 +4409,9 @@ async fn wait_for_message_with_idle_ttl(
         }
     };
     loop {
+        let store_notification = state
+            .store_notify(&store_key)
+            .map(|notify| notify.notified_owned());
         if state.is_draining() {
             waiter_guard.suppress_abnormal_on_drop();
             return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
@@ -4604,8 +4607,7 @@ async fn wait_for_message_with_idle_ttl(
             let remaining = deadline.saturating_duration_since(now);
             let ttl_remaining = idle_deadline.saturating_duration_since(now);
             sleep_until_next_poll_or_notify(
-                &state,
-                &store_key,
+                store_notification,
                 remaining.min(ttl_remaining).min(Duration::from_millis(100)),
             )
             .await;
@@ -4631,8 +4633,7 @@ async fn wait_for_message_with_idle_ttl(
                 return Response::PresenceEnded;
             }
             sleep_until_next_poll_or_notify(
-                &state,
-                &store_key,
+                store_notification,
                 idle_deadline
                     .saturating_duration_since(now)
                     .min(Duration::from_millis(250)),
@@ -4642,13 +4643,16 @@ async fn wait_for_message_with_idle_ttl(
     }
 }
 
-async fn sleep_until_next_poll_or_notify(state: &DaemonState, store_key: &str, duration: Duration) {
+async fn sleep_until_next_poll_or_notify(
+    notification: Option<impl std::future::Future<Output = ()>>,
+    duration: Duration,
+) {
     if duration.is_zero() {
         return;
     }
-    if let Some(notify) = state.store_notify(store_key) {
+    if let Some(notification) = notification {
         tokio::select! {
-            _ = notify.notified() => {}
+            _ = notification => {}
             _ = tokio::time::sleep(duration) => {}
         }
     } else {
