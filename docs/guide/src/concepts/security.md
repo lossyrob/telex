@@ -33,6 +33,13 @@ file, or the Postgres schema). Treat the store as sensitive if the messages are.
 A Postgres backend is shared across the machines and users configured to use it.
 Scope access with database and schema grants, and use a dedicated `--schema`.
 
+## Reporting a vulnerability
+
+Report security issues privately, not through public issues or pull requests. See
+the repository
+[security policy](https://github.com/lossyrob/telex/blob/main/SECURITY.md) for the
+private reporting channel and what to expect.
+
 ---
 
 Next: [Glossary](glossary.md)

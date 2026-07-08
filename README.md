@@ -146,6 +146,8 @@ against the retained delivery buffer.
 - **[telex-console/](telex-console/README.md)**: the read-only, live-tail TUI for watching messages
 - **[DESIGN.md](docs/design/DESIGN.md)**: the working design
 - **[DECISIONS.md](docs/design/DECISIONS.md)**: the decision log
+- **[SECURITY.md](SECURITY.md)**: supported versions and how to report a vulnerability
+- **[CONTRIBUTING.md](CONTRIBUTING.md)**: adding a backend, running the conformance suite, and [releasing](docs/developing/releasing.md)
 - **[DISPATCH.md](docs/design/proposals/DISPATCH.md)**: forward-looking discovery & dispatch (broadcast, Contract-Net)
 - **[EXTENSIONS.md](docs/design/proposals/EXTENSIONS.md)**: proposal for extensions & capability cards (how addresses advertise what they do)
 - **[TELEX.md](TELEX.md)** / **[PRODUCT-THESIS.md](PRODUCT-THESIS.md)**: the name, the metaphor, the thesis
