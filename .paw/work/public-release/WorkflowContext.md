@@ -39,7 +39,7 @@ Issue URL: https://github.com/lossyrob/telex/issues/59
 Remote: origin
 Artifact Lifecycle: commit-and-clean
 Artifact Paths: auto-derived
-Additional Inputs: none
+Additional Inputs: streamliner-context=streamliner/context.md
 
 ## Control State
 
