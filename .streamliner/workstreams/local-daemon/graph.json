@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-08T18:35:00.000Z",
+  "updatedAt": "2026-07-08T18:50:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -277,15 +277,21 @@
       ]
     },
     {
-      "id": "validation-harness",
+      "id": "release-confidence-validation",
       "type": "task",
-      "title": "Validation harness + Tier 1/2 loop (chaos + Entra-PG multi-host)",
-      "summary": "Derive the machine-checkable invariant suite from the merged design (no-dup / no-loss / single-writer / non-destructive-reaping / idle-wakeable / upgrade-transparent) and build a portable harness + synthetic session driver + fault injector. Run the Tier 1 (SQLite chaos: many sessions, daemon kill/restart mid-delivery, competing daemons, handoff under load) and Tier 2 (real Entra-PG, multi-host via containers: cross-machine lease/reclaim/fence under daemon deaths/partitions) validation loop; file/repair/rerun. Invariants + observability hooks are derived against the implemented reality (Status surface is the seam); missing observability is a bounded repair issue back to daemon-core.",
+      "title": "Release confidence validation (install, upgrade, Copilot bridge, Postgres smoke)",
+      "summary": "Practical validation pass over the real release and completed local-daemon/Copilot bridge path, replacing the oversized validation harness + AKS scale rig for this workstream. Validate release install/upgrade, Copilot bridge push, idle-drain duplicate prevention, bridge liveness/self-stop, daemon restart durability, status/gc/export observability, and a real Postgres/Entra two-session smoke. Produce a concise validation report for the hardening gate; file/fix any gaps found.",
       "status": "ready",
       "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 78
+      },
       "dependsOn": [
         "release-upgrade"
       ]
@@ -334,35 +340,6 @@
       ]
     },
     {
-      "id": "aks-scale-spike",
-      "type": "research",
-      "title": "AKS large-network harness spike",
-      "summary": "Prove the approach for a large network of telex hosts on AKS: N daemon pods (one local exchange per pod = a host) + M synthetic sessions driving attach/wait/ack/send against the shared Entra PG, with fault injection. Validate feasibility, orchestration, cost, and the metrics/oracle pipeline. Runs in parallel with validation-harness; its output shapes scale-rig-and-loop.",
-      "status": "ready",
-      "attention": "focus",
-      "repoIds": [
-        "telex"
-      ],
-      "dependsOn": [
-        "release-upgrade"
-      ]
-    },
-    {
-      "id": "scale-rig-and-loop",
-      "type": "task",
-      "title": "AKS scale rig + scale/stress loop (last)",
-      "summary": "Build the full AKS large-network scale rig (reusing the synthetic driver from validation-harness, informed by aks-scale-spike) and run the scale/stress validation loop against the Entra PG: large attendee counts, churn, contention, throughput, and partition/upgrade-under-load. Measures and closes the carried perf issues (#26 per-tick scan index, #27 mark_delivered cap, #24 registry GC). Produces the scale evidence for the hardening gate.",
-      "status": "planned",
-      "attention": "watch",
-      "repoIds": [
-        "telex"
-      ],
-      "dependsOn": [
-        "validation-harness",
-        "aks-scale-spike"
-      ]
-    },
-    {
       "id": "hardening-gate",
       "type": "gate",
       "title": "Hardening gate (validation report)",
@@ -373,7 +350,7 @@
         "telex"
       ],
       "dependsOn": [
-        "scale-rig-and-loop"
+        "release-confidence-validation"
       ]
     },
     {
@@ -449,13 +426,11 @@
     },
     {
       "id": "hardened",
-      "title": "System hardened (validation loop)",
-      "summary": "The validation-loop wave earned rollout confidence: Tier 1/2 chaos + Entra-PG multi-host + AKS scale exercised, gaps repaired and reruns passed, perf issues #26/#27/#24 closed, remaining risk explicitly accepted.",
+      "title": "System hardened (release confidence validation)",
+      "summary": "The practical release-confidence validation earned rollout confidence: release install/upgrade, Copilot bridge push, idle/liveness regressions, daemon restart durability, status/export diagnostics, and Postgres/Entra smoke exercised; gaps repaired or explicitly accepted.",
       "status": "planned",
       "nodeIds": [
-        "validation-harness",
-        "aks-scale-spike",
-        "scale-rig-and-loop",
+        "release-confidence-validation",
         "hardening-gate"
       ]
     },
