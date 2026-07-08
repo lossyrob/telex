@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-08T05:45:00.000Z",
+  "updatedAt": "2026-07-08T18:35:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -281,8 +281,8 @@
       "type": "task",
       "title": "Validation harness + Tier 1/2 loop (chaos + Entra-PG multi-host)",
       "summary": "Derive the machine-checkable invariant suite from the merged design (no-dup / no-loss / single-writer / non-destructive-reaping / idle-wakeable / upgrade-transparent) and build a portable harness + synthetic session driver + fault injector. Run the Tier 1 (SQLite chaos: many sessions, daemon kill/restart mid-delivery, competing daemons, handoff under load) and Tier 2 (real Entra-PG, multi-host via containers: cross-machine lease/reclaim/fence under daemon deaths/partitions) validation loop; file/repair/rerun. Invariants + observability hooks are derived against the implemented reality (Status surface is the seam); missing observability is a bounded repair issue back to daemon-core.",
-      "status": "planned",
-      "attention": "watch",
+      "status": "ready",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],
@@ -318,8 +318,8 @@
       "type": "task",
       "title": "Release-based telex upgrade UX",
       "summary": "Add the standard user-facing `telex upgrade` path after public releases exist: discover latest or explicit GitHub release, select the correct platform asset, download and verify checksum, then install through the versioned layout from #6. `upgrade --from <binary>` remains the local/manual path; this node adds release discovery/download/checksum behavior and actionable failures for missing assets, checksum mismatch, unsupported platforms, or incompatible versions.",
-      "status": "ready",
-      "attention": "focus",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -338,8 +338,8 @@
       "type": "research",
       "title": "AKS large-network harness spike",
       "summary": "Prove the approach for a large network of telex hosts on AKS: N daemon pods (one local exchange per pod = a host) + M synthetic sessions driving attach/wait/ack/send against the shared Entra PG, with fault injection. Validate feasibility, orchestration, cost, and the metrics/oracle pipeline. Runs in parallel with validation-harness; its output shapes scale-rig-and-loop.",
-      "status": "planned",
-      "attention": "watch",
+      "status": "ready",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],
