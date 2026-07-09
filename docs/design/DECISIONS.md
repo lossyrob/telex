@@ -1876,3 +1876,51 @@ its own ADR: a `src/commands/<harness>.rs` module with the `include_str!` consta
 with `source: <harness>/plugin`; and (if the harness ships a `bridge/`) a
 `node --check <harness>/bridge/<file>` gate in `.github/workflows/ci.yml`.
 
+## 0045 — Copilot pull fallback uses prepared single-shot runs
+
+- **Date:** 2026-07-09
+- **Status:** Accepted (issue #88)
+
+**Context.** Copilot push delivery depends on an in-session extension and the experimental
+`extensions_reload` tool. `telex wait --out-dir` already provides a durable, single-shot
+pull primitive, but the Copilot workflow exposed it only through a handwritten Windows
+PowerShell recipe. There was no Telex-owned cross-platform launcher, no idempotent run
+identity, and no enforcement preventing the same station from registering push and a live
+waiter simultaneously.
+
+**Decision.** Keep extension push preferred and add `telex copilot fallback prepare`.
+Preparation records one current, versioned run per `(store, session, address)`, creates a
+unique owner-private artifact directory, and returns structured launcher argv plus a
+shell-ready command. Repeating preparation before terminal `exit.code` returns the same
+run. Unix launches the current telex executable directly. Windows uses a generated
+PowerShell file because Copilot detached bare-executable launch has been observed to no-op;
+the generated file contains only the exact executable and generated run path, while
+address/session/options remain in the private JSON manifest. The Copilot task runner still
+owns detachment and completion wakeups; Telex runs one wait and exits.
+
+The hidden prepared-run command is the push-to-pull transition boundary. It first verifies
+that the run is current and exclusively claimed, requires daemon protocol 1.4, refuses a
+live bridge unless force was explicit, atomically clears the member's opaque `on_deliver`
+handler, verifies the clear, removes the address's bridge binding, and only then enters
+`wait --out-dir`. A setup failure writes the same terminal status/exit artifacts as a wait
+failure. Pull-to-push is deliberately asymmetric: push registration rejects a live waiter,
+so the agent explicitly runs `station stop` before `copilot attach --copilot-bridge`.
+Messages remain durable during that safe uncovered interval.
+
+The harness-neutral daemon protocol adds optional
+`Register.replace_on_deliver` (minor version 4), rejects `Wait` while an on-deliver handler
+is registered, and rejects on-deliver registration while a waiter is live. Status derives
+neutral `delivery_mode` values (`push`, `pull`, `conflict`) separately from instantaneous
+`station_health`; Copilot documentation interprets `pull` as fallback. `conflict` is a
+defensive version-skew/race tripwire, not a supported steady state. The root generic skill
+remains harness-neutral.
+
+**Consequences.** A Copilot session with extensions unavailable can remain reachable on
+macOS, Windows, or Linux without embedding a platform script in its prompt or running an
+infinite loop. A launcher that never starts leaves push untouched; duplicate prepare/run
+attempts converge on one run and cannot overwrite its terminal artifacts. Older daemons
+fail closed before a waiter can coexist with push. The agent still owns message-id dedupe,
+acknowledgement/disposition, terminal-artifact processing, and re-arming one run at a time.
+Targeted CI executes the generated launcher contract on macOS and Windows, while the normal
+Linux suite exercises the Unix path. Completed run directories remain as local operational
+artifacts; automated retention/garbage collection is outside this decision.

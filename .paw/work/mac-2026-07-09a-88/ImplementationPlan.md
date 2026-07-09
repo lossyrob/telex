@@ -101,7 +101,7 @@ Copilot adapter and embedded Copilot skill.
 - [x] **Phase 1: Enforce delivery exclusivity and expose mode** - Add the protocol, daemon gates, status model, and conflict guard.
 - [x] **Phase 2: Add the Copilot fallback run lifecycle** - Implement idempotent preparation, platform launch metadata, atomic push-to-pull transition, and one-shot execution.
 - [x] **Phase 3: Exercise fallback cross-platform** - Add end-to-end process coverage and macOS/Windows CI execution.
-- [ ] **Phase 4: Documentation** - Update the binary-owned Copilot workflow, operator guide, ADR, and as-built Docs.md.
+- [x] **Phase 4: Documentation** - Update the binary-owned Copilot workflow, operator guide, ADR, and as-built Docs.md.
 
 ## Phase Candidates
 
@@ -282,17 +282,17 @@ Copilot adapter and embedded Copilot skill.
 
 #### Automated Verification
 
-- [ ] Embedded-skill boundary tests pass:
+- [x] Embedded-skill boundary tests pass:
   `cargo test --test copilot_plugin`.
-- [ ] Documentation builds with `mdbook build docs/guide` when mdBook is
+- [x] Documentation builds with `mdbook build docs/guide` when mdBook is
   available.
 
 #### Manual Verification
 
-- [ ] `telex copilot skill` gives one platform-appropriate fallback sequence
+- [x] `telex copilot skill` gives one platform-appropriate fallback sequence
   with no infinite loop and no agent-authored platform script.
-- [ ] Root `telex skill` remains harness-neutral.
-- [ ] Docs.md accurately matches the final CLI and artifact contract.
+- [x] Root `telex skill` remains harness-neutral.
+- [x] Docs.md accurately matches the final CLI and artifact contract.
 
 ---
 

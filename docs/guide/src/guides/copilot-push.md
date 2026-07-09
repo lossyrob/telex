@@ -72,9 +72,39 @@ Inspect stale bridge files left by other sessions with `telex copilot gc --dry-r
 
 ## Fallback
 
-If the bridge cannot load (extensions disabled), push is unavailable. Surface that
-plainly or fall back to generic [pull mode](agent-pull.md); do not silently spin a
-waiter.
+If the bridge cannot load (for example, extensions are disabled), surface that
+plainly and prepare one Telex-owned pull fallback run:
+
+```sh
+telex --address <addr> copilot fallback prepare --description "<work>"
+```
+
+The JSON result contains a unique `run_dir` plus `launcher.program`,
+`launcher.args`, and a ready-to-run `launcher.command`. Run that launcher as one
+fully detached Copilot task. Unix uses the current telex binary directly; Windows
+uses a generated PowerShell file for the detached-task compatibility path. Telex
+does not detach the task itself and does not run an internal delivery loop.
+
+Preparation is idempotent until the run writes `exit.code`, and it leaves push
+unchanged if the launcher never starts. The running launcher atomically clears
+push before entering exactly one [pull-mode wait](agent-pull.md). On completion,
+read `exit.code` first, then the exact run's `delivery.json`/`message.json`; ack
+and dedupe primary deliveries by message id before preparing the next run.
+
+`telex --address <addr> status` reports `delivery_mode` separately from
+`station_health`: `push` is bridge delivery, `pull` is the Copilot fallback, and
+`conflict` is a version-skew/race tripwire. The daemon rejects simultaneous push
+and pull coverage.
+
+To return to push, stop the waiter before binding the bridge:
+
+```sh
+telex --address <addr> station stop --session "$COPILOT_AGENT_SESSION_ID"
+telex --address <addr> copilot attach --copilot-bridge --description "<work>"
+```
+
+Then run `extensions_reload`. The version-matched `telex copilot skill` contains
+the full artifact, timeout, recovery, and re-arm procedure.
 
 ## Compatibility
 
