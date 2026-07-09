@@ -11138,20 +11138,7 @@ fn normalize_windows_path(path: &Path) -> String {
 mod tests {
     use super::*;
     use crate::daemon_ipc::{ERROR_UNAUTHORIZED, REDACTED_SECRET};
-
-    fn repo_test_dir(label: &str) -> PathBuf {
-        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.push("target");
-        path.push("daemon-p2-tests");
-        path.push(format!(
-            "{}-{}-{}",
-            label,
-            std::process::id(),
-            monotonic_nonce()
-        ));
-        std::fs::create_dir_all(&path).expect("create repo-local test dir");
-        path
-    }
+    use crate::ipc::test_support::short_runtime_root;
 
     #[test]
     fn singleton_hash_changes_with_protocol_major_and_config_root() {
@@ -11169,7 +11156,7 @@ mod tests {
 
     #[test]
     fn cap_paths_differ_for_protocol_major_parallel_daemons() {
-        let run_dir = repo_test_dir("cap-paths");
+        let run_dir = short_runtime_root();
         let n = DaemonPaths::for_key(
             SingletonKey::from_parts("user-a", PathBuf::from(r"C:\telex\root"), 1),
             &run_dir,
@@ -11279,7 +11266,7 @@ mod tests {
 
     #[tokio::test]
     async fn endpoint_bind_exclusivity_rejects_second_listener() {
-        let run_dir = repo_test_dir("bind-exclusive");
+        let run_dir = short_runtime_root();
         let paths = DaemonPaths::for_key(
             SingletonKey::from_parts(
                 format!("user-{}", std::process::id()),
@@ -11299,7 +11286,7 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn windows_pipe_listener_rearms_while_client_is_connected() {
-        let run_dir = repo_test_dir("pipe-rearm");
+        let run_dir = short_runtime_root();
         let paths = DaemonPaths::for_key(
             SingletonKey::from_parts(
                 format!("user-{}", std::process::id()),

@@ -256,11 +256,7 @@ fn process_test_root(id: usize) -> PathBuf {
 
 #[cfg(not(windows))]
 fn process_test_root(id: usize) -> PathBuf {
-    std::env::current_dir()
-        .expect("current dir")
-        .join("target")
-        .join("t")
-        .join(format!("tx{}-{}", std::process::id(), id))
+    PathBuf::from("/tmp").join(format!("tx{}-{id}", std::process::id()))
 }
 
 #[cfg(windows)]

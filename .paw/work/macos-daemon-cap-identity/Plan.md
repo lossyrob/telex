@@ -9,7 +9,8 @@ Implement the macOS equivalents of the existing Linux daemon-authentication prim
 1. Add macOS process start-time capture in `src/session_watch.rs` using `proc_pidinfo(PROC_PIDTBSDINFO)`.
 2. Add macOS Unix-socket peer PID/UID lookup, executable-path lookup, and start-time verification in `src/daemon.rs`.
 3. Add unit coverage in `src/session_watch.rs` and process integration coverage in `tests/daemon_process_sqlite.rs` that proves a spawned macOS daemon publishes `server_start_time` and accepts a verified client connection.
-4. Run formatting, focused daemon tests, Clippy, and the workspace test suite.
+4. Expand the test-fixture scope to keep daemon, registry, and process-integration Unix socket paths within macOS `SUN_LEN`, including when the repository worktree path is long.
+5. Run formatting, focused daemon tests, Clippy, and the workspace test suite.
 
 ## Key Decisions
 
@@ -24,7 +25,7 @@ Implement the macOS equivalents of the existing Linux daemon-authentication prim
 
 - Do not make either identity field optional during authentication.
 - Do not change protocol versions or the cap-file schema.
-- Do not add new dependencies or alter non-macOS platform behavior.
+- Do not add new dependencies or alter production behavior on other platforms.
 - Do not update user-facing documentation; this restores documented supported-platform behavior without changing the interface.
 
 ## Success Criteria
