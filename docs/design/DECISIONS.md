@@ -1913,7 +1913,10 @@ is registered, and rejects on-deliver registration while a waiter is live. Statu
 neutral `delivery_mode` values (`push`, `pull`, `conflict`) separately from instantaneous
 `station_health`; Copilot documentation interprets `pull` as fallback. `conflict` is a
 defensive version-skew/race tripwire, not a supported steady state. The root generic skill
-remains harness-neutral.
+remains harness-neutral. The final opposite-mode check and own-mode installation are
+serialized by a weakly retained per-station admission mutex, so concurrent push and pull
+clients share one linearization point; expired mutex entries are pruned on later admission
+lookups rather than growing a durable lock registry.
 
 **Consequences.** A Copilot session with extensions unavailable can remain reachable on
 macOS, Windows, or Linux without embedding a platform script in its prompt or running an
