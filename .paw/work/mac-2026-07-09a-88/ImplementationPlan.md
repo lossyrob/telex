@@ -298,13 +298,14 @@ Copilot adapter and embedded Copilot skill.
 
 ## Final Verification
 
-- [ ] `cargo fmt --check`
-- [ ] `cargo test --workspace`
-- [ ] `cargo build --workspace`
-- [ ] `cargo clippy --workspace -- -D warnings`
-- [ ] `node --check copilot/bridge/extension.mjs`
-- [ ] `node --test copilot/bridge/busy-state.test.mjs`
-- [ ] Configured single-model final review by `claude-opus-4.8` has no blocking
+- [x] `cargo fmt --check`
+- [x] `cargo test --workspace`
+- [x] `cargo build --workspace`
+- [ ] `cargo clippy --workspace -- -D warnings` (repository baseline has 31
+  pre-existing errors; the fallback code adds none)
+- [x] `node --check copilot/bridge/extension.mjs`
+- [x] `node --test copilot/bridge/busy-state.test.mjs`
+- [x] Configured single-model final review by `claude-opus-4.8` has no blocking
   findings.
 - [ ] Issue #88 acceptance is satisfied end to end; PR uses `Closes #88`.
 
