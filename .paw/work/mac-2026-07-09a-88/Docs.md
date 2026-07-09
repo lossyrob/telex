@@ -191,13 +191,15 @@ The process-level fallback test:
 ```sh
 cargo test --no-default-features --features sqlite \
   --test daemon_process_sqlite \
-  real_process_copilot_fallback_cross_platform
+  copilot_fallback
 ```
 
-It provisions push, prepares and executes the generated launcher, verifies pull
-mode and a live waiter, sends and acknowledges a message through the exact run
-artifacts, re-arms, rejects a duplicate launcher, rejects push while pull is
-live, then performs the explicit stop-and-return-to-push sequence.
+The cold-start case creates pull fallback without a prior bridge, then receives
+and acknowledges two messages across two runs. The transition case provisions
+push, executes the generated launcher, verifies pull mode and metadata
+inheritance, sends and acknowledges through the exact run artifacts, re-arms,
+rejects a duplicate launcher, rejects push while pull is live, then performs the
+explicit stop-and-return-to-push sequence.
 
 GitHub Actions runs this focused test on `macos-latest` and `windows-latest`.
 The normal workspace suite exercises the Unix path on Linux.

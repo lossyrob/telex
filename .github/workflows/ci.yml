@@ -71,7 +71,7 @@ jobs:
           toolchain: stable
 
       - name: Exercise generated fallback launcher
-        run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite real_process_copilot_fallback_cross_platform
+        run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite copilot_fallback
 
   feature-check:
     name: Feature combinations build

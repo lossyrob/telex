@@ -2315,6 +2315,151 @@ fn real_process_copilot_attach_maps_session_and_loader_pid() {
 }
 
 #[test]
+fn real_process_copilot_fallback_cold_start() {
+    let env = ProcessEnv::new("real-copilot-fallback-cold");
+    let receiver = "fallback-cold-receiver";
+    let receiver_addr = "addr:fallback-cold-receiver";
+    let sender = "fallback-cold-sender";
+    let sender_addr = "addr:fallback-cold-sender";
+    let copilot_home = env.root.join("copilot-home");
+    std::fs::create_dir_all(&copilot_home).expect("create isolated Copilot home");
+
+    let prepare = || {
+        let mut cmd = env.command_with_session(receiver);
+        cmd.env_remove("TELEX_SESSION_ID")
+            .env("COPILOT_AGENT_SESSION_ID", receiver)
+            .env("COPILOT_LOADER_PID", std::process::id().to_string())
+            .env("HOME", &copilot_home)
+            .env("USERPROFILE", &copilot_home)
+            .args([
+                "--json",
+                "--address",
+                receiver_addr,
+                "copilot",
+                "fallback",
+                "prepare",
+                "--description",
+                "cold-start fallback test",
+                "--timeout-ms",
+                "10000",
+            ]);
+        let output = run_command_with_capture(cmd, &env.root, Duration::from_secs(8));
+        output.assert_success("prepare cold-start fallback");
+        output.json("prepare cold-start fallback")
+    };
+    let launcher_command = |prepared: &Value| {
+        let launcher = prepared.get("launcher").expect("launcher object");
+        let mut cmd = Command::new(
+            launcher
+                .get("program")
+                .and_then(Value::as_str)
+                .expect("launcher program"),
+        );
+        for arg in launcher
+            .get("args")
+            .and_then(Value::as_array)
+            .expect("launcher args")
+        {
+            cmd.arg(arg.as_str().expect("launcher arg string"));
+        }
+        env.configure_command(&mut cmd, receiver);
+        cmd.env("HOME", &copilot_home)
+            .env("USERPROFILE", &copilot_home)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        cmd
+    };
+
+    env.attach(sender, sender_addr);
+    let run_delivery = |prepared: &Value, body: &str| {
+        let run_dir = PathBuf::from(
+            prepared
+                .get("run_dir")
+                .and_then(Value::as_str)
+                .expect("prepared run_dir"),
+        );
+        let waiter = launcher_command(prepared)
+            .spawn()
+            .expect("spawn cold-start fallback launcher");
+        wait_until_path_exists(&run_dir.join("wait.pid"), Duration::from_secs(5));
+
+        let status = env.run_with_session(
+            receiver,
+            ["--json", "--address", receiver_addr, "status"],
+            Duration::from_secs(5),
+        );
+        status.assert_success("cold-start fallback status");
+        assert_eq!(
+            status
+                .json("cold-start fallback status")
+                .get("delivery_mode")
+                .and_then(Value::as_str),
+            Some("pull")
+        );
+
+        let sent = env.run_with_session(
+            sender,
+            [
+                "--json",
+                "--address",
+                sender_addr,
+                "send",
+                "--session",
+                sender,
+                "--to",
+                receiver_addr,
+                "--body",
+                body,
+            ],
+            Duration::from_secs(5),
+        );
+        sent.assert_success("send to cold-start fallback");
+        let (code, timed_out) = wait_status_with_timeout(waiter, Duration::from_secs(8));
+        assert!(!timed_out);
+        assert_eq!(code, Some(0));
+
+        let delivery: Value = serde_json::from_slice(
+            &std::fs::read(run_dir.join("delivery.json")).expect("cold-start fallback delivery"),
+        )
+        .expect("parse cold-start fallback delivery");
+        assert_eq!(
+            delivery.pointer("/message/body").and_then(Value::as_str),
+            Some(body)
+        );
+        let message_id = delivery
+            .pointer("/message/id")
+            .and_then(Value::as_i64)
+            .expect("cold-start fallback message id");
+        let message_id = message_id.to_string();
+        let ack = env.run_with_session(
+            receiver,
+            [
+                "--json",
+                "--address",
+                receiver_addr,
+                "ack",
+                "--session",
+                receiver,
+                "--id",
+                &message_id,
+            ],
+            Duration::from_secs(5),
+        );
+        ack.assert_success("ack cold-start fallback delivery");
+        run_dir
+    };
+
+    let first = prepare();
+    let first_dir = run_delivery(&first, "cold-start first delivery");
+    let second = prepare();
+    let second_dir = run_delivery(&second, "cold-start second delivery");
+    assert_ne!(
+        first_dir, second_dir,
+        "re-arm must allocate a fresh run after terminal artifacts are processed"
+    );
+}
+
+#[test]
 fn real_process_copilot_fallback_cross_platform() {
     let env = ProcessEnv::new("real-copilot-fallback");
     let receiver = "fallback-receiver";
@@ -2341,8 +2486,6 @@ fn real_process_copilot_fallback_cross_platform() {
             "copilot",
             "fallback",
             "prepare",
-            "--description",
-            "cross-platform fallback test",
             "--timeout-ms",
             "10000",
         ]);
@@ -2459,6 +2602,13 @@ fn real_process_copilot_fallback_cross_platform() {
     assert_eq!(
         pull_status.get("push_registered").and_then(Value::as_bool),
         Some(false)
+    );
+    assert_eq!(
+        pull_status
+            .pointer("/daemon_members/0/description")
+            .and_then(Value::as_str),
+        Some("cross-platform fallback test"),
+        "fallback transition must inherit existing station metadata"
     );
 
     env.attach(sender, sender_addr);
