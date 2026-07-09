@@ -46,7 +46,7 @@ fn store_lock_dir() -> Result<std::path::PathBuf> {
     #[cfg(windows)]
     let base = std::env::var_os("LOCALAPPDATA")
         .map(std::path::PathBuf::from)
-        .or_else(|| dirs::data_local_dir())
+        .or_else(dirs::data_local_dir)
         .ok_or_else(|| anyhow!("cannot resolve LOCALAPPDATA for store lock directory"))?;
 
     #[cfg(not(windows))]
@@ -155,26 +155,25 @@ fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
 
     let sid = windows_current_user_sid()?;
     let sddl = windows_dir_security_sddl(path)?;
-    if !windows_owner_private_sddl_is_strict(&sddl, &sid) {
-        if std::fs::read_dir(path)
+    if !windows_owner_private_sddl_is_strict(&sddl, &sid)
+        && std::fs::read_dir(path)
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(false)
-        {
-            let _ = std::fs::remove_dir(path);
-            create_windows_owner_only_dir(path).with_context(|| {
-                format!("recreating owner-private store lock directory {:?}", path)
-            })?;
-            let recreated = windows_dir_security_sddl(path)?;
-            if windows_owner_private_sddl_is_strict(&recreated, &sid) {
-                return Ok(());
-            }
+    {
+        let _ = std::fs::remove_dir(path);
+        create_windows_owner_only_dir(path).with_context(|| {
+            format!("recreating owner-private store lock directory {:?}", path)
+        })?;
+        let recreated = windows_dir_security_sddl(path)?;
+        if windows_owner_private_sddl_is_strict(&recreated, &sid) {
+            return Ok(());
         }
-        // Windows local app-data directories can carry inherited AppContainer/package ACEs that do
-        // not violate telex's cross-user store-lock invariant. We still reject non-local paths,
-        // reparse points, non-directories, and known broad/foreign SIDs in the parser tests; do not
-        // strand CI or normal local profiles solely because Windows preserved extra local package
-        // ACLs on the per-user lock directory.
     }
+    // Windows local app-data directories can carry inherited AppContainer/package ACEs that do
+    // not violate telex's cross-user store-lock invariant. We still reject non-local paths,
+    // reparse points, non-directories, and known broad/foreign SIDs in the parser tests; do not
+    // strand CI or normal local profiles solely because Windows preserved extra local package
+    // ACLs on the per-user lock directory.
     Ok(())
 }
 
@@ -245,7 +244,7 @@ fn create_windows_owner_only_dir(path: &std::path::Path) -> Result<()> {
         bInheritHandle: 0,
     };
     let wide_path = wide_null(path.as_os_str());
-    let ok = unsafe { CreateDirectoryW(wide_path.as_ptr(), &mut attrs) };
+    let ok = unsafe { CreateDirectoryW(wide_path.as_ptr(), &attrs) };
     unsafe {
         LocalFree(descriptor);
     }

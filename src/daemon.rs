@@ -1810,7 +1810,7 @@ fn spawn_daemon_process(exe: &Path) -> Result<()> {
             DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
             std::ptr::null(),
             std::ptr::null(),
-            &mut startup,
+            &startup,
             &mut process_info,
         )
     };
@@ -10208,9 +10208,7 @@ mod platform {
     }
 
     pub async fn connect(endpoint: &Endpoint) -> Result<ClientConn> {
-        let pipe_name = match endpoint {
-            Endpoint::WindowsPipe(name) => name,
-        };
+        let Endpoint::WindowsPipe(pipe_name) = endpoint;
         for _ in 0..20 {
             match ClientOptions::new().open(pipe_name) {
                 Ok(client) => return Ok(client),
@@ -10261,7 +10259,7 @@ mod platform {
                 wide.as_ptr(),
                 FILE_GENERIC_WRITE,
                 0,
-                &mut sa.attrs,
+                &sa.attrs,
                 CREATE_NEW,
                 FILE_ATTRIBUTE_NORMAL,
                 0,
@@ -10336,7 +10334,7 @@ mod platform {
                 8192,
                 8192,
                 0,
-                &mut sa.attrs,
+                &sa.attrs,
             )
         };
         if handle == INVALID_HANDLE_VALUE {
@@ -10357,7 +10355,7 @@ mod platform {
     fn create_owner_only_dir(path: &Path) -> Result<()> {
         let mut sa = owner_only_security_attributes()?;
         let wide = wide_null(path.as_os_str());
-        let ok = unsafe { CreateDirectoryW(wide.as_ptr(), &mut sa.attrs) };
+        let ok = unsafe { CreateDirectoryW(wide.as_ptr(), &sa.attrs) };
         if ok == 0 {
             let err = unsafe { GetLastError() };
             if err == ERROR_ALREADY_EXISTS {
@@ -10671,9 +10669,7 @@ mod platform {
         let info = process_identity(pid, None)?;
         let current = current_user_identity()?;
         if info.sid != current {
-            return Err(DaemonError::Unauthorized(format!(
-                "peer SID does not match current user SID"
-            )));
+            return Err(DaemonError::Unauthorized("peer SID does not match current user SID".to_string()));
         }
         Ok(())
     }

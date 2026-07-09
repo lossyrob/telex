@@ -537,6 +537,7 @@ fn make_tree_writable(path: &Path) -> Result<()> {
         #[cfg(unix)]
         perms.set_mode(perms.mode() | 0o200);
         #[cfg(not(unix))]
+        #[allow(clippy::permissions_set_readonly_false)]
         perms.set_readonly(false);
         std::fs::set_permissions(path, perms)?;
     }
