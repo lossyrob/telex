@@ -100,7 +100,7 @@ Copilot adapter and embedded Copilot skill.
 
 - [x] **Phase 1: Enforce delivery exclusivity and expose mode** - Add the protocol, daemon gates, status model, and conflict guard.
 - [x] **Phase 2: Add the Copilot fallback run lifecycle** - Implement idempotent preparation, platform launch metadata, atomic push-to-pull transition, and one-shot execution.
-- [ ] **Phase 3: Exercise fallback cross-platform** - Add end-to-end process coverage and macOS/Windows CI execution.
+- [x] **Phase 3: Exercise fallback cross-platform** - Add end-to-end process coverage and macOS/Windows CI execution.
 - [ ] **Phase 4: Documentation** - Update the binary-owned Copilot workflow, operator guide, ADR, and as-built Docs.md.
 
 ## Phase Candidates
@@ -245,14 +245,14 @@ Copilot adapter and embedded Copilot skill.
 
 #### Automated Verification
 
-- [ ] `cargo test --test daemon_process_sqlite copilot_fallback` passes locally
+- [x] `cargo test --test daemon_process_sqlite copilot_fallback` passes locally
   on macOS.
 - [ ] The targeted GitHub Actions job passes on macOS and Windows.
-- [ ] Existing workspace tests remain green: `cargo test --workspace`.
+- [x] Existing workspace tests remain green: `cargo test --workspace`.
 
 #### Manual Verification
 
-- [ ] The macOS launch path uses direct executable argv.
+- [x] The macOS launch path uses direct executable argv.
 - [ ] The Windows launch path uses the generated PowerShell file and no
   prompt-embedded wrapper body.
 

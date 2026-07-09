@@ -51,6 +51,28 @@ jobs:
         continue-on-error: true
         run: cargo clippy --workspace -- -D warnings
 
+  copilot-fallback:
+    name: Copilot fallback E2E (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Exercise generated fallback launcher
+        run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite real_process_copilot_fallback_cross_platform
+
   feature-check:
     name: Feature combinations build
     runs-on: ubuntu-latest
