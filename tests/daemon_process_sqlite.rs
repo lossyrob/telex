@@ -630,6 +630,12 @@ fn real_process_01_concurrent_first_use() {
         cap.get("instance_id").and_then(Value::as_str),
         Some(owner_ids[0].as_str())
     );
+    assert!(
+        cap.get("server_start_time")
+            .and_then(Value::as_u64)
+            .is_some_and(|start_time| start_time > 0),
+        "daemon cap file must include server_start_time: {cap}"
+    );
     assert_ne!(env.daemon_pid(), std::process::id());
 }
 

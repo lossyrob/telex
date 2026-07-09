@@ -1917,7 +1917,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         singleton_hash: paths.singleton_hash.clone(),
         protocol_major: paths.singleton.protocol_major,
         server_pid: Some(std::process::id()),
-        server_start_time: server_start_time,
+        server_start_time,
     };
     write_cap_file(&paths.cap_path, &cap)?;
     Ok(DaemonState {
@@ -1938,7 +1938,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
 
 fn current_process_start_time_for_cap() -> Result<Option<u64>> {
     let start_time = crate::session_watch::capture_process_start_time(std::process::id());
-    if cfg!(any(target_os = "linux", windows)) && start_time.is_none() {
+    if cfg!(any(target_os = "linux", target_os = "macos", windows)) && start_time.is_none() {
         return Err(DaemonError::Unsupported {
             capability: "daemon cap server_start_time",
             message: "current process start time could not be captured".to_string(),
@@ -10034,18 +10034,16 @@ mod platform {
         expected_start_time: Option<u64>,
     ) -> Result<()> {
         let (pid, uid) = peer_pid_uid(conn)?;
+        let pid = u32::try_from(pid).map_err(|_| {
+            DaemonError::Unauthorized(format!("server pid {pid} cannot be represented as u32"))
+        })?;
         let current = unsafe { libc::geteuid() };
         if uid != current {
             return Err(DaemonError::Unauthorized(format!(
                 "server uid {uid} does not match client uid {current}"
             )));
         }
-        let exe = std::fs::canonicalize(format!("/proc/{pid}/exe")).map_err(|e| {
-            DaemonError::Unsupported {
-                capability: "client-side server executable verification",
-                message: format!("cannot verify /proc/{pid}/exe: {e}"),
-            }
-        })?;
+        let exe = server_executable(pid)?;
         if !same_canonical_path(&exe, expected_exe) {
             return Err(DaemonError::Unauthorized(format!(
                 "server executable {} does not match {}",
@@ -10053,10 +10051,7 @@ mod platform {
                 expected_exe.display()
             )));
         }
-        let start_time = linux_start_time_ticks(pid)?;
-        let pid = u32::try_from(pid).map_err(|_| {
-            DaemonError::Unauthorized(format!("server pid {pid} cannot be represented as u32"))
-        })?;
+        let start_time = server_process_start_time(pid)?;
         verify_expected_peer_identity(pid, Some(start_time), expected_pid, expected_start_time)?;
         Ok(())
     }
@@ -10083,16 +10078,97 @@ mod platform {
         Ok((cred.pid, cred.uid))
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    fn peer_pid_uid(conn: &UnixStream) -> Result<(libc::pid_t, libc::uid_t)> {
+        let mut pid: libc::pid_t = 0;
+        let mut pid_len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+        let pid_rc = unsafe {
+            libc::getsockopt(
+                conn.as_raw_fd(),
+                libc::SOL_LOCAL,
+                libc::LOCAL_PEERPID,
+                &mut pid as *mut _ as *mut libc::c_void,
+                &mut pid_len,
+            )
+        };
+        if pid_rc != 0 {
+            return Err(io_err(
+                "reading unix peer pid",
+                std::io::Error::last_os_error(),
+            ));
+        }
+
+        let mut uid: libc::uid_t = 0;
+        let mut gid: libc::gid_t = 0;
+        let uid_rc = unsafe { libc::getpeereid(conn.as_raw_fd(), &mut uid, &mut gid) };
+        if uid_rc != 0 {
+            return Err(io_err(
+                "reading unix peer credentials",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        Ok((pid, uid))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     fn peer_pid_uid(_conn: &UnixStream) -> Result<(libc::pid_t, libc::uid_t)> {
         Err(DaemonError::Unsupported {
             capability: "unix peer credential verification",
-            message: "SO_PEERCRED implementation is only wired for Linux in P2".into(),
+            message: "peer credential verification is only wired for Linux and macOS".into(),
         })
     }
 
     #[cfg(target_os = "linux")]
-    fn linux_start_time_ticks(pid: libc::pid_t) -> Result<u64> {
+    fn server_executable(pid: u32) -> Result<PathBuf> {
+        std::fs::canonicalize(format!("/proc/{pid}/exe")).map_err(|e| DaemonError::Unsupported {
+            capability: "client-side server executable verification",
+            message: format!("cannot verify /proc/{pid}/exe: {e}"),
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn server_executable(pid: u32) -> Result<PathBuf> {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        let bytes = unsafe {
+            libc::proc_pidpath(
+                pid as libc::c_int,
+                buffer.as_mut_ptr() as *mut libc::c_void,
+                buffer.len() as u32,
+            )
+        };
+        if bytes <= 0 {
+            return Err(DaemonError::Unsupported {
+                capability: "client-side server executable verification",
+                message: format!(
+                    "cannot resolve executable path for pid {pid}: {}",
+                    std::io::Error::last_os_error()
+                ),
+            });
+        }
+        buffer.truncate(bytes as usize);
+        if buffer.last() == Some(&0) {
+            buffer.pop();
+        }
+        let path = PathBuf::from(OsString::from_vec(buffer));
+        std::fs::canonicalize(&path).map_err(|e| DaemonError::Unsupported {
+            capability: "client-side server executable verification",
+            message: format!("cannot canonicalize {} for pid {pid}: {e}", path.display()),
+        })
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn server_executable(_pid: u32) -> Result<PathBuf> {
+        Err(DaemonError::Unsupported {
+            capability: "client-side server executable verification",
+            message: "server executable verification is only wired for Linux and macOS".into(),
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    fn server_process_start_time(pid: u32) -> Result<u64> {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|e| {
             DaemonError::Unsupported {
                 capability: "client-side server start-time verification",
@@ -10119,11 +10195,21 @@ mod platform {
             })
     }
 
-    #[cfg(not(target_os = "linux"))]
-    fn linux_start_time_ticks(_pid: libc::pid_t) -> Result<u64> {
+    #[cfg(target_os = "macos")]
+    fn server_process_start_time(pid: u32) -> Result<u64> {
+        crate::session_watch::capture_process_start_time(pid).ok_or_else(|| {
+            DaemonError::Unsupported {
+                capability: "client-side server start-time verification",
+                message: format!("cannot capture process start time for pid {pid}"),
+            }
+        })
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn server_process_start_time(_pid: u32) -> Result<u64> {
         Err(DaemonError::Unsupported {
             capability: "client-side server start-time verification",
-            message: "process start-time verification is only wired for Linux in P2".into(),
+            message: "process start-time verification is only wired for Linux and macOS".into(),
         })
     }
 }
