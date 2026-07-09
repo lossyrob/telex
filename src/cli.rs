@@ -165,6 +165,9 @@ pub struct AttachArgs {
     /// Not a CLI flag; set by the Copilot bridge bind path.
     #[arg(skip)]
     pub on_deliver: Option<Vec<String>>,
+    /// Programmatic-only: replace the existing on-deliver handler during member refresh.
+    #[arg(skip)]
+    pub replace_on_deliver: bool,
     /// Programmatic-only: opt an on-deliver push handler into live CC observer traffic.
     #[arg(skip)]
     pub on_deliver_wake_on_cc: bool,

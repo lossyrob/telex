@@ -98,7 +98,7 @@ Copilot adapter and embedded Copilot skill.
 
 ## Phase Status
 
-- [ ] **Phase 1: Enforce delivery exclusivity and expose mode** - Add the protocol, daemon gates, status model, and conflict guard.
+- [x] **Phase 1: Enforce delivery exclusivity and expose mode** - Add the protocol, daemon gates, status model, and conflict guard.
 - [ ] **Phase 2: Add the Copilot fallback run lifecycle** - Implement idempotent preparation, platform launch metadata, atomic push-to-pull transition, and one-shot execution.
 - [ ] **Phase 3: Exercise fallback cross-platform** - Add end-to-end process coverage and macOS/Windows CI execution.
 - [ ] **Phase 4: Documentation** - Update the binary-owned Copilot workflow, operator guide, ADR, and as-built Docs.md.
@@ -150,19 +150,19 @@ Copilot adapter and embedded Copilot skill.
 
 #### Automated Verification
 
-- [ ] A waiter against a push member returns a terminal non-delivery outcome and
+- [x] A waiter against a push member returns a terminal non-delivery outcome and
   leaves push registered.
-- [ ] Push registration against a live waiter fails without stopping that
+- [x] Push registration against a live waiter fails without stopping that
   waiter.
-- [ ] Explicit replacement clears push while an ordinary refresh preserves it.
-- [ ] Old-wire JSON without the new field deserializes with existing behavior.
-- [ ] Status serializes `push`, `pull`, and the defensive `conflict` tripwire.
-- [ ] Library tests pass: `cargo test --lib`.
+- [x] Explicit replacement clears push while an ordinary refresh preserves it.
+- [x] Old-wire JSON without the new field deserializes with existing behavior.
+- [x] Status serializes `push`, `pull`, and the defensive `conflict` tripwire.
+- [x] Library tests pass: `cargo test --lib`.
 
 #### Manual Verification
 
-- [ ] Text and JSON status distinguish delivery mode from station health.
-- [ ] Push attach with a live waiter tells the operator to stop the station and
+- [x] Text and JSON status distinguish delivery mode from station health.
+- [x] Push attach with a live waiter tells the operator to stop the station and
   retry, without leaving bridge files behind.
 
 ---

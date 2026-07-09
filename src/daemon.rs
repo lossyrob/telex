@@ -10,10 +10,11 @@ use crate::backend::sqlite::SqliteBackend;
 use crate::backend::{Backend, WaitFetchOptions};
 use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
-    DeafStationStatus, EpochStatus, HandshakeError, HelloAck, IdleStationStatus, LiveWaiterStatus,
-    MemberStatus, NeedsAttachReason, PushDeliveryHealth, RecentErrorStatus, Request, Response,
-    RetentionStatus, SentReceipt, StationHealth, StoreStatus, WaiterOutcome, WatchPidRole,
-    WatchPidSpec, WatchPidStatus, ON_DELIVER_DEFERRED_EXIT, ON_DELIVER_PERMANENT_EXIT,
+    DeafStationStatus, DeliveryMode, EpochStatus, HandshakeError, HelloAck, IdleStationStatus,
+    LiveWaiterStatus, MemberStatus, NeedsAttachReason, PushDeliveryHealth, RecentErrorStatus,
+    Request, Response, RetentionStatus, SentReceipt, StationHealth, StoreStatus, WaiterOutcome,
+    WatchPidRole, WatchPidSpec, WatchPidStatus, ON_DELIVER_DEFERRED_EXIT,
+    ON_DELIVER_PERMANENT_EXIT,
 };
 use crate::model::{
     cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient, Attention,
@@ -1277,6 +1278,11 @@ impl MemberRecord {
             .cloned()
             .collect();
         let live_waiters_count = member_waiters.len();
+        let delivery_mode = match (self.on_deliver.is_some(), live_waiters_count > 0) {
+            (true, true) => DeliveryMode::Conflict,
+            (true, false) => DeliveryMode::Push,
+            (false, _) => DeliveryMode::Pull,
+        };
         let now = now_ms();
         let (station_health, health_detail) = self.station_health(
             live_waiters_count,
@@ -1314,6 +1320,7 @@ impl MemberRecord {
             pending_unconsumed_count,
             inbound_actionable_count,
             station_health,
+            delivery_mode,
             push_delivery,
             push_suppressed_count,
             health_detail,
@@ -1356,6 +1363,12 @@ impl MemberRecord {
             return (
                 StationHealth::Idle,
                 Some("station is marked idle".to_string()),
+            );
+        }
+        if self.on_deliver.is_some() && live_waiters_count > 0 {
+            return (
+                StationHealth::CoverageConflict,
+                Some("push handler and pull waiter are active at the same time".to_string()),
             );
         }
         if live_waiters_count > 0 {
@@ -3498,6 +3511,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             watch_pids,
             recovery,
             on_deliver,
+            replace_on_deliver,
             on_deliver_wake_on_cc,
         } => {
             register_member(
@@ -3512,6 +3526,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 watch_pids,
                 recovery,
                 on_deliver,
+                replace_on_deliver,
                 on_deliver_wake_on_cc,
             )
             .await
@@ -3630,12 +3645,28 @@ async fn register_member(
     watch_pids: Vec<WatchPidSpec>,
     recovery: bool,
     on_deliver: Option<Vec<String>>,
+    replace_on_deliver: bool,
     on_deliver_wake_on_cc: bool,
 ) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
     }
     let watch_pids = capture_watch_pids(watch_pids);
+
+    if on_deliver.is_some() && state.has_live_waiter_for(&store_key, &session_id, &address) {
+        state.push_recent_error(
+            "DeliveryModeConflict",
+            format!(
+                "rejected push registration store={store_key} session={session_id} address={address}: a live pull waiter is armed"
+            ),
+        );
+        return proto::error_response(
+            proto::ERROR_INCOMPATIBLE,
+            format!(
+                "address {address} has a live pull waiter; stop the station before registering push"
+            ),
+        );
+    }
 
     if let Some(existing) = state.get_member(&store_key, &session_id, &address) {
         let backend = match state.backend_for(&store_key).await {
@@ -3652,7 +3683,8 @@ async fn register_member(
                 refreshed.description = description;
                 refreshed.scope = scope;
                 refreshed.tags = tags;
-                let preserving_on_deliver = on_deliver.is_none() && existing.on_deliver.is_some();
+                let preserving_on_deliver =
+                    !replace_on_deliver && on_deliver.is_none() && existing.on_deliver.is_some();
                 refreshed.watch_pids = if preserving_on_deliver {
                     existing.watch_pids.clone()
                 } else {
@@ -3664,7 +3696,11 @@ async fn register_member(
                 // generic recovery/refresh re-registers with `on_deliver = None` (e.g. a `telex
                 // wait` re-attach); only an explicit re-provision replaces them, so a pull
                 // re-attach cannot silently disarm or process-anchor the Copilot bridge.
-                refreshed.on_deliver = on_deliver.clone().or_else(|| existing.on_deliver.clone());
+                refreshed.on_deliver = if replace_on_deliver {
+                    on_deliver.clone()
+                } else {
+                    on_deliver.clone().or_else(|| existing.on_deliver.clone())
+                };
                 if on_deliver.is_some() {
                     refreshed.on_deliver_wake_on_cc = on_deliver_wake_on_cc;
                     refreshed.on_deliver_cc_after_ms =
@@ -3674,9 +3710,12 @@ async fn register_member(
                             Ok(value) => value,
                             Err(response) => return response,
                         };
-                } else {
+                } else if preserving_on_deliver {
                     refreshed.on_deliver_wake_on_cc = existing.on_deliver_wake_on_cc;
                     refreshed.on_deliver_cc_after_ms = existing.on_deliver_cc_after_ms;
+                } else {
+                    refreshed.on_deliver_wake_on_cc = false;
+                    refreshed.on_deliver_cc_after_ms = None;
                 }
                 state.check_session_id_reuse_tripwire(&refreshed);
                 if !recovery {
@@ -3686,13 +3725,15 @@ async fn register_member(
                 // Reset the push retry state and re-scan backlog only on an explicit
                 // (re-)provision; a plain refresh that merely preserved the handler keeps its
                 // backoff intact (the per-heartbeat sweep still delivers any backlog).
-                if on_deliver.is_some() {
+                if on_deliver.is_some() || replace_on_deliver {
                     state.on_deliver_forget_member(&MemberKey {
                         store_key: refreshed.store_key.clone(),
                         session_id: refreshed.session_id.clone(),
                         address: refreshed.address.clone(),
                     });
-                    spawn_on_deliver_backlog(state.clone(), refreshed.clone());
+                    if refreshed.on_deliver.is_some() {
+                        spawn_on_deliver_backlog(state.clone(), refreshed.clone());
+                    }
                 }
                 return Response::Registered {
                     lease_epoch: refreshed.lease_epoch,
@@ -4329,23 +4370,32 @@ async fn wait_for_message_with_idle_ttl(
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
     }
 
-    if state
-        .get_member(&store_key, &session_id, &address)
-        .is_none()
-    {
-        let backend = match state.backend_for(&store_key).await {
-            Ok(backend) => backend,
-            Err(response) => return response,
-        };
-        return needs_attach_for_missing_member(
-            &state,
-            &backend,
-            &store_key,
-            &session_id,
-            &address,
-            "wait",
-        )
-        .await;
+    match state.get_member(&store_key, &session_id, &address) {
+        Some(member) if member.on_deliver.is_some() => {
+            state.push_recent_error(
+                "DeliveryModeConflict",
+                format!(
+                    "rejected pull wait store={store_key} session={session_id} address={address}: push delivery is registered"
+                ),
+            );
+            return Response::PresenceEnded;
+        }
+        Some(_) => {}
+        None => {
+            let backend = match state.backend_for(&store_key).await {
+                Ok(backend) => backend,
+                Err(response) => return response,
+            };
+            return needs_attach_for_missing_member(
+                &state,
+                &backend,
+                &store_key,
+                &session_id,
+                &address,
+                "wait",
+            )
+            .await;
+        }
     }
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
@@ -5196,6 +5246,7 @@ mod p3_tests {
             watch_pids: vec![WatchPidSpec::anchor(42)],
             recovery: false,
             on_deliver: None,
+            replace_on_deliver: false,
             on_deliver_wake_on_cc: false,
         }
     }
@@ -5230,6 +5281,133 @@ mod p3_tests {
         let resp = request(state.clone(), register_req(&store, "s1", "addr:a")).await;
         assert!(matches!(resp, Response::Registered { .. }));
         assert!(state.on_deliver_candidates(&store, "addr:a").is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_replace_clears_push_while_plain_refresh_preserves_it() {
+        let state = test_state("on-deliver-replace");
+        let store = store_key("on-deliver-replace");
+        let mut push = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut push {
+            *on_deliver = Some(vec!["handler".to_string()]);
+        }
+        assert!(matches!(
+            request(state.clone(), push).await,
+            Response::Registered { .. }
+        ));
+
+        assert!(matches!(
+            request(state.clone(), register_req(&store, "s1", "addr:a")).await,
+            Response::Registered { .. }
+        ));
+        assert!(
+            state
+                .get_member(&store, "s1", "addr:a")
+                .unwrap()
+                .on_deliver
+                .is_some(),
+            "ordinary refresh must preserve push"
+        );
+
+        let mut pull = register_req(&store, "s1", "addr:a");
+        if let Request::Register {
+            replace_on_deliver, ..
+        } = &mut pull
+        {
+            *replace_on_deliver = true;
+        }
+        assert!(matches!(
+            request(state.clone(), pull).await,
+            Response::Registered { .. }
+        ));
+        let status = state.status().await;
+        assert_eq!(status.members[0].delivery_mode, DeliveryMode::Pull);
+        assert!(!status.members[0].push_registered);
+        assert!(state.on_deliver_candidates(&store, "addr:a").is_empty());
+    }
+
+    #[tokio::test]
+    async fn wait_rejects_member_with_registered_push() {
+        let state = test_state("push-rejects-wait");
+        let store = store_key("push-rejects-wait");
+        let mut push = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut push {
+            *on_deliver = Some(vec!["handler".to_string()]);
+        }
+        assert!(matches!(
+            request(state.clone(), push).await,
+            Response::Registered { .. }
+        ));
+
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 100)).await;
+        assert!(matches!(wait, Response::PresenceEnded));
+        let status = state.status().await;
+        assert_eq!(status.members[0].delivery_mode, DeliveryMode::Push);
+        assert_eq!(status.members[0].live_waiters_count, 0);
+        assert!(status
+            .recent_errors
+            .iter()
+            .any(|error| error.kind == "DeliveryModeConflict"));
+    }
+
+    #[tokio::test]
+    async fn push_registration_rejects_live_waiter_without_stopping_it() {
+        let state = test_state("wait-rejects-push");
+        let store = store_key("wait-rejects-push");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let waiter_state = state.clone();
+        let waiter_req = wait_req(&store, "s1", "addr:a", 5_000);
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_req).await });
+        tokio::time::sleep(Duration::from_millis(75)).await;
+
+        let mut push = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut push {
+            *on_deliver = Some(vec!["handler".to_string()]);
+        }
+        let rejected = request(state.clone(), push).await;
+        assert!(matches!(
+            rejected,
+            Response::Error { code, .. } if code == proto::ERROR_INCOMPATIBLE
+        ));
+        let status = state.status().await;
+        assert_eq!(status.members[0].delivery_mode, DeliveryMode::Pull);
+        assert_eq!(status.members[0].live_waiters_count, 1);
+        assert!(!status.members[0].push_registered);
+
+        {
+            let mut members = state.members.lock().unwrap();
+            members
+                .get_mut(&DaemonState::member_key(&store, "s1", "addr:a"))
+                .unwrap()
+                .on_deliver = Some(vec!["legacy-handler".to_string()]);
+        }
+        let conflict = state.status().await;
+        assert_eq!(conflict.members[0].delivery_mode, DeliveryMode::Conflict);
+        assert_eq!(
+            conflict.members[0].station_health,
+            StationHealth::CoverageConflict
+        );
+        state
+            .members
+            .lock()
+            .unwrap()
+            .get_mut(&DaemonState::member_key(&store, "s1", "addr:a"))
+            .unwrap()
+            .on_deliver = None;
+
+        let stopped = request(
+            state.clone(),
+            Request::StationStop {
+                store_key: store,
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                wait_grace_ms: 1_000,
+            },
+        )
+        .await;
+        assert!(matches!(stopped, Response::StationStopped { .. }));
+        assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
     }
 
     #[test]
@@ -9656,6 +9834,7 @@ pub mod test_support {
             watch_pids,
             recovery: false,
             on_deliver: None,
+            replace_on_deliver: false,
             on_deliver_wake_on_cc: false,
         }
     }

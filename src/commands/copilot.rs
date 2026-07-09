@@ -914,6 +914,23 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
             return Ok(1);
         }
     };
+    // Avoid provisioning bridge files when the authoritative daemon gate will reject the
+    // transition. If no daemon is currently reachable, the register path below remains the
+    // source of truth and may spawn it normally.
+    if args.copilot_bridge {
+        if let (Ok(store_key), Ok(address)) =
+            (ctx.store_key(), ctx.cfg.require_address(&ctx.address))
+        {
+            if let Ok(Some(member)) = daemon_member_status(&store_key, &session, &address).await {
+                if member.live_waiters_count > 0 {
+                    eprintln!(
+                        "telex copilot attach: {address} has a live pull waiter; run `telex --address {address} station stop --session {session}` and retry push attach"
+                    );
+                    return Ok(1);
+                }
+            }
+        }
+    }
     let mut watch_pid = Vec::new();
     if !args.copilot_bridge {
         if let Some(pid) = copilot_loader_pid() {
@@ -951,6 +968,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
         session_poll_secs: 2,
         no_session_bind: args.copilot_bridge,
         on_deliver,
+        replace_on_deliver: false,
         on_deliver_wake_on_cc: args.copilot_bridge && args.wake_on_cc,
     };
     let mut result = crate::commands::attach::run(ctx, attach_args).await;
@@ -1154,7 +1172,16 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
         }
     };
     let bridge_live = bridge_is_live(&session);
-    let decision = evaluate_guard(&session, &active_members, settings, state, bridge_live);
+    let enforce_delivery_exclusivity =
+        (status.protocol_version.major, status.protocol_version.minor) >= (1, 4);
+    let decision = evaluate_guard(
+        &session,
+        &active_members,
+        settings,
+        state,
+        bridge_live,
+        enforce_delivery_exclusivity,
+    );
     if let Some(next_state) = &decision.next_state {
         if let Err(e) = write_guard_state(&state_path, next_state) {
             return allow_with_log(
@@ -1461,6 +1488,18 @@ async fn daemon_armed_push(
         .any(|m| m.address == address && m.push_registered && (!wake_on_cc || m.push_wake_on_cc)))
 }
 
+async fn daemon_member_status(
+    store_key: &str,
+    session: &str,
+    address: &str,
+) -> std::result::Result<Option<MemberStatus>, String> {
+    let (mut client, cap) = connect_existing_with_cap(store_key).await?;
+    let status = daemon_status(&mut client, store_key, &cap.admin_cap).await?;
+    Ok(active_session_members(&status, store_key, session)
+        .into_iter()
+        .find(|member| member.address == address))
+}
+
 fn active_session_members(
     status: &DaemonStatus,
     store_key: &str,
@@ -1550,6 +1589,7 @@ fn evaluate_guard(
     settings: GuardSettings,
     prior_state: Option<GuardState>,
     bridge_live: bool,
+    enforce_delivery_exclusivity: bool,
 ) -> GuardEvaluation {
     if members.is_empty() {
         return GuardEvaluation {
@@ -1573,6 +1613,14 @@ fn evaluate_guard(
                 && member.last_waiter_outcome == Some(WaiterOutcome::Message)
         })
         .collect::<Vec<_>>();
+    let conflicts = if enforce_delivery_exclusivity {
+        members
+            .iter()
+            .filter(|member| member.push_registered && member.live_waiters_count > 0)
+            .collect::<Vec<_>>()
+    } else {
+        Vec::new()
+    };
     // A push-covered member needs no waiter, but `push_registered` is only "handler registered",
     // not "bridge live". If the bridge is not live (crashed/unloaded/hung -- stale heartbeat) the
     // member is effectively uncovered and must be surfaced. If the bridge is live, do not nudge
@@ -1583,7 +1631,7 @@ fn evaluate_guard(
     } else {
         members
             .iter()
-            .filter(|member| member.push_registered)
+            .filter(|member| member.push_registered && member.live_waiters_count == 0)
             .collect::<Vec<_>>()
     };
     let push_backlog = Vec::new();
@@ -1591,6 +1639,7 @@ fn evaluate_guard(
         && delivered_unacked.is_empty()
         && push_backlog.is_empty()
         && push_dead.is_empty()
+        && conflicts.is_empty()
     {
         return GuardEvaluation {
             decision: HookDecision::Allow,
@@ -1601,7 +1650,13 @@ fn evaluate_guard(
         };
     }
 
-    let issue_key = coverage_issue_key(&unarmed, &delivered_unacked, &push_backlog, &push_dead);
+    let issue_key = coverage_issue_key(
+        &unarmed,
+        &delivered_unacked,
+        &push_backlog,
+        &push_dead,
+        &conflicts,
+    );
     let prior_nudges = match prior_state {
         Some(state) if state.issue_key.as_deref() == Some(issue_key.as_str()) => state.nudges,
         _ => 0,
@@ -1624,13 +1679,22 @@ fn evaluate_guard(
     }
 
     let nudges = prior_nudges.saturating_add(1);
-    let station_list = coverage_summary(&unarmed, &delivered_unacked, &push_backlog, &push_dead);
+    let station_list = coverage_summary(
+        &unarmed,
+        &delivered_unacked,
+        &push_backlog,
+        &push_dead,
+        &conflicts,
+    );
     let mut guidance_parts: Vec<&str> = Vec::new();
     if !push_dead.is_empty() {
         guidance_parts.push("The telex push bridge is not live -- run `extensions_reload` to load it (or `telex detach --address <station>` if done).");
     }
     if !unarmed.is_empty() {
         guidance_parts.push("Re-arm `telex wait ... --out-dir <dir>` if still attending, or run `telex detach --address <station>` if done.");
+    }
+    if !conflicts.is_empty() {
+        guidance_parts.push("Push and pull are both active for the same station -- stop the pull waiter or detach push before continuing.");
     }
     if !delivered_unacked.is_empty() || !push_backlog.is_empty() {
         guidance_parts.push("Ack handled deliveries with `telex ack --address <station> --session <session-id> --id <message-id>` before ending the turn; unacked messages redeliver.");
@@ -1659,6 +1723,7 @@ fn coverage_summary(
     delivered_unacked: &[&MemberStatus],
     push_backlog: &[&MemberStatus],
     push_dead: &[&MemberStatus],
+    conflicts: &[&MemberStatus],
 ) -> String {
     let mut parts = Vec::new();
     parts.extend(unarmed.iter().map(|member| {
@@ -1684,6 +1749,11 @@ fn coverage_summary(
             .iter()
             .map(|member| format!("{} (push) bridge is not live", member.address)),
     );
+    parts.extend(
+        conflicts
+            .iter()
+            .map(|member| format!("{} has conflicting push and pull coverage", member.address)),
+    );
     parts.join(", ")
 }
 
@@ -1692,6 +1762,7 @@ fn coverage_issue_key(
     delivered_unacked: &[&MemberStatus],
     push_backlog: &[&MemberStatus],
     push_dead: &[&MemberStatus],
+    conflicts: &[&MemberStatus],
 ) -> String {
     let mut parts = Vec::new();
     parts.extend(
@@ -1713,6 +1784,11 @@ fn coverage_issue_key(
         push_dead
             .iter()
             .map(|member| format!("push_dead\0{}\0{}", member.store_key, member.address)),
+    );
+    parts.extend(
+        conflicts
+            .iter()
+            .map(|member| format!("conflict\0{}\0{}", member.store_key, member.address)),
     );
     parts.sort();
     parts.join("\n")
@@ -1951,7 +2027,7 @@ fn print_json(value: &serde_json::Value) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::daemon_ipc::{ProtocolVersion, StationHealth};
+    use crate::daemon_ipc::{DeliveryMode, ProtocolVersion, StationHealth};
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
@@ -2258,6 +2334,7 @@ mod tests {
             } else {
                 StationHealth::Unattended
             },
+            delivery_mode: DeliveryMode::Pull,
             push_delivery: crate::daemon_ipc::PushDeliveryHealth::NotRegistered,
             push_suppressed_count: 0,
             health_detail: None,
@@ -2326,7 +2403,7 @@ mod tests {
             enabled: true,
             max_nudges: 3,
         };
-        let eval = evaluate_guard("s1", &[member("addr:a", 0, 2)], settings, None, true);
+        let eval = evaluate_guard("s1", &[member("addr:a", 0, 2)], settings, None, true, true);
         assert_eq!(eval.reason_code, "coverage_gap");
         assert_eq!(eval.nudges, 1);
         match eval.decision {
@@ -2348,7 +2425,7 @@ mod tests {
         let mut push = member("addr:push", 0, 0);
         push.push_registered = true;
         let pull = member("addr:pull", 0, 2);
-        let eval = evaluate_guard("s1", &[push, pull], settings, None, true);
+        let eval = evaluate_guard("s1", &[push, pull], settings, None, true, true);
         assert_eq!(
             eval.reason_code, "coverage_gap",
             "an uncovered pull address must still be nudged even when another address is push-covered"
@@ -2366,6 +2443,39 @@ mod tests {
     }
 
     #[test]
+    fn guard_blocks_conflicting_push_and_pull_coverage_on_current_protocol() {
+        let settings = GuardSettings {
+            enabled: true,
+            max_nudges: 3,
+        };
+        let mut conflict = member("addr:conflict", 1, 0);
+        conflict.push_registered = true;
+        conflict.delivery_mode = DeliveryMode::Conflict;
+        let eval = evaluate_guard("s1", &[conflict], settings, None, true, true);
+        assert_eq!(eval.reason_code, "coverage_gap");
+        match eval.decision {
+            HookDecision::Block { reason } => {
+                assert!(reason.contains("conflicting push and pull coverage"));
+                assert!(reason.contains("stop the pull waiter or detach push"));
+            }
+            other => panic!("expected block, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn guard_does_not_enforce_conflict_against_older_daemon_protocol() {
+        let settings = GuardSettings {
+            enabled: true,
+            max_nudges: 3,
+        };
+        let mut conflict = member("addr:legacy-conflict", 1, 0);
+        conflict.push_registered = true;
+        let eval = evaluate_guard("s1", &[conflict], settings, None, true, false);
+        assert_eq!(eval.reason_code, "covered");
+        assert!(matches!(eval.decision, HookDecision::Allow));
+    }
+
+    #[test]
     fn guard_allows_live_push_member_with_unacked_backlog() {
         let settings = GuardSettings {
             enabled: true,
@@ -2376,7 +2486,7 @@ mod tests {
         // bridge coverage is handled by `guard_nudges_push_member_when_bridge_not_live`.
         let mut push = member("addr:push", 0, 1);
         push.push_registered = true;
-        let eval = evaluate_guard("s1", &[push], settings, None, true);
+        let eval = evaluate_guard("s1", &[push], settings, None, true, true);
         assert_eq!(eval.reason_code, "covered");
         assert!(matches!(eval.decision, HookDecision::Allow));
     }
@@ -2389,7 +2499,7 @@ mod tests {
         };
         let mut push = member("addr:push", 0, 0);
         push.push_registered = true;
-        let eval = evaluate_guard("s1", &[push], settings, None, true);
+        let eval = evaluate_guard("s1", &[push], settings, None, true, true);
         assert_eq!(eval.reason_code, "covered");
         assert!(matches!(eval.decision, HookDecision::Allow));
     }
@@ -2403,7 +2513,7 @@ mod tests {
         // Handler registered on the daemon, but the bridge is not live (stale/absent heartbeat).
         let mut push = member("addr:push", 0, 0);
         push.push_registered = true;
-        let eval = evaluate_guard("s1", &[push], settings, None, false);
+        let eval = evaluate_guard("s1", &[push], settings, None, false, true);
         assert_eq!(eval.reason_code, "coverage_gap");
         match eval.decision {
             HookDecision::Block { reason } => {
@@ -2429,9 +2539,10 @@ mod tests {
                 &[],
                 &[],
                 &[],
+                &[],
             )),
         });
-        let eval = evaluate_guard("s1", &[member("addr:a", 0, 0)], settings, prior, true);
+        let eval = evaluate_guard("s1", &[member("addr:a", 0, 0)], settings, prior, true, true);
         assert_eq!(eval.reason_code, "cap_exhausted");
         assert!(matches!(eval.decision, HookDecision::Allow));
         assert_eq!(eval.next_state.unwrap().nudges, 2);
@@ -2449,9 +2560,9 @@ mod tests {
             nudges: 2,
             last_decision: "coverage_gap".to_string(),
             updated_at_ms: 1,
-            issue_key: Some(coverage_issue_key(&[&unarmed], &[], &[], &[])),
+            issue_key: Some(coverage_issue_key(&[&unarmed], &[], &[], &[], &[])),
         });
-        let eval = evaluate_guard("s1", &[armed, unarmed], settings, prior, true);
+        let eval = evaluate_guard("s1", &[armed, unarmed], settings, prior, true, true);
         assert_eq!(eval.reason_code, "coverage_gap");
         assert_eq!(eval.next_state.unwrap().nudges, 3);
     }
@@ -2468,9 +2579,9 @@ mod tests {
             nudges: 3,
             last_decision: "cap_exhausted".to_string(),
             updated_at_ms: 1,
-            issue_key: Some(coverage_issue_key(&[&previous], &[], &[], &[])),
+            issue_key: Some(coverage_issue_key(&[&previous], &[], &[], &[], &[])),
         });
-        let eval = evaluate_guard("s1", &[current], settings, prior, true);
+        let eval = evaluate_guard("s1", &[current], settings, prior, true, true);
         assert_eq!(eval.reason_code, "coverage_gap");
         assert_eq!(eval.next_state.unwrap().nudges, 1);
     }
@@ -2483,7 +2594,7 @@ mod tests {
         };
         let mut delivered = member("addr:delivered", 1, 1);
         delivered.last_waiter_outcome = Some(WaiterOutcome::Message);
-        let eval = evaluate_guard("s1", &[delivered], settings, None, true);
+        let eval = evaluate_guard("s1", &[delivered], settings, None, true, true);
         assert_eq!(eval.reason_code, "coverage_gap");
         match eval.decision {
             HookDecision::Block { reason } => {
@@ -2501,7 +2612,7 @@ mod tests {
             max_nudges: 3,
         };
         let pending_with_waiter = member("addr:pending", 1, 1);
-        let eval = evaluate_guard("s1", &[pending_with_waiter], settings, None, true);
+        let eval = evaluate_guard("s1", &[pending_with_waiter], settings, None, true, true);
         assert_eq!(eval.reason_code, "covered");
         assert!(matches!(eval.decision, HookDecision::Allow));
     }
@@ -2526,7 +2637,7 @@ mod tests {
             enabled: true,
             max_nudges: 3,
         };
-        let eval = evaluate_guard("s1", &[], settings, None, true);
+        let eval = evaluate_guard("s1", &[], settings, None, true, true);
         assert_eq!(eval.reason_code, "no_attended_stations");
         assert!(matches!(eval.decision, HookDecision::Allow));
         assert!(eval.next_state.is_none());

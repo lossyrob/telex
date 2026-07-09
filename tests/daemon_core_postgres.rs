@@ -558,6 +558,7 @@ async fn postgres_on_deliver_wake_on_cc_pushes_live_cc_without_replay() {
         watch_pids: vec![WatchPidSpec::anchor(std::process::id())],
         recovery: false,
         on_deliver: Some(record_stdin_argv(&output)),
+        replace_on_deliver: false,
         on_deliver_wake_on_cc: true,
     };
     assert!(matches!(
@@ -674,6 +675,7 @@ async fn postgres_on_deliver_failed_cc_retry_survives_later_accepted_cc() {
         watch_pids: vec![WatchPidSpec::anchor(std::process::id())],
         recovery: false,
         on_deliver: Some(fail_first_then_record_argv(&output_root)),
+        replace_on_deliver: false,
         on_deliver_wake_on_cc: true,
     };
     assert!(matches!(

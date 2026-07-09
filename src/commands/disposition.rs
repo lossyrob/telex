@@ -212,6 +212,7 @@ async fn register_for_retry<C: AckConnector>(
                 watch_pids: Vec::new(),
                 recovery: true,
                 on_deliver: None,
+                replace_on_deliver: false,
                 on_deliver_wake_on_cc: false,
             }),
         )
