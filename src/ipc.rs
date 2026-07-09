@@ -254,7 +254,10 @@ pub async fn ping(address: &str, expected_backend: &str) -> bool {
 #[cfg(test)]
 pub(crate) mod test_support {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    static NEXT_RUNTIME_ROOT: AtomicU64 = AtomicU64::new(1);
 
     /// Module-wide lock for tests that mutate the process-global `TELEX_HOME` (Unix endpoint paths
     /// derive from it). Rust runs tests in parallel threads in one binary, so any test touching
@@ -264,6 +267,18 @@ pub(crate) mod test_support {
     /// Acquire `ENV_LOCK`, tolerating poisoning from a panicking earlier test.
     pub fn env_guard() -> std::sync::MutexGuard<'static, ()> {
         ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// Create a unique fixture root short enough to leave room for Unix socket file names.
+    pub fn short_runtime_root() -> std::path::PathBuf {
+        let sequence = NEXT_RUNTIME_ROOT.fetch_add(1, Ordering::Relaxed);
+        #[cfg(unix)]
+        let base = std::path::PathBuf::from("/tmp");
+        #[cfg(not(unix))]
+        let base = std::env::temp_dir();
+        let root = base.join(format!("tx{}-{sequence}", std::process::id()));
+        std::fs::create_dir_all(&root).expect("create short runtime test root");
+        root
     }
 
     /// Spawn a minimal holder that answers each connection's `Ping` with a `Pong` stamped with

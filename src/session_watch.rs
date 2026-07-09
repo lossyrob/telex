@@ -165,7 +165,28 @@ mod platform {
         fields.get(19)?.parse::<u64>().ok()
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    fn process_start_time(pid: u32) -> Option<u64> {
+        let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+        let info_size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+        let bytes = unsafe {
+            libc::proc_pidinfo(
+                pid as libc::c_int,
+                libc::PROC_PIDTBSDINFO,
+                0,
+                &mut info as *mut _ as *mut libc::c_void,
+                info_size,
+            )
+        };
+        if bytes != info_size {
+            return None;
+        }
+        info.pbi_start_tvsec
+            .checked_mul(1_000_000)?
+            .checked_add(info.pbi_start_tvusec)
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     fn process_start_time(_pid: u32) -> Option<u64> {
         None
     }
@@ -331,6 +352,15 @@ mod tests {
         let pid = std::process::id();
         let start_time = capture_process_start_time(pid);
         assert!(process_alive_with_start_time(pid, start_time));
+    }
+
+    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
+    #[test]
+    fn supported_platform_captures_self_start_time() {
+        assert!(
+            capture_process_start_time(std::process::id()).is_some(),
+            "supported platforms must capture process identity for daemon authentication"
+        );
     }
 
     #[test]
