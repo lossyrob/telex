@@ -572,6 +572,14 @@ fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std
     Ok(())
 }
 
+pub(crate) fn write_terminal_error_artifacts(
+    dir: &Path,
+    address: &str,
+    detail: impl Into<String>,
+) -> std::io::Result<()> {
+    write_wait_artifacts(dir, &WaitOutcome::error(detail.into()), address)
+}
+
 /// Publish the waiter process identity as soon as `wait` starts blocking. This gives runtimes that
 /// hide detached-process handles (notably Copilot CLI) a first-class, non-command-line-hunting way to
 /// find the waiter during teardown.
@@ -640,6 +648,27 @@ mod tests {
     use crate::daemon_ipc::ERROR_NOT_RUNNING;
     use std::collections::VecDeque;
     use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn terminal_error_helper_writes_completion_artifacts() {
+        let dir = std::env::temp_dir().join(format!(
+            "telex-wait-error-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        write_terminal_error_artifacts(&dir, "addr:test", "fallback setup failed").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.join("exit.code")).unwrap(),
+            "1\n"
+        );
+        let status: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(dir.join("status.json")).unwrap()).unwrap();
+        assert_eq!(status["outcome"], "error");
+        assert_eq!(status["detail"], "fallback setup failed");
+        assert_eq!(status["address"], "addr:test");
+        let _ = std::fs::remove_dir_all(dir);
+    }
 
     struct ScriptConnector {
         clients: VecDeque<ScriptClient>,

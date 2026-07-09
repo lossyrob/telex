@@ -99,7 +99,7 @@ Copilot adapter and embedded Copilot skill.
 ## Phase Status
 
 - [x] **Phase 1: Enforce delivery exclusivity and expose mode** - Add the protocol, daemon gates, status model, and conflict guard.
-- [ ] **Phase 2: Add the Copilot fallback run lifecycle** - Implement idempotent preparation, platform launch metadata, atomic push-to-pull transition, and one-shot execution.
+- [x] **Phase 2: Add the Copilot fallback run lifecycle** - Implement idempotent preparation, platform launch metadata, atomic push-to-pull transition, and one-shot execution.
 - [ ] **Phase 3: Exercise fallback cross-platform** - Add end-to-end process coverage and macOS/Windows CI execution.
 - [ ] **Phase 4: Documentation** - Update the binary-owned Copilot workflow, operator guide, ADR, and as-built Docs.md.
 
@@ -207,19 +207,19 @@ Copilot adapter and embedded Copilot skill.
 
 #### Automated Verification
 
-- [ ] Two prepares before completion return one run directory and launcher.
-- [ ] A duplicate launcher cannot overwrite a live run's artifacts.
-- [ ] A launcher that never starts leaves push unchanged.
-- [ ] A running fallback clears push before arming its waiter and refuses to
+- [x] Two prepares before completion return one run directory and launcher.
+- [x] A duplicate launcher cannot overwrite a live run's artifacts.
+- [x] A launcher that never starts leaves push unchanged.
+- [x] A running fallback clears push before arming its waiter and refuses to
   wait if the clear cannot be proved.
-- [ ] Startup failures still produce `status.json` and terminal `exit.code`.
-- [ ] Library tests pass: `cargo test --lib`.
+- [x] Startup failures still produce `status.json` and terminal `exit.code`.
+- [x] Library tests pass: `cargo test --lib`.
 
 #### Manual Verification
 
-- [ ] Prepare JSON contains an exact run directory, launcher program/argv, and
+- [x] Prepare JSON contains an exact run directory, launcher program/argv, and
   expected artifact paths without requiring an agent-authored script.
-- [ ] The live-push refusal and `--force` path are explicit and observable.
+- [x] The live-push refusal and `--force` path are explicit and observable.
 
 ---
 

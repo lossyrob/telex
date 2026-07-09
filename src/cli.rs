@@ -464,6 +464,9 @@ pub enum CopilotCmd {
     Drain(CopilotDrainArgs),
     /// Detach a Copilot session's address and tear down its bridge if it was the last binding.
     Detach(CopilotDetachArgs),
+    /// Prepare or execute the single-shot pull fallback used when extension push is unavailable.
+    #[command(subcommand)]
+    Fallback(CopilotFallbackCmd),
     /// Garbage-collect stale Copilot bridge files for unloaded sessions.
     Gc(CopilotGcArgs),
 }
@@ -625,6 +628,53 @@ pub struct CopilotDetachArgs {
     /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
     pub session: Option<String>,
+}
+
+#[derive(Subcommand)]
+pub enum CopilotFallbackCmd {
+    /// Prepare one idempotent detached-waiter run and print its platform launcher.
+    Prepare(CopilotFallbackPrepareArgs),
+    /// Execute a prepared run. Invoked by the detached launcher, not directly by agents.
+    #[command(hide = true)]
+    Run(CopilotFallbackRunArgs),
+}
+
+#[derive(Args)]
+pub struct CopilotFallbackPrepareArgs {
+    /// Stable Copilot session identity; defaults to COPILOT_AGENT_SESSION_ID.
+    #[arg(long)]
+    pub session: Option<String>,
+    /// One-line directory description used when the station must be attached.
+    #[arg(long)]
+    pub description: Option<String>,
+    /// Project/workstream scope used when the station must be attached.
+    #[arg(long)]
+    pub scope: Option<String>,
+    /// Comma-separated coarse tags used when the station must be attached.
+    #[arg(long)]
+    pub tags: Option<String>,
+    /// Occupant identity used when the station must be attached.
+    #[arg(long)]
+    pub occupant: Option<String>,
+    /// Give up after this many milliseconds and produce an idle-timeout artifact.
+    #[arg(long, default_value_t = 1_800_000)]
+    pub timeout_ms: u64,
+    /// Only wake for messages at this attention or higher priority.
+    #[arg(long, value_parser = parse_attention_arg)]
+    pub min_attention: Option<Attention>,
+    /// Also wake for live CC traffic without making CC ack-required.
+    #[arg(long)]
+    pub wake_on_cc: bool,
+    /// Deliberately leave a currently live push bridge for pull fallback.
+    #[arg(long)]
+    pub force: bool,
+}
+
+#[derive(Args)]
+pub struct CopilotFallbackRunArgs {
+    /// Prepared fallback run directory containing fallback.json.
+    #[arg(long)]
+    pub run_dir: PathBuf,
 }
 
 #[derive(Args)]
@@ -958,6 +1008,43 @@ mod tests {
                 .unwrap()
                 .command,
             Command::Copilot(CopilotCmd::Gc(CopilotGcArgs { dry_run: true, .. }))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from([
+                "telex",
+                "--address",
+                "addr:a",
+                "copilot",
+                "fallback",
+                "prepare",
+                "--timeout-ms",
+                "5000",
+                "--force",
+            ])
+            .unwrap()
+            .command,
+            Command::Copilot(CopilotCmd::Fallback(CopilotFallbackCmd::Prepare(
+                CopilotFallbackPrepareArgs {
+                    timeout_ms: 5000,
+                    force: true,
+                    ..
+                }
+            )))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from([
+                "telex",
+                "copilot",
+                "fallback",
+                "run",
+                "--run-dir",
+                "/tmp/fallback-run",
+            ])
+            .unwrap()
+            .command,
+            Command::Copilot(CopilotCmd::Fallback(CopilotFallbackCmd::Run(
+                CopilotFallbackRunArgs { .. }
+            )))
         ));
     }
 

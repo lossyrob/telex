@@ -4,7 +4,7 @@
 //! environment variables, then maps them to generic telex session/watch-pid inputs. Core daemon
 //! protocol and identity helpers intentionally remain unaware of Copilot-specific names.
 
-use anyhow::Result;
+use anyhow::{anyhow, Context, Result};
 use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
@@ -12,20 +12,29 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use crate::cli::{
-    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotDetachArgs, CopilotDrainArgs, CopilotGcArgs,
+    AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotDetachArgs, CopilotDrainArgs,
+    CopilotFallbackCmd, CopilotFallbackPrepareArgs, CopilotFallbackRunArgs, CopilotGcArgs,
     CopilotPushArgs, CopilotResumeArgs, CopilotSessionEndArgs, CopilotSkillArgs,
-    CopilotTurnGuardArgs, Ctx, DetachArgs,
+    CopilotTurnGuardArgs, Ctx, DetachArgs, WaitArgs,
 };
 use crate::daemon_ipc::{
     DaemonStatus, MemberStatus, Request, Response, WaiterOutcome, WatchPidSpec, DAEMON_VERSION,
 };
-use crate::model::now_ms;
+use crate::model::{now_ms, Attention};
+use crate::output::emit;
 
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
 const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
 const HOOK_LOG_FILE: &str = "hook-events.ndjson";
 const HOOK_LOG_ROTATE_BYTES: u64 = 1_048_576;
 const LOCK_STALE_AFTER: Duration = Duration::from_secs(5 * 60);
+const FALLBACK_MANIFEST_VERSION: u32 = 1;
+const FALLBACK_PROTOCOL_VERSION: (u16, u16) = (1, 4);
+const FALLBACK_MANIFEST_FILE: &str = "fallback.json";
+const FALLBACK_CURRENT_FILE: &str = "current.json";
+const FALLBACK_RUN_CLAIM_FILE: &str = "run.claim";
+#[cfg(windows)]
+const FALLBACK_WINDOWS_LAUNCHER_FILE: &str = "wait-once.ps1";
 /// Bridge round-trip budget. Kept below the daemon's ON_DELIVER_TIMEOUT (30s) so the daemon
 /// observes our nonzero exit (and retries) rather than killing the handler mid-request.
 const BRIDGE_PUSH_TIMEOUT: Duration = Duration::from_secs(20);
@@ -73,8 +82,52 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
         CopilotCmd::Push(args) => push(ctx, args).await,
         CopilotCmd::Drain(args) => drain(ctx, args).await,
         CopilotCmd::Detach(args) => detach(ctx, args).await,
+        CopilotCmd::Fallback(cmd) => fallback(ctx, cmd).await,
         CopilotCmd::Gc(args) => gc(ctx, args),
     }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FallbackManifest {
+    version: u32,
+    run_id: String,
+    run_dir: PathBuf,
+    prepared_at_ms: i64,
+    executable: PathBuf,
+    backend_selector: Option<String>,
+    db_override: Option<String>,
+    store_key: String,
+    address: String,
+    session_id: String,
+    description: Option<String>,
+    scope: Option<String>,
+    tags: Option<String>,
+    occupant: Option<String>,
+    loader_pid: Option<u32>,
+    timeout_ms: u64,
+    min_attention: Option<String>,
+    wake_on_cc: bool,
+    force: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FallbackCurrent {
+    version: u32,
+    run_id: String,
+    run_dir: PathBuf,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct FallbackLauncher {
+    program: String,
+    args: Vec<String>,
+    command: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct FallbackRunClaim {
+    pid: u32,
+    start_time: Option<u64>,
 }
 
 /// The bridge extension bytes, embedded so they version with the daemon protocol.
@@ -1023,6 +1076,311 @@ async fn resume(ctx: &Ctx, args: CopilotResumeArgs) -> Result<i32> {
     .await
 }
 
+async fn fallback(ctx: &Ctx, cmd: CopilotFallbackCmd) -> Result<i32> {
+    match cmd {
+        CopilotFallbackCmd::Prepare(args) => fallback_prepare(ctx, args).await,
+        CopilotFallbackCmd::Run(args) => fallback_run(ctx, args).await,
+    }
+}
+
+async fn fallback_prepare(ctx: &Ctx, args: CopilotFallbackPrepareArgs) -> Result<i32> {
+    let session = match resolve_copilot_session(args.session.as_deref(), None) {
+        Some(session) => session,
+        None => {
+            eprintln!(
+                "telex: no Copilot session id available; set COPILOT_AGENT_SESSION_ID or pass --session"
+            );
+            return Ok(1);
+        }
+    };
+    let address = ctx.cfg.require_address(&ctx.address)?;
+    let store_key = ctx.store_key()?;
+    let station_root = fallback_station_root(&store_key, &session, &address)?;
+    ensure_private_dir(&station_root)?;
+    let current_path = station_root.join(FALLBACK_CURRENT_FILE);
+    let _lock = StateLock::acquire(&current_path)?;
+
+    if let Some(manifest) = unfinished_fallback_manifest(&current_path)? {
+        let launcher = fallback_launcher(&manifest)?;
+        emit_fallback_prepared(ctx, &manifest, &launcher, true);
+        return Ok(0);
+    }
+
+    if let Some(status) = daemon_status_if_running(&store_key).await? {
+        ensure_fallback_protocol(&status)?;
+        if let Some(member) = active_session_members(&status, &store_key, &session)
+            .into_iter()
+            .find(|member| member.address == address)
+        {
+            if member.live_waiters_count > 0 {
+                return Err(anyhow!(
+                    "fallback waiter already live for {address}; process its current run before preparing another"
+                ));
+            }
+            if member.push_registered && bridge_is_live(&session) && !args.force {
+                return Err(anyhow!(
+                    "push bridge is live for {address}; fallback is unnecessary (pass --force only for an intentional downgrade)"
+                ));
+            }
+        }
+    }
+
+    let (run_id, run_dir) = create_fallback_run_dir(&station_root)?;
+    let executable = std::env::current_exe().context("resolving the current telex executable")?;
+    let manifest = FallbackManifest {
+        version: FALLBACK_MANIFEST_VERSION,
+        run_id: run_id.clone(),
+        run_dir: run_dir.clone(),
+        prepared_at_ms: now_ms(),
+        executable,
+        backend_selector: ctx.cfg.backend_selector.clone(),
+        db_override: ctx.cfg.db_override.clone(),
+        store_key,
+        address,
+        session_id: session,
+        description: args.description,
+        scope: args.scope,
+        tags: args.tags,
+        occupant: args.occupant,
+        loader_pid: copilot_loader_pid(),
+        timeout_ms: args.timeout_ms,
+        min_attention: args
+            .min_attention
+            .map(|attention| attention.as_str().to_string()),
+        wake_on_cc: args.wake_on_cc,
+        force: args.force,
+    };
+    write_private_json(&run_dir.join(FALLBACK_MANIFEST_FILE), &manifest)?;
+    let launcher = fallback_launcher(&manifest)?;
+    let current = FallbackCurrent {
+        version: FALLBACK_MANIFEST_VERSION,
+        run_id,
+        run_dir,
+    };
+    write_private_json(&current_path, &current)?;
+    emit_fallback_prepared(ctx, &manifest, &launcher, false);
+    Ok(0)
+}
+
+async fn fallback_run(ctx: &Ctx, args: CopilotFallbackRunArgs) -> Result<i32> {
+    let run_dir = std::fs::canonicalize(&args.run_dir)
+        .with_context(|| format!("resolving prepared fallback run {}", args.run_dir.display()))?;
+    let manifest = read_fallback_manifest(&run_dir.join(FALLBACK_MANIFEST_FILE))?;
+    if std::fs::canonicalize(&manifest.run_dir).ok().as_deref() != Some(run_dir.as_path()) {
+        return Err(anyhow!(
+            "fallback manifest run_dir does not match {}",
+            run_dir.display()
+        ));
+    }
+    if run_dir.join("exit.code").exists() {
+        return Err(anyhow!(
+            "fallback run {} is already terminal; prepare a new run",
+            manifest.run_id
+        ));
+    }
+    let _claim = match FallbackRunLock::acquire(&run_dir) {
+        Ok(claim) => claim,
+        Err(e) => {
+            eprintln!("telex copilot fallback run: {e}");
+            return Ok(1);
+        }
+    };
+    if run_dir.join("exit.code").exists() {
+        return Err(anyhow!(
+            "fallback run {} became terminal before this launcher acquired it",
+            manifest.run_id
+        ));
+    }
+
+    match fallback_run_inner(ctx, &manifest, &run_dir).await {
+        Ok(code) => Ok(code),
+        Err(e) => {
+            let detail = e.to_string();
+            crate::commands::wait::write_terminal_error_artifacts(
+                &run_dir,
+                &manifest.address,
+                detail.clone(),
+            )
+            .map_err(|write_err| {
+                anyhow!(
+                    "{detail}; additionally failed to write terminal fallback artifacts: {write_err}"
+                )
+            })?;
+            eprintln!("telex copilot fallback run: {detail}");
+            Ok(1)
+        }
+    }
+}
+
+async fn fallback_run_inner(ctx: &Ctx, manifest: &FallbackManifest, run_dir: &Path) -> Result<i32> {
+    validate_current_fallback_run(manifest)?;
+    let run_ctx = Ctx {
+        cfg: crate::config::Config::resolve(
+            manifest.backend_selector.clone(),
+            manifest.db_override.clone(),
+            Some(manifest.address.clone()),
+        )?,
+        fmt: ctx.fmt,
+        address: Some(manifest.address.clone()),
+    };
+    let store_key = run_ctx.store_key()?;
+    if store_key != manifest.store_key {
+        return Err(anyhow!(
+            "prepared fallback store changed (expected {}, resolved {store_key})",
+            manifest.store_key
+        ));
+    }
+
+    let existing_status = daemon_status_if_running(&store_key).await?;
+    if let Some(status) = existing_status.as_ref() {
+        ensure_fallback_protocol(status)?;
+    }
+    let existing = existing_status.as_ref().and_then(|status| {
+        active_session_members(status, &store_key, &manifest.session_id)
+            .into_iter()
+            .find(|member| member.address == manifest.address)
+    });
+    if existing
+        .as_ref()
+        .is_some_and(|member| member.live_waiters_count > 0)
+    {
+        return Err(anyhow!(
+            "a pull waiter is already live for {}; refusing a duplicate fallback run",
+            manifest.address
+        ));
+    }
+    if existing
+        .as_ref()
+        .is_some_and(|member| member.push_registered)
+        && bridge_is_live(&manifest.session_id)
+        && !manifest.force
+    {
+        return Err(anyhow!(
+            "push bridge is live for {}; prepare with --force only for an intentional downgrade",
+            manifest.address
+        ));
+    }
+
+    if existing
+        .as_ref()
+        .is_none_or(|member| member.push_registered)
+    {
+        register_fallback_member(&run_ctx, manifest, existing.as_ref()).await?;
+    }
+
+    let status = daemon_status_snapshot(&store_key).await?;
+    ensure_fallback_protocol(&status)?;
+    let member = active_session_members(&status, &store_key, &manifest.session_id)
+        .into_iter()
+        .find(|member| member.address == manifest.address)
+        .ok_or_else(|| {
+            anyhow!(
+                "fallback registration did not create member {}",
+                manifest.address
+            )
+        })?;
+    if member.push_registered {
+        return Err(anyhow!(
+            "daemon did not clear push registration for {}; restart/update the daemon before using fallback",
+            manifest.address
+        ));
+    }
+    if member.live_waiters_count > 0 {
+        return Err(anyhow!(
+            "a pull waiter became live for {}; refusing duplicate coverage",
+            manifest.address
+        ));
+    }
+
+    match remove_bridge_binding(&manifest.session_id, &manifest.address) {
+        Ok(true) => remove_bridge_extension(&manifest.session_id),
+        Ok(false) => {}
+        Err(e) => {
+            return Err(anyhow!(
+                "cleared push but could not remove the bridge binding: {e}"
+            ))
+        }
+    }
+
+    let min_attention = manifest
+        .min_attention
+        .as_deref()
+        .map(Attention::parse)
+        .transpose()?;
+    crate::commands::wait::run(
+        &run_ctx,
+        WaitArgs {
+            session: Some(manifest.session_id.clone()),
+            timeout_ms: Some(manifest.timeout_ms),
+            min_attention,
+            wake_on_cc: manifest.wake_on_cc,
+            since: 0,
+            hang_ms: 8_000,
+            reconnect_grace_ms: None,
+            stale_heartbeat_ms: 15_000,
+            out_dir: Some(run_dir.to_path_buf()),
+        },
+    )
+    .await
+}
+
+async fn register_fallback_member(
+    ctx: &Ctx,
+    manifest: &FallbackManifest,
+    existing: Option<&MemberStatus>,
+) -> Result<()> {
+    let watch_pids = if let Some(pid) = manifest.loader_pid {
+        vec![WatchPidSpec::anchor(pid)]
+    } else {
+        existing
+            .map(|member| {
+                member
+                    .watch_pids
+                    .iter()
+                    .map(|watch| WatchPidSpec {
+                        pid: watch.pid,
+                        role: watch.role,
+                    })
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    let register = Request::Register {
+        store_key: manifest.store_key.clone(),
+        address: manifest.address.clone(),
+        session_id: manifest.session_id.clone(),
+        occupant: manifest
+            .occupant
+            .clone()
+            .or_else(|| existing.map(|member| member.occupant.clone()))
+            .unwrap_or_else(crate::identity::default_occupant),
+        description: manifest
+            .description
+            .clone()
+            .or_else(|| existing.and_then(|member| member.description.clone())),
+        scope: manifest
+            .scope
+            .clone()
+            .or_else(|| existing.and_then(|member| member.scope.clone())),
+        tags: manifest
+            .tags
+            .clone()
+            .or_else(|| existing.and_then(|member| member.tags.clone())),
+        watch_pids,
+        recovery: false,
+        on_deliver: None,
+        replace_on_deliver: true,
+        on_deliver_wake_on_cc: false,
+    };
+    match crate::daemon::request_connect_or_spawn(&ctx.store_key()?, &register).await? {
+        Response::Registered { .. } => Ok(()),
+        Response::Error { code, message, .. } => Err(anyhow!("{code}: {message}")),
+        other => Err(anyhow!(
+            "unexpected daemon fallback-register response: {other:?}"
+        )),
+    }
+}
+
 async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
     let payload = read_stdin_payload();
     let session = match resolve_copilot_session(args.session.as_deref(), payload.as_deref()) {
@@ -1832,6 +2190,384 @@ fn path_token(value: &str) -> String {
     }
 }
 
+fn fallback_station_root(store_key: &str, session: &str, address: &str) -> Result<PathBuf> {
+    let station_key = format!("{store_key}\0{session}\0{address}");
+    Ok(crate::config::telex_home()?
+        .join("copilot-fallback")
+        .join(crate::daemon::short_hash(station_key.as_bytes())))
+}
+
+fn ensure_private_dir(path: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    }
+    Ok(())
+}
+
+fn create_fallback_run_dir(station_root: &Path) -> Result<(String, PathBuf)> {
+    let runs = station_root.join("runs");
+    ensure_private_dir(&runs)?;
+    for _ in 0..8 {
+        let run_id = format!("{}-{}", now_ms(), message_fence_nonce());
+        let run_dir = runs.join(&run_id);
+        match std::fs::create_dir(&run_dir) {
+            Ok(()) => {
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::PermissionsExt;
+                    std::fs::set_permissions(&run_dir, std::fs::Permissions::from_mode(0o700))?;
+                }
+                let run_dir = std::fs::canonicalize(&run_dir)?;
+                return Ok((run_id, run_dir));
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        }
+    }
+    Err(anyhow!(
+        "could not allocate a unique Copilot fallback run directory"
+    ))
+}
+
+fn unfinished_fallback_manifest(current_path: &Path) -> Result<Option<FallbackManifest>> {
+    let current = match read_private_json::<FallbackCurrent>(current_path) {
+        Ok(current) => current,
+        Err(e)
+            if e.downcast_ref::<std::io::Error>()
+                .is_some_and(|io| io.kind() == std::io::ErrorKind::NotFound) =>
+        {
+            return Ok(None)
+        }
+        Err(e) => return Err(e),
+    };
+    if current.version != FALLBACK_MANIFEST_VERSION {
+        return Err(anyhow!(
+            "unsupported fallback current-pointer version {}",
+            current.version
+        ));
+    }
+    let manifest = read_fallback_manifest(&current.run_dir.join(FALLBACK_MANIFEST_FILE))?;
+    if manifest.run_id != current.run_id || manifest.run_dir != current.run_dir {
+        return Err(anyhow!(
+            "fallback current pointer does not match its run manifest"
+        ));
+    }
+    if current.run_dir.join("exit.code").exists() {
+        Ok(None)
+    } else {
+        Ok(Some(manifest))
+    }
+}
+
+fn read_fallback_manifest(path: &Path) -> Result<FallbackManifest> {
+    let manifest = read_private_json::<FallbackManifest>(path)?;
+    if manifest.version != FALLBACK_MANIFEST_VERSION {
+        return Err(anyhow!(
+            "unsupported fallback manifest version {}",
+            manifest.version
+        ));
+    }
+    if manifest.run_id.trim().is_empty()
+        || manifest.address.trim().is_empty()
+        || manifest.session_id.trim().is_empty()
+    {
+        return Err(anyhow!(
+            "fallback manifest is missing required identity fields"
+        ));
+    }
+    Ok(manifest)
+}
+
+fn validate_current_fallback_run(manifest: &FallbackManifest) -> Result<()> {
+    let station_root = manifest
+        .run_dir
+        .parent()
+        .and_then(Path::parent)
+        .ok_or_else(|| anyhow!("fallback run directory has no station root"))?;
+    let current: FallbackCurrent = read_private_json(&station_root.join(FALLBACK_CURRENT_FILE))?;
+    if current.version != FALLBACK_MANIFEST_VERSION
+        || current.run_id != manifest.run_id
+        || current.run_dir != manifest.run_dir
+    {
+        return Err(anyhow!(
+            "fallback run {} is no longer the station's current run",
+            manifest.run_id
+        ));
+    }
+    Ok(())
+}
+
+fn read_private_json<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T> {
+    let bytes = std::fs::read(path)?;
+    serde_json::from_slice(&bytes)
+        .with_context(|| format!("parsing fallback state {}", path.display()))
+}
+
+fn write_private_json<T: Serialize>(path: &Path, value: &T) -> Result<()> {
+    let bytes = serde_json::to_vec_pretty(value)?;
+    write_private_file(path, &bytes)?;
+    Ok(())
+}
+
+fn write_private_file(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    if let Some(parent) = path.parent() {
+        ensure_private_dir(parent)?;
+    }
+    let tmp = path.with_extension(format!(
+        "tmp-{}-{}",
+        std::process::id(),
+        message_fence_nonce()
+    ));
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&tmp)?;
+    file.write_all(bytes)?;
+    file.sync_all()?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600))?;
+    }
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            std::fs::remove_file(path)?;
+            std::fs::rename(&tmp, path)
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
+fn fallback_launcher(manifest: &FallbackManifest) -> Result<FallbackLauncher> {
+    let executable = path_string(&manifest.executable)?;
+    let run_dir = path_string(&manifest.run_dir)?;
+    #[cfg(windows)]
+    {
+        let script_path = manifest.run_dir.join(FALLBACK_WINDOWS_LAUNCHER_FILE);
+        let script = format!(
+            "$ErrorActionPreference = 'Stop'\r\n& {} '--json' 'copilot' 'fallback' 'run' '--run-dir' {}\r\nexit $LASTEXITCODE\r\n",
+            powershell_quote(&executable),
+            powershell_quote(&run_dir),
+        );
+        write_private_file(&script_path, script.as_bytes())?;
+        let script_path = path_string(&script_path)?;
+        let program = "pwsh".to_string();
+        let args = vec![
+            "-NoProfile".to_string(),
+            "-ExecutionPolicy".to_string(),
+            "Bypass".to_string(),
+            "-File".to_string(),
+            script_path,
+        ];
+        let command = shell_join_powershell(&program, &args);
+        Ok(FallbackLauncher {
+            program,
+            args,
+            command,
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        let program = executable;
+        let args = vec![
+            "--json".to_string(),
+            "copilot".to_string(),
+            "fallback".to_string(),
+            "run".to_string(),
+            "--run-dir".to_string(),
+            run_dir,
+        ];
+        let command = shell_join_posix(&program, &args);
+        Ok(FallbackLauncher {
+            program,
+            args,
+            command,
+        })
+    }
+}
+
+fn emit_fallback_prepared(
+    ctx: &Ctx,
+    manifest: &FallbackManifest,
+    launcher: &FallbackLauncher,
+    reused: bool,
+) {
+    let out = serde_json::json!({
+        "mode": "pull-fallback",
+        "reused": reused,
+        "run_id": manifest.run_id,
+        "run_dir": manifest.run_dir,
+        "launcher": launcher,
+        "artifacts": {
+            "exit_code": manifest.run_dir.join("exit.code"),
+            "status": manifest.run_dir.join("status.json"),
+            "delivery": manifest.run_dir.join("delivery.json"),
+            "message": manifest.run_dir.join("message.json"),
+            "wait_pid": manifest.run_dir.join("wait.pid"),
+        },
+    });
+    emit(ctx.fmt, &out, || {
+        println!(
+            "prepared Copilot pull fallback run {}{}",
+            manifest.run_id,
+            if reused { " (existing)" } else { "" }
+        );
+        println!("{}", launcher.command);
+    });
+}
+
+fn path_string(path: &Path) -> Result<String> {
+    path.to_str()
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| anyhow!("path is not valid Unicode: {}", path.display()))
+}
+
+#[cfg(not(windows))]
+fn shell_join_posix(program: &str, args: &[String]) -> String {
+    std::iter::once(program)
+        .chain(args.iter().map(String::as_str))
+        .map(posix_quote)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(not(windows))]
+fn posix_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(windows)]
+fn shell_join_powershell(program: &str, args: &[String]) -> String {
+    std::iter::once(program)
+        .chain(args.iter().map(String::as_str))
+        .map(powershell_quote)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+#[cfg(windows)]
+fn powershell_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+async fn daemon_status_snapshot(store_key: &str) -> Result<DaemonStatus> {
+    let (mut client, cap) = connect_existing_with_cap(store_key)
+        .await
+        .map_err(|e| anyhow!(e))?;
+    daemon_status(&mut client, store_key, &cap.admin_cap)
+        .await
+        .map_err(|e| anyhow!(e))
+}
+
+async fn daemon_status_if_running(store_key: &str) -> Result<Option<DaemonStatus>> {
+    let paths = crate::daemon::DaemonPaths::current()?;
+    let cap = match crate::daemon::read_cap_file(&paths.cap_path) {
+        Ok(cap) => cap,
+        Err(crate::daemon::DaemonError::NotRunning(_)) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    let mut client = match crate::daemon::connect_existing(store_key).await {
+        Ok(client) => client,
+        Err(crate::daemon::DaemonError::NotRunning(_)) => return Ok(None),
+        Err(e) => return Err(e.into()),
+    };
+    daemon_status(&mut client, store_key, &cap.admin_cap)
+        .await
+        .map(Some)
+        .map_err(|e| anyhow!(e))
+}
+
+fn ensure_fallback_protocol(status: &DaemonStatus) -> Result<()> {
+    let actual = (status.protocol_version.major, status.protocol_version.minor);
+    if actual < FALLBACK_PROTOCOL_VERSION {
+        return Err(anyhow!(
+            "running daemon protocol {}.{} predates atomic fallback transitions (need {}.{}); restart/update the daemon",
+            actual.0,
+            actual.1,
+            FALLBACK_PROTOCOL_VERSION.0,
+            FALLBACK_PROTOCOL_VERSION.1,
+        ));
+    }
+    Ok(())
+}
+
+struct FallbackRunLock {
+    path: PathBuf,
+}
+
+impl FallbackRunLock {
+    fn acquire(run_dir: &Path) -> Result<Self> {
+        let path = run_dir.join(FALLBACK_RUN_CLAIM_FILE);
+        let claim = FallbackRunClaim {
+            pid: std::process::id(),
+            start_time: crate::session_watch::capture_process_start_time(std::process::id()),
+        };
+        let mut options = OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        for _ in 0..2 {
+            match options.open(&path) {
+                Ok(mut file) => {
+                    let write_result = (|| -> Result<()> {
+                        let bytes = serde_json::to_vec(&claim)?;
+                        file.write_all(&bytes)?;
+                        file.sync_all()?;
+                        Ok(())
+                    })();
+                    if let Err(e) = write_result {
+                        drop(file);
+                        let _ = std::fs::remove_file(&path);
+                        return Err(e);
+                    }
+                    return Ok(Self { path });
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    let existing: FallbackRunClaim =
+                        read_private_json(&path).with_context(|| {
+                            format!("reading existing fallback claim {}", path.display())
+                        })?;
+                    if crate::session_watch::process_alive_with_start_time(
+                        existing.pid,
+                        existing.start_time,
+                    ) {
+                        return Err(anyhow!(
+                            "fallback run is already executing as pid {}",
+                            existing.pid
+                        ));
+                    }
+                    std::fs::remove_file(&path)?;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
+        Err(anyhow!(
+            "could not claim fallback run {}",
+            run_dir.display()
+        ))
+    }
+}
+
+impl Drop for FallbackRunLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
 fn read_guard_state(path: &Path) -> Result<Option<GuardState>> {
     match std::fs::read_to_string(path) {
         Ok(text) => Ok(Some(serde_json::from_str(&text)?)),
@@ -2377,6 +3113,52 @@ mod tests {
         member
     }
 
+    fn fallback_manifest_at(root: &Path) -> FallbackManifest {
+        ensure_private_dir(root).unwrap();
+        let run_dir = root.join("runs").join("run-1");
+        ensure_private_dir(&run_dir).unwrap();
+        let run_dir = std::fs::canonicalize(run_dir).unwrap();
+        FallbackManifest {
+            version: FALLBACK_MANIFEST_VERSION,
+            run_id: "run-1".to_string(),
+            run_dir,
+            prepared_at_ms: 1,
+            executable: std::env::current_exe().unwrap(),
+            backend_selector: None,
+            db_override: Some(root.join("db.sqlite").to_string_lossy().into_owned()),
+            store_key: "sqlite:/tmp/fallback-test.db".to_string(),
+            address: "addr:user-controlled".to_string(),
+            session_id: "session-user-controlled".to_string(),
+            description: Some("test fallback".to_string()),
+            scope: None,
+            tags: None,
+            occupant: None,
+            loader_pid: None,
+            timeout_ms: 1_000,
+            min_attention: Some("background".to_string()),
+            wake_on_cc: false,
+            force: false,
+        }
+    }
+
+    fn daemon_status_with_minor(minor: u16) -> DaemonStatus {
+        DaemonStatus {
+            protocol_version: ProtocolVersion { major: 1, minor },
+            daemon_version: "test".to_string(),
+            instance_id: "inst".to_string(),
+            singleton_key: "singleton".to_string(),
+            stores: Vec::new(),
+            backoff: Vec::new(),
+            recent_errors: Vec::new(),
+            epoch_by_address: Vec::new(),
+            members: Vec::new(),
+            live_waiters: Vec::new(),
+            retention: Vec::new(),
+            idle_stations: Default::default(),
+            deaf_stations: Default::default(),
+        }
+    }
+
     fn restore_env(key: &str, value: Option<std::ffi::OsString>) {
         match value {
             Some(value) => std::env::set_var(key, value),
@@ -2649,6 +3431,121 @@ mod tests {
         let token = path_token(&long);
         assert_ne!(token, long);
         assert!(token.len() <= 80);
+    }
+
+    #[test]
+    fn unfinished_fallback_run_is_reused_until_exit_code_exists() {
+        let root = std::env::temp_dir().join(format!(
+            "telex-fallback-current-{}-{}",
+            std::process::id(),
+            message_fence_nonce()
+        ));
+        let manifest = fallback_manifest_at(&root);
+        write_private_json(&manifest.run_dir.join(FALLBACK_MANIFEST_FILE), &manifest).unwrap();
+        let current = FallbackCurrent {
+            version: FALLBACK_MANIFEST_VERSION,
+            run_id: manifest.run_id.clone(),
+            run_dir: manifest.run_dir.clone(),
+        };
+        let current_path = root.join(FALLBACK_CURRENT_FILE);
+        write_private_json(&current_path, &current).unwrap();
+
+        let reused = unfinished_fallback_manifest(&current_path)
+            .unwrap()
+            .expect("unfinished run");
+        assert_eq!(reused.run_id, manifest.run_id);
+
+        std::fs::write(manifest.run_dir.join("exit.code"), b"2\n").unwrap();
+        assert!(unfinished_fallback_manifest(&current_path)
+            .unwrap()
+            .is_none());
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fallback_run_lock_rejects_duplicate_and_recovers_stale_claim() {
+        let root = std::env::temp_dir().join(format!(
+            "telex-fallback-claim-{}-{}",
+            std::process::id(),
+            message_fence_nonce()
+        ));
+        ensure_private_dir(&root).unwrap();
+        let first = FallbackRunLock::acquire(&root).unwrap();
+        assert!(FallbackRunLock::acquire(&root).is_err());
+        drop(first);
+        let second = FallbackRunLock::acquire(&root).unwrap();
+        drop(second);
+
+        write_private_json(
+            &root.join(FALLBACK_RUN_CLAIM_FILE),
+            &FallbackRunClaim {
+                pid: 0,
+                start_time: None,
+            },
+        )
+        .unwrap();
+        let recovered = FallbackRunLock::acquire(&root).unwrap();
+        drop(recovered);
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn unix_fallback_launcher_uses_direct_binary_argv_without_user_identity() {
+        let root = std::env::temp_dir().join(format!(
+            "telex-fallback-launcher-{}-{}",
+            std::process::id(),
+            message_fence_nonce()
+        ));
+        let manifest = fallback_manifest_at(&root);
+        let launcher = fallback_launcher(&manifest).unwrap();
+        assert_eq!(
+            launcher.program,
+            manifest.executable.to_string_lossy().as_ref()
+        );
+        let run_dir = manifest.run_dir.to_string_lossy().into_owned();
+        assert_eq!(
+            launcher.args,
+            vec![
+                "--json".to_string(),
+                "copilot".to_string(),
+                "fallback".to_string(),
+                "run".to_string(),
+                "--run-dir".to_string(),
+                run_dir,
+            ]
+        );
+        assert!(!launcher.command.contains(&manifest.address));
+        assert!(!launcher.command.contains(&manifest.session_id));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_fallback_launcher_contains_only_binary_and_generated_run_path() {
+        let root = std::env::temp_dir().join(format!(
+            "telex-fallback-launcher-{}-{}",
+            std::process::id(),
+            message_fence_nonce()
+        ));
+        let manifest = fallback_manifest_at(&root);
+        let launcher = fallback_launcher(&manifest).unwrap();
+        assert_eq!(launcher.program, "pwsh");
+        let script =
+            std::fs::read_to_string(manifest.run_dir.join(FALLBACK_WINDOWS_LAUNCHER_FILE)).unwrap();
+        assert!(script.contains("copilot"));
+        assert!(script.contains("fallback"));
+        assert!(script.contains("run"));
+        assert!(!script.contains(&manifest.address));
+        assert!(!script.contains(&manifest.session_id));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn fallback_requires_protocol_minor_four() {
+        let error = ensure_fallback_protocol(&daemon_status_with_minor(3)).unwrap_err();
+        assert!(error.to_string().contains("need 1.4"));
+        ensure_fallback_protocol(&daemon_status_with_minor(4)).unwrap();
     }
 
     #[test]
