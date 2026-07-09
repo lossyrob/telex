@@ -5697,12 +5697,10 @@ mod p3_tests {
             // fully controls the push-attempt map via `on_deliver_record_attempt`.
             *on_deliver = Some(Vec::new());
         }
+        let resp = request(state.clone(), req).await;
         assert!(
-            matches!(
-                request(state.clone(), req).await,
-                Response::Registered { .. }
-            ),
-            "push member should register"
+            matches!(resp, Response::Registered { .. }),
+            "push member should register; got: {resp:?}"
         );
     }
 
@@ -6310,10 +6308,8 @@ mod p3_tests {
             *on_deliver = Some(Vec::new());
             *on_deliver_wake_on_cc = true;
         }
-        assert!(matches!(
-            request(state.clone(), register).await,
-            Response::Registered { .. }
-        ));
+        let resp = request(state.clone(), register).await;
+        assert!(matches!(resp, Response::Registered { .. }), "expected Registered, got: {resp:?}");
         let initial_lower = state
             .get_member(&store, "s1", address)
             .unwrap()
