@@ -24,6 +24,7 @@ use crate::model::{now_ms, Attention};
 use crate::output::emit;
 
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
+const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "The telex push bridge is not live. Run `extensions_reload` to load it. If `extensions_reload` is unavailable, enable Copilot Extensions under `/experimental`; then re-provision with `telex --address <station> copilot resume` and run `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch its returned command; or detach with `telex --address <station> copilot detach`.";
 const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
 const HOOK_LOG_FILE: &str = "hook-events.ndjson";
 const HOOK_LOG_ROTATE_BYTES: u64 = 1_048_576;
@@ -2046,7 +2047,7 @@ fn evaluate_guard(
     );
     let mut guidance_parts: Vec<&str> = Vec::new();
     if !push_dead.is_empty() {
-        guidance_parts.push("The telex push bridge is not live -- run `extensions_reload` to load it (or `telex detach --address <station>` if done).");
+        guidance_parts.push(PUSH_BRIDGE_RECOVERY_GUIDANCE);
     }
     if !unarmed.is_empty() {
         guidance_parts.push("Re-arm `telex wait ... --out-dir <dir>` if still attending, or run `telex detach --address <station>` if done.");
@@ -2768,6 +2769,16 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    fn assert_in_order(text: &str, needles: &[&str]) {
+        let mut remainder = text;
+        for needle in needles {
+            let (_, after) = remainder
+                .split_once(needle)
+                .unwrap_or_else(|| panic!("missing ordered segment {needle:?} in {text:?}"));
+            remainder = after;
+        }
+    }
+
     #[test]
     fn parse_semver_reads_triples_and_strips_suffixes() {
         assert_eq!(parse_semver("0.1.0"), Some((0, 1, 0)));
@@ -2797,9 +2808,29 @@ mod tests {
             "copilot bridge protocol: v{COPILOT_BRIDGE_PROTOCOL}"
         )));
         assert!(doc.contains(MIN_COMPATIBLE_PLUGIN_VERSION));
-        // The bridge workflow and the --help source-of-truth guidance are present.
+        // The bridge workflow, extension prerequisite, recovery path, and --help
+        // source-of-truth guidance are present.
         assert!(doc.contains("copilot attach --copilot-bridge"));
         assert!(doc.contains("extensions_reload"));
+        assert!(doc.contains("Enable **Copilot Extensions** under `/experimental`"));
+        assert!(doc.contains("If `extensions_reload` is unavailable"));
+        assert!(doc.contains("copilot resume"));
+        assert!(doc.contains("supported pull"));
+        assert!(doc.contains("fallback below"));
+        let unavailable_recovery = doc
+            .split_once("If `extensions_reload` is unavailable:")
+            .expect("skill should explain unavailable extensions_reload recovery")
+            .1;
+        assert_in_order(
+            unavailable_recovery,
+            &[
+                "Enable Copilot Extensions",
+                "copilot resume",
+                "Run `extensions_reload`",
+                "supported pull",
+                "copilot detach",
+            ],
+        );
         assert!(doc.contains("copilot detach"));
         assert!(doc.contains("telex copilot --help"));
         // No inline warning without a stale plugin version.
@@ -3287,7 +3318,7 @@ mod tests {
     }
 
     #[test]
-    fn guard_nudges_push_member_when_bridge_not_live() {
+    fn guard_dead_bridge_nudges_always_offer_actionable_recovery() {
         let settings = GuardSettings {
             enabled: true,
             max_nudges: 3,
@@ -3295,15 +3326,52 @@ mod tests {
         // Handler registered on the daemon, but the bridge is not live (stale/absent heartbeat).
         let mut push = member("addr:push", 0, 0);
         push.push_registered = true;
-        let eval = evaluate_guard("s1", &[push], settings, None, false, true);
-        assert_eq!(eval.reason_code, "coverage_gap");
-        match eval.decision {
-            HookDecision::Block { reason } => {
-                assert!(reason.contains("addr:push (push) bridge is not live"));
-                assert!(reason.contains("extensions_reload"));
+        let mut prior_state = None;
+        for expected_nudge in 1..=settings.max_nudges {
+            let eval = evaluate_guard(
+                "s1",
+                std::slice::from_ref(&push),
+                settings,
+                prior_state,
+                false,
+                true,
+            );
+            assert_eq!(eval.reason_code, "coverage_gap");
+            assert_eq!(eval.nudges, expected_nudge);
+            match &eval.decision {
+                HookDecision::Block { reason } => {
+                    assert!(reason.contains("addr:push (push) bridge is not live"));
+                    assert!(reason.contains("copilot fallback prepare"));
+                    assert!(reason.contains(&format!("Nudge {expected_nudge}/3")));
+                    assert_in_order(
+                        reason,
+                        &[
+                            "Run `extensions_reload` to load it",
+                            "If `extensions_reload` is unavailable",
+                            "enable Copilot Extensions under `/experimental`",
+                            "copilot resume",
+                            "run `extensions_reload`",
+                            "supported pull fallback",
+                            "copilot fallback prepare",
+                            "copilot detach",
+                        ],
+                    );
+                }
+                other => panic!("expected block, got {other:?}"),
             }
-            other => panic!("expected block, got {other:?}"),
+            prior_state = eval.next_state;
         }
+
+        let exhausted = evaluate_guard(
+            "s1",
+            std::slice::from_ref(&push),
+            settings,
+            prior_state,
+            false,
+            true,
+        );
+        assert_eq!(exhausted.reason_code, "cap_exhausted");
+        assert!(matches!(exhausted.decision, HookDecision::Allow));
     }
 
     #[test]
