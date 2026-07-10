@@ -317,7 +317,7 @@ pub struct DaemonState {
     waiters: Mutex<BTreeMap<WaiterKey, WaiterRecord>>,
     delivery_admissions: Mutex<HashMap<MemberKey, Weak<AsyncMutex<()>>>>,
     #[cfg(test)]
-    delivery_admission_barrier: Mutex<Option<Arc<tokio::sync::Barrier>>>,
+    delivery_admission_control: Mutex<Option<Arc<DeliveryAdmissionTestControl>>>,
     next_waiter_id: AtomicU64,
     recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
@@ -348,6 +348,101 @@ struct SessionKey {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct WaiterKey {
     waiter_id: u64,
+}
+
+#[derive(Clone, Copy)]
+enum DeliveryAdmissionKind {
+    Register,
+    Wait,
+}
+
+#[cfg(test)]
+struct DeliveryAdmissionTestLane {
+    before_arrived: Semaphore,
+    before_release: Semaphore,
+    commit_arrived: Semaphore,
+    commit_release: Semaphore,
+}
+
+#[cfg(test)]
+impl DeliveryAdmissionTestLane {
+    fn new() -> Self {
+        Self {
+            before_arrived: Semaphore::new(0),
+            before_release: Semaphore::new(0),
+            commit_arrived: Semaphore::new(0),
+            commit_release: Semaphore::new(0),
+        }
+    }
+}
+
+#[cfg(test)]
+struct DeliveryAdmissionTestControl {
+    register: DeliveryAdmissionTestLane,
+    wait: DeliveryAdmissionTestLane,
+}
+
+#[cfg(test)]
+impl DeliveryAdmissionTestControl {
+    fn new() -> Self {
+        Self {
+            register: DeliveryAdmissionTestLane::new(),
+            wait: DeliveryAdmissionTestLane::new(),
+        }
+    }
+
+    fn lane(&self, kind: DeliveryAdmissionKind) -> &DeliveryAdmissionTestLane {
+        match kind {
+            DeliveryAdmissionKind::Register => &self.register,
+            DeliveryAdmissionKind::Wait => &self.wait,
+        }
+    }
+
+    async fn before_lock(&self, kind: DeliveryAdmissionKind) {
+        let lane = self.lane(kind);
+        lane.before_arrived.add_permits(1);
+        lane.before_release
+            .acquire()
+            .await
+            .expect("admission before-lock release")
+            .forget();
+    }
+
+    async fn before_commit(&self, kind: DeliveryAdmissionKind) {
+        let lane = self.lane(kind);
+        lane.commit_arrived.add_permits(1);
+        lane.commit_release
+            .acquire()
+            .await
+            .expect("admission commit release")
+            .forget();
+    }
+
+    async fn wait_before_lock(&self, kind: DeliveryAdmissionKind) {
+        self.lane(kind)
+            .before_arrived
+            .acquire()
+            .await
+            .expect("admission reached before-lock gate")
+            .forget();
+    }
+
+    async fn wait_before_commit(&self, kind: DeliveryAdmissionKind) {
+        self.lane(kind)
+            .commit_arrived
+            .acquire()
+            .await
+            .expect("admission reached commit gate")
+            .forget();
+    }
+
+    fn release_before_lock(&self, kind: DeliveryAdmissionKind) {
+        self.lane(kind).before_release.add_permits(1);
+    }
+
+    fn release_commit(&self, kind: DeliveryAdmissionKind) {
+        self.lane(kind).commit_release.add_permits(1);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -713,6 +808,7 @@ impl DaemonState {
         store_key: &str,
         session_id: &str,
         address: &str,
+        kind: DeliveryAdmissionKind,
     ) -> Arc<AsyncMutex<()>> {
         let key = Self::member_key(store_key, session_id, address);
         let admission = {
@@ -726,14 +822,23 @@ impl DaemonState {
                 admission
             }
         };
+        let _ = kind;
         #[cfg(test)]
         {
-            let barrier = self.delivery_admission_barrier.lock().unwrap().clone();
-            if let Some(barrier) = barrier {
-                barrier.wait().await;
+            let control = self.delivery_admission_control.lock().unwrap().clone();
+            if let Some(control) = control {
+                control.before_lock(kind).await;
             }
         }
         admission
+    }
+
+    #[cfg(test)]
+    async fn delivery_admission_before_commit(&self, kind: DeliveryAdmissionKind) {
+        let control = self.delivery_admission_control.lock().unwrap().clone();
+        if let Some(control) = control {
+            control.before_commit(kind).await;
+        }
     }
 
     fn session_key(store_key: &str, session_id: &str) -> SessionKey {
@@ -1974,7 +2079,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         waiters: Mutex::new(BTreeMap::new()),
         delivery_admissions: Mutex::new(HashMap::new()),
         #[cfg(test)]
-        delivery_admission_barrier: Mutex::new(None),
+        delivery_admission_control: Mutex::new(None),
         next_waiter_id: AtomicU64::new(1),
         recent_errors: Arc::new(Mutex::new(VecDeque::new())),
         ended_sessions: Mutex::new(BTreeMap::new()),
@@ -3688,7 +3793,12 @@ async fn register_member(
     // Admission is per station and outermost: never acquire it while holding another daemon
     // lock. Register may await backend work while holding it, but no long-lived waiter does.
     let delivery_admission = state
-        .delivery_admission(&store_key, &session_id, &address)
+        .delivery_admission(
+            &store_key,
+            &session_id,
+            &address,
+            DeliveryAdmissionKind::Register,
+        )
         .await;
     let _delivery_admission_guard = delivery_admission.lock().await;
     let watch_pids = capture_watch_pids(watch_pids);
@@ -3779,6 +3889,10 @@ async fn register_member(
                 if !recovery {
                     state.clear_definite_session_end(&store_key, &session_id);
                 }
+                #[cfg(test)]
+                state
+                    .delivery_admission_before_commit(DeliveryAdmissionKind::Register)
+                    .await;
                 state.insert_member(refreshed.clone());
                 // Reset the push retry state and re-scan backlog only on an explicit
                 // (re-)provision; a plain refresh that merely preserved the handler keeps its
@@ -3986,6 +4100,10 @@ async fn register_member(
     } else {
         None
     };
+    #[cfg(test)]
+    state
+        .delivery_admission_before_commit(DeliveryAdmissionKind::Register)
+        .await;
     state.insert_member(record);
     if let Some(member) = backlog {
         state.on_deliver_forget_member(&MemberKey {
@@ -4476,7 +4594,12 @@ async fn wait_for_message_with_idle_ttl(
         None
     };
     let delivery_admission = state
-        .delivery_admission(&store_key, &session_id, &address)
+        .delivery_admission(
+            &store_key,
+            &session_id,
+            &address,
+            DeliveryAdmissionKind::Wait,
+        )
         .await;
     let delivery_admission_guard = delivery_admission.lock().await;
     // Repeat the member/mode checks after all async preflight work. The opposite-mode recheck and
@@ -4525,6 +4648,10 @@ async fn wait_for_message_with_idle_ttl(
         })
         .unwrap_or((None, None));
     let waiter_pid_for_status = waiter_pid;
+    #[cfg(test)]
+    state
+        .delivery_admission_before_commit(DeliveryAdmissionKind::Wait)
+        .await;
     let mut waiter_guard = WaiterGuard::new(
         state.clone(),
         &store_key,
@@ -5273,7 +5400,7 @@ mod p3_tests {
             waiters: Mutex::new(BTreeMap::new()),
             delivery_admissions: Mutex::new(HashMap::new()),
             #[cfg(test)]
-            delivery_admission_barrier: Mutex::new(None),
+            delivery_admission_control: Mutex::new(None),
             next_waiter_id: AtomicU64::new(1),
             recent_errors: Arc::new(Mutex::new(VecDeque::new())),
             ended_sessions: Mutex::new(BTreeMap::new()),
@@ -5502,14 +5629,18 @@ mod p3_tests {
         assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
     }
 
-    #[tokio::test]
-    async fn concurrent_push_and_pull_admission_is_linearizable() {
-        let state = test_state("concurrent-delivery-admission");
-        let store = store_key("concurrent-delivery-admission");
+    async fn run_concurrent_delivery_admission_case(register_wins: bool) {
+        let label = if register_wins {
+            "concurrent-delivery-admission-register"
+        } else {
+            "concurrent-delivery-admission-wait"
+        };
+        let state = test_state(label);
+        let store = store_key(label);
         registered_epoch(state.clone(), &store, "s1", "addr:a").await;
 
-        *state.delivery_admission_barrier.lock().unwrap() =
-            Some(Arc::new(tokio::sync::Barrier::new(2)));
+        let control = Arc::new(DeliveryAdmissionTestControl::new());
+        *state.delivery_admission_control.lock().unwrap() = Some(control.clone());
 
         let mut push = register_req(&store, "s1", "addr:a");
         if let Request::Register { on_deliver, .. } = &mut push {
@@ -5524,13 +5655,57 @@ mod p3_tests {
             request(wait_state, wait_request).await
         }));
 
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            control.wait_before_lock(DeliveryAdmissionKind::Register),
+        )
+        .await
+        .expect("register reached admission boundary");
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            control.wait_before_lock(DeliveryAdmissionKind::Wait),
+        )
+        .await
+        .expect("wait reached admission boundary");
+
+        let winner = if register_wins {
+            DeliveryAdmissionKind::Register
+        } else {
+            DeliveryAdmissionKind::Wait
+        };
+        let loser = if register_wins {
+            DeliveryAdmissionKind::Wait
+        } else {
+            DeliveryAdmissionKind::Register
+        };
+        control.release_before_lock(winner);
+        tokio::time::timeout(Duration::from_secs(2), control.wait_before_commit(winner))
+            .await
+            .expect("winner reached commit boundary");
+
+        // The loser is now released while the winner is paused after its final recheck. With the
+        // admission mutex removed, it would also reach the commit boundary and this assertion
+        // would fail; with the mutex, it cannot pass the winner until after the winner commits.
+        control.release_before_lock(loser);
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                control.wait_before_commit(loser)
+            )
+            .await
+            .is_err(),
+            "losing mode crossed the commit boundary before the winner installed"
+        );
+        control.release_commit(winner);
+
         let push_response = tokio::time::timeout(Duration::from_secs(2), push_task)
             .await
             .expect("concurrent push admission completed")
             .expect("push task joined");
-        *state.delivery_admission_barrier.lock().unwrap() = None;
+        *state.delivery_admission_control.lock().unwrap() = None;
 
         let push_admitted = matches!(push_response, Response::Registered { .. });
+        assert_eq!(push_admitted, register_wins);
         if !push_admitted {
             assert!(matches!(
                 push_response,
@@ -5545,6 +5720,17 @@ mod p3_tests {
                     .expect("losing wait admission completed")
                     .expect("wait task joined");
             assert!(matches!(wait_response, Response::PresenceEnded));
+        }
+
+        if !register_wins {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            while !state.has_live_waiter_for(&store, "s1", "addr:a") {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "winning waiter did not install"
+                );
+                tokio::task::yield_now().await;
+            }
         }
 
         let status = state.status().await;
@@ -5580,6 +5766,12 @@ mod p3_tests {
                     .expect("wait task joined");
             assert!(matches!(wait_response, Response::PresenceEnded));
         }
+    }
+
+    #[tokio::test]
+    async fn concurrent_push_and_pull_admission_is_linearizable_in_both_orders() {
+        run_concurrent_delivery_admission_case(true).await;
+        run_concurrent_delivery_admission_case(false).await;
     }
 
     #[test]
@@ -9751,7 +9943,7 @@ pub mod test_support {
                 waiters: Mutex::new(BTreeMap::new()),
                 delivery_admissions: Mutex::new(HashMap::new()),
                 #[cfg(test)]
-                delivery_admission_barrier: Mutex::new(None),
+                delivery_admission_control: Mutex::new(None),
                 next_waiter_id: AtomicU64::new(1),
                 recent_errors: Arc::new(Mutex::new(VecDeque::new())),
                 ended_sessions: Mutex::new(BTreeMap::new()),
