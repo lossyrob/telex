@@ -22,7 +22,7 @@ use crate::daemon_ipc::{
 use crate::model::now_ms;
 
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
-const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "The telex push bridge is not live. If `extensions_reload` is unavailable, enable Copilot Extensions under `/experimental`; then re-provision with `telex --address <station> copilot resume` and run `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported pull fallback documented by `telex skill` (`telex wait`), or detach with `telex --address <station> copilot detach`.";
+const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "The telex push bridge is not live. Run `extensions_reload` to load it. If `extensions_reload` is unavailable, enable Copilot Extensions under `/experimental`; then re-provision with `telex --address <station> copilot resume` and run `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported pull fallback documented by `telex skill` (`telex wait`), or detach with `telex --address <station> copilot detach`.";
 const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
 const HOOK_LOG_FILE: &str = "hook-events.ndjson";
 const HOOK_LOG_ROTATE_BYTES: u64 = 1_048_576;
@@ -1957,6 +1957,16 @@ mod tests {
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+    fn assert_in_order(text: &str, needles: &[&str]) {
+        let mut remainder = text;
+        for needle in needles {
+            let (_, after) = remainder
+                .split_once(needle)
+                .unwrap_or_else(|| panic!("missing ordered segment {needle:?} in {text:?}"));
+            remainder = after;
+        }
+    }
+
     #[test]
     fn parse_semver_reads_triples_and_strips_suffixes() {
         assert_eq!(parse_semver("0.1.0"), Some((0, 1, 0)));
@@ -1995,6 +2005,20 @@ mod tests {
         assert!(doc.contains("copilot resume"));
         assert!(doc.contains("supported pull"));
         assert!(doc.contains("fallback below"));
+        let unavailable_recovery = doc
+            .split_once("If `extensions_reload` is unavailable:")
+            .expect("skill should explain unavailable extensions_reload recovery")
+            .1;
+        assert_in_order(
+            unavailable_recovery,
+            &[
+                "Enable Copilot Extensions",
+                "copilot resume",
+                "Run `extensions_reload`",
+                "supported pull",
+                "copilot detach",
+            ],
+        );
         assert!(doc.contains("copilot detach"));
         assert!(doc.contains("telex copilot --help"));
         // No inline warning without a stale plugin version.
@@ -2424,14 +2448,20 @@ mod tests {
             match &eval.decision {
                 HookDecision::Block { reason } => {
                     assert!(reason.contains("addr:push (push) bridge is not live"));
-                    assert!(reason.contains("If `extensions_reload` is unavailable"));
-                    assert!(reason.contains("Copilot Extensions under `/experimental`"));
-                    assert!(reason.contains("copilot resume"));
-                    assert!(reason.contains("run `extensions_reload`"));
-                    assert!(reason.contains("supported pull fallback"));
                     assert!(reason.contains("`telex wait`"));
-                    assert!(reason.contains("copilot detach"));
                     assert!(reason.contains(&format!("Nudge {expected_nudge}/3")));
+                    assert_in_order(
+                        reason,
+                        &[
+                            "Run `extensions_reload` to load it",
+                            "If `extensions_reload` is unavailable",
+                            "enable Copilot Extensions under `/experimental`",
+                            "copilot resume",
+                            "run `extensions_reload`",
+                            "supported pull fallback",
+                            "copilot detach",
+                        ],
+                    );
                 }
                 other => panic!("expected block, got {other:?}"),
             }
