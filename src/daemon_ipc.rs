@@ -86,15 +86,11 @@ pub const fn current_protocol_version() -> ProtocolVersion {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum WatchPidRole {
+    #[default]
     Anchor,
     Required,
-}
-
-impl Default for WatchPidRole {
-    fn default() -> Self {
-        Self::Anchor
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -768,13 +764,11 @@ pub fn evaluate_hello(hello: &Hello) -> HelloAck {
         .find(|cap| !caps.contains(cap.as_str()))
     {
         Some(format!("unknown required capability: {cap}"))
-    } else if let Some(cap) = required
-        .iter()
-        .find(|cap| !client_caps.contains(cap.as_str()))
-    {
-        Some(format!("client missing required capability: {cap}"))
     } else {
-        None
+        required
+            .iter()
+            .find(|cap| !client_caps.contains(cap.as_str()))
+            .map(|cap| format!("client missing required capability: {cap}"))
     };
 
     HelloAck {

@@ -44,11 +44,9 @@ jobs:
         run: cargo test --workspace --verbose
 
       - name: Check formatting
-        continue-on-error: true
         run: cargo fmt --check
 
       - name: Run Clippy
-        continue-on-error: true
         run: cargo clippy --workspace -- -D warnings
 
   feature-check:

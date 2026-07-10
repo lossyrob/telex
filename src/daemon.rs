@@ -1,5 +1,6 @@
 //! Hidden daemon singleton foundation: singleton identity, endpoint naming, capability
 //! file handling, connect-or-spawn, and a P2 JSONL server loop.
+#![allow(clippy::result_large_err, clippy::too_many_arguments)]
 
 #[cfg(feature = "postgres")]
 use crate::backend::postgres::{
@@ -1318,7 +1319,7 @@ impl MemberRecord {
             push_suppressed_count,
             health_detail,
             last_waiter_exit_at_ms: self.last_waiter_exit_at_ms,
-            last_waiter_outcome: self.last_waiter_outcome.clone(),
+            last_waiter_outcome: self.last_waiter_outcome,
             last_waiter_exit_code: self.last_waiter_exit_code,
             last_waiter_detail: self.last_waiter_detail.clone(),
             last_waiter_pid: self.last_waiter_pid,
@@ -1809,7 +1810,7 @@ fn spawn_daemon_process(exe: &Path) -> Result<()> {
             DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
             std::ptr::null(),
             std::ptr::null(),
-            &mut startup,
+            &startup,
             &mut process_info,
         )
     };
@@ -2090,6 +2091,7 @@ fn spawn_postgres_notify_listener(
 }
 
 #[cfg(feature = "postgres")]
+#[allow(clippy::large_enum_variant)]
 enum PgListenEvent {
     Message(AsyncMessage),
     Error(tokio_postgres::Error),
@@ -2694,7 +2696,7 @@ impl DaemonState {
                             return None;
                         }
                         let ts = attempt.notification_lower_bound.unwrap_or(lower_bound);
-                        if earliest_blocking.map_or(true, |blocking| ts < blocking) {
+                        if earliest_blocking.is_none_or(|blocking| ts < blocking) {
                             Some(ts)
                         } else {
                             None
@@ -4215,7 +4217,7 @@ async fn detach_member(
                     &store_key,
                     &session_id,
                     "Detach",
-                    &[member.clone()],
+                    std::slice::from_ref(&member),
                 );
                 // Do NOT record the durable tombstone again here: `release_epoch_lease_for_detach`
                 // above already wrote it atomically inside the lease-release transaction (see the
@@ -9822,9 +9824,7 @@ mod platform {
 
     impl Listener {
         pub fn bind(endpoint: &Endpoint) -> Result<Self> {
-            let path = match endpoint {
-                Endpoint::UnixSocket(path) => path,
-            };
+            let Endpoint::UnixSocket(path) = endpoint;
             if let Some(parent) = path.parent() {
                 ensure_owner_private_dir(parent)?;
             }
@@ -9892,6 +9892,7 @@ mod platform {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .mode(0o600)
             .open(&lock_path)
             .map_err(|e| io_err("opening daemon endpoint lock", e))?;
@@ -9942,9 +9943,7 @@ mod platform {
     }
 
     pub async fn connect(endpoint: &Endpoint) -> Result<ClientConn> {
-        let path = match endpoint {
-            Endpoint::UnixSocket(path) => path,
-        };
+        let Endpoint::UnixSocket(path) = endpoint;
         UnixStream::connect(path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 DaemonError::NotRunning(format!("endpoint {} does not exist", path.display()))
@@ -10295,9 +10294,7 @@ mod platform {
     }
 
     pub async fn connect(endpoint: &Endpoint) -> Result<ClientConn> {
-        let pipe_name = match endpoint {
-            Endpoint::WindowsPipe(name) => name,
-        };
+        let Endpoint::WindowsPipe(pipe_name) = endpoint;
         for _ in 0..20 {
             match ClientOptions::new().open(pipe_name) {
                 Ok(client) => return Ok(client),
@@ -10341,14 +10338,14 @@ mod platform {
     }
 
     pub fn write_owner_only_file(path: &Path, bytes: &[u8]) -> Result<()> {
-        let mut sa = owner_only_security_attributes()?;
+        let sa = owner_only_security_attributes()?;
         let wide = wide_null(path.as_os_str());
         let handle = unsafe {
             CreateFileW(
                 wide.as_ptr(),
                 FILE_GENERIC_WRITE,
                 0,
-                &mut sa.attrs,
+                &sa.attrs,
                 CREATE_NEW,
                 FILE_ATTRIBUTE_NORMAL,
                 0,
@@ -10406,7 +10403,7 @@ mod platform {
     }
 
     fn create_pipe(pipe_name: &str, first: bool) -> Result<NamedPipeServer> {
-        let mut sa = owner_only_security_attributes()?;
+        let sa = owner_only_security_attributes()?;
         let wide = wide_null(OsStr::new(pipe_name));
         let mut open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED;
         if first {
@@ -10423,7 +10420,7 @@ mod platform {
                 8192,
                 8192,
                 0,
-                &mut sa.attrs,
+                &sa.attrs,
             )
         };
         if handle == INVALID_HANDLE_VALUE {
@@ -10442,9 +10439,9 @@ mod platform {
     }
 
     fn create_owner_only_dir(path: &Path) -> Result<()> {
-        let mut sa = owner_only_security_attributes()?;
+        let sa = owner_only_security_attributes()?;
         let wide = wide_null(path.as_os_str());
-        let ok = unsafe { CreateDirectoryW(wide.as_ptr(), &mut sa.attrs) };
+        let ok = unsafe { CreateDirectoryW(wide.as_ptr(), &sa.attrs) };
         if ok == 0 {
             let err = unsafe { GetLastError() };
             if err == ERROR_ALREADY_EXISTS {
@@ -10758,9 +10755,9 @@ mod platform {
         let info = process_identity(pid, None)?;
         let current = current_user_identity()?;
         if info.sid != current {
-            return Err(DaemonError::Unauthorized(format!(
-                "peer SID does not match current user SID"
-            )));
+            return Err(DaemonError::Unauthorized(
+                "peer SID does not match current user SID".to_string(),
+            ));
         }
         Ok(())
     }
