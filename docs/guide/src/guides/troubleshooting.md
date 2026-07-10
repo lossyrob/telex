@@ -36,10 +36,12 @@ the owner can attend it again.
 
 ## Copilot: messages do not arrive as turns
 
-The push bridge may not be loaded. Re-run
-`telex --address <addr> copilot attach --copilot-bridge`, then run the
-`extensions_reload` tool once. If extensions are disabled, push is unavailable;
-fall back to [pull mode](../guides/agent-pull.md) (`telex wait`).
+The push bridge may not be loaded. If `extensions_reload` is unavailable, enable
+Copilot Extensions under `/experimental`. Then re-provision with
+`telex --address <addr> copilot resume` and run `extensions_reload`. If Copilot
+Extensions cannot be enabled, push is unavailable; fall back to
+[pull mode](../guides/agent-pull.md) (`telex wait`) or detach with
+`telex --address <addr> copilot detach`.
 
 ## Backend authentication failures (Postgres / Entra)
 

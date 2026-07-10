@@ -359,7 +359,8 @@ A second review pass and builder-directed follow-ups added:
   store even for named-backend / profile users.
 - **Direct bridge-liveness signal.** The bridge heartbeats into its registry; the turn guard treats
   a push member whose registry heartbeat is stale as uncovered (bridge not loaded / live) and
-  nudges to `extensions_reload`, rather than only inferring deafness from unacked backlog.
+  gives the prerequisite-aware resume/reload/fallback sequence, rather than only inferring
+  deafness from unacked backlog or repeating an unavailable-tool instruction.
 - **CI JS gate.** `node --check copilot/bridge/extension.mjs` runs in CI so a broken embedded
   bridge cannot ship baked into the binary.
 - **Re-delivery is re-provision-triggered, not timer-churned.** An **accepted** push (already queued
