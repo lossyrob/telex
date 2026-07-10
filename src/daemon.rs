@@ -10252,7 +10252,7 @@ mod platform {
     }
 
     pub fn write_owner_only_file(path: &Path, bytes: &[u8]) -> Result<()> {
-        let mut sa = owner_only_security_attributes()?;
+        let sa = owner_only_security_attributes()?;
         let wide = wide_null(path.as_os_str());
         let handle = unsafe {
             CreateFileW(
@@ -10317,7 +10317,7 @@ mod platform {
     }
 
     fn create_pipe(pipe_name: &str, first: bool) -> Result<NamedPipeServer> {
-        let mut sa = owner_only_security_attributes()?;
+        let sa = owner_only_security_attributes()?;
         let wide = wide_null(OsStr::new(pipe_name));
         let mut open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED;
         if first {
@@ -10353,7 +10353,7 @@ mod platform {
     }
 
     fn create_owner_only_dir(path: &Path) -> Result<()> {
-        let mut sa = owner_only_security_attributes()?;
+        let sa = owner_only_security_attributes()?;
         let wide = wide_null(path.as_os_str());
         let ok = unsafe { CreateDirectoryW(wide.as_ptr(), &sa.attrs) };
         if ok == 0 {
@@ -10669,7 +10669,9 @@ mod platform {
         let info = process_identity(pid, None)?;
         let current = current_user_identity()?;
         if info.sid != current {
-            return Err(DaemonError::Unauthorized("peer SID does not match current user SID".to_string()));
+            return Err(DaemonError::Unauthorized(
+                "peer SID does not match current user SID".to_string(),
+            ));
         }
         Ok(())
     }

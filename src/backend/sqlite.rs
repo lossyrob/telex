@@ -161,9 +161,8 @@ fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
             .unwrap_or(false)
     {
         let _ = std::fs::remove_dir(path);
-        create_windows_owner_only_dir(path).with_context(|| {
-            format!("recreating owner-private store lock directory {:?}", path)
-        })?;
+        create_windows_owner_only_dir(path)
+            .with_context(|| format!("recreating owner-private store lock directory {:?}", path))?;
         let recreated = windows_dir_security_sddl(path)?;
         if windows_owner_private_sddl_is_strict(&recreated, &sid) {
             return Ok(());
@@ -238,7 +237,7 @@ fn create_windows_owner_only_dir(path: &std::path::Path) -> Result<()> {
             std::io::Error::last_os_error()
         );
     }
-    let mut attrs = SECURITY_ATTRIBUTES {
+    let attrs = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: descriptor,
         bInheritHandle: 0,
