@@ -154,61 +154,102 @@ Copilot session id for you; the generic verbs do not.
 ## Fallback: no bridge (pull mode)
 
 If the bridge cannot be loaded (extensions disabled), telex push is unavailable.
-**Surface that plainly** rather than silently spinning a waiter. If you must keep
-receiving, fall back to generic pull mode with `telex wait`. `telex skill` documents
-the generic pull workflow; the Copilot-specific mechanics for running that fallback
-are below.
+**Surface that plainly** rather than pretending push is live. Telex can prepare one
+cross-platform, single-shot pull fallback without requiring an agent-authored script:
 
-**Session id for pull commands.** Generic `telex wait`/`ack` do not read Copilot env
-vars, so pass `--session "$COPILOT_AGENT_SESSION_ID"` (PowerShell:
-`$env:COPILOT_AGENT_SESSION_ID`) on every invocation, or set `TELEX_SESSION_ID` in the
-same shell. `telex copilot attach` maps `$COPILOT_AGENT_SESSION_ID` to the telex
-session id and `$COPILOT_LOADER_PID` to the loader `--watch-pid` backstop for you; the
-generic verbs do not.
-
-**Detached waiter pattern (Copilot CLI / Windows).** Run the waiter as a single-shot,
-**fully detached** background task (`detach: true`) so it does not spin the terminal
-like foreground work; the Copilot session is still notified when the detached task
-exits. Pass `--out-dir <dir>` and read the artifacts (`exit.code`, then
-`delivery.json`/`message.json`) after the completion wake — detached stdout is not
-returned to the agent. On Windows/Copilot CLI, wrap the call in a small `.ps1` and
-detach `pwsh -File ...`: some Copilot CLI versions silently no-op a detached bare
-external executable, while `pwsh -File` preserves PATH/environment. Keep the detached
-command variable-free (pass literal paths/addresses as script arguments):
-
-```powershell
-pwsh -NoProfile -ExecutionPolicy Bypass -File "C:\path\to\telex-wait-once.ps1" `
-  -Telex "telex" -Address "<addr>" -Session "<session-id>" `
-  -OutDir "C:\path\to\telex-wait-<unique>"
+```sh
+telex --address <addr> copilot fallback prepare --description "<what this session is doing>"
 ```
 
-```powershell
-param(
-  [Parameter(Mandatory)] [string]$Telex,
-  [Parameter(Mandatory)] [string]$Address,
-  [Parameter(Mandatory)] [string]$Session,
-  [Parameter(Mandatory)] [string]$OutDir,
-  [string]$MinAttention
-)
-if ([string]::IsNullOrWhiteSpace($MinAttention)) {
-  & $Telex --json --address $Address wait --session $Session --timeout-ms 1800000 --out-dir $OutDir
-} else {
-  & $Telex --json --address $Address wait --session $Session --timeout-ms 1800000 --min-attention $MinAttention --out-dir $OutDir
-}
-exit $LASTEXITCODE
+`prepare` maps `$COPILOT_AGENT_SESSION_ID`, creates a unique owner-private run
+directory, and prints JSON containing:
+
+- `run_dir` -- the exact artifact directory for this run;
+- `launcher.program` and `launcher.args` -- structured launch data;
+- `launcher.command` -- the platform-appropriate command to pass to the task runner;
+- the exact `exit.code`, `status.json`, `delivery.json`, `message.json`, and
+  `wait.pid` paths.
+
+Preparation does **not** change delivery mode. If the launcher never starts, existing
+push remains registered. Repeating `prepare` before `exit.code` exists returns the
+same run and launcher instead of creating a competing waiter. Unix launchers invoke
+the current telex binary directly. Windows launchers use a Telex-generated
+PowerShell file, so the prompt no longer embeds a handwritten platform wrapper.
+
+Run `launcher.command` as one **fully detached** task (`detach: true`). The Copilot
+task runner supplies detachment; Telex does not spawn a background process, and you
+must not append shell backgrounding or wrap the command in a loop. When the task
+actually starts, it:
+
+1. verifies that this is still the station's current run and that the daemon
+   supports the atomic fallback transition;
+2. refuses to leave a live push bridge unless `prepare --force` explicitly recorded
+   an intentional downgrade;
+3. clears and verifies push registration, removes this address's bridge binding,
+   then enters exactly one `telex wait` using `run_dir`.
+
+Use `--timeout-ms`, `--min-attention`, and `--wake-on-cc` on `prepare` to configure
+that wait. `--force` is not a recovery default; use it only when deliberately
+leaving a bridge whose heartbeat is still live.
+
+### Process a fallback completion
+
+The task completion notification is only a wakeup. Read `run_dir/exit.code` first;
+it is written last and is the durable completion marker. Do not trust the detached
+task's reported process exit code.
+
+- **`0` (message):** read `delivery.json` (or flat `message.json`), dedupe by
+  message id, then ack and disposition it:
+
+  ```sh
+  telex ack --address <addr> --id <message-id> --session "$COPILOT_AGENT_SESSION_ID"
+  telex handle --address <addr> --id <message-id> --session "$COPILOT_AGENT_SESSION_ID" --note "completed"
+  ```
+
+  PowerShell uses `$env:COPILOT_AGENT_SESSION_ID`. After processing the terminal
+  artifacts, call `fallback prepare` again; it creates the next unique run.
+  For `delivery_role: "cc"`, follow the recipient-specific metadata: the observer
+  copy is notification-only and does not require the primary recipient's ack or
+  terminal disposition.
+
+- **`1` (setup/error):** read `status.json.detail`, repair the reported condition,
+  then prepare a fresh run. An old running daemon fails closed here; restart/update
+  it rather than bypassing the mode gate.
+- **`2` (idle timeout):** prepare the next run if the station should remain reachable.
+- **`3` / `4` (daemon gone/hung):** repair the daemon, then prepare the next run.
+- **`5` (presence ended):** inspect `telex --address <addr> status`. If
+  `delivery_mode` is `push`, do not re-arm pull. If it is `pull`, re-attach/prepare
+  only if the station should still be attended. If no active member/mode is
+  reported, the station is stopped; leave it stopped unless the workflow still
+  requires attendance.
+
+If a task completion arrives but `exit.code` is absent, inspect status before
+launching anything: a live waiter means the original run is still active. Otherwise
+run `fallback prepare` again; it returns the same unfinished run so its generated
+launcher can be retried. Duplicate launcher starts are rejected without overwriting
+the active run's artifacts.
+
+### Switch modes and stop
+
+Status separates configured delivery from health:
+
+- `delivery_mode: push` -- on-deliver push is registered;
+- `delivery_mode: pull` -- Copilot is in pull-fallback mode (a live waiter is shown
+  separately by `live_waiters_count` / `station_health`);
+- `delivery_mode: conflict` -- version-skew/race tripwire; stop one mechanism before
+  continuing.
+
+The daemon rejects a waiter while push is registered and rejects push registration
+while a waiter is live. To return from fallback to push, stop pull first:
+
+```sh
+telex --address <addr> station stop --session "$COPILOT_AGENT_SESSION_ID"
+telex --address <addr> copilot attach --copilot-bridge --description "<work>"
 ```
 
-On the completion wake, read `<dir>\exit.code` (the completion marker — do **not**
-trust the Copilot detached task's reported exit code). If it is `0`, parse
-`<dir>\delivery.json` (or `<dir>\message.json`), then
-`telex ack --address <addr> --id <message-id> --session "$env:COPILOT_AGENT_SESSION_ID"`
-and dedupe by id before re-arming a fresh detached wait. If you see a completion
-notification but `<dir>\exit.code` is missing, the waiter did not actually run — re-arm
-via the `.ps1 -File` wrapper; do not infer an idle timeout. Do **not** use
-`list_powershell` (or any task-list status) to decide whether the waiter is armed or
-finished — a detached command can show `completed` while its child is still alive; the
-completion wake plus the `exit.code` artifact are the signal. Never wrap `telex wait`
-in an infinite shell loop. `telex wait --help` documents the waiter flags.
+Then run `extensions_reload`. To end fallback without returning to push, run
+`station stop` and do not prepare another run. Never wrap fallback launchers or
+`telex wait` in an infinite shell loop.
 
 ## Version and compatibility
 
@@ -234,6 +275,8 @@ telex copilot --help
 telex copilot attach --help
 telex copilot resume --help
 telex copilot detach --help
+telex copilot fallback --help
+telex copilot fallback prepare --help
 telex copilot gc --help
 telex ack --help
 telex handle --help

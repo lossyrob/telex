@@ -9,7 +9,7 @@ use std::fmt;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_MAJOR: u16 = 1;
-pub const PROTOCOL_MINOR: u16 = 3;
+pub const PROTOCOL_MINOR: u16 = 4;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
@@ -188,6 +188,10 @@ pub enum Request {
         /// address is durably committed. The daemon never interprets the argv.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         on_deliver: Option<Vec<String>>,
+        /// Explicitly replace the member's existing on-deliver handler. When true with
+        /// `on_deliver = None`, clears push registration instead of preserving it during refresh.
+        #[serde(default, skip_serializing_if = "is_false")]
+        replace_on_deliver: bool,
         /// Optional on-deliver opt-in for live CC observer traffic. Applies only when
         /// `on_deliver` is present; defaults false for older clients.
         #[serde(default, skip_serializing_if = "is_false")]
@@ -469,6 +473,9 @@ pub struct MemberStatus {
     pub inbound_actionable_count: i64,
     #[serde(default)]
     pub station_health: StationHealth,
+    /// Configured delivery path, separate from whether that path is currently healthy/armed.
+    #[serde(default)]
+    pub delivery_mode: DeliveryMode,
     /// Structured push-delivery health for a registered push station (see `PushDeliveryHealth`).
     #[serde(default)]
     pub push_delivery: PushDeliveryHealth,
@@ -551,9 +558,24 @@ pub enum StationHealth {
     /// by `push_delivery` (delivering / probing / stale_accepted) — this value only asserts the
     /// station is push-covered, not that a turn was confirmed seen.
     AttendedPush,
+    /// Both push and pull coverage are active. New protocol peers reject this state at both
+    /// entry points; the value remains a defensive tripwire for version skew and races.
+    CoverageConflict,
     Idle,
     /// Forward-compat catch-all so an older client deserializing a newer daemon's status does not
     /// fail on a value it does not know. Never produced intentionally.
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum DeliveryMode {
+    Push,
+    Pull,
+    Conflict,
+    /// Forward-compat/default value for status emitted by an older daemon.
+    #[default]
     #[serde(other)]
     Unknown,
 }
@@ -966,6 +988,7 @@ mod tests {
             StationHealth::Unattended,
             StationHealth::UnattendedWithBacklog,
             StationHealth::AttendedPush,
+            StationHealth::CoverageConflict,
             StationHealth::Idle,
         ] {
             let s = serde_json::to_value(h).unwrap();
@@ -1012,6 +1035,64 @@ mod tests {
         assert_eq!(member.push_delivery, PushDeliveryHealth::NotRegistered);
         assert_eq!(member.inbound_actionable_count, 0);
         assert_eq!(member.push_suppressed_count, 0);
+        assert_eq!(member.delivery_mode, DeliveryMode::Unknown);
+    }
+
+    #[test]
+    fn delivery_mode_serde_roundtrip_and_forward_compat() {
+        for mode in [
+            DeliveryMode::Push,
+            DeliveryMode::Pull,
+            DeliveryMode::Conflict,
+        ] {
+            let value = serde_json::to_value(mode).unwrap();
+            assert_eq!(serde_json::from_value::<DeliveryMode>(value).unwrap(), mode);
+        }
+        assert_eq!(
+            serde_json::from_value::<DeliveryMode>(serde_json::json!("future_mode")).unwrap(),
+            DeliveryMode::Unknown
+        );
+    }
+
+    #[test]
+    fn register_replace_on_deliver_is_additive_and_defaults_false() {
+        let old_wire = serde_json::json!({
+            "op": "register",
+            "store_key": "sqlite:/tmp/test.db",
+            "address": "addr:a",
+            "session_id": "s1",
+            "occupant": "tester"
+        });
+        let request: Request = serde_json::from_value(old_wire).unwrap();
+        assert!(matches!(
+            request,
+            Request::Register {
+                replace_on_deliver: false,
+                ..
+            }
+        ));
+
+        let mut new_wire = serde_json::json!({
+            "op": "register",
+            "store_key": "sqlite:/tmp/test.db",
+            "address": "addr:a",
+            "session_id": "s1",
+            "occupant": "tester",
+            "replace_on_deliver": true
+        });
+        let request: Request = serde_json::from_value(new_wire.clone()).unwrap();
+        assert!(matches!(
+            request,
+            Request::Register {
+                replace_on_deliver: true,
+                ..
+            }
+        ));
+        new_wire["replace_on_deliver"] = serde_json::Value::Bool(true);
+        assert_eq!(
+            serde_json::to_value(request).unwrap()["replace_on_deliver"],
+            new_wire["replace_on_deliver"]
+        );
     }
 
     #[test]

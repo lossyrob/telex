@@ -100,6 +100,11 @@ impl ProcessEnv {
 
     fn command_with_session(&self, session: &str) -> Command {
         let mut cmd = Command::new(&self.bin);
+        self.configure_command(&mut cmd, session);
+        cmd
+    }
+
+    fn configure_command(&self, cmd: &mut Command, session: &str) {
         cmd.env("TELEX_HOME", &self.home)
             .env("TELEX_RUN_DIR", &self.run_dir)
             .env("TELEX_DB", &self.db)
@@ -121,7 +126,6 @@ impl ProcessEnv {
         {
             cmd.env("XDG_STATE_HOME", &self.state_dir);
         }
-        cmd
     }
 
     fn run<I, S>(&self, args: I, timeout: Duration) -> CmdOutput
@@ -2308,6 +2312,466 @@ fn real_process_copilot_attach_maps_session_and_loader_pid() {
             .and_then(Value::as_u64),
         Some(std::process::id() as u64)
     );
+}
+
+#[test]
+fn real_process_copilot_fallback_cold_start() {
+    let env = ProcessEnv::new("real-copilot-fallback-cold");
+    let receiver = "fallback-cold-receiver";
+    let receiver_addr = "addr:fallback-cold-receiver";
+    let sender = "fallback-cold-sender";
+    let sender_addr = "addr:fallback-cold-sender";
+    let copilot_home = env.root.join("copilot-home");
+    std::fs::create_dir_all(&copilot_home).expect("create isolated Copilot home");
+
+    let prepare = || {
+        let mut cmd = env.command_with_session(receiver);
+        cmd.env_remove("TELEX_SESSION_ID")
+            .env("COPILOT_AGENT_SESSION_ID", receiver)
+            .env("COPILOT_LOADER_PID", std::process::id().to_string())
+            .env("HOME", &copilot_home)
+            .env("USERPROFILE", &copilot_home)
+            .args([
+                "--json",
+                "--address",
+                receiver_addr,
+                "copilot",
+                "fallback",
+                "prepare",
+                "--description",
+                "cold-start fallback test",
+                "--timeout-ms",
+                "10000",
+            ]);
+        let output = run_command_with_capture(cmd, &env.root, Duration::from_secs(8));
+        output.assert_success("prepare cold-start fallback");
+        output.json("prepare cold-start fallback")
+    };
+    let launcher_command = |prepared: &Value| {
+        let launcher = prepared.get("launcher").expect("launcher object");
+        let mut cmd = Command::new(
+            launcher
+                .get("program")
+                .and_then(Value::as_str)
+                .expect("launcher program"),
+        );
+        for arg in launcher
+            .get("args")
+            .and_then(Value::as_array)
+            .expect("launcher args")
+        {
+            cmd.arg(arg.as_str().expect("launcher arg string"));
+        }
+        env.configure_command(&mut cmd, receiver);
+        cmd.env("HOME", &copilot_home)
+            .env("USERPROFILE", &copilot_home)
+            .stdout(Stdio::null())
+            .stderr(Stdio::null());
+        cmd
+    };
+
+    env.attach(sender, sender_addr);
+    let run_delivery = |prepared: &Value, body: &str| {
+        let run_dir = PathBuf::from(
+            prepared
+                .get("run_dir")
+                .and_then(Value::as_str)
+                .expect("prepared run_dir"),
+        );
+        let waiter = launcher_command(prepared)
+            .spawn()
+            .expect("spawn cold-start fallback launcher");
+        wait_until_path_exists(&run_dir.join("wait.pid"), Duration::from_secs(5));
+
+        let status = env.run_with_session(
+            receiver,
+            ["--json", "--address", receiver_addr, "status"],
+            Duration::from_secs(5),
+        );
+        status.assert_success("cold-start fallback status");
+        assert_eq!(
+            status
+                .json("cold-start fallback status")
+                .get("delivery_mode")
+                .and_then(Value::as_str),
+            Some("pull")
+        );
+
+        let sent = env.run_with_session(
+            sender,
+            [
+                "--json",
+                "--address",
+                sender_addr,
+                "send",
+                "--session",
+                sender,
+                "--to",
+                receiver_addr,
+                "--body",
+                body,
+            ],
+            Duration::from_secs(5),
+        );
+        sent.assert_success("send to cold-start fallback");
+        let (code, timed_out) = wait_status_with_timeout(waiter, Duration::from_secs(8));
+        assert!(!timed_out);
+        assert_eq!(code, Some(0));
+
+        let delivery: Value = serde_json::from_slice(
+            &std::fs::read(run_dir.join("delivery.json")).expect("cold-start fallback delivery"),
+        )
+        .expect("parse cold-start fallback delivery");
+        assert_eq!(
+            delivery.pointer("/message/body").and_then(Value::as_str),
+            Some(body)
+        );
+        let message_id = delivery
+            .pointer("/message/id")
+            .and_then(Value::as_i64)
+            .expect("cold-start fallback message id");
+        let message_id = message_id.to_string();
+        let ack = env.run_with_session(
+            receiver,
+            [
+                "--json",
+                "--address",
+                receiver_addr,
+                "ack",
+                "--session",
+                receiver,
+                "--id",
+                &message_id,
+            ],
+            Duration::from_secs(5),
+        );
+        ack.assert_success("ack cold-start fallback delivery");
+        run_dir
+    };
+
+    let first = prepare();
+    let first_dir = run_delivery(&first, "cold-start first delivery");
+    let second = prepare();
+    let second_dir = run_delivery(&second, "cold-start second delivery");
+    assert_ne!(
+        first_dir, second_dir,
+        "re-arm must allocate a fresh run after terminal artifacts are processed"
+    );
+}
+
+#[test]
+fn real_process_copilot_fallback_cross_platform() {
+    let env = ProcessEnv::new("real-copilot-fallback");
+    let receiver = "fallback-receiver";
+    let receiver_addr = "addr:fallback-receiver";
+    let sender = "fallback-sender";
+    let sender_addr = "addr:fallback-sender";
+    let copilot_home = env.root.join("copilot-home");
+    std::fs::create_dir_all(&copilot_home).expect("create isolated Copilot home");
+
+    let configure_copilot = |cmd: &mut Command, session: &str| {
+        cmd.env_remove("TELEX_SESSION_ID")
+            .env("COPILOT_AGENT_SESSION_ID", session)
+            .env("COPILOT_LOADER_PID", std::process::id().to_string())
+            .env("HOME", &copilot_home)
+            .env("USERPROFILE", &copilot_home);
+    };
+    let prepare = || {
+        let mut cmd = env.command_with_session(receiver);
+        configure_copilot(&mut cmd, receiver);
+        cmd.args([
+            "--json",
+            "--address",
+            receiver_addr,
+            "copilot",
+            "fallback",
+            "prepare",
+            "--timeout-ms",
+            "10000",
+        ]);
+        let output = run_command_with_capture(cmd, &env.root, Duration::from_secs(8));
+        output.assert_success("prepare Copilot fallback");
+        output.json("prepare Copilot fallback")
+    };
+    let launcher_command = |prepared: &Value| {
+        let launcher = prepared.get("launcher").expect("launcher object");
+        let program = launcher
+            .get("program")
+            .and_then(Value::as_str)
+            .expect("launcher program");
+        let args = launcher
+            .get("args")
+            .and_then(Value::as_array)
+            .expect("launcher args");
+        let mut cmd = Command::new(program);
+        for arg in args {
+            cmd.arg(arg.as_str().expect("launcher arg string"));
+        }
+        env.configure_command(&mut cmd, receiver);
+        cmd.env("HOME", &copilot_home)
+            .env("USERPROFILE", &copilot_home);
+        cmd
+    };
+
+    let mut push_attach = env.command_with_session(receiver);
+    configure_copilot(&mut push_attach, receiver);
+    push_attach.args([
+        "--json",
+        "--address",
+        receiver_addr,
+        "copilot",
+        "attach",
+        "--copilot-bridge",
+        "--description",
+        "cross-platform fallback test",
+    ]);
+    let push_attach = run_command_with_capture(push_attach, &env.root, Duration::from_secs(8));
+    push_attach.assert_success("initial Copilot push attach");
+
+    let prepared = prepare();
+    assert_eq!(prepared.get("reused").and_then(Value::as_bool), Some(false));
+    let run_dir = PathBuf::from(
+        prepared
+            .get("run_dir")
+            .and_then(Value::as_str)
+            .expect("prepared run_dir"),
+    );
+    let prepared_again = prepare();
+    assert_eq!(
+        prepared_again.get("reused").and_then(Value::as_bool),
+        Some(true)
+    );
+    assert_eq!(
+        prepared_again.get("run_dir"),
+        prepared.get("run_dir"),
+        "preparing before completion must return the same run"
+    );
+
+    #[cfg(windows)]
+    assert_eq!(
+        prepared
+            .pointer("/launcher/program")
+            .and_then(Value::as_str),
+        Some("pwsh")
+    );
+    #[cfg(not(windows))]
+    assert_eq!(
+        prepared
+            .pointer("/launcher/program")
+            .and_then(Value::as_str),
+        Some(env.bin.to_str().expect("binary path is utf8"))
+    );
+
+    let before_launch = env.run_with_session(
+        receiver,
+        ["--json", "--address", receiver_addr, "status"],
+        Duration::from_secs(5),
+    );
+    before_launch.assert_success("status before fallback launch");
+    assert_eq!(
+        before_launch
+            .json("status before fallback launch")
+            .get("delivery_mode")
+            .and_then(Value::as_str),
+        Some("push"),
+        "preparing without launching must leave push intact"
+    );
+
+    let mut launcher = launcher_command(&prepared);
+    launcher.stdout(Stdio::null()).stderr(Stdio::null());
+    let fallback_waiter = launcher.spawn().expect("spawn prepared fallback launcher");
+    wait_until_path_exists(&run_dir.join("wait.pid"), Duration::from_secs(5));
+
+    let pull_status = env.run_with_session(
+        receiver,
+        ["--json", "--address", receiver_addr, "status"],
+        Duration::from_secs(5),
+    );
+    pull_status.assert_success("status with fallback waiter");
+    let pull_status = pull_status.json("status with fallback waiter");
+    assert_eq!(
+        pull_status.get("delivery_mode").and_then(Value::as_str),
+        Some("pull")
+    );
+    assert_eq!(
+        pull_status
+            .get("live_waiters_count")
+            .and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
+        pull_status.get("push_registered").and_then(Value::as_bool),
+        Some(false)
+    );
+    assert_eq!(
+        pull_status
+            .pointer("/daemon_members/0/description")
+            .and_then(Value::as_str),
+        Some("cross-platform fallback test"),
+        "fallback transition must inherit existing station metadata"
+    );
+
+    env.attach(sender, sender_addr);
+    let sent = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--to",
+            receiver_addr,
+            "--body",
+            "fallback process delivery",
+        ],
+        Duration::from_secs(5),
+    );
+    sent.assert_success("send to fallback waiter");
+
+    let (wait_code, wait_timed_out) =
+        wait_status_with_timeout(fallback_waiter, Duration::from_secs(8));
+    assert!(!wait_timed_out);
+    assert_eq!(wait_code, Some(0));
+    assert_eq!(
+        std::fs::read_to_string(run_dir.join("exit.code"))
+            .expect("fallback exit.code")
+            .trim(),
+        "0"
+    );
+    let delivery: Value = serde_json::from_slice(
+        &std::fs::read(run_dir.join("delivery.json")).expect("fallback delivery.json"),
+    )
+    .expect("parse fallback delivery.json");
+    assert_eq!(
+        delivery.pointer("/message/body").and_then(Value::as_str),
+        Some("fallback process delivery")
+    );
+    let message_id = delivery
+        .pointer("/message/id")
+        .and_then(Value::as_i64)
+        .expect("fallback message id");
+    let ack = env.run_with_session(
+        receiver,
+        [
+            "--json",
+            "--address",
+            receiver_addr,
+            "ack",
+            "--session",
+            receiver,
+            "--id",
+            &message_id.to_string(),
+        ],
+        Duration::from_secs(5),
+    );
+    ack.assert_success("ack fallback delivery");
+
+    let next = prepare();
+    let next_run_dir = PathBuf::from(
+        next.get("run_dir")
+            .and_then(Value::as_str)
+            .expect("next run_dir"),
+    );
+    assert_ne!(next_run_dir, run_dir);
+    let mut next_launcher = launcher_command(&next);
+    next_launcher.stdout(Stdio::null()).stderr(Stdio::null());
+    let next_waiter = next_launcher
+        .spawn()
+        .expect("spawn second prepared fallback launcher");
+    wait_until_path_exists(&next_run_dir.join("wait.pid"), Duration::from_secs(5));
+
+    let duplicate =
+        run_command_with_capture(launcher_command(&next), &env.root, Duration::from_secs(5));
+    duplicate.assert_failure("duplicate fallback launcher");
+    assert!(
+        !next_run_dir.join("exit.code").exists(),
+        "duplicate launcher must not overwrite the live run's artifacts"
+    );
+
+    let mut rejected_push = env.command_with_session(receiver);
+    configure_copilot(&mut rejected_push, receiver);
+    rejected_push.args([
+        "--json",
+        "--address",
+        receiver_addr,
+        "copilot",
+        "attach",
+        "--copilot-bridge",
+    ]);
+    let rejected_push = run_command_with_capture(rejected_push, &env.root, Duration::from_secs(5));
+    rejected_push.assert_failure("push attach with live fallback waiter");
+    assert!(
+        rejected_push.stderr.contains("station stop"),
+        "push rejection should give transition guidance: {}",
+        rejected_push.stderr
+    );
+
+    let stop = env.run_with_session(
+        receiver,
+        [
+            "--json",
+            "--address",
+            receiver_addr,
+            "station",
+            "stop",
+            "--session",
+            receiver,
+        ],
+        Duration::from_secs(5),
+    );
+    stop.assert_success("stop fallback before returning to push");
+    let (next_code, next_timed_out) = wait_status_with_timeout(next_waiter, Duration::from_secs(5));
+    assert!(!next_timed_out);
+    assert_eq!(next_code, Some(5));
+    assert_eq!(
+        std::fs::read_to_string(next_run_dir.join("exit.code"))
+            .expect("second fallback exit.code")
+            .trim(),
+        "5"
+    );
+
+    let mut retry_push = env.command_with_session(receiver);
+    configure_copilot(&mut retry_push, receiver);
+    retry_push.args([
+        "--json",
+        "--address",
+        receiver_addr,
+        "copilot",
+        "attach",
+        "--copilot-bridge",
+    ]);
+    let retry_push = run_command_with_capture(retry_push, &env.root, Duration::from_secs(8));
+    retry_push.assert_success("push attach after explicit fallback stop");
+
+    let direct_wait = env.run_with_session(
+        receiver,
+        [
+            "--json",
+            "--address",
+            receiver_addr,
+            "wait",
+            "--session",
+            receiver,
+            "--timeout-ms",
+            "100",
+        ],
+        Duration::from_secs(3),
+    );
+    assert_eq!(
+        direct_wait.code,
+        Some(5),
+        "generic waiter must reject a push-covered member: stdout={} stderr={}",
+        direct_wait.stdout,
+        direct_wait.stderr
+    );
+
+    let mut detach = env.command_with_session(receiver);
+    configure_copilot(&mut detach, receiver);
+    detach.args(["--json", "--address", receiver_addr, "copilot", "detach"]);
+    run_command_with_capture(detach, &env.root, Duration::from_secs(5))
+        .assert_success("detach final push station");
 }
 
 /// #66 self-stop: a deliberate `copilot detach` durably tombstones the session/address, and the
