@@ -39,7 +39,7 @@ If `extensions_reload` is unavailable, enable Copilot Extensions under
 `/experimental`, re-provision with
 `telex --address <addr> copilot resume --description "<work>"`, and then run
 `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported
-[pull fallback](agent-pull.md) or detach with
+[pull fallback](#fallback) or detach with
 `telex --address <addr> copilot detach`.
 
 ## Receive and disposition
