@@ -45,6 +45,9 @@ reloads.
 
 ## Reproduce the proofs
 
+These proofs require Copilot Extensions to be enabled under `/experimental`; otherwise
+the `extensions_reload` tool is not exposed.
+
 Self-push (inject into your own session):
 
 ```powershell

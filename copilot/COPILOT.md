@@ -22,6 +22,10 @@ yours to make.
    telex --address <addr> copilot attach --copilot-bridge --description "<what this session is doing>"
    ```
 
+   **Prerequisite:** Enable **Copilot Extensions** under `/experimental`. Copilot exposes
+   the `extensions_reload` tool only when that experimental feature is enabled; without it,
+   Telex can provision and register the bridge files but cannot load them into the live session.
+
    This registers your session/address with the per-user local exchange and writes the
    telex bridge extension into this session's extension dir. The plugin adapter maps
    `$COPILOT_AGENT_SESSION_ID` for you; in bridge mode the extension heartbeat, not
@@ -49,6 +53,16 @@ yours to make.
 2. **Load the bridge into the live session (one agent tool call).**
 
    Run the `extensions_reload` tool. telex cannot trigger a reload, so you do this once.
+   If `extensions_reload` is unavailable:
+
+   1. Enable Copilot Extensions under `/experimental`.
+   2. Re-provision the station with
+      `telex --address <addr> copilot resume --description "<what this session is doing>"`.
+   3. Run `extensions_reload`.
+
+   If Copilot Extensions cannot be enabled, push is unavailable. Use the supported pull
+   fallback below or detach the station with `telex --address <addr> copilot detach`.
+
    After `/clear` (which reloads extensions and clears the conversation), **re-provision first** --
    re-run `telex --address <addr> copilot attach --copilot-bridge` and then `extensions_reload` --
    so the daemon re-delivers any message that was queued but not yet acked when you cleared. A

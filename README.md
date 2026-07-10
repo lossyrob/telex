@@ -81,7 +81,8 @@ messages arrive as turns (no waiter to run or re-arm):
 copilot plugin marketplace add lossyrob/telex
 copilot plugin install telex@telex
 telex --address workstream:proj/node:issue-215 copilot attach --copilot-bridge --description "<work>"
-# then run the `extensions_reload` tool once; delivered telex messages arrive as turns.
+# enable Copilot Extensions under `/experimental` so `extensions_reload` is available,
+# then run that tool once; delivered telex messages arrive as turns.
 telex --address workstream:proj/node:issue-215 copilot detach   # tear down when done
 ```
 
