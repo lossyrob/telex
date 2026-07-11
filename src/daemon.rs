@@ -11358,7 +11358,7 @@ mod platform {
             return Err(io_err("opening peer process", err));
         }
         let process = Handle(process);
-        let token = process_token(process.0)?;
+        let token = process_token(process.0, format!("opening peer process token for {pid}"))?;
         let sid = sid_string_from_token(token.0)?;
         let start_time_100ns = process_start_time(process.0)?;
         let exe = if expected_exe.is_some() {
@@ -11409,19 +11409,19 @@ mod platform {
     }
 
     fn current_process_token() -> Result<Handle> {
-        process_token(unsafe { GetCurrentProcess() })
+        process_token(
+            unsafe { GetCurrentProcess() },
+            "opening current process token".to_string(),
+        )
     }
 
-    fn process_token(process: HANDLE) -> Result<Handle> {
+    fn process_token(process: HANDLE, access_denied_context: String) -> Result<Handle> {
         let mut token = 0isize;
         let ok = unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) };
         if ok == 0 {
             let err = std::io::Error::last_os_error();
             if is_access_denied(&err) {
-                return Err(access_denied_elevation_error(
-                    "opening peer process token".to_string(),
-                    err,
-                ));
+                return Err(access_denied_elevation_error(access_denied_context, err));
             }
             return Err(io_err("opening process token", err));
         }

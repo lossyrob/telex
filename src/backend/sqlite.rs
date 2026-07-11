@@ -158,7 +158,11 @@ fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
     // and here; treat NotFound as OK (that opener is creating a fresh strict-SDDL directory).
     let sddl = match windows_dir_security_sddl(path) {
         Ok(s) => s,
-        Err(_) => return Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(e)
+                .with_context(|| format!("checking store lock directory security {:?}", path));
+        }
     };
     if !windows_owner_private_sddl_is_strict(&sddl, &sid)
         && std::fs::read_dir(path)
