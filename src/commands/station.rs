@@ -45,12 +45,12 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                 .filter(|member| {
                     ctx.address
                         .as_ref()
-                        .map_or(true, |addr| member.address == *addr)
+                        .is_none_or(|addr| member.address == *addr)
                 })
                 .map(|member| {
                     let foreign_session = current_session_id
                         .as_ref()
-                        .map_or(true, |session_id| member.session_id != *session_id);
+                        .is_none_or(|session_id| member.session_id != *session_id);
                     json!({
                         "store_key": member.store_key,
                         "backend": member.backend,
@@ -58,6 +58,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                         "foreign_session": foreign_session,
                         "address": member.address,
                         "station_health": member.station_health,
+                        "delivery_mode": member.delivery_mode,
                         "health_detail": member.health_detail,
                         "waiters": member.waiters,
                         "push_registered": member.push_registered,
@@ -106,7 +107,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                             String::new()
                         };
                         println!(
-                            "{} session={}{} waiters={} pending={} health={}{}{}",
+                            "{} session={}{} mode={} waiters={} pending={} health={}{}{}",
                             station["address"].as_str().unwrap_or("?"),
                             station["session_id"].as_str().unwrap_or("?"),
                             if station["foreign_session"].as_bool().unwrap_or(false) {
@@ -114,6 +115,7 @@ async fn status(ctx: &Ctx, args: StationStatusArgs) -> Result<i32> {
                             } else {
                                 ""
                             },
+                            station["delivery_mode"].as_str().unwrap_or("unknown"),
                             station["live_waiters_count"],
                             station["pending_unconsumed_count"],
                             station["station_health"].as_str().unwrap_or("?"),

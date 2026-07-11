@@ -32,7 +32,7 @@ pub fn run_dir() -> Result<PathBuf> {
             .map(PathBuf::from)
             .or_else(dirs::data_local_dir)
             .ok_or_else(|| anyhow!("cannot resolve LOCALAPPDATA for runtime directory"))?;
-        return Ok(base.join("telex").join("run"));
+        Ok(base.join("telex").join("run"))
     }
 
     // On Unix the socket path is under run_dir, so this default is part of daemon rendezvous

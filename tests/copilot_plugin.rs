@@ -217,6 +217,33 @@ fn root_skill_points_copilot_sessions_at_the_binary_command() {
 }
 
 #[test]
+fn binary_owned_copilot_skill_uses_prepared_cross_platform_fallback() {
+    let copilot_skill = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("copilot")
+            .join("COPILOT.md"),
+    )
+    .expect("read binary-owned Copilot skill");
+    for required in [
+        "copilot fallback prepare",
+        "launcher.command",
+        "delivery_mode",
+        "fully detached",
+    ] {
+        assert!(
+            copilot_skill.contains(required),
+            "Copilot skill must document prepared fallback contract {required:?}"
+        );
+    }
+    for removed_manual_wrapper in ["telex-wait-once.ps1", "param("] {
+        assert!(
+            !copilot_skill.contains(removed_manual_wrapper),
+            "Copilot skill must not require the old agent-authored wrapper {removed_manual_wrapper:?}"
+        );
+    }
+}
+
+#[test]
 fn plugin_version_is_consistent_across_manifest_marketplace_and_bootstrap() {
     let manifest: Value =
         serde_json::from_str(include_str!("../copilot/plugin/plugin.json")).expect("plugin.json");

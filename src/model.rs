@@ -217,6 +217,7 @@ pub struct LeaseClaim {
 }
 
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum LeaseOutcome {
     /// We now hold the lease.
     Claimed,
@@ -253,6 +254,7 @@ pub struct EpochClaimed {
 
 /// Outcome of an epoch lease claim attempt.
 #[derive(Debug)]
+#[allow(clippy::large_enum_variant)]
 pub enum EpochClaimResult {
     /// Caller now holds the lease at this epoch.
     Claimed(EpochClaimed),

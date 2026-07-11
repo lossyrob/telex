@@ -157,7 +157,7 @@ pub async fn is_served_locally(address: &str, backend: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ipc::test_support::{env_guard, spawn_pong_holder};
+    use crate::ipc::test_support::{env_guard, short_runtime_root, spawn_pong_holder};
     use crate::model::now_ms;
 
     fn rec(address: &str, backend: &str, host: &str, pid: i64) -> HolderRecord {
@@ -250,13 +250,9 @@ mod tests {
     #[tokio::test]
     async fn live_local_holders_includes_live_and_skips_stale() {
         let _guard = env_guard();
-        let home =
-            std::env::temp_dir().join(format!("telex-home-{}-{}", std::process::id(), now_ms()));
-        let local_app_data = std::env::temp_dir().join(format!(
-            "telex-local-app-data-{}-{}",
-            std::process::id(),
-            now_ms()
-        ));
+        let root = short_runtime_root();
+        let home = root.join("h");
+        let local_app_data = root.join("l");
         std::fs::create_dir_all(&home).unwrap();
         std::fs::create_dir_all(&local_app_data).unwrap();
         let prev_home = std::env::var_os("TELEX_HOME");
@@ -306,7 +302,6 @@ mod tests {
             Some(v) => std::env::set_var("LOCALAPPDATA", v),
             None => std::env::remove_var("LOCALAPPDATA"),
         }
-        let _ = std::fs::remove_dir_all(&home);
-        let _ = std::fs::remove_dir_all(&local_app_data);
+        let _ = std::fs::remove_dir_all(&root);
     }
 }

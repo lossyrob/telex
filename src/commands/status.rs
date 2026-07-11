@@ -66,7 +66,7 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
             .filter(|member| {
                 current_session_id
                     .as_ref()
-                    .map_or(true, |session_id| member.session_id != *session_id)
+                    .is_none_or(|session_id| member.session_id != *session_id)
             })
             .cloned()
             .collect();
@@ -78,6 +78,7 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
         info["daemon_member_present"] = serde_json::json!(daemon_member_present);
         if daemon_member_present {
             info["station_health"] = serde_json::json!(daemon_members[0].station_health);
+            info["delivery_mode"] = serde_json::json!(daemon_members[0].delivery_mode);
             info["health_detail"] = serde_json::json!(daemon_members[0].health_detail);
             info["pending_unconsumed_count"] =
                 serde_json::json!(daemon_members[0].pending_unconsumed_count);
@@ -169,8 +170,11 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
                 String::new()
             };
             println!(
-                "station_health {} pending={}{}{}",
+                "station_health {} mode={} pending={}{}{}",
                 health,
+                info.get("delivery_mode")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown"),
                 pending,
                 push,
                 if info
@@ -217,6 +221,7 @@ fn alternate_backend_activity(
                 "backend": names.get(&member.store_key).cloned(),
                 "session_id": member.session_id,
                 "station_health": member.station_health,
+                "delivery_mode": member.delivery_mode,
                 "pending_unconsumed_count": member.pending_unconsumed_count,
                 "live_waiters_count": member.live_waiters_count,
             })

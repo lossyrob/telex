@@ -1,5 +1,6 @@
 //! Hidden daemon singleton foundation: singleton identity, endpoint naming, capability
 //! file handling, connect-or-spawn, and a P2 JSONL server loop.
+#![allow(clippy::result_large_err, clippy::too_many_arguments)]
 
 #[cfg(feature = "postgres")]
 use crate::backend::postgres::{
@@ -10,10 +11,11 @@ use crate::backend::sqlite::SqliteBackend;
 use crate::backend::{Backend, WaitFetchOptions};
 use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
-    DeafStationStatus, EpochStatus, HandshakeError, HelloAck, IdleStationStatus, LiveWaiterStatus,
-    MemberStatus, NeedsAttachReason, PushDeliveryHealth, RecentErrorStatus, Request, Response,
-    RetentionStatus, SentReceipt, StationHealth, StoreStatus, WaiterOutcome, WatchPidRole,
-    WatchPidSpec, WatchPidStatus, ON_DELIVER_DEFERRED_EXIT, ON_DELIVER_PERMANENT_EXIT,
+    DeafStationStatus, DeliveryMode, EpochStatus, HandshakeError, HelloAck, IdleStationStatus,
+    LiveWaiterStatus, MemberStatus, NeedsAttachReason, PushDeliveryHealth, RecentErrorStatus,
+    Request, Response, RetentionStatus, SentReceipt, StationHealth, StoreStatus, WaiterOutcome,
+    WatchPidRole, WatchPidSpec, WatchPidStatus, ON_DELIVER_DEFERRED_EXIT,
+    ON_DELIVER_PERMANENT_EXIT,
 };
 use crate::model::{
     cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient, Attention,
@@ -27,8 +29,8 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::Arc;
 use std::sync::Mutex;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 use tokio::io::BufReader;
 #[cfg(feature = "postgres")]
@@ -322,6 +324,9 @@ pub struct DaemonState {
     store_open_guard: AsyncMutex<()>,
     members: Mutex<BTreeMap<MemberKey, MemberRecord>>,
     waiters: Mutex<BTreeMap<WaiterKey, WaiterRecord>>,
+    delivery_admissions: Mutex<HashMap<MemberKey, Weak<AsyncMutex<()>>>>,
+    #[cfg(test)]
+    delivery_admission_control: Mutex<Option<Arc<DeliveryAdmissionTestControl>>>,
     next_waiter_id: AtomicU64,
     recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
@@ -352,6 +357,101 @@ struct SessionKey {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 struct WaiterKey {
     waiter_id: u64,
+}
+
+#[derive(Clone, Copy)]
+enum DeliveryAdmissionKind {
+    Register,
+    Wait,
+}
+
+#[cfg(test)]
+struct DeliveryAdmissionTestLane {
+    before_arrived: Semaphore,
+    before_release: Semaphore,
+    commit_arrived: Semaphore,
+    commit_release: Semaphore,
+}
+
+#[cfg(test)]
+impl DeliveryAdmissionTestLane {
+    fn new() -> Self {
+        Self {
+            before_arrived: Semaphore::new(0),
+            before_release: Semaphore::new(0),
+            commit_arrived: Semaphore::new(0),
+            commit_release: Semaphore::new(0),
+        }
+    }
+}
+
+#[cfg(test)]
+struct DeliveryAdmissionTestControl {
+    register: DeliveryAdmissionTestLane,
+    wait: DeliveryAdmissionTestLane,
+}
+
+#[cfg(test)]
+impl DeliveryAdmissionTestControl {
+    fn new() -> Self {
+        Self {
+            register: DeliveryAdmissionTestLane::new(),
+            wait: DeliveryAdmissionTestLane::new(),
+        }
+    }
+
+    fn lane(&self, kind: DeliveryAdmissionKind) -> &DeliveryAdmissionTestLane {
+        match kind {
+            DeliveryAdmissionKind::Register => &self.register,
+            DeliveryAdmissionKind::Wait => &self.wait,
+        }
+    }
+
+    async fn before_lock(&self, kind: DeliveryAdmissionKind) {
+        let lane = self.lane(kind);
+        lane.before_arrived.add_permits(1);
+        lane.before_release
+            .acquire()
+            .await
+            .expect("admission before-lock release")
+            .forget();
+    }
+
+    async fn before_commit(&self, kind: DeliveryAdmissionKind) {
+        let lane = self.lane(kind);
+        lane.commit_arrived.add_permits(1);
+        lane.commit_release
+            .acquire()
+            .await
+            .expect("admission commit release")
+            .forget();
+    }
+
+    async fn wait_before_lock(&self, kind: DeliveryAdmissionKind) {
+        self.lane(kind)
+            .before_arrived
+            .acquire()
+            .await
+            .expect("admission reached before-lock gate")
+            .forget();
+    }
+
+    async fn wait_before_commit(&self, kind: DeliveryAdmissionKind) {
+        self.lane(kind)
+            .commit_arrived
+            .acquire()
+            .await
+            .expect("admission reached commit gate")
+            .forget();
+    }
+
+    fn release_before_lock(&self, kind: DeliveryAdmissionKind) {
+        self.lane(kind).before_release.add_permits(1);
+    }
+
+    fn release_commit(&self, kind: DeliveryAdmissionKind) {
+        self.lane(kind).commit_release.add_permits(1);
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -709,6 +809,44 @@ impl DaemonState {
             store_key: store_key.to_string(),
             session_id: session_id.to_string(),
             address: address.to_string(),
+        }
+    }
+
+    async fn delivery_admission(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+        kind: DeliveryAdmissionKind,
+    ) -> Arc<AsyncMutex<()>> {
+        let key = Self::member_key(store_key, session_id, address);
+        let admission = {
+            let mut admissions = self.delivery_admissions.lock().unwrap();
+            admissions.retain(|_, weak| weak.strong_count() > 0);
+            if let Some(existing) = admissions.get(&key).and_then(Weak::upgrade) {
+                existing
+            } else {
+                let admission = Arc::new(AsyncMutex::new(()));
+                admissions.insert(key, Arc::downgrade(&admission));
+                admission
+            }
+        };
+        let _ = kind;
+        #[cfg(test)]
+        {
+            let control = self.delivery_admission_control.lock().unwrap().clone();
+            if let Some(control) = control {
+                control.before_lock(kind).await;
+            }
+        }
+        admission
+    }
+
+    #[cfg(test)]
+    async fn delivery_admission_before_commit(&self, kind: DeliveryAdmissionKind) {
+        let control = self.delivery_admission_control.lock().unwrap().clone();
+        if let Some(control) = control {
+            control.before_commit(kind).await;
         }
     }
 
@@ -1285,6 +1423,11 @@ impl MemberRecord {
             .cloned()
             .collect();
         let live_waiters_count = member_waiters.len();
+        let delivery_mode = match (self.on_deliver.is_some(), live_waiters_count > 0) {
+            (true, true) => DeliveryMode::Conflict,
+            (true, false) => DeliveryMode::Push,
+            (false, _) => DeliveryMode::Pull,
+        };
         let now = now_ms();
         let (station_health, health_detail) = self.station_health(
             live_waiters_count,
@@ -1322,11 +1465,12 @@ impl MemberRecord {
             pending_unconsumed_count,
             inbound_actionable_count,
             station_health,
+            delivery_mode,
             push_delivery,
             push_suppressed_count,
             health_detail,
             last_waiter_exit_at_ms: self.last_waiter_exit_at_ms,
-            last_waiter_outcome: self.last_waiter_outcome.clone(),
+            last_waiter_outcome: self.last_waiter_outcome,
             last_waiter_exit_code: self.last_waiter_exit_code,
             last_waiter_detail: self.last_waiter_detail.clone(),
             last_waiter_pid: self.last_waiter_pid,
@@ -1364,6 +1508,12 @@ impl MemberRecord {
             return (
                 StationHealth::Idle,
                 Some("station is marked idle".to_string()),
+            );
+        }
+        if self.on_deliver.is_some() && live_waiters_count > 0 {
+            return (
+                StationHealth::CoverageConflict,
+                Some("push handler and pull waiter are active at the same time".to_string()),
             );
         }
         if live_waiters_count > 0 {
@@ -1817,7 +1967,7 @@ fn spawn_daemon_process(exe: &Path) -> Result<()> {
             DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
             std::ptr::null(),
             std::ptr::null(),
-            &mut startup,
+            &startup,
             &mut process_info,
         )
     };
@@ -1925,7 +2075,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         singleton_hash: paths.singleton_hash.clone(),
         protocol_major: paths.singleton.protocol_major,
         server_pid: Some(std::process::id()),
-        server_start_time: server_start_time,
+        server_start_time,
     };
     write_cap_file(&paths.cap_path, &cap)?;
     Ok(DaemonState {
@@ -1936,6 +2086,9 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         store_open_guard: AsyncMutex::new(()),
         members: Mutex::new(BTreeMap::new()),
         waiters: Mutex::new(BTreeMap::new()),
+        delivery_admissions: Mutex::new(HashMap::new()),
+        #[cfg(test)]
+        delivery_admission_control: Mutex::new(None),
         next_waiter_id: AtomicU64::new(1),
         recent_errors: Arc::new(Mutex::new(VecDeque::new())),
         ended_sessions: Mutex::new(BTreeMap::new()),
@@ -1946,7 +2099,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
 
 fn current_process_start_time_for_cap() -> Result<Option<u64>> {
     let start_time = crate::session_watch::capture_process_start_time(std::process::id());
-    if cfg!(any(target_os = "linux", windows)) && start_time.is_none() {
+    if cfg!(any(target_os = "linux", target_os = "macos", windows)) && start_time.is_none() {
         return Err(DaemonError::Unsupported {
             capability: "daemon cap server_start_time",
             message: "current process start time could not be captured".to_string(),
@@ -2098,6 +2251,7 @@ fn spawn_postgres_notify_listener(
 }
 
 #[cfg(feature = "postgres")]
+#[allow(clippy::large_enum_variant)]
 enum PgListenEvent {
     Message(AsyncMessage),
     Error(tokio_postgres::Error),
@@ -2702,7 +2856,7 @@ impl DaemonState {
                             return None;
                         }
                         let ts = attempt.notification_lower_bound.unwrap_or(lower_bound);
-                        if earliest_blocking.map_or(true, |blocking| ts < blocking) {
+                        if earliest_blocking.is_none_or(|blocking| ts < blocking) {
                             Some(ts)
                         } else {
                             None
@@ -3506,6 +3660,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             watch_pids,
             recovery,
             on_deliver,
+            replace_on_deliver,
             on_deliver_wake_on_cc,
         } => {
             register_member(
@@ -3520,6 +3675,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 watch_pids,
                 recovery,
                 on_deliver,
+                replace_on_deliver,
                 on_deliver_wake_on_cc,
             )
             .await
@@ -3638,12 +3794,39 @@ async fn register_member(
     watch_pids: Vec<WatchPidSpec>,
     recovery: bool,
     on_deliver: Option<Vec<String>>,
+    replace_on_deliver: bool,
     on_deliver_wake_on_cc: bool,
 ) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
     }
+    // Admission is per station and outermost: never acquire it while holding another daemon
+    // lock. Register may await backend work while holding it, but no long-lived waiter does.
+    let delivery_admission = state
+        .delivery_admission(
+            &store_key,
+            &session_id,
+            &address,
+            DeliveryAdmissionKind::Register,
+        )
+        .await;
+    let _delivery_admission_guard = delivery_admission.lock().await;
     let watch_pids = capture_watch_pids(watch_pids);
+
+    if on_deliver.is_some() && state.has_live_waiter_for(&store_key, &session_id, &address) {
+        state.push_recent_error(
+            "DeliveryModeConflict",
+            format!(
+                "rejected push registration store={store_key} session={session_id} address={address}: a live pull waiter is armed"
+            ),
+        );
+        return proto::error_response(
+            proto::ERROR_INCOMPATIBLE,
+            format!(
+                "address {address} has a live pull waiter; stop the station before registering push"
+            ),
+        );
+    }
 
     if let Some(existing) = state.get_member(&store_key, &session_id, &address) {
         let backend = match state.backend_for(&store_key).await {
@@ -3660,7 +3843,8 @@ async fn register_member(
                 refreshed.description = description;
                 refreshed.scope = scope;
                 refreshed.tags = tags;
-                let preserving_on_deliver = on_deliver.is_none() && existing.on_deliver.is_some();
+                let preserving_on_deliver =
+                    !replace_on_deliver && on_deliver.is_none() && existing.on_deliver.is_some();
                 refreshed.watch_pids = if preserving_on_deliver {
                     existing.watch_pids.clone()
                 } else {
@@ -3672,7 +3856,11 @@ async fn register_member(
                 // generic recovery/refresh re-registers with `on_deliver = None` (e.g. a `telex
                 // wait` re-attach); only an explicit re-provision replaces them, so a pull
                 // re-attach cannot silently disarm or process-anchor the Copilot bridge.
-                refreshed.on_deliver = on_deliver.clone().or_else(|| existing.on_deliver.clone());
+                refreshed.on_deliver = if replace_on_deliver {
+                    on_deliver.clone()
+                } else {
+                    on_deliver.clone().or_else(|| existing.on_deliver.clone())
+                };
                 if on_deliver.is_some() {
                     refreshed.on_deliver_wake_on_cc = on_deliver_wake_on_cc;
                     refreshed.on_deliver_cc_after_ms =
@@ -3682,25 +3870,52 @@ async fn register_member(
                             Ok(value) => value,
                             Err(response) => return response,
                         };
-                } else {
+                } else if preserving_on_deliver {
                     refreshed.on_deliver_wake_on_cc = existing.on_deliver_wake_on_cc;
                     refreshed.on_deliver_cc_after_ms = existing.on_deliver_cc_after_ms;
+                } else {
+                    refreshed.on_deliver_wake_on_cc = false;
+                    refreshed.on_deliver_cc_after_ms = None;
+                }
+                // A plain refresh can preserve an existing handler even when this request did not
+                // carry `on_deliver`; validate the effective mode at the linearization point.
+                if refreshed.on_deliver.is_some()
+                    && state.has_live_waiter_for(&store_key, &session_id, &address)
+                {
+                    state.push_recent_error(
+                        "DeliveryModeConflict",
+                        format!(
+                            "rejected push-preserving refresh store={store_key} session={session_id} address={address}: a live pull waiter is armed"
+                        ),
+                    );
+                    return proto::error_response(
+                        proto::ERROR_INCOMPATIBLE,
+                        format!(
+                            "address {address} has a live pull waiter; stop the station before preserving push"
+                        ),
+                    );
                 }
                 state.check_session_id_reuse_tripwire(&refreshed);
                 if !recovery {
                     state.clear_definite_session_end(&store_key, &session_id);
                 }
+                #[cfg(test)]
+                state
+                    .delivery_admission_before_commit(DeliveryAdmissionKind::Register)
+                    .await;
                 state.insert_member(refreshed.clone());
                 // Reset the push retry state and re-scan backlog only on an explicit
                 // (re-)provision; a plain refresh that merely preserved the handler keeps its
                 // backoff intact (the per-heartbeat sweep still delivers any backlog).
-                if on_deliver.is_some() {
+                if on_deliver.is_some() || replace_on_deliver {
                     state.on_deliver_forget_member(&MemberKey {
                         store_key: refreshed.store_key.clone(),
                         session_id: refreshed.session_id.clone(),
                         address: refreshed.address.clone(),
                     });
-                    spawn_on_deliver_backlog(state.clone(), refreshed.clone());
+                    if refreshed.on_deliver.is_some() {
+                        spawn_on_deliver_backlog(state.clone(), refreshed.clone());
+                    }
                 }
                 return Response::Registered {
                     lease_epoch: refreshed.lease_epoch,
@@ -3895,6 +4110,10 @@ async fn register_member(
     } else {
         None
     };
+    #[cfg(test)]
+    state
+        .delivery_admission_before_commit(DeliveryAdmissionKind::Register)
+        .await;
     state.insert_member(record);
     if let Some(member) = backlog {
         state.on_deliver_forget_member(&MemberKey {
@@ -4223,7 +4442,7 @@ async fn detach_member(
                     &store_key,
                     &session_id,
                     "Detach",
-                    &[member.clone()],
+                    std::slice::from_ref(&member),
                 );
                 // Do NOT record the durable tombstone again here: `release_epoch_lease_for_detach`
                 // above already wrote it atomically inside the lease-release transaction (see the
@@ -4337,23 +4556,32 @@ async fn wait_for_message_with_idle_ttl(
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
     }
 
-    if state
-        .get_member(&store_key, &session_id, &address)
-        .is_none()
-    {
-        let backend = match state.backend_for(&store_key).await {
-            Ok(backend) => backend,
-            Err(response) => return response,
-        };
-        return needs_attach_for_missing_member(
-            &state,
-            &backend,
-            &store_key,
-            &session_id,
-            &address,
-            "wait",
-        )
-        .await;
+    match state.get_member(&store_key, &session_id, &address) {
+        Some(member) if member.on_deliver.is_some() => {
+            state.push_recent_error(
+                "DeliveryModeConflict",
+                format!(
+                    "rejected pull wait store={store_key} session={session_id} address={address}: push delivery is registered"
+                ),
+            );
+            return Response::PresenceEnded;
+        }
+        Some(_) => {}
+        None => {
+            let backend = match state.backend_for(&store_key).await {
+                Ok(backend) => backend,
+                Err(response) => return response,
+            };
+            return needs_attach_for_missing_member(
+                &state,
+                &backend,
+                &store_key,
+                &session_id,
+                &address,
+                "wait",
+            )
+            .await;
+        }
     }
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
@@ -4375,6 +4603,40 @@ async fn wait_for_message_with_idle_ttl(
     } else {
         None
     };
+    let delivery_admission = state
+        .delivery_admission(
+            &store_key,
+            &session_id,
+            &address,
+            DeliveryAdmissionKind::Wait,
+        )
+        .await;
+    let delivery_admission_guard = delivery_admission.lock().await;
+    // Repeat the member/mode checks after all async preflight work. The opposite-mode recheck and
+    // waiter installation below share the same per-station admission guard.
+    match state.get_member(&store_key, &session_id, &address) {
+        Some(member) if member.on_deliver.is_some() => {
+            state.push_recent_error(
+                "DeliveryModeConflict",
+                format!(
+                    "rejected pull wait at admission store={store_key} session={session_id} address={address}: push delivery is registered"
+                ),
+            );
+            return Response::PresenceEnded;
+        }
+        Some(_) => {}
+        None => {
+            return needs_attach_for_missing_member(
+                &state,
+                &backend,
+                &store_key,
+                &session_id,
+                &address,
+                "wait-admission",
+            )
+            .await;
+        }
+    }
     let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let idle_deadline = Instant::now() + idle_ttl;
     if state.has_live_waiter_for(&store_key, &session_id, &address) {
@@ -4396,6 +4658,10 @@ async fn wait_for_message_with_idle_ttl(
         })
         .unwrap_or((None, None));
     let waiter_pid_for_status = waiter_pid;
+    #[cfg(test)]
+    state
+        .delivery_admission_before_commit(DeliveryAdmissionKind::Wait)
+        .await;
     let mut waiter_guard = WaiterGuard::new(
         state.clone(),
         &store_key,
@@ -4409,6 +4675,8 @@ async fn wait_for_message_with_idle_ttl(
         cc_after_ms,
         timeout_ms,
     );
+    drop(delivery_admission_guard);
+    drop(delivery_admission);
     let parsed_min_attention = match min_attention.as_deref().map(Attention::parse).transpose() {
         Ok(value) => value,
         Err(e) => {
@@ -5140,6 +5408,9 @@ mod p3_tests {
             store_open_guard: AsyncMutex::new(()),
             members: Mutex::new(BTreeMap::new()),
             waiters: Mutex::new(BTreeMap::new()),
+            delivery_admissions: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            delivery_admission_control: Mutex::new(None),
             next_waiter_id: AtomicU64::new(1),
             recent_errors: Arc::new(Mutex::new(VecDeque::new())),
             ended_sessions: Mutex::new(BTreeMap::new()),
@@ -5204,6 +5475,7 @@ mod p3_tests {
             watch_pids: vec![WatchPidSpec::anchor(42)],
             recovery: false,
             on_deliver: None,
+            replace_on_deliver: false,
             on_deliver_wake_on_cc: false,
         }
     }
@@ -5238,6 +5510,278 @@ mod p3_tests {
         let resp = request(state.clone(), register_req(&store, "s1", "addr:a")).await;
         assert!(matches!(resp, Response::Registered { .. }));
         assert!(state.on_deliver_candidates(&store, "addr:a").is_empty());
+    }
+
+    #[tokio::test]
+    async fn explicit_replace_clears_push_while_plain_refresh_preserves_it() {
+        let state = test_state("on-deliver-replace");
+        let store = store_key("on-deliver-replace");
+        let mut push = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut push {
+            *on_deliver = Some(vec!["handler".to_string()]);
+        }
+        assert!(matches!(
+            request(state.clone(), push).await,
+            Response::Registered { .. }
+        ));
+
+        assert!(matches!(
+            request(state.clone(), register_req(&store, "s1", "addr:a")).await,
+            Response::Registered { .. }
+        ));
+        assert!(
+            state
+                .get_member(&store, "s1", "addr:a")
+                .unwrap()
+                .on_deliver
+                .is_some(),
+            "ordinary refresh must preserve push"
+        );
+
+        let mut pull = register_req(&store, "s1", "addr:a");
+        if let Request::Register {
+            replace_on_deliver, ..
+        } = &mut pull
+        {
+            *replace_on_deliver = true;
+        }
+        assert!(matches!(
+            request(state.clone(), pull).await,
+            Response::Registered { .. }
+        ));
+        let status = state.status().await;
+        assert_eq!(status.members[0].delivery_mode, DeliveryMode::Pull);
+        assert!(!status.members[0].push_registered);
+        assert!(state.on_deliver_candidates(&store, "addr:a").is_empty());
+    }
+
+    #[tokio::test]
+    async fn wait_rejects_member_with_registered_push() {
+        let state = test_state("push-rejects-wait");
+        let store = store_key("push-rejects-wait");
+        let mut push = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut push {
+            *on_deliver = Some(vec!["handler".to_string()]);
+        }
+        assert!(matches!(
+            request(state.clone(), push).await,
+            Response::Registered { .. }
+        ));
+
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 100)).await;
+        assert!(matches!(wait, Response::PresenceEnded));
+        let status = state.status().await;
+        assert_eq!(status.members[0].delivery_mode, DeliveryMode::Push);
+        assert_eq!(status.members[0].live_waiters_count, 0);
+        assert!(status
+            .recent_errors
+            .iter()
+            .any(|error| error.kind == "DeliveryModeConflict"));
+    }
+
+    #[tokio::test]
+    async fn push_registration_rejects_live_waiter_without_stopping_it() {
+        let state = test_state("wait-rejects-push");
+        let store = store_key("wait-rejects-push");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let waiter_state = state.clone();
+        let waiter_req = wait_req(&store, "s1", "addr:a", 5_000);
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_req).await });
+        tokio::time::sleep(Duration::from_millis(75)).await;
+
+        let mut push = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut push {
+            *on_deliver = Some(vec!["handler".to_string()]);
+        }
+        let rejected = request(state.clone(), push).await;
+        assert!(matches!(
+            rejected,
+            Response::Error { code, .. } if code == proto::ERROR_INCOMPATIBLE
+        ));
+        let status = state.status().await;
+        assert_eq!(status.members[0].delivery_mode, DeliveryMode::Pull);
+        assert_eq!(status.members[0].live_waiters_count, 1);
+        assert!(!status.members[0].push_registered);
+
+        {
+            let mut members = state.members.lock().unwrap();
+            members
+                .get_mut(&DaemonState::member_key(&store, "s1", "addr:a"))
+                .unwrap()
+                .on_deliver = Some(vec!["legacy-handler".to_string()]);
+        }
+        let conflict = state.status().await;
+        assert_eq!(conflict.members[0].delivery_mode, DeliveryMode::Conflict);
+        assert_eq!(
+            conflict.members[0].station_health,
+            StationHealth::CoverageConflict
+        );
+        state
+            .members
+            .lock()
+            .unwrap()
+            .get_mut(&DaemonState::member_key(&store, "s1", "addr:a"))
+            .unwrap()
+            .on_deliver = None;
+
+        let stopped = request(
+            state.clone(),
+            Request::StationStop {
+                store_key: store,
+                session_id: "s1".to_string(),
+                address: "addr:a".to_string(),
+                wait_grace_ms: 1_000,
+            },
+        )
+        .await;
+        assert!(matches!(stopped, Response::StationStopped { .. }));
+        assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
+    }
+
+    async fn run_concurrent_delivery_admission_case(register_wins: bool) {
+        let label = if register_wins {
+            "concurrent-delivery-admission-register"
+        } else {
+            "concurrent-delivery-admission-wait"
+        };
+        let state = test_state(label);
+        let store = store_key(label);
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+
+        let control = Arc::new(DeliveryAdmissionTestControl::new());
+        *state.delivery_admission_control.lock().unwrap() = Some(control.clone());
+
+        let mut push = register_req(&store, "s1", "addr:a");
+        if let Request::Register { on_deliver, .. } = &mut push {
+            *on_deliver = Some(vec!["handler".to_string()]);
+        }
+        let push_state = state.clone();
+        let push_task = tokio::spawn(async move { request(push_state, push).await });
+
+        let wait_state = state.clone();
+        let wait_request = wait_req(&store, "s1", "addr:a", 5_000);
+        let mut wait_task = Some(tokio::spawn(async move {
+            request(wait_state, wait_request).await
+        }));
+
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            control.wait_before_lock(DeliveryAdmissionKind::Register),
+        )
+        .await
+        .expect("register reached admission boundary");
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            control.wait_before_lock(DeliveryAdmissionKind::Wait),
+        )
+        .await
+        .expect("wait reached admission boundary");
+
+        let winner = if register_wins {
+            DeliveryAdmissionKind::Register
+        } else {
+            DeliveryAdmissionKind::Wait
+        };
+        let loser = if register_wins {
+            DeliveryAdmissionKind::Wait
+        } else {
+            DeliveryAdmissionKind::Register
+        };
+        control.release_before_lock(winner);
+        tokio::time::timeout(Duration::from_secs(2), control.wait_before_commit(winner))
+            .await
+            .expect("winner reached commit boundary");
+
+        // The loser is now released while the winner is paused after its final recheck. With the
+        // admission mutex removed, it would also reach the commit boundary and this assertion
+        // would fail; with the mutex, it cannot pass the winner until after the winner commits.
+        control.release_before_lock(loser);
+        assert!(
+            tokio::time::timeout(
+                Duration::from_millis(100),
+                control.wait_before_commit(loser)
+            )
+            .await
+            .is_err(),
+            "losing mode crossed the commit boundary before the winner installed"
+        );
+        control.release_commit(winner);
+
+        let push_response = tokio::time::timeout(Duration::from_secs(2), push_task)
+            .await
+            .expect("concurrent push admission completed")
+            .expect("push task joined");
+        *state.delivery_admission_control.lock().unwrap() = None;
+
+        let push_admitted = matches!(push_response, Response::Registered { .. });
+        assert_eq!(push_admitted, register_wins);
+        if !push_admitted {
+            assert!(matches!(
+                push_response,
+                Response::Error { code, .. } if code == proto::ERROR_INCOMPATIBLE
+            ));
+        }
+
+        if push_admitted {
+            let wait_response =
+                tokio::time::timeout(Duration::from_secs(2), wait_task.take().expect("wait task"))
+                    .await
+                    .expect("losing wait admission completed")
+                    .expect("wait task joined");
+            assert!(matches!(wait_response, Response::PresenceEnded));
+        }
+
+        if !register_wins {
+            let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+            while !state.has_live_waiter_for(&store, "s1", "addr:a") {
+                assert!(
+                    tokio::time::Instant::now() < deadline,
+                    "winning waiter did not install"
+                );
+                tokio::task::yield_now().await;
+            }
+        }
+
+        let status = state.status().await;
+        let member = status
+            .members
+            .iter()
+            .find(|member| member.address == "addr:a")
+            .expect("member status");
+        let waiter_admitted = member.live_waiters_count == 1;
+        assert_ne!(
+            push_admitted, waiter_admitted,
+            "exactly one delivery mode must be admitted: {member:?}"
+        );
+        assert_ne!(member.delivery_mode, DeliveryMode::Conflict);
+        assert_ne!(member.station_health, StationHealth::CoverageConflict);
+
+        if waiter_admitted {
+            let stopped = request(
+                state.clone(),
+                Request::StationStop {
+                    store_key: store,
+                    session_id: "s1".to_string(),
+                    address: "addr:a".to_string(),
+                    wait_grace_ms: 1_000,
+                },
+            )
+            .await;
+            assert!(matches!(stopped, Response::StationStopped { .. }));
+            let wait_response =
+                tokio::time::timeout(Duration::from_secs(2), wait_task.take().expect("wait task"))
+                    .await
+                    .expect("winning waiter stopped")
+                    .expect("wait task joined");
+            assert!(matches!(wait_response, Response::PresenceEnded));
+        }
+    }
+
+    #[tokio::test]
+    async fn concurrent_push_and_pull_admission_is_linearizable_in_both_orders() {
+        run_concurrent_delivery_admission_case(true).await;
+        run_concurrent_delivery_admission_case(false).await;
     }
 
     #[test]
@@ -9403,6 +9947,9 @@ pub mod test_support {
                 store_open_guard: AsyncMutex::new(()),
                 members: Mutex::new(BTreeMap::new()),
                 waiters: Mutex::new(BTreeMap::new()),
+                delivery_admissions: Mutex::new(HashMap::new()),
+                #[cfg(test)]
+                delivery_admission_control: Mutex::new(None),
                 next_waiter_id: AtomicU64::new(1),
                 recent_errors: Arc::new(Mutex::new(VecDeque::new())),
                 ended_sessions: Mutex::new(BTreeMap::new()),
@@ -9660,6 +10207,7 @@ pub mod test_support {
             watch_pids,
             recovery: false,
             on_deliver: None,
+            replace_on_deliver: false,
             on_deliver_wake_on_cc: false,
         }
     }
@@ -9826,9 +10374,7 @@ mod platform {
 
     impl Listener {
         pub fn bind(endpoint: &Endpoint) -> Result<Self> {
-            let path = match endpoint {
-                Endpoint::UnixSocket(path) => path,
-            };
+            let Endpoint::UnixSocket(path) = endpoint;
             if let Some(parent) = path.parent() {
                 ensure_owner_private_dir(parent)?;
             }
@@ -9896,6 +10442,7 @@ mod platform {
             .create(true)
             .read(true)
             .write(true)
+            .truncate(false)
             .mode(0o600)
             .open(&lock_path)
             .map_err(|e| io_err("opening daemon endpoint lock", e))?;
@@ -9946,9 +10493,7 @@ mod platform {
     }
 
     pub async fn connect(endpoint: &Endpoint) -> Result<ClientConn> {
-        let path = match endpoint {
-            Endpoint::UnixSocket(path) => path,
-        };
+        let Endpoint::UnixSocket(path) = endpoint;
         UnixStream::connect(path).await.map_err(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
                 DaemonError::NotRunning(format!("endpoint {} does not exist", path.display()))
@@ -10038,18 +10583,16 @@ mod platform {
         expected_start_time: Option<u64>,
     ) -> Result<()> {
         let (pid, uid) = peer_pid_uid(conn)?;
+        let pid = u32::try_from(pid).map_err(|_| {
+            DaemonError::Unauthorized(format!("server pid {pid} cannot be represented as u32"))
+        })?;
         let current = unsafe { libc::geteuid() };
         if uid != current {
             return Err(DaemonError::Unauthorized(format!(
                 "server uid {uid} does not match client uid {current}"
             )));
         }
-        let exe = std::fs::canonicalize(format!("/proc/{pid}/exe")).map_err(|e| {
-            DaemonError::Unsupported {
-                capability: "client-side server executable verification",
-                message: format!("cannot verify /proc/{pid}/exe: {e}"),
-            }
-        })?;
+        let exe = server_executable(pid)?;
         if !same_canonical_path(&exe, expected_exe) {
             return Err(DaemonError::Unauthorized(format!(
                 "server executable {} does not match {}",
@@ -10057,10 +10600,7 @@ mod platform {
                 expected_exe.display()
             )));
         }
-        let start_time = linux_start_time_ticks(pid)?;
-        let pid = u32::try_from(pid).map_err(|_| {
-            DaemonError::Unauthorized(format!("server pid {pid} cannot be represented as u32"))
-        })?;
+        let start_time = server_process_start_time(pid)?;
         verify_expected_peer_identity(pid, Some(start_time), expected_pid, expected_start_time)?;
         Ok(())
     }
@@ -10087,16 +10627,97 @@ mod platform {
         Ok((cred.pid, cred.uid))
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    fn peer_pid_uid(conn: &UnixStream) -> Result<(libc::pid_t, libc::uid_t)> {
+        let mut pid: libc::pid_t = 0;
+        let mut pid_len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+        let pid_rc = unsafe {
+            libc::getsockopt(
+                conn.as_raw_fd(),
+                libc::SOL_LOCAL,
+                libc::LOCAL_PEERPID,
+                &mut pid as *mut _ as *mut libc::c_void,
+                &mut pid_len,
+            )
+        };
+        if pid_rc != 0 {
+            return Err(io_err(
+                "reading unix peer pid",
+                std::io::Error::last_os_error(),
+            ));
+        }
+
+        let mut uid: libc::uid_t = 0;
+        let mut gid: libc::gid_t = 0;
+        let uid_rc = unsafe { libc::getpeereid(conn.as_raw_fd(), &mut uid, &mut gid) };
+        if uid_rc != 0 {
+            return Err(io_err(
+                "reading unix peer credentials",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        Ok((pid, uid))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     fn peer_pid_uid(_conn: &UnixStream) -> Result<(libc::pid_t, libc::uid_t)> {
         Err(DaemonError::Unsupported {
             capability: "unix peer credential verification",
-            message: "SO_PEERCRED implementation is only wired for Linux in P2".into(),
+            message: "peer credential verification is only wired for Linux and macOS".into(),
         })
     }
 
     #[cfg(target_os = "linux")]
-    fn linux_start_time_ticks(pid: libc::pid_t) -> Result<u64> {
+    fn server_executable(pid: u32) -> Result<PathBuf> {
+        std::fs::canonicalize(format!("/proc/{pid}/exe")).map_err(|e| DaemonError::Unsupported {
+            capability: "client-side server executable verification",
+            message: format!("cannot verify /proc/{pid}/exe: {e}"),
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn server_executable(pid: u32) -> Result<PathBuf> {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        let bytes = unsafe {
+            libc::proc_pidpath(
+                pid as libc::c_int,
+                buffer.as_mut_ptr() as *mut libc::c_void,
+                buffer.len() as u32,
+            )
+        };
+        if bytes <= 0 {
+            return Err(DaemonError::Unsupported {
+                capability: "client-side server executable verification",
+                message: format!(
+                    "cannot resolve executable path for pid {pid}: {}",
+                    std::io::Error::last_os_error()
+                ),
+            });
+        }
+        buffer.truncate(bytes as usize);
+        if buffer.last() == Some(&0) {
+            buffer.pop();
+        }
+        let path = PathBuf::from(OsString::from_vec(buffer));
+        std::fs::canonicalize(&path).map_err(|e| DaemonError::Unsupported {
+            capability: "client-side server executable verification",
+            message: format!("cannot canonicalize {} for pid {pid}: {e}", path.display()),
+        })
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn server_executable(_pid: u32) -> Result<PathBuf> {
+        Err(DaemonError::Unsupported {
+            capability: "client-side server executable verification",
+            message: "server executable verification is only wired for Linux and macOS".into(),
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    fn server_process_start_time(pid: u32) -> Result<u64> {
         let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).map_err(|e| {
             DaemonError::Unsupported {
                 capability: "client-side server start-time verification",
@@ -10123,11 +10744,21 @@ mod platform {
             })
     }
 
-    #[cfg(not(target_os = "linux"))]
-    fn linux_start_time_ticks(_pid: libc::pid_t) -> Result<u64> {
+    #[cfg(target_os = "macos")]
+    fn server_process_start_time(pid: u32) -> Result<u64> {
+        crate::session_watch::capture_process_start_time(pid).ok_or_else(|| {
+            DaemonError::Unsupported {
+                capability: "client-side server start-time verification",
+                message: format!("cannot capture process start time for pid {pid}"),
+            }
+        })
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    fn server_process_start_time(_pid: u32) -> Result<u64> {
         Err(DaemonError::Unsupported {
             capability: "client-side server start-time verification",
-            message: "process start-time verification is only wired for Linux in P2".into(),
+            message: "process start-time verification is only wired for Linux and macOS".into(),
         })
     }
 }
@@ -10213,9 +10844,7 @@ mod platform {
     }
 
     pub async fn connect(endpoint: &Endpoint) -> Result<ClientConn> {
-        let pipe_name = match endpoint {
-            Endpoint::WindowsPipe(name) => name,
-        };
+        let Endpoint::WindowsPipe(pipe_name) = endpoint;
         for _ in 0..20 {
             match ClientOptions::new().open(pipe_name) {
                 Ok(client) => return Ok(client),
@@ -10265,14 +10894,14 @@ mod platform {
     }
 
     pub fn write_owner_only_file(path: &Path, bytes: &[u8]) -> Result<()> {
-        let mut sa = owner_only_security_attributes()?;
+        let sa = owner_only_security_attributes()?;
         let wide = wide_null(path.as_os_str());
         let handle = unsafe {
             CreateFileW(
                 wide.as_ptr(),
                 FILE_GENERIC_WRITE,
                 0,
-                &mut sa.attrs,
+                &sa.attrs,
                 CREATE_NEW,
                 FILE_ATTRIBUTE_NORMAL,
                 0,
@@ -10330,7 +10959,7 @@ mod platform {
     }
 
     fn create_pipe(pipe_name: &str, first: bool) -> Result<NamedPipeServer> {
-        let mut sa = owner_only_security_attributes()?;
+        let sa = owner_only_security_attributes()?;
         let wide = wide_null(OsStr::new(pipe_name));
         let mut open_mode = PIPE_ACCESS_DUPLEX | FILE_FLAG_OVERLAPPED;
         if first {
@@ -10347,7 +10976,7 @@ mod platform {
                 8192,
                 8192,
                 0,
-                &mut sa.attrs,
+                &sa.attrs,
             )
         };
         if handle == INVALID_HANDLE_VALUE {
@@ -10366,9 +10995,9 @@ mod platform {
     }
 
     fn create_owner_only_dir(path: &Path) -> Result<()> {
-        let mut sa = owner_only_security_attributes()?;
+        let sa = owner_only_security_attributes()?;
         let wide = wide_null(path.as_os_str());
-        let ok = unsafe { CreateDirectoryW(wide.as_ptr(), &mut sa.attrs) };
+        let ok = unsafe { CreateDirectoryW(wide.as_ptr(), &sa.attrs) };
         if ok == 0 {
             let err = unsafe { GetLastError() };
             if err == ERROR_ALREADY_EXISTS {
@@ -10682,9 +11311,9 @@ mod platform {
         let info = process_identity(pid, None)?;
         let current = current_user_identity()?;
         if info.sid != current {
-            return Err(DaemonError::Unauthorized(format!(
-                "peer SID does not match current user SID"
-            )));
+            return Err(DaemonError::Unauthorized(
+                "peer SID does not match current user SID".to_string(),
+            ));
         }
         Ok(())
     }
@@ -11081,20 +11710,7 @@ fn normalize_windows_path(path: &Path) -> String {
 mod tests {
     use super::*;
     use crate::daemon_ipc::{ERROR_UNAUTHORIZED, REDACTED_SECRET};
-
-    fn repo_test_dir(label: &str) -> PathBuf {
-        let mut path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-        path.push("target");
-        path.push("daemon-p2-tests");
-        path.push(format!(
-            "{}-{}-{}",
-            label,
-            std::process::id(),
-            monotonic_nonce()
-        ));
-        std::fs::create_dir_all(&path).expect("create repo-local test dir");
-        path
-    }
+    use crate::ipc::test_support::short_runtime_root;
 
     #[test]
     fn singleton_hash_changes_with_protocol_major_and_config_root() {
@@ -11112,7 +11728,7 @@ mod tests {
 
     #[test]
     fn cap_paths_differ_for_protocol_major_parallel_daemons() {
-        let run_dir = repo_test_dir("cap-paths");
+        let run_dir = short_runtime_root();
         let n = DaemonPaths::for_key(
             SingletonKey::from_parts("user-a", PathBuf::from(r"C:\telex\root"), 1),
             &run_dir,
@@ -11233,7 +11849,7 @@ mod tests {
 
     #[tokio::test]
     async fn endpoint_bind_exclusivity_rejects_second_listener() {
-        let run_dir = repo_test_dir("bind-exclusive");
+        let run_dir = short_runtime_root();
         let paths = DaemonPaths::for_key(
             SingletonKey::from_parts(
                 format!("user-{}", std::process::id()),
@@ -11253,7 +11869,7 @@ mod tests {
     #[cfg(windows)]
     #[tokio::test]
     async fn windows_pipe_listener_rearms_while_client_is_connected() {
-        let run_dir = repo_test_dir("pipe-rearm");
+        let run_dir = short_runtime_root();
         let paths = DaemonPaths::for_key(
             SingletonKey::from_parts(
                 format!("user-{}", std::process::id()),
