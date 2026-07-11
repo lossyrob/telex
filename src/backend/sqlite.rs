@@ -154,41 +154,25 @@ fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
     }
 
     let sid = windows_current_user_sid()?;
-<<<<<<< HEAD
     // A concurrent opener's recreate path may call remove_dir between our symlink_metadata check
     // and here; treat NotFound as OK (that opener is creating a fresh strict-SDDL directory).
     let sddl = match windows_dir_security_sddl(path) {
         Ok(s) => s,
         Err(_) => return Ok(()),
     };
-    if !windows_owner_private_sddl_is_strict(&sddl, &sid) {
-        if std::fs::read_dir(path)
-            .map(|mut entries| entries.next().is_none())
-            .unwrap_or(false)
-        {
-            let _ = std::fs::remove_dir(path);
-            // Best-effort: a concurrent opener may win the creation race; errors are not fatal.
-            let _ = create_windows_owner_only_dir(path);
-            // If the directory still exists after the race, check whether it is now strict.
-            if let Ok(recreated) = windows_dir_security_sddl(path) {
-                if windows_owner_private_sddl_is_strict(&recreated, &sid) {
-                    return Ok(());
-                }
-            }
-=======
-    let sddl = windows_dir_security_sddl(path)?;
     if !windows_owner_private_sddl_is_strict(&sddl, &sid)
         && std::fs::read_dir(path)
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(false)
     {
         let _ = std::fs::remove_dir(path);
-        create_windows_owner_only_dir(path)
-            .with_context(|| format!("recreating owner-private store lock directory {:?}", path))?;
-        let recreated = windows_dir_security_sddl(path)?;
-        if windows_owner_private_sddl_is_strict(&recreated, &sid) {
-            return Ok(());
->>>>>>> origin/main
+        // Best-effort: a concurrent opener may win the creation race; errors are not fatal.
+        let _ = create_windows_owner_only_dir(path);
+        // If the directory still exists after the race, check whether it is now strict.
+        if let Ok(recreated) = windows_dir_security_sddl(path) {
+            if windows_owner_private_sddl_is_strict(&recreated, &sid) {
+                return Ok(());
+            }
         }
     }
     // Windows local app-data directories can carry inherited AppContainer/package ACEs that do
