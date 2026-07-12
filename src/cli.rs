@@ -276,9 +276,14 @@ pub struct SendArgs {
     /// Message body (inline). Body/subject/metadata are capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body: Option<String>,
-    /// Read the message body from UTF-8 (`-` stdin); capped below the 1 MiB IPC frame.
+    /// Read the message body from a UTF-8 file (`-` = stdin); capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body_file: Option<String>,
+    /// Read the message body from stdin (UTF-8). Equivalent to `--body-file -`. On Windows /
+    /// PowerShell, run `$OutputEncoding = [System.Text.Encoding]::UTF8` before piping
+    /// non-ASCII content, or write a UTF-8 file and use `--body-file <path>` instead.
+    #[arg(long)]
+    pub body_stdin: bool,
     /// CC addresses (visible observers). May be repeated and/or comma-separated.
     #[arg(long, value_delimiter = ',')]
     pub cc: Vec<String>,
@@ -310,9 +315,14 @@ pub struct ReplyArgs {
     /// Reply body (inline). Body/subject are capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body: Option<String>,
-    /// Read the reply body from UTF-8 (`-` stdin); capped below the 1 MiB IPC frame.
+    /// Read the reply body from a UTF-8 file (`-` = stdin); capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body_file: Option<String>,
+    /// Read the reply body from stdin (UTF-8). Equivalent to `--body-file -`. On Windows /
+    /// PowerShell, run `$OutputEncoding = [System.Text.Encoding]::UTF8` before piping
+    /// non-ASCII content, or write a UTF-8 file and use `--body-file <path>` instead.
+    #[arg(long)]
+    pub body_stdin: bool,
     /// Subject (defaults to "Re: <parent subject>").
     #[arg(long)]
     pub subject: Option<String>,

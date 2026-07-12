@@ -248,6 +248,7 @@ Then send to the selected address.
 ```sh
 telex send --to <addr> --subject "<subject>" --body "<body>"
 telex send --to <addr> --subject "<subject>" --body-file <path>   # body from a UTF-8 file (`-` = stdin)
+telex send --to <addr> --subject "<subject>" --body-stdin          # read body from stdin (UTF-8)
 ```
 
 Useful send flags:
@@ -256,15 +257,33 @@ Useful send flags:
 telex send --to <addr> --from <your-addr> --subject "<s>" --body "<s>" --cc <a,b> --cc <c> --kind <s> --attention interrupt|next-checkpoint|background|fyi --requires-disposition --metadata <json>
 ```
 
-`--body` and `--body-file` are mutually exclusive and exactly one is required. Prefer
-`--body-file` for non-trivial or multiline content — Markdown, code blocks, JSON, quoted command
-output — to avoid shell quoting headaches and command-line length limits. The file is read as
-UTF-8 and sent exactly as written (no trimming, so trailing newlines are preserved);
-`--body-file -` reads the body from stdin.
+`--body`, `--body-file`, and `--body-stdin` are mutually exclusive and exactly one is required.
+Prefer `--body-file` or `--body-stdin` for non-trivial or multiline content — Markdown, code blocks,
+JSON, quoted command output — to avoid shell quoting headaches and command-line length limits. Files
+are read as UTF-8 and sent exactly as written (no trimming, so trailing newlines are preserved).
+`--body-file -` and `--body-stdin` are equivalent: both read the body from stdin.
 
 ```sh
 # Recommended for multiline/structured messages:
 telex send --to <addr> --subject "Status" --body-file message.md --requires-disposition
+
+# Pipe a body from stdin:
+echo "Status update" | telex send --to <addr> --subject "Status" --body-stdin
+```
+
+**Windows / PowerShell — UTF-8 safety:** piped stdin must be UTF-8. Before piping non-ASCII
+content (accents, emoji, CJK characters), ensure PowerShell outputs UTF-8:
+
+```powershell
+$OutputEncoding = [System.Text.Encoding]::UTF8
+"Statut: café ✓" | telex send --to <addr> --subject "Statut" --body-stdin
+```
+
+For generated bodies, writing to a UTF-8 file first is the most reliable cross-platform path:
+
+```powershell
+$body | Out-File -Encoding utf8 body.txt
+telex send --to <addr> --subject "Status" --body-file body.txt
 ```
 
 `send` prints a receipt: `delivered`, `queued-unoccupied`, or `rejected-retired`, plus the new message id.
@@ -282,9 +301,10 @@ Reply inside an existing thread:
 ```sh
 telex reply --to-message <message-id> --body "<body>"
 telex reply --to-message <message-id> --body-file <path>   # reply body from a UTF-8 file (`-` = stdin)
+telex reply --to-message <message-id> --body-stdin          # read reply body from stdin (UTF-8)
 ```
 
-Optional reply flags are `--body-file <path>` (UTF-8 file body, `-` for stdin; mutually exclusive with `--body`, exactly one of the two required), `--from <your-addr>`, `--subject <s>`, `--cc <a,b>` / repeated `--cc <c>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, and `--requires-disposition`. As with `send`, `--from` defaults to `$TELEX_ADDRESS` / `--address`; the reply's destination is taken from the parent message's sender (so the parent must itself have had a `from`).
+Optional reply flags are `--body-file <path>` / `--body-stdin` (UTF-8 file or stdin; mutually exclusive with `--body`, exactly one of the three required), `--from <your-addr>`, `--subject <s>`, `--cc <a,b>` / repeated `--cc <c>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, and `--requires-disposition`. As with `send`, `--from` defaults to `$TELEX_ADDRESS` / `--address`; the reply's destination is taken from the parent message's sender (so the parent must itself have had a `from`). On Windows/PowerShell, see the UTF-8 piping note above.
 
 ## Reading
 
