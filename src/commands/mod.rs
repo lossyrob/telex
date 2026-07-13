@@ -145,8 +145,7 @@ mod tests {
     #[test]
     fn missing_body_file_reports_a_clear_error() {
         let path = temp_path("missing");
-        let err =
-            resolve_body(None, Some(path.to_string_lossy().into_owned()), false).unwrap_err();
+        let err = resolve_body(None, Some(path.to_string_lossy().into_owned()), false).unwrap_err();
         assert!(err.to_string().contains("body-file"));
     }
 

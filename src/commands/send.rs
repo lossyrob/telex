@@ -7,7 +7,8 @@ use crate::model::Attention;
 use crate::output::emit;
 
 pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
-    let body = crate::commands::resolve_body(args.body.clone(), args.body_file.clone(), args.body_stdin)?;
+    let body =
+        crate::commands::resolve_body(args.body.clone(), args.body_file.clone(), args.body_stdin)?;
     let _ = Attention::parse(&args.attention)?;
     let store_key = ctx.store_key()?;
     let session_id = resolve_session_id(args.session.as_deref())?;
