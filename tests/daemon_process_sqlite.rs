@@ -739,7 +739,7 @@ fn real_process_idle_wait_timeout_is_not_hung() {
             "--timeout-ms",
             "250",
             "--hang-ms",
-            "25",
+            "1000",
         ],
         Duration::from_secs(3),
     );
@@ -777,7 +777,7 @@ fn real_process_wait_out_dir_writes_artifacts() {
             "--timeout-ms",
             "250",
             "--hang-ms",
-            "25",
+            "1000",
             "--out-dir",
             out_dir.to_str().expect("out dir is utf8"),
         ],

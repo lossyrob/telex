@@ -10,12 +10,27 @@ recipients (visible observers), a `kind` label, an
 ```sh
 telex send --to <addr> --subject "<subject>" --body "<body>"
 telex send --to <addr> --subject "<subject>" --body-file <path>   # UTF-8 file; - for stdin
+telex send --to <addr> --subject "<subject>" --body-stdin          # read body from stdin (UTF-8)
 ```
 
-`--body` and `--body-file` are mutually exclusive and exactly one is required.
-Prefer `--body-file` for multiline or structured content (Markdown, code blocks,
-JSON) to avoid shell quoting limits. The file is read as UTF-8 and sent exactly
-as written.
+`--body`, `--body-file`, and `--body-stdin` are mutually exclusive and exactly one is required.
+Prefer `--body-file` or `--body-stdin` for multiline or structured content (Markdown, code blocks,
+JSON) to avoid shell quoting limits. Files and stdin are read as UTF-8 and sent exactly as written.
+`--body-file -` and `--body-stdin` are equivalent: both read the body from stdin.
+
+**Windows / PowerShell:** piped stdin must be UTF-8. Before piping non-ASCII content, run:
+
+```powershell
+$OutputEncoding = [System.Text.Encoding]::UTF8
+"Status: café ✓" | telex send --to <addr> --subject "Status" --body-stdin
+```
+
+For generated bodies, writing to a UTF-8 file first is the most reliable path:
+
+```powershell
+$body | Out-File -Encoding utf8 body.txt
+telex send --to <addr> --subject "Status" --body-file body.txt
+```
 
 `send` prints a receipt: `delivered` or `queued-unoccupied`, plus the new message
 id. A `queued-unoccupied` receipt is durable: the message is persisted and

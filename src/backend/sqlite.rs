@@ -154,18 +154,29 @@ fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
     }
 
     let sid = windows_current_user_sid()?;
-    let sddl = windows_dir_security_sddl(path)?;
+    // A concurrent opener's recreate path may call remove_dir between our symlink_metadata check
+    // and here; treat NotFound as OK (that opener is creating a fresh strict-SDDL directory).
+    let sddl = match windows_dir_security_sddl(path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => {
+            return Err(e)
+                .with_context(|| format!("checking store lock directory security {:?}", path));
+        }
+    };
     if !windows_owner_private_sddl_is_strict(&sddl, &sid)
         && std::fs::read_dir(path)
             .map(|mut entries| entries.next().is_none())
             .unwrap_or(false)
     {
         let _ = std::fs::remove_dir(path);
-        create_windows_owner_only_dir(path)
-            .with_context(|| format!("recreating owner-private store lock directory {:?}", path))?;
-        let recreated = windows_dir_security_sddl(path)?;
-        if windows_owner_private_sddl_is_strict(&recreated, &sid) {
-            return Ok(());
+        // Best-effort: a concurrent opener may win the creation race; errors are not fatal.
+        let _ = create_windows_owner_only_dir(path);
+        // If the directory still exists after the race, check whether it is now strict.
+        if let Ok(recreated) = windows_dir_security_sddl(path) {
+            if windows_owner_private_sddl_is_strict(&recreated, &sid) {
+                return Ok(());
+            }
         }
     }
     // Windows local app-data directories can carry inherited AppContainer/package ACEs that do
@@ -261,7 +272,7 @@ fn create_windows_owner_only_dir(path: &std::path::Path) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn windows_dir_security_sddl(path: &std::path::Path) -> Result<String> {
+fn windows_dir_security_sddl(path: &std::path::Path) -> std::io::Result<String> {
     use std::ffi::c_void;
     use windows_sys::Win32::Foundation::LocalFree;
     use windows_sys::Win32::Security::Authorization::{
@@ -285,11 +296,7 @@ fn windows_dir_security_sddl(path: &std::path::Path) -> Result<String> {
         )
     };
     if rc != 0 {
-        bail!(
-            "reading store lock directory security descriptor {:?}: {}",
-            path,
-            std::io::Error::from_raw_os_error(rc as i32)
-        );
+        return Err(std::io::Error::from_raw_os_error(rc as i32));
     }
     let mut sddl_ptr: *mut u16 = std::ptr::null_mut();
     let ok = unsafe {
@@ -303,13 +310,9 @@ fn windows_dir_security_sddl(path: &std::path::Path) -> Result<String> {
     };
     unsafe {
         LocalFree(sd);
-    }
+    };
     if ok == 0 {
-        bail!(
-            "converting store lock directory security descriptor {:?}: {}",
-            path,
-            std::io::Error::last_os_error()
-        );
+        return Err(std::io::Error::last_os_error());
     }
     let sddl = unsafe { wide_ptr_to_string(sddl_ptr) };
     unsafe {
@@ -548,11 +551,26 @@ fn acquire_store_lock(db_path: &str) -> Result<StoreLock> {
     let file_id = store_file_id(db)?;
     let lock_path = lock_dir.join(format!("store-{}.lock", file_id));
 
+    // A concurrent opener's recreate path may remove the lock directory between store_lock_dir()
+    // and open(); retry once with a fresh store_lock_dir() call on NotFound.
     let lock_file = std::fs::OpenOptions::new()
         .create(true)
         .write(true)
         .truncate(false)
         .open(&lock_path)
+        .or_else(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                let retry_dir =
+                    store_lock_dir().map_err(|e2| std::io::Error::other(e2.to_string()))?;
+                std::fs::OpenOptions::new()
+                    .create(true)
+                    .write(true)
+                    .truncate(false)
+                    .open(retry_dir.join(format!("store-{}.lock", file_id)))
+            } else {
+                Err(e)
+            }
+        })
         .map_err(|e| anyhow!("cannot open store lock {:?}: {}", lock_path, e))?;
 
     try_lock_exclusive(&lock_file).map_err(|e| {

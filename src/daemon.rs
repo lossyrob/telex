@@ -56,6 +56,16 @@ const DEFAULT_DEAF_WARN_MS: i64 = 2 * 60 * 1000;
 
 pub type Result<T> = std::result::Result<T, DaemonError>;
 
+#[cfg(windows)]
+const WINDOWS_ELEVATION_MISMATCH_HINT: &str = "On Windows, this usually means the telex daemon and this process are running at different elevations (Administrator vs non-Administrator), so they cannot authenticate over the daemon named pipe. Stop the existing daemon from a matching-elevation terminal, or restart/attach from the same elevation as this session (for an elevated session, start telex from an Administrator terminal).";
+
+fn daemon_handshake_eof_message() -> String {
+    let message = "daemon closed the connection during handshake".to_string();
+    #[cfg(windows)]
+    let message = format!("{message}; {WINDOWS_ELEVATION_MISMATCH_HINT}");
+    message
+}
+
 #[derive(Debug)]
 pub enum DaemonError {
     Io {
@@ -156,9 +166,7 @@ impl From<HandshakeError> for DaemonError {
                 DaemonError::Protocol(format!("daemon IPC frame exceeded {max_bytes} bytes"))
             }
             HandshakeError::MalformedFrame(e) => DaemonError::Protocol(e),
-            HandshakeError::Eof => {
-                DaemonError::Protocol("daemon closed the connection".to_string())
-            }
+            HandshakeError::Eof => DaemonError::Protocol(daemon_handshake_eof_message()),
             HandshakeError::Rejected(reason) => DaemonError::Incompatible(reason),
         }
     }
@@ -6233,12 +6241,10 @@ mod p3_tests {
             // fully controls the push-attempt map via `on_deliver_record_attempt`.
             *on_deliver = Some(Vec::new());
         }
+        let resp = request(state.clone(), req).await;
         assert!(
-            matches!(
-                request(state.clone(), req).await,
-                Response::Registered { .. }
-            ),
-            "push member should register"
+            matches!(resp, Response::Registered { .. }),
+            "push member should register; got: {resp:?}"
         );
     }
 
@@ -6846,10 +6852,11 @@ mod p3_tests {
             *on_deliver = Some(Vec::new());
             *on_deliver_wake_on_cc = true;
         }
-        assert!(matches!(
-            request(state.clone(), register).await,
-            Response::Registered { .. }
-        ));
+        let resp = request(state.clone(), register).await;
+        assert!(
+            matches!(resp, Response::Registered { .. }),
+            "expected Registered, got: {resp:?}"
+        );
         let initial_lower = state
             .get_member(&store, "s1", address)
             .unwrap()
@@ -10852,6 +10859,12 @@ mod platform {
                         "endpoint {pipe_name} does not exist"
                     )));
                 }
+                Err(e) if is_access_denied(&e) => {
+                    return Err(access_denied_elevation_error(
+                        format!("connecting to daemon named pipe {pipe_name}"),
+                        e,
+                    ));
+                }
                 Err(e) => return Err(io_err("connecting to daemon named pipe", e)),
             }
         }
@@ -11338,13 +11351,17 @@ mod platform {
     fn process_identity(pid: u32, expected_exe: Option<&Path>) -> Result<ProcessIdentity> {
         let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
         if process == 0 {
-            return Err(io_err(
-                "opening peer process",
-                std::io::Error::last_os_error(),
-            ));
+            let err = std::io::Error::last_os_error();
+            if is_access_denied(&err) {
+                return Err(access_denied_elevation_error(
+                    format!("opening peer process {pid}"),
+                    err,
+                ));
+            }
+            return Err(io_err("opening peer process", err));
         }
         let process = Handle(process);
-        let token = process_token(process.0)?;
+        let token = process_token(process.0, format!("opening peer process token for {pid}"))?;
         let sid = sid_string_from_token(token.0)?;
         let start_time_100ns = process_start_time(process.0)?;
         let exe = if expected_exe.is_some() {
@@ -11395,19 +11412,34 @@ mod platform {
     }
 
     fn current_process_token() -> Result<Handle> {
-        process_token(unsafe { GetCurrentProcess() })
+        process_token(
+            unsafe { GetCurrentProcess() },
+            "opening current process token".to_string(),
+        )
     }
 
-    fn process_token(process: HANDLE) -> Result<Handle> {
+    fn process_token(process: HANDLE, access_denied_context: String) -> Result<Handle> {
         let mut token = 0isize;
         let ok = unsafe { OpenProcessToken(process, TOKEN_QUERY, &mut token) };
         if ok == 0 {
-            return Err(io_err(
-                "opening process token",
-                std::io::Error::last_os_error(),
-            ));
+            let err = std::io::Error::last_os_error();
+            if is_access_denied(&err) {
+                return Err(access_denied_elevation_error(access_denied_context, err));
+            }
+            return Err(io_err("opening process token", err));
         }
         Ok(Handle(token))
+    }
+
+    fn is_access_denied(err: &std::io::Error) -> bool {
+        err.raw_os_error() == Some(ERROR_ACCESS_DENIED as i32)
+            || err.kind() == std::io::ErrorKind::PermissionDenied
+    }
+
+    fn access_denied_elevation_error(context: String, source: std::io::Error) -> DaemonError {
+        DaemonError::Unauthorized(format!(
+            "{context}: {source}. {WINDOWS_ELEVATION_MISMATCH_HINT}"
+        ))
     }
 
     struct LocalAllocGuard(*mut c_void);
@@ -11772,6 +11804,17 @@ mod tests {
             cap_required_peer_identity(&missing_start),
             Err(DaemonError::Unauthorized(_))
         ));
+    }
+
+    #[test]
+    fn handshake_eof_message_names_handshake_and_windows_elevation() {
+        let message = daemon_handshake_eof_message();
+        assert!(message.contains("closed the connection during handshake"));
+        #[cfg(windows)]
+        {
+            assert!(message.contains("different elevations"));
+            assert!(message.contains("Administrator"));
+        }
     }
 
     #[cfg(windows)]
