@@ -6853,7 +6853,10 @@ mod p3_tests {
             *on_deliver_wake_on_cc = true;
         }
         let resp = request(state.clone(), register).await;
-        assert!(matches!(resp, Response::Registered { .. }), "expected Registered, got: {resp:?}");
+        assert!(
+            matches!(resp, Response::Registered { .. }),
+            "expected Registered, got: {resp:?}"
+        );
         let initial_lower = state
             .get_member(&store, "s1", address)
             .unwrap()
