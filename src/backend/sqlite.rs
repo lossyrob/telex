@@ -272,7 +272,7 @@ fn create_windows_owner_only_dir(path: &std::path::Path) -> Result<()> {
 }
 
 #[cfg(windows)]
-fn windows_dir_security_sddl(path: &std::path::Path) -> Result<String> {
+fn windows_dir_security_sddl(path: &std::path::Path) -> std::io::Result<String> {
     use std::ffi::c_void;
     use windows_sys::Win32::Foundation::LocalFree;
     use windows_sys::Win32::Security::Authorization::{
@@ -296,11 +296,7 @@ fn windows_dir_security_sddl(path: &std::path::Path) -> Result<String> {
         )
     };
     if rc != 0 {
-        bail!(
-            "reading store lock directory security descriptor {:?}: {}",
-            path,
-            std::io::Error::from_raw_os_error(rc as i32)
-        );
+        return Err(std::io::Error::from_raw_os_error(rc as i32));
     }
     let mut sddl_ptr: *mut u16 = std::ptr::null_mut();
     let ok = unsafe {
@@ -314,13 +310,9 @@ fn windows_dir_security_sddl(path: &std::path::Path) -> Result<String> {
     };
     unsafe {
         LocalFree(sd);
-    }
+    };
     if ok == 0 {
-        bail!(
-            "converting store lock directory security descriptor {:?}: {}",
-            path,
-            std::io::Error::last_os_error()
-        );
+        return Err(std::io::Error::last_os_error());
     }
     let sddl = unsafe { wide_ptr_to_string(sddl_ptr) };
     unsafe {
@@ -568,11 +560,12 @@ fn acquire_store_lock(db_path: &str) -> Result<StoreLock> {
         .open(&lock_path)
         .or_else(|e| {
             if e.kind() == std::io::ErrorKind::NotFound {
-                let retry_dir = store_lock_dir()
-                    .map_err(|e2| std::io::Error::other(e2.to_string()))?;
+                let retry_dir =
+                    store_lock_dir().map_err(|e2| std::io::Error::other(e2.to_string()))?;
                 std::fs::OpenOptions::new()
                     .create(true)
                     .write(true)
+                    .truncate(false)
                     .open(retry_dir.join(format!("store-{}.lock", file_id)))
             } else {
                 Err(e)
