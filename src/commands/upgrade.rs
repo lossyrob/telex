@@ -533,6 +533,21 @@ fn required_u32(value: &serde_json::Value, key: &str) -> Result<u32> {
     u32::try_from(raw).map_err(|_| anyhow!("source version field `{key}` is out of range: {raw}"))
 }
 
+fn unauthorized_drain_message(message: &str, response_rejected: bool) -> String {
+    let reason = if response_rejected {
+        format!("the daemon rejected the drain request as unauthorized ({message})")
+    } else {
+        format!("cannot authenticate the running daemon — {message}")
+    };
+    format!(
+        "drain failed: {reason}; \
+         the daemon may have been started by a different telex binary \
+         (a foreign-executable daemon); re-run this command from the \
+         daemon's owning binary, or pass --skip-drain to bypass drain \
+         coordination"
+    )
+}
+
 async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
     let store_key = ctx.store_key()?;
     let paths = crate::daemon::DaemonPaths::current()?;
@@ -558,6 +573,9 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         Ok(Err(DaemonError::NotRunning(message))) => {
             return Ok(json!({"drained": false, "status": "not_running", "message": message}));
         }
+        Ok(Err(DaemonError::Unauthorized(msg))) => {
+            bail!(unauthorized_drain_message(&msg, false))
+        }
         Ok(Err(e)) => return Err(e.into()),
         Err(_) => bail!("daemon drain timed out after {timeout_ms}ms"),
     };
@@ -567,7 +585,7 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
             Ok(json!({"drained": false, "status": "not_running", "message": message}))
         }
         Response::Error { code, message, .. } if code == ERROR_UNAUTHORIZED => {
-            bail!("daemon drain unauthorized: {message}")
+            bail!(unauthorized_drain_message(&message, true))
         }
         Response::Error { code, message, .. } => bail!("daemon drain failed: {code}: {message}"),
         other => bail!("unexpected daemon drain response: {other:?}"),
@@ -577,6 +595,47 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// When a foreign-executable daemon (started by a different telex binary) owns the store, the
+    /// IPC auth check returns DaemonError::Unauthorized before the drain request is even sent.
+    /// The error should name the cause and suggest --skip-drain so it is actionable (issue #81).
+    #[test]
+    fn drain_unauthorized_connection_error_is_actionable() {
+        let inner = "server executable /a/telex does not match /b/telex";
+        let formatted = unauthorized_drain_message(inner, false);
+        assert!(
+            formatted.contains("foreign-executable daemon"),
+            "message should name the foreign-executable cause: {formatted}"
+        );
+        assert!(
+            formatted.contains("--skip-drain"),
+            "message should suggest --skip-drain: {formatted}"
+        );
+        assert!(
+            formatted.contains(inner),
+            "message should include original detail: {formatted}"
+        );
+    }
+
+    /// When the daemon responds with Unauthorized to a Drain request (response-level auth error),
+    /// the error message should also be actionable (issue #81).
+    #[test]
+    fn drain_unauthorized_response_error_is_actionable() {
+        let raw_message = "proof rejected by daemon".to_string();
+        let formatted = unauthorized_drain_message(&raw_message, true);
+        assert!(
+            formatted.contains("foreign-executable daemon"),
+            "message should name the foreign-executable cause: {formatted}"
+        );
+        assert!(
+            formatted.contains("--skip-drain"),
+            "message should suggest --skip-drain: {formatted}"
+        );
+        assert!(
+            formatted.contains(&raw_message),
+            "message should include original detail: {formatted}"
+        );
+    }
 
     #[test]
     fn strip_sensitive_env_hides_github_token_from_child() {
