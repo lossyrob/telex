@@ -141,15 +141,30 @@ yours to make.
 
 Receiving is push; **sending is not**. To start or continue a conversation, `telex send` and
 `telex reply` need your session id -- exactly like `ack`/`handle`, they do **not** read Copilot
-env vars, and fail closed with `no session id available` without it:
+env vars, and fail closed with `no session id available` without it.
+
+For every agent-authored operational `send` or new conversation, include a concise,
+non-empty `--subject`. The subject is the human/operator scan surface in timelines,
+operator views, and message lists, so make it communicate the outcome, requested action,
+or topic at a glance rather than repeating an opaque kind or the body's first line. Good
+subjects include `PR #123 ready for review`, `CI failure needs repair`,
+`Issue #45 blocked on scope decision`, and `PR #123 merged; stand down`.
 
 ```sh
-telex --address <addr> send --to <peer> --body "..." --session "$COPILOT_AGENT_SESSION_ID"
+telex --address <addr> send --to <peer> --subject "PR #123 ready for review" --body "..." --session "$COPILOT_AGENT_SESSION_ID"
 ```
 
 On PowerShell use `$env:COPILOT_AGENT_SESSION_ID`. `telex reply` takes the same `--session`
 (run `telex reply --help` for its exact flags). Only `telex copilot attach`/`detach` map the
 Copilot session id for you; the generic verbs do not.
+
+Replies inherit `Re: <parent subject>` when `--subject` is omitted. That is sufficient when
+the parent subject is already useful. If the parent subject is blank, vague, or misleading,
+provide a meaningful replacement instead of perpetuating an unhelpful thread title:
+
+```sh
+telex --address <addr> reply --to-message <id> --subject "CI failure needs repair" --body "..." --session "$COPILOT_AGENT_SESSION_ID"
+```
 
 ## Fallback: no bridge (pull mode)
 
