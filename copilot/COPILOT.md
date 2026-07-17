@@ -141,7 +141,7 @@ yours to make.
 
 Receiving is push; **sending is not**. To start or continue a conversation, `telex send` and
 `telex reply` need your session id -- exactly like `ack`/`handle`, they do **not** read Copilot
-env vars, and fail closed with `no session id available` without it:
+env vars, and fail closed with `no session id available` without it.
 
 For every agent-authored operational `send` or new conversation, include a concise,
 non-empty `--subject`. The subject is the human/operator scan surface in timelines,

@@ -2833,8 +2833,9 @@ mod tests {
         );
         assert!(doc.contains("copilot detach"));
         assert!(doc.contains("telex copilot --help"));
+        let normalized = doc.split_whitespace().collect::<Vec<_>>().join(" ");
         for required in [
-            "concise,\nnon-empty `--subject`",
+            "concise, non-empty `--subject`",
             "human/operator scan surface",
             "PR #123 ready for review",
             "CI failure needs repair",
@@ -2843,11 +2844,14 @@ mod tests {
             "parent subject is blank, vague, or misleading",
         ] {
             assert!(
-                doc.contains(required),
+                normalized.contains(required),
                 "Copilot skill must preserve subject guidance {required:?}"
             );
         }
-        for line in doc.lines().filter(|line| line.contains(" send --to ")) {
+        for line in doc
+            .lines()
+            .filter(|line| line.contains("telex ") && line.contains("send --"))
+        {
             assert!(
                 line.contains("--subject"),
                 "agent-facing Copilot send example must include --subject: {line}"
