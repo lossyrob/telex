@@ -5463,6 +5463,19 @@ mod p3_tests {
         format!("sqlite:{}", path.to_string_lossy())
     }
 
+    fn close_test_stores(state: &DaemonState, backend: Arc<dyn Backend>) {
+        // A real daemon restart closes store locks before its successor starts. These unit
+        // tests reuse one process, so release the old state's stores explicitly rather than
+        // depending on Arc drop timing under the parallel test harness.
+        state.stores.lock().unwrap().clear();
+        assert_eq!(
+            Arc::strong_count(&backend),
+            1,
+            "unexpected backend owner retained across simulated restart"
+        );
+        drop(backend);
+    }
+
     fn register_req(store: &str, session: &str, address: &str) -> Request {
         Request::Register {
             store_key: store.to_string(),
@@ -7714,6 +7727,7 @@ mod p3_tests {
             registered_epoch(state.clone(), &store, "s1", "addr:a").await;
             let backend = state.backend_for(&store).await.unwrap();
             insert_test_message(&backend, "addr:a", None).await;
+            close_test_stores(&state, backend);
         }
 
         let restarted = test_state("detach-after-restart-two");
@@ -8288,6 +8302,7 @@ mod p3_tests {
             let lease = backend.get_lease("addr:a").await.unwrap().unwrap();
             assert_eq!(lease.lease_epoch, Some(epoch));
             assert_eq!(lease.owner_instance_id, None);
+            close_test_stores(&state, backend);
         }
 
         let restarted = test_state("drain-two");
