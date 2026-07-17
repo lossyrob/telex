@@ -245,6 +245,17 @@ telex resolve --tag <tag> --scope <scope>
 
 Then send to the selected address.
 
+For every agent-authored operational `send` or new conversation, provide a concise,
+non-empty `--subject`. The subject is the human/operator scan surface in timelines,
+operator views, and message lists, so choose a short title that communicates the
+outcome, requested action, or topic at a glance. Do not substitute an opaque message
+kind or copy the first line of the body. Good subjects include:
+
+- `PR #123 ready for review`
+- `CI failure needs repair`
+- `Issue #45 blocked on scope decision`
+- `PR #123 merged; stand down`
+
 ```sh
 telex send --to <addr> --subject "<subject>" --body "<body>"
 telex send --to <addr> --subject "<subject>" --body-file <path>   # body from a UTF-8 file (`-` = stdin)
@@ -299,10 +310,18 @@ per recipient, so acking a message for address A never consumes the same
 Reply inside an existing thread:
 
 ```sh
+# A meaningful parent subject is inherited as "Re: ...".
 telex reply --to-message <message-id> --body "<body>"
 telex reply --to-message <message-id> --body-file <path>   # reply body from a UTF-8 file (`-` = stdin)
 telex reply --to-message <message-id> --body-stdin          # read reply body from stdin (UTF-8)
+
+# Replace a blank, vague, or misleading parent subject.
+telex reply --to-message <message-id> --subject "CI failure needs repair" --body "<body>"
 ```
+
+When the parent already has a useful subject, the inherited `Re: ...` is sufficient.
+When the parent subject is blank, vague, or misleading, pass a meaningful replacement
+with `--subject` instead of perpetuating an unhelpful thread title.
 
 Optional reply flags are `--body-file <path>` / `--body-stdin` (UTF-8 file or stdin; mutually exclusive with `--body`, exactly one of the three required), `--from <your-addr>`, `--subject <s>`, `--cc <a,b>` / repeated `--cc <c>`, `--kind <s>`, `--attention interrupt|next-checkpoint|background|fyi`, and `--requires-disposition`. As with `send`, `--from` defaults to `$TELEX_ADDRESS` / `--address`; the reply's destination is taken from the parent message's sender (so the parent must itself have had a `from`). On Windows/PowerShell, see the UTF-8 piping note above.
 
@@ -479,7 +498,7 @@ Then select a backend per command, or rely on the default:
 
 ```sh
 telex --backend staging inbox
-telex send --to node:x --body "hi"     # uses the default backend
+telex send --to node:x --subject "Ping node x" --body "hi"     # uses the default backend
 telex backend list
 ```
 

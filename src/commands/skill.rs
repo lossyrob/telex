@@ -119,6 +119,32 @@ mod tests {
     }
 
     #[test]
+    fn embedded_skill_requires_operator_scannable_subjects() {
+        let body = strip_frontmatter(SKILL_MD);
+        for required in [
+            "concise,\nnon-empty `--subject`",
+            "human/operator scan surface",
+            "PR #123 ready for review",
+            "CI failure needs repair",
+            "Issue #45 blocked on scope decision",
+            "PR #123 merged; stand down",
+            "When the parent already has a useful subject",
+            "parent subject is blank, vague, or misleading",
+        ] {
+            assert!(
+                body.contains(required),
+                "embedded skill must preserve subject guidance {required:?}"
+            );
+        }
+        for line in body.lines().filter(|line| line.contains("telex send --")) {
+            assert!(
+                line.contains("--subject"),
+                "agent-facing send example must include --subject: {line}"
+            );
+        }
+    }
+
+    #[test]
     fn strip_is_noop_without_frontmatter() {
         let s = "# Title\n\nbody";
         assert_eq!(strip_frontmatter(s), s);

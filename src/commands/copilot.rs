@@ -2833,6 +2833,26 @@ mod tests {
         );
         assert!(doc.contains("copilot detach"));
         assert!(doc.contains("telex copilot --help"));
+        for required in [
+            "concise,\nnon-empty `--subject`",
+            "human/operator scan surface",
+            "PR #123 ready for review",
+            "CI failure needs repair",
+            "Issue #45 blocked on scope decision",
+            "PR #123 merged; stand down",
+            "parent subject is blank, vague, or misleading",
+        ] {
+            assert!(
+                doc.contains(required),
+                "Copilot skill must preserve subject guidance {required:?}"
+            );
+        }
+        for line in doc.lines().filter(|line| line.contains(" send --to ")) {
+            assert!(
+                line.contains("--subject"),
+                "agent-facing Copilot send example must include --subject: {line}"
+            );
+        }
         // No inline warning without a stale plugin version.
         assert!(!doc.contains("[!WARNING]"));
     }
