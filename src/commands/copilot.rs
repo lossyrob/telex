@@ -2841,6 +2841,7 @@ mod tests {
             "CI failure needs repair",
             "Issue #45 blocked on scope decision",
             "PR #123 merged; stand down",
+            "sufficient when the parent subject is already useful",
             "parent subject is blank, vague, or misleading",
         ] {
             assert!(
