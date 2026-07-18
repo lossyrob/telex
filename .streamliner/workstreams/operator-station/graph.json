@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "id": "operator-station",
+  "projectKey": "telex",
+  "title": "Operator Station (mediated human-attention loop)",
+  "summary": "Workstream formed. Wave 1 is a single-session vertical spike proving worker -> operator agent -> desktop Station -> reply -> worker before any production client or UI contract is accepted.",
+  "status": "active",
+  "attention": "focus",
+  "createdAt": "2026-07-10T21:33:25Z",
+  "updatedAt": "2026-07-10T21:33:25Z",
+  "trackingIssue": {
+    "owner": "lossyrob",
+    "repo": "telex",
+    "number": 92
+  },
+  "repos": [
+    {
+      "id": "telex",
+      "owner": "lossyrob",
+      "name": "telex",
+      "role": "primary"
+    }
+  ],
+  "designRefs": [
+    {
+      "repoId": "telex",
+      "path": "docs/design/index.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "PRODUCT-THESIS.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/daemon.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/proposals/EXTENSIONS.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/proposals/DISPATCH.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "telex-console/README.md"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "operator-loop-spike",
+      "type": "research",
+      "title": "Vertical spike: mediated human-attention loop",
+      "summary": "Build one deliberately narrow Windows experimental loop: a worker sends to a stable attention address; an operator agent filters and escalates to a desktop-attended address; the Station shows the message and accepts a reply; the operator agent routes the response back with source provenance intact. Temporary CLI/library integration is allowed and must be documented rather than treated as the production contract.",
+      "status": "ready",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 93
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "viability-gate",
+      "type": "gate",
+      "title": "Mediated attention loop is worth productionizing",
+      "summary": "Builder dogfoods the spike with several real sessions during a focused work period and decides whether it materially reduces terminal tab polling, preserves enough context, routes replies naturally, and filters at the right level. The gate may pass, reshape the boundary, or stop the workstream; no production contract work proceeds before it.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "operator-loop-spike"
+      ]
+    },
+    {
+      "id": "station-contract",
+      "type": "research",
+      "title": "Production Station and operator-loop contract",
+      "summary": "Using spike evidence, establish and document the accepted production boundary: human-attended address semantics; supported daemon/client integration; source/provenance conventions; namespaced message kinds and metadata; notification policy; reply/disposition behavior; direct, assisted, and quiet routing modes; operator-agent recovery expectations; identity and safety limits. Update project design/ADRs where the accepted behavior changes intended Telex design.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "viability-gate"
+      ]
+    },
+    {
+      "id": "station-app",
+      "type": "task",
+      "title": "Production Windows Operator Station",
+      "summary": "Implement the separately installable Windows desktop Station under the accepted contract: configured operator addresses, actionable feed and threads, notification policy, reply and disposition, direct/assisted operation, backend selection, provenance display, restart/backfill behavior, and safe links without arbitrary command execution. Sketch; detail at promotion after station-contract.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "station-contract"
+      ]
+    },
+    {
+      "id": "operator-broker",
+      "type": "task",
+      "title": "Reusable operator-agent role and routing policy",
+      "summary": "Package and document a reusable operator-agent role that attends worker-facing ingress addresses, resolves or clarifies routine messages, aggregates and summarizes related traffic, escalates human obligations with source provenance and recommendations, receives human replies, routes outcomes back, and dispositions both raw and mediated messages. It remains a reference integrator rather than Telex core behavior. Sketch; detail at promotion after station-contract.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "station-contract"
+      ]
+    },
+    {
+      "id": "usable-loop-gate",
+      "type": "gate",
+      "title": "Production Station and operator loop are usable",
+      "summary": "Builder validates the production app and operator role together through direct and assisted scenarios. The system must make source provenance legible, route replies predictably, avoid obvious notification overload, and remain optional to ordinary Telex use before hardening proceeds.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "station-app",
+        "operator-broker"
+      ]
+    },
+    {
+      "id": "operational-hardening",
+      "type": "task",
+      "title": "Postgres, recovery, notification, security, and packaging hardening",
+      "summary": "Harden the accepted loop through realistic use: networked Postgres and remote senders; Station and operator-agent restart/offline recovery; unoccupied and stale addresses; noisy workloads and digest/suppression behavior; duplicate delivery; delayed replies; sender/provenance presentation; safe link handling; install/upgrade/auto-start expectations; documentation and troubleshooting. Produce a concise validation report for closure. Sketch; detail after usable-loop-gate.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "usable-loop-gate"
+      ]
+    },
+    {
+      "id": "closure-gate",
+      "type": "gate",
+      "title": "Human-attention loop validated and workstream reconciled",
+      "summary": "Builder runs the hardened Station with several real local and remote sessions, confirms direct and mediated operation, validates recovery and notification posture, reviews the operational-hardening evidence, and accepts the exported Station/operator-loop contract. Reconciliation records lessons for future Streamliner portfolio-attention work.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "operational-hardening"
+      ]
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "viability-proven",
+      "title": "Mediated attention loop proven valuable",
+      "summary": "A real vertical loop exists and builder dogfooding has established that it is worth productionizing.",
+      "status": "planned",
+      "nodeIds": [
+        "operator-loop-spike",
+        "viability-gate"
+      ]
+    },
+    {
+      "id": "usable-station",
+      "title": "Production Station and operator role usable",
+      "summary": "The accepted contract, desktop Station, and reusable operator-agent role work together and have passed builder UX validation.",
+      "status": "planned",
+      "nodeIds": [
+        "station-contract",
+        "station-app",
+        "operator-broker",
+        "usable-loop-gate"
+      ]
+    },
+    {
+      "id": "closure-ready",
+      "title": "Operator Station operationally validated",
+      "summary": "The human-attention loop has survived Postgres, restart/offline, notification-pressure, provenance, safety, and packaging validation and is ready for closure.",
+      "status": "planned",
+      "nodeIds": [
+        "operational-hardening",
+        "closure-gate"
+      ]
+    }
+  ],
+  "presentation": {
+    "shortName": "TLX-O",
+    "color": "#6D5DFB"
+  },
+  "launchPolicy": {
+    "requiredTracker": "github-issue"
+  },
+  "launchDefaults": {
+    "promptProfileId": "paw-lite-loop-v8-lossyrob",
+    "terminal": {
+      "titleTemplate": "TLX-O {githubIssue}"
+    },
+    "launchAfterInit": true,
+    "reviewCompanion": true,
+    "reviewPromptTemplateId": "paw-review-loop-v2-nomatt-lossrob"
+  }
+}
