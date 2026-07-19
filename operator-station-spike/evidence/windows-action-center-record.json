@@ -1,8 +1,9 @@
 {
   "schema": "operator-station-spike.windows-action-center-evidence.v1",
-  "capturedAt": "2026-07-19T10:36:00Z",
+  "capturedAt": "2026-07-19T11:21:09.036971Z",
   "source": "%LOCALAPPDATA%\\Microsoft\\Windows\\Notifications\\wpndatabase.db",
   "queryMode": "read-only",
+  "extractionScript": "operator-station-spike/harness/Get-OperatorSpikeToastRecord.ps1",
   "handler": {
     "recordId": 920,
     "primaryId": "com.lossyrob.telex.operatorstationspike",

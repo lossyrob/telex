@@ -4,7 +4,7 @@ use tauri::{
     AppHandle, Manager,
 };
 
-const TRAY_ICON: &[u8] = include_bytes!("../../../assets/telex.png");
+const TRAY_ICON: &[u8] = include_bytes!("../icons/telex.png");
 
 pub fn setup(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let show = MenuItem::with_id(app, "show", "Show", true, None::<&str>)?;

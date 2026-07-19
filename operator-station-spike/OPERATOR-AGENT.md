@@ -20,6 +20,9 @@ if ([string]::IsNullOrWhiteSpace($env:TELEX_OPERATOR_SPIKE_DB)) {
 if (-not (Test-Path -LiteralPath $env:TELEX_OPERATOR_SPIKE_DB -PathType Leaf)) {
     throw "TELEX_OPERATOR_SPIKE_DB must identify the existing isolated SQLite database."
 }
+if ([string]::IsNullOrWhiteSpace($env:COPILOT_AGENT_SESSION_ID)) {
+    throw "COPILOT_AGENT_SESSION_ID is required; run this assignment inside Copilot CLI."
+}
 
 $fingerprint = & .\operator-station-spike\harness\Get-OperatorSpikeStoreFingerprint.ps1 `
     -DatabasePath $env:TELEX_OPERATOR_SPIKE_DB

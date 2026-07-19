@@ -86,7 +86,8 @@
     "sentinelOutsideRecent200": true,
     "sentinelRecoveredByExport": true,
     "stationDetachAttachSimulated": true,
-    "passed": true
+    "passed": true,
+    "evidence": "operator-station-spike/evidence/stress-evidence.json"
   },
   "notification": {
     "toastApiReturnedSuccess": true,
@@ -94,6 +95,7 @@
     "actionCenterRecordCaptured": true,
     "actionCenterArrivalTime": "2026-07-19T09:29:10.182738Z",
     "actionCenterEvidence": "operator-station-spike/evidence/windows-action-center-record.json",
+    "actionCenterExtractionScript": "operator-station-spike/harness/Get-OperatorSpikeToastRecord.ps1",
     "toastScreenshotCaptured": false
   }
 }

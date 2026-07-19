@@ -14,6 +14,7 @@ Use Windows with:
 - current `telex` on `PATH`;
 - PowerShell 7 or Windows PowerShell 5.1;
 - Node.js/npm;
+- Python 3 (only for reproducible read-only Action Center evidence extraction);
 - Rust stable plus the MSVC build tools;
 - WebView2 and the normal Tauri 2 Windows prerequisites;
 - Copilot CLI with the Telex plugin and Copilot Extensions enabled.
@@ -71,6 +72,13 @@ Run the helper self-check once:
 & .\operator-station-spike\harness\Test-OperatorSpikeStoreFingerprint.ps1
 ```
 
+To reproduce the Action Center evidence after a live toast:
+
+```powershell
+& .\operator-station-spike\harness\Get-OperatorSpikeToastRecord.ps1 `
+    -OutputPath .\operator-station-spike\evidence\windows-action-center-record.json
+```
+
 ## 3. Launch the Station
 
 In Terminal 1, set the same database variable, then:
@@ -105,6 +113,9 @@ telex copilot attach --db $env:TELEX_OPERATOR_SPIKE_DB `
 
 It must then invoke `extensions_reload`. Confirm Station occupancy shows both
 `attention:rob` and `operator:rob` attended.
+
+Copilot CLI sets `COPILOT_AGENT_SESSION_ID` for the operator-agent session. The
+assignment preflight refuses to start if that identity is absent.
 
 ## 5. Send a worker decision
 
@@ -323,6 +334,10 @@ telex copilot detach --db $env:TELEX_OPERATOR_SPIKE_DB `
 
 Stop Station normally with Ctrl+C. No walkthrough step starts an infinite
 waiter or unmanaged background process.
+
+To inspect accumulated local scope records, run
+`harness\Reset-OperatorSpikeLocalScope.ps1`. Add `-Apply -Confirm` only when
+intentionally clearing spike-local session/high-water state.
 
 ## Builder viability is a separate gate
 

@@ -17,6 +17,7 @@ future Application Client work in issue #12.
 
 - Windows, WebView2, Node.js/npm
 - Rust stable with MSVC build tools
+- Python 3 for the optional Action Center evidence extractor
 - `telex` 0.1.0-compatible CLI on `PATH`
 - An existing, isolated SQLite store in `TELEX_OPERATOR_SPIKE_DB`
 
@@ -79,3 +80,8 @@ Get-ChildItem .\harness\*.ps1 | ForEach-Object {
     if ($errors.Count) { throw "$($_.Name): $($errors -join '; ')" }
 }
 ```
+
+The Action Center evidence can be regenerated with
+`harness\Get-OperatorSpikeToastRecord.ps1`. Spike-local session/high-water files
+can be listed, or explicitly removed with confirmation, through
+`harness\Reset-OperatorSpikeLocalScope.ps1`.

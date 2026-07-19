@@ -163,7 +163,7 @@ fn fingerprint_normalized_path(path: &str) -> String {
         .strip_prefix(r"\\?\")
         .or_else(|| path.strip_prefix("//?/"))
         .unwrap_or(path);
-    let normalized = stripped.replace('\\', "/").to_lowercase();
+    let normalized = stripped.replace('\\', "/").to_ascii_lowercase();
     format!("sha256:{:x}", Sha256::digest(normalized.as_bytes()))
 }
 
@@ -198,6 +198,13 @@ mod tests {
         assert_eq!(first, second);
         assert!(first.starts_with("sha256:"));
         assert_eq!(first.len(), "sha256:".len() + 64);
+    }
+
+    #[test]
+    fn fingerprint_normalization_is_deterministic_for_unicode_paths() {
+        let first = fingerprint_normalized_path(r"\\?\C:\TÜRKİYE\İ.db");
+        let second = fingerprint_normalized_path("c:/tÜrkİye/İ.db");
+        assert_eq!(first, second);
     }
 
     #[test]

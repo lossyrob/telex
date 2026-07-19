@@ -548,17 +548,12 @@ impl TelexCli {
                 error: None,
                 refreshed_at_ms: now_ms(),
             },
-            None => AddressOccupancy {
-                address: self.config.station_address.clone(),
-                occupied: false,
-                age_secs: 0.0,
-                occupant: None,
-                station_health: Some("not-attached".into()),
-                pending_unconsumed_count: Some(0),
-                live_waiters_count: Some(0),
-                error: None,
-                refreshed_at_ms: now_ms(),
-            },
+            None => {
+                return Err(format!(
+                    "Station {} is not attached for session {}",
+                    self.config.station_address, self.session_id
+                ))
+            }
         })
     }
 
@@ -1071,5 +1066,40 @@ mod tests {
         );
         assert_eq!(message.source_references.len(), 1);
         assert!(message.metadata_raw.unwrap().starts_with('{'));
+    }
+
+    #[test]
+    fn lifecycle_fixtures_cover_every_strict_response_shape() {
+        let attach: AttachWire = parse_json(
+            include_str!("../../fixtures/telex-cli/attach.json"),
+            "attach",
+        )
+        .unwrap();
+        assert_eq!(attach.address, "operator:rob");
+        assert_eq!(attach.lease_epoch, 1);
+
+        let status: StatusWire = parse_json(
+            include_str!("../../fixtures/telex-cli/status.json"),
+            "status",
+        )
+        .unwrap();
+        assert!(status.occupancy.occupied);
+        assert_eq!(status.live_waiters_count, Some(1));
+
+        let station: StationStatusWire = parse_json(
+            include_str!("../../fixtures/telex-cli/station-status.json"),
+            "station status",
+        )
+        .unwrap();
+        assert_eq!(station.count, station.stations.len());
+        assert_eq!(station.stations[0].station_health, "armed");
+
+        let stopped: StopWire = parse_json(
+            include_str!("../../fixtures/telex-cli/station-stop.json"),
+            "station stop",
+        )
+        .unwrap();
+        assert!(stopped.detached);
+        assert_eq!(stopped.waiters_after, 0);
     }
 }

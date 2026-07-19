@@ -2,7 +2,8 @@ use crate::model::StationMessage;
 use std::path::{Path, PathBuf};
 
 pub const AUMID: &str = "com.lossyrob.telex.operatorstationspike";
-const APP_ICON: &[u8] = include_bytes!("../../../assets/telex.png");
+const APP_ICON: &[u8] = include_bytes!("../icons/telex.png");
+const TOAST_BODY_LIMIT: usize = 200;
 
 pub fn prepare(app_data_dir: &Path) -> Result<PathBuf, String> {
     let icon_path = app_data_dir.join("operator-station-spike.png");
@@ -64,7 +65,7 @@ pub fn show(message: &StationMessage) -> Result<(), String> {
     let xml = format!(
         "<toast><visual><binding template=\"ToastGeneric\"><text>{}</text><text>{}</text><text placement=\"attribution\">{}</text></binding></visual></toast>",
         xml_escape(title),
-        xml_escape(&message.body),
+        xml_escape(&toast_body(&message.body)),
         xml_escape(attribution),
     );
     let document =
@@ -95,6 +96,15 @@ fn xml_escape(value: &str) -> String {
         .replace('\'', "&apos;")
 }
 
+fn toast_body(value: &str) -> String {
+    if value.chars().count() <= TOAST_BODY_LIMIT {
+        return value.to_string();
+    }
+    let mut body: String = value.chars().take(TOAST_BODY_LIMIT - 1).collect();
+    body.push('…');
+    body
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -105,5 +115,13 @@ mod tests {
             xml_escape("<operator & \"human\">"),
             "&lt;operator &amp; &quot;human&quot;&gt;"
         );
+    }
+
+    #[test]
+    fn toast_body_is_bounded_without_splitting_unicode() {
+        let source = "é".repeat(TOAST_BODY_LIMIT + 10);
+        let bounded = toast_body(&source);
+        assert_eq!(bounded.chars().count(), TOAST_BODY_LIMIT);
+        assert!(bounded.ends_with('…'));
     }
 }

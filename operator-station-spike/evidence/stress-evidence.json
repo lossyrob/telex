@@ -1,0 +1,45 @@
+{
+  "schema": "operator-station-spike.smoke-evidence.v1",
+  "passed": true,
+  "assignmentVersion": "1",
+  "modelId": "scripted-operator-stand-in",
+  "telexVersion": "telex 0.1.0",
+  "storeFingerprint": "sha256:b9644cc0624483ea79d6a36848e78fa8efe45495561ade0245a363e6471b5639",
+  "addresses": {
+    "worker": "worker:operator-loop-smoke",
+    "ingress": "attention:rob",
+    "station": "operator:rob"
+  },
+  "raw": {
+    "messageId": 1,
+    "threadId": 1,
+    "dispositions": [
+      "escalated",
+      "closed"
+    ],
+    "routedReplyId": 4
+  },
+  "mediated": {
+    "escalationId": 2,
+    "threadId": 2,
+    "humanReplyId": 3,
+    "kind": "operator-station-spike.escalation",
+    "attention": "interrupt"
+  },
+  "assertions": {
+    "metadataRoundTrip": true,
+    "fullFingerprintPresent": true,
+    "rawEscalatedBeforeClose": true,
+    "humanReplyMediatedThread": true,
+    "routeBackRawThread": true,
+    "rawClosedAfterRouteBack": true
+  },
+  "stress": {
+    "enabled": true,
+    "newerMessageCount": 1055,
+    "exceedsOneThousand": true,
+    "sentinelOutsideRecent200": true,
+    "sentinelRecoveredByExport": true,
+    "stationDetachAttachSimulated": true
+  }
+}

@@ -9,6 +9,9 @@ use std::time::Duration;
 const STATUS_INTERVAL: Duration = Duration::from_secs(5);
 const ACK_BUDGET: Duration = Duration::from_secs(15);
 const ACK_ATTEMPTS: usize = 3;
+const ACK_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(4);
+const MAX_ACK_PENDING_REDELIVERIES: u8 = 3;
+const MAX_INGEST_FAILURES: u8 = 3;
 
 pub fn spawn(runtime: Arc<Runtime>) {
     let courier = runtime.clone();
@@ -99,15 +102,11 @@ async fn startup(runtime: &Arc<Runtime>) -> Result<(), String> {
 }
 
 fn startup_projection(
-    mut export: Vec<StationMessage>,
+    export: Vec<StationMessage>,
     inbox: Vec<StationMessage>,
     station_address: &str,
 ) -> Vec<StationMessage> {
-    export.sort_by_key(|message| std::cmp::Reverse(message.id));
     let mut retained = BTreeMap::new();
-    for message in export.iter().take(200) {
-        retained.insert(message.id, message.clone());
-    }
     for message in export
         .into_iter()
         .filter(|message| message.is_unresolved_primary_disposition(station_address))
@@ -122,6 +121,9 @@ fn startup_projection(
 
 async fn courier_loop(runtime: &Arc<Runtime>) {
     let mut consecutive_daemon_hung = 0u8;
+    let mut consecutive_ack_pending = 0u8;
+    let mut consecutive_ingest_failures = 0u8;
+    let mut ack_pending_message_id = None;
     let mut backoff_seconds = 1u64;
     loop {
         if runtime.is_shutting_down() {
@@ -134,7 +136,7 @@ async fn courier_loop(runtime: &Arc<Runtime>) {
                 courier.persistent = false;
                 courier.consecutive_daemon_hung = consecutive_daemon_hung;
                 courier.current_waiter_pid = None;
-                courier.ack_pending_message_id = None;
+                courier.ack_pending_message_id = ack_pending_message_id;
             })
             .await;
         let _ = runtime.emit_state().await;
@@ -189,22 +191,93 @@ async fn courier_loop(runtime: &Arc<Runtime>) {
         match decision {
             ExitDecision::Delivery => {
                 consecutive_daemon_hung = 0;
-                backoff_seconds = 1;
-                if let Err(error) = process_delivery(runtime, &stdout).await {
-                    runtime
-                        .diagnostic("error", "delivery-ingest-failed", error.clone())
-                        .await;
-                    if !pause(runtime, error, Some(1)).await {
-                        return;
+                match process_delivery(runtime, &stdout).await {
+                    Ok(DeliveryOutcome::Acked) => {
+                        consecutive_ack_pending = 0;
+                        consecutive_ingest_failures = 0;
+                        ack_pending_message_id = None;
+                        backoff_seconds = 1;
+                    }
+                    Ok(DeliveryOutcome::AckPending(message_id)) => {
+                        consecutive_ingest_failures = 0;
+                        ack_pending_message_id = Some(message_id);
+                        consecutive_ack_pending = consecutive_ack_pending.saturating_add(1);
+                        let detail = format!(
+                            "ack for message {message_id} remains pending after redelivery attempt {consecutive_ack_pending}/{MAX_ACK_PENDING_REDELIVERIES}"
+                        );
+                        if failure_decision(consecutive_ack_pending, MAX_ACK_PENDING_REDELIVERIES)
+                            == FailureDecision::Pause
+                        {
+                            runtime
+                                .diagnostic("error", "ack-pending-exceeded", detail.clone())
+                                .await;
+                            if !pause(runtime, detail, Some(1)).await {
+                                return;
+                            }
+                            consecutive_ack_pending = 0;
+                            ack_pending_message_id = None;
+                            backoff_seconds = 1;
+                        } else {
+                            runtime
+                                .set_courier(|courier| {
+                                    courier.phase = CourierPhase::AckPending;
+                                    courier.detail = Some(detail);
+                                    courier.ack_pending_message_id = Some(message_id);
+                                })
+                                .await;
+                            let _ = runtime.emit_state().await;
+                            if !delay_or_shutdown(runtime, Duration::from_secs(backoff_seconds))
+                                .await
+                            {
+                                return;
+                            }
+                            backoff_seconds = (backoff_seconds * 2).min(5);
+                        }
+                    }
+                    Err(error) => {
+                        consecutive_ack_pending = 0;
+                        ack_pending_message_id = None;
+                        consecutive_ingest_failures = consecutive_ingest_failures.saturating_add(1);
+                        runtime
+                            .diagnostic("error", "delivery-ingest-failed", error.clone())
+                            .await;
+                        let detail = format!(
+                            "delivery ingest failed {consecutive_ingest_failures}/{MAX_INGEST_FAILURES}: {error}"
+                        );
+                        if failure_decision(consecutive_ingest_failures, MAX_INGEST_FAILURES)
+                            == FailureDecision::Pause
+                        {
+                            if !pause(runtime, detail, Some(1)).await {
+                                return;
+                            }
+                            consecutive_ingest_failures = 0;
+                            backoff_seconds = 1;
+                        } else {
+                            runtime
+                                .set_courier(|courier| {
+                                    courier.phase = CourierPhase::Backoff;
+                                    courier.detail = Some(detail);
+                                })
+                                .await;
+                            let _ = runtime.emit_state().await;
+                            if !delay_or_shutdown(runtime, Duration::from_secs(backoff_seconds))
+                                .await
+                            {
+                                return;
+                            }
+                            backoff_seconds = (backoff_seconds * 2).min(5);
+                        }
                     }
                 }
             }
             ExitDecision::Rearm => {
                 consecutive_daemon_hung = 0;
+                consecutive_ingest_failures = 0;
                 backoff_seconds = 1;
             }
             ExitDecision::Reattach => {
                 consecutive_daemon_hung = 0;
+                consecutive_ingest_failures = 0;
                 runtime
                     .set_courier(|courier| {
                         courier.phase = CourierPhase::Attaching;
@@ -265,13 +338,14 @@ async fn courier_loop(runtime: &Arc<Runtime>) {
                     return;
                 }
                 consecutive_daemon_hung = 0;
+                consecutive_ingest_failures = 0;
                 backoff_seconds = 1;
             }
         }
     }
 }
 
-async fn process_delivery(runtime: &Arc<Runtime>, stdout: &str) -> Result<(), String> {
+async fn process_delivery(runtime: &Arc<Runtime>, stdout: &str) -> Result<DeliveryOutcome, String> {
     let payload = runtime.cli.parse_wait_payload(stdout)?;
     validate_wait_payload(&payload, &runtime.config.station_address)?;
     let mut progress = DeliveryProgress::new(payload.id);
@@ -309,6 +383,7 @@ async fn process_delivery(runtime: &Arc<Runtime>, stdout: &str) -> Result<(), St
                 })
                 .await;
             runtime.emit_state().await?;
+            Ok(DeliveryOutcome::Acked)
         }
         Err(error) => {
             runtime.mark_ack_pending(payload.id, true).await;
@@ -322,12 +397,9 @@ async fn process_delivery(runtime: &Arc<Runtime>, stdout: &str) -> Result<(), St
                 .await;
             runtime.diagnostic("error", "ack-pending", error).await;
             runtime.emit_state().await?;
-            if !delay_or_shutdown(runtime, Duration::from_secs(1)).await {
-                return Ok(());
-            }
+            Ok(DeliveryOutcome::AckPending(payload.id))
         }
     }
-    Ok(())
 }
 
 fn validate_wait_payload(payload: &WaitPayload, station_address: &str) -> Result<(), String> {
@@ -358,7 +430,7 @@ async fn ack_with_retry(runtime: &Arc<Runtime>, message_id: i64) -> Result<(), S
         }
         match runtime
             .cli
-            .ack(message_id, remaining.min(Duration::from_secs(10)))
+            .ack(message_id, remaining.min(ACK_ATTEMPT_TIMEOUT))
             .await
         {
             Ok(()) => return Ok(()),
@@ -503,6 +575,26 @@ enum ExitDecision {
     Pause,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum FailureDecision {
+    Backoff,
+    Pause,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum DeliveryOutcome {
+    Acked,
+    AckPending(i64),
+}
+
+fn failure_decision(attempt: u8, maximum: u8) -> FailureDecision {
+    if attempt >= maximum {
+        FailureDecision::Pause
+    } else {
+        FailureDecision::Backoff
+    }
+}
+
 fn decide_exit(code: i32, consecutive_daemon_hung: u8) -> (ExitDecision, u8) {
     match code {
         0 => (ExitDecision::Delivery, 0),
@@ -611,7 +703,8 @@ mod tests {
                 }
             })
             .collect();
-        let projected = startup_projection(export, vec![], "operator:rob");
+        let inbox: Vec<_> = (51..=250).map(|id| message(id, false, None)).collect();
+        let projected = startup_projection(export, inbox, "operator:rob");
         assert_eq!(projected.len(), 201);
         assert!(projected.iter().any(|message| message.id == 1));
         assert!(projected.iter().any(|message| message.id == 250));
@@ -627,6 +720,29 @@ mod tests {
         assert_eq!(decide_exit(5, 0), (ExitDecision::Reattach, 0));
         assert_eq!(decide_exit(4, 0), (ExitDecision::Backoff, 1));
         assert_eq!(decide_exit(4, 1), (ExitDecision::Pause, 2));
+    }
+
+    #[test]
+    fn repeated_delivery_failures_escalate_after_a_bounded_count() {
+        assert_eq!(
+            failure_decision(1, MAX_ACK_PENDING_REDELIVERIES),
+            FailureDecision::Backoff
+        );
+        assert_eq!(
+            failure_decision(MAX_ACK_PENDING_REDELIVERIES, MAX_ACK_PENDING_REDELIVERIES),
+            FailureDecision::Pause
+        );
+        assert_eq!(
+            failure_decision(MAX_INGEST_FAILURES, MAX_INGEST_FAILURES),
+            FailureDecision::Pause
+        );
+    }
+
+    #[test]
+    fn three_ack_attempts_fit_inside_the_fifteen_second_budget() {
+        let command_time = ACK_ATTEMPT_TIMEOUT * ACK_ATTEMPTS as u32;
+        let retry_sleep = Duration::from_secs((ACK_ATTEMPTS - 1) as u64);
+        assert!(command_time + retry_sleep <= ACK_BUDGET);
     }
 
     #[test]

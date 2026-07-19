@@ -1,0 +1,12 @@
+{
+  "address": "operator:rob",
+  "occupancy": {
+    "occupied": true,
+    "age_secs": 1.5,
+    "occupant": "fixture"
+  },
+  "station_health": "armed",
+  "pending_unconsumed_count": 0,
+  "live_waiters_count": 1,
+  "additiveFixtureField": true
+}

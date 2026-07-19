@@ -38,4 +38,6 @@ database records the Station AUMID, notification type `toast`, arrival time
 `2026-07-19T09:29:10.182738Z`, and the exact live escalation title/body/
 attribution. See `windows-action-center-record.json`. No screenshot of the
 transient toast flyout was captured; the persisted OS Action Center record is
-the notification-surface evidence.
+the notification-publication evidence. The record is reproducible with
+`harness/Get-OperatorSpikeToastRecord.ps1`; Focus Assist/quiet-hours perception
+was not independently observed.

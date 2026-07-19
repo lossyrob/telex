@@ -5,6 +5,7 @@ the experimental Station adapter. Required fields are validated; additive
 unknown fields are intentionally tolerated.
 
 - `version.json`
+- `attach.json`
 - `wait-delivery.json`
 - `read-full.json`
 - `inbox.json`
@@ -12,5 +13,11 @@ unknown fields are intentionally tolerated.
 - `ack.json`
 - `disposition.json`
 - `reply.json`
+- `status.json`
+- `station-status.json`
+- `station-stop.json`
 
 They are spike evidence, not a frozen public CLI JSON contract.
+The source fingerprint in `read-full.json` is illustrative; callers must
+substitute the active store fingerprint before asserting that a source is
+available.

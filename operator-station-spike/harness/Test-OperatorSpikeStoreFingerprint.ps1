@@ -39,7 +39,14 @@ try {
         throw 'The canonical path retained the Windows verbatim-path prefix.'
     }
 
-    $normalizedPath = $details.CanonicalPath.Replace('\', '/').ToLowerInvariant()
+    $normalizedChars = $details.CanonicalPath.Replace('\', '/').ToCharArray()
+    for ($index = 0; $index -lt $normalizedChars.Length; $index++) {
+        $code = [int][char]$normalizedChars[$index]
+        if ($code -ge [int][char]'A' -and $code -le [int][char]'Z') {
+            $normalizedChars[$index] = [char]($code + 32)
+        }
+    }
+    $normalizedPath = -join $normalizedChars
     $sha256 = [System.Security.Cryptography.SHA256]::Create()
     try {
         $expectedHex = ([System.BitConverter]::ToString(
@@ -65,6 +72,13 @@ try {
         throw 'A missing database path was not rejected.'
     }
 
+    $unicodePath = Join-Path $selfCheckRoot 'TÜRKİYE.db'
+    [System.IO.File]::WriteAllBytes($unicodePath, [byte[]](0x54, 0x4c, 0x58))
+    $unicodeFingerprint = & $helper -DatabasePath $unicodePath
+    if ($unicodeFingerprint -notmatch '^sha256:[0-9a-f]{64}$') {
+        throw 'A Unicode database path did not produce a stable full fingerprint.'
+    }
+
     [pscustomobject]@{
         passed      = $true
         fingerprint = $absoluteFingerprint
@@ -75,6 +89,7 @@ try {
             'verbatim-prefix-stripped'
             'sha256-normalized-path'
             'missing-file-rejected'
+            'unicode-path'
         )
     } | ConvertTo-Json -Depth 4
 }

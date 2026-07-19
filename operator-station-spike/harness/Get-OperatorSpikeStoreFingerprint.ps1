@@ -99,7 +99,14 @@ if ($finalPath.StartsWith('\\?\', [System.StringComparison]::Ordinal)) {
     $finalPath = $finalPath.Substring(4)
 }
 
-$normalizedPath = $finalPath.Replace('\', '/').ToLowerInvariant()
+$normalizedChars = $finalPath.Replace('\', '/').ToCharArray()
+for ($index = 0; $index -lt $normalizedChars.Length; $index++) {
+    $code = [int][char]$normalizedChars[$index]
+    if ($code -ge [int][char]'A' -and $code -le [int][char]'Z') {
+        $normalizedChars[$index] = [char]($code + 32)
+    }
+}
+$normalizedPath = -join $normalizedChars
 $utf8 = [System.Text.UTF8Encoding]::new($false)
 $sha256 = [System.Security.Cryptography.SHA256]::Create()
 try {
