@@ -1163,6 +1163,56 @@ fn mismatched_watcher_private_token_preserves_ordinary_send_output() {
 }
 
 #[test]
+fn ordinary_send_happy_path_is_identical_with_and_without_mismatched_watcher_token() {
+    let sender = "ordinary-parity-sender";
+    let receiver = "ordinary-parity-receiver";
+    let sender_addr = "addr:ordinary-parity-sender";
+    let receiver_addr = "addr:ordinary-parity-receiver";
+    let send_args = [
+        "--json",
+        "--address",
+        sender_addr,
+        "send",
+        "--session",
+        sender,
+        "--from",
+        sender_addr,
+        "--to",
+        receiver_addr,
+        "--subject",
+        "ordinary parity",
+        "--body",
+        "identical happy path",
+    ];
+
+    // Perform the same successful ordinary send against two separate but equivalent stores: the
+    // first message in each fresh store is deterministic, so a normal send with no private env and
+    // one with a mismatched TELEX_WATCHER_INTERNAL_SEND_ONCE_V1 must be byte-for-byte identical.
+    let run_send = |env: &ProcessEnv, token: Option<&str>| -> CmdOutput {
+        env.attach(receiver, receiver_addr);
+        env.attach(sender, sender_addr);
+        let mut cmd = env.command_with_session(sender);
+        if let Some(token) = token {
+            cmd.env("TELEX_WATCHER_INTERNAL_SEND_ONCE_V1", token);
+        }
+        cmd.args(send_args);
+        run_command_with_capture(cmd, &env.root, Duration::from_secs(6))
+    };
+
+    let baseline_env = ProcessEnv::new("ordinary-parity-baseline");
+    let baseline = run_send(&baseline_env, None);
+    baseline.assert_success("ordinary send without private token");
+
+    let mismatched_env = ProcessEnv::new("ordinary-parity-mismatched");
+    let mismatched = run_send(&mismatched_env, Some("a-different-runtime"));
+    mismatched.assert_success("ordinary send with mismatched private token");
+
+    assert_eq!(mismatched.code, baseline.code);
+    assert_eq!(mismatched.stdout, baseline.stdout);
+    assert_eq!(mismatched.stderr, baseline.stderr);
+}
+
+#[test]
 fn real_process_wait_out_dir_delivers_message_artifact() {
     let env = ProcessEnv::new("real-out-dir-msg");
     let receiver = "real-out-dir-msg-receiver";

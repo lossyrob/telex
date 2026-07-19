@@ -282,7 +282,8 @@ impl Registry {
         Ok(())
     }
 
-    pub fn add(&mut self, spec: WatchSpec) -> Result<Watch> {
+    pub fn add(&mut self, mut spec: WatchSpec) -> Result<Watch> {
+        normalize_addresses(&mut spec);
         validate_spec(&mut spec.clone())?;
         let spec = canonicalize_spec(spec)?;
         let now = now_ms();
@@ -302,7 +303,8 @@ impl Registry {
             .ok_or_else(|| anyhow!("added watch disappeared from registry"))
     }
 
-    pub fn update(&mut self, id: &str, spec: WatchSpec) -> Result<Watch> {
+    pub fn update(&mut self, id: &str, mut spec: WatchSpec) -> Result<Watch> {
+        normalize_addresses(&mut spec);
         validate_spec(&mut spec.clone())?;
         if id != spec.id {
             bail!("update file id must match the requested watch id");
@@ -394,6 +396,49 @@ impl Registry {
 
     pub fn remove(&mut self, id: &str) -> Result<Watch> {
         self.set_status(id, WatchStatus::Removed)
+    }
+
+    /// Spread active overdue watches by a bounded, deterministic 0-10% of their interval before the
+    /// first due batch after a restart. This avoids a thundering herd of simultaneous detector
+    /// launches when many watches were overdue while the runtime was down, while preserving the
+    /// one-run catch-up guarantee (the jitter never exceeds 10% of the interval). The delay is a
+    /// stable function of the watch id so a given watch is spread consistently across restarts, and
+    /// it does NOT bump the configuration revision (jitter is not a lifecycle mutation).
+    pub fn apply_restart_jitter(
+        &mut self,
+        selected: &BTreeSet<String>,
+        now: i64,
+    ) -> Result<Vec<(String, i64)>> {
+        let overdue: Vec<Watch> = self
+            .list()?
+            .into_iter()
+            .filter(|watch| {
+                watch.status == WatchStatus::Active.as_str()
+                    && watch.next_due_ms <= now
+                    && (selected.is_empty() || selected.contains(&watch.id))
+            })
+            .collect();
+        let mut applied = Vec::new();
+        let tx = self.connection.transaction()?;
+        for watch in overdue {
+            let span_ms = (watch.interval_seconds as i64).saturating_mul(1000) / 10;
+            let jitter_ms = if span_ms > 0 {
+                (stable_hash(&watch.id) % (span_ms as u64 + 1)) as i64
+            } else {
+                0
+            };
+            if jitter_ms == 0 {
+                continue;
+            }
+            let next_due = now.saturating_add(jitter_ms);
+            tx.execute(
+                "UPDATE watches SET next_due_ms=?2 WHERE id=?1",
+                params![watch.id, next_due],
+            )?;
+            applied.push((watch.id, jitter_ms));
+        }
+        tx.commit()?;
+        Ok(applied)
     }
 
     pub fn due(&self, selected: &BTreeSet<String>, now: i64) -> Result<Vec<Watch>> {
@@ -1091,6 +1136,24 @@ fn backoff_ms(failures: u32) -> i64 {
     (seconds * 1000) as i64
 }
 
+/// FNV-1a 64-bit hash of a watch id. Deterministic across restarts and platforms so the same watch
+/// receives the same restart jitter without introducing a random-number dependency.
+fn stable_hash(value: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in value.as_bytes() {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn normalize_addresses(spec: &mut WatchSpec) {
+    // Approved Plan address normalization: trim surrounding whitespace, preserve case, and let
+    // `validate_address` reject empty or internal-whitespace values after trimming.
+    spec.sender = spec.sender.trim().to_string();
+    spec.target = spec.target.trim().to_string();
+}
+
 fn validate_address(field: &str, raw: &str) -> Result<()> {
     if raw.trim().is_empty() || raw.trim() != raw || raw.len() > 1024 {
         bail!("{field} must be a non-empty trimmed Telex address up to 1024 bytes");
@@ -1239,6 +1302,141 @@ mod tests {
             parameters: serde_json::json!({}),
             state: serde_json::json!({"cursor": 1}),
         }
+    }
+
+    #[test]
+    fn add_trims_surrounding_whitespace_and_preserves_case() {
+        let dir = test_dir("addr-trim");
+        let mut registry = Registry::open(&dir.join("watcher.sqlite")).unwrap();
+        let mut spec = fixture_spec(&dir);
+        spec.sender = "  Service:Watcher  ".into();
+        spec.target = "\tProject:Telex\n".into();
+        let watch = registry.add(spec).unwrap();
+        assert_eq!(watch.sender, "Service:Watcher");
+        assert_eq!(watch.target, "Project:Telex");
+    }
+
+    #[test]
+    fn add_rejects_internal_whitespace_after_trimming() {
+        let dir = test_dir("addr-internal-ws");
+        let mut registry = Registry::open(&dir.join("watcher.sqlite")).unwrap();
+        let mut spec = fixture_spec(&dir);
+        spec.sender = "  service watcher  ".into();
+        let error = registry.add(spec).unwrap_err().to_string();
+        assert!(
+            error.contains("whitespace"),
+            "internal whitespace must be rejected: {error}"
+        );
+    }
+
+    #[test]
+    fn add_rejects_addresses_that_are_only_whitespace() {
+        let dir = test_dir("addr-empty-ws");
+        let mut registry = Registry::open(&dir.join("watcher.sqlite")).unwrap();
+        let mut spec = fixture_spec(&dir);
+        spec.target = "   ".into();
+        let error = registry.add(spec).unwrap_err().to_string();
+        assert!(
+            error.contains("non-empty"),
+            "whitespace-only address must be rejected: {error}"
+        );
+    }
+
+    #[test]
+    fn update_trims_surrounding_whitespace_before_immutability_check() {
+        let dir = test_dir("addr-update-trim");
+        let mut registry = Registry::open(&dir.join("watcher.sqlite")).unwrap();
+        let base = fixture_spec(&dir);
+        let watch = registry.add(base.clone()).unwrap();
+        let mut updated = base;
+        // Padded values must normalize to the persisted sender/target so the immutability guard
+        // treats them as unchanged rather than an attempted reroute.
+        updated.sender = "  service:watcher  ".into();
+        updated.target = "  project:telex  ".into();
+        updated.interval_seconds = 120;
+        let result = registry.update(&watch.id, updated).unwrap();
+        assert_eq!(result.sender, "service:watcher");
+        assert_eq!(result.interval_seconds, 120);
+    }
+
+    #[test]
+    fn restart_jitter_spreads_overdue_watches_within_deterministic_bounds() {
+        let dir = test_dir("jitter-bounds");
+        let mut registry = Registry::open(&dir.join("watcher.sqlite")).unwrap();
+        let interval = 60u64;
+        let ids = [
+            "watch-alpha",
+            "watch-bravo",
+            "watch-charlie",
+            "watch-delta",
+            "watch-echo",
+        ];
+        for id in ids {
+            let mut spec = fixture_spec(&dir);
+            spec.id = id.to_string();
+            registry.add(spec).unwrap();
+        }
+        let revision_before = registry.revision().unwrap();
+        let now = now_ms();
+        let applied = registry
+            .apply_restart_jitter(&BTreeSet::new(), now)
+            .unwrap();
+
+        let span = (interval as i64) * 1000 / 10;
+        for (id, delay) in &applied {
+            // Bounded by 10% of the interval, and exactly the deterministic per-id value.
+            assert!(
+                *delay > 0 && *delay <= span,
+                "{id} delay {delay} outside (0, {span}]"
+            );
+            let expected = (stable_hash(id) % (span as u64 + 1)) as i64;
+            assert_eq!(*delay, expected, "jitter must be deterministic for {id}");
+            let watch = registry.get(id).unwrap().unwrap();
+            assert_eq!(watch.next_due_ms, now + delay);
+        }
+
+        let distinct: BTreeSet<i64> = applied.iter().map(|(_, delay)| *delay).collect();
+        assert!(
+            distinct.len() > 1,
+            "jitter must not schedule every overdue watch identically: {applied:?}"
+        );
+        assert_eq!(
+            registry.revision().unwrap(),
+            revision_before,
+            "restart jitter must not bump the configuration revision"
+        );
+    }
+
+    #[test]
+    fn restart_jitter_leaves_non_overdue_watches_untouched() {
+        let dir = test_dir("jitter-non-overdue");
+        let mut registry = Registry::open(&dir.join("watcher.sqlite")).unwrap();
+        let mut spec = fixture_spec(&dir);
+        spec.id = "future-watch".into();
+        let watch = registry.add(spec).unwrap();
+        let now = now_ms();
+        // Schedule this watch well into the future so it is not overdue at restart.
+        let future = now + 10_000_000;
+        registry
+            .connection
+            .execute(
+                "UPDATE watches SET next_due_ms=?2 WHERE id=?1",
+                params![watch.id, future],
+            )
+            .unwrap();
+
+        let applied = registry
+            .apply_restart_jitter(&BTreeSet::new(), now)
+            .unwrap();
+        assert!(
+            applied.is_empty(),
+            "no overdue watch should be spread: {applied:?}"
+        );
+        assert_eq!(
+            registry.get(&watch.id).unwrap().unwrap().next_due_ms,
+            future,
+            "a non-overdue watch must keep its schedule"
+        );
     }
 
     #[test]

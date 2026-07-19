@@ -133,6 +133,16 @@ impl Drop for ShutdownListener {
     }
 }
 
+/// Aborts a background task when the scheduler returns, so the independent periodic reconcile never
+/// outlives the runtime that spawned it.
+struct AbortOnDrop(tokio::task::JoinHandle<()>);
+
+impl Drop for AbortOnDrop {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
 pub fn run() -> Result<()> {
     tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -366,8 +376,39 @@ async fn run_scheduler(
         .await?;
         return Err(error);
     }
+    if !once {
+        let jittered = registry.apply_restart_jitter(&selected, now_ms())?;
+        if !jittered.is_empty() {
+            lifecycle_log(
+                "startup-jitter",
+                &runtime_session_id,
+                watcher_pid,
+                json!({
+                    "spreadWatches": jittered
+                        .iter()
+                        .map(|(id, delay_ms)| json!({"watchId": id, "delayMs": delay_ms}))
+                        .collect::<Vec<_>>(),
+                }),
+            );
+        }
+    }
+    // Run the healthy periodic sender reconciliation independently of the scheduler/detector-await
+    // loop so it keeps senders attached even while a long detector runs. It shares the lifecycle
+    // mutex and shutdown signal, re-reads configured senders each cycle, and exits on shutdown.
+    let _periodic_reconcile = if once {
+        None
+    } else {
+        let path = registry_path.to_path_buf();
+        Some(AbortOnDrop(tokio::spawn(run_periodic_reconcile(
+            Arc::clone(&lifecycle),
+            shutdown.clone(),
+            Duration::from_secs(5),
+            runtime_session_id.clone(),
+            watcher_pid,
+            move || Registry::open(&path).and_then(|registry| sender_set(&registry)),
+        ))))
+    };
     let mut last_revision = registry.revision()?;
-    let mut last_reconcile = tokio::time::Instant::now();
     let mut runs = 0usize;
     let mut ready = true;
 
@@ -419,48 +460,6 @@ async fn run_scheduler(
             }
             ready = true;
             last_revision = revision;
-            last_reconcile = tokio::time::Instant::now();
-        } else if last_reconcile.elapsed() >= Duration::from_secs(5) {
-            lifecycle_log(
-                "periodic-reconcile",
-                &runtime_session_id,
-                watcher_pid,
-                json!({"desiredSenders": desired}),
-            );
-            if let Err(error) = reconcile_with_backoff(
-                &lifecycle,
-                &shutdown,
-                &desired,
-                &runtime_session_id,
-                watcher_pid,
-            )
-            .await
-            {
-                lifecycle_log(
-                    "reconcile-failed",
-                    &runtime_session_id,
-                    watcher_pid,
-                    json!({"error": error.to_string(), "retryAfterSeconds": 30}),
-                );
-                if once {
-                    return finish_runtime(
-                        &mut registry,
-                        &lifecycle,
-                        &shutdown,
-                        RuntimeRecord {
-                            id: runtime_record_id,
-                            session_id: &runtime_session_id,
-                            watcher_pid,
-                        },
-                        runs,
-                        "degraded-not-ready",
-                    )
-                    .await;
-                }
-                ready = false;
-                continue;
-            }
-            last_reconcile = tokio::time::Instant::now();
         }
 
         let due = if once && !selected.is_empty() {
@@ -599,6 +598,66 @@ where
     outcomes
 }
 
+/// Independent periodic sender reconciliation loop. Runs off the scheduler/detector-await path so a
+/// long-running detector cannot stall healthy reconciliation. Shares the lifecycle mutex and
+/// shutdown signal, re-reads the desired sender set each cycle, and retains the bounded ~30s retry
+/// behavior of `reconcile_with_backoff`.
+async fn run_periodic_reconcile<A, D>(
+    lifecycle: SharedLifecycle<A>,
+    shutdown: ShutdownSignal,
+    interval: Duration,
+    runtime_session_id: String,
+    watcher_pid: u32,
+    desired_provider: D,
+) where
+    A: adapter::TelexAdapter,
+    D: Fn() -> Result<BTreeSet<String>> + Send + 'static,
+{
+    loop {
+        tokio::select! {
+            _ = tokio::time::sleep(interval) => {}
+            _ = shutdown.cancelled() => break,
+        }
+        if shutdown.is_requested() {
+            break;
+        }
+        let desired = match desired_provider() {
+            Ok(desired) => desired,
+            Err(error) => {
+                lifecycle_log(
+                    "periodic-reconcile-skip",
+                    &runtime_session_id,
+                    watcher_pid,
+                    json!({"error": error.to_string()}),
+                );
+                continue;
+            }
+        };
+        lifecycle_log(
+            "periodic-reconcile",
+            &runtime_session_id,
+            watcher_pid,
+            json!({"desiredSenders": desired}),
+        );
+        if let Err(error) = reconcile_with_backoff(
+            &lifecycle,
+            &shutdown,
+            &desired,
+            &runtime_session_id,
+            watcher_pid,
+        )
+        .await
+        {
+            lifecycle_log(
+                "reconcile-failed",
+                &runtime_session_id,
+                watcher_pid,
+                json!({"error": error.to_string(), "retryAfterSeconds": 30}),
+            );
+        }
+    }
+}
+
 async fn reconcile_with_backoff<A: adapter::TelexAdapter>(
     lifecycle: &SharedLifecycle<A>,
     shutdown: &ShutdownSignal,
@@ -612,10 +671,14 @@ async fn reconcile_with_backoff<A: adapter::TelexAdapter>(
         if shutdown.is_requested() {
             bail!("runtime shutdown began before sender reconciliation");
         }
-        let (result, attached) = {
+        let (result, attached, verified) = {
             let mut lifecycle = lifecycle.lock().await;
             let result = lifecycle.reconcile(desired).await;
-            (result, lifecycle.attached().clone())
+            (
+                result,
+                lifecycle.attached().clone(),
+                lifecycle.verified().clone(),
+            )
         };
         match result {
             Ok(()) => {
@@ -627,6 +690,7 @@ async fn reconcile_with_backoff<A: adapter::TelexAdapter>(
                         "generation": attempt + 1,
                         "desiredSenders": desired,
                         "attachedSenders": attached,
+                        "verifiedSenders": verified,
                     }),
                 );
                 return Ok(());
@@ -646,6 +710,7 @@ async fn reconcile_with_backoff<A: adapter::TelexAdapter>(
                             "error": last_error,
                             "delaySeconds": delay,
                             "attachedSenders": attached,
+                            "verifiedSenders": verified,
                         }),
                     );
                     tokio::select! {
@@ -1605,6 +1670,125 @@ mod tests {
         assert!(
             elapsed < Duration::from_secs(15),
             "shutdown must not wait for the detector timeout, took {elapsed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn periodic_reconcile_runs_while_a_detector_is_blocked() {
+        use adapter::{SendReceipt, SendResult, TelexAdapter};
+        use async_trait::async_trait;
+
+        #[derive(Clone, Default)]
+        struct CountingAdapter {
+            attaches: Arc<StdMutex<usize>>,
+        }
+
+        #[async_trait]
+        impl TelexAdapter for CountingAdapter {
+            async fn attach(&self, _: &str, _: &str, _: u32) -> Result<()> {
+                *self.attaches.lock().unwrap() += 1;
+                Ok(())
+            }
+            async fn verify_attached(&self, _: &str, _: &str, _: u32) -> Result<()> {
+                Ok(())
+            }
+            async fn strict_send(&self, _: &str, _: &SendRequest) -> Result<SendResult> {
+                Ok(SendResult::Accepted {
+                    receipt: SendReceipt {
+                        receipt: "ok".into(),
+                        id: 1,
+                        thread_id: 1,
+                        to: "target".into(),
+                        from: None,
+                    },
+                })
+            }
+            async fn detach(&self, _: &str, _: &str) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let adapter = CountingAdapter::default();
+        let counter = Arc::clone(&adapter.attaches);
+        let lifecycle = Arc::new(Mutex::new(LifecycleCoordinator::new(
+            adapter,
+            "runtime".into(),
+            7,
+        )));
+        let shutdown = lifecycle.lock().await.shutdown_signal();
+        let desired = BTreeSet::from(["service:watcher".to_string()]);
+        let provider = move || Ok(desired.clone());
+        let handle = tokio::spawn(run_periodic_reconcile(
+            Arc::clone(&lifecycle),
+            shutdown.clone(),
+            Duration::from_millis(50),
+            "runtime".into(),
+            7,
+            provider,
+        ));
+
+        // While a long detector would block the scheduler loop, the independent reconcile keeps
+        // running: several attach cycles must complete during this window.
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        assert!(
+            *counter.lock().unwrap() >= 2,
+            "periodic reconcile must run while a detector is blocked, saw {} attaches",
+            *counter.lock().unwrap()
+        );
+
+        shutdown.request();
+        tokio::time::timeout(Duration::from_secs(2), handle)
+            .await
+            .expect("periodic reconcile must exit promptly on shutdown")
+            .expect("periodic reconcile task must not panic");
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn reconcile_backoff_is_bounded_and_returns_err_not_a_busy_loop() {
+        use adapter::{SendResult, TelexAdapter};
+        use async_trait::async_trait;
+
+        #[derive(Clone, Default)]
+        struct AlwaysFailAdapter;
+
+        #[async_trait]
+        impl TelexAdapter for AlwaysFailAdapter {
+            async fn attach(&self, sender: &str, _: &str, _: u32) -> Result<()> {
+                bail!("forced attach failure for {sender}")
+            }
+            async fn verify_attached(&self, _: &str, _: &str, _: u32) -> Result<()> {
+                Ok(())
+            }
+            async fn strict_send(&self, _: &str, _: &SendRequest) -> Result<SendResult> {
+                unreachable!("reconcile never sends")
+            }
+            async fn detach(&self, _: &str, _: &str) -> Result<()> {
+                Ok(())
+            }
+        }
+
+        let lifecycle = Arc::new(Mutex::new(LifecycleCoordinator::new(
+            AlwaysFailAdapter,
+            "runtime".into(),
+            3,
+        )));
+        let shutdown = lifecycle.lock().await.shutdown_signal();
+        let desired = BTreeSet::from(["service:watcher".to_string()]);
+
+        let start = tokio::time::Instant::now();
+        let result = reconcile_with_backoff(&lifecycle, &shutdown, &desired, "runtime", 3).await;
+        let elapsed = start.elapsed();
+
+        assert!(
+            result.is_err(),
+            "bounded reconcile retries must ultimately return an error"
+        );
+        // The five backoff sleeps sum to 1+2+4+8+15 = 30s. Under the paused test clock this is the
+        // exact virtual elapsed time, proving the loop sleeps (not a 250ms busy loop) and is bounded.
+        assert_eq!(
+            elapsed,
+            Duration::from_secs(30),
+            "reconcile backoff must be a bounded ~30s, got {elapsed:?}"
         );
     }
 }

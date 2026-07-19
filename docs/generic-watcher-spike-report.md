@@ -297,7 +297,8 @@ Watcher preserves degraded stderr in attempt diagnostics.
 - timeout and shutdown terminate process groups/Windows Job Objects;
 - failures use bounded exponential backoff;
 - overdue watches run once after restart rather than replaying every missed
-  cadence.
+  cadence and receive deterministic 0-10% interval jitter to avoid a
+  simultaneous provider burst.
 
 ### Script provenance
 
@@ -328,7 +329,11 @@ The runtime:
 
 - reconciles senders at startup, on registry revision, periodically, and after
   typed membership loss;
+- runs periodic reconciliation independently from detector execution, so a
+  long detector does not stall membership repair;
 - verifies sender session/PID/role/status after attachment;
+- distinguishes touched/attached senders (shutdown compensation) from verified
+  senders (ready for use) in lifecycle diagnostics;
 - remains non-ready on partial attachment;
 - sends with explicit session and sender;
 - retries one send after explicit reconciliation;

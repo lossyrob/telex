@@ -363,6 +363,7 @@ pub struct LifecycleCoordinator<A> {
     runtime_session_id: String,
     watcher_pid: u32,
     attached: BTreeSet<String>,
+    verified: BTreeSet<String>,
     shutting_down: bool,
     shutdown_signal: ShutdownSignal,
     generation: u64,
@@ -375,14 +376,23 @@ impl<A: TelexAdapter> LifecycleCoordinator<A> {
             runtime_session_id,
             watcher_pid,
             attached: BTreeSet::new(),
+            verified: BTreeSet::new(),
             shutting_down: false,
             shutdown_signal: ShutdownSignal::default(),
             generation: 0,
         }
     }
 
+    /// Senders whose attach changed Telex state (used for bounded shutdown compensation). This set
+    /// may include senders that were attached but not yet verified.
     pub fn attached(&self) -> &BTreeSet<String> {
         &self.attached
+    }
+
+    /// Senders that completed a successful attach *and* verification. Only these are ready; never
+    /// report an unverified sender as verified.
+    pub fn verified(&self) -> &BTreeSet<String> {
+        &self.verified
     }
 
     pub fn shutdown_signal(&self) -> ShutdownSignal {
@@ -407,8 +417,10 @@ impl<A: TelexAdapter> LifecycleCoordinator<A> {
                 .await
                 .with_context(|| format!("attach sender {sender:?}"))?;
             // Attach changes Telex state even if the subsequent status query fails. Keep it
-            // immediately so bounded shutdown can compensate for every partial reconcile.
+            // immediately so bounded shutdown can compensate for every partial reconcile. A sender
+            // is not verified until the status query below succeeds.
             self.attached.insert(sender.clone());
+            self.verified.remove(sender);
             if self.is_shutting_down() {
                 bail!("runtime is shutting down; sender reconciliation is disabled");
             }
@@ -416,6 +428,7 @@ impl<A: TelexAdapter> LifecycleCoordinator<A> {
                 .verify_attached(sender, &self.runtime_session_id, self.watcher_pid)
                 .await
                 .with_context(|| format!("verify sender {sender:?}"))?;
+            self.verified.insert(sender.clone());
         }
         let obsolete: Vec<String> = self.attached.difference(desired).cloned().collect();
         for sender in obsolete {
@@ -427,6 +440,7 @@ impl<A: TelexAdapter> LifecycleCoordinator<A> {
                 .await
                 .with_context(|| format!("detach removed sender {sender:?}"))?;
             self.attached.remove(&sender);
+            self.verified.remove(&sender);
         }
         Ok(())
     }
@@ -503,6 +517,7 @@ impl<A: TelexAdapter> LifecycleCoordinator<A> {
             outcomes.push((sender, last_error.unwrap_or_else(|| "detached".to_string())));
         }
         self.attached.clear();
+        self.verified.clear();
         outcomes
     }
 }
@@ -518,6 +533,7 @@ mod tests {
         attach_count: Arc<Mutex<u32>>,
         needs_attach_once: Arc<Mutex<bool>>,
         fail_attach_for: Arc<Mutex<Option<String>>>,
+        fail_verify_for: Arc<Mutex<Option<String>>>,
         fail_detach_for: Arc<Mutex<Option<String>>>,
         detached: Arc<Mutex<Vec<String>>>,
     }
@@ -531,7 +547,10 @@ mod tests {
             }
             Ok(())
         }
-        async fn verify_attached(&self, _: &str, _: &str, _: u32) -> Result<()> {
+        async fn verify_attached(&self, sender: &str, _: &str, _: u32) -> Result<()> {
+            if self.fail_verify_for.lock().unwrap().as_deref() == Some(sender) {
+                bail!("forced verify failure for {sender}");
+            }
             Ok(())
         }
         async fn strict_send(&self, _: &str, request: &SendRequest) -> Result<SendResult> {
@@ -603,11 +622,42 @@ mod tests {
             coordinator.attached(),
             &BTreeSet::from(["sender-a".to_string()])
         );
+        // sender-a attached and verified before sender-b's attach failed aborted reconcile.
+        assert_eq!(
+            coordinator.verified(),
+            &BTreeSet::from(["sender-a".to_string()])
+        );
 
         assert_eq!(
             coordinator.shutdown().await,
             vec![("sender-a".to_string(), "detached".to_string())]
         );
+        assert_eq!(probe.detached.lock().unwrap().as_slice(), ["sender-a"]);
+        assert!(coordinator.verified().is_empty());
+    }
+
+    #[tokio::test]
+    async fn attached_but_unverified_sender_is_never_reported_verified() {
+        let fake = FakeAdapter::default();
+        // Attach succeeds but verification fails, so the sender is touched (needs shutdown
+        // compensation) yet must never be labelled verified/ready.
+        *fake.fail_verify_for.lock().unwrap() = Some("sender-a".into());
+        let probe = fake.clone();
+        let mut coordinator = LifecycleCoordinator::new(fake, "runtime".into(), 10);
+        let desired = BTreeSet::from(["sender-a".to_string()]);
+
+        assert!(coordinator.reconcile(&desired).await.is_err());
+        assert_eq!(
+            coordinator.attached(),
+            &BTreeSet::from(["sender-a".to_string()]),
+            "attach must be tracked for shutdown compensation"
+        );
+        assert!(
+            coordinator.verified().is_empty(),
+            "a sender that failed verification must not be reported as verified"
+        );
+
+        coordinator.shutdown().await;
         assert_eq!(probe.detached.lock().unwrap().as_slice(), ["sender-a"]);
     }
 
