@@ -34,7 +34,7 @@ The Watcher writes one JSON request to stdin. Each detector writes exactly one J
 
 `event` is present only for `event` or `terminal`. `degraded` intentionally has neither `event` nor `nextState`; provider/authentication/read errors are represented this way and leave the stored cursor unchanged. A nonzero process exit indicates that the detector itself could not run or write a result, not that a watched PR needs attention.
 
-Each detector hashes normalized observed evidence into an opaque `nextState.cursor`. The first event is suppressed by default to establish a baseline. For the generic GitHub and Azure DevOps PR detectors, `emitInitialSnapshot: true` emits one deterministic read-only snapshot on the first observation even when no attention, ready-to-merge, or terminal condition applies. Those events use `github.pull-request.snapshot` and `azure-devops.pull-request.snapshot`; they describe the observed PR but request no action. Passing the returned state into the same detector with unchanged evidence returns `idle`, preventing replay.
+Each detector hashes normalized observed evidence into an opaque `nextState.cursor`. The first event is suppressed by default to establish a baseline. For the generic GitHub and Azure DevOps PR detectors, `emitInitialSnapshot: true` emits one deterministic read-only snapshot on the first observation even when no attention, ready-to-merge, or terminal condition applies. Those events use `github.pull-request.snapshot` and `azure-devops.pull-request.snapshot`; they describe the observed PR but request no action. The Azure detector also supports `emitInitialCreatedEvent: true`, which emits `azure-devops.pull-request.created` from the provider's live PR ID and creation timestamp for a newly created proof PR. Passing the returned state into the same detector with unchanged evidence returns `idle`, preventing replay.
 
 ## Examples
 
@@ -73,7 +73,7 @@ Set `organization`, `project`, `repositoryId`, and `pullRequestId`. Select exact
 
 - **PAT:** Set `allowPatAuthentication: true`, `allowBearerAuthentication: false`, and replace the allowlist entry with `AZURE_DEVOPS_EXT_PAT`.
 
-The script rejects both modes enabled together or neither enabled. It does not use another credential source. Neither token type is included in stdout, metadata, diagnostics, fixtures, or sample registrations. With `emitInitialSnapshot: true`, a neutral first observation emits one `azure-devops.pull-request.snapshot`; an unchanged cursor returns `idle`.
+The script rejects both modes enabled together or neither enabled. It does not use another credential source. Neither token type is included in stdout, metadata, diagnostics, fixtures, or sample registrations. With `emitInitialCreatedEvent: true`, a newly created PR emits one `azure-devops.pull-request.created`; with `emitInitialSnapshot: true`, a neutral first observation emits one `azure-devops.pull-request.snapshot`. An unchanged cursor returns `idle`.
 
 The Azure DevOps sample has no real organization, project, repository, PR, URL, or secret. Its fixture follows the REST `7.1` PR/threads response shape.
 

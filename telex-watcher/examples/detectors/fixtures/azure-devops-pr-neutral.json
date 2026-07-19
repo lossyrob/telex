@@ -2,6 +2,7 @@
   "pullRequest": {
     "pullRequestId": 74,
     "title": "Example neutral Azure DevOps pull request",
+    "creationDate": "2026-07-19T12:00:00Z",
     "status": "active",
     "isDraft": true,
     "mergeStatus": "notSet",

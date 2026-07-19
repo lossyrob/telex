@@ -120,6 +120,11 @@ $azureSnapshot = Test-ReplaySuppression -ScriptName 'azure-devops-pr-detector.ps
     emitInitialSnapshot = $true
 }
 Assert-True ($azureSnapshot.event.kind -eq 'azure-devops.pull-request.snapshot') 'Azure DevOps neutral fixture should emit an initial snapshot'
+$azureCreated = Test-ReplaySuppression -ScriptName 'azure-devops-pr-detector.ps1' -Parameters @{
+    fixturePath = (Join-Path $fixturesRoot 'azure-devops-pr-neutral.json')
+    emitInitialCreatedEvent = $true
+}
+Assert-True ($azureCreated.event.kind -eq 'azure-devops.pull-request.created') 'Azure DevOps neutral fixture should emit an initial created event'
 Test-DefaultBaseline -ScriptName 'azure-devops-pr-detector.ps1' -Parameters @{
     fixturePath = (Join-Path $fixturesRoot 'azure-devops-pr-neutral.json')
     emitInitialSnapshot = $false

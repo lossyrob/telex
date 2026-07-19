@@ -157,6 +157,17 @@ fn fixture_detectors_emit_protocol_results_and_suppress_replay() {
         azure_snapshot["event"]["kind"],
         "azure-devops.pull-request.snapshot"
     );
+    let azure_created = assert_initial_event_then_idle(
+        "azure-devops-pr-detector.ps1",
+        json!({
+            "fixturePath": fixtures.join("azure-devops-pr-neutral.json"),
+            "emitInitialCreatedEvent": true,
+        }),
+    );
+    assert_eq!(
+        azure_created["event"]["kind"],
+        "azure-devops.pull-request.created"
+    );
     let (azure_baseline, _) = run_detector(
         "azure-devops-pr-detector.ps1",
         json!({

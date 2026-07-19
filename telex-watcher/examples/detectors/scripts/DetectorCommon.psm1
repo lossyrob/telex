@@ -33,6 +33,26 @@ function Get-DetectorParameter {
     return $Default
 }
 
+function Get-OptionalValue {
+    param(
+        $Object,
+        [string]$Name,
+        $Default = $null
+    )
+
+    if ($Object -is [System.Collections.IDictionary]) {
+        if ($Object.Contains($Name)) {
+            return $Object[$Name]
+        }
+        return $Default
+    }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) {
+        return $Default
+    }
+    return $property.Value
+}
+
 function Resolve-DetectorPath {
     param([string]$Path)
 
@@ -119,13 +139,15 @@ function Write-SnapshotResult {
     $cursor = Get-OpaqueCursor $Evidence
     $nextState = [ordered]@{ cursor = $cursor }
     $previousCursor = Get-StateCursor $Request
-    $emitInitialSnapshot = [bool](Get-DetectorParameter -Request $Request -Name 'emitInitialSnapshot' -Default $false)
+    $emitInitialEvent =
+        [bool](Get-DetectorParameter -Request $Request -Name 'emitInitialSnapshot' -Default $false) -or
+        [bool](Get-DetectorParameter -Request $Request -Name 'emitInitialCreatedEvent' -Default $false)
 
     if ($previousCursor -eq $cursor) {
         Write-DetectorResult -Outcome idle -NextState $nextState
         return
     }
-    if ($null -eq $previousCursor -and -not $emitInitialSnapshot) {
+    if ($null -eq $previousCursor -and -not $emitInitialEvent) {
         Write-DetectorResult -Outcome idle -NextState $nextState
         return
     }
@@ -137,4 +159,4 @@ function Write-SnapshotResult {
     Write-DetectorResult -Outcome $(if ($Terminal) { 'terminal' } else { 'event' }) -NextState $nextState -Event $Event
 }
 
-Export-ModuleMember -Function Read-DetectorRequest, Get-DetectorParameter, Resolve-DetectorPath, ConvertTo-CompactJson, Get-Sha256, Get-OpaqueCursor, Get-StateCursor, New-EventId, Write-DetectorResult, Write-Degraded, Write-SnapshotResult
+Export-ModuleMember -Function Read-DetectorRequest, Get-DetectorParameter, Get-OptionalValue, Resolve-DetectorPath, ConvertTo-CompactJson, Get-Sha256, Get-OpaqueCursor, Get-StateCursor, New-EventId, Write-DetectorResult, Write-Degraded, Write-SnapshotResult

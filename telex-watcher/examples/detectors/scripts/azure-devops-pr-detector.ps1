@@ -52,10 +52,19 @@ try {
     $data = Get-AzureDevOpsPrData -Request $request
     $pr = $data.pullRequest
     $reviewers = @($pr.reviewers | ForEach-Object {
-        [ordered]@{ id = [string]$_.id; displayName = [string]$_.displayName; vote = [int]$_.vote; required = [bool]$_.isRequired }
+        [ordered]@{
+            id = [string](Get-OptionalValue -Object $_ -Name 'id' -Default '')
+            displayName = [string](Get-OptionalValue -Object $_ -Name 'displayName' -Default '')
+            vote = [int](Get-OptionalValue -Object $_ -Name 'vote' -Default 0)
+            required = [bool](Get-OptionalValue -Object $_ -Name 'isRequired' -Default $false)
+        }
     } | Sort-Object id)
     $threads = @($data.threads | ForEach-Object {
-        [ordered]@{ id = [int]$_.id; status = [string]$_.status; isDeleted = [bool]$_.isDeleted }
+        [ordered]@{
+            id = [int](Get-OptionalValue -Object $_ -Name 'id' -Default 0)
+            status = [string](Get-OptionalValue -Object $_ -Name 'status' -Default '')
+            isDeleted = [bool](Get-OptionalValue -Object $_ -Name 'isDeleted' -Default $false)
+        }
     } | Sort-Object id)
     $blockingVotes = @($reviewers | Where-Object { $_.vote -le -5 })
     $reason = $null
@@ -82,6 +91,7 @@ try {
     $evidence = [ordered]@{
         provider = 'azure-devops'
         pullRequestId = [int]$pr.pullRequestId
+        creationDate = [string]$pr.creationDate
         status = [string]$pr.status
         draft = [bool]$pr.isDraft
         mergeStatus = [string]$pr.mergeStatus
@@ -92,6 +102,10 @@ try {
     }
     $cursor = Get-OpaqueCursor $evidence
     $event = $null
+    if ($null -eq $kind -and [bool](Get-DetectorParameter -Request $request -Name 'emitInitialCreatedEvent' -Default $false) -and $null -eq (Get-StateCursor $request)) {
+        $reason = "pull request was created at $($pr.creationDate)"
+        $kind = 'azure-devops.pull-request.created'
+    }
     if ($null -eq $kind -and [bool](Get-DetectorParameter -Request $request -Name 'emitInitialSnapshot' -Default $false) -and $null -eq (Get-StateCursor $request)) {
         $reason = 'initial read-only snapshot'
         $kind = 'azure-devops.pull-request.snapshot'
@@ -105,6 +119,7 @@ try {
             metadata = [ordered]@{
                 provider = 'azure-devops'
                 pullRequestId = [int]$pr.pullRequestId
+                creationDate = [string]$pr.creationDate
                 status = [string]$pr.status
                 mergeStatus = [string]$pr.mergeStatus
                 blockingReviewers = @($blockingVotes | ForEach-Object { $_.displayName })

@@ -865,6 +865,7 @@ async fn run_attempt<A: adapter::TelexAdapter>(
         &attempt_id,
         &prior_state_hash,
         &before_digest,
+        &output.stderr,
         result,
         result_value,
     )
@@ -883,6 +884,7 @@ async fn apply_result<A: adapter::TelexAdapter>(
     attempt_id: &str,
     prior_state_hash: &str,
     script_digest: &str,
+    stderr: &[u8],
     result: ValidatedResult,
     result_value: Value,
 ) -> Result<()> {
@@ -899,11 +901,12 @@ async fn apply_result<A: adapter::TelexAdapter>(
     }
     match result.outcome {
         Outcome::Degraded => {
+            let diagnostic = diagnostic_with_stderr("detector reported degraded", stderr, watch);
             registry.record_failure(
                 watch,
                 attempt_id,
                 "degraded",
-                "detector reported degraded",
+                &diagnostic,
                 Some(&result_value),
                 Some(script_digest),
             )?;
