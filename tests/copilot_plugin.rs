@@ -89,10 +89,9 @@ fn hook_manifest_wires_session_end_and_agent_stop_adapters() {
     let agent_stop_drain = &hooks["hooks"]["agentStop"][1];
     assert_eq!(agent_stop_drain["type"], "command");
     let powershell = agent_stop_drain["powershell"].as_str().unwrap();
-    assert!(powershell.contains("COPILOT_PLUGIN_ROOT"));
-    assert!(powershell.contains("drain-hook.ps1"));
-    assert!(powershell.contains("plugin installation is incomplete"));
-    assert!(!powershell.contains("telex --json copilot drain"));
+    assert!(powershell.contains("telex --json copilot drain"));
+    assert!(!powershell.contains("COPILOT_PLUGIN_ROOT"));
+    assert!(!powershell.contains("drain-hook.ps1"));
     let bash = agent_stop_drain["bash"].as_str().unwrap();
     assert!(bash.contains("COPILOT_PLUGIN_ROOT"));
     assert!(bash.contains("drain-hook.sh"));
@@ -111,7 +110,11 @@ fn hook_manifest_wires_session_end_and_agent_stop_adapters() {
 
 #[test]
 fn drain_hook_launchers_keep_the_plugin_boundary_thin_and_actionable() {
-    let powershell = include_str!("../copilot/plugin/drain-hook.ps1");
+    let hooks: Value =
+        serde_json::from_str(include_str!("../copilot/plugin/hooks.json")).expect("hooks json");
+    let powershell = hooks["hooks"]["agentStop"][1]["powershell"]
+        .as_str()
+        .expect("PowerShell hook command");
     let shell = include_str!("../copilot/plugin/drain-hook.sh");
     assert!(powershell.contains("@('off', '0', 'false')"));
     assert!(shell.contains("tr '[:upper:]' '[:lower:]'"));
@@ -222,6 +225,11 @@ fn drain_hook_launcher_is_neutral_blocks_and_honors_off_switch() {
 
     #[cfg(windows)]
     {
+        let restricted =
+            run_drain_hook_with_execution_policy(&path, &capture, "0", payload, "Restricted");
+        assert_neutral_decision(&restricted);
+        std::fs::remove_file(&capture).expect("remove restricted-policy capture");
+
         let missing_bin = root.join("missing-bin");
         std::fs::create_dir_all(&missing_bin).expect("create empty PATH");
         let missing_path = std::env::join_paths([missing_bin]).expect("join empty test PATH");
@@ -237,15 +245,18 @@ fn drain_hook_launcher_is_neutral_blocks_and_honors_off_switch() {
         assert_eq!(decision["decision"], "block");
     }
 
-    let missing_launcher = run_drain_hook_missing_plugin_root(payload);
-    assert_eq!(missing_launcher.status.code(), Some(0));
-    assert!(missing_launcher.stderr.is_empty());
-    let decision: Value =
-        serde_json::from_slice(&missing_launcher.stdout).expect("missing-launcher decision json");
-    assert_eq!(decision["decision"], "block");
-    assert!(decision["reason"]
-        .as_str()
-        .is_some_and(|reason| reason.contains("plugin installation is incomplete")));
+    #[cfg(unix)]
+    {
+        let missing_launcher = run_drain_hook_missing_plugin_root(payload);
+        assert_eq!(missing_launcher.status.code(), Some(0));
+        assert!(missing_launcher.stderr.is_empty());
+        let decision: Value = serde_json::from_slice(&missing_launcher.stdout)
+            .expect("missing-launcher decision json");
+        assert_eq!(decision["decision"], "block");
+        assert!(decision["reason"]
+            .as_str()
+            .is_some_and(|reason| reason.contains("plugin installation is incomplete")));
+    }
 
     std::fs::remove_dir_all(&root).expect("clean launcher test root");
 }
@@ -551,17 +562,9 @@ fn run_drain_hook(
             "-NoLogo",
             "-NoProfile",
             "-NonInteractive",
-            "-ExecutionPolicy",
-            "Bypass",
             "-Command",
             hook_command,
         ])
-        .env(
-            "COPILOT_PLUGIN_ROOT",
-            Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("copilot")
-                .join("plugin"),
-        )
         .env("PATH", path)
         .env("TELEX_FAKE_CAPTURE", capture)
         .env("TELEX_FAKE_EXIT", fake_exit);
@@ -573,6 +576,37 @@ fn run_drain_hook(
             command.env_remove("TELEX_COPILOT_DRAIN");
         }
     }
+    run_with_stdin(command, payload)
+}
+
+#[cfg(windows)]
+fn run_drain_hook_with_execution_policy(
+    path: &OsString,
+    capture: &Path,
+    fake_exit: &str,
+    payload: &str,
+    policy: &str,
+) -> Output {
+    let hooks: Value =
+        serde_json::from_str(include_str!("../copilot/plugin/hooks.json")).expect("hooks json");
+    let hook_command = hooks["hooks"]["agentStop"][1]["powershell"]
+        .as_str()
+        .expect("PowerShell hook command");
+    let mut command = Command::new(pwsh_path());
+    command
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            policy,
+            "-Command",
+            hook_command,
+        ])
+        .env("PATH", path)
+        .env("TELEX_FAKE_CAPTURE", capture)
+        .env("TELEX_FAKE_EXIT", fake_exit)
+        .env_remove("TELEX_COPILOT_DRAIN");
     run_with_stdin(command, payload)
 }
 
@@ -627,26 +661,6 @@ fn run_drain_hook(
             command.env_remove("TELEX_COPILOT_DRAIN");
         }
     }
-    run_with_stdin(command, payload)
-}
-
-#[cfg(windows)]
-fn run_drain_hook_missing_plugin_root(payload: &str) -> Output {
-    let hooks: Value =
-        serde_json::from_str(include_str!("../copilot/plugin/hooks.json")).expect("hooks json");
-    let hook_command = hooks["hooks"]["agentStop"][1]["powershell"]
-        .as_str()
-        .expect("PowerShell hook command");
-    let mut command = Command::new(pwsh_path());
-    command
-        .args([
-            "-NoLogo",
-            "-NoProfile",
-            "-NonInteractive",
-            "-Command",
-            hook_command,
-        ])
-        .env_remove("COPILOT_PLUGIN_ROOT");
     run_with_stdin(command, payload)
 }
 

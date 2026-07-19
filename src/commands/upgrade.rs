@@ -675,7 +675,7 @@ mod tests {
     }
 
     #[test]
-    fn source_metadata_accepts_legacy_version_json_without_build_id() {
+    fn source_metadata_intentionally_maps_legacy_missing_build_id_to_unknown() {
         let value = serde_json::json!({
             "version": {
                 "package_version": "0.1.0",
@@ -695,6 +695,8 @@ mod tests {
             }
         });
 
+        // An older candidate cannot report a field it predates. Preserve that
+        // first-hop uncertainty explicitly rather than inventing build identity.
         let metadata = parse_source_metadata(&value).unwrap();
         assert_eq!(metadata.build_id, install::UNKNOWN_BUILD_ID);
 

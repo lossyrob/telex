@@ -242,6 +242,100 @@ fn version_flag_distinguishes_same_semver_builds() {
 }
 
 #[test]
+fn build_id_rebuilds_when_packed_branch_gains_a_loose_ref() {
+    let root =
+        std::env::temp_dir().join(format!("telex-packed-ref-build-id-{}", std::process::id()));
+    std::fs::remove_dir_all(&root).ok();
+    std::fs::create_dir_all(root.join("src")).expect("create fixture src");
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"build-id-fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .expect("write fixture Cargo.toml");
+    std::fs::write(root.join("build.rs"), read("build.rs")).expect("write fixture build.rs");
+    std::fs::write(
+        root.join("src").join("main.rs"),
+        "fn main() { println!(\"{}\", env!(\"TELEX_BUILD_ID\")); }\n",
+    )
+    .expect("write fixture main");
+    std::fs::write(root.join("tracked.txt"), "one\n").expect("write fixture source");
+
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .expect("run fixture git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+    git(&["init", "--quiet"]);
+    git(&["config", "user.email", "telex-test@example.invalid"]);
+    git(&["config", "user.name", "Telex Test"]);
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "initial"]);
+
+    let symbolic_ref = String::from_utf8(git(&["symbolic-ref", "HEAD"]).stdout)
+        .expect("symbolic ref utf8")
+        .trim()
+        .to_string();
+    git(&["pack-refs", "--all", "--prune"]);
+    let loose_ref = String::from_utf8(git(&["rev-parse", "--git-path", &symbolic_ref]).stdout)
+        .expect("loose ref path utf8");
+    assert!(
+        !root.join(loose_ref.trim()).exists(),
+        "fixture branch ref should start packed-only"
+    );
+
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let target = root.join("target");
+    let run = || {
+        let output = Command::new(&cargo)
+            .args(["run", "--quiet"])
+            .current_dir(&root)
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("TELEX_BUILD_ID")
+            .env_remove("GITHUB_SHA")
+            .output()
+            .expect("run fixture cargo");
+        assert!(
+            output.status.success(),
+            "fixture cargo run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("fixture output utf8")
+            .trim()
+            .to_string()
+    };
+
+    let first = run();
+    std::fs::write(root.join("tracked.txt"), "two\n").expect("advance fixture source");
+    git(&["add", "tracked.txt"]);
+    git(&["commit", "--quiet", "-m", "advance"]);
+    assert!(
+        root.join(loose_ref.trim()).exists(),
+        "advancing a packed branch should create its loose ref"
+    );
+    let second = run();
+    let head = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout)
+        .expect("head utf8")
+        .trim()
+        .to_string();
+
+    assert_ne!(
+        first, second,
+        "build ID must change when the branch advances"
+    );
+    assert_eq!(second, head, "rebuilt binary must report the advanced HEAD");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
 fn archive_name_grammar_is_consistent_across_workflow_and_installers() {
     // The asset grammar is telex-<tag>-<target>.{zip,tar.gz}. Couple the grammar
     // fragments across the producing workflow and the consuming installers so a

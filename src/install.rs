@@ -681,7 +681,7 @@ mod tests {
     }
 
     #[test]
-    fn manifest_persists_build_id_and_accepts_legacy_manifest() {
+    fn manifest_persists_build_id_and_maps_legacy_missing_value_to_unknown() {
         let root = temp_root("manifest-build-id");
         let layout = layout_for_root(&root);
         let src = source_binary(&root, "src");
@@ -728,6 +728,8 @@ mod tests {
         )
         .unwrap();
 
+        // Legacy writers omit build_id. Reading that manifest as unknown is the
+        // intentional cross-version contract; do not infer identity from the path.
         let legacy = read_manifest(&layout, "v1").unwrap();
         assert_eq!(legacy.build_id, UNKNOWN_BUILD_ID);
 

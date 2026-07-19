@@ -60,10 +60,10 @@ fn emit_git_rerun_paths(repo: &Path) {
         paths.push(packed_refs);
     }
 
+    // A packed branch can later gain a loose ref without changing packed-refs.
+    // Register the loose-ref path even while absent so Cargo observes its creation.
     for path in paths {
-        if path.exists() {
-            println!("cargo:rerun-if-changed={}", path.display());
-        }
+        println!("cargo:rerun-if-changed={}", path.display());
     }
 }
 
