@@ -1,6 +1,6 @@
 # Plan: Mediated Human-Attention Loop
 
-Plan revision: 2
+Plan revision: 3
 
 ## Outcome anchor
 
@@ -118,11 +118,13 @@ render recognized experimental source references; unknown metadata remains
 visible as raw JSON. The operator agent sends from its own attended address and
 never impersonates the worker.
 
-The parser will recognize both the experimental
-`operator-station-spike` key/URN and a reserved future `operator-station`
-key/URN concurrently. This accept-both behavior is a migration escape hatch, not
-a production convention. The report will inventory every baked-in spike string
-and present promotion or retirement as an issue #12 decision.
+The parser will recognize the experimental `operator-station-spike` key/URN
+values only. Every other namespace remains
+opaque and is rendered as raw metadata. The spike will not reserve, accept, or
+preview a production-looking `operator-station` namespace before the viability
+gate, `station-contract`, and issue #12 define the supported contract. The report
+will inventory every baked-in experimental string and present promotion or
+retirement as a later decision.
 
 ## Notification policy
 
@@ -139,7 +141,8 @@ messages, the Station uses this table:
 Feed content always comes from Telex. A small persisted
 `last-observed-max-message-id` marker is permitted solely to prevent restart
 re-toasts; it is not a local message cache. Cold start seeds that marker from the
-maximum ID in the first successful backfill, suppressing all startup toasts.
+maximum ID only after both the actionable and recent initial snapshots succeed
+and their union is complete, suppressing all startup toasts.
 
 ## Work items
 
@@ -158,6 +161,15 @@ maximum ID in the first successful backfill, suppressing all startup toasts.
   The Station maps it into its adapter configuration, and every
   worker/operator-agent/harness command passes
   `--db $env:TELEX_OPERATOR_SPIKE_DB`.
+- Require the versioned operator-agent assignment itself to repeat that database
+  rule in its setup and every example command; the role must refuse to start the
+  demo when the variable is absent.
+- Scope every persisted Station session ID and toast/high-water marker to the
+  configured Station address plus a normalized store fingerprint. For an
+  explicit SQLite path, canonicalize it in memory and hash it with SHA-256; for
+  a named backend, hash the normalized backend selector. Persist and display
+  only the fingerprint, never the absolute database path or an unredacted store
+  key. A Station-address or store change creates a distinct local state scope.
 - Before coding against the metadata shape, preserve a captured fixture from a
   real `send` -> `inbox --json` -> `read --full --json` round trip and assert the
   source-reference envelope survives byte-for-byte.
@@ -179,8 +191,10 @@ maximum ID in the first successful backfill, suppressing all startup toasts.
   message.
 - Render experimental source-message references separately from the mediated
   thread, while retaining raw metadata inspection. Resolve source IDs when
-  available; show `resolved`, `not-found`, or `different-backend` state and retain
+  available; show `resolved` or `unavailable in current store` state and retain
   captured sender, subject, and timestamp when a raw source cannot be opened.
+  The metadata does not claim source-store identity, so the UI must not infer
+  `different-backend`.
 - Send a human reply in the selected mediated thread from the Station address.
 - Support the minimum useful disposition actions: defer, handle, and close.
 - Show occupancy for both `attention:rob` and `operator:rob`, including a visible
@@ -205,8 +219,11 @@ maximum ID in the first successful backfill, suppressing all startup toasts.
 - Add a Windows walkthrough and bounded smoke harness using an isolated SQLite
   store path shared explicitly by every participant so the builder can launch
   the complete loop without further implementation. The harness must fail before
-  sending if the canonical database variable is absent and must print the
-  resolved database path for each participant.
+  sending if the canonical database variable is absent and must print the same
+  safe store fingerprint for each participant without logging the absolute path.
+  The harness initializes the database first and sets the variable from the
+  resolved canonical Windows path so path aliases do not split local state
+  fingerprints.
 - Add a scripted operator-agent stand-in for regression coverage. It supplements
   rather than replaces the prompt-driven operator-agent run and must assert the
   raw message reaches `escalated`, the human reply stays in the mediated thread,
@@ -223,7 +240,18 @@ maximum ID in the first successful backfill, suppressing all startup toasts.
 - Record raw worker message, human escalation, human reply, routed worker
   response, thread IDs, source metadata, disposition states, Station backfill,
   notification attempt/result, message-to-toast latency, address occupancy, the
-  exact Telex version/backend/database identity, and Station restart behavior.
+  exact Telex version, configured selector type, safe store fingerprint, and
+  Station restart behavior.
+- After the first complete real worker -> operator agent -> Station -> human
+  reply -> operator agent -> worker demonstration, send a disposition-required
+  `demo-review-requested` Telex message to the Operator Station workstream
+  orchestrator with the evidence package and wait for its review before final
+  implementation review or PR creation. Apply any `demo-feedback` and repeat the
+  checkpoint as needed; a `demo-approved` response confirms only that the node's
+  first complete demonstration was reviewed, not that the later builder
+  viability gate passed. There is no timeout-based self-approval: an absent
+  response leaves the gate closed and is escalated through the existing blocker
+  protocol while this session remains attached.
 - Write `docs/operator-loop-spike-report.md` with demonstrated value, failures,
   assumptions, temporary integration shortcuts, known defects, and concrete
   Application Client requirements for issue #12.
@@ -256,6 +284,10 @@ maximum ID in the first successful backfill, suppressing all startup toasts.
 - **No production packaging promise:** development launch and builder dogfood
   are in scope; installer, auto-start, upgrade, and multi-platform support are
   deferred.
+- **Raw demo path remains process-local:** `TELEX_OPERATOR_SPIKE_DB` necessarily
+  carries the isolated SQLite path in participant process environments. The
+  Station must not persist or display it, and the report records this as a
+  temporary secret-handling/configuration shortcut for issue #12.
 - **Self-labelled experiment:** the standalone Rust package keeps a `-spike`
   suffix and its README opens with "spike-only; do not depend on this crate."
   Adapter methods are observations for issue #12, not exported architecture.
@@ -263,11 +295,13 @@ maximum ID in the first successful backfill, suppressing all startup toasts.
 ## Verification and evidence
 
 - Frontend unit tests for message merge/dedupe, notification eligibility,
-  source-reference parsing (including legacy/future alias and missing-source
-  degradation), and reply/disposition interaction.
+  source-reference parsing (experimental namespace only, unknown namespace raw
+  rendering, and unavailable-source degradation), and reply/disposition
+  interaction.
 - Rust unit tests for configuration, command construction, JSON parsing,
   strict tested-version fixtures, notification policy, persisted session/cursor
-  reuse, restart-quiet toast behavior, and subprocess error handling.
+  scoping by address/store fingerprint, restart-quiet toast behavior after a
+  complete initial union, and subprocess error handling.
 - `npm test`, `npm run build`, `cargo fmt --check`, and `cargo test` in the
   standalone Station.
 - Root `cargo test --workspace` only as a boundary regression guard proving the
