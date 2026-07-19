@@ -206,6 +206,9 @@ fn source_metadata_invocation_grammar_is_stable() {
     let v: Value = serde_json::from_slice(&output.stdout).expect("valid version JSON");
     // Fields consumed by src/commands/upgrade.rs::source_metadata.
     assert!(v["version"]["package_version"].is_string());
+    assert!(v["version"]["build_id"]
+        .as_str()
+        .is_some_and(|build_id| !build_id.is_empty()));
     assert!(v["version"]["supported_schema_min"].is_number());
     assert!(v["version"]["supported_schema_max"].is_number());
     assert!(v["daemon_metadata"]["protocol_version"]["major"].is_number());
@@ -214,6 +217,28 @@ fn source_metadata_invocation_grammar_is_stable() {
     assert!(v["copilot"]["bridge_protocol"].is_number());
     assert!(v["copilot"]["min_compatible_plugin_version"].is_string());
     std::fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
+fn version_flag_distinguishes_same_semver_builds() {
+    let output = Command::new(telex_bin())
+        .arg("--version")
+        .output()
+        .expect("run telex --version");
+    assert!(
+        output.status.success(),
+        "telex --version exited with failure: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains(env!("CARGO_PKG_VERSION")),
+        "version flag must retain the package version: {text:?}"
+    );
+    assert!(
+        text.contains(env!("TELEX_BUILD_ID")),
+        "version flag must expose the build identifier: {text:?}"
+    );
 }
 
 #[test]
@@ -317,6 +342,32 @@ fn version_json_exposes_the_upgrade_contract_surface() {
     assert!(
         v["version"]["package_version"].is_string(),
         "version.package_version must be a string"
+    );
+    let build_id = v["version"]["build_id"]
+        .as_str()
+        .expect("version.build_id must be a string");
+    assert!(
+        !build_id.is_empty(),
+        "version.build_id must be a non-empty string"
+    );
+    assert_eq!(
+        build_id,
+        env!("TELEX_BUILD_ID"),
+        "version.build_id must identify the binary compiled for this test"
+    );
+    let text_output = Command::new(&bin)
+        .args(["--text", "version"])
+        .output()
+        .expect("run telex version");
+    assert!(
+        text_output.status.success(),
+        "telex version exited with failure: {}",
+        String::from_utf8_lossy(&text_output.stderr)
+    );
+    let text = String::from_utf8_lossy(&text_output.stdout);
+    assert!(
+        text.lines().any(|line| line == format!("build {build_id}")),
+        "telex version text must expose the JSON build id; output was {text:?}"
     );
     // The install root is always a concrete path; assert a non-null string, not mere
     // key presence (a JSON null would satisfy is_some but break upgrade tooling).

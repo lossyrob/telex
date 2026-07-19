@@ -6,9 +6,9 @@ Keep compatibility ownership in the binary while covering the stale-binary failu
 
 ## Work Items
 
-- [ ] Add a binary build identifier to `telex version`, versioned install manifests, and upgrade metadata while accepting older metadata that lacks it.
-- [ ] Add cross-platform drain hook launchers that honor `TELEX_COPILOT_DRAIN`, suppress successful adapter output, and surface missing/stale binary failures as actionable Copilot continuation prompts.
-- [ ] Update plugin contract tests and directly related compatibility documentation, then validate the targeted and repository test surfaces.
+- [x] Add a binary build identifier to `telex version`, versioned install manifests, and upgrade metadata while accepting older metadata that lacks it.
+- [x] Add cross-platform drain hook launchers that honor `TELEX_COPILOT_DRAIN`, suppress successful adapter output, and surface missing/stale binary failures as actionable Copilot continuation prompts.
+- [x] Update plugin contract tests and directly related compatibility documentation, then validate the targeted and repository test surfaces.
 
 ## Key Decisions
 

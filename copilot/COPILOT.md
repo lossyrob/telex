@@ -268,11 +268,13 @@ Then run `extensions_reload`. To end fallback without returning to push, run
 
 ## Version and compatibility
 
-The header printed above this document reports the installed `telex` version, the
-Copilot **bridge protocol** version, and the **minimum compatible plugin** version. If
-your plugin is older than the minimum, `telex copilot skill` prints a compatibility
-warning: update the plugin (or the binary) rather than trusting stale instructions. You
-can force the check explicitly:
+The header printed above this document reports the installed `telex` version and
+binary build identifier, the Copilot **bridge protocol** version, and the **minimum
+compatible plugin** version. `telex --version` also includes the build identifier,
+and `telex --json version` exposes it as `version.build_id`, so two binaries that
+share a package version can still be distinguished. If your plugin is older than the
+minimum, `telex copilot skill` prints a compatibility warning: update the plugin (or
+the binary) rather than trusting stale instructions. You can force the check explicitly:
 
 ```sh
 telex copilot skill --plugin-version <your-plugin-version>
@@ -285,6 +287,7 @@ binary. Before relying on specific syntax, run:
 
 ```sh
 telex --version
+telex --json version
 telex copilot skill
 telex copilot --help
 telex copilot attach --help

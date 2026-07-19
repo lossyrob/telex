@@ -18,8 +18,8 @@
       },
       {
         "type": "command",
-        "powershell": "telex --json copilot drain",
-        "bash": "telex --json copilot drain",
+        "powershell": "& (Join-Path $env:COPILOT_PLUGIN_ROOT 'drain-hook.ps1')",
+        "bash": "sh \"$COPILOT_PLUGIN_ROOT/drain-hook.sh\"",
         "timeoutSec": 30
       }
     ]

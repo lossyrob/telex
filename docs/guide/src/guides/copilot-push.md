@@ -118,8 +118,10 @@ the full artifact, timeout, recovery, and re-arm procedure.
 
 ## Compatibility
 
-`telex copilot skill` prints the installed version, the bridge protocol version,
-and the minimum compatible plugin version, and warns if the plugin is older than
-the binary supports. Release install scripts pin the plugin and binary to the same
-tag. The plugin shape is validated against a specific Copilot CLI version; see the
+`telex copilot skill` prints the installed version and binary build identifier, the
+bridge protocol version, and the minimum compatible plugin version, and warns if the
+plugin is older than the binary supports. `telex --version` includes the same build
+identifier, while `telex --json version` exposes it as `version.build_id`, so
+same-semver binaries remain distinguishable. Release install scripts pin the plugin
+and binary to the same tag. The plugin shape is validated against a specific Copilot CLI version; see the
 [acceptance matrix](https://github.com/lossyrob/telex/blob/main/docs/design/copilot-plugin-validation.md).
