@@ -1,0 +1,29 @@
+{
+  "message": {
+    "id": 2,
+    "thread_id": 2,
+    "parent_id": null,
+    "from_addr": "attention:rob",
+    "to_addr": "operator:rob",
+    "cc": null,
+    "kind": "operator-station-spike.escalation",
+    "attention": "interrupt",
+    "requires_disposition": true,
+    "subject": "Human decision required: Rollout window",
+    "body": "Which rollout day should be selected?",
+    "metadata": "{\"extensions\":{\"operator-station-spike\":\"urn:telex:experimental:operator-station-spike:v1\"},\"ext\":{\"operator-station-spike\":{\"sourceMessages\":[{\"id\":1,\"threadId\":1,\"from\":\"worker:builder\",\"to\":\"attention:rob\",\"subject\":\"Rollout-window decision\",\"sentAtMs\":1784453234925,\"storeFingerprint\":\"sha256:01c8339e141541a13c8a7df6a6f48610ff6aa0009d4b3373833e91b0026678ee\"}]}}}",
+    "sent_at_ms": 1784453349423,
+    "created_at_ms": 1784453349423
+  },
+  "dispositions": [],
+  "delivery": {
+    "delivered_to": "operator:rob",
+    "primary_to": "operator:rob",
+    "cc": [],
+    "delivery_role": "to",
+    "requires_disposition_for_current_recipient": true
+  },
+  "thread": [],
+  "additiveFixtureField": true
+}
+

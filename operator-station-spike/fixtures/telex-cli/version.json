@@ -1,0 +1,9 @@
+{
+  "version": {
+    "package_version": "0.1.0",
+    "supported_schema_min": 2,
+    "supported_schema_max": 2
+  },
+  "additiveFixtureField": "accepted"
+}
+

@@ -1,0 +1,96 @@
+{
+  "schema": "operator-station-spike.demo-evidence.v1",
+  "outcome": "complete",
+  "platform": "Windows",
+  "telexVersion": "0.1.0",
+  "storeFingerprint": "sha256:01c8339e141541a13c8a7df6a6f48610ff6aa0009d4b3373833e91b0026678ee",
+  "addresses": {
+    "worker": "worker:builder",
+    "ingress": "attention:rob",
+    "station": "operator:rob"
+  },
+  "attendance": {
+    "stationHealth": "armed",
+    "stationLiveWaiters": 1,
+    "stationPendingUnconsumed": 0,
+    "operatorHealth": "attended_push",
+    "operatorPendingUnconsumed": 0
+  },
+  "messages": {
+    "rawWorkerRequest": {
+      "id": 1,
+      "threadId": 1,
+      "from": "worker:builder",
+      "to": "attention:rob",
+      "kind": "decision-request",
+      "attention": "next-checkpoint",
+      "requiresDisposition": true
+    },
+    "humanEscalation": {
+      "id": 2,
+      "threadId": 2,
+      "from": "attention:rob",
+      "to": "operator:rob",
+      "kind": "operator-station-spike.escalation",
+      "attention": "interrupt",
+      "requiresDisposition": true
+    },
+    "stationHumanReply": {
+      "id": 3,
+      "threadId": 2,
+      "parentId": 2,
+      "from": "operator:rob",
+      "to": "attention:rob",
+      "kind": "operator-station-spike.human-reply",
+      "body": "Use Thursday. Avoid the Tuesday dependency freeze and notify the release owner before scheduling."
+    },
+    "routedWorkerOutcome": {
+      "id": 4,
+      "threadId": 1,
+      "parentId": 1,
+      "from": "attention:rob",
+      "to": "worker:builder",
+      "kind": "operator-station-spike.routed-outcome"
+    }
+  },
+  "dispositions": {
+    "rawWorkerRequest": [
+      "escalated",
+      "closed"
+    ],
+    "humanEscalation": [
+      "handled"
+    ]
+  },
+  "provenance": {
+    "namespace": "urn:telex:experimental:operator-station-spike:v1",
+    "sourceMessageId": 1,
+    "sourceThreadId": 1,
+    "sourceStoreFingerprintMatched": true,
+    "rawAndMediatedThreadsDistinct": true
+  },
+  "restart": {
+    "stationRestarts": 3,
+    "stationSessionIdentityStable": true,
+    "unresolvedEscalationBackfilled": true,
+    "recentMediatedThreadBackfilled": true
+  },
+  "operatorAbsence": {
+    "detachObserved": true,
+    "stationRenderedUnattendedWarning": true,
+    "reattachObserved": true
+  },
+  "restartStress": {
+    "newerMessageCount": 1055,
+    "exceedsOneThousand": true,
+    "sentinelOutsideRecent200": true,
+    "sentinelRecoveredByExport": true,
+    "stationDetachAttachSimulated": true,
+    "passed": true
+  },
+  "notification": {
+    "toastApiReturnedSuccess": true,
+    "feedUpdateContinued": true,
+    "toastScreenshotCaptured": false
+  }
+}

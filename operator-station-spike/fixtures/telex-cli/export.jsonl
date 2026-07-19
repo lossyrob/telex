@@ -1,0 +1,2 @@
+{"message":{"id":2,"thread_id":2,"parent_id":null,"from_addr":"attention:rob","to_addr":"operator:rob","cc":null,"kind":"operator-station-spike.escalation","attention":"interrupt","requires_disposition":true,"subject":"Human decision required: Rollout window","body":"Which rollout day should be selected?","metadata":null,"sent_at_ms":1784453349423,"created_at_ms":1784453349423},"dispositions":[]}
+

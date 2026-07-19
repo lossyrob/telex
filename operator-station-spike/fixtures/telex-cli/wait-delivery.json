@@ -1,0 +1,25 @@
+{
+  "id": 2,
+  "thread_id": 2,
+  "parent_id": null,
+  "from": "attention:rob",
+  "to": "operator:rob",
+  "delivered_to": "operator:rob",
+  "primary_to": "operator:rob",
+  "cc": [],
+  "delivery_role": "to",
+  "kind": "operator-station-spike.escalation",
+  "attention": "interrupt",
+  "requires_disposition": true,
+  "requires_disposition_for_current_recipient": true,
+  "subject": "Human decision required: Rollout window",
+  "body": "Which rollout day should be selected?",
+  "sent_at_ms": 1784453349423,
+  "buffered_at_ms": 1784453349423,
+  "lease_epoch": 1,
+  "waiter_exit_ms": 1784453350000,
+  "additiveFixtureField": {
+    "accepted": true
+  }
+}
+

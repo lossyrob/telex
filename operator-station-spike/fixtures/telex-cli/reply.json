@@ -1,0 +1,13 @@
+{
+  "receipt": "delivered",
+  "id": 3,
+  "thread_id": 2,
+  "parent_id": 2,
+  "to": "attention:rob",
+  "from": "operator:rob",
+  "attention": "background",
+  "requires_disposition": false,
+  "occupied": true,
+  "additiveFixtureField": true
+}
+

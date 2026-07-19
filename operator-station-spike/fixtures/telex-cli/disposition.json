@@ -1,0 +1,11 @@
+{
+  "id": 3,
+  "message_id": 2,
+  "recipient": "operator:rob",
+  "state": "handled",
+  "note": "Station marked handled",
+  "by_principal": "robemanuele",
+  "at_ms": 1784454873898,
+  "additiveFixtureField": true
+}
+

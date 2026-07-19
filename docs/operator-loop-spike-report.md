@@ -1,0 +1,168 @@
+# Operator loop spike report
+
+## Outcome
+
+**Complete for issue #93's implementation node; not a builder viability pass.**
+
+The Windows spike demonstrated the complete mediated loop on a real isolated
+Telex store:
+
+`worker -> attention:rob -> operator agent -> operator:rob Station -> human reply -> operator agent -> worker`
+
+The Tauri Station is runnable, the reusable operator-agent assignment is in
+`operator-station-spike/OPERATOR-AGENT.md`, and the builder walkthrough is in
+`operator-station-spike/WALKTHROUGH.md`.
+
+## Demonstrated scenario
+
+| Leg | Evidence |
+|---|---|
+| Worker to operator agent | Message `#1`, raw thread `#1`, `worker:builder -> attention:rob` |
+| Operator escalation | Message `#2`, mediated thread `#2`, kind `operator-station-spike.escalation` |
+| Healthy Station attendance | `station_health=armed`, one live waiter, zero pending unconsumed after ingest/ack |
+| Feed and source provenance | `operator-station-spike/evidence/station-mediated-thread.png` |
+| Human reply authored in Station | Message `#3`, `operator:rob -> attention:rob`, mediated thread `#2` |
+| Route back to worker | Message `#4`, `attention:rob -> worker:builder`, raw thread `#1` |
+| Raw lifecycle | Message `#1` dispositions: `escalated`, then `closed` |
+| Human-facing disposition | Escalation `#2` marked `handled` through Station UI |
+| Restart continuity | Three Station restarts retained the same scoped session identity and backfilled the unresolved/recent thread |
+| >1,000-message cutoff | 1,055 newer FYI rows pushed an unresolved sentinel outside the 200 recent tail; export recovery still found it |
+| Operator absence | Station rendered `Operator agent: unattended`, then returned online after reattach |
+
+The sanitized record is
+`operator-station-spike/evidence/demo-transcript.json`.
+
+## What the spike built
+
+- A standalone Tauri v2 Windows application outside the Telex workspace.
+- One supervised application-owned `telex wait` courier at a time.
+- `wait -> read --full -> ingest/dedupe -> ack -> re-arm` delivery ordering.
+- Export-backed unresolved startup recovery plus a 200-message recent inbox.
+- Feed, mediated thread, reply, defer/handle/close, raw metadata, and source
+  provenance rendering.
+- Windows AUMID/toast emission that cannot block feed ingestion.
+- Address health for the Station and operator-agent ingress.
+- A versioned operator-agent assignment and bounded PowerShell smoke/stress
+  harness.
+
+## Experimental source convention
+
+Only this namespace is interpreted:
+
+```text
+extension key: operator-station-spike
+extension ID:  urn:telex:experimental:operator-station-spike:v1
+schema:        urn:telex:experimental:operator-station-spike:v1#escalation
+```
+
+Each source reference carries:
+
+- numeric message and thread ID;
+- captured sender, recipient, subject, and sent time;
+- full safe store fingerprint.
+
+The Station opens a numeric source only when the fingerprint matches the active
+store. Missing/mismatched identity renders `unavailable in current store`.
+Unknown namespaces remain raw metadata. No production `operator-station`
+namespace is reserved.
+
+## Key decisions and pivots
+
+1. **Inbox polling was rejected as live attendance.** External plan review
+   correctly identified that `attach + inbox` proves visibility but not delivery
+   consumption or healthy attendance. The implementation moved to a supervised
+   one-shot wait courier with ack only after application ingestion.
+2. **Unresolved recovery uses export, not actionable inbox limits.** Current
+   inbox limits apply before actionable filtering. Startup scans selected-address
+   JSONL export to retain every unresolved primary obligation plus a recent tail.
+3. **Source IDs are store-local.** The same fingerprint scopes local Station
+   state and numeric source resolution.
+4. **CLI additions are compatible.** Required fields/types fail visibly;
+   additive fields are tolerated. Captured fixtures document the tested private
+   shapes without declaring a public contract.
+
+## Temporary integration shortcuts
+
+- Every application operation is a `telex` subprocess.
+- Live delivery is a repeatedly supervised one-shot waiter.
+- Startup export materializes all selected-address history in the current CLI
+  process before the Station retains unresolved/recent rows.
+- SQLite path selection is process environment configuration; only its
+  fingerprint is persisted/displayed.
+- Local SQLite and Windows are the only exercised deployment.
+- Development launch uses `npm run tauri dev`; there is no installer, upgrade,
+  auto-start, signing, or production packaging.
+- The Station session UUID/high-water marker is local app-data state rather than
+  a shared Application Client facility.
+
+## Product observations
+
+- A distilled escalation with recommendation context is understandable without
+  opening the raw thread, while the source card preserves auditability.
+- Separating raw and mediated threads made the return path unambiguous: the
+  Station reply stayed in thread `#2`; the routed result returned in thread `#1`.
+- Delivery/ack health is important product state. `armed` and zero pending
+  unconsumed rows are materially stronger evidence than a message appearing in
+  a read-only feed.
+- Operator-agent occupancy is valuable human context. The explicit unattended
+  warning prevented quiet operator failure from looking like "no news."
+- Reply plus separate disposition is usable for the spike, but a production
+  Station should decide whether common reply/disposition combinations need one
+  higher-level operation.
+
+## Failures and limitations observed
+
+- The first live UI reply failed because the installed Telex 0.1.0 CLI does not
+  accept `reply --body-stdin`; the adapter changed to the supported
+  `--body-file -` stdin form.
+- The current wait payload does not include metadata, requiring a second
+  `read --full` call before ingest/ack.
+- The Windows toast API returned success and no toast error reached the UI, but
+  an OS toast screenshot was not captured.
+- Full export can become slow or memory-heavy on a large store.
+- Postgres, remote principals, spoofing resistance, noisy production traffic,
+  delayed/stale replies, and security hardening were not validated.
+- No production telemetry or log rotation subsystem was added; diagnostics are
+  bounded in memory.
+
+## Requirements for issue #12
+
+1. One supported application station identity and attach/detach/recovery
+   lifecycle, including stable store identity without exposing credentials or
+   paths.
+2. A streaming/callback/async-iterator receive API that yields message,
+   delivery-role context, metadata, and ack capability without a subprocess
+   courier and follow-up read.
+3. Explicit ack-after-ingest semantics, duplicate/redelivery identity, and
+   observable ack-pending/deaf states.
+4. A query/cursor for all unresolved obligations plus bounded recent history,
+   without full-store materialization or inbox pre-filter limit ambiguity.
+5. Typed send, reply, read-thread, and disposition operations with additive
+   response compatibility.
+6. Service/application identity and backend selection suitable for SQLite and
+   credentialed Postgres.
+7. Safe source-reference/store identity conventions that can be promoted,
+   revised, or rejected after the viability gate.
+8. Clear reply/disposition atomicity and recovery behavior when a human answers
+   after the originating session changes.
+
+## Success-criterion evidence matrix
+
+| Issue #93 criterion | Result | Evidence |
+|---|---|---|
+| Worker message reaches operator agent through durable address | demonstrated | Raw message `#1`, push-attended `attention:rob` |
+| Human escalation is understandable and preserves provenance | demonstrated | Escalation `#2`, source card/screenshot, metadata fixture |
+| Desktop feed and Windows notification | demonstrated with caveat | Feed screenshot; toast API success, no OS screenshot |
+| Station reply reaches operator agent and routes back | demonstrated | Messages `#3` and `#4` |
+| Raw and mediated threads remain separately auditable | demonstrated | Thread IDs `#1` and `#2`, dispositions in transcript |
+| Restart preserves unresolved/recent conversation | demonstrated | Stable Station identity across three restarts and UI backfill |
+| Old unresolved obligation survives >1,000 newer IDs | demonstrated | Stress harness: 1,055 FYI rows, sentinel absent from recent 200 and recovered by export |
+| Report separates value from temporary integration | demonstrated | This report's observations, shortcuts, and #12 requirements |
+| Builder can launch viability gate without implementation | demonstrated | README, walkthrough, assignment, harness, fixtures |
+
+## Viability gate observations
+
+Append future builder observations here with date, scenario, notification volume,
+operator-agent behavior, reply quality, defects, and whether terminal-tab
+polling was reduced. This section is an evidence log; appending an observation
+does not promote the experimental namespace or pass the gate automatically.
