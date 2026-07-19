@@ -1638,8 +1638,8 @@ installed in that session.
 from the installed binary (`telex copilot skill` for the Copilot push path, `telex skill`
 for the generic pull path), and names command `--help` as the syntax source of truth. The
 installed binary owns the detail: `telex copilot skill` prints the version-matched Copilot
-workflow from an embedded `COPILOT.md`, headed by `telex v..`, the Copilot **bridge
-protocol** version, and the **minimum compatible plugin** version. It accepts
+workflow from an embedded `COPILOT.md`, headed by `telex v..`, the binary build
+identifier, the Copilot **bridge protocol** version, and the **minimum compatible plugin** version. It accepts
 `--plugin-version` (or `TELEX_PLUGIN_VERSION`) and prints a clear compatibility **warning**
 when the plugin is older than the binary supports. The detailed Copilot section in the root
 `SKILL.md` is likewise reduced to a pointer at `telex copilot skill`, so the Copilot flow
@@ -1653,6 +1653,13 @@ small, defers to the binary, and embeds no detailed recipes. `telex copilot skil
 longer dumps the whole generic skill; agents wanting the generic/pull reference still run
 `telex skill`. The plugin's own version is the one version fact the bootstrap legitimately
 carries (it matches `plugin.json`), used only to drive the compatibility check.
+The binary's source build identifier is also reported by `telex --version` and
+`telex --json version`, so official same-semver builds from different commits remain
+distinguishable without moving compatibility policy into the plugin. Release builds
+verify this identifier against `GITHUB_SHA`; source builds without Git metadata may
+report `unknown`. Git fallback is accepted only when the canonical Git top-level is
+the Telex manifest directory, so an unrelated ancestor repository cannot lend a false
+identity. The value is diagnostic rather than an attestation.
 
 ## 0041 — On-deliver re-delivery is re-provision-triggered, not timer-until-ack
 
@@ -1795,18 +1802,23 @@ durable state, then send:
   lower-bound advance, not treated as queued) nor a transient failure (no fast re-push, no error
   log), does not increment the degraded-status attempt counter, and is held for a
   deferred backstop. Invariant: `HEARTBEAT_INTERVAL <= deferred backstop < accepted backstop`.
-- **Turn-stop drains via an ungated `agentStop` hook.** A dedicated `agentStop` hook entry runs
-  `telex copilot drain --session <id>`, independent of `TELEX_TURN_GUARD` and its nudge cap, with
-  its own `TELEX_COPILOT_DRAIN` off-switch. It sends a `DrainDeferred` request; the daemon clears
-  the deferred skip for the session's on-deliver members (leaving accepted attempts untouched) and
-  re-runs the existing on-deliver sweep. The sweep re-fetches `fetch_wait_candidates`, so a message
-  acked before the drain is no longer a candidate and is skipped. The drain re-sweeps every
+- **Turn-stop drains via an ungated `agentStop` hook.** A dedicated `agentStop` hook entry runs a
+  small plugin launcher that forwards the hook payload to `telex --json copilot drain`, independent
+  of `TELEX_TURN_GUARD` and its nudge cap, with its own `TELEX_COPILOT_DRAIN` off-switch. Success,
+  no-op, and the off-switch produce neutral hook output so the drain entry cannot cancel an earlier
+  turn-guard block. It sends a
+  `DrainDeferred` request; the daemon clears the deferred skip for the session's on-deliver members
+  (leaving accepted attempts untouched) and re-runs the existing on-deliver sweep. The sweep
+  re-fetches `fetch_wait_candidates`, so a message acked before the drain is no longer a candidate
+  and is skipped. The drain re-sweeps every
   on-deliver member of the session (matched by `session_id` across stores, so a named-backend
   session still drains), which closes a deferred-vs-drain inflight race and opportunistically
   re-attempts backstop-elapsed messages; the only zero-work fast path is the client-side no-bridge
-  check. It returns before the sweeps complete and has a client-side IPC deadline below the hook
-  timeout, so running it on every turn-stop never blocks the turn. The daemon stays harness-neutral:
-  it re-runs a generic sweep on request; "busy/idle" lives entirely in the bridge.
+  check. Once the binary command starts, it returns before the sweeps complete and has a client-side
+  IPC deadline below the hook timeout, preserving fail-open runtime/daemon behavior. A missing or
+  stale PATH binary fails before dispatch, so the launcher emits an actionable Copilot `block`
+  decision instead of silently skipping the required command. The daemon stays harness-neutral: it
+  re-runs a generic sweep on request; "busy/idle" lives entirely in the bridge.
 
 **Consequences.** The stale queued-turn class is removed: a busy non-`interrupt` message is not
 queued behind the current turn, and if it is consumed before turn-stop the drain's durable

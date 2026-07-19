@@ -206,6 +206,9 @@ fn source_metadata_invocation_grammar_is_stable() {
     let v: Value = serde_json::from_slice(&output.stdout).expect("valid version JSON");
     // Fields consumed by src/commands/upgrade.rs::source_metadata.
     assert!(v["version"]["package_version"].is_string());
+    assert!(v["version"]["build_id"]
+        .as_str()
+        .is_some_and(|build_id| !build_id.is_empty()));
     assert!(v["version"]["supported_schema_min"].is_number());
     assert!(v["version"]["supported_schema_max"].is_number());
     assert!(v["daemon_metadata"]["protocol_version"]["major"].is_number());
@@ -214,6 +217,269 @@ fn source_metadata_invocation_grammar_is_stable() {
     assert!(v["copilot"]["bridge_protocol"].is_number());
     assert!(v["copilot"]["min_compatible_plugin_version"].is_string());
     std::fs::remove_dir_all(&tmp).ok();
+}
+
+#[test]
+fn version_flag_distinguishes_same_semver_builds() {
+    let output = Command::new(telex_bin())
+        .arg("--version")
+        .output()
+        .expect("run telex --version");
+    assert!(
+        output.status.success(),
+        "telex --version exited with failure: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        text.contains(env!("CARGO_PKG_VERSION")),
+        "version flag must retain the package version: {text:?}"
+    );
+    assert!(
+        text.contains(env!("TELEX_BUILD_ID")),
+        "version flag must expose the build identifier: {text:?}"
+    );
+}
+
+#[test]
+fn build_id_rebuilds_when_packed_branch_gains_a_loose_ref() {
+    let root =
+        std::env::temp_dir().join(format!("telex-packed-ref-build-id-{}", std::process::id()));
+    std::fs::remove_dir_all(&root).ok();
+    std::fs::create_dir_all(root.join("src")).expect("create fixture src");
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"build-id-fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .expect("write fixture Cargo.toml");
+    std::fs::write(root.join("build.rs"), read("build.rs")).expect("write fixture build.rs");
+    std::fs::write(
+        root.join("src").join("main.rs"),
+        "fn main() { println!(\"{}\", env!(\"TELEX_BUILD_ID\")); }\n",
+    )
+    .expect("write fixture main");
+    std::fs::write(root.join("tracked.txt"), "one\n").expect("write fixture source");
+
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .expect("run fixture git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+    git(&["init", "--quiet"]);
+    git(&["config", "user.email", "telex-test@example.invalid"]);
+    git(&["config", "user.name", "Telex Test"]);
+    git(&["add", "."]);
+    git(&["commit", "--quiet", "-m", "initial"]);
+
+    let symbolic_ref = String::from_utf8(git(&["symbolic-ref", "HEAD"]).stdout)
+        .expect("symbolic ref utf8")
+        .trim()
+        .to_string();
+    git(&["pack-refs", "--all", "--prune"]);
+    let loose_ref = String::from_utf8(git(&["rev-parse", "--git-path", &symbolic_ref]).stdout)
+        .expect("loose ref path utf8");
+    assert!(
+        !root.join(loose_ref.trim()).exists(),
+        "fixture branch ref should start packed-only"
+    );
+
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let target = root.join("target");
+    let run = || {
+        let output = Command::new(&cargo)
+            .args(["run", "--quiet"])
+            .current_dir(&root)
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("TELEX_BUILD_ID")
+            .env_remove("GITHUB_SHA")
+            .output()
+            .expect("run fixture cargo");
+        assert!(
+            output.status.success(),
+            "fixture cargo run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("fixture output utf8")
+            .trim()
+            .to_string()
+    };
+
+    let first = run();
+    std::fs::write(root.join("tracked.txt"), "two\n").expect("advance fixture source");
+    git(&["add", "tracked.txt"]);
+    git(&["commit", "--quiet", "-m", "advance"]);
+    assert!(
+        root.join(loose_ref.trim()).exists(),
+        "advancing a packed branch should create its loose ref"
+    );
+    let second = run();
+    let head = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout)
+        .expect("head utf8")
+        .trim()
+        .to_string();
+
+    assert_ne!(
+        first, second,
+        "build ID must change when the branch advances"
+    );
+    assert_eq!(second, head, "rebuilt binary must report the advanced HEAD");
+    std::fs::remove_dir_all(root).ok();
+}
+
+#[test]
+fn build_id_ignores_an_unrelated_ancestor_repository() {
+    let outer = std::env::temp_dir().join(format!(
+        "telex-unrelated-ancestor-build-id-{}",
+        std::process::id()
+    ));
+    std::fs::remove_dir_all(&outer).ok();
+    std::fs::create_dir_all(&outer).expect("create outer repo");
+
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&outer)
+            .output()
+            .expect("run outer fixture git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "--quiet"]);
+    git(&["config", "user.email", "telex-test@example.invalid"]);
+    git(&["config", "user.name", "Telex Test"]);
+    std::fs::write(outer.join("unrelated.txt"), "ancestor\n").expect("write outer source");
+    git(&["add", "unrelated.txt"]);
+    git(&["commit", "--quiet", "-m", "unrelated ancestor"]);
+
+    let nested = outer.join("metadata-less-telex");
+    std::fs::create_dir_all(nested.join("src")).expect("create nested fixture");
+    std::fs::write(
+        nested.join("Cargo.toml"),
+        "[package]\nname = \"nested-build-id-fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .expect("write nested Cargo.toml");
+    std::fs::write(nested.join("build.rs"), read("build.rs")).expect("write nested build.rs");
+    std::fs::write(
+        nested.join("src").join("main.rs"),
+        "fn main() { println!(\"{}\", env!(\"TELEX_BUILD_ID\")); }\n",
+    )
+    .expect("write nested main");
+
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = Command::new(cargo)
+        .args(["run", "--quiet"])
+        .current_dir(&nested)
+        .env("CARGO_TARGET_DIR", nested.join("target"))
+        .env_remove("TELEX_BUILD_ID")
+        .env_remove("GITHUB_SHA")
+        .output()
+        .expect("run nested fixture cargo");
+    assert!(
+        output.status.success(),
+        "nested fixture cargo run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("nested fixture output utf8")
+            .trim(),
+        "unknown",
+        "an unrelated ancestor repository must not supply Telex build identity"
+    );
+
+    std::fs::remove_dir_all(outer).ok();
+}
+
+#[test]
+fn build_id_refreshes_when_source_becomes_a_standalone_repository() {
+    let root = std::env::temp_dir().join(format!(
+        "telex-build-id-ownership-transition-{}",
+        std::process::id()
+    ));
+    let target = std::env::temp_dir().join(format!(
+        "telex-build-id-ownership-transition-target-{}",
+        std::process::id()
+    ));
+    std::fs::remove_dir_all(&root).ok();
+    std::fs::remove_dir_all(&target).ok();
+    std::fs::create_dir_all(root.join("src")).expect("create transition fixture");
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"ownership-transition-fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .expect("write transition Cargo.toml");
+    std::fs::write(root.join("build.rs"), read("build.rs")).expect("write transition build.rs");
+    std::fs::write(
+        root.join("src").join("main.rs"),
+        "fn main() { println!(\"{}\", env!(\"TELEX_BUILD_ID\")); }\n",
+    )
+    .expect("write transition main");
+
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let run = || {
+        let output = Command::new(&cargo)
+            .args(["run", "--quiet"])
+            .current_dir(&root)
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("TELEX_BUILD_ID")
+            .env_remove("GITHUB_SHA")
+            .output()
+            .expect("run transition fixture cargo");
+        assert!(
+            output.status.success(),
+            "transition fixture cargo run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("transition output utf8")
+            .trim()
+            .to_string()
+    };
+
+    assert_eq!(run(), "unknown");
+
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .expect("run transition fixture git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+    git(&["init", "--quiet"]);
+    git(&["config", "user.email", "telex-test@example.invalid"]);
+    git(&["config", "user.name", "Telex Test"]);
+    git(&["add", "Cargo.toml", "build.rs", "src/main.rs"]);
+    git(&["commit", "--quiet", "-m", "initialize source repository"]);
+    let head = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout)
+        .expect("transition head utf8")
+        .trim()
+        .to_string();
+
+    assert_eq!(
+        run(),
+        head,
+        "creating manifest-local Git metadata must invalidate the prior unknown build"
+    );
+    std::fs::remove_dir_all(root).ok();
+    std::fs::remove_dir_all(target).ok();
 }
 
 #[test]
@@ -318,6 +584,32 @@ fn version_json_exposes_the_upgrade_contract_surface() {
         v["version"]["package_version"].is_string(),
         "version.package_version must be a string"
     );
+    let build_id = v["version"]["build_id"]
+        .as_str()
+        .expect("version.build_id must be a string");
+    assert!(
+        !build_id.is_empty(),
+        "version.build_id must be a non-empty string"
+    );
+    assert_eq!(
+        build_id,
+        env!("TELEX_BUILD_ID"),
+        "version.build_id must identify the binary compiled for this test"
+    );
+    let text_output = Command::new(&bin)
+        .args(["--text", "version"])
+        .output()
+        .expect("run telex version");
+    assert!(
+        text_output.status.success(),
+        "telex version exited with failure: {}",
+        String::from_utf8_lossy(&text_output.stderr)
+    );
+    let text = String::from_utf8_lossy(&text_output.stdout);
+    assert!(
+        text.lines().any(|line| line == format!("build {build_id}")),
+        "telex version text must expose the JSON build id; output was {text:?}"
+    );
     // The install root is always a concrete path; assert a non-null string, not mere
     // key presence (a JSON null would satisfy is_some but break upgrade tooling).
     assert!(
@@ -412,6 +704,17 @@ fn release_workflow_enforces_the_version_and_publish_guards() {
     assert!(
         release.contains("needs: [verify-version, build]"),
         "publish must depend on [verify-version, build]"
+    );
+
+    assert!(
+        release.contains("TELEX_BUILD_ID: ${{ github.sha }}"),
+        "release builds must embed the exact release commit as the build identifier"
+    );
+    assert!(
+        release.contains("Verify release binary build identity")
+            && release.contains("metadata.version.build_id")
+            && release.contains("does not match GITHUB_SHA"),
+        "release workflow must reject an archive candidate whose binary build_id is not GITHUB_SHA"
     );
 
     // The [package].version the guard reads must be present and semver-shaped; if a

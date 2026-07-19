@@ -268,11 +268,26 @@ Then run `extensions_reload`. To end fallback without returning to push, run
 
 ## Version and compatibility
 
-The header printed above this document reports the installed `telex` version, the
-Copilot **bridge protocol** version, and the **minimum compatible plugin** version. If
-your plugin is older than the minimum, `telex copilot skill` prints a compatibility
-warning: update the plugin (or the binary) rather than trusting stale instructions. You
-can force the check explicitly:
+The header printed above this document reports the installed `telex` version and
+source build identifier, the Copilot **bridge protocol** version, and the **minimum
+compatible plugin** version. `telex --version` also includes the build identifier,
+and `telex --json version` exposes it as `version.build_id`. Official release builds
+are gated so this value equals the release commit; source builds without Git metadata
+may report `unknown`. Git fallback is used only for a standalone Telex checkout whose
+Git top-level is the manifest directory, never from an unrelated ancestor repository.
+The identifier is diagnostic, not cryptographic provenance.
+
+If the drain hook reports plugin/binary skew, use `telex --json version` to inspect
+`version.current_exe`, plus `Get-Command telex` on Windows or `command -v telex` on
+POSIX, and confirm the versioned launcher wins PATH precedence over stale shims such
+as a Cargo-installed copy. Reinstall the plugin and binary from the same release,
+then restart Copilot. If intentionally rolling back the binary, roll back the plugin
+to the same release first. `TELEX_COPILOT_DRAIN=off` is a temporary escape hatch,
+not a completed repair.
+
+If your plugin is older than the minimum, `telex copilot skill` prints a compatibility
+warning: update the plugin (or the binary) rather than trusting stale instructions.
+You can force the check explicitly:
 
 ```sh
 telex copilot skill --plugin-version <your-plugin-version>
@@ -285,6 +300,7 @@ binary. Before relying on specific syntax, run:
 
 ```sh
 telex --version
+telex --json version
 telex copilot skill
 telex copilot --help
 telex copilot attach --help

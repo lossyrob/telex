@@ -1622,6 +1622,7 @@ fn render_copilot_skill(plugin_version: Option<&str>) -> String {
     out.push_str(&format!(
         "telex v{DAEMON_VERSION} -- Copilot CLI skill (version-matched)\n"
     ));
+    out.push_str(&format!("binary build: {}\n", crate::install::BUILD_ID));
     out.push_str(&format!(
         "build: backends [{}]; entra auth {entra}\n",
         crate::backend::available_kinds().join(", ")
@@ -2804,6 +2805,7 @@ mod tests {
     fn copilot_skill_render_is_version_headed_and_workflow_complete() {
         let doc = render_copilot_skill(None);
         assert!(doc.contains(&format!("telex v{DAEMON_VERSION}")));
+        assert!(doc.contains(&format!("binary build: {}", crate::install::BUILD_ID)));
         assert!(doc.contains(&format!(
             "copilot bridge protocol: v{COPILOT_BRIDGE_PROTOCOL}"
         )));

@@ -449,19 +449,24 @@ queued turn arrived later as stale, already-handled work. Issue #65 replaces "qu
   (invariant `HEARTBEAT_INTERVAL <= deferred < accepted backstop`). `telex status` reports a
   member's `push_deferred_count`, so deferred is diagnosable distinctly from accepted-unacked and
   failed-transient.
-- **Turn-stop drains it.** A dedicated `agentStop` hook entry runs `telex copilot drain --session
-  <id>`, independent of `TELEX_TURN_GUARD` / its nudge cap, with its own `TELEX_COPILOT_DRAIN`
-  off-switch. It sends `DrainDeferred`; the daemon clears the deferred skip for the session's
-  on-deliver members (leaving accepted attempts untouched, so a genuinely queued turn is not
+- **Turn-stop drains it.** A dedicated `agentStop` hook entry runs a small plugin launcher that
+  forwards the hook payload to `telex --json copilot drain`, independent of `TELEX_TURN_GUARD` /
+  its nudge cap, with its own `TELEX_COPILOT_DRAIN` off-switch. It sends `DrainDeferred`; the daemon
+  clears the deferred skip for the session's on-deliver members (leaving accepted attempts
+  untouched, so a genuinely queued turn is not
   duplicated) and re-runs the on-deliver sweep. The sweep re-fetches `fetch_wait_candidates`, so a
   message acked before the drain is no longer a candidate and is skipped — the repro guarantee. The
   drain re-sweeps **every** on-deliver member of the session (matched by `session_id` across stores,
   so a named-`--backend`/`--db` session still drains), which closes a deferred-vs-drain inflight race
   and opportunistically re-attempts messages whose backstop elapsed; the only zero-work fast path is
   client-side (`telex copilot drain` skips the daemon round-trip when the session has no bridge
-  registry). The drain returns before the sweeps complete and has a client-side deadline below the
-  hook timeout, so it never blocks turn-stop. The daemon stays harness-neutral: it re-runs a generic
-  sweep on request; "busy/idle" lives only in the bridge.
+  registry). Once the binary command starts, the drain returns before the sweeps complete and has a
+  client-side deadline below the hook timeout, so runtime/daemon failures remain fail-open. Success,
+  no-op, and the explicit drain off-switch emit neutral hook output so they cannot cancel the
+  turn-guard command's independent block. Before dispatch, a missing or stale PATH binary blocks
+  with actionable plugin/binary-skew and PATH-winner guidance rather than failing silently. The
+  daemon stays harness-neutral: it re-runs a generic sweep on request;
+  "busy/idle" lives only in the bridge.
 - **No loss.** If the drain hook is missed or races a still-busy bridge, the deferred backstop +
   heartbeat sweep re-attempt within a bounded delay (a re-defer while busy is cheap and injects no
   stale turn); re-provision (reattach / `/clear` reload) still re-delivers unacked backlog. Durable

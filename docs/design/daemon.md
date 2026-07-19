@@ -1764,8 +1764,10 @@ misleading an agent (see
   intentionally **not** a copy of the canonical skill; a test asserts it stays a thin bootstrap
   that defers to the binary and embeds no detailed recipes (superseding the former
   byte-identical mirror).
-- **Invariant:** the detailed, version-accurate behavior is owned by the binary; a plugin/binary
-  mismatch is surfaced by `telex copilot skill` rather than trusted silently.
+- **Invariant:** the detailed, version-accurate behavior and compatibility policy are owned by the
+  binary. `telex copilot skill` provides the explicit compatibility check; the plugin's drain
+  launchers only surface that the required binary-owned command could not start and direct the
+  operator to the versioned upgrade path rather than silently skipping it.
 
 ## 16. Minimal upgrade floor
 

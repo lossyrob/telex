@@ -16,7 +16,12 @@ use crate::profiles::BackendProfile;
 #[derive(Parser)]
 #[command(
     name = "telex",
-    version,
+    version = concat!(
+        env!("CARGO_PKG_VERSION"),
+        " (build ",
+        env!("TELEX_BUILD_ID"),
+        ")"
+    ),
     about = "A CLI-first message fabric for AI agent sessions",
     long_about = "Telex lets ephemeral agent sessions attach to durable addresses, exchange \
 typed operational messages with answerback liveness, and leave an auditable disposition record. \

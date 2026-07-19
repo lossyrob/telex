@@ -23,6 +23,7 @@ pub async fn version(ctx: &Ctx, args: VersionArgs) -> Result<i32> {
     });
     emit(ctx.fmt, &out, || {
         println!("telex {}", info.package_version);
+        println!("build {}", info.build_id);
         println!("exe {}", info.current_exe);
         println!("install_root {}", info.install.root);
         println!(
@@ -474,6 +475,10 @@ fn source_metadata(source: &Path, root: &Path) -> Result<install::SourceMetadata
             source.display()
         )
     })?;
+    parse_source_metadata(&value)
+}
+
+fn parse_source_metadata(value: &serde_json::Value) -> Result<install::SourceMetadata> {
     let version = value
         .get("version")
         .ok_or_else(|| anyhow!("source version JSON missing `version` object"))?;
@@ -488,6 +493,12 @@ fn source_metadata(source: &Path, root: &Path) -> Result<install::SourceMetadata
         .ok_or_else(|| anyhow!("source version JSON missing `copilot` object"))?;
     Ok(install::SourceMetadata {
         package_version: required_str(version, "package_version")?.to_string(),
+        build_id: version
+            .get("build_id")
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or(install::UNKNOWN_BUILD_ID)
+            .to_string(),
         schema_min: required_i64(version, "supported_schema_min")?,
         schema_max: required_i64(version, "supported_schema_max")?,
         protocol_major: required_u16(protocol, "major")?,
@@ -661,5 +672,37 @@ mod tests {
             !stdout.contains("SENTINEL_LEAK_9x7q"),
             "GITHUB_TOKEN leaked to the probe child: {stdout:?}"
         );
+    }
+
+    #[test]
+    fn source_metadata_intentionally_maps_legacy_missing_build_id_to_unknown() {
+        let value = serde_json::json!({
+            "version": {
+                "package_version": "0.1.0",
+                "supported_schema_min": 2,
+                "supported_schema_max": 2
+            },
+            "daemon_metadata": {
+                "protocol_version": {
+                    "major": 1,
+                    "minor": 0
+                },
+                "required_capabilities": ["send"]
+            },
+            "copilot": {
+                "bridge_protocol": 1,
+                "min_compatible_plugin_version": "0.1.0"
+            }
+        });
+
+        // An older candidate cannot report a field it predates. Preserve that
+        // first-hop uncertainty explicitly rather than inventing build identity.
+        let metadata = parse_source_metadata(&value).unwrap();
+        assert_eq!(metadata.build_id, install::UNKNOWN_BUILD_ID);
+
+        let mut current = value;
+        current["version"]["build_id"] = serde_json::json!("candidate-build");
+        let metadata = parse_source_metadata(&current).unwrap();
+        assert_eq!(metadata.build_id, "candidate-build");
     }
 }

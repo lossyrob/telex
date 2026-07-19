@@ -118,8 +118,20 @@ the full artifact, timeout, recovery, and re-arm procedure.
 
 ## Compatibility
 
-`telex copilot skill` prints the installed version, the bridge protocol version,
-and the minimum compatible plugin version, and warns if the plugin is older than
-the binary supports. Release install scripts pin the plugin and binary to the same
-tag. The plugin shape is validated against a specific Copilot CLI version; see the
+`telex copilot skill` prints the installed version and source build identifier, the
+bridge protocol version, and the minimum compatible plugin version, and warns if the
+plugin is older than the binary supports. `telex --version` includes the same build
+identifier, while `telex --json version` exposes it as `version.build_id`. Published
+release binaries are gated to report the release commit; source builds without Git
+metadata may report `unknown`. Git fallback is accepted only for a standalone Telex
+checkout, not an unrelated ancestor repository, and the value is diagnostic rather
+than an attestation.
+
+If the drain hook reports skew, inspect `version.current_exe` plus `Get-Command telex`
+or `command -v telex`, reinstall the plugin and binary from the same release, and make
+the versioned launcher precede stale shims on PATH before restarting Copilot. A binary
+rollback must be paired with the plugin from the same release.
+
+Release install scripts pin the plugin and binary to the same tag. The plugin shape is
+validated against a specific Copilot CLI version; see the
 [acceptance matrix](https://github.com/lossyrob/telex/blob/main/docs/design/copilot-plugin-validation.md).

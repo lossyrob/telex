@@ -11,6 +11,8 @@ use std::process::{Command, Stdio};
 
 pub const LAUNCHER_GUARD_ENV: &str = "TELEX_LAUNCHER_ACTIVE";
 pub const INSTALL_ROOT_ENV: &str = "TELEX_INSTALL_ROOT";
+pub const UNKNOWN_BUILD_ID: &str = "unknown";
+pub const BUILD_ID: &str = env!("TELEX_BUILD_ID");
 pub const SUPPORTED_SCHEMA_MIN: i64 = 2;
 pub const SUPPORTED_SCHEMA_MAX: i64 = 2;
 #[cfg(feature = "sqlite")]
@@ -31,6 +33,8 @@ pub struct InstallLayout {
 pub struct VersionManifest {
     pub tag: String,
     pub package_version: String,
+    #[serde(default = "unknown_build_id")]
+    pub build_id: String,
     pub binary: String,
     pub installed_at_ms: i64,
     pub source: String,
@@ -48,6 +52,7 @@ pub struct VersionManifest {
 #[derive(Debug, Clone)]
 pub struct SourceMetadata {
     pub package_version: String,
+    pub build_id: String,
     pub schema_min: i64,
     pub schema_max: i64,
     pub protocol_major: u16,
@@ -60,6 +65,7 @@ pub struct SourceMetadata {
 #[derive(Debug, Clone, Serialize)]
 pub struct VersionInfo {
     pub package_version: &'static str,
+    pub build_id: &'static str,
     pub current_exe: String,
     pub launcher_guard_env: &'static str,
     pub supported_schema_min: i64,
@@ -257,6 +263,7 @@ pub fn version_info(root: Option<PathBuf>) -> Result<VersionInfo> {
         .and_then(|tag| read_manifest(&layout, tag).ok());
     Ok(VersionInfo {
         package_version: env!("CARGO_PKG_VERSION"),
+        build_id: BUILD_ID,
         current_exe: exe.to_string_lossy().into_owned(),
         launcher_guard_env: LAUNCHER_GUARD_ENV,
         supported_schema_min: SUPPORTED_SCHEMA_MIN,
@@ -482,6 +489,7 @@ fn current_manifest(
 ) -> VersionManifest {
     let source_metadata = source_metadata.unwrap_or_else(|| SourceMetadata {
         package_version: env!("CARGO_PKG_VERSION").to_string(),
+        build_id: BUILD_ID.to_string(),
         schema_min: SUPPORTED_SCHEMA_MIN,
         schema_max: SUPPORTED_SCHEMA_MAX,
         protocol_major: crate::daemon_ipc::PROTOCOL_MAJOR,
@@ -497,6 +505,7 @@ fn current_manifest(
     VersionManifest {
         tag: tag.to_string(),
         package_version: source_metadata.package_version,
+        build_id: source_metadata.build_id,
         binary: binary.to_string_lossy().into_owned(),
         installed_at_ms: crate::model::now_ms(),
         source: source.to_string(),
@@ -509,6 +518,10 @@ fn current_manifest(
         min_compatible_plugin_version: source_metadata.min_compatible_plugin_version,
         previous_tag,
     }
+}
+
+fn unknown_build_id() -> String {
+    UNKNOWN_BUILD_ID.to_string()
 }
 
 fn remove_version_dir(path: &Path, force: bool) -> Result<()> {
@@ -663,6 +676,62 @@ mod tests {
             .collect::<BTreeSet<_>>();
         assert!(kept.contains("v1"));
         assert!(kept.contains("v2"));
+
+        std::fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn manifest_persists_build_id_and_maps_legacy_missing_value_to_unknown() {
+        let root = temp_root("manifest-build-id");
+        let layout = layout_for_root(&root);
+        let src = source_binary(&root, "src");
+        install_binary(&layout, "v1", &src, "test", false, None).unwrap();
+
+        let manifest_path = layout.versions_dir.join("v1").join("manifest.json");
+        let manifest = read_manifest(&layout, "v1").unwrap();
+        assert_eq!(manifest.build_id, BUILD_ID);
+        assert!(!manifest.build_id.is_empty());
+
+        let candidate = source_binary(&root, "candidate");
+        let candidate_metadata = SourceMetadata {
+            package_version: "9.9.9".to_string(),
+            build_id: "candidate-build".to_string(),
+            schema_min: SUPPORTED_SCHEMA_MIN,
+            schema_max: SUPPORTED_SCHEMA_MAX,
+            protocol_major: crate::daemon_ipc::PROTOCOL_MAJOR,
+            protocol_minor: crate::daemon_ipc::PROTOCOL_MINOR,
+            required_capabilities: Vec::new(),
+            copilot_bridge_protocol: crate::commands::copilot::COPILOT_BRIDGE_PROTOCOL,
+            min_compatible_plugin_version: crate::commands::copilot::MIN_COMPATIBLE_PLUGIN_VERSION
+                .to_string(),
+        };
+        install_binary(
+            &layout,
+            "v2",
+            &candidate,
+            "candidate",
+            false,
+            Some(candidate_metadata),
+        )
+        .unwrap();
+        assert_eq!(
+            read_manifest(&layout, "v2").unwrap().build_id,
+            "candidate-build"
+        );
+
+        let mut value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&manifest_path).unwrap()).unwrap();
+        value.as_object_mut().unwrap().remove("build_id");
+        atomic_write(
+            &manifest_path,
+            &serde_json::to_string_pretty(&value).unwrap(),
+        )
+        .unwrap();
+
+        // Legacy writers omit build_id. Reading that manifest as unknown is the
+        // intentional cross-version contract; do not infer identity from the path.
+        let legacy = read_manifest(&layout, "v1").unwrap();
+        assert_eq!(legacy.build_id, UNKNOWN_BUILD_ID);
 
         std::fs::remove_dir_all(root).ok();
     }
