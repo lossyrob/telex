@@ -150,6 +150,25 @@ pub struct SentEvent {
     pub accepted_at_ms: i64,
 }
 
+#[derive(Debug, Clone, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ReconciledStartup {
+    /// Prior runtimes that were still `running` and have now been marked `interrupted`.
+    pub runtime_session_ids: Vec<String>,
+    /// Attempts that were still unfinished and have now been failed as `runtime-interrupted`.
+    pub attempt_ids: Vec<String>,
+    /// Watches whose failure backoff/next-due were extended to fence a possibly surviving detector.
+    pub watch_ids: Vec<String>,
+}
+
+impl ReconciledStartup {
+    pub fn is_empty(&self) -> bool {
+        self.runtime_session_ids.is_empty()
+            && self.attempt_ids.is_empty()
+            && self.watch_ids.is_empty()
+    }
+}
+
 pub struct Registry {
     connection: Connection,
 }
@@ -711,6 +730,106 @@ impl Registry {
         })?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(Into::into)
+    }
+
+    /// Reconcile the wreckage of a Watcher runtime that died abruptly (no clean shutdown), so a
+    /// fresh runtime never inherits a `running` session row or an unfinished attempt. This runs
+    /// once at startup, after the scheduler file lock is held and before the new runtime row is
+    /// recorded, in a single transaction. Detector `state_json` and the `sent_events` ledger are
+    /// intentionally left untouched; only liveness bookkeeping and failure backoff change.
+    pub fn reconcile_interrupted_runtimes(&mut self) -> Result<ReconciledStartup> {
+        let now = now_ms();
+        let tx = self.connection.transaction()?;
+
+        let mut reconciled = ReconciledStartup::default();
+
+        // 1. Prior runtimes still marked running are interrupted.
+        {
+            let mut statement = tx.prepare(
+                "SELECT runtime_session_id FROM runtime_sessions WHERE status='running'",
+            )?;
+            let ids = statement.query_map([], |row| row.get::<_, String>(0))?;
+            for id in ids {
+                reconciled.runtime_session_ids.push(id?);
+            }
+        }
+        if !reconciled.runtime_session_ids.is_empty() {
+            let detail = json_text(&serde_json::json!({
+                "reason": "runtime-interrupted",
+                "detail": "prior Watcher runtime ended without a clean shutdown; reconciled at startup",
+            }))?;
+            tx.execute(
+                "UPDATE runtime_sessions SET status='interrupted', ended_at_ms=?1, detail_json=?2 \
+                 WHERE status='running'",
+                params![now, detail],
+            )?;
+        }
+
+        // 2. Attempts left unfinished become visible runtime-interrupted failures. We never invent
+        //    a receipt or an event commit: state_committed stays false and result/receipt are null.
+        let unfinished: Vec<(String, String)> = {
+            let mut statement =
+                tx.prepare("SELECT id, watch_id FROM attempts WHERE finished_at_ms IS NULL")?;
+            let rows = statement.query_map([], |row| {
+                Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+            })?;
+            rows.collect::<std::result::Result<Vec<_>, _>>()?
+        };
+        if !unfinished.is_empty() {
+            tx.execute(
+                "UPDATE attempts SET finished_at_ms=?1, outcome='runtime-interrupted', \
+                 state_committed=0, diagnostic=?2 WHERE finished_at_ms IS NULL",
+                params![
+                    now,
+                    "Watcher runtime was interrupted before this attempt finished; no send or state commit occurred"
+                ],
+            )?;
+        }
+        for (attempt_id, _) in &unfinished {
+            reconciled.attempt_ids.push(attempt_id.clone());
+        }
+
+        // 3. Each affected watch takes one failure and a next-due fence of at least its configured
+        //    timeout plus the normal failure backoff, so a detector descendant that outlived the
+        //    dead runtime cannot immediately overlap the fresh runtime's next attempt.
+        let mut affected_watches: Vec<String> = Vec::new();
+        for (_, watch_id) in &unfinished {
+            if !affected_watches.contains(watch_id) {
+                affected_watches.push(watch_id.clone());
+            }
+        }
+        for watch_id in &affected_watches {
+            let row: Option<(i64, i64)> = tx
+                .query_row(
+                    "SELECT timeout_seconds, failure_count FROM watches WHERE id=?1",
+                    params![watch_id],
+                    |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+                )
+                .optional()?;
+            let Some((timeout_seconds, failure_count)) = row else {
+                continue;
+            };
+            let failures = (failure_count as u32).saturating_add(1);
+            let fence = timeout_seconds
+                .saturating_mul(1000)
+                .saturating_add(backoff_ms(failures));
+            let next_due = now.saturating_add(fence);
+            tx.execute(
+                "UPDATE watches SET failure_count=?2, next_due_ms=?3, last_diagnostic=?4, \
+                 updated_at_ms=?5 WHERE id=?1",
+                params![
+                    watch_id,
+                    failures,
+                    next_due,
+                    "runtime interrupted mid-attempt; retry delayed to fence a possible surviving detector",
+                    now
+                ],
+            )?;
+            reconciled.watch_ids.push(watch_id.clone());
+        }
+
+        tx.commit()?;
+        Ok(reconciled)
     }
 
     pub fn runtime_started(&mut self, runtime_session_id: &str, pid: u32) -> Result<i64> {
@@ -1449,6 +1568,143 @@ mod tests {
         assert_eq!(recovered.next_due_ms, next_due);
         assert_eq!(recovered.status, WatchStatus::Active.as_str());
         drop(reopened);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn startup_reconciles_interrupted_runtime_and_delays_retry() {
+        let dir = test_dir("startup-reconcile");
+        let mut registry = Registry::open(&dir.join("watcher.sqlite")).unwrap();
+        let watch = registry.add(fixture_spec(&dir)).unwrap();
+
+        // A committed event establishes detector state + a ledger row that must survive untouched.
+        let prior = registry
+            .begin_attempt("attempt-committed", &watch, Some("digest"))
+            .unwrap();
+        registry
+            .commit_event(
+                &watch,
+                "attempt-committed",
+                "provider:1",
+                &prior,
+                serde_json::json!({"cursor": 2}),
+                "envelope",
+                "digest",
+                42,
+                &serde_json::json!({"receipt": "delivered"}),
+                false,
+                &serde_json::json!({"outcome": "event"}),
+            )
+            .unwrap();
+
+        // A second attempt is left unfinished, and a runtime row is left running: the wreckage of
+        // an abruptly killed Watcher (PID 59916) that never recorded a clean shutdown.
+        let current = registry.get(&watch.id).unwrap().unwrap();
+        registry
+            .begin_attempt("attempt-stale", &current, Some("digest"))
+            .unwrap();
+        registry.runtime_started("old-runtime", 59916).unwrap();
+
+        let before = now_ms();
+        let reconciled = registry.reconcile_interrupted_runtimes().unwrap();
+
+        assert_eq!(
+            reconciled.runtime_session_ids,
+            vec!["old-runtime".to_string()]
+        );
+        assert_eq!(reconciled.attempt_ids, vec!["attempt-stale".to_string()]);
+        assert_eq!(reconciled.watch_ids, vec![watch.id.clone()]);
+
+        // The stale runtime row is now interrupted with an end time.
+        let (status, ended): (String, Option<i64>) = registry
+            .connection
+            .query_row(
+                "SELECT status, ended_at_ms FROM runtime_sessions WHERE runtime_session_id='old-runtime'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(status, "interrupted");
+        assert!(
+            ended.is_some(),
+            "interrupted runtime must record an end time"
+        );
+
+        // The unfinished attempt is a visible runtime-interrupted failure with no commit/receipt.
+        let attempts = registry.attempts(&watch.id, 10).unwrap();
+        let stale = attempts.iter().find(|a| a.id == "attempt-stale").unwrap();
+        assert_eq!(stale.outcome.as_deref(), Some("runtime-interrupted"));
+        assert!(stale.finished_at_ms.is_some());
+        assert!(!stale.state_committed);
+        assert!(stale.receipt_json.is_none());
+        assert!(stale.event_id.is_none());
+        assert!(stale.diagnostic.is_some());
+
+        // The already-committed attempt is untouched.
+        let committed = attempts
+            .iter()
+            .find(|a| a.id == "attempt-committed")
+            .unwrap();
+        assert!(committed.state_committed);
+
+        // Detector state and the ledger are preserved.
+        let after = registry.get(&watch.id).unwrap().unwrap();
+        assert_eq!(after.state, serde_json::json!({"cursor": 2}));
+        let events = registry.events(&watch.id, 10).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_id, "provider:1");
+
+        // Failure is counted once and the retry is fenced by at least timeout + normal backoff so a
+        // surviving detector descendant cannot immediately overlap the fresh runtime.
+        assert_eq!(after.failure_count, 1);
+        let fence = (fixture_spec(&dir).timeout_seconds as i64) * 1000 + backoff_ms(1);
+        assert!(
+            after.next_due_ms - before >= fence,
+            "next_due delay {} must be at least the timeout+backoff fence {fence}",
+            after.next_due_ms - before
+        );
+
+        drop(registry);
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn clean_startup_with_no_stale_rows_is_a_noop() {
+        let dir = test_dir("startup-clean");
+        let mut registry = Registry::open(&dir.join("watcher.sqlite")).unwrap();
+        let watch = registry.add(fixture_spec(&dir)).unwrap();
+
+        // A fully finished attempt and a cleanly ended runtime leave nothing to reconcile.
+        registry
+            .begin_attempt("attempt-1", &watch, Some("digest"))
+            .unwrap();
+        registry
+            .commit_idle(
+                &watch,
+                "attempt-1",
+                serde_json::json!({"cursor": 3}),
+                false,
+                &serde_json::json!({"outcome": "idle"}),
+            )
+            .unwrap();
+        let record = registry.runtime_started("prior-runtime", 4242).unwrap();
+        registry
+            .runtime_finished(record, "shutdown", &serde_json::json!({"reason": "clean"}))
+            .unwrap();
+
+        let before = registry.get(&watch.id).unwrap().unwrap();
+        let reconciled = registry.reconcile_interrupted_runtimes().unwrap();
+        assert!(
+            reconciled.is_empty(),
+            "clean startup must reconcile nothing"
+        );
+
+        let after = registry.get(&watch.id).unwrap().unwrap();
+        assert_eq!(after.failure_count, before.failure_count);
+        assert_eq!(after.next_due_ms, before.next_due_ms);
+        assert_eq!(after.state, before.state);
+
+        drop(registry);
         let _ = fs::remove_dir_all(dir);
     }
 

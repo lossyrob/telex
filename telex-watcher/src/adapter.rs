@@ -56,10 +56,10 @@ pub struct SendRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct SendReceipt {
     pub receipt: String,
     pub id: i64,
+    #[serde(alias = "threadId")]
     pub thread_id: i64,
     pub to: String,
     #[serde(default)]
@@ -241,10 +241,12 @@ impl CliTelexAdapter {
     }
 
     fn command_error(&self, action: &str, output: &std::process::Output) -> anyhow::Error {
+        let stdout = String::from_utf8_lossy(&output.stdout);
         let stderr = String::from_utf8_lossy(&output.stderr);
         anyhow!(
-            "telex {action} failed with {}: {}",
+            "telex {action} failed with {}; stdout={:?}; stderr={:?}",
             output.status,
+            stdout.trim(),
             stderr.trim()
         )
     }
@@ -808,5 +810,16 @@ mod tests {
         assert!(error.contains("deliberately detached"), "{error}");
         // A deliberate detach must never trigger reconciliation/reattach.
         assert_eq!(*probe.attach_count.lock().unwrap(), 0);
+    }
+
+    #[test]
+    fn send_receipt_accepts_real_telex_snake_case_and_fixture_camel_case() {
+        for raw in [
+            r#"{"receipt":"delivered","id":1,"thread_id":2,"to":"addr:target"}"#,
+            r#"{"receipt":"delivered","id":1,"threadId":2,"to":"addr:target"}"#,
+        ] {
+            let receipt: SendReceipt = serde_json::from_str(raw).unwrap();
+            assert_eq!(receipt.thread_id, 2);
+        }
     }
 }

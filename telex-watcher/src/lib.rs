@@ -302,6 +302,21 @@ async fn run_scheduler(
     }
     let runtime_session_id = fresh_runtime_session_id();
     let watcher_pid = std::process::id();
+    // Reconcile the wreckage of any runtime that died abruptly before we record this one, so a
+    // fresh runtime never inherits a `running` session row or an unfinished attempt.
+    let reconciled = registry.reconcile_interrupted_runtimes()?;
+    if !reconciled.is_empty() {
+        lifecycle_log(
+            "startup-reconciled",
+            &runtime_session_id,
+            watcher_pid,
+            json!({
+                "interruptedRuntimes": reconciled.runtime_session_ids,
+                "failedAttempts": reconciled.attempt_ids,
+                "delayedWatches": reconciled.watch_ids,
+            }),
+        );
+    }
     let runtime_record_id = registry.runtime_started(&runtime_session_id, watcher_pid)?;
     lifecycle_log(
         "runtime-started",
@@ -617,7 +632,7 @@ async fn reconcile_with_backoff<A: adapter::TelexAdapter>(
                 return Ok(());
             }
             Err(error) => {
-                last_error = Some(error.to_string());
+                last_error = Some(format!("{error:#}"));
                 if shutdown.is_requested() {
                     break;
                 }
