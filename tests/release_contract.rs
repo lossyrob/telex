@@ -465,6 +465,17 @@ fn release_workflow_enforces_the_version_and_publish_guards() {
         "publish must depend on [verify-version, build]"
     );
 
+    assert!(
+        release.contains("TELEX_BUILD_ID: ${{ github.sha }}"),
+        "release builds must embed the exact release commit as the build identifier"
+    );
+    assert!(
+        release.contains("Verify release binary build identity")
+            && release.contains("metadata.version.build_id")
+            && release.contains("does not match GITHUB_SHA"),
+        "release workflow must reject an archive candidate whose binary build_id is not GITHUB_SHA"
+    );
+
     // The [package].version the guard reads must be present and semver-shaped; if a
     // future refactor moved it to workspace inheritance this extraction would empty
     // out and fail here.

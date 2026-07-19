@@ -1654,8 +1654,10 @@ longer dumps the whole generic skill; agents wanting the generic/pull reference 
 `telex skill`. The plugin's own version is the one version fact the bootstrap legitimately
 carries (it matches `plugin.json`), used only to drive the compatibility check.
 The binary's source build identifier is also reported by `telex --version` and
-`telex --json version`, so same-semver binaries remain distinguishable without moving
-compatibility policy into the plugin.
+`telex --json version`, so official same-semver builds from different commits remain
+distinguishable without moving compatibility policy into the plugin. Release builds
+verify this identifier against `GITHUB_SHA`; source builds without Git metadata may
+report `unknown`, and the value is diagnostic rather than an attestation.
 
 ## 0041 — On-deliver re-delivery is re-provision-triggered, not timer-until-ack
 
@@ -1800,7 +1802,9 @@ durable state, then send:
   deferred backstop. Invariant: `HEARTBEAT_INTERVAL <= deferred backstop < accepted backstop`.
 - **Turn-stop drains via an ungated `agentStop` hook.** A dedicated `agentStop` hook entry runs a
   small plugin launcher that forwards the hook payload to `telex --json copilot drain`, independent
-  of `TELEX_TURN_GUARD` and its nudge cap, with its own `TELEX_COPILOT_DRAIN` off-switch. It sends a
+  of `TELEX_TURN_GUARD` and its nudge cap, with its own `TELEX_COPILOT_DRAIN` off-switch. Success,
+  no-op, and the off-switch produce neutral hook output so the drain entry cannot cancel an earlier
+  turn-guard block. It sends a
   `DrainDeferred` request; the daemon clears the deferred skip for the session's on-deliver members
   (leaving accepted attempts untouched) and re-runs the existing on-deliver sweep. The sweep
   re-fetches `fetch_wait_candidates`, so a message acked before the drain is no longer a candidate

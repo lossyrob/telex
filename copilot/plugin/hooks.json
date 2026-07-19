@@ -18,8 +18,8 @@
       },
       {
         "type": "command",
-        "powershell": "& (Join-Path $env:COPILOT_PLUGIN_ROOT 'drain-hook.ps1')",
-        "bash": "sh \"$COPILOT_PLUGIN_ROOT/drain-hook.sh\"",
+        "powershell": "$script = if ([string]::IsNullOrWhiteSpace($env:COPILOT_PLUGIN_ROOT)) { $null } else { Join-Path $env:COPILOT_PLUGIN_ROOT 'drain-hook.ps1' }; if ($script -and (Test-Path -LiteralPath $script -PathType Leaf)) { & $script } else { '{\"decision\":\"block\",\"reason\":\"Telex plugin installation is incomplete: the drain hook launcher is unavailable. Reinstall the telex plugin from a matched release, then restart Copilot.\"}' }",
+        "bash": "if [ -n \"${COPILOT_PLUGIN_ROOT:-}\" ] && [ -f \"$COPILOT_PLUGIN_ROOT/drain-hook.sh\" ]; then sh \"$COPILOT_PLUGIN_ROOT/drain-hook.sh\"; else printf '%s\\n' '{\"decision\":\"block\",\"reason\":\"Telex plugin installation is incomplete: the drain hook launcher is unavailable. Reinstall the telex plugin from a matched release, then restart Copilot.\"}'; fi",
         "timeoutSec": 30
       }
     ]

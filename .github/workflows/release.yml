@@ -90,7 +90,22 @@ jobs:
 
       - name: Build release binary
         # Batteries-included published binary: all backends + Entra auth.
+        env:
+          TELEX_BUILD_ID: ${{ github.sha }}
         run: cargo build --release --target ${{ matrix.target }} --features entra
+
+      - name: Verify release binary build identity
+        shell: pwsh
+        run: |
+          $exe = if ("${{ runner.os }}" -eq "Windows") {
+            "target\${{ matrix.target }}\release\telex.exe"
+          } else {
+            "target/${{ matrix.target }}/release/telex"
+          }
+          $metadata = & $exe --json version | ConvertFrom-Json
+          if ($metadata.version.build_id -ne "${{ github.sha }}") {
+            throw "release binary build_id '$($metadata.version.build_id)' does not match GITHUB_SHA '${{ github.sha }}'"
+          }
 
       - name: Package Windows binary
         if: runner.os == 'Windows'

@@ -461,9 +461,11 @@ queued turn arrived later as stale, already-handled work. Issue #65 replaces "qu
   and opportunistically re-attempts messages whose backstop elapsed; the only zero-work fast path is
   client-side (`telex copilot drain` skips the daemon round-trip when the session has no bridge
   registry). Once the binary command starts, the drain returns before the sweeps complete and has a
-  client-side deadline below the hook timeout, so runtime/daemon failures remain fail-open. Before
-  dispatch, a missing or stale PATH binary blocks with actionable plugin/binary-skew guidance rather
-  than failing silently. The daemon stays harness-neutral: it re-runs a generic sweep on request;
+  client-side deadline below the hook timeout, so runtime/daemon failures remain fail-open. Success,
+  no-op, and the explicit drain off-switch emit neutral hook output so they cannot cancel the
+  turn-guard command's independent block. Before dispatch, a missing or stale PATH binary blocks
+  with actionable plugin/binary-skew and PATH-winner guidance rather than failing silently. The
+  daemon stays harness-neutral: it re-runs a generic sweep on request;
   "busy/idle" lives only in the bridge.
 - **No loss.** If the drain hook is missed or races a still-busy bridge, the deferred backstop +
   heartbeat sweep re-attempt within a bounded delay (a re-defer while busy is cheap and injects no
