@@ -459,7 +459,7 @@ impl<A: TelexAdapter> LifecycleCoordinator<A> {
             .await?
         {
             SendResult::Accepted { receipt } => Ok(receipt),
-            SendResult::NeedsAttach { reason, message }
+            SendResult::NeedsAttach { reason, message: _ }
                 if reason.as_deref() != Some("deliberately_detached") =>
             {
                 if self.is_shutting_down() {
