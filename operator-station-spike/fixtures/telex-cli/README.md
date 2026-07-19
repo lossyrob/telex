@@ -14,4 +14,3 @@ unknown fields are intentionally tolerated.
 - `reply.json`
 
 They are spike evidence, not a frozen public CLI JSON contract.
-

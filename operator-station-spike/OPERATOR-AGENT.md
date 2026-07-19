@@ -1,7 +1,7 @@
 # Experimental operator-agent assignment
 
-**Assignment version:** `1`  
-**Ingress:** `attention:rob`  
+**Assignment version:** `1`
+**Ingress:** `attention:rob`
 **Human Station:** `operator:rob`
 
 This is a spike-only assignment. It mediates a narrow operational loop; it is
