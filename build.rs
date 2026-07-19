@@ -13,6 +13,13 @@ fn main() {
     let git_root = owned_git_root(&manifest_dir);
     if let Some(git_root) = git_root.as_deref() {
         emit_git_rerun_paths(git_root);
+    } else {
+        // Re-run if a metadata-less source tree later becomes a standalone checkout.
+        // Do not watch any rejected ancestor repository metadata.
+        println!(
+            "cargo:rerun-if-changed={}",
+            manifest_dir.join(".git").display()
+        );
     }
 
     let build_id = env_build_id("TELEX_BUILD_ID")

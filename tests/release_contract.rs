@@ -403,6 +403,86 @@ fn build_id_ignores_an_unrelated_ancestor_repository() {
 }
 
 #[test]
+fn build_id_refreshes_when_source_becomes_a_standalone_repository() {
+    let root = std::env::temp_dir().join(format!(
+        "telex-build-id-ownership-transition-{}",
+        std::process::id()
+    ));
+    let target = std::env::temp_dir().join(format!(
+        "telex-build-id-ownership-transition-target-{}",
+        std::process::id()
+    ));
+    std::fs::remove_dir_all(&root).ok();
+    std::fs::remove_dir_all(&target).ok();
+    std::fs::create_dir_all(root.join("src")).expect("create transition fixture");
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[package]\nname = \"ownership-transition-fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .expect("write transition Cargo.toml");
+    std::fs::write(root.join("build.rs"), read("build.rs")).expect("write transition build.rs");
+    std::fs::write(
+        root.join("src").join("main.rs"),
+        "fn main() { println!(\"{}\", env!(\"TELEX_BUILD_ID\")); }\n",
+    )
+    .expect("write transition main");
+
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let run = || {
+        let output = Command::new(&cargo)
+            .args(["run", "--quiet"])
+            .current_dir(&root)
+            .env("CARGO_TARGET_DIR", &target)
+            .env_remove("TELEX_BUILD_ID")
+            .env_remove("GITHUB_SHA")
+            .output()
+            .expect("run transition fixture cargo");
+        assert!(
+            output.status.success(),
+            "transition fixture cargo run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        String::from_utf8(output.stdout)
+            .expect("transition output utf8")
+            .trim()
+            .to_string()
+    };
+
+    assert_eq!(run(), "unknown");
+
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&root)
+            .output()
+            .expect("run transition fixture git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        output
+    };
+    git(&["init", "--quiet"]);
+    git(&["config", "user.email", "telex-test@example.invalid"]);
+    git(&["config", "user.name", "Telex Test"]);
+    git(&["add", "Cargo.toml", "build.rs", "src/main.rs"]);
+    git(&["commit", "--quiet", "-m", "initialize source repository"]);
+    let head = String::from_utf8(git(&["rev-parse", "HEAD"]).stdout)
+        .expect("transition head utf8")
+        .trim()
+        .to_string();
+
+    assert_eq!(
+        run(),
+        head,
+        "creating manifest-local Git metadata must invalidate the prior unknown build"
+    );
+    std::fs::remove_dir_all(root).ok();
+    std::fs::remove_dir_all(target).ok();
+}
+
+#[test]
 fn archive_name_grammar_is_consistent_across_workflow_and_installers() {
     // The asset grammar is telex-<tag>-<target>.{zip,tar.gz}. Couple the grammar
     // fragments across the producing workflow and the consuming installers so a
