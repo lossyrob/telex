@@ -1,6 +1,6 @@
 # Plan: Mediated Human-Attention Loop
 
-Plan revision: 3
+Plan revision: 4
 
 ## Outcome anchor
 
@@ -32,19 +32,26 @@ as a temporary subprocess integration seam:
 
 - attach `operator:rob` with a stable application session identity and the
   desktop process as a watched PID;
-- build startup state from the deduplicated union of actionable
-  `telex inbox --json` and recent `telex inbox --all --json` snapshots;
-- poll bounded snapshots for new messages and refresh both address-status
-  projections;
+- build startup/history state from `telex export --address operator:rob`,
+  `telex inbox --all --limit 200 --json`, and on-demand
+  `telex read --full --json`;
+- own one supervised `telex wait` courier subprocess at a time inside the
+  desktop runtime for live delivery;
+- on courier delivery, parse the wait payload, enrich it through `telex read`,
+  ingest/dedupe it into Station state, then issue transport `telex ack` and
+  re-arm only after the ack succeeds;
+- recover and surface waiter timeout, daemon-gone, daemon-hung,
+  presence-ended, re-attach, and malformed-payload outcomes;
+- refresh both address-status projections on a bounded timer;
 - call `telex read --full --json` for thread detail and disposition history;
 - call `telex reply --json` for human replies;
 - call the existing disposition verbs for defer/handle/close;
-- preserve backend selection through optional backend/database configuration.
+- require an explicit SQLite database path for the executable spike.
 
 This deliberately favors a real, narrow loop over a premature reusable client
-API. The report will inventory subprocess polling, command JSON parsing,
-application identity, lifecycle, and cursor limitations as requirements for
-issue #12.
+API. The report will inventory courier supervision, subprocess JSON parsing,
+application identity, lifecycle, full-history startup projection, and cursor
+limitations as requirements for issue #12.
 
 The live demonstration will use one explicit isolated SQLite path supplied to
 the worker, operator agent, Station, and smoke harness. It will not share the
@@ -57,23 +64,31 @@ The spike will make its bounded behavior visible and configurable:
 
 | Setting | Default |
 |---|---:|
-| Poll interval | 2 seconds |
-| Telex subprocess timeout | 10 seconds |
-| Recent backfill limit | 200 messages |
-| Actionable backfill limit | 1,000 messages |
-| Status refresh interval | Same 2-second scheduler tick as message refresh |
+| Live courier | one supervised `telex wait` process |
+| Courier idle timeout | 30 seconds, then re-arm |
+| Non-wait subprocess timeout | 10 seconds |
+| Recent backfill | `telex inbox --all --limit 200 --json` |
+| Unresolved backfill | complete selected-address history via `telex export` |
+| Status refresh interval | 5 seconds |
+| Recovery backoff | 1 second, capped at 5 seconds |
+| Ack retry budget | 3 attempts within 15 seconds |
 
 The Station will record the tested `telex --json version` output at startup and
 include it in diagnostics and the spike report. Response parsing will use strict
-typed fixtures for that tested version so missing, renamed, or unexpected
-top-level JSON fields fail visibly rather than silently dropping provenance or
-disposition state.
+typed required fields for that tested version so missing, renamed, invalid, or
+incompatible fields fail visibly rather than silently dropping provenance or
+disposition state. Additive unknown fields remain compatible and are ignored.
 
-The Station will not arm `telex wait` or register a push callback. This is an
-explicit spike shortcut: the attached address is read through polling durable
-records, so production answerback, push-delivery health, richer cursors, and
-deaf-station semantics remain requirements for issue #12 rather than conclusions
-of this experiment.
+The live receive loop is an explicitly experimental application-owned courier
+supervisor, not an agent-session background waiter. It uses the daemon's current
+one-shot `wait`/`ack` contract but does not claim that subprocess supervision is
+the production Application Client shape. Richer streaming/callback delivery,
+cursor APIs, application identity, and lifecycle management remain requirements
+for issue #12.
+
+Postgres execution is intentionally out of scope for this Windows/local spike.
+Defining a credential-free stable Postgres store fingerprint and supported
+application lifecycle belongs to issue #12 and later operational hardening.
 
 ## Experimental message convention
 
@@ -100,7 +115,8 @@ The reusable operator-agent assignment will use:
           "from": "worker:example",
           "to": "attention:rob",
           "subject": "Decision needed",
-          "sentAtMs": 1750000000000
+          "sentAtMs": 1750000000000,
+          "storeFingerprint": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
         }
       ],
       "ingressAddress": "attention:rob",
@@ -126,6 +142,13 @@ gate, `station-contract`, and issue #12 define the supported contract. The repor
 will inventory every baked-in experimental string and present promotion or
 retirement as a later decision.
 
+Every numeric source reference carries the same non-sensitive store fingerprint
+algorithm used for local Station state. The Station resolves a source ID only
+when the reference fingerprint exactly matches the active store fingerprint.
+A missing or mismatched fingerprint renders `unavailable in current store` with
+captured sender, subject, and timestamp; it must never open a same-number message
+from another store.
+
 ## Notification policy
 
 Initial backfill never emits a toast. For newly observed primary inbound
@@ -141,8 +164,31 @@ messages, the Station uses this table:
 Feed content always comes from Telex. A small persisted
 `last-observed-max-message-id` marker is permitted solely to prevent restart
 re-toasts; it is not a local message cache. Cold start seeds that marker from the
-maximum ID only after both the actionable and recent initial snapshots succeed
-and their union is complete, suppressing all startup toasts.
+maximum ID only after the complete export-backed unresolved projection and the
+recent inbox snapshot both succeed and their union is complete, suppressing all
+startup toasts. Live courier deliveries beyond that marker are toast candidates.
+
+## Planned repository paths
+
+- Station package overview: `operator-station-spike/README.md`
+- Station package and frontend: `operator-station-spike/package.json`,
+  `operator-station-spike/src/`
+- Tauri runtime and CLI adapter:
+  `operator-station-spike/src-tauri/src/`
+- Operator-agent assignment:
+  `operator-station-spike/OPERATOR-AGENT.md`
+- Builder walkthrough: `operator-station-spike/WALKTHROUGH.md`
+- Smoke harness:
+  `operator-station-spike/harness/Invoke-OperatorLoopSmoke.ps1`
+- Shared fingerprint helper:
+  `operator-station-spike/harness/Get-OperatorSpikeStoreFingerprint.ps1`
+- Captured additive-compatible CLI fixtures:
+  `operator-station-spike/fixtures/telex-cli/*.json`
+- Sanitized live demonstration evidence:
+  `operator-station-spike/evidence/demo-transcript.json` and
+  `operator-station-spike/evidence/demo-summary.md`
+- Spike findings and issue #12 requirements:
+  `docs/operator-loop-spike-report.md`
 
 ## Work items
 
@@ -157,6 +203,10 @@ and their union is complete, suppressing all startup toasts.
   `anchor:<pid>` watch on the Tauri Rust process. Persist the generated Station
   session UUID under the application data directory and reuse it across
   restarts.
+- Spawn every Telex child with the same persisted `TELEX_SESSION_ID`,
+  configured `TELEX_ADDRESS`, and `TELEX_OPERATOR_SPIKE_DB`; also pass explicit
+  session/address flags where the verb supports them. Every re-issued `attach`
+  restores `--watch-pid anchor:<tauri-pid>`.
 - Require the canonical `TELEX_OPERATOR_SPIKE_DB` variable for the live demo.
   The Station maps it into its adapter configuration, and every
   worker/operator-agent/harness command passes
@@ -165,20 +215,58 @@ and their union is complete, suppressing all startup toasts.
   rule in its setup and every example command; the role must refuse to start the
   demo when the variable is absent.
 - Scope every persisted Station session ID and toast/high-water marker to the
-  configured Station address plus a normalized store fingerprint. For an
-  explicit SQLite path, canonicalize it in memory and hash it with SHA-256; for
-  a named backend, hash the normalized backend selector. Persist and display
-  only the fingerprint, never the absolute database path or an unredacted store
-  key. A Station-address or store change creates a distinct local state scope.
+  configured Station address plus a normalized store fingerprint. The Station
+  and PowerShell helper both require the database to exist, resolve the final
+  Windows path, strip a `\\?\` prefix, normalize separators, lowercase the
+  Windows path, and hash the resulting UTF-8 bytes with full SHA-256. Persist and
+  display only the fingerprint, never the absolute database path or an
+  unredacted store key. A Station-address or store change creates a distinct
+  local state scope.
 - Before coding against the metadata shape, preserve a captured fixture from a
-  real `send` -> `inbox --json` -> `read --full --json` round trip and assert the
-  source-reference envelope survives byte-for-byte.
-- Implement bounded actionable-plus-recent polling/backfill, deduplication by
-  message ID, address occupancy/status refresh, and visible reconnect/error
-  status without creating a Telex waiter.
+  real `send` -> `wait` -> `read --full --json` round trip and assert the
+  source-reference envelope survives enrichment byte-for-byte. Telex stores
+  `message.metadata` as an opaque JSON string, so the adapter must explicitly
+  parse that string a second time before interpreting the experimental envelope.
+- Capture additive-compatible fixtures for every response shape the adapter
+  parses: `wait`, `read --full`, `inbox --all`, `export`, `ack`, one disposition
+  verb, and `reply`.
+- Implement startup/history projection by streaming
+  `telex export --address operator:rob --since 0` JSON lines and retaining every
+  unresolved primary inbound disposition-required message plus the 200 most
+  recent messages. Merge `telex inbox --all --limit 200 --json` for current
+  delivery role/status fields and use `read --full` on selection.
+- Complete and ingest the startup export+inbox union, then seed its high-water
+  marker, before arming the first live courier. Messages arriving during startup
+  remain durably queued and are delivered after arming; this removes the
+  live-vs-backfill toast race.
+- Implement one managed courier child at a time using
+  `telex wait --timeout-ms 30000`. On exit `0`, validate the payload, fetch the
+  authoritative message/metadata through `read`, ingest and dedupe it in backend
+  Station state, emit it to the frontend, then `ack`; do not re-arm before ack
+  success. On duplicate redelivery, update the existing record and ack
+  idempotently.
+- Retry `ack` up to three times within 15 seconds. If it still fails, retain the
+  ingested message as `ack-pending`, surface degraded status, and re-arm after
+  recovery backoff; at-least-once redelivery is deduped and retries the ack
+  instead of leaving the Station silently unarmed.
+- Treat exit `1` as a persistent command/protocol/configuration error: surface it
+  and pause automatic re-arm until configuration changes or the user requests
+  retry. Treat exit `2` as an idle re-arm. Trust `wait`'s internal re-register
+  during its reconnect grace; after terminal exit `3` or `5`, explicitly
+  re-issue anchored `attach` before the next courier. After two consecutive exit
+  `4` daemon-hung outcomes, enter persistent degraded state and pause re-arm
+  until status reports recovery or the user retries. Any malformed exit-0
+  payload is a visible ingest error and is not acked. Never run two courier
+  children for the same Station concurrently.
+- On graceful application shutdown, cancel/kill the managed child and stop the
+  Station membership. After an unexpected Tauri crash, the anchor-watch causes
+  daemon-side presence end and an orphaned courier exits without ack, preserving
+  at-least-once redelivery on restart.
+- Implement address occupancy/status refresh on a five-second timer, separate
+  from the live courier path.
 - Emit Windows toasts only for newly observed primary inbound messages that are
-  eligible under the declared policy. Initial backfill and repeated snapshots
-  must not re-toast.
+  successfully ingested from the live courier and eligible under the declared
+  policy. Initial history projection and duplicate redelivery must not re-toast.
 - Keep diagnostics in a bounded in-memory ring and avoid persistent message-body
   logging. The report captures one diagnostic snapshot; long-run telemetry and
   rolling-log policy remain explicit issue #12 requirements.
@@ -191,18 +279,17 @@ and their union is complete, suppressing all startup toasts.
   message.
 - Render experimental source-message references separately from the mediated
   thread, while retaining raw metadata inspection. Resolve source IDs when
-  available; show `resolved` or `unavailable in current store` state and retain
-  captured sender, subject, and timestamp when a raw source cannot be opened.
-  The metadata does not claim source-store identity, so the UI must not infer
-  `different-backend`.
+  the reference fingerprint matches the active store and the message is
+  available; otherwise show `unavailable in current store` and retain captured
+  sender, subject, and timestamp. Never infer identity from numeric ID alone.
 - Send a human reply in the selected mediated thread from the Station address.
 - Support the minimum useful disposition actions: defer, handle, and close.
 - Show occupancy for both `attention:rob` and `operator:rob`, including a visible
   warning when the operator agent or Station address is unattended.
 - Preserve restart continuity by rebuilding feed and thread state from Telex
-  backfill rather than browser-only message storage. Combine up to 1,000
-  actionable messages with the 200 most recent messages so an older unresolved
-  obligation remains visible after newer traffic.
+  history rather than browser-only message storage. Retain all unresolved
+  primary obligations found in the selected-address export plus the 200 most
+  recent messages.
 
 ### 3. Package the operator-agent assignment and dogfood walkthrough
 
@@ -211,7 +298,8 @@ and their union is complete, suppressing all startup toasts.
   disposition transitions, human-reply handling, and routing back to the
   worker.
 - Version-stamp the assignment. Require the operator agent to record its
-  assignment version and model ID in escalation metadata.
+  assignment version and model ID in escalation metadata and to compute/include
+  the shared experimental store fingerprint on every numeric source reference.
 - Require these raw-thread disposition transitions: `handled` when resolved
   locally; `deferred` while awaiting worker evidence; `escalated` immediately
   after creating a human escalation; and `closed` after routing the mediated
@@ -270,10 +358,14 @@ and their union is complete, suppressing all startup toasts.
   the root workspace.
 - **CLI subprocess seam:** accepted only for this spike; it is not a public
   Application Client decision.
-- **Bounded polling instead of a waiter:** the desktop process owns a two-second
-  polling loop over durable records. It will not run `telex wait`; restart
-  recovery comes from actionable-plus-recent backfill. The missing push,
-  station-health, and cursor contract is reported to issue #12.
+- **Application-owned wait courier:** the desktop runtime supervises one
+  short-lived `telex wait` child at a time, ingests before acking, and re-arms
+  after terminal courier outcomes. This proves healthy attendance with today's
+  daemon but remains a subprocess shortcut, not the issue #12 client contract.
+- **Export-backed restart projection:** startup scans selected-address history
+  to retain all unresolved primary obligations plus a bounded recent tail. The
+  current CLI's full-history materialization cost is explicitly a spike
+  shortcut and an issue #12 cursor/query requirement.
 - **Two auditable threads:** raw worker/operator traffic and mediated
   operator/human traffic remain distinct and are linked through opaque source
   references.
@@ -296,12 +388,17 @@ and their union is complete, suppressing all startup toasts.
 
 - Frontend unit tests for message merge/dedupe, notification eligibility,
   source-reference parsing (experimental namespace only, unknown namespace raw
-  rendering, and unavailable-source degradation), and reply/disposition
-  interaction.
+  rendering, matching/missing/mismatched store fingerprints, and
+  unavailable-source degradation), and reply/disposition interaction.
 - Rust unit tests for configuration, command construction, JSON parsing,
-  strict tested-version fixtures, notification policy, persisted session/cursor
-  scoping by address/store fingerprint, restart-quiet toast behavior after a
-  complete initial union, and subprocess error handling.
+  required-field validation with additive-field tolerance, courier exit-state
+  recovery (including exit `1`, consecutive exit `4`, terminal `3`/`5`
+  re-attach, and repeated ack failure), shared session/address/database child
+  environment, ingest-before-ack ordering, idempotent duplicate delivery,
+  notification policy, delayed courier arming until startup completion,
+  persisted session/cursor scoping by address/store fingerprint, restart-quiet
+  toast behavior after a complete initial union, and subprocess cleanup/error
+  handling.
 - `npm test`, `npm run build`, `cargo fmt --check`, and `cargo test` in the
   standalone Station.
 - Root `cargo test --workspace` only as a boundary regression guard proving the
@@ -313,32 +410,34 @@ and their union is complete, suppressing all startup toasts.
   reply -> operator agent -> worker, plus a Station restart/backfill check.
 - Smoke-harness regression for the full route-back leg and raw `escalated`
   disposition.
-- Restart stress that sends at least 220 newer background messages after an
-  unresolved escalation, restarts the Station, and verifies the older
-  actionable escalation has fallen outside the 200-message recent tail but
-  remains visible through actionable backfill without a duplicate toast.
-- Preflight the configured actionable limit against the tested binary with a
-  real `telex inbox --limit 1000 --json` call and fail visibly if that command or
-  response shape is unsupported.
+- Restart stress that sends at least 1,050 newer FYI or terminally dispositioned
+  messages after an unresolved escalation, restarts the Station, and verifies
+  the older obligation has fallen outside the explicit
+  `inbox --all --limit 200` recent tail. The load also exceeds 1,000 newer IDs to
+  disprove the superseded inbox-bound assumption; export-backed unresolved
+  projection must still surface it without a duplicate toast.
 - Captured real metadata round-trip fixture and verified graceful behavior when
-  its referenced source message cannot be resolved.
+  its referenced source message cannot be resolved or carries a mismatched store
+  fingerprint. Add a two-store collision fixture where the same numeric ID
+  exists in both stores and the Station refuses to open the wrong one.
 
 ## Risks and mitigations
 
 - **Subprocess/JSON contract leakage:** keep the adapter private to the spike,
   document every command relied upon, and report the required semantic client
   operations to issue #12.
-- **Polling latency or missed toast:** use monotonic message IDs, bounded
-  snapshots, explicit dedupe, a persisted observation cursor, and no-toast
-  initial backfill; durable Telex data remains authoritative.
+- **Courier failure or missed toast:** supervise exactly one waiter, make every
+  terminal outcome visible, ingest before ack, normally re-arm only after ack,
+  use visible `ack-pending` degraded redelivery after the bounded retry budget,
+  dedupe by message ID, and suppress toasts during initial history projection.
 - **Duplicate or stale delivery:** dedupe by message ID and display disposition
   state; the operator assignment must also dedupe pushed raw messages.
 - **Toast registration differences on developer machines:** make toast failure
   visible without blocking feed updates, and record the actual Windows result.
-- **Old unresolved obligations:** union a high bounded actionable set with the
-  recent feed and test past the default inbox window. More than 1,000 concurrent
-  unresolved items is outside this spike and becomes a cursor/query requirement
-  for issue #12.
+- **Large history at startup:** the spike uses full selected-address `export` to
+  recover every unresolved primary obligation plus a bounded recent tail. This
+  is correct for the dogfood store but may materialize substantial history; a
+  production unresolved-query/cursor surface is an issue #12 requirement.
 - **UI scope growth:** prefer a plain two-pane feed/thread surface. Do not add
   routing modes, aliases, rich decisions, process control, or broad filtering.
 - **Operator-agent absence:** queued messages and source threads remain durable;
