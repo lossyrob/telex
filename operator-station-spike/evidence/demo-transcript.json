@@ -91,6 +91,9 @@
   "notification": {
     "toastApiReturnedSuccess": true,
     "feedUpdateContinued": true,
+    "actionCenterRecordCaptured": true,
+    "actionCenterArrivalTime": "2026-07-19T09:29:10.182738Z",
+    "actionCenterEvidence": "operator-station-spike/evidence/windows-action-center-record.json",
     "toastScreenshotCaptured": false
   }
 }

@@ -1,0 +1,25 @@
+{
+  "schema": "operator-station-spike.windows-action-center-evidence.v1",
+  "capturedAt": "2026-07-19T10:36:00Z",
+  "source": "%LOCALAPPDATA%\\Microsoft\\Windows\\Notifications\\wpndatabase.db",
+  "queryMode": "read-only",
+  "handler": {
+    "recordId": 920,
+    "primaryId": "com.lossyrob.telex.operatorstationspike",
+    "handlerType": "app:desktop",
+    "createdTime": "2026-07-19 09:29:10"
+  },
+  "notification": {
+    "order": 316890,
+    "id": 319302,
+    "handlerId": 920,
+    "type": "toast",
+    "payloadType": "Xml",
+    "arrivalTime": "2026-07-19T09:29:10.182738Z",
+    "title": "Human decision required: Rollout window",
+    "body": "Worker worker:builder reports that Tuesday and Thursday are both technically viable rollout windows. Scheduling ownership and dependency-freeze risk require human judgment. Which rollout day should be selected: Tuesday or Thursday?",
+    "attribution": "attention:rob",
+    "payload": "<toast><visual><binding template=\"ToastGeneric\"><text>Human decision required: Rollout window</text><text>Worker worker:builder reports that Tuesday and Thursday are both technically viable rollout windows. Scheduling ownership and dependency-freeze risk require human judgment. Which rollout day should be selected: Tuesday or Thursday?</text><text placement=\"attribution\">attention:rob</text></binding></visual></toast>"
+  }
+}
+

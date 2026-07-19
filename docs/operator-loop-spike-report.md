@@ -21,6 +21,7 @@ The Tauri Station is runnable, the reusable operator-agent assignment is in
 | Operator escalation | Message `#2`, mediated thread `#2`, kind `operator-station-spike.escalation` |
 | Healthy Station attendance | `station_health=armed`, one live waiter, zero pending unconsumed after ingest/ack |
 | Feed and source provenance | `operator-station-spike/evidence/station-mediated-thread.png` |
+| Windows notification surface | Action Center record `operator-station-spike/evidence/windows-action-center-record.json` |
 | Human reply authored in Station | Message `#3`, `operator:rob -> attention:rob`, mediated thread `#2` |
 | Route back to worker | Message `#4`, `attention:rob -> worker:builder`, raw thread `#1` |
 | Raw lifecycle | Message `#1` dispositions: `escalated`, then `closed` |
@@ -118,7 +119,9 @@ namespace is reserved.
 - The current wait payload does not include metadata, requiring a second
   `read --full` call before ingest/ack.
 - The Windows toast API returned success and no toast error reached the UI, but
-  an OS toast screenshot was not captured.
+  a transient flyout screenshot was not captured. The persisted Windows Action
+  Center database record contains the live escalation title/body/attribution and
+  arrival timestamp.
 - Full export can become slow or memory-heavy on a large store.
 - Postgres, remote principals, spoofing resistance, noisy production traffic,
   delayed/stale replies, and security hardening were not validated.
@@ -152,7 +155,7 @@ namespace is reserved.
 |---|---|---|
 | Worker message reaches operator agent through durable address | demonstrated | Raw message `#1`, push-attended `attention:rob` |
 | Human escalation is understandable and preserves provenance | demonstrated | Escalation `#2`, source card/screenshot, metadata fixture |
-| Desktop feed and Windows notification | demonstrated with caveat | Feed screenshot; toast API success, no OS screenshot |
+| Desktop feed and Windows notification | demonstrated | Feed screenshot plus persisted Windows Action Center toast record |
 | Station reply reaches operator agent and routes back | demonstrated | Messages `#3` and `#4` |
 | Raw and mediated threads remain separately auditable | demonstrated | Thread IDs `#1` and `#2`, dispositions in transcript |
 | Restart preserves unresolved/recent conversation | demonstrated | Stable Station identity across three restarts and UI backfill |

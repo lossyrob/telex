@@ -33,5 +33,9 @@ healthy courier, and address status. `station-operator-unattended.png` captures
 the occupancy warning.
 
 The Windows toast API returned success for the live interrupt escalation and
-feed ingestion continued. An OS toast screenshot was not captured, so the report
-records that limitation separately from the successful API result.
+feed ingestion continued. A read-only capture from the Windows Action Center
+database records the Station AUMID, notification type `toast`, arrival time
+`2026-07-19T09:29:10.182738Z`, and the exact live escalation title/body/
+attribution. See `windows-action-center-record.json`. No screenshot of the
+transient toast flyout was captured; the persisted OS Action Center record is
+the notification-surface evidence.
