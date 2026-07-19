@@ -22,4 +22,3 @@
     "payload": "<toast><visual><binding template=\"ToastGeneric\"><text>Human decision required: Rollout window</text><text>Worker worker:builder reports that Tuesday and Thursday are both technically viable rollout windows. Scheduling ownership and dependency-freeze risk require human judgment. Which rollout day should be selected: Tuesday or Thursday?</text><text placement=\"attribution\">attention:rob</text></binding></visual></toast>"
   }
 }
-
