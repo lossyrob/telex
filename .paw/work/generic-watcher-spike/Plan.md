@@ -1,215 +1,209 @@
 # Generic Watcher Spike Plan
 
-Revision: 3
+Revision: 4
 
 ## Outcome
 
 Build and exercise an experimental, separately runnable `telex-watcher`
 application that persists trusted local detector registrations, executes them
-outside agent sessions, and emits only normalized Telex messages. The spike will
-demonstrate generic GitHub, repository-customized GitHub, and Azure DevOps
-detectors, including restart recovery, a real Telex bridge wakeup, and durable
-unoccupied-address queueing, without leaving a session-owned waiter or loop.
+outside agent sessions, and emits only normalized Telex messages. The node will
+demonstrate generic GitHub, repository-customized GitHub, and live Azure DevOps
+detectors, restart recovery, a real Copilot bridge wakeup, and durable
+unoccupied-address queueing without a session-owned waiter or Loop task.
+
+Fixture-backed Azure DevOps execution is sufficient for deterministic
+implementation tests, but it does not satisfy the live distinct-provider
+completion criterion. If reachable ADO coordinates and credentials cannot be
+obtained, the implementer will send `decision-needed` and hold rather than
+claiming the node complete.
+
+## Scope Guardrails
+
+- The runtime is provider-neutral. GitHub and Azure DevOps semantics remain in
+  editable detector scripts.
+- The runtime's only trigger reaction is a normalized Telex send.
+- Registration is local-only and detector commands are trusted same-user code.
+- Target, sender, cadence, timeout, attention, disposition requirement, working
+  directory, and environment allowlist are Watcher policy.
+- Detector output cannot reroute, impersonate, schedule, launch an agent, or
+  request a post-trigger action.
+- The Telex integration is explicitly experimental and does not freeze the
+  issue #12 Application Client contract.
 
 ## Approach
 
-### 1. Add a separate experimental application
+### 1. Add a narrow experimental application
 
-- Add `telex-watcher/` as a Rust workspace member with its own
-  `telex-watcher` binary. Unlike the existing throwaway `spike/` crate, this
-  node exports a runnable multi-day dogfood application, so it remains under
-  workspace build/test/clippy coverage. If the viability gate rejects the
-  product, the whole member can be removed without changing Telex core.
-- Keep it outside Telex core and `telex-console`; label the surface experimental
-  in CLI help and documentation.
-- Use a dedicated SQLite registry, defaulting below the user's Telex data
-  directory, for watch configuration, opaque detector state, attempts, and sent
-  event provenance.
-- Store the registry schema version in `PRAGMA user_version`. New registries
-  apply ordered migrations `0 -> 1 -> 2`; open runs every lower-version
-  migration in one transaction and refuses an unknown higher version without
-  modifying the file. Version 2 intentionally adds send-time routing
-  provenance so the migration harness is exercised by this spike.
-- Hold an advisory OS file lock with `fs2` while `run` is active so only one
-  runtime schedules a registry at a time while management commands remain
-  available. Lock ownership, not lock-file existence, is authoritative and
-  releases automatically on process exit. Network-share registries are
-  unsupported in the spike.
-
-### 2. Define detector protocol version 1
-
-The Watcher sends one JSON request on stdin containing:
-
-- `schemaVersion: 1`;
-- stable watch ID and opaque registration parameters;
-- the detector's prior opaque JSON state;
-- current UTC time and attempt ID;
-- script mode and the exact SHA-256 digest being executed.
-
-The detector must exit successfully and emit exactly one bounded JSON result on
-stdout:
-
-- `idle`: successful observation with optional `nextState`;
-- `event`: one required normalized event plus optional `nextState`;
-- `terminal`: optional final event plus optional `nextState`, then stop after a
-  successful transaction;
-- `degraded`: no state advancement; retry under Watcher backoff policy.
-
-An event contains only stable event ID, namespaced kind, subject, body, and
-opaque metadata. It cannot provide target, sender, cadence, timeout,
-environment, a command, or any post-trigger action. Attention and disposition
-requirements are registration policy rather than detector output.
-
-Process exit status represents execution success or failure. Protocol version 1
-uses these explicit limits:
-
-| Field | Limit |
-|---|---:|
-| Detector stdout | 256 KiB |
-| Detector stderr | 64 KiB |
-| Opaque state | 256 KiB serialized |
-| Event subject | 512 UTF-8 bytes |
-| Event body | 128 KiB |
-| Detector metadata | 64 KiB serialized |
-
-Cap failures set structured `truncated` and `limit` diagnostics; truncated event
-content is never sent as success.
-
-### 3. Persist policy, state, and provenance
+- Add `telex-watcher/` as a Rust workspace member with its own binary. This
+  keeps the runnable dogfood application under workspace build/test/clippy
+  coverage while leaving Telex core and `telex-console` unchanged.
+- Use a dedicated SQLite registry below the user's Telex data directory.
+- Hold an advisory `fs2` file lock while `run` is active so one runtime
+  schedules a registry at a time while management commands remain available.
+- Create one explicit registry schema version for the spike and fail clearly if
+  an unknown version is opened. General migration, backup, retention, and
+  compaction administration are deferred and recorded in the report.
 
 Persist each watch's:
 
-- stable ID, command argv, working directory, and explicit script path;
-- `follow-path` or `pinned` script mode and pinned digest when applicable;
-- fixed Telex sender and target;
+- stable watch ID, command argv, canonical script path, and working directory;
+- `pinned` or `follow-path` script mode and pinned digest when applicable;
+- immutable sender and target;
 - cadence, timeout, attention, disposition requirement, and environment
   allowlist;
 - opaque parameters and current opaque state;
 - lifecycle status, next due time, failure count, and last diagnostic.
 
-Persist every attempt with timing, outcome, script digest, bounded/redacted
-stderr, and error details. Persist accepted events with watch ID, event ID,
-send-time sender and target, Telex message ID/receipt, attempt ID, script
-digest, and acceptance timestamp.
-Removal is a soft lifecycle state and preserves audit rows. Sent-event
-provenance is not automatically pruned. Attempts retain the newest 1,000 rows
-per watch by default and may also be pruned explicitly with `gc`; the report
-will measure registry growth and record this experimental policy.
+Persist bounded attempts and accepted-event provenance sufficient to explain:
 
-Use a unique `(watch_id, event_id)` ledger index and an index on
-`(watch_id, accepted_at_ms)` for inspection. Explicit event-ledger pruning is
-allowed only for terminal or removed watches after export, never for active
-watches. `status` warns when the ledger exceeds 100,000 rows or the registry
-exceeds 100 MiB, and the spike report records the measured growth rate.
+- which script digest ran;
+- which prior state was supplied;
+- which result was returned;
+- which event ID and normalized envelope were accepted;
+- which sender/target and Telex receipt were used;
+- whether state committed after acceptance.
 
-Persist runtime identity/heartbeat and in-flight attempt PID, process-group ID,
-process start token, and command fingerprint. On restart, a stale in-flight
-attempt becomes `orphaned` and the watch is not rescheduled until the old group
-is proven gone or an operator explicitly invokes recovery. This prevents
-overlap even when abrupt Unix process death leaves descendants.
+Removed watches retain their state and provenance in the spike registry.
+Long-term pruning and archival policy are deferred.
 
-### 4. Enforce the state/send transaction
+### 2. Define detector protocol version 1
+
+The Watcher sends one JSON request on stdin:
+
+```json
+{
+  "schemaVersion": 1,
+  "attempt": {
+    "id": "attempt-id",
+    "now": "2026-07-19T00:00:00Z"
+  },
+  "watch": {
+    "id": "stable-watch-id",
+    "parameters": {}
+  },
+  "script": {
+    "mode": "pinned",
+    "sha256": "..."
+  },
+  "state": {}
+}
+```
+
+The detector must exit successfully and emit exactly one bounded JSON result:
+
+- `idle`: successful observation with optional `nextState`;
+- `event`: one required event plus optional `nextState`;
+- `terminal`: optional final event plus optional `nextState`;
+- `degraded`: no state advancement; retry under Watcher backoff policy.
+
+An event contains only:
+
+- stable event ID;
+- namespaced kind;
+- subject and body;
+- opaque provider metadata.
+
+Protocol version 1 limits detector stdout to 256 KiB, stderr to 64 KiB,
+serialized opaque state to 256 KiB, subject to 512 UTF-8 bytes, body to
+128 KiB, and metadata to 64 KiB. Cap failures are visible attempt failures;
+truncated events are never sent.
+
+Process exit status represents command execution success/failure. Structured
+JSON represents detector state.
+
+### 3. Enforce fail-safe state and duplicate ordering
 
 - `idle`: atomically commit validated `nextState`, reset failure backoff, and
   schedule the next run.
-- `event`: first check the sent-event ledger for `(watch_id, event_id)`. An
-  already-committed event is not sent again; its proposed state may be committed
-  because the ledger proves prior durable acceptance. Otherwise send to the
-  registration's fixed Telex sender/target first. Only after a durable
+- New `event`: send to the fixed sender/target first. Only after a durable
   `delivered` or `queued-unoccupied` receipt atomically commit `nextState`, the
   sent-event ledger row, and the next schedule.
-- `terminal` with an event: use the same send-before-state ordering, then mark
-  the watch terminal in the same local commit transaction. The sent-event
-  ledger uses the same `(watch_id, event_id)` key for terminal events.
+- `terminal` with an event: use the same send-before-state transaction and mark
+  the watch terminal in the local commit.
 - `terminal` without an event: commit state and terminal status directly.
-- `degraded`, timeout, non-zero exit, malformed output, oversize output, pinned
-  digest mismatch, or Telex failure: retain prior detector state, record the
-  attempt, increase bounded exponential backoff, and expose the failure through
-  inspection commands.
+- `degraded`, timeout, non-zero exit, malformed/oversize output, digest
+  mismatch, or Telex failure: retain prior detector state, record the attempt,
+  and apply bounded backoff.
 
-If Telex accepts a message and the Watcher crashes before its local commit, the
-detector may repeat the stable event ID on restart because no ledger row exists.
-That applies equally to `event` and event-producing `terminal` results. The
-scheduler re-runs the still-active watch; each interrupted acceptance attempt
-can create at most one additional copy before its local commit. The spike will
-document this explicit at-least-once window rather than hiding it.
+Each committed event row binds:
 
-### 5. Bound scheduling and execution
+- `watch_id` and `event_id`;
+- prior-state hash and committed next-state hash;
+- normalized event-envelope hash;
+- script digest;
+- sender, target, Telex message ID, and receipt.
 
-- Schedule active watches from persisted due times and recover them on restart.
-- Enforce one in-flight attempt per watch plus a configurable global
-  concurrency limit.
-- Spawn every detector in a cross-platform process group using
-  `command-group`: a Windows Job Object or a Unix process group. Timeout,
-  Watcher shutdown, and cancellation terminate the full descendant tree, not
-  only the shell parent.
-- Read stdout and stderr concurrently with hard byte caps.
+An existing `(watch_id, event_id)` never authorizes a new state transition:
+
+- if the normalized event-envelope hash matches the committed ledger row, treat
+  the repeated ID as a visible `stale-duplicate` no-op even when the watch state
+  has advanced through later events; do not send and do not commit the
+  detector's newly proposed `nextState`;
+- if the same ID now has different event evidence, fail the attempt as
+  `duplicate-event-conflict`; do not send and do not advance state. Record both
+  hashes for diagnosis, but do not increment provider-failure backoff.
+
+Because ledger and state commit atomically, a committed ledger row proves the
+original transition, not any later proposal. If Telex accepts a message and the
+Watcher crashes before the local transaction, no ledger row exists and the
+stable event ID may be sent again after restart. The report will preserve this
+explicit at-least-once window.
+
+### 4. Bound scheduling and trusted process execution
+
+- Schedule active watches from persisted due times and execute an overdue watch
+  once on restart before resuming normal cadence.
+- Enforce one in-flight attempt per watch and a configurable global concurrency
+  limit.
+- Spawn each detector in a `command-group` process group/Windows Job Object.
+  Timeout and graceful Watcher shutdown terminate the full descendant tree.
+- Read stdout and stderr concurrently with hard byte limits.
 - Apply bounded exponential retry backoff for execution failures and degraded
   results.
-- Use monotonic deadlines while the process is running and wall-clock UTC only
-  for persisted due times and detector `now`. Detect divergence between
-  monotonic and wall-clock elapsed time. After resume or a large forward jump,
-  run each overdue watch at most once, spread due work with bounded jitter, and
-  schedule the next cadence from completion. A backward wall-clock jump
-  rebases deadlines rather than stalling until the old timestamp returns.
-  Record observed clock skew on the attempt.
-- Read and hash the script immediately before spawn, then hash it again before
-  accepting detector output. A digest change during execution invalidates the
-  result, so a follow-path mid-save cannot emit or advance state. Detector
-  authoring guidance will recommend atomic file replacement.
-- Clear the child environment. Restore the platform launch baseline
-  (`PATH`, temporary-directory variables, locale, shell/system-root variables,
-  and user profile/config roots) and copy only registration-approved inherited
-  variable names. Example allowlists include `GH_CONFIG_DIR`, `GH_TOKEN`,
-  `AZURE_DEVOPS_EXT_PAT`, and `AZURE_CONFIG_DIR`. Values are read at execution
-  time, never persisted. Known inherited secret values are replaced in bounded
-  stderr with `[redacted:<VARIABLE>]`.
-- Handle Ctrl+C, SIGINT, and SIGTERM as a graceful drain: stop scheduling,
-  wait up to 10 seconds, then terminate remaining process groups. On Windows,
-  require and test Job Object `KILL_ON_JOB_CLOSE` behavior. On Unix, SIGKILL
-  cannot run cleanup; persisted orphan state blocks rescheduling and
-  `recover <watch-id> --terminate` performs a start-token/fingerprint-guarded
-  best-effort group kill. If identity cannot be proved, report the orphan for
-  operator action rather than risking an unrelated PID.
-- Write Watcher-runtime JSONL logs separately from detector attempt stderr.
-  Default to `<registry>.logs/`, rotate daily, retain seven files and at most
-  50 MiB combined, and support `run --log-file` plus `--log-level`.
+- Hash the script immediately before execution and again before accepting the
+  result. A follow-path change during execution invalidates the attempt.
+- Clear the child environment, restore the minimal platform launch baseline,
+  and copy only registration-approved inherited variables. Values are read at
+  execution time and never persisted. Exact values of explicitly sensitive
+  allowlisted variables (`GH_TOKEN`, `AZURE_DEVOPS_EXT_PAT`, and names ending
+  in `TOKEN`, `PAT`, `KEY`, or `SECRET`) are redacted from bounded stderr; the
+  runtime never logs the constructed child environment.
+- Handle Ctrl+C/SIGINT/SIGTERM by stopping new scheduling, allowing a short
+  drain, and terminating remaining process groups.
 
-### 6. Use a narrow experimental Telex adapter
+Abrupt Watcher death can leave Unix descendants beyond the dead process's
+control. The spike records interrupted attempts and delays their next run by at
+least the configured timeout plus failure backoff, but production-grade orphan
+adoption/termination is deferred to operational hardening and called out as a
+known limitation.
 
-- Define an internal `TelexAdapter` interface returning a classified send
-  receipt. Implement it with a configured `telex` subprocess for the spike;
-  tests use a fake adapter, and a future issue #12 client can replace the CLI
-  implementation without changing scheduling or state logic.
-- Give the application a stable service session identity derived from its
-  registry and pass it on every send. This is an application identity, not
-  `COPILOT_AGENT_SESSION_ID`; agent-session coordination commands retain their
-  existing Copilot session requirement.
-- Pass the registration's fixed sender/target and policy-controlled attention
-  and disposition requirement.
-- Add Watcher protocol version, watch ID, event ID, attempt ID, script digest,
-  and script mode to normalized metadata while retaining detector metadata as
-  an opaque nested value.
-- The CLI adapter passes an explicit sender and session on every invocation. It
-  relies on the current `telex send` recovery path to register/re-register the
-  sender after `NeedsAttach`, including after daemon restart. Residual
-  `NeedsAttach`, daemon unavailable, IPC/auth rejection, process failure,
-  malformed JSON, and unknown receipt values are classified separately and do
-  not advance detector state.
-- Parse the JSON send receipt and treat only durable `delivered` or
-  `queued-unoccupied` receipts as acceptance. Any new receipt vocabulary fails
-  closed until classified.
-- Apply adapter backoff from 1 second to a 60-second ceiling with 20% jitter.
-  Persist the last successful contact and current adapter failure/backoff
-  summary so an all-watches Telex outage is distinguishable from provider
-  failures. Test both transient daemon restart and a daemon that remains down
-  through the ceiling.
-- Report this subprocess/session integration as temporary evidence for issue
-  #12 rather than a production application-client contract.
+After restart, overdue watches receive bounded 0-10% cadence jitter so a group
+of recovered watches does not all invoke providers on the same scheduler tick.
 
-### 7. Provide local management commands
+### 5. Use a narrow experimental Telex adapter
 
-Implement commands sufficient for dogfooding:
+- Define an internal `TelexAdapter` interface returning a classified receipt.
+- Implement the spike adapter by invoking a configured `telex` executable.
+- Give the application a stable service session identity derived from the
+  registry and pass an explicit session and sender on every send.
+- Rely on the current `telex send` recovery path to re-register after
+  `NeedsAttach`, including after daemon restart.
+- Normalize metadata with protocol version, watch ID, event ID, attempt ID,
+  script digest/mode, and nested detector metadata.
+- Accept only `delivered` and `queued-unoccupied`; unknown receipt vocabulary
+  fails closed.
+- Distinguish daemon unavailable, residual `NeedsAttach`, IPC/auth rejection,
+  command failure, malformed JSON, unknown receipt, and durable acceptance in
+  attempts and inspection output.
+
+The CLI subprocess/session behavior is a temporary integration shortcut.
+Tests use a fake adapter. The report will translate observed requirements into
+issue #12 rather than presenting this trait or subprocess shape as a public
+contract.
+
+### 6. Provide local management and diagnostics
+
+Implement:
 
 - `add --file <watch.json>`;
 - `list`;
@@ -220,179 +214,155 @@ Implement commands sufficient for dogfooding:
 - `remove <watch-id>`;
 - `attempts <watch-id> [--limit <n>]`;
 - `events <watch-id> [--limit <n>]`;
-- `status`;
-- `stop [--grace-seconds <n>]`;
-- `recover <watch-id> --terminate`;
-- `backup <path>`;
-- `export <path>`;
-- `gc [--attempt-retention <n>] [--events-before <time> --status
-  terminal|removed]`;
-- `run`, plus bounded single-pass/id-selective options for tests and manual
-  exercises.
+- `run`, with bounded `--once` and watch-selection options for tests/exercises.
 
-Add/update validates command argv, canonical local script and working-directory
-paths, protocol policy, JSON fields, script digest, timing bounds, and Telex
-addresses before persisting changes. It also validates environment variable
-names without persisting their values. `list` and `show` expose a per-watch
-health summary, consecutive failure count, next due time, last attempt ID,
-last script digest, and last accepted event/receipt. `attempts` and `events`
-provide structured JSON-capable local diagnostics correlated by watch,
-attempt, event, script digest, and Telex message ID. `update` cannot change
-sender or target after creation; rerouting requires removing the old watch and
-adding a new watch ID. `status` reports registry schema version, runtime
-PID/uptime, last scheduler tick, adapter last contact/current backoff, runtime
-log path, and watch counts by lifecycle. `backup` uses SQLite's online backup
-API; recovery stops the runtime, restores the file, and reopens through normal
-schema checks.
+Add/update validates local paths, argv, JSON, timing bounds, environment variable
+names, script mode/digest, and Telex addresses. Sender and target cannot be
+changed by update; rerouting requires a new watch ID.
 
-### 8. Add editable detector examples
+`list`, `show`, `attempts`, and `events` expose enough structured JSON-capable
+diagnostics to correlate watch, attempt, event, script digest, state hashes,
+receipt, and failure/backoff without reading SQLite directly.
 
-- Generic GitHub PR detector using `gh`, adapting useful PR state/review/check
+The `run` process writes scheduler/lock/adapter/shutdown lifecycle records as
+JSONL on stderr so multi-day dogfood can redirect and tail a simple run log.
+Production rotation remains deferred.
+
+### 7. Add editable detector examples
+
+- Generic GitHub PR detector using `gh`, adapting useful review/check/merge
   decisions from the Loop reference without its worker/waiter lifecycle.
 - Customized GitHub detector demonstrating repository-specific author/comment
   filtering without runtime changes.
-- Azure DevOps PR detector using the same stdin/stdout protocol against Azure
-  DevOps REST data.
-- Include sample registrations and fixture-capable inputs so detector behavior
-  is reproducible. The Azure DevOps template accepts `organization`, `project`,
-  `repository`, and `pullRequest` parameters and uses
-  `AZURE_DEVOPS_EXT_PAT` only when explicitly allowlisted. The deterministic
-  proof fixture will live at
-  `telex-watcher/examples/fixtures/azure-devops-pr.json` and preserve an Azure
-  DevOps REST 7.1 PR response shape.
-- Before the live exercise, preflight optional live ADO coordinates supplied as
-  `TELEX_WATCHER_ADO_ORG`, `TELEX_WATCHER_ADO_PROJECT`,
-  `TELEX_WATCHER_ADO_REPO`, and `TELEX_WATCHER_ADO_PR`. If all are present and
-  reachable, exercise the real endpoint. Otherwise execute the ADO detector
-  through the detached live Watcher against the checked-in fixture and mark
-  provider-network validation incomplete in the report rather than silently
-  dropping the required detector scenario.
-- The external Plan approval is also the explicit decision point for this
-  fallback: approval of revision 3 accepts fixture-mode as sufficient for the
-  detector-protocol proof when no live ADO coordinates exist. Feedback that
-  requires live ADO becomes a blocking prerequisite before implementation.
+- Azure DevOps PR detector using the same protocol against REST 7.1 data.
+- Fixture-capable provider inputs for deterministic tests.
+- A non-PR HTTP/JSON or file-condition detector plus sample registration
+  prepared explicitly for later `viability-gate` builder dogfood.
 
-### 9. Validate behavior and run the live spike
+The non-PR scenario is a handoff from #101; this node prepares and validates the
+template contract but does not count it as one of its required live provider
+proofs. Readiness means the template executes through the real runtime against a
+local fixture, produces a protocol-valid `idle` or `event` result, and passes the
+same state/provenance assertions as provider templates; live Telex delivery is
+left to `viability-gate`.
+
+Azure DevOps proof policy:
+
+- A checked-in ADO response fixture validates parser and protocol behavior.
+- Live proof requires reachable organization/project/repository/PR coordinates
+  and an explicitly allowlisted credential path such as
+  `AZURE_DEVOPS_EXT_PAT`.
+- If live access is unavailable, send `decision-needed` to the workstream and
+  campaign orchestrators and stop before claiming completion.
+- Approval of this plan does not waive live ADO.
+
+### 8. Validate behavior and run the live spike
 
 Automated validation will cover:
 
-- protocol parsing and policy-field rejection;
+- protocol parsing, caps, and policy-field exclusion;
 - idle state advancement;
-- event state remaining unchanged before/after a failed Telex send;
-- event state and sent ledger committing after both `delivered` and
-  `queued-unoccupied` durable receipts, with unknown receipt values rejected;
-- stable event/watch/script provenance;
-- restart recovery from persisted state, with zero resend after a fully
-  committed event and at most one duplicate per deliberately interrupted
-  send-accepted/local-commit attempt;
-- timeout, malformed output, output caps, non-zero exit, degraded backoff,
-  pinned digest mismatch, follow-path mid-execution drift, process-tree
-  termination, and non-overlap;
-- event-producing terminal crash/retry behavior;
-- daemon restart and `NeedsAttach` recovery through the CLI adapter;
-- degraded-watch surfacing and structured attempt/event diagnostics;
-- schema `1 -> 2` migration preserving committed sent-event rows and refusal of
-  unknown higher versions;
-- graceful drain, Unix orphan-state recovery, and Windows Job Object closure;
-- simulated suspend/forward/backward clock jumps with one-run catch-up and
-  jitter;
-- runtime log rotation and adapter-wide stall visibility;
-- CLI add/inspect/pause/resume/update/remove/status/stop/recover/backup/export/
-  gc behavior.
+- state unchanged after failed Telex send;
+- state plus ledger commit after `delivered` and `queued-unoccupied`;
+- duplicate event ID no-op/conflict behavior with no state advancement;
+- terminal event ordering and crash/retry window;
+- restart recovery from committed opaque state;
+- timeout, full process-group termination, non-overlap, malformed output,
+  oversize output, non-zero exit, degraded backoff, pinned mismatch, and
+  follow-path drift;
+- daemon restart and `NeedsAttach` recovery;
+- management and diagnostic commands;
+- generic GitHub, customized GitHub, ADO fixture, and non-PR template behavior.
 
-The live exercise will:
+Live sequence:
 
-1. Build the Watcher and local Telex binary.
-2. Preflight GitHub and optional live ADO access, then register generic GitHub,
-   customized GitHub, and Azure DevOps watches. Use the checked-in ADO fixture
-   if live ADO coordinates are absent or unreachable and record that limitation.
-3. Launch `telex-watcher run` as a fully independent detached process, with no
-   Telex waiter or Loop task in the originating agent session.
-4. Observe an actual Copilot bridge wakeup at the occupied implementer address
-   and a `queued-unoccupied` receipt for a pre-created unoccupied proof address.
-5. Restart the Telex daemon under the running Watcher and verify sender
-   re-registration without permanent stall.
-6. Stop and restart the Watcher, verify opaque state recovery, assert zero
-   resend for committed event IDs, and demonstrate the documented single-crash
-   duplicate window with a controlled acceptance/commit interruption.
-7. Exercise timeout with a descendant process, overlap, malformed/oversize
-   output, digest drift, execution failure, and degraded backoff, then inspect
-   the bounded structured diagnostics.
-8. Exercise graceful stop, abrupt restart with a controlled stale attempt,
-   scheduler catch-up after a simulated clock gap, registry backup/restore, and
-   schema migration while preserving committed event provenance.
-9. Stop only the exact proof process after evidence is captured; the application
-   itself remains runnable for later multi-day dogfooding.
+1. Build the local Telex and Watcher binaries.
+2. Preflight GitHub and live ADO coordinates/credentials. Send
+   `decision-needed` and hold if live ADO is unavailable. Preflight must also
+   identify a controllable PR comment, reviewer-state, or policy/check action
+   that can be caused during the exercise; record the exact trigger action for
+   reproducibility.
+3. Register and run the first generic GitHub and live Azure DevOps watches
+   through a fully detached Watcher process with no session waiter.
+4. After the first end-to-end GitHub and ADO events, send their evidence to the
+   Telex Watcher workstream orchestrator as a disposition-required
+   `provider-proof-checkpoint` and stop before broader dogfooding.
+5. Resolve any feedback and wait for the workstream orchestrator to approve
+   continuing. Automated tests and non-provider implementation may continue
+   while evidence is under review, but no broader live dogfooding proceeds. If
+   either provider event or the checkpoint disposition remains unavailable
+   after four hours of active runtime/review, send `decision-needed` with
+   partial evidence and hold.
+6. Exercise the repository-customized GitHub policy without runtime changes.
+7. Prove both an actual Copilot bridge wakeup and a
+   `queued-unoccupied` receipt to a pre-created unoccupied address.
+8. Stop/restart the Watcher and verify committed state and event IDs are not
+   replayed; separately demonstrate the controlled send-accepted/local-commit
+   duplicate window.
+9. Exercise timeout, overlap prevention, malformed/oversize output, script
+   drift, execution failure, degraded backoff, and daemon restart.
+10. Stop only the exact proof process after evidence is captured.
 
-### 10. Produce the spike report
+### 9. Produce the spike report
 
 Create `docs/generic-watcher-spike-report.md` covering:
 
-- exercised provider scenarios and evidence;
-- detector protocol and state/send ordering;
-- restart and failure behavior;
-- script and event provenance;
+- provider scenarios, first-event checkpoint, and evidence;
+- detector protocol and duplicate/state/send ordering;
+- GitHub/customized-GitHub/live-ADO results;
+- prepared non-PR viability-gate handoff;
+- wakeup and durable-queue evidence;
+- restart, timeout, overlap, malformed output, and failure behavior;
+- stable watch/event/script/state/receipt provenance;
 - detector-authoring experience;
-- trusted-local execution, credential, and logging observations;
-- registry growth, retention threshold, backup/restore, schema migration,
-  scheduler clock behavior, and abrupt-shutdown limitations;
+- trusted-local execution, environment, credential, and diagnostic observations;
 - every temporary integration shortcut;
-- requirements exported to issue #12, organized by lifecycle/recovery,
-  push/poll behavior, service/application identity, send/receive/reply/
-  disposition needs, cursor/restart behavior, provenance/metadata, and
-  supported IPC/binding ergonomics;
-- known defects, risks, incomplete validation, and discrete deferred work.
+- known defects and incomplete validation;
+- discrete deferred production items;
+- issue #12 requirements for lifecycle/recovery, push/poll, service identity,
+  send/receive/reply/disposition, cursor/restart, provenance/metadata, and
+  IPC/binding ergonomics.
 
-## Key Decisions
+Explicit deferred items include:
 
-- Eventless `idle` results may advance opaque state because detectors need to
-  record deliberately ignored observations and provider cursors.
-- `degraded` never advances state.
-- Attention and `requiresDisposition` are registration policy, not detector
-  output.
-- `pinned` is the default dogfood mode; `follow-path` is an explicit
-  development opt-in that records every executed digest and rejects results if
-  the file changes during execution.
-- Removed watches retain sent-event provenance and recent attempt history;
-  explicit `gc` may prune attempts and may prune exported ledger rows only for
-  terminal or removed watches.
-- Repeated failures remain locally visible in the spike; automatic failure
-  notification policy is deferred to the production contract.
-- The internal `TelexAdapter` is the migration seam. The CLI subprocess is its
-  experimental implementation; no new public SDK is frozen in this node.
-- Both live Copilot wakeup and durable unoccupied queueing are required in this
-  node.
-- Sender and target are immutable for a watch ID.
-- Registry schema migration, backup, process-level status, and rotated runtime
-  logs are included because the deliverable is a multi-day dogfood application,
-  not a one-shot schema prototype.
+- general registry migrations and backup/restore tooling;
+- retention, export, purge, and compaction administration;
+- production log rotation and service supervision;
+- suspend/clock-jump and rate-limit hardening;
+- abrupt-crash orphan adoption/termination;
+- automatic degradation notifications;
+- production packaging, sandboxing, and remote administration.
 
 ## Work Items
 
-1. **Runtime and protocol:** implement the crate, registry, detector contract,
-   scheduler, process bounds, Telex adapter, and management CLI.
-2. **Behavioral tests:** prove state ordering, recovery, provenance, lifecycle
-   commands, and bounded failure cases with real child processes and a fake
-   receipt-producing Telex executable.
-3. **Detector examples:** add and exercise generic GitHub, customized GitHub,
-   and Azure DevOps templates plus sample registrations.
-4. **Live proof and report:** run the detached multi-detector/restart/failure
-   exercise, capture evidence, and write the spike report.
+1. **Runtime and protocol:** implement the narrow crate, registry, detector
+   contract, bounded scheduler/execution, receipt-gated transaction, Telex
+   adapter, and required management CLI.
+2. **Behavioral tests:** prove state ordering, duplicate safety, recovery,
+   provenance, CLI behavior, and bounded failure cases.
+3. **Detector examples:** add generic GitHub, customized GitHub, Azure DevOps,
+   and non-PR handoff templates plus deterministic fixtures.
+4. **Live proof and report:** run the detached provider/checkpoint/restart/
+   failure exercise and write the report.
 
-Work items are intentionally sequenced because tests and templates depend on
-the protocol/runtime contract, and the report depends on the executed system.
+These items are sequenced because tests/templates depend on the protocol and the
+report depends on executed evidence.
 
 ## Completion Criteria
 
 - The application and workspace pass formatting, build, tests, and clippy.
-- All management operations work against a persistent registry.
-- The required three detector scenarios run through the same provider-neutral
-  runtime.
-- Event-producing state is demonstrably unchanged on send failure and committed
-  only after durable Telex acceptance.
-- Restart, timeout, overlap, malformed output, execution failure, degraded
-  output, and script provenance are demonstrated.
-- A detached Watcher process produces both a real Telex bridge wakeup and a
-  durable unoccupied-address queue with no originating-session waiter.
-- The report honestly identifies the at-least-once window, temporary CLI
+- Required management operations work against a persistent registry.
+- Generic GitHub, customized GitHub, and live Azure DevOps detectors execute
+  through the same provider-neutral runtime.
+- The workstream orchestrator approves the first GitHub/ADO event checkpoint
+  before broader dogfooding continues.
+- Duplicate event IDs never advance state solely because a ledger row exists.
+- Event-producing state is unchanged on send failure and commits only after a
+  durable Telex receipt.
+- Restart, timeout, non-overlap, malformed/oversize output, execution failure,
+  degraded output, and script provenance are demonstrated.
+- A detached Watcher produces both a real Copilot bridge wakeup and durable
+  unoccupied queueing with no originating-session waiter.
+- The non-PR scenario is ready for `viability-gate`.
+- The report honestly identifies the at-least-once window, temporary Telex
   integration, issue #12 requirements, risks, and deferred production work.
