@@ -1,6 +1,6 @@
 # Generic Watcher Spike Plan
 
-Revision: 4
+Revision: 5
 
 ## Outcome
 
@@ -182,12 +182,64 @@ of recovered watches does not all invoke providers on the same scheduler tick.
 
 ### 5. Use a narrow experimental Telex adapter
 
-- Define an internal `TelexAdapter` interface returning a classified receipt.
+- Define an internal `TelexAdapter` plus a serialized lifecycle coordinator for
+  sender attachment, strict send, reconciliation, and detach.
 - Implement the spike adapter by invoking a configured `telex` executable.
-- Give the application a stable service session identity derived from the
-  registry and pass an explicit session and sender on every send.
-- Rely on the current `telex send` recovery path to re-register after
-  `NeedsAttach`, including after daemon restart.
+- Add a narrow experimental `telex send --require-attached` mode. It preserves
+  normal CLI behavior by default, but for Watcher traffic it returns
+  `NeedsAttachReason::RestartLost` or
+  `NeedsAttachReason::DeliberatelyDetached` without running the current unbound
+  `register_for_retry` path.
+  This prevents daemon restart from replacing PID-bound membership with a
+  registration that has no watched process.
+- Generate one cryptographically random, never-persisted runtime session UUID
+  on every Watcher OS-process start. One runtime session spans every configured
+  sender address. Reuse that UUID only while the same Watcher process remains
+  alive, including across Telex daemon restart; every new Watcher process gets a
+  new UUID.
+- Capture the actual Watcher PID. Explicitly attach every distinct sender before
+  any watch using it becomes eligible:
+
+  ```text
+  telex --address <sender> attach
+    --session <runtime-uuid>
+    --no-session-bind
+    --watch-pid <watcher-pid>:required
+    --occupant watcher:<watcher-pid>
+  ```
+
+  `required` plus Telex's captured process start time makes Watcher death a
+  negative liveness signal for every sender in the runtime session.
+- Startup normalizes/deduplicates the sender set and remains non-ready for sends
+  until all required senders attach. Partial attachment is visible and
+  retried at 1, 2, 4, 8, and 15 seconds (30-second ceiling); exhaustion leaves
+  the runtime `degraded-not-ready` and forbids detector sends. The Watcher never
+  silently operates with a partially attached identity set.
+- Sender normalization trims surrounding whitespace, rejects empty values, and
+  otherwise preserves the exact Telex address string without case-folding.
+- After every attach/reconcile, query station status for the runtime UUID and
+  fail readiness if any desired sender is absent, attached under another
+  session, has empty `watch_pids`, or does not contain the actual Watcher PID
+  with role `required`.
+- Reconcile configured senders under one lifecycle lock:
+  - adding a watch with a new sender attaches that sender before activation;
+  - every scheduler cycle reads the registry revision and recomputes the sender
+    set from all non-removed watches, including paused watches;
+  - pausing/resuming therefore does not detach a still-configured sender;
+  - removing the last non-removed watch for a sender detaches that address;
+  - another active or paused watch sharing the sender keeps membership attached;
+  - re-adding a detached sender explicitly attaches it and clears only the
+    current runtime session/address tombstone.
+- Invoke strict send with explicit runtime session and fixed sender. On
+  `NeedsAttach` caused by daemon membership loss, reconcile all currently
+  configured senders with the same UUID/PID, then retry the send exactly once.
+  A deliberate-detach reason does not hidden-recover during shutdown.
+- Run a bounded periodic sender reconciliation so daemon restart is repaired
+  even before the next event. This is a Watcher-owned local lifecycle check, not
+  a Telex waiter and not an agent-session task. The timer runs every five
+  seconds when healthy and backs off to at most 30 seconds after failures.
+  Timer and send-triggered reconciliation share one lock/generation so they
+  cannot stampede or race shutdown.
 - Normalize metadata with protocol version, watch ID, event ID, attempt ID,
   script digest/mode, and nested detector metadata.
 - Accept only `delivered` and `queued-unoccupied`; unknown receipt vocabulary
@@ -195,11 +247,32 @@ of recovered watches does not all invoke providers on the same scheduler tick.
 - Distinguish daemon unavailable, residual `NeedsAttach`, IPC/auth rejection,
   command failure, malformed JSON, unknown receipt, and durable acceptance in
   attempts and inspection output.
+- Graceful shutdown first blocks new scheduling/reattachment, drains bounded
+  sends, and detaches every sender under the runtime UUID. Record every
+  per-address outcome and retry transient detach failures up to three times.
+  Unresolved detach failures make shutdown degraded but do not reuse the UUID.
+  Detach tombstones remain attributable to that discarded UUID; the next
+  process's fresh UUID is not blocked.
+- Abrupt Watcher death assumes no cleanup. Within a bounded daemon heartbeat
+  allowance, the dead/reused required PID ends the whole runtime session,
+  releases every sender lease, and marks each sender idle/unoccupied. A new
+  Watcher UUID retries boundedly until it can claim the stable sender addresses;
+  no force takeover/reset is used. If takeover still fails after 30 seconds,
+  startup remains non-ready and surfaces a blocker instead of operating
+  partially.
+- Inbound messages or replies to a Watcher sender are not consumed in #101.
+  While the Watcher is down they remain durable and report
+  `queued-unoccupied`. While its sender-only station is attached, a receipt may
+  say `delivered` because the address is occupied, but no receive/ack loop exists
+  and the Watcher must not claim application consumption.
 
-The CLI subprocess/session behavior is a temporary integration shortcut.
-Tests use a fake adapter. The report will translate observed requirements into
-issue #12 rather than presenting this trait or subprocess shape as a public
-contract.
+The strict-send flag, CLI subprocess lifecycle, sender-only occupancy semantics,
+and all session/attachment/receipt assumptions are temporary #12 evidence.
+Tests use a fake adapter where appropriate. The report will not present this
+shape as a public Application Client contract. If `--require-attached` cannot
+remain a narrow backward-compatible CLI change, reopen the mechanism choice and
+use the council's fallback: a spike-private `Register`/`Send`/`Detach` IPC
+adapter with the same lifecycle semantics.
 
 ### 6. Provide local management and diagnostics
 
@@ -226,7 +299,10 @@ receipt, and failure/backoff without reading SQLite directly.
 
 The `run` process writes scheduler/lock/adapter/shutdown lifecycle records as
 JSONL on stderr so multi-day dogfood can redirect and tail a simple run log.
-Production rotation remains deferred.
+Lifecycle records include `runtime_session_id`, `watcher_pid`, sender,
+desired/attached sender sets, reconcile generation, lease epoch when available,
+typed result/error, retry count, and detach outcome. Production rotation remains
+deferred.
 
 ### 7. Add editable detector examples
 
@@ -271,6 +347,33 @@ Automated validation will cover:
   oversize output, non-zero exit, degraded backoff, pinned mismatch, and
   follow-path drift;
 - daemon restart and `NeedsAttach` recovery;
+- two Watcher OS-process starts producing different runtime UUIDs, while one
+  live process retains the same UUID across Telex daemon restart;
+- two distinct senders attached under one fresh runtime UUID with the actual
+  Watcher PID recorded as `required` for both;
+- station-status assertions rejecting any Watcher-owned desired sender with
+  empty `watch_pids`, a non-`required` predicate, another session, or the wrong
+  PID/start time;
+- strict send never invoking unbound auto-registration, including a forced
+  daemon-loss race between attach and send;
+- paired compatibility coverage showing ordinary unflagged `telex send`
+  retains its existing auto-recovery behavior;
+- every Watcher attach passing `--no-session-bind`, including a test with
+  ambient `TELEX_SESSION_PID` set that proves no extra anchor is registered;
+- every send passing explicit `--session` and `--from`, plus an ambiguity test
+  that omitting `from` with multiple senders is refused;
+- add/pause/resume/remove reconciliation for watches sharing sender addresses;
+- partial multi-sender attach remaining non-ready and converging or failing
+  boundedly;
+- graceful detach followed by a new-runtime UUID reattaching the stable senders;
+- abrupt Watcher termination releasing all sender leases within two daemon
+  heartbeat intervals, followed by fresh-runtime takeover without force reset;
+- inbound message and reply queueing to a sender while the Watcher is down,
+  without claiming consumption;
+- inbound traffic while a sender-only station is attached, proving that a
+  `delivered` occupancy receipt still leaves the message unconsumed without a
+  receive/ack loop;
+- shutdown racing `NeedsAttach` without reattaching after detach begins;
 - management and diagnostic commands;
 - generic GitHub, customized GitHub, ADO fixture, and non-PR template behavior.
 
@@ -299,9 +402,21 @@ Live sequence:
 8. Stop/restart the Watcher and verify committed state and event IDs are not
    replayed; separately demonstrate the controlled send-accepted/local-commit
    duplicate window.
-9. Exercise timeout, overlap prevention, malformed/oversize output, script
+9. Exercise at least two configured sender addresses:
+   1. capture the initial runtime UUID, PID-bound status, and lease epochs;
+   2. restart the Telex daemon and prove all senders reconcile under the same
+      runtime UUID/PID;
+   3. gracefully detach, restart, and prove a different UUID claims both;
+   4. abruptly terminate that Watcher and verify both senders become
+      idle/unoccupied within two observed daemon heartbeat intervals;
+   5. start another fresh UUID and claim both without force takeover.
+10. Send a new message and a reply to a Watcher sender during downtime, then
+    verify durable queueing without a false consumption claim.
+11. Send inbound traffic while the sender-only Watcher station is attached and
+    prove `delivered` means occupied rather than consumed.
+12. Exercise timeout, overlap prevention, malformed/oversize output, script
    drift, execution failure, degraded backoff, and daemon restart.
-10. Stop only the exact proof process after evidence is captured.
+13. Stop only the exact proof process after evidence is captured.
 
 ### 9. Produce the spike report
 
@@ -317,11 +432,29 @@ Create `docs/generic-watcher-spike-report.md` covering:
 - detector-authoring experience;
 - trusted-local execution, environment, credential, and diagnostic observations;
 - every temporary integration shortcut;
+- experimental service-station identity, multi-sender attach/reconcile/detach,
+  required-PID liveness, graceful/abrupt restart, sender-only inbound queueing,
+  and any measured race or CLI limitation;
 - known defects and incomplete validation;
 - discrete deferred production items;
 - issue #12 requirements for lifecycle/recovery, push/poll, service identity,
   send/receive/reply/disposition, cursor/restart, provenance/metadata, and
-  IPC/binding ergonomics.
+  IPC/binding ergonomics, including:
+  - stable service address versus ephemeral never-reused process session;
+  - typed PID/start-time liveness;
+  - atomic or visibly partial multi-address attach/reconcile/detach;
+  - typed `NeedsAttach` reasons and caller-selected recovery policy;
+  - explicit sender selection for multi-address applications;
+  - bounded reconcile-and-send without raw CLI error parsing;
+  - collision/takeover policy with no hidden force reset;
+  - receipt occupancy versus durable acceptance versus actual consumption;
+  - sender-only versus bidirectional application-station semantics;
+  - message/event-ID deduplication guidance across accepted-send/local-commit
+    crash windows;
+  - daemon-restart notification or ergonomic explicit reattachment without a
+    resident waiter or timer-only discovery;
+  - status/audit for session, PID predicate, lease epoch, idle state, and last
+    reconcile.
 
 Explicit deferred items include:
 
@@ -359,6 +492,14 @@ report depends on executed evidence.
 - Duplicate event IDs never advance state solely because a ledger row exists.
 - Event-producing state is unchanged on send failure and commits only after a
   durable Telex receipt.
+- Every configured sender is explicitly attached before use under one fresh
+  per-process runtime UUID with the actual Watcher PID as a required liveness
+  predicate; strict send never creates unbound membership.
+- Daemon restart restores all sender registrations under the same live runtime
+  identity, graceful stop detaches all senders, and abrupt Watcher death makes
+  them idle/unoccupied before a fresh runtime UUID takes over without force.
+- Messages/replies addressed to sender-only stations during downtime are shown
+  durably queued and are not reported as consumed by Watcher.
 - Restart, timeout, non-overlap, malformed/oversize output, execution failure,
   degraded output, and script provenance are demonstrated.
 - A detached Watcher produces both a real Copilot bridge wakeup and durable
