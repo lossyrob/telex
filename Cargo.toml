@@ -11,7 +11,7 @@ default-run = "telex"
 # `telex-console` TUI crate. `spike/` (a throwaway feasibility crate) stays excluded so a plain
 # `cargo build` at the repo root builds only `telex`; build the console with `-p telex-console`.
 [workspace]
-members = ["telex-console"]
+members = ["telex-console", "telex-watcher"]
 exclude = ["spike"]
 
 [[bin]]

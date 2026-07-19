@@ -1,0 +1,21 @@
+{
+  "pullRequest": {
+    "pullRequestId": 73,
+    "title": "Example Azure DevOps pull request",
+    "status": "active",
+    "isDraft": false,
+    "mergeStatus": "succeeded",
+    "lastMergeSourceCommit": { "commitId": "0123456789abcdef0123456789abcdef01234567" },
+    "reviewers": [
+      {
+        "id": "11111111-1111-1111-1111-111111111111",
+        "displayName": "Example Required Reviewer",
+        "vote": 10,
+        "isRequired": true
+      }
+    ]
+  },
+  "threads": [
+    { "id": 1, "status": "fixed", "isDeleted": false }
+  ]
+}

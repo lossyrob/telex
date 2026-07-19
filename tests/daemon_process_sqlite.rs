@@ -1063,6 +1063,106 @@ fn real_process_send_without_daemon_does_not_spawn() {
 }
 
 #[test]
+fn watcher_private_send_returns_needs_attach_without_registering() {
+    let env = ProcessEnv::new("watcher-private-send");
+    let runtime = "watcher-runtime-uuid";
+    let sender_addr = "addr:watcher-private-sender";
+    let receiver_addr = "addr:watcher-private-receiver";
+
+    env.attach(runtime, sender_addr);
+    let detached = env.run_with_session(
+        runtime,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "detach",
+            "--session",
+            runtime,
+        ],
+        Duration::from_secs(5),
+    );
+    detached.assert_success("detach Watcher sender");
+
+    let mut command = env.command_with_session(runtime);
+    command
+        .env("TELEX_WATCHER_INTERNAL_SEND_ONCE_V1", runtime)
+        .args([
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            runtime,
+            "--from",
+            sender_addr,
+            "--to",
+            receiver_addr,
+            "--subject",
+            "strict private send",
+            "--body",
+            "must not re-register",
+        ]);
+    let private = run_command_with_capture(command, &env.root, Duration::from_secs(5));
+    private.assert_success("private Watcher send");
+    let response = private.json("private Watcher send");
+    assert_eq!(response["type"], "error");
+    assert_eq!(response["code"], "NeedsAttach");
+    assert_eq!(response["needs_attach_reason"], "deliberately_detached");
+
+    let status = env.run(
+        ["--json", "--address", sender_addr, "status"],
+        Duration::from_secs(5),
+    );
+    status.assert_success("status after private Watcher send");
+    assert!(
+        status.json("status")["daemon_members"]
+            .as_array()
+            .expect("daemon members array")
+            .is_empty(),
+        "private send must not restore sender membership"
+    );
+}
+
+#[test]
+fn mismatched_watcher_private_token_preserves_ordinary_send_output() {
+    let env = ProcessEnv::new("watcher-private-mismatch");
+    let session = "ordinary-send-session";
+    let sender_addr = "addr:watcher-private-mismatch-sender";
+    let receiver_addr = "addr:watcher-private-mismatch-receiver";
+    let args = [
+        "--json",
+        "--address",
+        sender_addr,
+        "send",
+        "--session",
+        session,
+        "--from",
+        sender_addr,
+        "--to",
+        receiver_addr,
+        "--subject",
+        "ordinary send",
+        "--body",
+        "daemon is intentionally absent",
+    ];
+
+    let mut baseline = env.command_with_session(session);
+    baseline.args(args);
+    let baseline = run_command_with_capture(baseline, &env.root, Duration::from_secs(5));
+
+    let mut mismatched = env.command_with_session(session);
+    mismatched
+        .env("TELEX_WATCHER_INTERNAL_SEND_ONCE_V1", "a-different-runtime")
+        .args(args);
+    let mismatched = run_command_with_capture(mismatched, &env.root, Duration::from_secs(5));
+
+    assert_eq!(mismatched.code, baseline.code);
+    assert_eq!(mismatched.stdout, baseline.stdout);
+    assert_eq!(mismatched.stderr, baseline.stderr);
+}
+
+#[test]
 fn real_process_wait_out_dir_delivers_message_artifact() {
     let env = ProcessEnv::new("real-out-dir-msg");
     let receiver = "real-out-dir-msg-receiver";

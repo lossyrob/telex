@@ -1,0 +1,26 @@
+{
+  "id": "example-file-json",
+  "command": [
+    "pwsh",
+    "-NoLogo",
+    "-NoProfile",
+    "-File",
+    "C:\\path\\to\\telex-watcher\\examples\\detectors\\scripts\\file-json-detector.ps1"
+  ],
+  "scriptPath": "C:\\path\\to\\telex-watcher\\examples\\detectors\\scripts\\file-json-detector.ps1",
+  "workingDirectory": "C:\\path\\to\\telex-watcher\\examples\\detectors\\scripts",
+  "scriptMode": "follow-path",
+  "sender": "watcher@example.invalid",
+  "target": "recipient@example.invalid",
+  "intervalSeconds": 60,
+  "timeoutSeconds": 10,
+  "attention": "fyi",
+  "requiresDisposition": false,
+  "environmentAllowlist": [],
+  "parameters": {
+    "inputPath": "C:\\path\\to\\input.json",
+    "readyField": "ready",
+    "emitInitialSnapshot": false
+  },
+  "state": {}
+}

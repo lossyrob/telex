@@ -1,0 +1,14 @@
+{
+  "number": 43,
+  "title": "Example external review activity",
+  "url": "https://github.example.invalid/example/repo/pull/43",
+  "author": { "login": "example-author" },
+  "reviews": [
+    { "id": "100", "state": "COMMENTED", "author": { "login": "example-author" } },
+    { "id": "101", "state": "APPROVED", "author": { "login": "external-reviewer" } }
+  ],
+  "comments": [
+    { "id": "200", "body": "Author follow-up", "author": { "login": "example-author" } },
+    { "id": "201", "body": "Please consider the edge case.", "author": { "login": "external-commenter" } }
+  ]
+}
