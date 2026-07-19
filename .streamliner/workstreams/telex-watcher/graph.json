@@ -1,0 +1,219 @@
+{
+  "schemaVersion": 1,
+  "id": "telex-watcher",
+  "projectKey": "telex",
+  "title": "Telex Watcher (external deterministic watch loops)",
+  "summary": "Workstream formed locally. Wave 1 is a provider-neutral external detector spike with editable GitHub and Azure DevOps examples, proving durable Telex wakeup without session-bound background tasks.",
+  "status": "active",
+  "attention": "focus",
+  "createdAt": "2026-07-18T23:46:41Z",
+  "updatedAt": "2026-07-18T23:46:41Z",
+  "trackingIssue": {
+    "owner": "lossyrob",
+    "repo": "telex",
+    "number": 100
+  },
+  "repos": [
+    {
+      "id": "telex",
+      "owner": "lossyrob",
+      "name": "telex",
+      "role": "primary"
+    }
+  ],
+  "designRefs": [
+    {
+      "repoId": "telex",
+      "path": "docs/design/index.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "PRODUCT-THESIS.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/daemon.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/DESIGN.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/proposals/EXTENSIONS.md"
+    },
+    {
+      "repoId": "telex",
+      "path": ".streamliner/workstreams/operator-station/brief.md"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "generic-watcher-spike",
+      "type": "research",
+      "title": "Vertical spike: generic external detector runner",
+      "summary": "Build one provider-neutral persistent external watcher: trusted local detector commands, versioned structured results, opaque state, fixed Telex target/sender, state commit after durable send, restart recovery, and editable GitHub/Azure DevOps examples including repository-specific filtering. No agent session retains a background waiter.",
+      "status": "ready",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 101
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "viability-gate",
+      "type": "gate",
+      "title": "External detector hosting is broadly useful",
+      "summary": "Builder dogfoods materially different GitHub, customized GitHub, Azure DevOps, and non-PR watches. The gate passes only if agents can author detectors quickly, watches survive outside sessions, and Telex wakeup is more reliable and less disruptive than background loop tasks.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "generic-watcher-spike"
+      ]
+    },
+    {
+      "id": "watcher-contract",
+      "type": "research",
+      "title": "Production Watcher contract and application-client requirements",
+      "summary": "Promote successful spike semantics into the intended design: detector envelope, watch lifecycle, script pin/follow policy, credentials and environment, failure notification, state/dedup transaction, service identity, message conventions, and the exact requirements exported to the shared Telex Application Client issue #12.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "viability-gate"
+      ]
+    },
+    {
+      "id": "watcher-runtime",
+      "type": "task",
+      "title": "Production Telex Watcher runtime and CLI",
+      "summary": "Implement the separately installable in-repo Watcher application under the accepted contract: supervised per-user lifecycle, durable registry and state, bounded scheduler and execution, application-client integration from #12, Telex event transaction, inspection/control CLI, diagnostics, and backend/profile support. Sketch; detail after watcher-contract and the campaign application-client checkpoint.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "watcher-contract"
+      ]
+    },
+    {
+      "id": "detector-template-library",
+      "type": "task",
+      "title": "Agent-authored detector templates and skill guidance",
+      "summary": "Package editable, tested detector templates and agent guidance for GitHub PRs, Azure DevOps PRs, HTTP/JSON, and command/file conditions. Templates demonstrate protocol and safe state practice without moving provider semantics into the runtime. Sketch; detail after watcher-contract.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "watcher-contract"
+      ]
+    },
+    {
+      "id": "usable-watcher-gate",
+      "type": "gate",
+      "title": "Production Watcher and detector authoring are usable",
+      "summary": "Builder validates the production runtime and template workflow together: create or adapt detectors rapidly, operate several watches concurrently, inspect failures and provenance, and receive predictable Telex events without session background tasks.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "watcher-runtime",
+        "detector-template-library"
+      ]
+    },
+    {
+      "id": "operational-hardening",
+      "type": "task",
+      "title": "Watcher reliability, security, packaging, and scale hardening",
+      "summary": "Exercise restart and upgrade, malformed/hung detectors, credential and log handling, rate limits, jitter/backoff, duplicate events, many concurrent watches, SQLite/Postgres targets, terminal lifecycle, script updates, daemon failures, and install/troubleshooting behavior. Produce validation evidence for closure. Sketch; detail after usable-watcher-gate.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "usable-watcher-gate"
+      ]
+    },
+    {
+      "id": "closure-gate",
+      "type": "gate",
+      "title": "External watch loops reliably deliver Telex attention",
+      "summary": "Builder validates several real long-duration watches, including GitHub and Azure DevOps, confirms session queues remain free of background waiters, reviews hardening evidence, and accepts the Watcher/runtime/template exports and campaign integration with Operator Station.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "operational-hardening"
+      ]
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "viability-proven",
+      "title": "Generic external Watcher proven valuable",
+      "summary": "A provider-neutral detector loop works outside agent sessions and has been dogfooded across GitHub, Azure DevOps, and custom conditions.",
+      "status": "planned",
+      "nodeIds": [
+        "generic-watcher-spike",
+        "viability-gate"
+      ]
+    },
+    {
+      "id": "usable-watcher",
+      "title": "Production Watcher and detector templates usable",
+      "summary": "The accepted contract, application-client integration, runtime, and editable template workflow work together and have passed builder validation.",
+      "status": "planned",
+      "nodeIds": [
+        "watcher-contract",
+        "watcher-runtime",
+        "detector-template-library",
+        "usable-watcher-gate"
+      ]
+    },
+    {
+      "id": "closure-ready",
+      "title": "Telex Watcher operationally validated",
+      "summary": "Long-duration external observation and Telex event delivery have survived realistic reliability, security, packaging, and scale validation.",
+      "status": "planned",
+      "nodeIds": [
+        "operational-hardening",
+        "closure-gate"
+      ]
+    }
+  ],
+  "presentation": {
+    "shortName": "TLX-W",
+    "color": "#F59E0B"
+  },
+  "launchPolicy": {
+    "requiredTracker": "github-issue"
+  },
+  "launchDefaults": {
+    "promptProfileId": "paw-lite-loop-v8-lossyrob",
+    "terminal": {
+      "titleTemplate": "TLX-W {githubIssue}"
+    },
+    "launchAfterInit": true,
+    "reviewCompanion": true,
+    "reviewPromptTemplateId": "paw-review-loop-v2-nomatt-lossrob"
+  }
+}

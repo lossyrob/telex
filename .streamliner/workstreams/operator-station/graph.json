@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "Workstream formed. Wave 1 is a single-session vertical spike proving worker -> operator agent -> desktop Station -> reply -> worker before any production client or UI contract is accepted.",
+  "summary": "Addressable Attention campaign workstream. Wave 1 is a single-session vertical spike proving worker -> operator agent -> desktop Station -> reply -> worker before the shared #12 Application Client or product UI contract is accepted.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-10T21:33:25Z",
+  "updatedAt": "2026-07-18T23:46:41Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -84,7 +84,7 @@
       "id": "station-contract",
       "type": "research",
       "title": "Production Station and operator-loop contract",
-      "summary": "Using spike evidence, establish and document the accepted production boundary: human-attended address semantics; supported daemon/client integration; source/provenance conventions; namespaced message kinds and metadata; notification policy; reply/disposition behavior; direct, assisted, and quiet routing modes; operator-agent recovery expectations; identity and safety limits. Update project design/ADRs where the accepted behavior changes intended Telex design.",
+      "summary": "Using spike evidence, establish and document the accepted product boundary: human-attended address semantics; source/provenance conventions; namespaced message kinds and metadata; notification policy; reply/disposition behavior; direct, assisted, and quiet routing modes; operator-agent recovery expectations; identity and safety limits. Contribute application-client requirements to shared issue #12 rather than owning a desktop-only client contract.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
@@ -98,7 +98,7 @@
       "id": "station-app",
       "type": "task",
       "title": "Production Windows Operator Station",
-      "summary": "Implement the separately installable Windows desktop Station under the accepted contract: configured operator addresses, actionable feed and threads, notification policy, reply and disposition, direct/assisted operation, backend selection, provenance display, restart/backfill behavior, and safe links without arbitrary command execution. Sketch; detail at promotion after station-contract.",
+      "summary": "Implement the separately installable Windows desktop Station under the accepted product contract and the campaign's shared #12 application-client-ready checkpoint: configured operator addresses, actionable feed and threads, notification policy, reply and disposition, direct/assisted operation, backend selection, provenance display, restart/backfill behavior, and safe links without arbitrary command execution. Sketch; detail at promotion after station-contract.",
       "status": "planned",
       "attention": "watch",
       "repoIds": [

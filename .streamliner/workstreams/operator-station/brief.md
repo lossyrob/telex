@@ -69,7 +69,9 @@ The richer rationale and early interaction model are preserved in
 
 ## Current State
 
-The workstream is formed under parent issue
+The workstream is part of the
+**[Addressable Attention campaign #102](https://github.com/lossyrob/telex/issues/102)**
+documented in `.streamliner/shaping/roadmap.md`. It is formed under parent issue
 [#92](https://github.com/lossyrob/telex/issues/92). The first executable node is
 the `operator-loop-spike`, tracked by
 [#93](https://github.com/lossyrob/telex/issues/93): a single-session vertical
@@ -80,7 +82,10 @@ dogfooded the spike and passed the viability gate.
 The current Telex local exchange, Postgres backend, attention levels, replies,
 dispositions, and durable message record provide the substrate. The production
 Station contract is intentionally unresolved until the spike shows what the
-experience actually requires.
+experience actually requires. Production integration must also consume the
+campaign's shared Telex Application Client seam in
+[#12](https://github.com/lossyrob/telex/issues/12), rather than freezing a
+desktop-only client API.
 
 ## Decisions
 
@@ -101,6 +106,9 @@ experience actually requires.
 - **Experimental integration does not set production architecture:** the spike
   may use CLI subprocesses or in-process library access; the post-gate contract
   decides the supported daemon/client boundary.
+- **The Application Client is campaign-owned through #12:** Operator Station
+  contributes requirements but does not independently own the shared
+  non-agent-station client used by Telex Watcher.
 - **Direct and assisted operation are routing configurations:** workers use
   stable responsibility addresses; which station attends an ingress address
   determines whether traffic reaches the desktop directly or passes through an
@@ -131,6 +139,8 @@ experience actually requires.
 
 - The local-daemon workstream's local-exchange lifecycle, durable delivery,
   attention, reply, disposition, and Postgres behavior.
+- The campaign's `application-client-ready` checkpoint, owned through issue #12,
+  before production Station integration is frozen.
 - Existing Telex client/library and backend traits used only as experimental
   seams until the production contract is accepted.
 - Streamliner Desktop's Tauri tray/feed/notification patterns as reference code,
