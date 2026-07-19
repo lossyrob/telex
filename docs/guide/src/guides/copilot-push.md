@@ -123,7 +123,9 @@ bridge protocol version, and the minimum compatible plugin version, and warns if
 plugin is older than the binary supports. `telex --version` includes the same build
 identifier, while `telex --json version` exposes it as `version.build_id`. Published
 release binaries are gated to report the release commit; source builds without Git
-metadata may report `unknown`, and the value is diagnostic rather than an attestation.
+metadata may report `unknown`. Git fallback is accepted only for a standalone Telex
+checkout, not an unrelated ancestor repository, and the value is diagnostic rather
+than an attestation.
 
 If the drain hook reports skew, inspect `version.current_exe` plus `Get-Command telex`
 or `command -v telex`, reinstall the plugin and binary from the same release, and make

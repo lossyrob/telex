@@ -273,7 +273,9 @@ source build identifier, the Copilot **bridge protocol** version, and the **mini
 compatible plugin** version. `telex --version` also includes the build identifier,
 and `telex --json version` exposes it as `version.build_id`. Official release builds
 are gated so this value equals the release commit; source builds without Git metadata
-may report `unknown`. The identifier is diagnostic, not cryptographic provenance.
+may report `unknown`. Git fallback is used only for a standalone Telex checkout whose
+Git top-level is the manifest directory, never from an unrelated ancestor repository.
+The identifier is diagnostic, not cryptographic provenance.
 
 If the drain hook reports plugin/binary skew, use `telex --json version` to inspect
 `version.current_exe`, plus `Get-Command telex` on Windows or `command -v telex` on

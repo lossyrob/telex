@@ -336,6 +336,73 @@ fn build_id_rebuilds_when_packed_branch_gains_a_loose_ref() {
 }
 
 #[test]
+fn build_id_ignores_an_unrelated_ancestor_repository() {
+    let outer = std::env::temp_dir().join(format!(
+        "telex-unrelated-ancestor-build-id-{}",
+        std::process::id()
+    ));
+    std::fs::remove_dir_all(&outer).ok();
+    std::fs::create_dir_all(&outer).expect("create outer repo");
+
+    let git = |args: &[&str]| {
+        let output = Command::new("git")
+            .args(args)
+            .current_dir(&outer)
+            .output()
+            .expect("run outer fixture git");
+        assert!(
+            output.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    };
+    git(&["init", "--quiet"]);
+    git(&["config", "user.email", "telex-test@example.invalid"]);
+    git(&["config", "user.name", "Telex Test"]);
+    std::fs::write(outer.join("unrelated.txt"), "ancestor\n").expect("write outer source");
+    git(&["add", "unrelated.txt"]);
+    git(&["commit", "--quiet", "-m", "unrelated ancestor"]);
+
+    let nested = outer.join("metadata-less-telex");
+    std::fs::create_dir_all(nested.join("src")).expect("create nested fixture");
+    std::fs::write(
+        nested.join("Cargo.toml"),
+        "[package]\nname = \"nested-build-id-fixture\"\nversion = \"0.0.0\"\nedition = \"2021\"\n",
+    )
+    .expect("write nested Cargo.toml");
+    std::fs::write(nested.join("build.rs"), read("build.rs")).expect("write nested build.rs");
+    std::fs::write(
+        nested.join("src").join("main.rs"),
+        "fn main() { println!(\"{}\", env!(\"TELEX_BUILD_ID\")); }\n",
+    )
+    .expect("write nested main");
+
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let output = Command::new(cargo)
+        .args(["run", "--quiet"])
+        .current_dir(&nested)
+        .env("CARGO_TARGET_DIR", nested.join("target"))
+        .env_remove("TELEX_BUILD_ID")
+        .env_remove("GITHUB_SHA")
+        .output()
+        .expect("run nested fixture cargo");
+    assert!(
+        output.status.success(),
+        "nested fixture cargo run failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(output.stdout)
+            .expect("nested fixture output utf8")
+            .trim(),
+        "unknown",
+        "an unrelated ancestor repository must not supply Telex build identity"
+    );
+
+    std::fs::remove_dir_all(outer).ok();
+}
+
+#[test]
 fn archive_name_grammar_is_consistent_across_workflow_and_installers() {
     // The asset grammar is telex-<tag>-<target>.{zip,tar.gz}. Couple the grammar
     // fragments across the producing workflow and the consuming installers so a

@@ -1657,7 +1657,9 @@ The binary's source build identifier is also reported by `telex --version` and
 `telex --json version`, so official same-semver builds from different commits remain
 distinguishable without moving compatibility policy into the plugin. Release builds
 verify this identifier against `GITHUB_SHA`; source builds without Git metadata may
-report `unknown`, and the value is diagnostic rather than an attestation.
+report `unknown`. Git fallback is accepted only when the canonical Git top-level is
+the Telex manifest directory, so an unrelated ancestor repository cannot lend a false
+identity. The value is diagnostic rather than an attestation.
 
 ## 0041 — On-deliver re-delivery is re-provision-triggered, not timer-until-ack
 

@@ -10,11 +10,14 @@ fn main() {
 
     let manifest_dir =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").unwrap_or_else(|| ".".into()));
-    emit_git_rerun_paths(&manifest_dir);
+    let git_root = owned_git_root(&manifest_dir);
+    if let Some(git_root) = git_root.as_deref() {
+        emit_git_rerun_paths(git_root);
+    }
 
     let build_id = env_build_id("TELEX_BUILD_ID")
         .or_else(|| env_build_id("GITHUB_SHA"))
-        .or_else(|| git_build_id(&manifest_dir))
+        .or_else(|| git_root.as_deref().and_then(git_build_id))
         .unwrap_or_else(|| UNKNOWN_BUILD_ID.to_string());
     println!("cargo:rustc-env=TELEX_BUILD_ID={build_id}");
 }
@@ -25,6 +28,13 @@ fn env_build_id(name: &str) -> Option<String> {
 
 fn git_build_id(repo: &Path) -> Option<String> {
     git_stdout(repo, &["rev-parse", "HEAD"]).and_then(|value| sanitize(&value))
+}
+
+fn owned_git_root(manifest_dir: &Path) -> Option<PathBuf> {
+    let top_level = PathBuf::from(git_stdout(manifest_dir, &["rev-parse", "--show-toplevel"])?);
+    let manifest_dir = manifest_dir.canonicalize().ok()?;
+    let top_level = top_level.canonicalize().ok()?;
+    (top_level == manifest_dir).then_some(top_level)
 }
 
 fn sanitize(value: &str) -> Option<String> {
