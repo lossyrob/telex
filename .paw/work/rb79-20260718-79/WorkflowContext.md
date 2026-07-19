@@ -48,7 +48,7 @@ Reconciliation: current
 
 ### Required Workflow Items
 - `init` | `resolved` | `activity`
-- `planning` | `pending` | `activity`
+- `planning` | `resolved` | `activity`
 - `planning-docs-review` | `not_applicable` | `activity`
 - `implementation` | `pending` | `activity`
 - `final-review` | `pending` | `activity`
