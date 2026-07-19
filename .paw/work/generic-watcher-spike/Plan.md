@@ -1,6 +1,6 @@
 # Generic Watcher Spike Plan
 
-Revision: 5
+Revision: 6
 
 ## Outcome
 
@@ -185,11 +185,14 @@ of recovered watches does not all invoke providers on the same scheduler tick.
 - Define an internal `TelexAdapter` plus a serialized lifecycle coordinator for
   sender attachment, strict send, reconciliation, and detach.
 - Implement the spike adapter by invoking a configured `telex` executable.
-- Add a narrow experimental `telex send --require-attached` mode. It preserves
-  normal CLI behavior by default, but for Watcher traffic it returns
-  `NeedsAttachReason::RestartLost` or
-  `NeedsAttachReason::DeliberatelyDetached` without running the current unbound
-  `register_for_retry` path.
+- Add a spike-private, programmatic-only send-once mode inside the current
+  command implementation. It is not a Clap flag, help entry, documented CLI
+  behavior, stable Rust API, or public binding. The Watcher subprocess opts in
+  through `TELEX_WATCHER_INTERNAL_SEND_ONCE_V1=<runtime-uuid>`; the command
+  activates the mode only when the value exactly matches its explicit
+  `--session`. It returns a JSON result carrying the existing typed daemon
+  response. In this mode every current or future `NeedsAttachReason` returns
+  directly without running the unbound `register_for_retry` path.
   This prevents daemon restart from replacing PID-bound membership with a
   registration that has no watched process.
 - Generate one cryptographically random, never-persisted runtime session UUID
@@ -266,13 +269,16 @@ of recovered watches does not all invoke providers on the same scheduler tick.
   say `delivered` because the address is occupied, but no receive/ack loop exists
   and the Watcher must not claim application consumption.
 
-The strict-send flag, CLI subprocess lifecycle, sender-only occupancy semantics,
-and all session/attachment/receipt assumptions are temporary #12 evidence.
-Tests use a fake adapter where appropriate. The report will not present this
-shape as a public Application Client contract. If `--require-attached` cannot
-remain a narrow backward-compatible CLI change, reopen the mechanism choice and
-use the council's fallback: a spike-private `Register`/`Send`/`Detach` IPC
-adapter with the same lifecycle semantics.
+The internal send-once environment contract, CLI subprocess lifecycle,
+sender-only occupancy semantics, and all session/attachment/receipt assumptions
+are temporary #12 evidence. Tests use a fake adapter where appropriate. The
+internal mode is explicitly unstable, absent from help/docs, and is not
+presented as a production Application Client surface. If that command-local
+mechanism cannot preserve typed responses without broad changes, use the
+council's fallback: a non-default `watcher-spike-private` feature exposing only
+a `#[doc(hidden)]` daemon request helper consumed by the Watcher crate, with the
+configured `telex` executable used for peer verification. Do not create a
+public CLI flag, default feature, stable SDK, or supported binding in this node.
 
 ### 6. Provide local management and diagnostics
 
@@ -356,8 +362,16 @@ Automated validation will cover:
   PID/start time;
 - strict send never invoking unbound auto-registration, including a forced
   daemon-loss race between attach and send;
-- paired compatibility coverage showing ordinary unflagged `telex send`
-  retains its existing auto-recovery behavior;
+- ordinary existing `telex send` retaining its current auto-recovery behavior;
+- ordinary send producing byte-identical stdout/stderr/exit behavior when the
+  private opt-in variable is absent or does not exactly match `--session`;
+- the private send-once mode remaining absent from CLI help/documentation,
+  returning typed membership loss to the Watcher coordinator, and never being
+  presented as a production Application Client API;
+- JSON-envelope round trips for `delivered`, `queued-unoccupied`,
+  `RestartLost`, and `DeliberatelyDetached`;
+- any fallback helper remaining absent from default features/docs and callable
+  only by the Watcher crate's non-default spike-private build;
 - every Watcher attach passing `--no-session-bind`, including a test with
   ambient `TELEX_SESSION_PID` set that proves no extra anchor is registered;
 - every send passing explicit `--session` and `--from`, plus an ambiguity test
