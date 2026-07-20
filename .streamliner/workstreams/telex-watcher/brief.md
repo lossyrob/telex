@@ -11,19 +11,20 @@ arbitrary local detectors.
 
 ## Approach
 
-The workstream starts with a deliberately generic vertical spike. The daemon
+The workstream began with a deliberately generic vertical spike. The runtime
 understands only a narrow detector protocol: execute a trusted local command on
 a schedule, provide its prior opaque state, validate the structured result, send
 any reported event to the watch's fixed Telex address, and commit the detector's
-next state only after Telex returns a durable send receipt. The daemon does not
+next state only after Telex returns a durable send receipt. The runtime does not
 understand GitHub, Azure DevOps, PR policy, or arbitrary trigger actions.
 
-The spike must demonstrate this contract with both GitHub and Azure DevOps
-detectors, including at least one detector customized for repository-specific
-author or comment filtering. A builder viability gate then evaluates whether
-agents can create and improve detectors quickly and whether external events
-reliably wake the responsible Telex address without leaving any background task
-inside the session.
+The spike landed in [PR #105](https://github.com/lossyrob/telex/pull/105) and is
+documented in [`docs/generic-watcher-spike-report.md`](../../../docs/generic-watcher-spike-report.md).
+It demonstrates the contract with GitHub and Azure DevOps detectors, including
+repository-specific author/comment filtering. The builder viability gate now
+evaluates whether agents can create and improve materially different detectors
+quickly and whether external events reliably wake the responsible Telex address
+without leaving any background task inside the session.
 
 If the gate passes, a contract node promotes the successful experimental
 semantics into production design. Production implementation consumes the shared
@@ -74,19 +75,25 @@ The richer rationale and detector protocol sketch are preserved in
 
 The workstream is part of the
 **[Addressable Attention campaign #102](https://github.com/lossyrob/telex/issues/102)**
-documented in `.streamliner/shaping/roadmap.md`. It is formed under parent issue
-[#100](https://github.com/lossyrob/telex/issues/100). The first executable node is
-the `generic-watcher-spike`, tracked by
-[#101](https://github.com/lossyrob/telex/issues/101), which proves the detector
-contract, persistent external runtime, Telex event transaction, and
-agent-authored GitHub/Azure DevOps examples before production architecture is
-accepted.
+and is tracked by parent issue
+[#100](https://github.com/lossyrob/telex/issues/100). The
+`generic-watcher-spike` completed through
+[#101](https://github.com/lossyrob/telex/issues/101) and
+[PR #105](https://github.com/lossyrob/telex/pull/105). The experimental runtime
+proved the provider-neutral detector contract, receipt-gated state transaction,
+PID-bound sender lifecycle, occupied Copilot wakeup, durable unoccupied queueing,
+and editable generic GitHub, customized GitHub, Azure DevOps, and non-PR
+templates.
 
-The existing Lossyrob Loop scripts are reference implementations for domain
-checks and event-state reasoning, but their session-owned worker plus attached
-waiter lifecycle is explicitly not reused. The shared production application
-client remains a campaign-level seam through issue #12 and must not be
-independently designed inside this workstream.
+The `viability-gate` is now ready for builder dogfood across materially different
+watches. It must judge detector-authoring speed, multi-watch reliability,
+restart behavior, and whether external Watcher hosting is less disruptive than
+session-owned Loop workers and waiters. The gate does not pass automatically
+because the spike merged.
+
+Production contract and runtime work remain blocked on that gate. The shared
+Application Client remains campaign-owned through issue #12; the spike exports
+requirements to it but does not establish a public client contract.
 
 ## Decisions
 
@@ -115,6 +122,13 @@ independently designed inside this workstream.
 - **Experimental integration does not set the application-client contract:** the
   spike may call the CLI or current Rust library; production work consumes the
   campaign's shared #12 checkpoint.
+- **Destructive Telex tests use an isolated plane:** daemon restart, failure, and
+  upgrade evidence must use unique absolute `TELEX_HOME`, `TELEX_DB`, and
+  `TELEX_INSTALL_ROOT` values plus the absolute worktree binary. The default
+  local daemon and installed launcher are campaign coordination infrastructure.
+- **Live provider mutation requires explicit authority:** credentials and
+  coordinates are not permission to mutate a provider resource. A meaningful
+  transition must use an owned or explicitly authorized disposable resource.
 
 ## Open Questions
 
