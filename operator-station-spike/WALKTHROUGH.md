@@ -180,7 +180,13 @@ Station sends the reply from `operator:rob` in the mediated thread. The
 operator agent receives it on `attention:rob`, validates the exact v1
 experimental envelope and fingerprint, then uses `telex reply` against the
 original raw message ID. It closes the raw obligation only after that route
-succeeds.
+succeeds. The Station marks human replies disposition-required; the operator
+must route and verify the receipt before acking that human-reply obligation.
+
+The scripted smoke harness also exercises a failure boundary: it detaches the
+operator after the human reply exists but before route-back, reattaches the same
+operator session, proves the unacked human reply remains actionable, then routes,
+acks, and closes in that order.
 
 In Terminal 3, inspect the worker inbox:
 

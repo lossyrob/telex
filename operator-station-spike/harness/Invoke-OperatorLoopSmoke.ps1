@@ -313,13 +313,23 @@ Use Thursday. Avoid the Tuesday dependency freeze and notify the release owner b
         '--body-file', $humanBody,
         '--kind', $humanReplyKind,
         '--attention', 'next-checkpoint',
+        '--requires-disposition',
         '--json'
     )
 
     $humanReplyId = [long]$humanReplyReceipt.id
+    $storedHumanReply = Invoke-TelexJson -Arguments @(
+        'read',
+        '--db', $env:TELEX_OPERATOR_SPIKE_DB,
+        '--address', $stationAddress,
+        '--id', $humanReplyId,
+        '--full',
+        '--json'
+    )
     Assert-Condition -Condition (
         [long]$humanReplyReceipt.thread_id -eq $mediatedThreadId -and
-        [long]$humanReplyReceipt.thread_id -ne [long]$raw.thread_id
+        [long]$humanReplyReceipt.thread_id -ne [long]$raw.thread_id -and
+        $storedHumanReply.message.requires_disposition
     ) -Message 'The human reply did not remain in the distinct mediated thread.'
 
     Invoke-TelexJson -Arguments @(
@@ -332,6 +342,42 @@ Use Thursday. Avoid the Tuesday dependency freeze and notify the release owner b
         '--note', "Human response sent as message $humanReplyId.",
         '--json'
     ) | Out-Null
+
+    # Simulate the operator session ending after receiving the human obligation
+    # but before route-back. Because the message is disposition-required and has
+    # not been acked, reattachment must recover it as actionable.
+    $operatorBinding = @($attached | Where-Object { $_.Address -eq $ingressAddress })[0]
+    Invoke-TelexJson -Arguments @(
+        'detach',
+        '--db', $env:TELEX_OPERATOR_SPIKE_DB,
+        '--address', $ingressAddress,
+        '--session', $operatorSession,
+        '--json'
+    ) | Out-Null
+    $attached.Remove($operatorBinding) | Out-Null
+    Invoke-TelexJson -Arguments @(
+        'attach',
+        '--db', $env:TELEX_OPERATOR_SPIKE_DB,
+        '--address', $ingressAddress,
+        '--session', $operatorSession,
+        '--description', 'Scripted operator-agent stand-in after return-path restart',
+        '--json'
+    ) | Out-Null
+    $attached.Add($operatorBinding)
+
+    $recoveredHumanReply = Invoke-TelexJson -Arguments @(
+        'inbox',
+        '--db', $env:TELEX_OPERATOR_SPIKE_DB,
+        '--address', $ingressAddress,
+        '--limit', 20,
+        '--json'
+    )
+    Assert-Condition -Condition (
+        @(
+            $recoveredHumanReply.items |
+                Where-Object { [long]$_.id -eq $humanReplyId -and $_.actionable }
+        ).Count -eq 1
+    ) -Message 'The unacked human reply was not recoverable after operator reattachment.'
 
     $routedBody = Join-Path $bodyRoot 'routed-outcome.txt'
     Write-Utf8Body -Path $routedBody -Content @'
@@ -357,6 +403,17 @@ Human decision: use Thursday. Avoid the Tuesday dependency freeze and notify the
         [long]$routedReceipt.thread_id -ne $mediatedThreadId -and
         $routedReceipt.to -eq $workerAddress
     ) -Message 'The routed outcome did not return to the worker in the original raw thread.'
+
+    Invoke-TelexJson -Arguments @(
+        'ack',
+        '--db', $env:TELEX_OPERATOR_SPIKE_DB,
+        '--address', $ingressAddress,
+        '--session', $operatorSession,
+        '--recipient', $ingressAddress,
+        '--id', $humanReplyId,
+        '--note', 'Route-back succeeded before human-reply acknowledgment.',
+        '--json'
+    ) | Out-Null
 
     Invoke-TelexJson -Arguments @(
         'close',
@@ -545,6 +602,7 @@ Human decision: use Thursday. Avoid the Tuesday dependency freeze and notify the
             humanReplyMediatedThread = $true
             routeBackRawThread       = $true
             rawClosedAfterRouteBack  = $true
+            humanReplyRecoveredBeforeAck = $true
         }
         stress                  = $stressEvidence
     }

@@ -248,29 +248,41 @@ If either check fails, leave the metadata opaque and report that the source is
 unavailable in the current store. Never open or reply to a same-number message
 from a mismatched store.
 
-After validating the source, acknowledge the human-reply delivery and route
-the outcome with `telex reply` to the **original raw message ID**:
+After validating the source, route the outcome with `telex reply` to the
+**original raw message ID before acknowledging the human-reply delivery**. This
+keeps the return-leg obligation recoverable if the operator session exits or the
+route command fails:
 
 ```powershell
-telex ack --db $env:TELEX_OPERATOR_SPIKE_DB `
-    --address attention:rob `
-    --session $env:COPILOT_AGENT_SESSION_ID `
-    --recipient attention:rob `
-    --id $humanReplyMessageId `
-    --note "Human reply captured for route-back." --json
-
-telex reply --db $env:TELEX_OPERATOR_SPIKE_DB `
+$routedReceipt = telex reply --db $env:TELEX_OPERATOR_SPIKE_DB `
     --address attention:rob `
     --session $env:COPILOT_AGENT_SESSION_ID `
     --from attention:rob `
     --to-message $rawMessageId `
     --body-file $routedOutcomeBodyFile `
     --kind operator-station-spike.routed-outcome `
-    --attention next-checkpoint --json
+    --attention next-checkpoint --json |
+    ConvertFrom-Json
+
+if (
+    [long]$routedReceipt.thread_id -ne [long]$raw.thread_id -or
+    [long]$routedReceipt.parent_id -ne [long]$rawMessageId -or
+    [string]$routedReceipt.to -ne [string]$raw.from_addr
+) {
+    throw "The route-back receipt does not match the original raw thread."
+}
+
+telex ack --db $env:TELEX_OPERATOR_SPIKE_DB `
+    --address attention:rob `
+    --session $env:COPILOT_AGENT_SESSION_ID `
+    --recipient attention:rob `
+    --id $humanReplyMessageId `
+    --note "Human outcome routed back successfully." --json
 ```
 
 This reply remains in the raw worker thread; the human reply remains in the
-mediated thread. After the route-back succeeds:
+mediated thread. If routing fails, do not ack: reattach/resume and retry the same
+human-reply obligation. After route-back and ack both succeed:
 
 ```powershell
 telex close --db $env:TELEX_OPERATOR_SPIKE_DB `

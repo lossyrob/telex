@@ -456,6 +456,7 @@ impl TelexCli {
                 HUMAN_REPLY_KIND.into(),
                 "--attention".into(),
                 "background".into(),
+                "--requires-disposition".into(),
                 "--session".into(),
                 self.session_id.clone().into(),
             ],
@@ -464,7 +465,12 @@ impl TelexCli {
             Some(body.into_bytes()),
         );
         let parsed: ReceiptWire = self.run_json(spec).await?;
-        Ok(parsed.into())
+        let receipt: SentReceipt = parsed.into();
+        let sent = self.read_full(receipt.id).await?;
+        if !sent.message.requires_disposition {
+            return Err("telex reply did not preserve the required return-path obligation".into());
+        }
+        Ok(receipt)
     }
 
     pub async fn disposition(

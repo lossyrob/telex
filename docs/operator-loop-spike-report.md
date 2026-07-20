@@ -136,6 +136,9 @@ promotion, renaming, or retirement.
 - Reply plus separate disposition is usable for the spike, but a production
   Station should decide whether common reply/disposition combinations need one
   higher-level operation.
+- Station-authored human replies are disposition-required. The operator
+  assignment verifies and sends the worker route-back before acknowledging the
+  human reply, preserving recovery if routing or the operator session fails.
 
 ## Failures and limitations observed
 
@@ -154,6 +157,9 @@ promotion, renaming, or retirement.
   delayed/stale replies, and security hardening were not validated.
 - No production telemetry or log rotation subsystem was added; diagnostics are
   bounded in memory.
+- `operator-station-spike/evidence/return-path-recovery-evidence.json` exercises
+  operator detach/reattach after the human reply exists but before route-back,
+  then proves the unacked obligation remains actionable.
 
 ## Requirements for issue #12
 

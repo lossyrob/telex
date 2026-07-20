@@ -97,5 +97,11 @@
     "actionCenterEvidence": "operator-station-spike/evidence/windows-action-center-record.json",
     "actionCenterExtractionScript": "operator-station-spike/harness/Get-OperatorSpikeToastRecord.ps1",
     "toastScreenshotCaptured": false
+  },
+  "postReviewHardening": {
+    "stationHumanRepliesRequireDisposition": true,
+    "routeBackPrecedesHumanReplyAck": true,
+    "operatorRestartBeforeRouteBackExercised": true,
+    "evidence": "operator-station-spike/evidence/return-path-recovery-evidence.json"
   }
 }
