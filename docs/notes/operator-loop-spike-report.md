@@ -10,8 +10,8 @@ Telex store:
 `worker -> attention:rob -> operator agent -> operator:rob Station -> human reply -> operator agent -> worker`
 
 The Tauri Station is runnable, the reusable operator-agent assignment is in
-`operator-station-spike/OPERATOR-AGENT.md`, and the builder walkthrough is in
-`operator-station-spike/WALKTHROUGH.md`.
+`spike/operator-station/OPERATOR-AGENT.md`, and the builder walkthrough is in
+`spike/operator-station/WALKTHROUGH.md`.
 
 ## Demonstrated scenario
 
@@ -20,8 +20,8 @@ The Tauri Station is runnable, the reusable operator-agent assignment is in
 | Worker to operator agent | Message `#1`, raw thread `#1`, `worker:builder -> attention:rob` |
 | Operator escalation | Message `#2`, mediated thread `#2`, kind `operator-station-spike.escalation` |
 | Healthy Station attendance | `station_health=armed`, one live waiter, zero pending unconsumed after ingest/ack |
-| Feed and source provenance | `operator-station-spike/evidence/station-mediated-thread.png` |
-| Windows notification publication | Reproducible Action Center record `operator-station-spike/evidence/windows-action-center-record.json` |
+| Feed and source provenance | `spike/operator-station/evidence/station-mediated-thread.png` |
+| Windows notification publication | Reproducible Action Center record `spike/operator-station/evidence/windows-action-center-record.json` |
 | Human reply authored in Station | Message `#3`, `operator:rob -> attention:rob`, mediated thread `#2` |
 | Route back to worker | Message `#4`, `attention:rob -> worker:builder`, raw thread `#1` |
 | Raw lifecycle | Message `#1` dispositions: `escalated`, then `closed` |
@@ -31,7 +31,7 @@ The Tauri Station is runnable, the reusable operator-agent assignment is in
 | Operator absence | Station rendered `Operator agent: unattended`, then returned online after reattach |
 
 The sanitized record is
-`operator-station-spike/evidence/demo-transcript.json`.
+`spike/operator-station/evidence/demo-transcript.json`.
 
 ## What the spike built
 
@@ -163,7 +163,7 @@ promotion, renaming, or retirement.
   delayed/stale replies, and security hardening were not validated.
 - No production telemetry or log rotation subsystem was added; diagnostics are
   bounded in memory.
-- `operator-station-spike/evidence/return-path-recovery-evidence.json` exercises
+- `spike/operator-station/evidence/return-path-recovery-evidence.json` exercises
   operator detach/reattach after the human reply exists but before route-back,
   then proves the unacked obligation remains actionable and becomes terminal
   and non-actionable only after the successful route-back.
@@ -207,7 +207,7 @@ promotion, renaming, or retirement.
 | Station reply reaches operator agent and routes back | demonstrated | Messages `#3` and `#4` |
 | Raw and mediated threads remain separately auditable | demonstrated | Thread IDs `#1` and `#2`, dispositions in transcript |
 | Restart preserves unresolved/recent conversation | demonstrated | Stable Station identity across three restarts and UI backfill |
-| Old unresolved obligation survives >1,000 newer IDs | demonstrated | `operator-station-spike/evidence/stress-evidence.json`: 1,055 FYI rows, sentinel absent from recent 200 and recovered by export |
+| Old unresolved obligation survives >1,000 newer IDs | demonstrated | `spike/operator-station/evidence/stress-evidence.json`: 1,055 FYI rows, sentinel absent from recent 200 and recovered by export |
 | Report separates value from temporary integration | demonstrated | This report's observations, shortcuts, and #12 requirements |
 | Builder can launch viability gate without implementation | demonstrated | README, walkthrough, assignment, harness, fixtures |
 

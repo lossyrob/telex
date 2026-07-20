@@ -24,7 +24,7 @@ From the repository root:
 ```powershell
 Get-Command telex -ErrorAction Stop
 
-Push-Location .\operator-station-spike
+Push-Location .\spike\operator-station
 npm install
 npm test
 npm run build
@@ -51,7 +51,7 @@ $env:TELEX_OPERATOR_SPIKE_DB = Join-Path $runRoot "operator-loop.db"
 # A store-scoped status call creates the selected SQLite schema.
 telex status --db $env:TELEX_OPERATOR_SPIKE_DB --json | Out-Null
 
-$store = & .\operator-station-spike\harness\Get-OperatorSpikeStoreFingerprint.ps1 `
+$store = & .\spike\operator-station\harness\Get-OperatorSpikeStoreFingerprint.ps1 `
     -DatabasePath $env:TELEX_OPERATOR_SPIKE_DB `
     -IncludeCanonicalPath
 $env:TELEX_OPERATOR_SPIKE_DB = $store.CanonicalPath
@@ -69,16 +69,16 @@ recording it in evidence. Every Telex command below explicitly supplies
 Run the helper self-check once:
 
 ```powershell
-& .\operator-station-spike\harness\Test-OperatorSpikeStoreFingerprint.ps1
+& .\spike\operator-station\harness\Test-OperatorSpikeStoreFingerprint.ps1
 ```
 
 To reproduce the Action Center evidence after a live toast:
 
 ```powershell
 $sourceHead = git rev-parse HEAD
-& .\operator-station-spike\harness\Get-OperatorSpikeToastRecord.ps1 `
+& .\spike\operator-station\harness\Get-OperatorSpikeToastRecord.ps1 `
     -SourceHead $sourceHead `
-    -OutputPath .\operator-station-spike\evidence\windows-action-center-record.json
+    -OutputPath .\spike\operator-station\evidence\windows-action-center-record.json
 ```
 
 ## 3. Launch the Station
@@ -87,7 +87,7 @@ In Terminal 1, set the same database variable, then:
 
 ```powershell
 $env:TELEX_ADDRESS = "operator:rob"
-Push-Location .\operator-station-spike
+Push-Location .\spike\operator-station
 npm run tauri dev
 ```
 
@@ -100,7 +100,7 @@ database path.
 In Terminal 2, set the same database variable and start Copilot CLI in the
 repository. Assign it:
 
-> Follow `operator-station-spike/OPERATOR-AGENT.md`, assignment version 1.
+> Follow `spike/operator-station/OPERATOR-AGENT.md`, assignment version 1.
 > Attend `attention:rob` on the explicit isolated store and use the Copilot push
 > bridge.
 
@@ -242,7 +242,7 @@ Stop Terminal 1 with Ctrl+C and wait for the foreground Tauri process to exit.
 Do not kill processes by name. Relaunch it:
 
 ```powershell
-Push-Location .\operator-station-spike
+Push-Location .\spike\operator-station
 npm run tauri dev
 ```
 
@@ -284,7 +284,7 @@ $smokeRoot = Join-Path $PWD (".local\smoke-" + (Get-Date -Format "yyyyMMdd-HHmms
 New-Item -ItemType Directory -Path $smokeRoot -Force | Out-Null
 $env:TELEX_OPERATOR_SPIKE_DB = Join-Path $smokeRoot "smoke.db"
 
-& .\operator-station-spike\harness\Invoke-OperatorLoopSmoke.ps1 `
+& .\spike\operator-station\harness\Invoke-OperatorLoopSmoke.ps1 `
     -EvidencePath (Join-Path $smokeRoot "smoke-evidence.json")
 ```
 
@@ -295,7 +295,7 @@ the safe fingerprint, fixed addresses, IDs, thread IDs, and assertions.
 Parser-check all scripts:
 
 ```powershell
-Get-ChildItem .\operator-station-spike\harness\*.ps1 | ForEach-Object {
+Get-ChildItem .\spike\operator-station\harness\*.ps1 | ForEach-Object {
     $tokens = $null
     $errors = $null
     [void][System.Management.Automation.Language.Parser]::ParseFile(
@@ -317,7 +317,7 @@ $stressRoot = Join-Path $PWD (".local\stress-" + (Get-Date -Format "yyyyMMdd-HHm
 New-Item -ItemType Directory -Path $stressRoot -Force | Out-Null
 $env:TELEX_OPERATOR_SPIKE_DB = Join-Path $stressRoot "stress.db"
 
-& .\operator-station-spike\harness\Invoke-OperatorLoopSmoke.ps1 `
+& .\spike\operator-station\harness\Invoke-OperatorLoopSmoke.ps1 `
     -Stress `
     -StressCount 1055 `
     -EvidencePath (Join-Path $stressRoot "stress-evidence.json")

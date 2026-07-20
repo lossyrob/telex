@@ -69,7 +69,7 @@ result = {
     "capturedAt": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
     "source": r"%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db",
     "queryMode": "read-only",
-    "extractionScript": "operator-station-spike/harness/Get-OperatorSpikeToastRecord.ps1",
+    "extractionScript": "spike/operator-station/harness/Get-OperatorSpikeToastRecord.ps1",
     "sourceHead": source_head or None,
     "handler": {
         "recordId": handler[0],

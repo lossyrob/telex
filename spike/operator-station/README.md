@@ -29,7 +29,7 @@ expose a SHA-256 store fingerprint, never the path.
 ```powershell
 $env:TELEX_OPERATOR_SPIKE_DB = "C:\path\to\existing\operator-loop.db"
 
-Push-Location .\operator-station-spike
+Push-Location .\spike\operator-station
 npm install
 npm test
 npm run build

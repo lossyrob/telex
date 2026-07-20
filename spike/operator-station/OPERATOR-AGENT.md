@@ -24,7 +24,7 @@ if ([string]::IsNullOrWhiteSpace($env:COPILOT_AGENT_SESSION_ID)) {
     throw "COPILOT_AGENT_SESSION_ID is required; run this assignment inside Copilot CLI."
 }
 
-$fingerprint = & .\operator-station-spike\harness\Get-OperatorSpikeStoreFingerprint.ps1 `
+$fingerprint = & .\spike\operator-station\harness\Get-OperatorSpikeStoreFingerprint.ps1 `
     -DatabasePath $env:TELEX_OPERATOR_SPIKE_DB
 if ($fingerprint -notmatch '^sha256:[0-9a-f]{64}$') {
     throw "The isolated store fingerprint is invalid."

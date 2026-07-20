@@ -87,15 +87,15 @@
     "sentinelRecoveredByExport": true,
     "stationDetachAttachSimulated": true,
     "passed": true,
-    "evidence": "operator-station-spike/evidence/stress-evidence.json"
+    "evidence": "spike/operator-station/evidence/stress-evidence.json"
   },
   "notification": {
     "toastApiReturnedSuccess": true,
     "feedUpdateContinued": true,
     "actionCenterRecordCaptured": true,
     "actionCenterArrivalTime": "2026-07-20T03:28:45.18241Z",
-    "actionCenterEvidence": "operator-station-spike/evidence/windows-action-center-record.json",
-    "actionCenterExtractionScript": "operator-station-spike/harness/Get-OperatorSpikeToastRecord.ps1",
+    "actionCenterEvidence": "spike/operator-station/evidence/windows-action-center-record.json",
+    "actionCenterExtractionScript": "spike/operator-station/harness/Get-OperatorSpikeToastRecord.ps1",
     "currentHeadReplay": "c29dac8278324a90fe789b33fe843654bb24958c",
     "sourceBodyCharacters": 231,
     "publishedBodyCharacters": 200,
@@ -107,6 +107,6 @@
     "routeBackPrecedesHumanReplyAck": true,
     "humanReplyTerminalAfterRouteBack": true,
     "operatorRestartBeforeRouteBackExercised": true,
-    "evidence": "operator-station-spike/evidence/return-path-recovery-evidence.json"
+    "evidence": "spike/operator-station/evidence/return-path-recovery-evidence.json"
   }
 }
