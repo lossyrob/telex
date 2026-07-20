@@ -14,6 +14,20 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
     let session_id = resolve_session_id(args.session.as_deref())?;
     let from_addr = args.from.clone().or_else(|| ctx.address.clone());
 
+    // This narrow branch is consumed only by the experimental Watcher subprocess.  It must be
+    // selected by an explicit session rather than by an ambient TELEX_SESSION_ID, otherwise a
+    // normal `telex send` could silently lose its established recovery behavior.
+    if watcher_private_send_active(
+        std::env::var("TELEX_WATCHER_INTERNAL_SEND_ONCE_V1")
+            .ok()
+            .as_deref(),
+        args.session.as_deref(),
+    ) {
+        let response = send_once(&store_key, &session_id, from_addr, &args, body).await?;
+        println!("{}", watcher_private_response_json(&response)?);
+        return Ok(0);
+    }
+
     let mut retried_after_attach = false;
     loop {
         let response = send_once(
@@ -29,6 +43,7 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
                 emit_receipt(ctx, &receipt);
                 return Ok(0);
             }
+
             Response::Error {
                 code,
                 message,
@@ -52,6 +67,14 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
             other => return Err(anyhow!("unexpected daemon send response: {other:?}")),
         }
     }
+}
+
+fn watcher_private_send_active(token: Option<&str>, explicit_session: Option<&str>) -> bool {
+    matches!((token, explicit_session), (Some(token), Some(session)) if token == session)
+}
+
+fn watcher_private_response_json(response: &Response) -> Result<String> {
+    Ok(serde_json::to_string(response)?)
 }
 
 async fn send_once(
@@ -132,4 +155,37 @@ fn emit_receipt(ctx: &Ctx, receipt: &SentReceipt) {
             receipt.receipt, receipt.id, receipt.thread_id, receipt.to
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{watcher_private_response_json, watcher_private_send_active};
+    use crate::daemon_ipc::{NeedsAttachReason, Response, ERROR_NEEDS_ATTACH};
+
+    #[test]
+    fn watcher_private_mode_requires_an_exact_explicit_session_match() {
+        assert!(watcher_private_send_active(
+            Some("runtime-1"),
+            Some("runtime-1")
+        ));
+        assert!(!watcher_private_send_active(
+            Some("runtime-1"),
+            Some("runtime-2")
+        ));
+        assert!(!watcher_private_send_active(Some("runtime-1"), None));
+        assert!(!watcher_private_send_active(None, Some("runtime-1")));
+    }
+
+    #[test]
+    fn watcher_private_result_preserves_typed_needs_attach_reason() {
+        let response = Response::Error {
+            code: ERROR_NEEDS_ATTACH.to_string(),
+            message: "membership was lost".to_string(),
+            needs_attach_reason: Some(NeedsAttachReason::RestartLost),
+        };
+
+        let json = watcher_private_response_json(&response).unwrap();
+        assert!(json.contains(r#""type":"error""#));
+        assert!(json.contains(r#""needs_attach_reason":"restart_lost""#));
+    }
 }

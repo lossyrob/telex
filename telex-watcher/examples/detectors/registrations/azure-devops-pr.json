@@ -1,0 +1,33 @@
+{
+  "id": "example-azure-devops-pr",
+  "command": [
+    "pwsh",
+    "-NoLogo",
+    "-NoProfile",
+    "-File",
+    "C:\\path\\to\\telex-watcher\\examples\\detectors\\scripts\\azure-devops-pr-detector.ps1"
+  ],
+  "scriptPath": "C:\\path\\to\\telex-watcher\\examples\\detectors\\scripts\\azure-devops-pr-detector.ps1",
+  "workingDirectory": "C:\\path\\to\\telex-watcher\\examples\\detectors\\scripts",
+  "scriptMode": "follow-path",
+  "sender": "watcher@example.invalid",
+  "target": "recipient@example.invalid",
+  "intervalSeconds": 300,
+  "timeoutSeconds": 30,
+  "attention": "next-checkpoint",
+  "requiresDisposition": false,
+  "environmentAllowlist": [
+    "AZURE_DEVOPS_ACCESS_TOKEN"
+  ],
+  "parameters": {
+    "organization": "AZURE-DEVOPS-ORGANIZATION",
+    "project": "AZURE-DEVOPS-PROJECT",
+    "repositoryId": "AZURE-DEVOPS-REPOSITORY-ID",
+    "pullRequestId": 123,
+    "allowBearerAuthentication": true,
+    "allowPatAuthentication": false,
+    "emitInitialCreatedEvent": false,
+    "emitInitialSnapshot": false
+  },
+  "state": {}
+}

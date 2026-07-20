@@ -1,0 +1,15 @@
+{
+  "number": 44,
+  "title": "Example neutral pull request",
+  "url": "https://github.example.invalid/example/repo/pull/44",
+  "state": "OPEN",
+  "isDraft": false,
+  "mergeStateStatus": "CLEAN",
+  "reviewDecision": "REVIEW_REQUIRED",
+  "author": { "login": "example-author" },
+  "statusCheckRollup": [
+    { "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS" }
+  ],
+  "reviews": [],
+  "comments": []
+}
