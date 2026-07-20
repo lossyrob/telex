@@ -80,7 +80,7 @@ namespace is reserved.
 | `urn:telex:experimental:operator-station-spike:v1#escalation` | Escalation schema marker | Interpreted only by the spike |
 | `operator-station-spike.demo-evidence.v1` | Sanitized evidence file | Evidence-only |
 | `operator-station-spike.smoke-evidence.v1` | Harness result | Evidence-only |
-| `operator-station-spike.windows-action-center-evidence.v1` | Action Center extraction | Evidence-only |
+| `operator-station-spike.windows-action-center-evidence.v2` | Action Center extraction | Evidence-only |
 
 All are replaceable experimental strings. Issue #12 and `station-contract` own
 promotion, renaming, or retirement.
@@ -157,7 +157,10 @@ promotion, renaming, or retirement.
   `c29dac8278324a90fe789b33fe843654bb24958c` using the same 231-character
   escalation content. The persisted Action Center body is the expected
   200-character runtime truncation (199 characters plus `…`) and exactly matches
-  the XML payload.
+  the XML payload. Evidence schema v2 names this code revision
+  `stationReplayHead`. Its `extractor.currentCheckoutPath` is deliberately an
+  independent locator in the checkout containing the artifact, not a
+  capture-time path that must resolve at the replay head.
 - Full export can become slow or memory-heavy on a large store.
 - Postgres, remote principals, spoofing resistance, noisy production traffic,
   delayed/stale replies, and security hardening were not validated.

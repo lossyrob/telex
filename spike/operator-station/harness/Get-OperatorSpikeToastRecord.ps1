@@ -2,7 +2,7 @@
 param(
     [string] $Aumid = 'com.lossyrob.telex.operatorstationspike',
 
-    [string] $SourceHead,
+    [string] $StationReplayHead,
 
     [string] $OutputPath
 )
@@ -23,7 +23,7 @@ import sqlite3
 import sys
 import xml.etree.ElementTree as ET
 
-database, aumid, source_head = sys.argv[1], sys.argv[2], sys.argv[3]
+database, aumid, station_replay_head = sys.argv[1], sys.argv[2], sys.argv[3]
 conn = sqlite3.connect("file:" + database.replace("\\", "/") + "?mode=ro", uri=True)
 handler = conn.execute(
     """
@@ -65,12 +65,15 @@ arrival = (
 ).isoformat().replace("+00:00", "Z")
 
 result = {
-    "schema": "operator-station-spike.windows-action-center-evidence.v1",
+    "schema": "operator-station-spike.windows-action-center-evidence.v2",
     "capturedAt": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
     "source": r"%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db",
     "queryMode": "read-only",
-    "extractionScript": "spike/operator-station/harness/Get-OperatorSpikeToastRecord.ps1",
-    "sourceHead": source_head or None,
+    "extractor": {
+        "currentCheckoutPath": "spike/operator-station/harness/Get-OperatorSpikeToastRecord.ps1",
+        "pathSemantics": "resolves in the checkout containing this evidence artifact; independent of stationReplayHead",
+    },
+    "stationReplayHead": station_replay_head or None,
     "handler": {
         "recordId": handler[0],
         "primaryId": handler[1],
@@ -95,7 +98,7 @@ result = {
 print(json.dumps(result, indent=2))
 '@
 
-$json = $pythonSource | & $python - $database $Aumid $SourceHead
+$json = $pythonSource | & $python - $database $Aumid $StationReplayHead
 if ($LASTEXITCODE -ne 0) {
     throw 'Reading the Windows Action Center record failed.'
 }

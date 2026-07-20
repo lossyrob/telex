@@ -1,10 +1,13 @@
 {
-  "schema": "operator-station-spike.windows-action-center-evidence.v1",
+  "schema": "operator-station-spike.windows-action-center-evidence.v2",
   "capturedAt": "2026-07-20T03:30:24.871601Z",
   "source": "%LOCALAPPDATA%\\Microsoft\\Windows\\Notifications\\wpndatabase.db",
   "queryMode": "read-only",
-  "extractionScript": "spike/operator-station/harness/Get-OperatorSpikeToastRecord.ps1",
-  "sourceHead": "c29dac8278324a90fe789b33fe843654bb24958c",
+  "extractor": {
+    "currentCheckoutPath": "spike/operator-station/harness/Get-OperatorSpikeToastRecord.ps1",
+    "pathSemantics": "resolves in the checkout containing this evidence artifact; independent of stationReplayHead"
+  },
+  "stationReplayHead": "c29dac8278324a90fe789b33fe843654bb24958c",
   "handler": {
     "recordId": 920,
     "primaryId": "com.lossyrob.telex.operatorstationspike",

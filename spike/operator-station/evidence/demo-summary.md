@@ -46,3 +46,7 @@ The same 231-character title/body/attribution was replayed through Station head
 `c29dac8278324a90fe789b33fe843654bb24958c`. The resulting Action Center body is
 exactly 200 characters, ends in the runtime's ellipsis, and is byte-for-text
 identical to the body embedded in the captured XML payload.
+
+Evidence schema v2 records that revision as `stationReplayHead`.
+`extractor.currentCheckoutPath` is an independent current-checkout locator for
+the extraction script and is not expected to resolve at the replay head.

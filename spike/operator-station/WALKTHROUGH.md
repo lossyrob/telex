@@ -75,11 +75,16 @@ Run the helper self-check once:
 To reproduce the Action Center evidence after a live toast:
 
 ```powershell
-$sourceHead = git rev-parse HEAD
+$stationReplayHead = git rev-parse HEAD
 & .\spike\operator-station\harness\Get-OperatorSpikeToastRecord.ps1 `
-    -SourceHead $sourceHead `
+    -StationReplayHead $stationReplayHead `
     -OutputPath .\spike\operator-station\evidence\windows-action-center-record.json
 ```
+
+`stationReplayHead` identifies the Station code used to publish the toast.
+`extractor.currentCheckoutPath` is an independent locator in the checkout that
+contains the evidence artifact; it is not a path that must resolve at the replay
+head.
 
 ## 3. Launch the Station
 
@@ -242,7 +247,7 @@ Stop Terminal 1 with Ctrl+C and wait for the foreground Tauri process to exit.
 Do not kill processes by name. Relaunch it:
 
 ```powershell
-Push-Location .\spike\operator-station
+# Terminal 1 remains in spike\operator-station after Ctrl+C.
 npm run tauri dev
 ```
 
