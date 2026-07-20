@@ -81,6 +81,11 @@ describe("experimentalSources", () => {
     expect(source?.resolution).toBe("unavailable-in-current-store");
   });
 
+  it("keeps a matching-store source explicitly pending resolution", () => {
+    const [source] = experimentalSources(metadata, fingerprint);
+    expect(source?.resolution).toBe("eligible-for-resolution");
+  });
+
   it("ignores malformed metadata", () => {
     expect(experimentalSources("{", fingerprint)).toEqual([]);
   });

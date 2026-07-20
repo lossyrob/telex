@@ -76,7 +76,7 @@ export function experimentalSources(
         storeFingerprint,
         resolution:
           storeFingerprint === activeStoreFingerprint
-            ? "resolved"
+            ? "eligible-for-resolution"
             : "unavailable-in-current-store",
         message: null,
       } satisfies SourceReferenceView,

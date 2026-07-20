@@ -329,7 +329,7 @@ function SourceReferences({ sources }: { sources: SourceReferenceView[] }) {
   if (sources.length === 0) return null;
   return (
     <section className="sources">
-      <h3>Raw source provenance</h3>
+      <h3>Operator-agent asserted source</h3>
       {sources.map((source) => (
         <article key={`${source.storeFingerprint}:${source.id}`}>
           <div>
@@ -341,18 +341,31 @@ function SourceReferences({ sources }: { sources: SourceReferenceView[] }) {
           </div>
           <span
             className={
-              source.resolution === "resolved" ? "resolved" : "unavailable"
+              source.resolution === "matched" ? "resolved" : "unavailable"
             }
           >
-            {source.resolution === "resolved"
-              ? "Resolved"
-              : "Unavailable in current store"}
+            {sourceResolutionLabel(source.resolution)}
           </span>
           <code>{source.storeFingerprint || "no store fingerprint"}</code>
         </article>
       ))}
     </section>
   );
+}
+
+function sourceResolutionLabel(
+  resolution: SourceReferenceView["resolution"],
+): string {
+  switch (resolution) {
+    case "matched":
+      return "ID and envelope fields matched";
+    case "eligible-for-resolution":
+      return "Matching store; resolution pending";
+    case "envelope-mismatch":
+      return "Envelope fields do not match current message";
+    case "unavailable-in-current-store":
+      return "Unavailable in current store";
+  }
 }
 
 function StatusPill({

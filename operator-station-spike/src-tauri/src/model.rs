@@ -75,6 +75,18 @@ pub struct SourceReference {
     pub availability: SourceAvailability,
 }
 
+impl SourceReference {
+    pub fn matches_message(&self, message: &StationMessage) -> bool {
+        self.id == message.id
+            && self.thread_id == message.thread_id
+            && self
+                .from
+                .as_ref()
+                .is_none_or(|from| message.from.as_ref() == Some(from))
+            && self.to.as_ref().is_none_or(|to| &message.to == to)
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "kebab-case")]
 pub enum SourceAvailability {
@@ -455,6 +467,26 @@ mod tests {
         assert!(parse_source_references(&foreign_namespace, "sha256:active")
             .unwrap()
             .is_none());
+    }
+
+    #[test]
+    fn source_reference_matches_documented_identity_fields() {
+        let message = message("interrupt", ESCALATION_KIND, true, "to");
+        let matching = SourceReference {
+            id: message.id,
+            thread_id: message.thread_id,
+            from: message.from.clone(),
+            to: Some(message.to.clone()),
+            subject: message.subject.clone(),
+            sent_at_ms: Some(message.sent_at_ms),
+            store_fingerprint: Some("sha256:active".into()),
+            availability: SourceAvailability::Available,
+        };
+        assert!(matching.matches_message(&message));
+
+        let mut mismatched = matching;
+        mismatched.from = Some("worker:other".into());
+        assert!(!mismatched.matches_message(&message));
     }
 
     #[test]

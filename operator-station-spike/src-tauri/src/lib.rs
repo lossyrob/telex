@@ -41,7 +41,10 @@ async fn read_thread(
     for reference in thread.message.source_references.clone() {
         let (resolution, message) = if reference.availability == SourceAvailability::Available {
             match state.cli.read_full(reference.id).await {
-                Ok(source) => ("resolved".to_string(), Some(source.message)),
+                Ok(source) if reference.matches_message(&source.message) => {
+                    ("matched".to_string(), Some(source.message))
+                }
+                Ok(_) => ("envelope-mismatch".to_string(), None),
                 Err(_) => ("unavailable-in-current-store".to_string(), None),
             }
         } else {

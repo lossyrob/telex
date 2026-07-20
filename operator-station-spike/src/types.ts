@@ -76,7 +76,11 @@ export interface SourceReferenceView {
   subject: string | null;
   sentAtMs: number;
   storeFingerprint: string | null;
-  resolution: "resolved" | "unavailable-in-current-store";
+  resolution:
+    | "matched"
+    | "eligible-for-resolution"
+    | "envelope-mismatch"
+    | "unavailable-in-current-store";
   message: StationMessage | null;
 }
 
