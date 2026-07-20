@@ -41,3 +41,8 @@ transient toast flyout was captured; the persisted OS Action Center record is
 the notification-publication evidence. The record is reproducible with
 `harness/Get-OperatorSpikeToastRecord.ps1`; Focus Assist/quiet-hours perception
 was not independently observed.
+
+The same 231-character title/body/attribution was replayed through Station head
+`c29dac8278324a90fe789b33fe843654bb24958c`. The resulting Action Center body is
+exactly 200 characters, ends in the runtime's ellipsis, and is byte-for-text
+identical to the body embedded in the captured XML payload.

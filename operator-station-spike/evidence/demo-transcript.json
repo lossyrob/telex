@@ -93,9 +93,13 @@
     "toastApiReturnedSuccess": true,
     "feedUpdateContinued": true,
     "actionCenterRecordCaptured": true,
-    "actionCenterArrivalTime": "2026-07-19T09:29:10.182738Z",
+    "actionCenterArrivalTime": "2026-07-20T03:28:45.18241Z",
     "actionCenterEvidence": "operator-station-spike/evidence/windows-action-center-record.json",
     "actionCenterExtractionScript": "operator-station-spike/harness/Get-OperatorSpikeToastRecord.ps1",
+    "currentHeadReplay": "c29dac8278324a90fe789b33fe843654bb24958c",
+    "sourceBodyCharacters": 231,
+    "publishedBodyCharacters": 200,
+    "publishedBodyEndsWithEllipsis": true,
     "toastScreenshotCaptured": false
   },
   "postReviewHardening": {

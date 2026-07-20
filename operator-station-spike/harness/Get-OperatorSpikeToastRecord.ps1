@@ -2,6 +2,8 @@
 param(
     [string] $Aumid = 'com.lossyrob.telex.operatorstationspike',
 
+    [string] $SourceHead,
+
     [string] $OutputPath
 )
 
@@ -21,7 +23,7 @@ import sqlite3
 import sys
 import xml.etree.ElementTree as ET
 
-database, aumid = sys.argv[1], sys.argv[2]
+database, aumid, source_head = sys.argv[1], sys.argv[2], sys.argv[3]
 conn = sqlite3.connect("file:" + database.replace("\\", "/") + "?mode=ro", uri=True)
 handler = conn.execute(
     """
@@ -68,6 +70,7 @@ result = {
     "source": r"%LOCALAPPDATA%\Microsoft\Windows\Notifications\wpndatabase.db",
     "queryMode": "read-only",
     "extractionScript": "operator-station-spike/harness/Get-OperatorSpikeToastRecord.ps1",
+    "sourceHead": source_head or None,
     "handler": {
         "recordId": handler[0],
         "primaryId": handler[1],
@@ -83,6 +86,8 @@ result = {
         "arrivalTime": arrival,
         "title": title,
         "body": body,
+        "bodyCharacterCount": len(body) if body is not None else None,
+        "bodyEndsWithEllipsis": body.endswith("…") if body is not None else None,
         "attribution": attribution,
         "payload": payload,
     },
@@ -90,7 +95,7 @@ result = {
 print(json.dumps(result, indent=2))
 '@
 
-$json = $pythonSource | & $python - $database $Aumid
+$json = $pythonSource | & $python - $database $Aumid $SourceHead
 if ($LASTEXITCODE -ne 0) {
     throw 'Reading the Windows Action Center record failed.'
 }

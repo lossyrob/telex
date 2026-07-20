@@ -152,6 +152,11 @@ promotion, renaming, or retirement.
   contains the live escalation title/body/attribution and arrival timestamp.
   A transient flyout screenshot was not captured, so Focus Assist/quiet-hours
   perception was not independently verified.
+- Notification evidence was regenerated from Station head
+  `c29dac8278324a90fe789b33fe843654bb24958c` using the same 231-character
+  escalation content. The persisted Action Center body is the expected
+  200-character runtime truncation (199 characters plus `…`) and exactly matches
+  the XML payload.
 - Full export can become slow or memory-heavy on a large store.
 - Postgres, remote principals, spoofing resistance, noisy production traffic,
   delayed/stale replies, and security hardening were not validated.
