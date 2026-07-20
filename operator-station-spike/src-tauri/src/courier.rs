@@ -129,6 +129,74 @@ async fn courier_loop(runtime: &Arc<Runtime>) {
         if runtime.is_shutting_down() {
             return;
         }
+        if let CourierOperation::RetryAck(message_id) =
+            next_courier_operation(ack_pending_message_id)
+        {
+            runtime
+                .set_courier(|courier| {
+                    courier.phase = CourierPhase::AckPending;
+                    courier.detail = Some(format!(
+                        "retrying acknowledgment for ingested message {message_id}"
+                    ));
+                    courier.ack_pending_message_id = Some(message_id);
+                    courier.current_waiter_pid = None;
+                    courier.persistent = false;
+                })
+                .await;
+            let _ = runtime.emit_state().await;
+            match ack_with_retry(runtime, message_id).await {
+                Ok(()) => {
+                    runtime.mark_ack_pending(message_id, false).await;
+                    runtime
+                        .set_courier(|courier| {
+                            courier.phase = CourierPhase::Armed;
+                            courier.detail =
+                                Some(format!("message {message_id} acknowledgment recovered"));
+                            courier.ack_pending_message_id = None;
+                            courier.persistent = false;
+                        })
+                        .await;
+                    let _ = runtime.emit_state().await;
+                    ack_pending_message_id = None;
+                    consecutive_ack_pending = 0;
+                    backoff_seconds = 1;
+                }
+                Err(error) => {
+                    consecutive_ack_pending = consecutive_ack_pending.saturating_add(1);
+                    let detail = format!(
+                        "ack for message {message_id} remains pending after direct retry {consecutive_ack_pending}/{MAX_ACK_PENDING_REDELIVERIES}: {error}"
+                    );
+                    runtime
+                        .diagnostic("error", "ack-pending-retry-failed", detail.clone())
+                        .await;
+                    if failure_decision(consecutive_ack_pending, MAX_ACK_PENDING_REDELIVERIES)
+                        == FailureDecision::Pause
+                    {
+                        if !pause(runtime, detail, Some(1)).await {
+                            return;
+                        }
+                        consecutive_ack_pending = 0;
+                        backoff_seconds = 1;
+                    } else {
+                        runtime
+                            .set_courier(|courier| {
+                                courier.phase = CourierPhase::AckPending;
+                                courier.detail = Some(detail);
+                                courier.ack_pending_message_id = Some(message_id);
+                            })
+                            .await;
+                        let _ = runtime.emit_state().await;
+                        if !delay_retry_or_shutdown(runtime, Duration::from_secs(backoff_seconds))
+                            .await
+                        {
+                            return;
+                        }
+                        backoff_seconds = (backoff_seconds * 2).min(5);
+                    }
+                }
+            }
+            continue;
+        }
         runtime
             .set_courier(|courier| {
                 courier.phase = CourierPhase::Armed;
@@ -201,37 +269,9 @@ async fn courier_loop(runtime: &Arc<Runtime>) {
                     Ok(DeliveryOutcome::AckPending(message_id)) => {
                         consecutive_ingest_failures = 0;
                         ack_pending_message_id = Some(message_id);
-                        consecutive_ack_pending = consecutive_ack_pending.saturating_add(1);
-                        let detail = format!(
-                            "ack for message {message_id} remains pending after redelivery attempt {consecutive_ack_pending}/{MAX_ACK_PENDING_REDELIVERIES}"
-                        );
-                        if failure_decision(consecutive_ack_pending, MAX_ACK_PENDING_REDELIVERIES)
-                            == FailureDecision::Pause
-                        {
-                            runtime
-                                .diagnostic("error", "ack-pending-exceeded", detail.clone())
-                                .await;
-                            if !pause(runtime, detail, Some(1)).await {
-                                return;
-                            }
-                            consecutive_ack_pending = 0;
-                            ack_pending_message_id = None;
-                            backoff_seconds = 1;
-                        } else {
-                            runtime
-                                .set_courier(|courier| {
-                                    courier.phase = CourierPhase::AckPending;
-                                    courier.detail = Some(detail);
-                                    courier.ack_pending_message_id = Some(message_id);
-                                })
-                                .await;
-                            let _ = runtime.emit_state().await;
-                            if !delay_or_shutdown(runtime, Duration::from_secs(backoff_seconds))
-                                .await
-                            {
-                                return;
-                            }
-                            backoff_seconds = (backoff_seconds * 2).min(5);
+                        consecutive_ack_pending = 1;
+                        if !delay_retry_or_shutdown(runtime, Duration::from_secs(1)).await {
+                            return;
                         }
                     }
                     Err(error) => {
@@ -505,6 +545,18 @@ async fn delay_or_shutdown(runtime: &Arc<Runtime>, delay: Duration) -> bool {
     }
 }
 
+async fn delay_retry_or_shutdown(runtime: &Arc<Runtime>, delay: Duration) -> bool {
+    if runtime.is_shutting_down() {
+        return false;
+    }
+    let mut shutdown = runtime.shutdown_receiver();
+    tokio::select! {
+        _ = tokio::time::sleep(delay) => true,
+        _ = runtime.wait_for_retry() => !runtime.is_shutting_down(),
+        _ = shutdown.changed() => false,
+    }
+}
+
 async fn status_loop(runtime: Arc<Runtime>) {
     let mut interval = tokio::time::interval(STATUS_INTERVAL);
     let mut shutdown = runtime.shutdown_receiver();
@@ -585,6 +637,19 @@ enum FailureDecision {
 enum DeliveryOutcome {
     Acked,
     AckPending(i64),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CourierOperation {
+    Wait,
+    RetryAck(i64),
+}
+
+fn next_courier_operation(ack_pending_message_id: Option<i64>) -> CourierOperation {
+    match ack_pending_message_id {
+        Some(message_id) => CourierOperation::RetryAck(message_id),
+        None => CourierOperation::Wait,
+    }
 }
 
 fn failure_decision(attempt: u8, maximum: u8) -> FailureDecision {
@@ -736,6 +801,24 @@ mod tests {
             failure_decision(MAX_INGEST_FAILURES, MAX_INGEST_FAILURES),
             FailureDecision::Pause
         );
+    }
+
+    #[test]
+    fn ack_pending_retries_saved_ack_without_waiter_redelivery() {
+        let message_id = 42;
+        assert_eq!(
+            next_courier_operation(Some(message_id)),
+            CourierOperation::RetryAck(message_id)
+        );
+        assert_eq!(
+            failure_decision(MAX_ACK_PENDING_REDELIVERIES, MAX_ACK_PENDING_REDELIVERIES),
+            FailureDecision::Pause
+        );
+        assert_eq!(
+            next_courier_operation(Some(message_id)),
+            CourierOperation::RetryAck(message_id)
+        );
+        assert_eq!(next_courier_operation(None), CourierOperation::Wait);
     }
 
     #[test]
