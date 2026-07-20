@@ -3,8 +3,10 @@ use crate::model::{AddressOccupancy, CourierPhase, StationMessage};
 use crate::state::Runtime;
 use crate::toast;
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::watch;
 
 const STATUS_INTERVAL: Duration = Duration::from_secs(5);
 const ACK_BUDGET: Duration = Duration::from_secs(15);
@@ -549,11 +551,31 @@ async fn delay_retry_or_shutdown(runtime: &Arc<Runtime>, delay: Duration) -> boo
     if runtime.is_shutting_down() {
         return false;
     }
-    let mut shutdown = runtime.shutdown_receiver();
+    match wait_for_retry_or_delay(runtime.wait_for_retry(), runtime.shutdown_receiver(), delay)
+        .await
+    {
+        RetryDelayOutcome::Elapsed => true,
+        RetryDelayOutcome::RetryRequested => !runtime.is_shutting_down(),
+        RetryDelayOutcome::Shutdown => false,
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum RetryDelayOutcome {
+    Elapsed,
+    RetryRequested,
+    Shutdown,
+}
+
+async fn wait_for_retry_or_delay(
+    retry: impl Future<Output = ()>,
+    mut shutdown: watch::Receiver<bool>,
+    delay: Duration,
+) -> RetryDelayOutcome {
     tokio::select! {
-        _ = tokio::time::sleep(delay) => true,
-        _ = runtime.wait_for_retry() => !runtime.is_shutting_down(),
-        _ = shutdown.changed() => false,
+        _ = tokio::time::sleep(delay) => RetryDelayOutcome::Elapsed,
+        _ = retry => RetryDelayOutcome::RetryRequested,
+        _ = shutdown.changed() => RetryDelayOutcome::Shutdown,
     }
 }
 
@@ -803,9 +825,28 @@ mod tests {
         );
     }
 
-    #[test]
-    fn ack_pending_retries_saved_ack_without_waiter_redelivery() {
+    #[tokio::test]
+    async fn ack_pending_retry_is_prompt_and_keeps_the_saved_message() {
         let message_id = 42;
+        let retry = Arc::new(tokio::sync::Notify::new());
+        let (_shutdown_tx, shutdown_rx) = watch::channel(false);
+        let retry_waiter = retry.clone();
+        let wait = tokio::spawn(async move {
+            wait_for_retry_or_delay(
+                retry_waiter.notified(),
+                shutdown_rx,
+                Duration::from_secs(60),
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        retry.notify_one();
+
+        let outcome = tokio::time::timeout(Duration::from_secs(1), wait)
+            .await
+            .expect("manual retry should interrupt ack-pending backoff")
+            .expect("retry wait task should complete");
+        assert_eq!(outcome, RetryDelayOutcome::RetryRequested);
         assert_eq!(
             next_courier_operation(Some(message_id)),
             CourierOperation::RetryAck(message_id)
