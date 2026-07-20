@@ -291,12 +291,9 @@ fn parse_source_references(
     if extension != Some(EXPERIMENTAL_NAMESPACE_URN) {
         return Ok(None);
     }
-    let schema = value
-        .get("dataschema")
-        .and_then(Value::as_str)
-        .ok_or_else(|| "experimental metadata is missing dataschema".to_string())?;
-    if !schema.starts_with(&format!("{EXPERIMENTAL_NAMESPACE_URN}#")) {
-        return Err("experimental metadata dataschema does not match its namespace".into());
+    let expected_schema = format!("{EXPERIMENTAL_NAMESPACE_URN}#escalation");
+    if value.get("dataschema").and_then(Value::as_str) != Some(expected_schema.as_str()) {
+        return Ok(None);
     }
     let source_values = value
         .get("ext")
@@ -437,6 +434,27 @@ mod tests {
                 .unwrap()
                 .is_none()
         );
+
+        let other_schema = metadata.replace("#escalation", "#other");
+        assert!(parse_source_references(&other_schema, "sha256:active")
+            .unwrap()
+            .is_none());
+
+        let mut missing_schema: Value = serde_json::from_str(&metadata).unwrap();
+        missing_schema.as_object_mut().unwrap().remove("dataschema");
+        assert!(
+            parse_source_references(&missing_schema.to_string(), "sha256:active")
+                .unwrap()
+                .is_none()
+        );
+
+        let foreign_namespace = metadata.replace(
+            EXPERIMENTAL_NAMESPACE_URN,
+            "urn:telex:experimental:foreign:v1",
+        );
+        assert!(parse_source_references(&foreign_namespace, "sha256:active")
+            .unwrap()
+            .is_none());
     }
 
     #[test]
