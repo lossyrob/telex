@@ -39,7 +39,7 @@ viability gate.
   dogfood.
 - A reusable experimental operator-agent assignment/prompt that attends the
   ingress address and mediates between workers and the human Station.
-- `docs/operator-loop-spike-report.md`, recording the demonstrated flow,
+- `docs/notes/operator-loop-spike-report.md`, recording the demonstrated flow,
   integration shortcuts, product observations, failures, and concrete
   requirements for the post-gate production contract.
 - Source-reference conventions used by the spike, clearly labeled experimental
@@ -98,7 +98,7 @@ viability gate.
 
 No project design update is required merely to land the experiment. Record
 potential Telex design changes as findings in
-`docs/operator-loop-spike-report.md`; the post-gate `station-contract` node owns
+`docs/notes/operator-loop-spike-report.md`; the post-gate `station-contract` node owns
 promoting accepted changes into the design layer and ADR log.
 
 ## Success criteria
