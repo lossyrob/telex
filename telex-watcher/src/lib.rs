@@ -1138,6 +1138,12 @@ async fn execute_detector(
         inherit_allowlisted_environment(&mut command, &watch.environment_allowlist);
     configure_process_group(&mut command)?;
     #[cfg(windows)]
+    {
+        use windows_sys::Win32::System::Threading::CREATE_SUSPENDED;
+
+        command.creation_flags(CREATE_SUSPENDED);
+    }
+    #[cfg(windows)]
     let process_group = create_windows_job()?;
 
     let mut child = command
@@ -1148,6 +1154,11 @@ async fn execute_detector(
         let _ = child.kill().await;
         let _ = child.wait().await;
         return Err(error).context("assign detector to Windows Job Object");
+    }
+    #[cfg(windows)]
+    if let Err(error) = resume_windows_initial_thread(&child) {
+        terminate_process_group(&mut child, &process_group).await;
+        return Err(error).context("resume detector after Windows Job Object assignment");
     }
     let stdout = child
         .stdout
@@ -1400,6 +1411,18 @@ impl Drop for WindowsJob {
 }
 
 #[cfg(windows)]
+struct WindowsHandle(windows_sys::Win32::Foundation::HANDLE);
+
+#[cfg(windows)]
+impl Drop for WindowsHandle {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+#[cfg(windows)]
 fn create_windows_job() -> Result<WindowsJob> {
     use std::ptr::null;
     use windows_sys::Win32::Foundation::CloseHandle;
@@ -1433,6 +1456,86 @@ fn create_windows_job() -> Result<WindowsJob> {
 }
 
 #[cfg(windows)]
+fn resume_windows_initial_thread(child: &Child) -> Result<()> {
+    use windows_sys::Win32::System::Threading::{OpenThread, ResumeThread, THREAD_SUSPEND_RESUME};
+
+    let thread_id = suspended_detector_thread_id(child)?;
+    let handle = unsafe { OpenThread(THREAD_SUSPEND_RESUME, 0, thread_id) };
+    if handle == 0 {
+        return Err(std::io::Error::last_os_error()).context("open suspended detector thread");
+    }
+    let _thread = WindowsHandle(handle);
+    let previous_suspend_count = unsafe { ResumeThread(handle) };
+    if previous_suspend_count == u32::MAX {
+        return Err(std::io::Error::last_os_error()).context("resume suspended detector thread");
+    }
+    if !is_single_initial_suspend(previous_suspend_count) {
+        bail!(
+            "detector initial thread had unexpected suspend count {previous_suspend_count}; refusing to run it"
+        );
+    }
+    Ok(())
+}
+
+#[cfg(windows)]
+fn suspended_detector_thread_id(child: &Child) -> Result<u32> {
+    use windows_sys::Win32::Foundation::{
+        GetLastError, SetLastError, ERROR_NO_MORE_FILES, ERROR_SUCCESS, INVALID_HANDLE_VALUE,
+    };
+    use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Thread32First, Thread32Next, TH32CS_SNAPTHREAD, THREADENTRY32,
+    };
+
+    let process_id = child.id().ok_or_else(|| {
+        anyhow!("suspended detector exited before its initial thread was recovered")
+    })?;
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error()).context("snapshot Windows threads");
+    }
+    let _snapshot = WindowsHandle(snapshot);
+    let mut entry: THREADENTRY32 = unsafe { std::mem::zeroed() };
+    entry.dwSize = std::mem::size_of::<THREADENTRY32>() as u32;
+    unsafe {
+        SetLastError(ERROR_SUCCESS);
+    }
+    if unsafe { Thread32First(snapshot, &mut entry) } == 0 {
+        let error = unsafe { GetLastError() };
+        if error == ERROR_NO_MORE_FILES {
+            bail!("suspended detector has no initial thread");
+        }
+        bail!("enumerate suspended detector threads failed with Windows error {error}");
+    }
+
+    let mut matching_thread = None;
+    loop {
+        if entry.th32OwnerProcessID == process_id
+            && matching_thread.replace(entry.th32ThreadID).is_some()
+        {
+            bail!("suspended detector has multiple initial threads");
+        }
+        unsafe {
+            SetLastError(ERROR_SUCCESS);
+        }
+        if unsafe { Thread32Next(snapshot, &mut entry) } == 0 {
+            let error = unsafe { GetLastError() };
+            if error == ERROR_NO_MORE_FILES {
+                break;
+            }
+            bail!(
+                "continue suspended detector thread enumeration failed with Windows error {error}"
+            );
+        }
+    }
+    matching_thread.ok_or_else(|| anyhow!("suspended detector has no initial thread"))
+}
+
+#[cfg(windows)]
+fn is_single_initial_suspend(previous_suspend_count: u32) -> bool {
+    previous_suspend_count == 1
+}
+
+#[cfg(windows)]
 fn assign_windows_job(job: &WindowsJob, child: &Child) -> Result<()> {
     use windows_sys::Win32::System::JobObjects::AssignProcessToJobObject;
 
@@ -1450,10 +1553,13 @@ fn assign_windows_job(job: &WindowsJob, child: &Child) -> Result<()> {
 async fn terminate_process_group(child: &mut Child, job: &WindowsJob) {
     use windows_sys::Win32::System::JobObjects::TerminateJobObject;
 
-    unsafe {
-        TerminateJobObject(job.0, 1);
+    if unsafe { TerminateJobObject(job.0, 1) } == 0 {
+        let _ = child.kill().await;
     }
-    let _ = child.wait().await;
+    if child.wait().await.is_err() {
+        let _ = child.kill().await;
+        let _ = child.wait().await;
+    }
 }
 
 fn lifecycle_log(event: &str, runtime_session_id: &str, watcher_pid: u32, detail: Value) {
@@ -1604,6 +1710,15 @@ mod tests {
                 "{benign} should not be sensitive"
             );
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_resume_requires_exactly_one_initial_suspend() {
+        assert!(is_single_initial_suspend(1));
+        assert!(!is_single_initial_suspend(0));
+        assert!(!is_single_initial_suspend(2));
+        assert!(!is_single_initial_suspend(u32::MAX));
     }
 
     fn sleeper_watch() -> Watch {

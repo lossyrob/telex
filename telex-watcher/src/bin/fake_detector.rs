@@ -4,6 +4,7 @@
 //! process-group termination, sleeps to force timeouts, and emits configurable stdout/stderr and
 //! exit codes to exercise idle/event/terminal/degraded/malformed/oversize/non-zero paths.
 
+use fs2::FileExt;
 use std::fs;
 use std::io::{Read, Write};
 use std::path::Path;
@@ -18,6 +19,10 @@ struct Config {
     sleep_ms: u64,
     #[serde(default)]
     spawn_child_dir: Option<String>,
+    /// Spawns a child that holds an exclusive lock until termination. Windows boundary tests use
+    /// this to prove the child ran before timeout and that Job teardown reaped it.
+    #[serde(default)]
+    spawn_locked_child_dir: Option<String>,
     #[serde(default)]
     child_sleep_ms: u64,
     #[serde(default = "yes")]
@@ -63,6 +68,28 @@ fn main() {
         return;
     }
 
+    if args.get(1).map(String::as_str) == Some("--locked-child") {
+        let dir = args.get(2).cloned().unwrap_or_default();
+        let sleep_ms: u64 = args
+            .get(3)
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        let dir = Path::new(&dir);
+        let lock = fs::OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .truncate(false)
+            .open(dir.join("child.lock"))
+            .expect("open locked-child lock file");
+        lock.lock_exclusive().expect("lock locked-child lock file");
+        fs::write(dir.join("child-pid"), std::process::id().to_string())
+            .expect("write locked-child pid");
+        fs::write(dir.join("child-ready"), b"ready").expect("write locked-child readiness");
+        sleep(Duration::from_millis(sleep_ms));
+        return;
+    }
+
     let config_path = args.get(1).expect("fake_detector requires a config path");
     let config: Config = match fs::read_to_string(config_path) {
         Ok(text) => serde_json::from_str(&text).expect("fake_detector config was not valid JSON"),
@@ -71,6 +98,17 @@ fn main() {
             std::process::exit(97);
         }
     };
+
+    if let Some(dir) = &config.spawn_locked_child_dir {
+        let exe = std::env::current_exe().expect("resolve fake_detector executable");
+        #[allow(clippy::zombie_processes)]
+        let _child = Command::new(exe)
+            .arg("--locked-child")
+            .arg(dir)
+            .arg(config.child_sleep_ms.to_string())
+            .spawn()
+            .expect("spawn locked fake_detector descendant");
+    }
 
     if config.mutate_self {
         use std::io::Write as _;

@@ -130,6 +130,7 @@ Protocol version 1 enforces:
 | Event subject | 512 UTF-8 bytes |
 | Event body | 128 KiB |
 | Detector metadata | 64 KiB serialized |
+| Normalized Watcher metadata | 80 KiB serialized |
 
 Truncated or oversize event output is never sent as success.
 

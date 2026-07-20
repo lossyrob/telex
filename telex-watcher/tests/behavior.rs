@@ -6,7 +6,7 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 
 const WATCHER: &str = env!("CARGO_BIN_EXE_telex-watcher");
 const FAKE_DETECTOR: &str = env!("CARGO_BIN_EXE_fake_detector");
@@ -627,6 +627,153 @@ fn timeout_terminates_the_whole_process_group() {
         latest_attempt(&harness, "watch")["outcome"],
         "execution-failed"
     );
+}
+
+#[cfg(windows)]
+struct LockedChildCleanup {
+    lock_path: PathBuf,
+    pid_path: PathBuf,
+}
+
+#[cfg(windows)]
+impl LockedChildCleanup {
+    fn lock_is_held(&self) -> bool {
+        use fs2::FileExt;
+        let Ok(file) = fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&self.lock_path)
+        else {
+            return false;
+        };
+        file.try_lock_exclusive().is_err()
+    }
+}
+
+#[cfg(windows)]
+impl Drop for LockedChildCleanup {
+    fn drop(&mut self) {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, TerminateProcess, PROCESS_TERMINATE,
+        };
+
+        if !self.lock_is_held() {
+            return;
+        }
+        let Ok(pid) = fs::read_to_string(&self.pid_path).and_then(|pid| {
+            pid.trim()
+                .parse::<u32>()
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))
+        }) else {
+            return;
+        };
+        unsafe {
+            let process = OpenProcess(PROCESS_TERMINATE, 0, pid);
+            if process != 0 {
+                let _ = TerminateProcess(process, 1);
+                let _ = CloseHandle(process);
+            }
+        }
+    }
+}
+
+#[cfg(windows)]
+fn wait_for_file(path: &Path, timeout: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + timeout;
+    while !path.exists() {
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    true
+}
+
+#[cfg(windows)]
+fn wait_for_exclusive_lock(path: &Path, timeout: std::time::Duration) -> bool {
+    use fs2::FileExt;
+
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Ok(file) = fs::OpenOptions::new().read(true).write(true).open(path) {
+            if file.try_lock_exclusive().is_ok() {
+                return true;
+            }
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+}
+
+#[cfg(windows)]
+#[test]
+fn windows_timeout_kills_immediate_grandchild() {
+    const ITERATIONS: usize = 5;
+    for iteration in 0..ITERATIONS {
+        let harness = Harness::new(&format!("windows-grandchild-{iteration}"));
+        let markers = harness.root.join("locked-child-markers");
+        fs::create_dir_all(&markers).unwrap();
+        let _cleanup = LockedChildCleanup {
+            lock_path: markers.join("child.lock"),
+            pid_path: markers.join("child-pid"),
+        };
+        let config = harness.write_config(json!({
+            "sleepMs": 60_000,
+            "spawnLockedChildDir": markers.to_string_lossy(),
+            "childSleepMs": 60_000,
+        }));
+        let mut spec = spec_for(&config, "watch", "service:watcher");
+        spec["timeoutSeconds"] = json!(2);
+        let spec_file = harness.write_spec(spec);
+        let added = harness.run(&["add", "--file", &spec_file.to_string_lossy()]);
+        assert_eq!(added.code, 0, "add failed: {}", added.stderr);
+
+        let started = std::time::Instant::now();
+        let watcher = harness
+            .watcher(&["run", "--once", "--watch", "watch"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start watcher");
+        let ready = wait_for_file(
+            &markers.join("child-ready"),
+            std::time::Duration::from_millis(1500),
+        );
+        let output = watcher.wait_with_output().expect("wait for watcher");
+        let lock_released = wait_for_exclusive_lock(
+            &markers.join("child.lock"),
+            std::time::Duration::from_secs(3),
+        );
+
+        assert!(
+            ready,
+            "iteration {iteration}: grandchild never acquired its lock and signaled readiness before timeout; watcher status {:?}, stderr: {}",
+            output.status,
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            output.status.success(),
+            "iteration {iteration}: watcher failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(8),
+            "iteration {iteration}: timeout cleanup hung for {:?}",
+            started.elapsed()
+        );
+        assert!(
+            lock_released,
+            "iteration {iteration}: grandchild lock remained held after detector timeout"
+        );
+        assert_eq!(
+            latest_attempt(&harness, "watch")["outcome"],
+            "execution-failed",
+            "iteration {iteration}: detector timeout must be recorded"
+        );
+    }
 }
 
 fn sha256_hex(bytes: &[u8]) -> String {

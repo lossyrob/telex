@@ -11,6 +11,7 @@ pub const MAX_STATE_BYTES: usize = 256 * 1024;
 pub const MAX_SUBJECT_BYTES: usize = 512;
 pub const MAX_BODY_BYTES: usize = 128 * 1024;
 pub const MAX_METADATA_BYTES: usize = 64 * 1024;
+pub const MAX_NORMALIZED_METADATA_BYTES: usize = 80 * 1024;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -207,7 +208,7 @@ pub fn send_metadata(
         "script": { "mode": script_mode, "sha256": script_digest },
         "detector": event.metadata,
     });
-    ensure_json_cap("normalized metadata", &value, MAX_METADATA_BYTES)?;
+    ensure_json_cap("normalized metadata", &value, MAX_NORMALIZED_METADATA_BYTES)?;
     Ok(serde_json::to_string(&value)?)
 }
 
@@ -312,6 +313,20 @@ mod tests {
         let mut event = base_event();
         event.metadata = serde_json::json!({ "blob": "m".repeat(MAX_METADATA_BYTES + 1) });
         assert!(validate_event(&event).is_err());
+    }
+
+    #[test]
+    fn detector_metadata_near_its_cap_can_be_wrapped_by_watcher_metadata() {
+        let mut event = base_event();
+        event.metadata = serde_json::json!({
+            "payload": "x".repeat(MAX_METADATA_BYTES - 64)
+        });
+        validate_event(&event).unwrap();
+
+        let metadata =
+            send_metadata("watch", "attempt", "follow-path", &"a".repeat(64), &event).unwrap();
+        assert!(metadata.len() <= MAX_NORMALIZED_METADATA_BYTES);
+        assert!(metadata.len() > MAX_METADATA_BYTES);
     }
 
     #[test]
