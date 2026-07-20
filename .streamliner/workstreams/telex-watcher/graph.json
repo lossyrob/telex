@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "Workstream formed locally. Wave 1 is a provider-neutral external detector spike with editable GitHub and Azure DevOps examples, proving durable Telex wakeup without session-bound background tasks.",
+  "summary": "Wave 1's provider-neutral detector spike merged in PR #105. The builder-owned viability gate is ready to dogfood GitHub, customized GitHub, Azure DevOps, and non-PR watches before production contract work begins.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-18T23:46:41Z",
+  "updatedAt": "2026-07-20T20:36:46Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -53,8 +53,8 @@
       "type": "research",
       "title": "Vertical spike: generic external detector runner",
       "summary": "Build one provider-neutral persistent external watcher: trusted local detector commands, versioned structured results, opaque state, fixed Telex target/sender, state commit after durable send, restart recovery, and editable GitHub/Azure DevOps examples including repository-specific filtering. No agent session retains a background waiter.",
-      "status": "ready",
-      "attention": "focus",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -71,7 +71,7 @@
       "type": "gate",
       "title": "External detector hosting is broadly useful",
       "summary": "Builder dogfoods materially different GitHub, customized GitHub, Azure DevOps, and non-PR watches. The gate passes only if agents can author detectors quickly, watches survive outside sessions, and Telex wakeup is more reliable and less disruptive than background loop tasks.",
-      "status": "planned",
+      "status": "ready",
       "attention": "focus",
       "repoIds": [
         "telex"

@@ -2,12 +2,15 @@
 
 - **Workstream:** telex-watcher
 - **Type:** research (product/technical spike)
-- **Status:** ready
+- **Status:** completed
 - **Depends on:** none
 - **Blocks:** viability-gate
 - **Tracker:** [lossyrob/telex#101](https://github.com/lossyrob/telex/issues/101)
 - **Parent workstream:** [lossyrob/telex#100](https://github.com/lossyrob/telex/issues/100)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
+- **Result:** [PR #105](https://github.com/lossyrob/telex/pull/105) merged;
+  evidence is recorded in
+  [`docs/generic-watcher-spike-report.md`](../../../../docs/generic-watcher-spike-report.md).
 
 ## Outcome
 
