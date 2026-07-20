@@ -6,7 +6,9 @@
 use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Command;
+#[cfg(windows)]
+use std::process::Stdio;
 
 const WATCHER: &str = env!("CARGO_BIN_EXE_telex-watcher");
 const FAKE_DETECTOR: &str = env!("CARGO_BIN_EXE_fake_detector");
