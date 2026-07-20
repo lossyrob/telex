@@ -4,7 +4,7 @@
   "assignmentVersion": "1",
   "modelId": "scripted-operator-stand-in",
   "telexVersion": "telex 0.1.0",
-  "storeFingerprint": "sha256:9d20ffc1cd1d6c916421d5fc4ef65e523efed08ab4bc61a09ce42afdce0a9dba",
+  "storeFingerprint": "sha256:83f556662ea0602294e44aa7a56d2707ae255bed940bf21e2f55704103dd360f",
   "addresses": {
     "worker": "worker:operator-loop-smoke",
     "ingress": "attention:rob",
@@ -33,7 +33,8 @@
     "humanReplyMediatedThread": true,
     "routeBackRawThread": true,
     "rawClosedAfterRouteBack": true,
-    "humanReplyRecoveredBeforeAck": true
+    "humanReplyRecoveredBeforeAck": true,
+    "humanReplyTerminalAfterRoute": true
   },
   "stress": {
     "enabled": false,

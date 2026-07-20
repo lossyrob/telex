@@ -75,7 +75,9 @@ Run the helper self-check once:
 To reproduce the Action Center evidence after a live toast:
 
 ```powershell
+$sourceHead = git rev-parse HEAD
 & .\operator-station-spike\harness\Get-OperatorSpikeToastRecord.ps1 `
+    -SourceHead $sourceHead `
     -OutputPath .\operator-station-spike\evidence\windows-action-center-record.json
 ```
 
@@ -181,12 +183,13 @@ operator agent receives it on `attention:rob`, validates the exact v1
 experimental envelope and fingerprint, then uses `telex reply` against the
 original raw message ID. It closes the raw obligation only after that route
 succeeds. The Station marks human replies disposition-required; the operator
-must route and verify the receipt before acking that human-reply obligation.
+must route and verify the receipt before acking and terminally handling that
+human-reply obligation.
 
 The scripted smoke harness also exercises a failure boundary: it detaches the
 operator after the human reply exists but before route-back, reattaches the same
 operator session, proves the unacked human reply remains actionable, then routes,
-acks, and closes in that order.
+acks and handles the human reply, and closes the raw request in that order.
 
 In Terminal 3, inspect the worker inbox:
 

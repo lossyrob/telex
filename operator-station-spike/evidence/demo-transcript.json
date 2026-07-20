@@ -105,6 +105,7 @@
   "postReviewHardening": {
     "stationHumanRepliesRequireDisposition": true,
     "routeBackPrecedesHumanReplyAck": true,
+    "humanReplyTerminalAfterRouteBack": true,
     "operatorRestartBeforeRouteBackExercised": true,
     "evidence": "operator-station-spike/evidence/return-path-recovery-evidence.json"
   }

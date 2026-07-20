@@ -82,8 +82,8 @@ impl SourceReference {
             && self
                 .from
                 .as_ref()
-                .is_none_or(|from| message.from.as_ref() == Some(from))
-            && self.to.as_ref().is_none_or(|to| &message.to == to)
+                .is_some_and(|from| message.from.as_ref() == Some(from))
+            && self.to.as_ref().is_some_and(|to| &message.to == to)
     }
 }
 
@@ -487,6 +487,19 @@ mod tests {
         let mut mismatched = matching;
         mismatched.from = Some("worker:other".into());
         assert!(!mismatched.matches_message(&message));
+
+        let missing_from = SourceReference {
+            from: None,
+            ..mismatched.clone()
+        };
+        assert!(!missing_from.matches_message(&message));
+
+        let missing_to = SourceReference {
+            from: message.from.clone(),
+            to: None,
+            ..mismatched
+        };
+        assert!(!missing_to.matches_message(&message));
     }
 
     #[test]

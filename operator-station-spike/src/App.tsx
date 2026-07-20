@@ -358,11 +358,11 @@ function sourceResolutionLabel(
 ): string {
   switch (resolution) {
     case "matched":
-      return "ID and envelope fields matched";
+      return "ID and complete envelope matched";
     case "eligible-for-resolution":
       return "Matching store; resolution pending";
     case "envelope-mismatch":
-      return "Envelope fields do not match current message";
+      return "Source envelope is incomplete or mismatched";
     case "unavailable-in-current-store":
       return "Unavailable in current store";
   }

@@ -416,6 +416,35 @@ Human decision: use Thursday. Avoid the Tuesday dependency freeze and notify the
     ) | Out-Null
 
     Invoke-TelexJson -Arguments @(
+        'handle',
+        '--db', $env:TELEX_OPERATOR_SPIKE_DB,
+        '--address', $ingressAddress,
+        '--session', $operatorSession,
+        '--recipient', $ingressAddress,
+        '--id', $humanReplyId,
+        '--note', 'Human reply routed back to the originating worker.',
+        '--json'
+    ) | Out-Null
+
+    $humanReplyFinalInbox = Invoke-TelexJson -Arguments @(
+        'inbox',
+        '--db', $env:TELEX_OPERATOR_SPIKE_DB,
+        '--address', $ingressAddress,
+        '--all',
+        '--limit', 20,
+        '--json'
+    )
+    $humanReplyFinalItems = @(
+        $humanReplyFinalInbox.items |
+            Where-Object { [long]$_.id -eq $humanReplyId }
+    )
+    Assert-Condition -Condition (
+        $humanReplyFinalItems.Count -eq 1 -and
+        $humanReplyFinalItems[0].latest_disposition -in @('handled', 'rejected', 'closed') -and
+        -not $humanReplyFinalItems[0].actionable
+    ) -Message 'The routed human reply did not reach a terminal non-actionable disposition.'
+
+    Invoke-TelexJson -Arguments @(
         'close',
         '--db', $env:TELEX_OPERATOR_SPIKE_DB,
         '--address', $ingressAddress,
@@ -603,6 +632,7 @@ Human decision: use Thursday. Avoid the Tuesday dependency freeze and notify the
             routeBackRawThread       = $true
             rawClosedAfterRouteBack  = $true
             humanReplyRecoveredBeforeAck = $true
+            humanReplyTerminalAfterRoute = $true
         }
         stress                  = $stressEvidence
     }

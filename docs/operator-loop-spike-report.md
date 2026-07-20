@@ -137,8 +137,9 @@ promotion, renaming, or retirement.
   Station should decide whether common reply/disposition combinations need one
   higher-level operation.
 - Station-authored human replies are disposition-required. The operator
-  assignment verifies and sends the worker route-back before acknowledging the
-  human reply, preserving recovery if routing or the operator session fails.
+  assignment verifies and sends the worker route-back before acknowledging and
+  terminally handling the human reply, preserving recovery if routing or the
+  operator session fails without leaving a completed reply actionable.
 
 ## Failures and limitations observed
 
@@ -164,7 +165,8 @@ promotion, renaming, or retirement.
   bounded in memory.
 - `operator-station-spike/evidence/return-path-recovery-evidence.json` exercises
   operator detach/reattach after the human reply exists but before route-back,
-  then proves the unacked obligation remains actionable.
+  then proves the unacked obligation remains actionable and becomes terminal
+  and non-actionable only after the successful route-back.
 
 ## Requirements for issue #12
 

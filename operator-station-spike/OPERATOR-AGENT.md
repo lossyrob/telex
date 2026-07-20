@@ -278,11 +278,19 @@ telex ack --db $env:TELEX_OPERATOR_SPIKE_DB `
     --recipient attention:rob `
     --id $humanReplyMessageId `
     --note "Human outcome routed back successfully." --json
+
+telex handle --db $env:TELEX_OPERATOR_SPIKE_DB `
+    --address attention:rob `
+    --session $env:COPILOT_AGENT_SESSION_ID `
+    --recipient attention:rob `
+    --id $humanReplyMessageId `
+    --note "Human reply routed back to the originating worker." --json
 ```
 
 This reply remains in the raw worker thread; the human reply remains in the
 mediated thread. If routing fails, do not ack: reattach/resume and retry the same
-human-reply obligation. After route-back and ack both succeed:
+human-reply obligation. After route-back, ack, and the human-reply terminal
+disposition all succeed:
 
 ```powershell
 telex close --db $env:TELEX_OPERATOR_SPIKE_DB `
