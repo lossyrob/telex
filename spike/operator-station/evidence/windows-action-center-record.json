@@ -1,0 +1,31 @@
+{
+  "schema": "operator-station-spike.windows-action-center-evidence.v2",
+  "capturedAt": "2026-07-20T03:30:24.871601Z",
+  "source": "%LOCALAPPDATA%\\Microsoft\\Windows\\Notifications\\wpndatabase.db",
+  "queryMode": "read-only",
+  "extractor": {
+    "currentCheckoutPath": "spike/operator-station/harness/Get-OperatorSpikeToastRecord.ps1",
+    "pathSemantics": "resolves in the checkout containing this evidence artifact; independent of stationReplayHead"
+  },
+  "stationReplayHead": "c29dac8278324a90fe789b33fe843654bb24958c",
+  "handler": {
+    "recordId": 920,
+    "primaryId": "com.lossyrob.telex.operatorstationspike",
+    "handlerType": "app:desktop",
+    "createdTime": "2026-07-19 09:29:10"
+  },
+  "notification": {
+    "order": 317088,
+    "id": 319530,
+    "handlerId": 920,
+    "type": "toast",
+    "payloadType": "Xml",
+    "arrivalTime": "2026-07-20T03:28:45.182410Z",
+    "title": "Human decision required: Rollout window",
+    "body": "Worker worker:builder reports that Tuesday and Thursday are both technically viable rollout windows. Scheduling ownership and dependency-freeze risk require human judgment. Which rollout day should b\u2026",
+    "bodyCharacterCount": 200,
+    "bodyEndsWithEllipsis": true,
+    "attribution": "attention:rob",
+    "payload": "<toast><visual><binding template=\"ToastGeneric\"><text>Human decision required: Rollout window</text><text>Worker worker:builder reports that Tuesday and Thursday are both technically viable rollout windows. Scheduling ownership and dependency-freeze risk require human judgment. Which rollout day should b\u2026</text><text placement=\"attribution\">attention:rob</text></binding></visual></toast>"
+  }
+}

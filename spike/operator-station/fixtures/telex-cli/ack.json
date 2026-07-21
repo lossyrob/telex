@@ -1,0 +1,8 @@
+{
+  "state": "acknowledged",
+  "message_id": 2,
+  "recipient": "operator:rob",
+  "delivery_outcome": "marked",
+  "lease_epoch": 1,
+  "additiveFixtureField": true
+}

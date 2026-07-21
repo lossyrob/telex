@@ -1,0 +1,43 @@
+{
+  "schema": "operator-station-spike.smoke-evidence.v1",
+  "passed": true,
+  "assignmentVersion": "1",
+  "modelId": "scripted-operator-stand-in",
+  "telexVersion": "telex 0.1.0",
+  "storeFingerprint": "sha256:83f556662ea0602294e44aa7a56d2707ae255bed940bf21e2f55704103dd360f",
+  "addresses": {
+    "worker": "worker:operator-loop-smoke",
+    "ingress": "attention:rob",
+    "station": "operator:rob"
+  },
+  "raw": {
+    "messageId": 1,
+    "threadId": 1,
+    "dispositions": [
+      "escalated",
+      "closed"
+    ],
+    "routedReplyId": 4
+  },
+  "mediated": {
+    "escalationId": 2,
+    "threadId": 2,
+    "humanReplyId": 3,
+    "kind": "operator-station-spike.escalation",
+    "attention": "interrupt"
+  },
+  "assertions": {
+    "metadataRoundTrip": true,
+    "fullFingerprintPresent": true,
+    "rawEscalatedBeforeClose": true,
+    "humanReplyMediatedThread": true,
+    "routeBackRawThread": true,
+    "rawClosedAfterRouteBack": true,
+    "humanReplyRecoveredBeforeAck": true,
+    "humanReplyTerminalAfterRoute": true
+  },
+  "stress": {
+    "enabled": false,
+    "note": "Run with -Stress to add 1,055 bounded FYI messages and exercise export-backed restart recovery."
+  }
+}
