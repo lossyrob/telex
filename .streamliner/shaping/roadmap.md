@@ -27,16 +27,18 @@ long-lived task occupying the session?
 **Theater.** The Telex application layer: non-agent stations, deterministic event
 producers, human recipients, and the shared programmatic client they consume.
 
-**State.** Main effort; both product viability spikes are ready to advance in
-parallel. The shared production application-client contract remains intentionally
-downstream of real evidence from both.
+**State.** Main effort. Telex Watcher Wave 1 is merged and reconciled; its
+builder-owned `viability-gate` is ready. Operator Station Wave 1 is implemented,
+fully reviewed, and merge-ready in PR #104; its viability gate follows merge and
+workstream reconciliation. The shared production application-client contract
+remains downstream of both independent builder gates.
 
 ## Covering workstreams
 
 | Workstream | Tracker | Outcome | Current first move |
 |---|---|---|---|
-| Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Human-attended Telex endpoint plus an optional operator-agent filter and reply loop. | Run the mediated attention vertical spike [#93](https://github.com/lossyrob/telex/issues/93). |
-| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral deterministic detectors emit Telex messages without session-owned background tasks. | Run the generic detector vertical spike [#101](https://github.com/lossyrob/telex/issues/101) with GitHub and Azure DevOps examples. |
+| Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Human-attended Telex endpoint plus an optional operator-agent filter and reply loop. | Merge [PR #104](https://github.com/lossyrob/telex/pull/104), reconcile Wave 1, then run the builder viability gate. |
+| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral deterministic detectors emit Telex messages without session-owned background tasks. | Wave 1 completed through [#101](https://github.com/lossyrob/telex/issues/101) / [PR #105](https://github.com/lossyrob/telex/pull/105) and reconciliation [PR #108](https://github.com/lossyrob/telex/pull/108); run the ready builder viability gate. |
 
 ## Shared seam
 
@@ -59,13 +61,16 @@ public client API.
 
 ### Stage 1 — Parallel operational-loop viability
 
-Run simultaneously:
+The parallel Wave 1 implementation stage produced:
 
-- Operator Station `operator-loop-spike`: worker → operator agent → human Station
-  → reply → worker.
-- Telex Watcher `generic-watcher-spike`
-  [#101](https://github.com/lossyrob/telex/issues/101): external detector →
-  Watcher → Telex → target agent, with no originating session waiter.
+- Operator Station `operator-loop-spike`: complete implementation and approved
+  live demonstration of worker → operator agent → human Station → reply →
+  worker; PR #104 is awaiting merge.
+- Telex Watcher `generic-watcher-spike`: merged and reconciled proof of external
+  detector → Watcher → Telex → target agent with no originating session waiter.
+  Evidence includes generic/custom GitHub, an authorized live Azure DevOps PR
+  transition, occupied Copilot wakeup, durable unoccupied queueing, receipt-gated
+  state, and isolated daemon-restart testing.
 
 The spikes answer different questions and should not block each other:
 
@@ -74,8 +79,9 @@ The spikes answer different questions and should not block each other:
 
 ### Stage 2 — Independent viability gates
 
-Each workstream has its own builder gate. Either may pass, reshape, or stop
-without forcing the other to the same conclusion.
+Each workstream has its own builder gate. The Watcher gate is ready now; the
+Operator Station gate becomes ready after PR #104 merge/reconciliation. Either
+may pass, reshape, or stop without forcing the other to the same conclusion.
 
 Both gates produce evidence for #12:
 
@@ -151,17 +157,27 @@ collapse into noise, and no session-bound polling task is required.
 - The operator agent reasons and filters; neither Telex core nor Watcher
   interprets what deserves human attention.
 - Shared application-client semantics have one owner through #12.
+- Destructive daemon, upgrade, handoff, and branch-binary tests use an isolated
+  `TELEX_HOME`, `TELEX_DB`, `TELEX_INSTALL_ROOT`, absolute worktree binary, and
+  disposable proof stations. The default local daemon and installed launcher are
+  campaign coordination infrastructure and are never test targets.
 
 ## Side issue
 
 - [#12](https://github.com/lossyrob/telex/issues/12) — revise the existing
   embeddable SDK design around the post-daemon reality and broaden it to desktop,
   headless service, and agent SDK application stations after the viability
-  reports exist.
+  reports exist. Watcher requirements are published in the issue; Operator
+  Station requirements join them after Wave 1 reconciliation.
 
 ## Current next actions
 
-1. Launch Operator Station spike #93.
-2. Launch the Telex Watcher generic detector spike #101.
-3. Reconcile both viability reports into #12 before either production runtime
-   freezes its client integration.
+1. Merge Operator Station PR #104 and complete its post-merge workstream
+   reconciliation.
+2. Run the independent Watcher and Operator Station builder viability gates,
+   recording real dogfood observations without auto-passing either gate.
+3. Consolidate both accepted gate outcomes and spike reports into #12; decide
+   whether to form the shared Application Client enabling workstream.
+4. Keep production `station-app` and `watcher-runtime` nodes blocked until their
+   viability gate and the shared `application-client-ready` checkpoint permit
+   promotion.
