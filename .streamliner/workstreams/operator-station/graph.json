@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-21T19:05:22Z",
+  "updatedAt": "2026-07-21T20:43:16Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -202,18 +202,18 @@
   ],
   "presentation": {
     "shortName": "TLX-O",
-    "color": "#6D5DFB"
+    "color": "#4891c8"
   },
   "launchPolicy": {
     "requiredTracker": "github-issue"
   },
   "launchDefaults": {
-    "promptProfileId": "paw-lite-loop-v8-lossyrob",
+    "promptProfileId": "telex-operator-station-implementer-v1",
     "terminal": {
       "titleTemplate": "TLX-O {githubIssue}"
     },
     "launchAfterInit": true,
     "reviewCompanion": true,
-    "reviewPromptTemplateId": "paw-review-loop-v2-nomatt-lossrob"
+    "reviewPromptTemplateId": "operator-station-reviewer-v1"
   }
 }

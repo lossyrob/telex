@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-21T19:17:04Z",
+  "updatedAt": "2026-07-21T20:43:16Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -208,18 +208,18 @@
   ],
   "presentation": {
     "shortName": "TLX-W",
-    "color": "#F59E0B"
+    "color": "#00ff00"
   },
   "launchPolicy": {
     "requiredTracker": "github-issue"
   },
   "launchDefaults": {
-    "promptProfileId": "paw-lite-loop-v8-lossyrob",
+    "promptProfileId": "telex-watcher-implementer-v1",
     "terminal": {
       "titleTemplate": "TLX-W {githubIssue}"
     },
     "launchAfterInit": true,
     "reviewCompanion": true,
-    "reviewPromptTemplateId": "paw-review-loop-v2-nomatt-lossrob"
+    "reviewPromptTemplateId": "telex-watcher-reviewer-v1"
   }
 }
