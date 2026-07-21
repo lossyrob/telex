@@ -16,6 +16,13 @@ authorized a disposable PR-created transition. A shared-daemon restart disrupted
 campaign communications and established a mandatory isolated test-plane rule.
 Final review exposed and fixed a Windows process-containment race.
 
+The builder subsequently passed the viability gate after scoped PR lifecycle
+dogfood on Operator Station PR #104. The shared Watcher runtime detected merge
+in about 26 seconds, emitted one initial snapshot and one merge event with no
+duplicates/noise, agreed with the canonical checker, removed the watch, and
+remained live for reuse. That moves the workstream from experimental viability
+into production contract definition.
+
 ## Boundaries
 
 - **Held:** Provider semantics stayed in editable scripts; Watcher remained
@@ -47,6 +54,11 @@ Production work cannot treat the spike-private send-once environment contract,
 CLI subprocess lifecycle, or sender-only occupancy behavior as a supported
 client API.
 
+The passed gate exports a product decision: external Watcher hosting is useful
+enough to continue. Node #110 now owns the accepted production Watcher contract;
+production runtime/template work remains blocked on that contract and the
+campaign-owned Application Client checkpoint.
+
 ## Context fitness
 
 The outcome and boundary sections were strong enough to prevent workflow-engine,
@@ -71,6 +83,11 @@ review-object counting; future review prompts should require raw-token/AST
 verification for secret-adjacent findings and identify the expected review by
 marker or review ID.
 
+The builder gate required little additional intervention: a scoped Watcher-backed
+PR sentry run produced timely, quiet, canonical-checker-consistent evidence and
+clean watch removal. That is the intended gate shape—real use and judgment rather
+than another implementation review.
+
 ## Inspired vs. recovery interventions
 
 - **Inspired:** Real sender lifecycle evidence produced the stable-address /
@@ -88,8 +105,8 @@ marker or review ID.
 
 ## Closeout observation dispositions
 
-None yet. The brief's `Closeout Observations` section remains a parking lane for
-later viability and production dogfood.
+- Test-support helper binaries are currently Cargo-normal binaries: promoted to
+  #110 for explicit production packaging disposition before publishing.
 
 ## Promotion candidates
 
@@ -100,8 +117,10 @@ later viability and production dogfood.
 - Long-lived applications need explicit stable-address, process-incarnation,
   strict recovery, receipt, and sender-only/bidirectional semantics: target
   authority — issue #12 / future Application Client contract.
-  - Disposition: exported through the spike report; campaign consolidation into
-    #12 is required before production implementation.
+  - Disposition: exported through the spike report and
+    [issue #12 comment](https://github.com/lossyrob/telex/issues/12#issuecomment-5027181549);
+    #110 owns the Watcher-specific contract while campaign consolidation remains
+    required before production implementation.
 - External-provider proof requires mutation authority as well as credentials:
   target authority — workstream-design lesson (`project`).
   - Disposition: deferred with rationale; apply to the next live-provider node
@@ -111,3 +130,8 @@ later viability and production dogfood.
   (`streamliner`).
   - Disposition: deferred with rationale pending comparison with the parallel
     Operator Station spike.
+- Shared Watcher supervision can replace a session-owned PR sentry loop for
+  scoped PAW dogfood while a one-shot canonical checker remains authoritative:
+  target authority — detector-template guidance and Watcher viability evidence.
+  - Disposition: accepted by the builder viability gate; #110 and the later
+    template node own production contract/guidance.
