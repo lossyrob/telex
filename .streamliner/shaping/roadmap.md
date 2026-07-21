@@ -27,17 +27,19 @@ long-lived task occupying the session?
 **Theater.** The Telex application layer: non-agent stations, deterministic event
 producers, human recipients, and the shared programmatic client they consume.
 
-**State.** Main effort at the builder-validation plateau. Both Wave 1 spikes are
-merged and durably reconciled, and both builder-owned `viability-gate` nodes are
-ready but unpassed. The shared production application-client contract remains
-downstream of both independent builder decisions.
+**State.** Telex Watcher has passed its builder viability gate and promoted
+contract node [#110](https://github.com/lossyrob/telex/issues/110), which is
+launch-ready. Operator Station remains at its ready, unpassed builder viability
+gate. Production runtime/application work and the shared application-client
+checkpoint remain blocked on contract convergence and the remaining Operator
+decision.
 
 ## Covering workstreams
 
 | Workstream | Tracker | Outcome | Current first move |
 |---|---|---|---|
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Human-attended Telex endpoint plus an optional operator-agent filter and reply loop. | Wave 1 completed through [#93](https://github.com/lossyrob/telex/issues/93) / [PR #104](https://github.com/lossyrob/telex/pull/104) and reconciliation `d782b1f`; run the ready builder viability gate. |
-| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral deterministic detectors emit Telex messages without session-owned background tasks. | Wave 1 completed through [#101](https://github.com/lossyrob/telex/issues/101) / [PR #105](https://github.com/lossyrob/telex/pull/105) and reconciliation [PR #108](https://github.com/lossyrob/telex/pull/108); run the ready builder viability gate. |
+| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral deterministic detectors emit Telex messages without session-owned background tasks. | Viability passed through reconciliation [PR #112](https://github.com/lossyrob/telex/pull/112); launch contract node [#110](https://github.com/lossyrob/telex/issues/110) with the opt-in Watcher-backed v2 prompt pair. |
 
 ## Shared seam
 
@@ -80,8 +82,11 @@ The spikes answer different questions and should not block each other:
 
 ### Stage 2 — Independent viability gates
 
-Each workstream has its own ready builder gate. Both remain unpassed. Either may
-pass, reshape, or stop without forcing the other to the same conclusion.
+Each workstream has its own builder gate. Watcher passed after scoped PR-lifecycle
+dogfood (~26-second merge detection, one snapshot plus one merge event, no
+duplicate/noisy events, canonical-checker agreement, clean watch removal, and
+reusable shared runtime). Operator Station remains ready and unpassed. Its
+decision may still pass, reshape, or stop independently.
 
 Both gates produce evidence for #12:
 
@@ -92,12 +97,14 @@ Both gates produce evidence for #12:
 - provenance and metadata;
 - supported IPC/binding ergonomics.
 
-### Stage 3 — Shared application-client checkpoint
+### Stage 3 — Contract convergence and shared application-client checkpoint
 
-Consolidate the spike reports into #12. Accept one semantic Application Client
-contract and, if needed, form its enabling workstream. Production app nodes wait
-on the resulting `application-client-ready` checkpoint; product-specific contract
-and UX/design nodes may continue in parallel while that checkpoint is built.
+Watcher contract node #110 may proceed now and must export its Application
+Client requirements without freezing the shared contract. Consolidate Watcher
+and Operator spike/gate evidence into #12. After the remaining Operator gate,
+accept one semantic Application Client contract and, if needed, form its enabling
+workstream. Production app nodes wait on the resulting
+`application-client-ready` checkpoint.
 
 ### Stage 4 — Parallel production applications
 
@@ -167,15 +174,20 @@ collapse into noise, and no session-bound polling task is required.
 - [#12](https://github.com/lossyrob/telex/issues/12) — revise the existing
   embeddable SDK design around the post-daemon reality and broaden it to desktop,
   headless service, and agent SDK application stations after the viability
-  reports exist. Both Watcher and Operator Station requirements are now
-  published evidence; acceptance/consolidation waits on the builder gates.
+  reports exist. Watcher viability evidence and contract-node promotion are
+  published; Operator evidence is published but its builder gate remains open.
 
 ## Current next actions
 
-1. Run the independent Watcher and Operator Station builder viability gates,
-   recording real dogfood observations without auto-passing either gate.
-2. Consolidate both accepted gate outcomes and spike reports into #12; decide
-   whether to form the shared Application Client enabling workstream.
-3. Keep production `station-app` and `watcher-runtime` nodes blocked until their
+1. Launch Watcher contract node #110 using
+   `telex-watcher-implementer-watcher-v2` plus
+   `telex-watcher-reviewer-watcher-v2`; retain v1 fallback and the shared
+   externally supervised Watcher runtime.
+2. Run the Operator Station builder viability gate and record the explicit pass,
+   reshape, or stop decision.
+3. Consolidate #110 plus both spike/gate outcomes into #12; decide whether to
+   form the shared Application Client enabling workstream and export
+   `application-client-ready`.
+4. Keep production `station-app` and `watcher-runtime` nodes blocked until their
    viability gate and the shared `application-client-ready` checkpoint permit
    promotion.
