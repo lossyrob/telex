@@ -21,14 +21,13 @@ understand GitHub, Azure DevOps, PR policy, or arbitrary trigger actions.
 The spike landed in [PR #105](https://github.com/lossyrob/telex/pull/105) and is
 documented in [`docs/generic-watcher-spike-report.md`](../../../docs/generic-watcher-spike-report.md).
 It demonstrates the contract with GitHub and Azure DevOps detectors, including
-repository-specific author/comment filtering. The builder viability gate now
-evaluates whether agents can create and improve materially different detectors
-quickly and whether external events reliably wake the responsible Telex address
-without leaving any background task inside the session.
+repository-specific author/comment filtering. The builder passed the viability
+gate after scoped post-merge dogfood confirmed useful, low-noise PR supervision
+without a session-owned Loop task.
 
-If the gate passes, a contract node promotes the successful experimental
-semantics into production design. Production implementation consumes the shared
-Telex Application Client seam tracked in
+The `watcher-contract` node now promotes the successful experimental semantics
+into production design. Production implementation consumes the shared Telex
+Application Client seam tracked in
 [#12](https://github.com/lossyrob/telex/issues/12), alongside the Operator Station
 workstream. The Watcher runtime and detector-template library can then advance
 under that accepted contract before operational hardening and closure.
@@ -85,15 +84,20 @@ PID-bound sender lifecycle, occupied Copilot wakeup, durable unoccupied queueing
 and editable generic GitHub, customized GitHub, Azure DevOps, and non-PR
 templates.
 
-The `viability-gate` is now ready for builder dogfood across materially different
-watches. It must judge detector-authoring speed, multi-watch reliability,
-restart behavior, and whether external Watcher hosting is less disruptive than
-session-owned Loop workers and waiters. The gate does not pass automatically
-because the spike merged.
+The builder passed `viability-gate` after a scoped Watcher-backed PR lifecycle
+dogfood on Operator Station PR #104. The shared runtime detected the merged PR in
+about 26 seconds, emitted one baseline snapshot and one merge event, produced no
+duplicates or noise, agreed with the canonical checker, required no fallback,
+removed the watch cleanly, and remained live for reuse.
 
-Production contract and runtime work remain blocked on that gate. The shared
-Application Client remains campaign-owned through issue #12; the spike exports
-requirements to it but does not establish a public client contract.
+The next launch-ready node is
+[`watcher-contract` #110](https://github.com/lossyrob/telex/issues/110). It owns
+the production detector, state, lifecycle, trust, failure, provenance, and
+message contract plus the exact Watcher requirements exported to issue #12.
+
+Production runtime and template implementation remain blocked on that accepted
+contract and the campaign-owned Application Client checkpoint. Passing the
+viability gate does not promote the spike-private send seam into a public API.
 
 ## Decisions
 
@@ -129,6 +133,10 @@ requirements to it but does not establish a public client contract.
 - **Live provider mutation requires explicit authority:** credentials and
   coordinates are not permission to mutate a provider resource. A meaningful
   transition must use an owned or explicitly authorized disposable resource.
+- **External detector hosting is viable:** builder dogfood confirmed that a
+  shared Watcher runtime can replace a session-owned PR sentry loop for scoped
+  supervision with timely, low-noise Telex delivery and clean watch lifecycle.
+  Production semantics still require the contract and shared-client gates.
 
 ## Open Questions
 
@@ -172,8 +180,13 @@ requirements to it but does not establish a public client contract.
 
 ## Closeout Observations
 
-Parking lot for bounded detector templates, diagnostics, CLI ergonomics, and
-polling-policy improvements discovered during dogfooding. Any expansion into
-general automation, remote executable registration, hosted event ingestion, or
-cross-principal script trust belongs in its own issue, candidate, or follow-on
-workstream.
+- `telex-watcher/src/bin/fake_detector.rs` and `fake_telex.rs` are normal Cargo
+  binaries for integration-test discovery. Before production publishing, put
+  them behind a non-default test-support feature or equivalent packaging
+  boundary. Keep the product crate top-level rather than moving it into
+  throwaway `spike/`.
+
+Continue parking bounded detector-template, diagnostics, CLI, and polling-policy
+improvements here during dogfooding. Any expansion into general automation,
+remote executable registration, hosted event ingestion, or cross-principal
+script trust belongs in its own issue, candidate, or follow-on workstream.

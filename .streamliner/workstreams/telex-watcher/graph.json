@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "Wave 1's provider-neutral detector spike merged in PR #105. The builder-owned viability gate is ready to dogfood GitHub, customized GitHub, Azure DevOps, and non-PR watches before production contract work begins.",
+  "summary": "The builder passed the Watcher viability gate after successful low-noise PR lifecycle dogfood. Production Watcher contract node #110 is ready; runtime work still waits on that contract and the shared Application Client checkpoint.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-20T20:36:46Z",
+  "updatedAt": "2026-07-21T19:17:04Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -71,8 +71,8 @@
       "type": "gate",
       "title": "External detector hosting is broadly useful",
       "summary": "Builder dogfoods materially different GitHub, customized GitHub, Azure DevOps, and non-PR watches. The gate passes only if agents can author detectors quickly, watches survive outside sessions, and Telex wakeup is more reliable and less disruptive than background loop tasks.",
-      "status": "ready",
-      "attention": "focus",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -85,11 +85,17 @@
       "type": "research",
       "title": "Production Watcher contract and application-client requirements",
       "summary": "Promote successful spike semantics into the intended design: detector envelope, watch lifecycle, script pin/follow policy, credentials and environment, failure notification, state/dedup transaction, service identity, message conventions, and the exact requirements exported to the shared Telex Application Client issue #12.",
-      "status": "planned",
+      "status": "ready",
       "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 110
+      },
       "dependsOn": [
         "viability-gate"
       ]
@@ -171,7 +177,7 @@
       "id": "viability-proven",
       "title": "Generic external Watcher proven valuable",
       "summary": "A provider-neutral detector loop works outside agent sessions and has been dogfooded across GitHub, Azure DevOps, and custom conditions.",
-      "status": "planned",
+      "status": "completed",
       "nodeIds": [
         "generic-watcher-spike",
         "viability-gate"
