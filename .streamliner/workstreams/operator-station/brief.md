@@ -72,20 +72,31 @@ The richer rationale and early interaction model are preserved in
 The workstream is part of the
 **[Addressable Attention campaign #102](https://github.com/lossyrob/telex/issues/102)**
 documented in `.streamliner/shaping/roadmap.md`. It is formed under parent issue
-[#92](https://github.com/lossyrob/telex/issues/92). The first executable node is
-the `operator-loop-spike`, tracked by
-[#93](https://github.com/lossyrob/telex/issues/93): a single-session vertical
-slice intended to create viability and operational-loop confidence rather than
-production substrate. Later nodes remain sketches until the builder has
-dogfooded the spike and passed the viability gate.
+[#92](https://github.com/lossyrob/telex/issues/92). Wave 1's
+`operator-loop-spike` is complete: issue
+[#93](https://github.com/lossyrob/telex/issues/93) closed when
+[PR #104](https://github.com/lossyrob/telex/pull/104) merged at
+`fc2ec2cbf0d23ebdb6064564f64c62c89efe5508`.
 
-The current Telex local exchange, Postgres backend, attention levels, replies,
-dispositions, and durable message record provide the substrate. The production
-Station contract is intentionally unresolved until the spike shows what the
-experience actually requires. Production integration must also consume the
-campaign's shared Telex Application Client seam in
-[#12](https://github.com/lossyrob/telex/issues/12), rather than freezing a
-desktop-only client API.
+The merged spike under `spike/operator-station/` demonstrates the full
+worker -> operator agent -> Windows Station -> human reply -> operator agent ->
+worker loop with distinct raw and mediated threads, source provenance, honest
+wait/read/ingest/ack attendance, restart recovery, address-health visibility,
+and Windows Action Center publication. The evidence and temporary-integration
+findings are recorded in
+[`docs/notes/operator-loop-spike-report.md`](../../../docs/notes/operator-loop-spike-report.md).
+No project design change was accepted by the spike.
+
+The `viability-gate` is now **ready but not passed**. The builder's next action
+is to use
+[`spike/operator-station/WALKTHROUGH.md`](../../../spike/operator-station/WALKTHROUGH.md)
+with several real sessions during a focused work period, append observations to
+the report's `Viability gate observations`, and decide whether the mediated loop
+reduces tab polling, filters at the right level, preserves enough context, and
+routes replies naturally. The gate may pass, reshape, or stop the workstream.
+`station-contract` remains planned and blocked until that decision. Production
+integration also remains dependent on the campaign-owned Application Client
+seam in [#12](https://github.com/lossyrob/telex/issues/12).
 
 ## Decisions
 
@@ -113,6 +124,10 @@ desktop-only client API.
   stable responsibility addresses; which station attends an ingress address
   determines whether traffic reaches the desktop directly or passes through an
   operator agent.
+- **Merged spike mechanisms remain evidence, not accepted contracts:** the
+  subprocess courier, full-history export, path-scoped store fingerprint,
+  experimental namespace, and current UI semantics remain replaceable until the
+  viability gate and the campaign-owned #12 seam accept a production boundary.
 
 ## Open Questions
 
@@ -149,7 +164,9 @@ desktop-only client API.
 
 ### Exports
 
-- A demonstrated mediated human-attention loop and its viability evidence.
+- A demonstrated mediated human-attention loop under
+  `spike/operator-station/`, with evidence and requirements in
+  `docs/notes/operator-loop-spike-report.md`.
 - An accepted production Station/client contract if the viability gate passes.
 - A separately installable human Station that remains optional to Telex core.
 - A reusable operator-agent role and routing convention that other orchestration
@@ -162,4 +179,7 @@ desktop-only client API.
 Parking lot for bounded polish, notification tuning, message rendering, and
 operator-agent prompt improvements discovered during dogfooding. Anything that
 changes Telex semantics, identity guarantees, routing architecture, or session
-lifecycle belongs in its own node, candidate, or follow-on workstream.
+lifecycle belongs in its own node, candidate, or follow-on workstream. The
+merged spike's current carry-forward items remain in
+`docs/notes/operator-loop-spike-report.md` and `reconciliation-note.md`; none is
+promoted into a closeout batch before the viability gate.

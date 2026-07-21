@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "Addressable Attention campaign workstream. Wave 1 is a single-session vertical spike proving worker -> operator agent -> desktop Station -> reply -> worker before the shared #12 Application Client or product UI contract is accepted.",
+  "summary": "Wave 1's mediated-attention spike is merged. The builder viability gate is ready for real multi-session dogfood; no production Station or shared #12 Application Client contract has been accepted.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-18T23:46:41Z",
+  "updatedAt": "2026-07-21T19:05:22Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -53,7 +53,7 @@
       "type": "research",
       "title": "Vertical spike: mediated human-attention loop",
       "summary": "Build one deliberately narrow Windows experimental loop: a worker sends to a stable attention address; an operator agent filters and escalates to a desktop-attended address; the Station shows the message and accepts a reply; the operator agent routes the response back with source provenance intact. Temporary CLI/library integration is allowed and must be documented rather than treated as the production contract.",
-      "status": "ready",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -71,7 +71,7 @@
       "type": "gate",
       "title": "Mediated attention loop is worth productionizing",
       "summary": "Builder dogfoods the spike with several real sessions during a focused work period and decides whether it materially reduces terminal tab polling, preserves enough context, routes replies naturally, and filters at the right level. The gate may pass, reshape the boundary, or stop the workstream; no production contract work proceeds before it.",
-      "status": "planned",
+      "status": "ready",
       "attention": "focus",
       "repoIds": [
         "telex"

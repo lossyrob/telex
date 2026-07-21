@@ -2,10 +2,12 @@
 
 - **Workstream:** operator-station
 - **Type:** research (product/technical spike)
-- **Status:** ready
+- **Status:** completed
 - **Depends on:** none
 - **Blocks:** viability-gate
 - **Tracker:** [lossyrob/telex#93](https://github.com/lossyrob/telex/issues/93)
+- **Merged:** [lossyrob/telex#104](https://github.com/lossyrob/telex/pull/104)
+  at `fc2ec2cbf0d23ebdb6064564f64c62c89efe5508`
 - **Parent workstream:** [lossyrob/telex#92](https://github.com/lossyrob/telex/issues/92)
 
 ## Outcome
@@ -128,3 +130,17 @@ promoting accepted changes into the design layer and ADR log.
   before the PR is finalized.
 - Conduct the multi-session dogfood separately at `viability-gate`; the worker
   should prepare the environment and walkthrough but must not self-pass the gate.
+
+## Completion
+
+PR #104 merged the runnable experimental Station, operator-agent assignment,
+walkthrough, and evidence. The implementation satisfied this node's declared
+confidence transition without accepting the experimental namespace, subprocess
+courier, full-history export, or UI semantics as production contracts.
+
+The next transition is the builder-owned `viability-gate`, which is ready but
+unpassed. Use `spike/operator-station/WALKTHROUGH.md` for real multi-session
+dogfood and record observations in
+`docs/notes/operator-loop-spike-report.md`. Application Client requirements and
+other deferred production concerns remain owned by #12, `station-contract`, and
+later hardening nodes.
