@@ -26,7 +26,7 @@ static copy in this plugin.
 For an explicit plugin/binary compatibility check, pass this plugin's version:
 
 ```sh
-telex copilot skill --plugin-version 0.1.0
+telex copilot skill --plugin-version 0.1.1
 ```
 
 If the binary reports that the plugin is older than it supports, follow the printed warning

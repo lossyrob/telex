@@ -1,7 +1,7 @@
 {
   "name": "telex",
   "description": "Telex Copilot CLI plugin: session lifecycle hooks, push-delivery bridge provisioning, and a bootstrap skill that loads version-matched instructions from the installed telex binary.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "author": {
     "name": "Rob Emanuele"
   },
@@ -10,4 +10,3 @@
   "hooks": "hooks.json",
   "skills": "skills/"
 }
-
