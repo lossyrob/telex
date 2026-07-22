@@ -2,7 +2,7 @@
 
 ## Revision and source freeze
 
-This is revision 14 of the execution plan. Its approval identity is the Git
+This is revision 15 of the execution plan. Its approval identity is the Git
 commit that contains these exact `Plan.md` bytes and the lowercase SHA-256 of
 those bytes encoded as UTF-8 without a BOM, LF line endings, and exactly one
 trailing LF.
@@ -30,7 +30,7 @@ canonical when an export predates the merged contract.
 | Operator Station | `5042612298` | `5044388908` | `0722051760bab569d3f947fd7b29f2dabe13ef77` | `2d99e552292a4401d3403540b6d2eaa90272282d` |
 
 Canonical source-comment body digests refetched from GitHub at revision 5 and
-unchanged through revision 14:
+unchanged through revision 15:
 
 | Comment | SHA-256 |
 |---|---|
@@ -49,7 +49,8 @@ Canonical design-file Git blob identities:
 | Planning metadata | Commit | Effect |
 |---|---|---|
 | Formation base | `0db1b1839c1fea62507b593f2b2c96e50bdc529a` | Application Client workstream formation. |
-| Current planning/branch base | `7a568c43413fc7aeab6a484b07dce0f0db11d68f` | Preserves the Operator Station consumer graph update to `application-client/application-client-ready-gate`; this integration-only movement does not revise AC-01 through AC-15. |
+| Current planning/branch base | `1032ff377377242fe93bb911755f07632ed84c89` | Preserves the Operator and Watcher consumer graph updates to `application-client/application-client-ready-gate`; these integration-only movements do not revise W-01 through W-15 or AC-01 through AC-15. |
+| Builder resume | Telex `1857` relayed by `1860` | Supersedes the scope pause recorded in current shared Watcher planning artifacts. Shared artifact reconciliation remains orchestrator-owned and is not performed in this branch. |
 
 The Watcher export references
 `9df7d25c41b2eca827361db11a7a01c416721d36`, which predates the final
@@ -531,7 +532,10 @@ edit a published checkpoint.
    `attention:rob`, match the live campaign mediator, and are never normalized
    to a T-A URI. It must also verify that only Application Client orchestration
    authors bounded human-attention milestones and that the worker sends only
-   authoritative T-A evidence/status packets.
+   authoritative T-A evidence/status packets. Before human approval, only
+   `merge-floor-ready` / `node-merge-floor-ready` are permitted with
+   `humanFloorStatus: pending` and `mergeAuthorized: false`; `merge-ready` /
+   `node-merge-ready` are post-human only.
 4. Resolve every blocking planning finding.
 5. Re-canonicalize and commit the exact reviewed `Plan.md`.
 
@@ -691,11 +695,14 @@ owns any corresponding human-value PR-opened message to `attention:rob`.
    sentry mode, and whether Loop fallback was used. Never run Watcher and Loop
    supervision in parallel and never stop the shared runtime.
 7. With the sentry active, the worker sends one disposition-required
-   `merge-floor-ready` packet containing the full merge-ready field report to
-   Application Client orchestration and a `node-merge-ready` status to campaign
-   orchestration, then holds. The packet contains exact PR URL and head, current
-   `PAW Review: +1`, CI conclusion, mergeability, unresolved-thread count,
-   checkpoint evidence, bundle and publication identities, and sentry evidence.
+   `merge-floor-ready` packet containing the full technical/checkpoint/sentry
+   evidence to Application Client orchestration and a
+   `node-merge-floor-ready` status to campaign orchestration, then holds. Both
+   packets carry `humanFloorStatus: pending` and `mergeAuthorized: false`.
+   Neither packet is named `merge-ready`. The evidence contains exact PR URL
+   and head, current `PAW Review: +1`, CI conclusion, mergeability,
+   unresolved-thread count, checkpoint evidence, bundle and publication
+   identities, and sentry evidence.
 8. Application Client orchestration independently rechecks that packet and is
    the only owner authorized to send the disposition-required
    `attention.merge-floor` request to literal `attention:rob`. Immediately
@@ -718,9 +725,14 @@ owns any corresponding human-value PR-opened message to `attention:rob`.
     drift, or sentry-health loss invalidates the floor. The worker sends a fresh
     `merge-floor-ready` packet; the workstream must independently recheck and
     author a new floor request, and campaign must obtain a new human disposition.
-12. After human-floor approval and authoritative campaign authorization, do not
-    merge the PR. Hold it healthy for orchestration.
-13. After merge, send one disposition-required `reconciliation-requested` packet
+12. After human-floor approval and authoritative campaign authorization, the
+    worker sends the disposition-required `merge-ready` field report to
+    Application Client orchestration and `node-merge-ready` to campaign
+    orchestration. Both cite the workstream-authored floor request ID, human
+    disposition ID, and campaign authorization ID and carry
+    `humanFloorStatus: approved` and `mergeAuthorized: true`.
+13. Do not merge the PR. Hold it healthy for orchestration.
+14. After merge, send one disposition-required `reconciliation-requested` packet
    to Application Client orchestration and concise `node-merged` status to
    campaign orchestration. Require durable received/disposition confirmation;
    if it remains unconfirmed, escalate the original message ID to campaign
@@ -767,6 +779,11 @@ identify the changed evidence axis and superseding packet/request/disposition.
 The floor-request record also captures the literal destination, pre-send
 `attended_push` health evidence, durable received evidence, and the human
 disposition evidence.
+After human approval, the ledger separately records the worker-authored
+`merge-ready` and `node-merge-ready` message IDs, their
+`humanFloorStatus: approved` / `mergeAuthorized: true` metadata, and the three
+authorization evidence IDs they cite. Pre-human and post-human messages are
+never conflated.
 For bounded human-attention routing, the ledger links each worker-authored T-A
 milestone/blocker packet to any workstream-authored `attention:rob` message and
 records the routing category. It records no human-attention row for excluded
@@ -819,6 +836,9 @@ The final field report will include:
 - worker-authored `merge-floor-ready` evidence packet ID and exact evidence
   digest covering PR/head, review, CI, mergeability, threads, checkpoint,
   bundle, publication, and sentry state;
+- post-human worker-authored `merge-ready` and `node-merge-ready` message IDs
+  with `humanFloorStatus: approved`, `mergeAuthorized: true`, and all three
+  authorization evidence IDs;
 - workstream-authored `attention.merge-floor` request ID, explicit human
   approval disposition ID, and campaign merge-authorization ID with both
   required citations;
@@ -865,8 +885,9 @@ The node is done only when all of the following are true:
    `PAW Review: +1`, green CI, clean mergeability, and zero unresolved review
    threads.
 10. The worker delivered a disposition-required `merge-floor-ready` evidence
-    packet containing the full merge-ready field report while exactly one sentry
-    was active, then held. Application Client orchestration independently
+    packet containing the full technical/checkpoint/sentry evidence with
+    `humanFloorStatus: pending` and `mergeAuthorized: false` while exactly one
+    sentry was active, then held. Application Client orchestration independently
     rechecked it and authored the disposition-required `attention.merge-floor`
     request to literal `attention:rob` only after refreshing and verifying live
     `attended_push` health without normalization; the worker recorded but did
@@ -880,8 +901,10 @@ The node is done only when all of the following are true:
     checkpoint, bundle, publication, or sentry change has a fresh packet,
     workstream request, and human disposition.
 12. The canonical field report and approval inventory have durable Telex
-   retrieval records, `merge-ready` and `node-merge-ready` are delivered, and
-   exactly one Watcher-or-Loop sentry mode is active under canonical lifecycle
+   retrieval records. Only after human approval and authoritative campaign
+   authorization are `merge-ready` and `node-merge-ready` delivered with
+   `humanFloorStatus: approved` and `mergeAuthorized: true`; exactly one
+   Watcher-or-Loop sentry mode remains active under canonical lifecycle
    handling.
 13. Required human-value milestones and material blocker/decision changes are
     routed to exact `attention:rob` only by Application Client orchestration,
@@ -922,6 +945,7 @@ The node is done only when all of the following are true:
 - Application Client orchestration, not the worker, owns the bounded
   human-attention milestones and blocker routing; excluded low-value events are
   not sent to `attention:rob`.
-- Human-floor approval is single-use for the exact merge-ready evidence and is
-  invalidated and reacquired after any listed evidence change.
+- Human-floor approval is single-use for the exact pre-human
+  `merge-floor-ready` evidence and is invalidated and reacquired after any
+  listed evidence change.
 - The PR is not merged by this worker.

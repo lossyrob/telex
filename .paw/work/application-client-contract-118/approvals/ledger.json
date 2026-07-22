@@ -86,8 +86,8 @@
       "responseMessageId": 1817,
       "allocatedAdr": 49,
       "allocationBaseCommit": "7a568c43413fc7aeab6a484b07dce0f0db11d68f",
-      "useCondition": "revision-14-dual-plan-approval-and-allocation-revalidation",
-      "supersededByPlanRevision": 14,
+      "useCondition": "revision-15-dual-plan-approval-and-allocation-revalidation",
+      "supersededByPlanRevision": 15,
       "supersededReason": "mandatory-human-merge-floor"
     },
     {
@@ -146,6 +146,7 @@
       "requestMessageId": 1825,
       "requestedAt": "2026-07-22T13:26:42.908Z",
       "status": "superseded",
+      "feedbackMessageId": 1826,
       "supersededByPlanRevision": 13,
       "supersededReason": "literal-human-address-and-single-use-floor"
     },
@@ -179,6 +180,52 @@
       "campaignProtocolMessageId": 1831,
       "supersededByPlanRevision": 14,
       "supersededReason": "bounded-human-attention-routing"
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-requested",
+      "planRevision": 14,
+      "sourceHead": "626a80a1cc5749fcd57c792dc4e41b038b728458",
+      "digest": "4cdbb40f6870d5559517d0225fff278e17c5aacdf0b17b9d55b3fd2bcaadbf74",
+      "byteLength": 50048,
+      "approver": "telex://lossyrob/telex/T-A:application-client-orch",
+      "requestMessageId": 1842,
+      "requestedAt": "2026-07-22T14:20:43.988Z",
+      "status": "superseded",
+      "workstreamStatusMessageId": 1836,
+      "closedWithoutReview": true,
+      "builderPauseMessageId": 1846,
+      "workstreamPauseMessageId": 1848,
+      "supersededByPlanRevision": 15,
+      "supersededReason": "pre-human-merge-vocabulary"
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-requested",
+      "planRevision": 14,
+      "sourceHead": "626a80a1cc5749fcd57c792dc4e41b038b728458",
+      "digest": "4cdbb40f6870d5559517d0225fff278e17c5aacdf0b17b9d55b3fd2bcaadbf74",
+      "byteLength": 50048,
+      "approver": "telex://lossyrob/telex/T-A:campaign-orch",
+      "requestMessageId": 1843,
+      "requestedAt": "2026-07-22T14:20:43.988Z",
+      "status": "superseded",
+      "feedbackMessageId": 1837,
+      "reviewStatusMessageId": 1838,
+      "closedWithoutReview": true,
+      "builderPauseMessageId": 1846,
+      "workstreamPauseMessageId": 1848,
+      "supersededByPlanRevision": 15,
+      "supersededReason": "pre-human-merge-vocabulary"
+    },
+    {
+      "gate": "builder-scope",
+      "kind": "builder-scope-approved",
+      "builderApprovalMessageId": 1857,
+      "resumeMessageId": 1860,
+      "status": "approved-resumed",
+      "preservedDraftRevision": 15,
+      "planningBase": "1032ff377377242fe93bb911755f07632ed84c89"
     }
   ]
 }
