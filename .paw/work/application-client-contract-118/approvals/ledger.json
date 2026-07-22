@@ -86,8 +86,8 @@
       "responseMessageId": 1817,
       "allocatedAdr": 49,
       "allocationBaseCommit": "7a568c43413fc7aeab6a484b07dce0f0db11d68f",
-      "useCondition": "revision-15-dual-plan-approval-and-allocation-revalidation",
-      "supersededByPlanRevision": 15,
+      "useCondition": "revision-17-dual-plan-approval-and-allocation-revalidation",
+      "supersededByPlanRevision": 17,
       "supersededReason": "mandatory-human-merge-floor"
     },
     {
@@ -225,7 +225,24 @@
       "resumeMessageId": 1860,
       "status": "approved-resumed",
       "preservedDraftRevision": 15,
-      "planningBase": "1032ff377377242fe93bb911755f07632ed84c89"
+      "planningBase": "f6e0deec043308971029ddefc50411ee455fd27a"
+    },
+    {
+      "gate": "planning-candidate",
+      "planRevision": 15,
+      "digest": "7570e5492efbdf3be8e1f82c0bcb3a4a72a7a19fbec04d1d0882c824e0584a14",
+      "status": "superseded-before-request",
+      "supersededByPlanRevision": 16,
+      "supersededReason": "latest-main-planning-base-reconciliation"
+    },
+    {
+      "gate": "planning-candidate",
+      "planRevision": 16,
+      "digest": "0e0870236fad63adc179c08f6c23cf07627b4fcb3cee9ac9021cf6deb043d598",
+      "status": "superseded-before-request",
+      "supersededByPlanRevision": 17,
+      "supersededReason": "subagent-model-policy",
+      "requiredReviewModel": "claude-opus-4.8-high"
     }
   ]
 }

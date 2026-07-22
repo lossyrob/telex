@@ -2,7 +2,7 @@
 
 ## Revision and source freeze
 
-This is revision 15 of the execution plan. Its approval identity is the Git
+This is revision 17 of the execution plan. Its approval identity is the Git
 commit that contains these exact `Plan.md` bytes and the lowercase SHA-256 of
 those bytes encoded as UTF-8 without a BOM, LF line endings, and exactly one
 trailing LF.
@@ -30,7 +30,7 @@ canonical when an export predates the merged contract.
 | Operator Station | `5042612298` | `5044388908` | `0722051760bab569d3f947fd7b29f2dabe13ef77` | `2d99e552292a4401d3403540b6d2eaa90272282d` |
 
 Canonical source-comment body digests refetched from GitHub at revision 5 and
-unchanged through revision 15:
+unchanged through revision 17:
 
 | Comment | SHA-256 |
 |---|---|
@@ -49,8 +49,8 @@ Canonical design-file Git blob identities:
 | Planning metadata | Commit | Effect |
 |---|---|---|
 | Formation base | `0db1b1839c1fea62507b593f2b2c96e50bdc529a` | Application Client workstream formation. |
-| Current planning/branch base | `1032ff377377242fe93bb911755f07632ed84c89` | Preserves the Operator and Watcher consumer graph updates to `application-client/application-client-ready-gate`; these integration-only movements do not revise W-01 through W-15 or AC-01 through AC-15. |
-| Builder resume | Telex `1857` relayed by `1860` | Supersedes the scope pause recorded in current shared Watcher planning artifacts. Shared artifact reconciliation remains orchestrator-owned and is not performed in this branch. |
+| Current planning/branch base | `f6e0deec043308971029ddefc50411ee455fd27a` | Preserves the Operator and Watcher consumer gate updates plus Application Client builder-resume/ADR-0049 reconciliation. These planning-only movements do not revise W-01 through W-15 or AC-01 through AC-15. |
+| Builder resume | Telex `1857` relayed by `1860` | Supersedes the scope pause. Application Client shared artifacts now record active planning and ADR 0049 reservation; further reconciliation remains orchestrator-owned and is not performed in this branch. |
 
 The Watcher export references
 `9df7d25c41b2eca827361db11a7a01c416721d36`, which predates the final
@@ -524,7 +524,7 @@ edit a published checkpoint.
    its exact revision, byte length, and digest.
 3. Run the configured non-interactive society-of-thought planning-docs review:
    - specialist: `general-reviewer`;
-   - model: `claude-opus-4.7-high`;
+   - model: `claude-opus-4.8-high`;
    - interaction: `parallel`;
    - perspectives: `premortem`, `retrospective`;
    - perspective cap: `2`.
