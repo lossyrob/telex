@@ -103,11 +103,12 @@ Watcher shared-client requirements were dual-approved and published to
 No Watcher implementation node is launch-ready yet. `watcher-runtime` and
 `detector-template-library` are planned with resolvable dependencies on
 `telex/application-client/application-client-ready-gate`. Application Client
-workstream [#117](https://github.com/lossyrob/telex/issues/117) is active and
+workstream [#117](https://github.com/lossyrob/telex/issues/117) and
 contract-convergence node [#118](https://github.com/lossyrob/telex/issues/118)
-is the current shared work. Campaign/#12 must disposition the requirements and
-complete that gate before either Watcher node can become ready. There is no
-spike-private fallback.
+exist but are paused pending explicit builder scope approval. They are not active
+work until campaign relays that decision. After authorization, campaign/#12 must
+disposition the requirements and complete the shared gate before either Watcher
+node can become ready. There is no spike-private fallback.
 
 ## Decisions
 

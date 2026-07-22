@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "Production Watcher contract #110 is complete. Runtime/template nodes have resolvable pending dependencies on application-client/application-client-ready-gate while contract-convergence #118 prepares the shared semantic checkpoint.",
+  "summary": "Production Watcher contract #110 is complete. Runtime/template nodes have resolvable pending dependencies on application-client/application-client-ready-gate; #117/#118 is paused pending explicit builder scope approval.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-22T14:18:45Z",
+  "updatedAt": "2026-07-22T14:29:55Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
