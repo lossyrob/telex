@@ -1,6 +1,6 @@
 # Plan: Production Watcher Contract
 
-Plan revision: 3
+Plan revision: 4
 
 - Issue: `lossyrob/telex#110`
 - Work ID: `watcher-contract`
@@ -322,12 +322,31 @@ already does, and make future drift mechanically detectable.
 - Do not modify Streamliner roadmap, workstream graph, brief, or shared campaign
   artifacts from this worker branch.
 
-### 3. Publish the shared-client requirements
+### 3. Stabilize the contract against latest main and run final review
 
-After the reviewed design text is stable, prepare the exact UTF-8, no-BOM issue
-#12 comment draft in a private file. It will:
+After drafting `watcher.md`, schemas, index changes, and the allocated ADR:
+
+- fetch/rebase latest `main`;
+- verify the campaign allocation is still collision-free;
+- preserve every sibling domain contract, ADR, and design-index reading-order
+  entry;
+- if a sibling contract merged first, complete the explicit cross-contract
+  consistency pass without changing its accepted domain semantics;
+- resolve or escalate any semantic conflict rather than silently choosing
+  between contracts;
+- run the configured final `society-of-thought` `general-reviewer` review on the
+  rebased design content; and
+- resolve final-review findings before generating the #12 publication candidate.
+
+The rebased, reviewed PR head is the semantic source for the requirements draft.
+
+### 4. Publish the shared-client requirements
+
+After the rebased design text passes final review, prepare the exact UTF-8,
+no-BOM issue #12 comment draft in a private file. It will:
 
 - links the production Watcher contract and issue #110;
+- identifies the source design commit or PR head SHA;
 - distinguishes accepted Watcher-specific semantics from shared-client needs;
 - enumerates the final requirements and acceptance implications;
 - identifies rejected spike-private seams; and
@@ -355,7 +374,7 @@ proposal or claim the shared checkpoint. If #12 does not accept the required
 semantics, report the affected runtime/template work as blocked; do not restore a
 private client seam.
 
-### 4. Verify consistency and prepare the PR
+### 5. Verify final alignment and prepare the PR
 
 - Check every issue/brief/report open question has an accepted, rejected, or
   deferred disposition with owner/rationale/downstream impact.
@@ -384,6 +403,15 @@ private client seam.
 - If runtime/template owners are assigned before merge, request a lightweight
   contract-consumable acknowledgment. Otherwise make the checklist an explicit
   launch-acceptance gate for those nodes and record that owners were unassigned.
+- Compare the final PR head against the source SHA named in the approved #12
+  draft. If any later rebase, final review, or PR review changes a Watcher
+  semantic represented by the published requirements, the draft is stale:
+  increment its revision, regenerate the exact UTF-8 bytes, obtain two fresh
+  approvals, and publish an explicit superseding/correction comment before
+  merge-ready. There is no semantic-drift exception.
+- Confirm the merge-ready field report names the final PR head, approved
+  requirements-draft revision/digest, and verified GitHub comment URL, and states
+  that the final contract and published requirements remain semantically aligned.
 - No runtime code is changed; project builds/tests are not a proxy for design
   consistency and are not required unless implementation files change
   unexpectedly.
@@ -393,14 +421,18 @@ private client seam.
 The work is intentionally sequential because the tracker export depends on the
 reviewed contract text:
 
-1. Draft `watcher.md`, schemas, and index update.
-2. Request and receive dynamic ADR allocation, then append the allocated ADR.
-3. Resolve internal consistency findings.
-4. Obtain dual approval for the exact #12 requirements draft and publish it.
-5. Fetch/rebase latest `main`, reconcile sibling design files semantically, and
-   verify ADR allocation.
-6. Verify the tracker comment and final diff.
-7. Commit selectively and create the PR through `paw-pr`.
+1. Draft `watcher.md`, schemas, proposed ADR content, and index update.
+2. Request and receive dynamic ADR allocation.
+3. Fetch/rebase latest `main`, append the allocated ADR, preserve sibling design
+   content, and complete the cross-contract consistency pass.
+4. Resolve consistency findings and run configured final review on the rebased
+   contract.
+5. Generate the exact #12 draft from that reviewed PR head, obtain dual approval,
+   and publish only the approved bytes.
+6. Recheck final-head/published-requirements semantic alignment and repeat the
+   draft approval/correction flow after any later semantic change.
+7. Verify the tracker comment and final diff.
+8. Commit selectively and create the PR through `paw-pr`.
 
 ## Review and gates
 
@@ -415,7 +447,7 @@ reviewed contract text:
 4. Keep Plan.md as UTF-8 without BOM, compute SHA-256 over its exact raw
    filesystem bytes, and send that same file through `--body-file` so newline or
    console transcoding cannot change the approved byte stream.
-5. Send revision 3 and that digest, with the full Plan.md as the body, in separate
+5. Send revision 4 and that digest, with the full Plan.md as the body, in separate
    disposition-required `plan-review-requested` Telex messages to the Watcher
    orchestrator and campaign orchestrator.
 6. Do not begin design edits until both orchestrators approve the same revision
@@ -446,6 +478,9 @@ reviewed contract text:
   after the final rebase.
 - Issue #12 contains the byte-exact dual-approved Watcher shared-client
   requirements and exclusions.
+- The published requirements identify their source PR head, and the final
+  merge-ready report confirms that head remains semantically aligned or records
+  the later approved superseding/correction draft.
 - The merge-ready packet includes the downstream-consumer checklist and requests
   confirmation that runtime/template nodes can be detailed without reopening the
   contract.
