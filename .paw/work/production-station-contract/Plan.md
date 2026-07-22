@@ -2,7 +2,7 @@
 
 - **Issue:** lossyrob/telex#114
 - **Workstream / node:** operator-station / station-contract
-- **Plan revision:** 1
+- **Plan revision:** 2
 - **Base / target:** `main` -> `feature/production-station-contract`
 - **Outcome:** Publish an accepted production Operator Station and mediated-attention
   contract that is precise enough to detail `station-app` and `operator-broker`,
@@ -16,7 +16,7 @@ namespace, campaign metadata, or UI. The document will define the product and
 application-layer behavior, identify the Telex core semantics it relies on, and
 separate Station/operator requirements from the shared Application Client seam.
 
-Record two load-bearing choices separately in the decision log:
+Record two load-bearing candidate decisions separately in the decision log:
 
 - Operator Station is an optional application-layer Station plus operator-agent
   role; Telex core does not acquire human UI, semantic routing, or workflow
@@ -26,6 +26,10 @@ Record two load-bearing choices separately in the decision log:
   durable queueing, and membership are daemon-owned.
 
 The detailed product rules remain in the normative Station design.
+Do not reserve ADR numbers during planning because Watcher contract node #110
+is editing the same design layer concurrently. Allocate the next available
+numbers only after synchronizing with the latest shared design head and
+inspecting #110's current/final decision-log and index changes.
 
 Publish a GitHub comment on issue #12 containing only the exact shared semantic
 requirements needed by Operator Station. It will not propose package names,
@@ -212,17 +216,46 @@ realization.
 
 ### 2. Integrate the design layer
 
+- The domain document `docs/design/operator-station.md` may be authored
+  independently after plan approval. Before creating or editing shared
+  `docs/design/index.md` and `docs/design/DECISIONS.md`, fetch the latest
+  `origin/main`, synchronize this branch with that shared head, and inspect the
+  active/final #110 Watcher contract diff for proposed index entries and ADR
+  titles/numbers.
+- Observe the current `DECISIONS.md` high-water number and `origin/main` commit,
+  then send campaign orchestration a disposition-required
+  `adr-allocation-requested` message containing issue/node/workstream, requested
+  count `2`, the two proposed titles and one-line rationales, and the observed
+  high-water commit/number.
+- Wait for `adr-allocated` containing exact numbers and the campaign's base
+  commit. Campaign holds those numbers until this node publishes or explicitly
+  releases them. Use only the allocated numbers. If the base, high-water, or a
+  sibling change conflicts, return to campaign; never renumber or overwrite
+  silently. If allocation is unavailable, contradictory, or cannot remain
+  collision-free, send `decision-needed` to campaign and the workstream
+  orchestrator and hold shared-file editing; do not invent numbers or continue
+  with an unrecorded reservation.
 - Link the new contract from `docs/design/index.md` and add it to the reading
   order.
-- Append ADR 0046 for the application-layer Station/operator boundary.
-- Append ADR 0047 for exclusive ingress attendance and application-owned
-  direct/assisted transition sequencing.
+- Append separate ADRs titled **Operator Station mediation remains application
+  logic outside Telex core** and **Direct and assisted routing use exclusive
+  ingress attendance** using only the campaign allocation.
+- Immediately before final agent review and PR readiness, fetch/rebase the
+  latest `origin/main`, preserve every existing ADR and any merged #110 domain
+  contract/index entry, and verify the allocation remains collision-free. If
+  this is the second contract PR to integrate, perform an explicit
+  cross-contract consistency pass without changing the first contract's
+  accepted domain semantics.
+- Record durable coordination provenance in the PR description and field
+  report: final `origin/main` integration SHA, inspected #110 PR/head or merge
+  SHA (or explicit "not published"), ADR allocation message ID, allocated
+  numbers/base commit, and any index reconciliation performed.
 - Do not edit `.streamliner` artifacts or the read-only Streamliner Desktop
   checkout.
 
 ### 3. Export Operator Station requirements to issue #12
 
-Post a UTF-8 GitHub issue comment that:
+Draft a UTF-8 GitHub issue comment that:
 
 - states #114 is the Operator Station source;
 - lists these shared semantic requirements:
@@ -260,6 +293,52 @@ Post a UTF-8 GitHub issue comment that:
 - identifies spike shortcuts that are explicitly not requirements;
 - avoids choosing bindings, package names, protocol framing, or API signatures.
 
+Before posting:
+
+1. Materialize the exact comment as an immutable UTF-8-without-BOM file in
+  session-private state with LF line endings and exactly one trailing LF.
+  Compute SHA-256 from those canonical file bytes and use that same file for
+  both Telex request bodies and `gh ... --body-file`; do not round-trip through
+  console text or regenerate the file between approval and publication.
+2. Send the complete draft separately to the workstream orchestrator and
+  campaign orchestrator as disposition-required
+  `application-client-requirements-review-requested` messages. Both carry issue
+  #114, current branch head, accepted Station design path, evidence references,
+  draft revision, SHA-256 digest, the observed #12 comment high-water, and
+  inspected #110 PR/head or merge SHA.
+3. Require campaign orchestration to compare the draft with #110's
+  current/final Watcher requirements and preserve #12 as the sole shared
+  contract owner. The comment states that campaign/#12 convergence, not this
+  domain export, accepts the eventual Application Client contract. The
+  workstream orchestrator separately verifies that the draft is faithful to
+  the accepted Station design and does not export Station UX/operator policy
+  as shared-client semantics.
+4. Publication requires `application-client-requirements-approved` from both
+  orchestrators for the same revision and digest. If either sends feedback,
+  resolve every point, increment the draft revision, recompute the digest, and
+  request two fresh approvals. Ignore and disposition stale replies. If
+  feedback conflicts, or #110 is too unstable for a bounded comparison, send
+  `decision-needed` to both and hold rather than inventing a fallback.
+5. Immediately before posting, re-read #12 and the inspected #110 reference. If
+  either changed since the approval evidence, request reconfirmation from both
+  orchestrators even when the draft bytes are unchanged.
+6. Post the comment to GitHub only after the exact-text dual approval. Fetch the
+  resulting body and canonicalize only its textual transport representation to
+  UTF-8 without BOM, LF line endings, and exactly one trailing LF. Verify that
+  canonical SHA-256 matches the approved digest and capture the issue-comment
+  URL plus both approval message IDs. Any difference beyond CRLF/LF or trailing
+  newline normalization is a publication mismatch: stop, report it to both
+  approvers, and obtain explicit reconfirmation before replacing or accepting
+  the comment. The durable Telex request bodies are the audit copies of the
+  exact approved bytes; the session-private file is only the immutable
+  transport source.
+7. Treat the Operator Station and Watcher comments as independent domain
+  requirement exports. Neither supersedes the other; campaign/#12 convergence
+  resolves overlaps and accepts the eventual shared contract.
+
+Plan approval is not approval of the later #12 requirements text. The PR cannot
+be finalized until this campaign seam review and GitHub publication complete.
+
 ### 4. Validate completeness and consistency
 
 - Cross-check every #114 success criterion, open question, and spike
@@ -286,7 +365,7 @@ Post a UTF-8 GitHub issue comment that:
 1. Run the configured society-of-thought planning-docs review with the
    `general-reviewer` specialist and resolve blocking findings.
 2. Send the exact reviewed Plan.md bytes to both orchestrators as
-   `plan-review-requested`, revision 1, with a SHA-256 digest.
+   `plan-review-requested`, revision 2, with a SHA-256 digest.
 3. Begin design editing only after both orchestrators approve the same revision
    and digest. Any later Plan.md byte change increments the revision and resets
    both approvals.
