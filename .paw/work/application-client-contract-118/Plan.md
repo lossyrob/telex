@@ -2,7 +2,7 @@
 
 ## Revision and source freeze
 
-This is revision 13 of the execution plan. Its approval identity is the Git
+This is revision 14 of the execution plan. Its approval identity is the Git
 commit that contains these exact `Plan.md` bytes and the lowercase SHA-256 of
 those bytes encoded as UTF-8 without a BOM, LF line endings, and exactly one
 trailing LF.
@@ -30,7 +30,7 @@ canonical when an export predates the merged contract.
 | Operator Station | `5042612298` | `5044388908` | `0722051760bab569d3f947fd7b29f2dabe13ef77` | `2d99e552292a4401d3403540b6d2eaa90272282d` |
 
 Canonical source-comment body digests refetched from GitHub at revision 5 and
-unchanged through revision 13:
+unchanged through revision 14:
 
 | Comment | SHA-256 |
 |---|---|
@@ -118,6 +118,34 @@ expanded or rewritten.
 | Telex Watcher consumer | `telex://lossyrob/telex/T-A:watcher-orch` |
 | Paired reviewer | `telex://lossyrob/telex/T-A:app-client-review-118` |
 | Human merge floor (workstream-owned sender) | `attention:rob` |
+
+## Bounded Human-Attention Routing
+
+The worker never sends an `attention.*` message or sends directly to
+`attention:rob`. It sends authoritative evidence, blocker, decision, and
+lifecycle packets to Application Client and campaign orchestration. Application
+Client orchestration independently verifies those packets and owns the bounded
+human-value routing to exact `attention:rob`; campaign mediates onward to the
+human operator.
+
+Workstream-owned human-attention milestones are:
+
+- PR opened;
+- review-ready;
+- current-head approved;
+- merge-floor;
+- merged or closed;
+- node/workstream completion and reconciliation;
+- current blockers and `decision-needed` items;
+- material blocker changes.
+
+`attention.merge-floor` is disposition-required. Other workstream-authored
+attention milestones use the campaign profile appropriate to the event and
+preserve the originating worker packet IDs. The workstream does not route every
+CI transition, detector attempt, polling result, duplicate status, unchanged
+blocker, or low-value progress tick. The approval ledger and field report
+distinguish worker-authored T-A packets from workstream-authored human-attention
+messages.
 
 ## Required Semantic Outcome
 
@@ -501,7 +529,9 @@ edit a published checkpoint.
    - perspective cap: `2`.
    The review must verify that human-floor destination bytes are exactly
    `attention:rob`, match the live campaign mediator, and are never normalized
-   to a T-A URI.
+   to a T-A URI. It must also verify that only Application Client orchestration
+   authors bounded human-attention milestones and that the worker sends only
+   authoritative T-A evidence/status packets.
 4. Resolve every blocking planning finding.
 5. Re-canonicalize and commit the exact reviewed `Plan.md`.
 
@@ -630,16 +660,24 @@ exact blob before attesting; digest-only approval is forbidden.
 
 ### Gate 7: Paired Review and PR Sentry
 
+Before paired review, the worker sends authoritative `pr-opened` evidence to
+Application Client and campaign orchestration. Application Client orchestration
+owns any corresponding human-value PR-opened message to `attention:rob`.
+
 1. Verify the configured reviewer address is attended, then after push, green
    CI, and clean mergeability send `review-ready` to
    `telex://lossyrob/telex/T-A:app-client-review-118`. If it is unattended, notify Application Client
    and campaign orchestration and hold rather than selecting an unapproved
-   fallback reviewer.
+   fallback reviewer. Send matching review-ready evidence to Application Client
+   and campaign orchestration; the workstream owns any human-attention
+   review-ready milestone.
 2. Read every real GitHub review and require a verified `PAW Review: +1` for the
    current head. The assigned paired reviewer posts that current-head GitHub
    review after its Telex review request; a local SoT artifact is not a
    substitute. Record the reviewer Telex address, GitHub identity, approval
-   message ID, and reviewed commit.
+   message ID, and reviewed commit. Send current-head approval evidence to
+   Application Client and campaign orchestration; the workstream owns any
+   human-attention approved milestone.
 3. Treat semantically relevant review repairs as bundle/publication changes and
    repeat the affected exact-digest gates.
 4. Verify green CI, clean mergeability, exact PR head, and zero unresolved
@@ -688,6 +726,13 @@ exact blob before attesting; digest-only approval is forbidden.
    if it remains unconfirmed, escalate the original message ID to campaign
    orchestration without sending a duplicate reconciliation request. Keep the
    sentry/evidence record until confirmation or explicit campaign disposition.
+   Application Client orchestration owns human-attention merged/closed,
+   node/workstream completion, and reconciliation milestones.
+
+At every stage, the worker sends current blockers, `decision-needed` evidence,
+and material blocker changes to Application Client and campaign orchestration.
+Application Client orchestration decides whether they warrant human-attention
+routing. Unchanged blockers and low-value progress ticks are not repeated.
 
 ## Approval and Repair Accounting
 
@@ -722,6 +767,11 @@ identify the changed evidence axis and superseding packet/request/disposition.
 The floor-request record also captures the literal destination, pre-send
 `attended_push` health evidence, durable received evidence, and the human
 disposition evidence.
+For bounded human-attention routing, the ledger links each worker-authored T-A
+milestone/blocker packet to any workstream-authored `attention:rob` message and
+records the routing category. It records no human-attention row for excluded
+CI transitions, detector attempts, polling results, duplicate status, unchanged
+blockers, or low-value ticks.
 
 ## Work Items
 
@@ -778,6 +828,11 @@ The final field report will include:
   request;
 - any floor invalidation axis and the superseding packet, workstream request,
   and human disposition IDs;
+- worker T-A packet IDs and workstream-authored `attention:rob` message IDs for
+  PR opened, review-ready, approved, merge-floor, merged/closed,
+  completion/reconciliation, blockers, decisions, and material blocker changes;
+- confirmation that excluded CI/detector/polling/duplicate/low-value events were
+  not routed to human attention;
 - confirmation that campaign technical approval and PR #115/#116 were not used
   as merge authorization;
 - process feedback for PAW, Telex, paired review, and Watcher sentry.
@@ -828,7 +883,12 @@ The node is done only when all of the following are true:
    retrieval records, `merge-ready` and `node-merge-ready` are delivered, and
    exactly one Watcher-or-Loop sentry mode is active under canonical lifecycle
    handling.
-13. The worker has not merged the PR. After orchestration merges it, exactly one
+13. Required human-value milestones and material blocker/decision changes are
+    routed to exact `attention:rob` only by Application Client orchestration,
+    with worker T-A provenance preserved. Excluded CI transitions, detector
+    attempts, polling results, duplicate status, unchanged blockers, and
+    low-value ticks are not routed.
+14. The worker has not merged the PR. After orchestration merges it, exactly one
     reconciliation request and the campaign merge status are sent as specified.
 
 ## Success Criteria
@@ -859,6 +919,9 @@ The node is done only when all of the following are true:
   never authorizes merge.
 - The workstream floor request uses exact literal `attention:rob`, follows a
   fresh `attended_push` health check, and has durable received evidence.
+- Application Client orchestration, not the worker, owns the bounded
+  human-attention milestones and blocker routing; excluded low-value events are
+  not sent to `attention:rob`.
 - Human-floor approval is single-use for the exact merge-ready evidence and is
   invalidated and reacquired after any listed evidence change.
 - The PR is not merged by this worker.
