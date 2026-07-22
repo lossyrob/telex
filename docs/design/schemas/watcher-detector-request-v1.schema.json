@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-detector-request-v1.schema.json",
+  "title": "Telex Watcher detector request v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "attempt",
+    "watch",
+    "script",
+    "state"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "now"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "now": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "watch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "parameters"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "parameters": true
+      }
+    },
+    "script": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "sha256"
+      ],
+      "properties": {
+        "mode": {
+          "enum": [
+            "pinned",
+            "follow-path"
+          ]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "state": true
+  },
+  "$defs": {
+    "nonControlString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    }
+  }
+}

@@ -17,6 +17,11 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   + Status surface, daemon-native session ownership, the liveness model, the minimal
   upgrade floor, the gating tests, and the consolidated resolutions of the
   design-foundation open questions.
+- **[watcher.md](watcher.md)** — the **normative Telex Watcher application
+  contract**: trusted local detector execution, versioned request/result schemas,
+  receipt-gated state and deduplication, watch lifecycle and health, script and
+  credential policy, sender identity, normalized events, and the requirements
+  exported to the shared Application Client.
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — the **visual on-ramp** to the daemon design:
   mermaid diagrams (component map, pull **and push** message delivery, restart/re-attach,
   station liveness, the single-writer epoch fence, authorization) that teach the
@@ -44,9 +49,11 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
 2. `DESIGN.md` — how the system is shaped.
 3. `ARCHITECTURE.md` — the visual on-ramp (mermaid diagrams) to the local-exchange design.
 4. `daemon.md` — the precise contracts `daemon-core` and downstream nodes implement.
-5. `copilot-bridge-push.md` — how push delivery layers a harness bridge on the daemon's
+5. `watcher.md` — how a provider-neutral headless application executes trusted
+   local detectors and commits state only after durable Telex acceptance.
+6. `copilot-bridge-push.md` — how push delivery layers a harness bridge on the daemon's
    on-deliver exec (read after `daemon.md` sec.13.2).
-6. `DECISIONS.md` — why each load-bearing choice was made.
+7. `DECISIONS.md` — why each load-bearing choice was made.
 
 ## Open-question resolutions (design-foundation)
 

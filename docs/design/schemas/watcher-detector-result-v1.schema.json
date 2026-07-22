@@ -1,0 +1,128 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-detector-result-v1.schema.json",
+  "title": "Telex Watcher detector result v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "outcome"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "outcome": {
+      "enum": [
+        "idle",
+        "event",
+        "terminal",
+        "degraded"
+      ]
+    },
+    "nextState": true,
+    "event": {
+      "$ref": "#/$defs/event"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "idle"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "not": {
+          "required": [
+            "event"
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "event"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "required": [
+          "event"
+        ]
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "const": "degraded"
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "not": {
+          "anyOf": [
+            {
+              "required": [
+                "event"
+              ]
+            },
+            {
+              "required": [
+                "nextState"
+              ]
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "nonControlString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind",
+        "subject",
+        "body"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 3,
+          "pattern": "^(?!\\.)(?!.*\\.$)[^\\u0000-\\u001f\\u007f]+\\.[^\\u0000-\\u001f\\u007f]+$"
+        },
+        "subject": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "body": {
+          "type": "string"
+        },
+        "metadata": true
+      }
+    }
+  }
+}

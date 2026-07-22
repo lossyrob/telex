@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-health-v1.schema.json",
+  "title": "Telex Watcher health surface v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "observedAt",
+    "staleAfterSeconds",
+    "runtime",
+    "watches"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "staleAfterSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
+    "watches": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/watch"
+      }
+    }
+  },
+  "$defs": {
+    "nullableDateTime": {
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nonNegativeCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rows",
+        "bytes",
+        "warningRows",
+        "warningBytes",
+        "warning"
+      ],
+      "properties": {
+        "rows": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "bytes": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "warningRows": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "warningBytes": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "warning": {
+          "type": "boolean"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtimeId",
+        "pid",
+        "startedAt",
+        "heartbeatAt",
+        "status",
+        "senderReady",
+        "registryRevision",
+        "retention"
+      ],
+      "properties": {
+        "runtimeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "heartbeatAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "enum": [
+            "starting",
+            "ready",
+            "degraded",
+            "stopping"
+          ]
+        },
+        "senderReady": {
+          "type": "boolean"
+        },
+        "registryRevision": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "retention": {
+          "$ref": "#/$defs/retention"
+        }
+      }
+    },
+    "watch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "watchId",
+        "lifecycle",
+        "health",
+        "blockedReason",
+        "consecutiveFailures",
+        "lastAttemptAt",
+        "lastSuccessAt",
+        "lastEventAt",
+        "nextAttemptAt",
+        "senderReady",
+        "diagnosticCategory",
+        "maxSafeDowntimeSeconds",
+        "retention"
+      ],
+      "properties": {
+        "watchId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "lifecycle": {
+          "enum": [
+            "active",
+            "paused",
+            "terminal",
+            "removed"
+          ]
+        },
+        "health": {
+          "enum": [
+            "ready",
+            "degraded",
+            "blocked",
+            "paused",
+            "terminal",
+            "removed"
+          ]
+        },
+        "blockedReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "consecutiveFailures": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "lastAttemptAt": {
+          "$ref": "#/$defs/nullableDateTime"
+        },
+        "lastSuccessAt": {
+          "$ref": "#/$defs/nullableDateTime"
+        },
+        "lastEventAt": {
+          "$ref": "#/$defs/nullableDateTime"
+        },
+        "nextAttemptAt": {
+          "$ref": "#/$defs/nullableDateTime"
+        },
+        "senderReady": {
+          "type": "boolean"
+        },
+        "diagnosticCategory": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "maxSafeDowntimeSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "retention": {
+          "$ref": "#/$defs/retention"
+        }
+      }
+    }
+  }
+}
