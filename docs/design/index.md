@@ -18,7 +18,7 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   upgrade floor, the gating tests, and the consolidated resolutions of the
   design-foundation open questions.
 - **[operator-station.md](operator-station.md)** — the **normative Operator Station
-  application contract**: human-attended address semantics, direct and mediated
+  application contract**: human-attended address semantics, direct and assisted
   routing, operator-agent authority, source provenance, notification policy,
   reply/disposition behavior, recovery, identity, safety, and the requirements
   exported to the shared Application Client.

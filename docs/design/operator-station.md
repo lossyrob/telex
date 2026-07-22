@@ -329,7 +329,7 @@ unsupported; the Station does not auto-handle or auto-reject it.
 | Kind | Direction | Purpose | Required to process | Safe to ignore |
 |---|---|---|---:|---:|
 | `operator-station.escalation` | operator agent -> Station | New human obligation with recommendation and sources | yes | no |
-| `operator-station.human-reply` | Station -> operator agent | Human response requiring route-back or stale-origin resolution | yes | no |
+| `operator-station.human-reply` | Station -> operator agent | Human text or disposition outcome requiring raw-lifecycle update or stale-origin resolution | yes | no |
 | `operator-station.digest` | operator agent -> Station | Aggregated informational summary | no | yes |
 
 `operator-station.escalation` and `operator-station.human-reply` normally set
@@ -400,12 +400,14 @@ A Station-authored reply stays in the mediated thread and uses:
     "operator-station": {
       "mediationId": "same-mediation-id",
       "operationId": "retry-stable-reply-operation-id",
+      "responseType": "text-reply",
       "rootEscalation": {
         "storeId": "opaque-logical-store-id",
         "messageId": 456,
         "threadId": 456
       },
-      "humanDispositionIntent": "handled"
+      "humanDispositionIntent": "handled",
+      "humanNote": "Optional disposition note"
     }
   }
 }
@@ -414,6 +416,18 @@ A Station-authored reply stays in the mediated thread and uses:
 The reply is sent from the human address to the operator-agent address with
 `requiresDisposition: true`. `next-checkpoint` is the default attention;
 the human may select `interrupt` only for a genuinely urgent outcome.
+
+`responseType` is:
+
+- `text-reply` when the human supplied reply body text;
+- `disposition-only` when assisted-mode Handle, Defer, Reject, or Close has no
+  human reply text.
+
+For `disposition-only`, the Station supplies a concise generated body such as
+"Human deferred this escalation without a textual reply." The message is a
+durable operator notification, not invented decision content. The
+`humanDispositionIntent` is one of `handled`, `deferred`, `rejected`, or
+`closed`; `humanNote` carries an optional human-authored reason.
 
 ### Digest envelope
 
@@ -594,6 +608,12 @@ For a human obligation the Station offers:
 The selected recipient's disposition is always explicit. Reply does not
 implicitly mutate another recipient's disposition.
 
+In direct mode, disposition-only actions apply to the raw obligation locally
+because the Station attends ingress. In assisted mode, every disposition-only
+action first sends a durable `operator-station.human-reply` with
+`responseType: disposition-only`. The Station changes the mediated root only
+after that operator notification is durably accepted.
+
 ### Reply & Handle ordering
 
 `Reply & Handle` is a higher-level application operation:
@@ -618,21 +638,61 @@ Failure states are explicit:
 | restart after reply receipt | recover operation and complete pending Handle without resending |
 | indeterminate result | show partial/unknown; reconcile by operation ID and receipt before retry |
 
-### Operator handling of the human reply
+### Assisted disposition-only ordering
 
-The human reply is a separate operator obligation. The operator agent:
+Handle, Defer, Reject, and Close without human text use the same retry and
+ordering discipline:
+
+1. Mint or reuse a retry-stable operation ID.
+2. Send a disposition-only `operator-station.human-reply` identifying the
+   intended root disposition and optional human note.
+3. Verify the receipt identifies the expected mediated parent/thread, sender,
+   and operator-agent recipient.
+4. Only after durable acceptance, apply the intended disposition to the
+   mediated root.
+
+If notification send fails, the root remains unchanged. If notification
+succeeds but root disposition fails, the Station shows
+`operator notified / disposition pending` and retries only the root
+disposition. Restart recovery reconciles by operation ID and never resends a
+confirmed operator notification.
+
+The operator-visible message remains a disposition-required obligation until
+the raw lifecycle transition below succeeds. This prevents a terminal mediated
+root from stranding an `escalated` raw source.
+
+### Operator handling of the human response
+
+Every assisted-mode human response, including disposition-only outcomes, is a
+separate operator obligation. The operator agent:
 
 1. reads the mediated root and validates its v1 envelope;
 2. resolves the original source;
-3. routes the outcome in the raw thread using the same mediation ID and a
-   retry-stable route operation ID;
-4. verifies durable acceptance;
-5. acknowledges and terminally handles the human reply;
-6. closes the raw obligation when appropriate.
+3. applies the response according to `responseType` and
+   `humanDispositionIntent`;
+4. verifies the raw-thread reply or disposition transition;
+5. acknowledges and terminally handles the human-response message.
+
+For `text-reply`, the operator routes the human text in the raw thread using the
+same mediation ID and a retry-stable route operation ID, then closes the raw
+obligation when appropriate.
+
+For `disposition-only`:
+
+| Human intent | Required raw outcome |
+|---|---|
+| `handled` | send a generic completion only when the source needs notice, then `closed` |
+| `deferred` | record `deferred`; keep the raw obligation open for later human input |
+| `rejected` | notify the source when safely addressable, then `rejected` with the human note |
+| `closed` | notify the source when policy requires it, then `closed` |
+
+The operator does not terminally handle the human-response message until the
+required raw reply/disposition succeeds. Operator replacement recovers the
+unresolved human-response message and repeats reconciliation by operation ID.
 
 Durable queueing to an active but unoccupied source address counts as accepted
 route-back. Human consumption by the source is not required before the
-operator's reply obligation becomes terminal.
+operator's response obligation becomes terminal.
 
 ### Stale-origin outcomes
 
@@ -655,8 +715,8 @@ The operator never guesses a replacement source. It records one of:
   determines no safe route exists;
 - a new directed message only after explicit policy or human confirmation.
 
-The mediated thread shows the outcome. A late reply to a closed escalation is a
-new operator obligation and follows the same validation.
+The mediated thread shows the outcome. A late response to a closed escalation
+is a new operator obligation and follows the same validation.
 
 ## Restart, replacement, duplicates, and recovery
 
@@ -681,7 +741,8 @@ session UUID, or high-water file is not the shared production contract.
 The durable ingress address survives the agent session. A replacement operator:
 
 1. explicitly attaches the ingress address;
-2. loads unresolved raw obligations and unresolved human replies;
+2. loads unresolved raw obligations and unresolved human responses, including
+   disposition-only outcomes;
 3. reads bounded mediated/raw thread context;
 4. reconstructs episodes from mediation IDs and source references;
 5. reconciles any prior operation ID before authoring a duplicate;
@@ -691,7 +752,7 @@ Recovery does not depend on the previous model transcript or local-only memory.
 
 ### Duplicate and partial authoring
 
-Escalation, human reply, route-back, and compound disposition operations use
+Escalation, human response, route-back, and compound disposition operations use
 retry-stable application operation IDs. The shared client must expose whether
 an operation was accepted, duplicated, rejected, or indeterminate.
 
@@ -747,7 +808,7 @@ semantics, not Station API design.
 | AC-07 | Unresolved-obligation query plus bounded recent/thread history without full-store materialization |
 | AC-08 | Typed send, reply, read-thread, and per-recipient disposition operations with explicit sender selection |
 | AC-09 | Retry-safe application operation identity/idempotency with an explicit accepted-send duplicate window |
-| AC-10 | Reply-and-disposition and route-back compound semantics with durable ordering, partial outcomes, and recovery handles |
+| AC-10 | Reply/disposition, disposition-only operator notification, and route-back compound semantics with durable ordering, partial outcomes, and recovery handles |
 | AC-11 | Source resolution using logical-store identity plus message ID, with authoritative/captured/unavailable states |
 | AC-12 | Lifecycle/health projection covering registration, epoch/owner, receive health, pending unconsumed, inbound actionable, ack pending, and detach/recovery outcomes |
 | AC-13 | Backend-profile selection without backend-specific message semantics, covering current SQLite and credentialed Postgres, with authenticated principal provenance when available |
@@ -762,7 +823,7 @@ semantics, not Station API design.
 | Attendance and health | AC-04, AC-05, AC-12, AC-14 |
 | Production extension and provenance | AC-02, AC-04, AC-08, AC-11 |
 | Feed/history | AC-04, AC-05, AC-06, AC-07, AC-14 |
-| Reply & Handle and route-back | AC-08, AC-09, AC-10, AC-15 |
+| Human reply/disposition and route-back | AC-08, AC-09, AC-10, AC-15 |
 | Restart and replacement | AC-01, AC-05, AC-06, AC-07, AC-09, AC-12, AC-14 |
 | Identity and principals | AC-02, AC-11, AC-13 |
 
@@ -782,6 +843,8 @@ inputs, not acceptance of that shared contract.
 - implement the feed, thread, source, health, notification, and safe-link
   behavior in this document;
 - implement Reply & Handle with fail-closed ordering and visible partial state;
+- implement assisted disposition-only operator notification before root
+  disposition;
 - preserve local read state as separate from ack/disposition;
 - validate Windows notification behavior and restart continuity.
 
@@ -790,7 +853,8 @@ inputs, not acceptance of that shared contract.
 - package the operator-agent authority and lifecycle in this document;
 - implement retry-stable mediation, clarification, escalation, aggregation, and
   route-back;
-- rehydrate unresolved raw and human-reply obligations after replacement;
+- apply disposition-only human outcomes to the raw lifecycle;
+- rehydrate unresolved raw and human-response obligations after replacement;
 - preserve source trust and non-impersonation;
 - apply stale-origin outcomes explicitly.
 
@@ -817,7 +881,7 @@ inputs, not acceptance of that shared contract.
 | Production client surface | deferred to shared contract | issue #12 | This node defines semantics, not API shape |
 | Operator role launch and recovery | contract accepted; implementation deferred | `operator-broker` | Stable address, explicit attach, unresolved rehydration, and operation identity are fixed here |
 | Production kinds and metadata | accepted with replacement | this document / `operator-broker` / `station-app` | Experimental namespace is retired; v1 Station convention is fixed |
-| Reply plus disposition | accepted | `station-app`, `operator-broker`, issue #12 | Reply & Handle order and partial states are normative |
+| Reply plus disposition | accepted | `station-app`, `operator-broker`, issue #12 | Reply & Handle and assisted disposition-only notification order are normative |
 | Direct/assisted/quiet transitions | accepted with vocabulary refinement | `station-app`, deployment docs | Quiet is assisted policy; direct/assisted are exclusive topologies |
 | Notification defaults | accepted; experiential validation deferred | `station-app`, operational hardening | Deterministic defaults are fixed; Focus Assist/noisy-load evidence remains |
 | Principal assurance | presentation accepted; cryptographic assurance deferred | issue #12, operational hardening | Address and principal are separate; missing evidence is explicit |
