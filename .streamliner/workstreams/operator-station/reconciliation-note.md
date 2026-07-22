@@ -15,8 +15,15 @@ resolution, clarification, route-back, restart continuity, and notification
 publication. The builder also chose to use the campaign orchestrator as the
 live `attention:rob` mediator during normal workstream execution.
 
-`station-contract` is now ready as issue #114. It owns promotion from
-experimental evidence into accepted product design.
+`station-contract` subsequently completed in PR #116. The accepted
+`docs/design/operator-station.md`, ADR 0047, and ADR 0048 now promote the
+mediated loop into intended product design. The corrected Operator Station
+AC-01 through AC-15 export and merged-source addendum are published on issue
+#12.
+
+The workstream is now waiting on the campaign-owned
+`application-client-ready` checkpoint. `station-app` and `operator-broker`
+remain planned rather than ready.
 
 ## Boundaries
 
@@ -37,10 +44,11 @@ The durable exports are the experimental Station and assignment under
 `spike/operator-station/`, plus the evidence and Application Client requirements
 in `docs/notes/operator-loop-spike-report.md`.
 
-The subprocess courier, full-history export, store fingerprint, experimental
-namespace, current UI behavior, `attention.*` kinds, and `campaignAttention`
-metadata are explicitly not production contracts. Issue #12 and #114 remain
-the promotion authorities.
+The accepted domain export is `docs/design/operator-station.md`, backed by ADR
+0047/0048. The subprocess courier, full-history export, store fingerprint,
+experimental namespace, current UI behavior, `attention.*` kinds, and
+`campaignAttention` metadata remain explicitly outside the production contract.
+Issue #12 remains the shared-client convergence authority.
 
 ## Context fitness
 
@@ -53,14 +61,23 @@ that did not support its claims before the PR advanced.
 The node spec should have named the intended final repository layout earlier.
 That would have prevented the late shared-artifact path reconciliation.
 
+For the contract wave, explicit campaign ADR allocation and exact-byte #12
+draft approval were necessary because Watcher and Operator edited the same
+design index, decision log, and shared-client tracker concurrently. The final
+paired review also showed that replied-to findings and resolved GitHub threads
+are separate merge-floor evidence.
+
 ## Attention allocation
 
-Operator attention was highest-leverage at plan review, the first live demo, and
-the workstream-owned artifact reconciliation. The paired reviewer remained the
-right owner for code-level lifecycle, provenance, and evidence defects. The
-builder's next attention belongs at #114's product-contract reviews, especially
-routing modes, provenance, notification posture, and the reply/disposition UX.
-Campaign attention belongs at the #12 seam review.
+Operator attention was highest-leverage at plan review, the first live demo,
+the domain-contract review, the exact #12 export review, and the
+workstream-owned artifact reconciliations. The paired reviewer remained the
+right owner for detailed lifecycle, provenance, recovery, and safety defects.
+
+The builder's next attention belongs at the later production usability gate.
+Campaign attention now belongs at #12 convergence and formation of the shared
+Application Client enabling work/checkpoint. Operator workstream execution is
+waiting rather than requesting another worker launch.
 
 ## Inspired vs. recovery interventions
 
@@ -75,13 +92,20 @@ Campaign attention belongs at the #12 seam review.
   authoritative node spec before merge.
 - **Recovery:** Review found route-back/ack/disposition ordering gaps that the
   initial implementation evidence did not expose.
+- **Inspired:** The cross-contract consistency pass preserved one coherent
+  Watcher/Operator design layer and made the shared-client overlap explicit.
+- **Recovery:** Fixed ADR assumptions and a stale #12 export required dynamic
+  allocation, exact-byte approval, Class D correction, and publication
+  verification before merge.
+- **Recovery:** Paired review found per-recipient delivery identity,
+  terminal route-back, restart-safe metadata operations, unresolved-work
+  handoff, and inert-rendering gaps in the initial contract.
 
 ## Closeout observation dispositions
 
-- Reply/disposition clarity: promoted to
-  [#114](https://github.com/lossyrob/telex/issues/114). The production contract
-  must make terminal obligation state explicit and evaluate a combined
-  **Reply & Handle** flow.
+- Reply/disposition clarity: completed in
+  [#114](https://github.com/lossyrob/telex/issues/114) at the contract level.
+  `station-app` owns implementation and usability evidence.
 
 Other deferred items remain production-contract or hardening concerns owned by
 #12, #114, or `operational-hardening`.
@@ -90,15 +114,16 @@ Other deferred items remain production-contract or hardening concerns owned by
 
 - Consolidate the spike's Application Client requirements with Telex Watcher
   evidence: target authority — issue #12
-  - Disposition: ready for promotion; both product viability gates have passed.
-    #114 will publish the exact Operator Station requirements while campaign
-    orchestration owns the shared contract/checkpoint.
+  - Disposition: landed as the corrected Operator Station domain export and
+    merge-SHA addendum on #12; campaign convergence still owns acceptance and
+    the checkpoint.
 - Decide whether to promote, rename, or retire the experimental message/source
   convention: target authority — issue #114
-  - Disposition: promoted to #114; the contract node will accept, revise, or
-    reject the spike and campaign-local conventions.
+  - Disposition: landed in `docs/design/operator-station.md`; the experimental
+    namespace is retired, the production v1 application convention is accepted,
+    and campaign-local conventions remain evidence only.
 - Preserve the lesson that application attendance must prove delivery and
   consumption, not database visibility: target authority — workstream-design
   lesson (`project`)
-  - Disposition: landed in this reconciliation note and the spike report;
-    promote further only if another Telex application workstream corroborates it.
+  - Disposition: landed in this reconciliation note, the spike report, the
+    Operator Station contract, and AC-04/AC-05.
