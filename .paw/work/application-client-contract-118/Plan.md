@@ -2,7 +2,7 @@
 
 ## Revision and source freeze
 
-This is revision 11 of the execution plan. Its approval identity is the Git
+This is revision 12 of the execution plan. Its approval identity is the Git
 commit that contains these exact `Plan.md` bytes and the lowercase SHA-256 of
 those bytes encoded as UTF-8 without a BOM, LF line endings, and exactly one
 trailing LF.
@@ -30,7 +30,7 @@ canonical when an export predates the merged contract.
 | Operator Station | `5042612298` | `5044388908` | `0722051760bab569d3f947fd7b29f2dabe13ef77` | `2d99e552292a4401d3403540b6d2eaa90272282d` |
 
 Canonical source-comment body digests refetched from GitHub at revision 5 and
-unchanged through revision 11:
+unchanged through revision 12:
 
 | Comment | SHA-256 |
 |---|---|
@@ -116,7 +116,7 @@ equivalent on this backend.
 | Operator Station consumer | `telex://lossyrob/telex/T-A:operator-station-orch` |
 | Telex Watcher consumer | `telex://lossyrob/telex/T-A:watcher-orch` |
 | Paired reviewer | `telex://lossyrob/telex/T-A:app-client-review-118` |
-| Human merge floor | `telex://lossyrob/telex/T-A:attention:rob` |
+| Human merge floor (workstream-owned sender) | `telex://lossyrob/telex/T-A:attention:rob` |
 
 ## Required Semantic Outcome
 
@@ -640,30 +640,37 @@ exact blob before attesting; digest-only approval is forbidden.
    repeat the affected exact-digest gates.
 4. Verify green CI, clean mergeability, exact PR head, and zero unresolved
    review threads.
-5. After the exact-head technical state and checkpoint evidence are complete,
-   send one disposition-required `attention.merge-floor` request to
-   `telex://lossyrob/telex/T-A:attention:rob`. Campaign orchestration mediates
-   the request and must return an explicit human approval disposition. Campaign
-   technical approvals, recommendations, or prior PR #115/#116 outcomes never
-   satisfy this floor.
-6. Any campaign merge authorization must cite both the
-   `attention.merge-floor` request message ID and the human approval disposition
-   ID. An authorization missing either reference is non-authoritative, and the
-   PR remains held.
-7. Immediately before adding watches, run the canonical terminal PR-state
+5. Immediately before adding watches, run the canonical terminal PR-state
    check. Merged or closed PRs skip Watcher registration and Loop fallback.
-8. Load and follow the canonical `paw-pr-lifecycle` state machine. Prefer the
+6. Load and follow the canonical `paw-pr-lifecycle` state machine. Prefer the
    shared Watcher runtime, use pinned private detector copies only as review
    tooling rather than a product/client seam, and use issue-scoped watch IDs.
    Record runtime identity, detector digest, watch ID, health probe, selected
    sentry mode, and whether Loop fallback was used. Never run Watcher and Loop
    supervision in parallel and never stop the shared runtime.
-9. After human-floor approval and authoritative campaign authorization, send
-   the full
+7. The worker sends one disposition-required `merge-floor-ready` evidence packet
+   to Application Client orchestration and a concise status to campaign
+   orchestration, then holds. The packet contains exact PR URL and head, current
+   `PAW Review: +1`, CI conclusion, mergeability, unresolved-thread count,
+   checkpoint evidence, bundle and publication identities, and sentry evidence.
+8. Application Client orchestration independently rechecks that packet and is
+   the only owner authorized to send the disposition-required
+   `attention.merge-floor` request to
+   `telex://lossyrob/telex/T-A:attention:rob`. The worker records the request but
+   never authors it.
+9. Campaign orchestration mediates the explicit human disposition. Campaign
+   technical approvals, recommendations, or prior PR #115/#116 outcomes never
+   satisfy this floor.
+10. Any campaign merge authorization must cite both the workstream-authored
+    `attention.merge-floor` request message ID and the human approval disposition
+    ID. An authorization missing either reference is non-authoritative, and the
+    PR remains held.
+11. After human-floor approval and authoritative campaign authorization, send
+    the full
    disposition-required `merge-ready` field report to Application Client
    orchestration and `node-merge-ready` to campaign orchestration.
-10. Do not merge the PR. Hold it healthy for orchestration.
-11. After merge, send one disposition-required `reconciliation-requested` packet
+12. Do not merge the PR. Hold it healthy for orchestration.
+13. After merge, send one disposition-required `reconciliation-requested` packet
    to Application Client orchestration and concise `node-merged` status to
    campaign orchestration. Require durable received/disposition confirmation;
    if it remains unconfirmed, escalate the original message ID to campaign
@@ -692,10 +699,12 @@ terminal dispositions, report digest, and the local recovery path before
 message IDs, the committed bundle manifest and PR head, and the published issue
 #12 body; the local session artifact is not an approval authority.
 
-The ledger also records the `attention.merge-floor` request ID, human approval
+The ledger records the worker-authored `merge-floor-ready` evidence packet ID,
+the workstream-authored `attention.merge-floor` request ID, human approval
 disposition ID, and campaign merge-authorization message ID. The authorization
-record is valid only when it cites the first two IDs. No technical approval or
-recommendation is recorded as a human-floor substitute.
+record is valid only when it cites the workstream request and human disposition.
+The worker never appears as sender of `attention.merge-floor`; no technical
+approval or recommendation is recorded as a human-floor substitute.
 
 ## Work Items
 
@@ -715,9 +724,10 @@ recommendation is recorded as a human-floor substitute.
      ensure CI and mergeability.
 6. **Complete paired review and sentry handoff**
    - Current-head `PAW Review: +1`, zero unresolved threads, explicit human
-     merge-floor approval, campaign authorization citing both floor IDs,
-     merge-ready field report, Watcher-backed lifecycle monitoring, and
-     post-merge reconciliation request.
+     merge-floor approval requested only by Application Client orchestration,
+     campaign authorization citing both floor IDs, worker-authored
+     merge-floor-ready and merge-ready reports, Watcher-backed lifecycle
+     monitoring, and post-merge reconciliation request.
 
 ## Verification and Evidence
 
@@ -739,8 +749,12 @@ The final field report will include:
 - old issue #12 proposal elements accepted, replaced, deferred, or rejected;
 - risks, boundary pressure, and explicit no-private-fallback confirmation;
 - repair/reapproval cycle counts and PR sentry mode evidence;
-- `attention.merge-floor` request ID, explicit human approval disposition ID,
-  and campaign merge-authorization ID with both required citations;
+- worker-authored `merge-floor-ready` evidence packet ID;
+- workstream-authored `attention.merge-floor` request ID, explicit human
+  approval disposition ID, and campaign merge-authorization ID with both
+  required citations;
+- confirmation that the worker recorded but did not author the human-floor
+  request;
 - confirmation that campaign technical approval and PR #115/#116 were not used
   as merge authorization;
 - process feedback for PAW, Telex, paired review, and Watcher sentry.
@@ -772,15 +786,19 @@ The node is done only when all of the following are true:
 9. Final configured PAW review is complete; the current PR head has verified
    `PAW Review: +1`, green CI, clean mergeability, and zero unresolved review
    threads.
-10. A disposition-required `attention.merge-floor` request has explicit human
-    approval routed by campaign, and any campaign merge authorization cites
-    both the merge-floor request ID and human approval disposition ID. Technical
-    campaign approval alone and PR #115/#116 are not precedent or substitutes.
-11. The canonical field report and approval inventory have durable Telex
+10. The worker delivered a disposition-required `merge-floor-ready` evidence
+    packet and held. Application Client orchestration independently rechecked it
+    and authored the disposition-required `attention.merge-floor` request; the
+    worker recorded but did not author that request.
+11. The workstream-authored floor request has explicit human approval routed by
+    campaign, and any campaign merge authorization cites both that request ID
+    and the human approval disposition ID. Technical campaign approval alone and
+    PR #115/#116 are not precedent or substitutes.
+12. The canonical field report and approval inventory have durable Telex
    retrieval records, `merge-ready` and `node-merge-ready` are delivered, and
    exactly one Watcher-or-Loop sentry mode is active under canonical lifecycle
    handling.
-12. The worker has not merged the PR. After orchestration merges it, exactly one
+13. The worker has not merged the PR. After orchestration merges it, exactly one
     reconciliation request and the campaign merge status are sent as specified.
 
 ## Success Criteria
@@ -806,6 +824,7 @@ The node is done only when all of the following are true:
   production usability. The manifest records `checkpointScope: design-only`,
   and downstream consumers acknowledge that scope.
 - The branch contains no production client code and no private fallback seam.
-- Merge authorization includes the mandatory human-floor evidence; technical
-  campaign approval alone never authorizes merge.
+- Merge authorization includes workstream-owned human-floor evidence; the
+  worker never authors the floor request, and technical campaign approval alone
+  never authorizes merge.
 - The PR is not merged by this worker.
