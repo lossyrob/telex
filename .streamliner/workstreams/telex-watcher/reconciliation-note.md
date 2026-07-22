@@ -23,6 +23,12 @@ duplicates/noise, agreed with the canonical checker, removed the watch, and
 remained live for reuse. That moves the workstream from experimental viability
 into production contract definition.
 
+Production contract node #110 then landed in PR #115. It promoted the proven
+domain semantics into `docs/design/watcher.md`, four canonical schemas, and ADR
+0046. The byte-exact Watcher requirements export is published on issue #12.
+Downstream implementation is now waiting on campaign acceptance of the shared
+Application Client rather than on unresolved Watcher-domain design.
+
 ## Boundaries
 
 - **Held:** Provider semantics stayed in editable scripts; Watcher remained
@@ -35,6 +41,9 @@ into production contract definition.
   membership, restart reconciliation, and sender-only receipt semantics to make
   the external runtime honest. These are #12 requirements, not accepted
   production architecture.
+- **Held:** The production contract remained design-only and did not promote CLI
+  subprocess parsing, raw daemon IPC, the private send-once environment
+  contract, or sender occupancy into a supported Application Client.
 
 ## Contracts and exports
 
@@ -59,6 +68,12 @@ enough to continue. Node #110 now owns the accepted production Watcher contract;
 production runtime/template work remains blocked on that contract and the
 campaign-owned Application Client checkpoint.
 
+PR #115 completed that domain contract. Runtime/template workers can rely on
+`docs/design/watcher.md`, ADR 0046, and the four schemas without reopening
+detector, state, lifecycle, trust, failure, provenance, health, or message
+semantics. They cannot launch until #12 dispositions produce
+`application-client-ready`.
+
 ## Context fitness
 
 The outcome and boundary sections were strong enough to prevent workflow-engine,
@@ -71,6 +86,10 @@ The launch context missed two operational prerequisites. Destructive daemon
 tests needed isolation from the coordination plane from the start, and meaningful
 live provider transitions needed an owned or explicitly authorized disposable
 resource rather than credentials alone.
+
+Parallel contract work added two useful controls: campaign-allocated ADR numbers
+prevented shared decision-log collisions, and a byte-exact dual-orchestrator
+draft gate kept the #12 export aligned with the final reviewed Watcher contract.
 
 ## Attention allocation
 
@@ -88,6 +107,12 @@ PR sentry run produced timely, quiet, canonical-checker-consistent evidence and
 clean watch removal. That is the intended gate shape—real use and judgment rather
 than another implementation review.
 
+Contract review focused on genuine semantic gaps. The paired reviewer required a
+pre-send ledger fence, defined event-producing results without `nextState` as
+unchanged prior state, and made actionable inbound backlog force
+`productionReady = false`. Those changes strengthened the domain contract
+without changing the already-approved shared-client requirements.
+
 ## Inspired vs. recovery interventions
 
 - **Inspired:** Real sender lifecycle evidence produced the stable-address /
@@ -102,11 +127,18 @@ than another implementation review.
 - **Recovery:** Final review found the Windows process could spawn descendants
   before Job assignment; suspended creation and resume-after-assignment closed
   the race.
+- **Inspired:** Dynamic ADR allocation and byte-exact #12 draft approval allowed
+  parallel domain contracts to advance without pre-allocating shared design
+  numbers or accepting a shared API prematurely.
+- **Recovery:** Final contract review found three underspecified semantics:
+  duplicate evidence needed a pre-send fence, omitted event `nextState` needed a
+  defined committed state, and send-only inbound backlog needed an explicit
+  production-readiness consequence.
 
 ## Closeout observation dispositions
 
-- Test-support helper binaries are currently Cargo-normal binaries: promoted to
-  #110 for explicit production packaging disposition before publishing.
+- Test-support helper binaries: promoted through #110 into the
+  `watcher-runtime` packaging acceptance checklist.
 
 ## Promotion candidates
 
@@ -117,10 +149,10 @@ than another implementation review.
 - Long-lived applications need explicit stable-address, process-incarnation,
   strict recovery, receipt, and sender-only/bidirectional semantics: target
   authority — issue #12 / future Application Client contract.
-  - Disposition: exported through the spike report and
-    [issue #12 comment](https://github.com/lossyrob/telex/issues/12#issuecomment-5027181549);
-    #110 owns the Watcher-specific contract while campaign consolidation remains
-    required before production implementation.
+  - Disposition: Watcher-specific semantics landed in `docs/design/watcher.md`
+    and ADR 0046; exact shared requirements are published in
+    [issue #12 comment](https://github.com/lossyrob/telex/issues/12#issuecomment-5042702401).
+    Campaign consolidation remains required before production implementation.
 - External-provider proof requires mutation authority as well as credentials:
   target authority — workstream-design lesson (`project`).
   - Disposition: deferred with rationale; apply to the next live-provider node

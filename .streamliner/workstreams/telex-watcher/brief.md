@@ -25,9 +25,9 @@ repository-specific author/comment filtering. The builder passed the viability
 gate after scoped post-merge dogfood confirmed useful, low-noise PR supervision
 without a session-owned Loop task.
 
-The `watcher-contract` node now promotes the successful experimental semantics
-into production design. Production implementation consumes the shared Telex
-Application Client seam tracked in
+The `watcher-contract` node landed the accepted production design in
+[PR #115](https://github.com/lossyrob/telex/pull/115). Production implementation
+consumes the shared Telex Application Client seam tracked in
 [#12](https://github.com/lossyrob/telex/issues/12), alongside the Operator Station
 workstream. The Watcher runtime and detector-template library can then advance
 under that accepted contract before operational hardening and closure.
@@ -38,6 +38,9 @@ The richer rationale and detector protocol sketch are preserved in
 ## Design References
 
 - `telex:docs/design/index.md` - entry point for Telex's intended-system design.
+- `telex:docs/design/watcher.md` - normative production Watcher contract.
+- `telex:docs/design/DECISIONS.md` - ADR 0046 records the load-bearing
+  provider-neutral, trusted-local, receipt-gated architecture.
 - `telex:PRODUCT-THESIS.md` - durable responsibilities, store-and-forward
   delivery, and Telex's boundary against workflow execution.
 - `telex:docs/design/daemon.md` - local-exchange lifecycle and durable send
@@ -90,14 +93,17 @@ about 26 seconds, emitted one baseline snapshot and one merge event, produced no
 duplicates or noise, agreed with the canonical checker, required no fallback,
 removed the watch cleanly, and remained live for reuse.
 
-The next launch-ready node is
-[`watcher-contract` #110](https://github.com/lossyrob/telex/issues/110). It owns
-the production detector, state, lifecycle, trust, failure, provenance, and
-message contract plus the exact Watcher requirements exported to issue #12.
+The `watcher-contract` completed through
+[#110](https://github.com/lossyrob/telex/issues/110) and
+[PR #115](https://github.com/lossyrob/telex/pull/115). The merged design adds
+`docs/design/watcher.md`, four canonical v1 schemas, and ADR 0046. The exact
+Watcher shared-client requirements were dual-approved and published to
+[issue #12](https://github.com/lossyrob/telex/issues/12#issuecomment-5042702401).
 
-Production runtime and template implementation remain blocked on that accepted
-contract and the campaign-owned Application Client checkpoint. Passing the
-viability gate does not promote the spike-private send seam into a public API.
+No Watcher implementation node is launch-ready yet. `watcher-runtime` and
+`detector-template-library` are planned but explicitly waiting for campaign/#12
+to disposition the shared requirements and publish the
+`application-client-ready` checkpoint. There is no spike-private fallback.
 
 ## Decisions
 
@@ -137,23 +143,21 @@ viability gate does not promote the spike-private send seam into a public API.
   shared Watcher runtime can replace a session-owned PR sentry loop for scoped
   supervision with timely, low-noise Telex delivery and clean watch lifecycle.
   Production semantics still require the contract and shared-client gates.
+- **The production Watcher domain contract is accepted:** `docs/design/watcher.md`,
+  its four canonical schemas, and ADR 0046 govern downstream runtime/template
+  work. Intentional changes require normal design/decision updates.
+- **There is no private Application Client fallback:** production Watcher nodes
+  wait for #12/campaign convergence. CLI subprocess parsing, raw daemon IPC,
+  `TELEX_WATCHER_INTERNAL_SEND_ONCE_V1`, and sender occupancy are not accepted
+  production client seams.
 
 ## Open Questions
 
-- What exact JSON input/output envelope gives detectors enough context while
-  keeping Watcher-owned routing, credentials, and execution policy authoritative?
-- Should eventless `nextState` commits be allowed on every successful poll, and
-  how should a detector distinguish ignored observations from unseen work?
-- What are the precise semantics of pinned scripts versus a development
-  `follow-path` mode, and how is the executed content digest recorded?
-- How are credentials exposed safely to a detector: inherited CLI authentication,
-  explicit environment allowlists, or named command wrappers?
-- Which watch lifecycles are required initially: single-event, until-terminal,
-  explicit cancellation, and/or address-bound expiration?
-- When a detector repeatedly degrades, should Watcher notify the target address,
-  a separate operator address, or only expose local diagnostics?
-- What application-client shape from #12 best serves both a headless service and
-  the Operator Station without coupling either product to internal daemon IPC?
+- Which of the 15 Watcher shared-client requirements will #12 accept, defer, or
+  reject, and which dispositions block runtime versus template promotion?
+- When `application-client-ready` exists, should `watcher-runtime` and
+  `detector-template-library` be promoted in parallel or staged around a shared
+  conformance harness?
 
 ## Imports and Exports
 
@@ -163,8 +167,8 @@ viability gate does not promote the spike-private send seam into a public API.
   address routing, attention levels, metadata, and Postgres support.
 - Existing Loop skill detector logic and tests as domain examples, excluding its
   owner-bound worker and attached waiter runtime.
-- The shared Telex Application Client contract from issue #12 after the viability
-  gate.
+- The campaign's `application-client-ready` checkpoint after #12 dispositions
+  and shared contract convergence.
 
 ### Exports
 
@@ -177,14 +181,14 @@ viability gate does not promote the spike-private send seam into a public API.
   sessions, operator agents, and Operator Station.
 - Operational evidence about application-client needs shared with issue #12 and
   the Operator Station campaign workstream.
+- The accepted production Watcher contract in `docs/design/watcher.md`, ADR 0046,
+  and canonical request/result/event-metadata/health schemas.
 
 ## Closeout Observations
 
-- `telex-watcher/src/bin/fake_detector.rs` and `fake_telex.rs` are normal Cargo
-  binaries for integration-test discovery. Before production publishing, put
-  them behind a non-default test-support feature or equivalent packaging
-  boundary. Keep the product crate top-level rather than moving it into
-  throwaway `spike/`.
+- Test-support helper packaging is promoted into the accepted Watcher contract:
+  `watcher-runtime` must prove the default production package excludes
+  `fake_detector` and `fake_telex` while keeping the product crate top-level.
 
 Continue parking bounded detector-template, diagnostics, CLI, and polling-policy
 improvements here during dogfooding. Any expansion into general automation,

@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "The builder passed the Watcher viability gate after successful low-noise PR lifecycle dogfood. Production Watcher contract node #110 is ready; runtime work still waits on that contract and the shared Application Client checkpoint.",
+  "summary": "Production Watcher contract #110 merged in PR #115 with ADR 0046, four canonical schemas, and a dual-approved #12 requirements export. Runtime/template nodes are waiting for the campaign application-client-ready checkpoint.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-21T20:43:16Z",
+  "updatedAt": "2026-07-22T08:08:51Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -25,6 +25,14 @@
     {
       "repoId": "telex",
       "path": "docs/design/index.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/watcher.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/DECISIONS.md"
     },
     {
       "repoId": "telex",
@@ -85,8 +93,8 @@
       "type": "research",
       "title": "Production Watcher contract and application-client requirements",
       "summary": "Promote successful spike semantics into the intended design: detector envelope, watch lifecycle, script pin/follow policy, credentials and environment, failure notification, state/dedup transaction, service identity, message conventions, and the exact requirements exported to the shared Telex Application Client issue #12.",
-      "status": "ready",
-      "attention": "focus",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -112,6 +120,14 @@
       ],
       "dependsOn": [
         "watcher-contract"
+      ],
+      "externalDependsOn": [
+        {
+          "id": "application-client-ready",
+          "label": "Shared Application Client contract accepted",
+          "url": "https://github.com/lossyrob/telex/issues/12",
+          "status": "pending"
+        }
       ]
     },
     {
@@ -126,6 +142,14 @@
       ],
       "dependsOn": [
         "watcher-contract"
+      ],
+      "externalDependsOn": [
+        {
+          "id": "application-client-ready",
+          "label": "Shared Application Client contract accepted",
+          "url": "https://github.com/lossyrob/telex/issues/12",
+          "status": "pending"
+        }
       ]
     },
     {
@@ -214,12 +238,12 @@
     "requiredTracker": "github-issue"
   },
   "launchDefaults": {
-    "promptProfileId": "telex-watcher-implementer-v1",
+    "promptProfileId": "telex-watcher-implementer-watcher-v2",
     "terminal": {
       "titleTemplate": "TLX-W {githubIssue}"
     },
     "launchAfterInit": true,
     "reviewCompanion": true,
-    "reviewPromptTemplateId": "telex-watcher-reviewer-v1"
+    "reviewPromptTemplateId": "telex-watcher-reviewer-watcher-v2"
   }
 }
