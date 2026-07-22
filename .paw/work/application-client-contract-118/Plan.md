@@ -2,7 +2,7 @@
 
 ## Revision and source freeze
 
-This is revision 7 of the execution plan. Its approval identity is the Git
+This is revision 9 of the execution plan. Its approval identity is the Git
 commit that contains these exact `Plan.md` bytes and the lowercase SHA-256 of
 those bytes encoded as UTF-8 without a BOM, LF line endings, and exactly one
 trailing LF.
@@ -30,7 +30,7 @@ canonical when an export predates the merged contract.
 | Operator Station | `5042612298` | `5044388908` | `0722051760bab569d3f947fd7b29f2dabe13ef77` | `2d99e552292a4401d3403540b6d2eaa90272282d` |
 
 Canonical source-comment body digests refetched from GitHub at revision 5 and
-unchanged through revision 7:
+unchanged through revision 9:
 
 | Comment | SHA-256 |
 |---|---|
@@ -48,7 +48,7 @@ Canonical design-file Git blob identities:
 
 | Planning metadata | Commit | Effect |
 |---|---|---|
-| Formation base | `0db1b18` | Application Client workstream formation. |
+| Formation base | `0db1b1839c1fea62507b593f2b2c96e50bdc529a` | Application Client workstream formation. |
 | Current planning/branch base | `7a568c43413fc7aeab6a484b07dce0f0db11d68f` | Preserves the Operator Station consumer graph update to `application-client/application-client-ready-gate`; this integration-only movement does not revise AC-01 through AC-15. |
 
 The Watcher export references
@@ -301,9 +301,10 @@ The approval ledger is append-only by gate attempt and records gate, request
 kind, plan revision or source head, digest, approver address/principal, request
 and approval message IDs, timestamp, digest-reproduction attestation, and any
 superseding attempt. Before `commit-and-clean`, export an exact evidence
-snapshot to the session's persistent artifact directory and send its digest and
-complete approval inventory to Application Client and campaign orchestration.
-The final field report references that durable snapshot.
+snapshot for worker-local recovery and send its digest and complete approval
+inventory to Application Client and campaign orchestration. The durable
+retrieval record is the resulting Telex delivery plus its acknowledgment and
+ledger message ID; the local snapshot is not approval evidence.
 
 ## Dynamic ADR Allocation
 
@@ -349,11 +350,14 @@ trailing LF. Object keys use this fixed ordinal order:
 `schemaVersion`, `checkpointScope`, `sourceProvenance`, `files`. Each
 `sourceProvenance` entry uses `domain`, `requirementExportComment`,
 `mergedSourceAddendumComment`, `mergeCommit`, `canonicalFinalHead`, and
-`sourceCommentDigests`; the domain entries sort by `domain`, and comment
-digests sort by comment ID. Each `files` entry uses `path`, `byteLength`,
-`sha256`. JSON strings use the standard JSON escaping rules without Unicode
-normalization. The manifest generator is the sole writer; independently
-reproducing these bytes is required before approval.
+`sourceCommentDigests`; the domain entries sort by UTF-8 byte-lexicographic
+`domain`. `sourceCommentDigests` is an array of exactly two objects. Each object
+uses fixed key order `commentId`, `role`, `sha256`; `commentId` is a JSON
+integer, `role` is `requirement-export` or `merged-source-addendum`, and entries
+sort by ascending numeric `commentId`. Each `files` entry uses fixed key order
+`path`, `byteLength`, `sha256`. JSON strings use standard JSON escaping without
+Unicode normalization. The manifest generator is the sole writer;
+independently reproducing these bytes is required before approval.
 
 The manifest does not list itself or embed its own digest, avoiding circular
 identity. The review identity is the tuple:
@@ -644,11 +648,13 @@ The field report is written at
 `.paw/work/application-client-contract-118/evidence/final-field-report.md`,
 canonicalized and hashed, then copied without modification to
 `C:\Users\robemanuele\.copilot\session-state\ac0ce967-6551-4d69-8d4f-cd89c8ecaab7\files\application-client-contract-118-evidence\`.
-It is sent verbatim through Telex to Application Client and campaign
-orchestration. The approval ledger records both durable message IDs, the report
-digest, and that session-artifact path before `commit-and-clean`; the Telex
-deliveries and exported evidence snapshot are the post-cleanup retrieval
-locations.
+The local copy is worker-recovery evidence only. The report is sent verbatim as
+disposition-required Telex deliveries to Application Client and campaign
+orchestration. The approval ledger records both message IDs, acknowledgments,
+terminal dispositions, report digest, and the local recovery path before
+`commit-and-clean`. Post-cleanup durable retrieval is through those Telex
+message IDs, the committed bundle manifest and PR head, and the published issue
+#12 body; the local session artifact is not an approval authority.
 
 ## Work Items
 
@@ -695,13 +701,34 @@ The final field report will include:
 
 ## Definition of Done
 
-The semantic gate is complete only when the crosswalk contains exactly 30
-source rows with all required disposition fields; the source-freeze evidence
-and candidate manifest reproduce; the ADR determination is recorded; both
-consumer and both orchestration approvals bind the same digests; issue #12
-fetch verification succeeds; the canonical field report is durably delivered;
-and the checkpoint text states its design-only scope. These conditions do not
-claim implementation, conformance, or consumer readiness.
+The node is done only when all of the following are true:
+
+1. Both external plan reviewers approved the same exact plan revision and
+   digest before any contract, crosswalk, ADR, or publication content was
+   edited.
+2. The crosswalk contains exactly 30 source rows with every required
+   disposition, rationale, owner, blocking effect, source digest, and
+   strength-preservation field.
+3. Source-freeze evidence, canonicalization tests, candidate manifest, listed
+   file digests, and bundle closure reproduce from the approved source head.
+4. The campaign-owned ADR determination is recorded, and any allocated ADR uses
+   the dynamically returned number without collision.
+5. Operator Station and Watcher approved the same source head and bundle
+   digest, followed by matching Application Client and campaign approvals.
+6. Application Client and campaign approved the same exact issue #12
+   publication bytes, and the fetched published body matches that digest.
+7. The checkpoint text and machine-readable manifest state design-only scope
+   and do not claim implementation, conformance, consumer integration, or
+   production readiness.
+8. Final configured PAW review is complete; the current PR head has verified
+   `PAW Review: +1`, green CI, clean mergeability, and zero unresolved review
+   threads.
+9. The canonical field report and approval inventory have durable Telex
+   retrieval records, `merge-ready` and `node-merge-ready` are delivered, and
+   exactly one Watcher-or-Loop sentry mode is active under canonical lifecycle
+   handling.
+10. The worker has not merged the PR. After orchestration merges it, exactly one
+    reconciliation request and the campaign merge status are sent as specified.
 
 ## Success Criteria
 
