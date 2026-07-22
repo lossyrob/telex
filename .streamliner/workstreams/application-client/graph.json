@@ -3,11 +3,11 @@
   "id": "application-client",
   "projectKey": "telex",
   "title": "Telex Application Client (supported long-lived application integration)",
-  "summary": "Contract-convergence node #118 is ready to reconcile the merged Watcher and Operator requirements through issue #12 and publish application-client-ready.",
+  "summary": "Builder-approved contract-convergence node #118 is active in exact-plan review; ADR 0049 is reserved, application-client-ready remains pending, and all later nodes are planned but blocked on that semantic gate.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-07-22T10:05:00Z",
+  "updatedAt": "2026-07-22T14:45:07Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -64,8 +64,8 @@
       "id": "contract-convergence",
       "type": "research",
       "title": "Converge shared Application Client contract",
-      "summary": "Reconcile every merged Watcher and Operator requirement through issue #12, land one API-neutral normative contract and explicit dispositions, and prepare the application-client-ready checkpoint without selecting bindings or implementing production code.",
-      "status": "ready",
+      "summary": "Active planning for issue #118: obtain fresh dual exact approval for planning-reviewed revision 14 at commit 626a80a, then reconcile every merged Watcher and Operator requirement through issue #12. ADR 0049 is allocated but not landed; no contract or publication work begins before the plan gate.",
+      "status": "in-progress",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -82,7 +82,7 @@
       "id": "application-client-ready-gate",
       "type": "gate",
       "title": "Shared semantic contract accepted",
-      "summary": "Campaign validates the merged contract, per-requirement dispositions, consumer approvals, merged-source provenance, and exact issue #12 publication before exporting application-client-ready to both product workstreams.",
+      "summary": "Pending semantic gate: campaign validates the merged contract, per-requirement dispositions, consumer approvals, merged-source provenance, ADR 0049, and exact issue #12 publication before exporting application-client-ready to both product workstreams.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
@@ -182,7 +182,7 @@
     {
       "id": "application-client-ready",
       "title": "Shared Application Client semantic contract accepted",
-      "summary": "Issue #12 contains the merged contract and explicit dispositions, allowing Operator Station and Watcher to detail and coordinate production implementation without private seams.",
+      "summary": "Pending: issue #12 must contain the approved merged contract and explicit dispositions before Operator Station and Watcher may detail and coordinate production implementation without private seams.",
       "status": "planned",
       "nodeIds": [
         "contract-convergence",

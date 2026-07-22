@@ -39,8 +39,9 @@ The richer formation rationale and requirement-family map are preserved in
   shared-client requirements.
 - `telex:docs/design/operator-station.md` - accepted Station/operator domain
   contract and AC-01 through AC-15.
-- `telex:docs/design/DECISIONS.md` - ADR 0046 through ADR 0048 and future
-  dynamically allocated Application Client decisions.
+- `telex:docs/design/DECISIONS.md` - ADR 0046 through ADR 0048 and the
+  campaign-allocated ADR 0049 once the accepted Application Client contract
+  lands.
 - `telex:PRODUCT-THESIS.md` - durable responsibility, store-and-forward, and
   workflow-engine boundaries.
 - `telex:.streamliner/shaping/roadmap.md` - Addressable Attention campaign
@@ -88,9 +89,23 @@ Both consumer domain contracts are merged and durably reconciled:
   and merged-source
   [addendum](https://github.com/lossyrob/telex/issues/12#issuecomment-5044388908).
 
-The `contract-convergence` node is ready through
-[#118](https://github.com/lossyrob/telex/issues/118). No product implementation
-node is launch-ready before `application-client-ready`.
+The builder explicitly approved retaining this workstream and
+`contract-convergence` node
+[#118](https://github.com/lossyrob/telex/issues/118) after the campaign's scope
+review. The node is active in planning. Planning-reviewed plan revision 14 is
+committed at `626a80a`; requests sent before the scope pause were closed, and a
+fresh exact-plan request must receive both Application Client and campaign
+approval before contract work begins.
+
+Campaign orchestration allocated ADR 0049 for the shared API-neutral semantic
+boundary. The number is reserved but the ADR is not yet landed; use remains
+gated on exact plan approval and latest-main collision revalidation. Issue #12
+remains the sole semantic owner and has not published
+`application-client-ready`.
+
+The `application-client-ready-gate` is pending. All later client, binding,
+conformance, integration, and hardening nodes remain planned and blocked on
+that semantic checkpoint.
 
 ## Decisions
 
@@ -113,6 +128,12 @@ node is launch-ready before `application-client-ready`.
   product-private clients are not allowed substitutes.
 - **Consumer review is mandatory:** both Operator Station and Watcher
   orchestrators review the final contract bundle before campaign acceptance.
+- **Builder approved the workstream shape:** #117 and #118 remain the execution
+  geometry around issue #12; the scope pause is closed, but no pause-era plan
+  approval carries forward.
+- **ADR 0049 is allocated, not accepted:** campaign reserved the number for the
+  shared semantic boundary; the worker may use it only after the exact plan gate
+  and latest-main collision check.
 - **Shared artifacts follow primary-main ownership:** workers use feature
   worktrees; only the Application Client workstream orchestrator reconciles this
   brief, graph, and related Streamliner state from the primary main checkout.
