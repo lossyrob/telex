@@ -105,6 +105,7 @@ A production registration contains the following policy.
 | `workingDirectory` | Canonical absolute local directory. |
 | `scriptMode` | `pinned` or `follow-path`. |
 | `scriptDigest` | Required bare lowercase SHA-256 hex for `pinned`; absent for `follow-path`. |
+| `backendProfile` | Explicit local Telex backend/profile selection; credentials are not copied into the registration. |
 | `sender` | Stable Telex sender responsibility. Immutable for a watch ID. |
 | `target` | Fixed Telex target. Immutable for a watch ID. |
 | `attention` | Fixed Telex attention policy. |
@@ -312,6 +313,7 @@ Committed evidence binds:
 - normalized-envelope hash;
 - algorithm-qualified executed script digest;
 - sender and target;
+- opaque logical-store identity;
 - Telex message ID and typed receipt; and
 - commit timestamp.
 
@@ -522,6 +524,7 @@ The normative metadata shape is
     "eventId": "github:review:8421",
     "attemptId": "attempt-uuid",
     "runtimeId": "runtime-uuid",
+    "logicalStoreId": "store:opaque-stable-id",
     "registrationRevision": 3,
     "detectorSchemaVersion": 1,
     "script": {
@@ -581,7 +584,7 @@ The health document includes:
 - `schemaVersion`, `observedAt`, and declared `staleAfterSeconds`;
 - runtime ID, PID, start/heartbeat times, status, sender readiness, and registry
   revision;
-- per-watch lifecycle and health;
+- per-watch logical-store identity, lifecycle, and health;
 - consecutive failures;
 - last attempt, success, and event times;
 - next attempt;
@@ -649,6 +652,10 @@ The shared Application Client must support:
     explicitly reattach without a resident waiter.
 14. **Dedup guidance.** Message/event identity and the accepted-send/local-commit
     duplicate window are documented.
+15. **Backend/store selection and provenance.** Applications explicitly select a
+    configured backend/profile and receive a stable, equality-comparable opaque
+    logical-store identity on status, receipt, and receive records without raw
+    paths, credentials, or connection strings.
 
 Production Watcher runtime promotion is hard-gated on the campaign-owned
 `application-client-ready` checkpoint. There is no private-seam fallback.
@@ -721,6 +728,8 @@ feature or an equivalent test-only package.
 
 - Where are registration revisions, lifecycle, opaque state, attempts, event
   ledger, runtime records, and health persisted?
+- How are backend/profile selection and opaque logical-store identity threaded
+  through registration, membership, receipts, ledger evidence, and health?
 - How are the four schemas represented and checked in CI?
 - How are RFC 8785 hashes and algorithm-qualified evidence produced?
 - Which platform mechanisms prove detector-tree death after abrupt runtime exit?

@@ -131,6 +131,7 @@
       "additionalProperties": false,
       "required": [
         "watchId",
+        "logicalStoreId",
         "lifecycle",
         "health",
         "blockedReason",
@@ -146,6 +147,10 @@
       ],
       "properties": {
         "watchId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "logicalStoreId": {
           "type": "string",
           "minLength": 1
         },

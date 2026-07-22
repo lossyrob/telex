@@ -1939,3 +1939,34 @@ acknowledgement/disposition, terminal-artifact processing, and re-arming one run
 Targeted CI executes the generated launcher contract on macOS and Windows, while the normal
 Linux suite exercises the Unix path. Completed run directories remain as local operational
 artifacts; automated retention/garbage collection is outside this decision.
+
+## 0046 — Watcher runs provider-neutral trusted local detectors with receipt-gated state
+
+- **Date:** 2026-07-22
+- **Status:** Accepted (issue #110)
+
+**Context.** Long-duration external observation should not occupy an agent session or
+reproduce the Loop skill's session-owned worker and attached waiter lifecycle. The generic
+Watcher spike proved that editable GitHub, Azure DevOps, and local detectors can run in a
+separate persistent process, preserve opaque state, and wake or durably queue for a Telex
+address. Production still needs a narrow boundary that does not turn Telex or Watcher into
+a provider-specific workflow engine.
+
+**Decision.** Telex Watcher is a separately supervised, provider-neutral application that
+executes trusted same-user local detector commands under the strict versioned contract in
+[watcher.md](watcher.md). Watcher owns route, sender, attention, disposition, cadence,
+timeout, environment, script, and allowed-kind policy; detector output can only propose a
+normalized message and opaque next state. Event-producing state commits only after typed
+durable Telex acceptance, with stable `(watchId, eventId)` evidence and at-least-once
+duplicates preferred over consume-before-send loss. Pinned scripts are the production
+default, send-only application membership and receipt semantics come from the shared
+Application Client owned through issue #12, and no spike-private CLI/env/IPC seam becomes
+the public contract.
+
+**Consequences.** Detector scripts retain the user's authority and are not sandboxed;
+local-only registration, environment allowlisting, provenance, bounded execution, and
+visible health reduce but do not remove that risk. Runtime and template implementations
+must conform to the canonical schemas, receipt/state transaction, restart and containment
+rules, and deferred-work ownership in `watcher.md`. Production runtime promotion remains
+blocked on `application-client-ready`; arbitrary actions, hosted ingestion, remote code
+registration, multi-host failover, and provider policy remain outside this decision.

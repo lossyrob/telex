@@ -21,6 +21,7 @@
         "eventId",
         "attemptId",
         "runtimeId",
+        "logicalStoreId",
         "registrationRevision",
         "detectorSchemaVersion",
         "script"
@@ -36,6 +37,9 @@
           "$ref": "#/$defs/nonControlString"
         },
         "runtimeId": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "logicalStoreId": {
           "$ref": "#/$defs/nonControlString"
         },
         "registrationRevision": {
