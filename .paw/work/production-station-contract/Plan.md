@@ -2,7 +2,7 @@
 
 - **Issue:** lossyrob/telex#114
 - **Workstream / node:** operator-station / station-contract
-- **Plan revision:** 2
+- **Plan revision:** 3
 - **Base / target:** `main` -> `feature/production-station-contract`
 - **Outcome:** Publish an accepted production Operator Station and mediated-attention
   contract that is precise enough to detail `station-app` and `operator-broker`,
@@ -253,7 +253,72 @@ realization.
 - Do not edit `.streamliner` artifacts or the read-only Streamliner Desktop
   checkout.
 
-### 3. Export Operator Station requirements to issue #12
+### 3. Obtain workstream approval of the Station domain contract
+
+After the initial `operator-station.md`, allocated ADR entries, design-index
+integration, accepted/deferred/rejected matrix, and downstream obligations are
+complete:
+
+1. Run the initial consistency checks from Work Item 5, commit the complete
+   initial domain design, and ensure the owned files are clean. Prepare a
+   canonical JSON bundle manifest serialized as UTF-8 without BOM, sorted keys,
+   no insignificant whitespace, LF line endings, and exactly one trailing LF.
+   The manifest contains:
+   - schema version and committed source head;
+   - full path, Git blob ID (`HEAD:<path>`), and SHA-256 for
+     `docs/design/operator-station.md`;
+   - each allocated Operator Station ADR number/title plus the SHA-256 of that
+     exact canonical ADR entry text, not the whole shared `DECISIONS.md`;
+   - each Operator Station index contribution identified by stable anchor plus
+     the SHA-256 of its exact canonical text, not the whole shared `index.md`;
+   - ADR allocation message ID and allocation base commit.
+   Compute the domain bundle digest from those manifest bytes. This scopes
+   approval to Operator Station-owned content, so sibling ADR/index edits do not
+   invalidate the domain contract.
+2. Send a disposition-required `station-contract-review-requested` message to
+   the workstream orchestrator with attention `next-checkpoint`. Include the
+   complete canonical manifest and digest, current head, design/index/ADR diff,
+   spike/dogfood
+   evidence links, the accepted/deferred/rejected matrix, downstream
+   obligations, and focused review prompts for routing modes, provenance,
+   notification, Reply & Handle, recovery, identity, and safety.
+3. Wait for `station-contract-approved` naming that head and bundle digest or
+   address every `station-contract-feedback` point. Batch non-urgent fixes into
+   one candidate head before re-requesting approval. If feedback conflicts or
+   cannot be resolved within #114 authority, send `decision-needed` to the
+   workstream and campaign orchestrators and hold.
+4. Define the approved source anchor as
+   `{ stationContractApprovalMessageId, sourceHead, domainBundleDigest }`. The
+   canonical manifest is kept in immutable session-private state and included
+   in the durable Telex review request; the request message ID is its durable
+   audit reference.
+
+This engagement checkpoint is the issue #114 domain-contract review. Internal
+society-of-thought review does not replace it. It must complete before the #12
+draft gate and before final PAW/PR review.
+
+Later change classification is explicit and owned by the workstream
+orchestrator. The design maps each shared-client-relevant section to the
+numbered #12 requirement bullets below; the worker proposes a class and the
+workstream approval confirms it:
+
+- **Class A - integration-only:** sibling/shared-file movement outside the
+  Operator Station ADR/index snippets, or unrelated commits. Update coordination
+  provenance only; no domain or #12 reapproval.
+- **Class B - editorial domain change:** owned bytes change without semantic
+  meaning. Recompute the bundle and obtain batched workstream reconfirmation;
+  no #12 reconfirmation.
+- **Class C - domain semantic change, not shared-client affecting:** obtain
+  batched workstream reconfirmation; no #12 reconfirmation.
+- **Class D - shared-client affecting:** obtain workstream reconfirmation and
+  the dual #12 source/comment reconfirmation below. Update the comment only when
+  its bytes change.
+
+Uncertain or disputed classification is `decision-needed` to workstream and
+campaign orchestration. Reconfirmation is per candidate head/batch, not per
+commit.
+
+### 4. Export Operator Station requirements to issue #12
 
 Draft a UTF-8 GitHub issue comment that:
 
@@ -304,7 +369,8 @@ Before posting:
   campaign orchestrator as disposition-required
   `application-client-requirements-review-requested` messages. Both carry issue
   #114, current branch head, accepted Station design path, evidence references,
-  draft revision, SHA-256 digest, the observed #12 comment high-water, and
+  draft revision, SHA-256 digest, the complete approved source anchor and
+  canonical bundle manifest, the observed #12 comment high-water, and
   inspected #110 PR/head or merge SHA.
 3. Require campaign orchestration to compare the draft with #110's
   current/final Watcher requirements and preserve #12 as the sole shared
@@ -334,18 +400,45 @@ Before posting:
   transport source.
 7. Treat the Operator Station and Watcher comments as independent domain
   requirement exports. Neither supersedes the other; campaign/#12 convergence
-  resolves overlaps and accepts the eventual shared contract.
+  resolves overlaps and accepts the eventual shared contract. A campaign
+  convergence edit elsewhere on #12 does not mutate or invalidate this
+  historical domain export. A requested correction to this Operator Station
+  comment is a Class D change and follows the same dual-approval/update path.
 
 Plan approval is not approval of the later #12 requirements text. The PR cannot
 be finalized until this campaign seam review and GitHub publication complete.
 
-### 4. Validate completeness and consistency
+Classify later PAW, workstream, paired-review, or PR-review repairs using the
+Class A/B/C/D rules above. For Class D:
+
+- recompute the domain bundle and obtain workstream contract reconfirmation;
+- send both #12 approvers the replacement approved source anchor and request
+  reconfirmation, even if the comment bytes remain unchanged;
+- if the comment bytes change, increment the draft revision, obtain two fresh
+  exact-digest approvals, update the existing GitHub comment, and re-verify its
+  canonical digest.
+
+Before every `review-ready`, `rereview-requested`, and `merge-ready` handoff,
+recompute the current Operator Station-owned domain bundle and verify it matches
+the active approved source anchor; a different current head is acceptable only
+for recorded Class A changes. Verify the published #12 comment URL/body/digest
+and recorded source anchor remain faithful. Record these fields in handoff
+metadata and the field report: current head, approved source head, domain bundle
+digest, station-contract approval message ID, #12 comment URL/digest, both #12
+approval message IDs, change classification since the anchor, and fidelity
+result. Stop and repair the review/publication chain on mismatch.
+
+### 5. Validate completeness and consistency
 
 - Cross-check every #114 success criterion, open question, and spike
   carry-forward item against an explicit design disposition.
 - Check consistency with `PRODUCT-THESIS.md`, `DESIGN.md`, `daemon.md`,
   `EXTENSIONS.md`, `DISPATCH.md`, the accepted spike report, issue #12, and the
   campaign mediation convention.
+- Maintain and verify an explicit mapping from each
+  shared-client-relevant `operator-station.md` section/ADR decision to the
+  numbered #12 requirement bullets, so Class B/C/D change classification is
+  reviewable rather than subjective.
 - For each contract decision, cite and verify the governing substrate:
   - attendance/health: daemon sections 4, 5, 9, 13.2, and 14; ADRs 0023, 0027,
     0031, 0039, and 0042;
@@ -365,13 +458,17 @@ be finalized until this campaign seam review and GitHub publication complete.
 1. Run the configured society-of-thought planning-docs review with the
    `general-reviewer` specialist and resolve blocking findings.
 2. Send the exact reviewed Plan.md bytes to both orchestrators as
-   `plan-review-requested`, revision 2, with a SHA-256 digest.
+   `plan-review-requested`, revision 3, with a SHA-256 digest.
 3. Begin design editing only after both orchestrators approve the same revision
    and digest. Any later Plan.md byte change increments the revision and resets
    both approvals.
 4. After implementation, run the configured society-of-thought final review
-   with `general-reviewer`, resolve findings, then use `paw-pr`.
-5. Use the Telex reviewer handshake after CI is green; do not merge the PR.
+   with `general-reviewer` only after the Station domain-contract review and
+   #12 draft publication gates complete. Resolve findings, batch and classify
+   any source change using Class A/B/C/D, complete the required reconfirmation,
+   then use `paw-pr`.
+5. Use the Telex reviewer handshake after CI is green; verify source/comment
+   fidelity before every review or merge-ready handoff; do not merge the PR.
 
 ## Expected artifacts
 
