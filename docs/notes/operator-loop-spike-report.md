@@ -221,6 +221,50 @@ operator-agent behavior, reply quality, defects, and whether terminal-tab
 polling was reduced. This section is an evidence log; appending an observation
 does not promote the experimental namespace or pass the gate automatically.
 
+### Dogfood: 2026-07-21 — guided synthetic session
+
+- **Duration / participants:** One live Windows Station, one real Copilot
+  operator-agent session, and one synthetic worker identity on a fresh isolated
+  SQLite store. The run included several hours of idle continuity before final
+  verification.
+- **Raw messages:** One genuine human-priority decision, one routine completion,
+  and one missing-evidence release question followed by evidence.
+- **Human escalations:** One. The operator correctly escalated the
+  learning-speed versus dependency-freeze risk instead of choosing for the
+  builder.
+- **Human outcome:** The builder selected Tuesday. The reply stayed in the
+  mediated thread; the operator verified route-back before acknowledging and
+  handling the human reply, returned the decision to the original raw thread,
+  and closed the raw obligation.
+- **Routine filtering:** The completion was handled locally with a concise
+  proceed response and no human escalation.
+- **Clarification filtering:** The release question was deferred with a precise
+  request for CI, rollback, and mergeability evidence. After the worker replied
+  to that clarification with all three facts, the operator handled the original
+  obligation and sent a release-ready response.
+- **Restart / continuity:** The Station restarted with the same scoped session
+  identity, returned to `armed`, backfilled the mediated conversation, and did
+  not restore a terminal message as actionable.
+- **Notification:** A Windows Action Center record matched the live escalation
+  title, truncated body, attribution, and arrival time.
+- **Observed friction:** The first automated operator launch truncated a
+  multiline prompt, and subsequent retries left orphaned session occupancy that
+  required explicit cleanup before a clean operator could attach. This is
+  launch/orchestration tooling friction rather than evidence against the
+  mediated product loop.
+- **Observed UX gap:** After the builder replied and reported clicking Handle,
+  the root human escalation still had no Station disposition and required CLI
+  cleanup. The run did not establish whether the click targeted a changed
+  selection or whether the reply/handle interaction is unclear. Production
+  contract work should test reply-plus-disposition as one higher-level action.
+- **Terminal inspection:** The builder did not need to inspect the worker
+  thread to understand or answer the decision; verification after the run did
+  inspect Telex state to assess gate evidence.
+- **Decision:** Pending. The loop worked and showed useful filtering behavior,
+  but one guided synthetic worker is insufficient to pass the gate. Run a
+  focused session with multiple real workers and measure escalation quality and
+  terminal checks avoided before deciding pass, reshape, or stop.
+
 ## Deferred carry-forward items
 
 - Production notification-policy validation under Focus Assist, quiet hours, and
