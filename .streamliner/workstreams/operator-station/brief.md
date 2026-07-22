@@ -87,16 +87,22 @@ findings are recorded in
 [`docs/notes/operator-loop-spike-report.md`](../../../docs/notes/operator-loop-spike-report.md).
 No project design change was accepted by the spike.
 
-The `viability-gate` is now **ready but not passed**. The builder's next action
-is to use
-[`spike/operator-station/WALKTHROUGH.md`](../../../spike/operator-station/WALKTHROUGH.md)
-with several real sessions during a focused work period, append observations to
-the report's `Viability gate observations`, and decide whether the mediated loop
-reduces tab polling, filters at the right level, preserves enough context, and
-routes replies naturally. The gate may pass, reshape, or stop the workstream.
-`station-contract` remains planned and blocked until that decision. Production
-integration also remains dependent on the campaign-owned Application Client
-seam in [#12](https://github.com/lossyrob/telex/issues/12).
+The builder has **passed the viability gate**. Guided dogfood demonstrated
+selective human escalation, routine resolution, evidence-seeking clarification,
+route-back, restart continuity, and Windows notification publication. The
+builder also requested that the campaign orchestrator serve `attention:rob`
+during normal workstream execution; the campaign-local mediation prompts are
+landed and the Station is running at `operator:rob` on the default local store.
+
+The next ready node is `station-contract`, tracked by
+[#114](https://github.com/lossyrob/telex/issues/114). It will promote the
+accepted product direction into the design layer, resolve the routing,
+provenance, notification, reply/disposition, recovery, identity, and safety
+contract, and publish the exact shared-client requirements to
+[#12](https://github.com/lossyrob/telex/issues/12). Production `station-app` and
+`operator-broker` work remains planned until #114 lands; application integration
+also remains dependent on the campaign-owned `application-client-ready`
+checkpoint.
 
 ## Decisions
 
@@ -128,6 +134,14 @@ seam in [#12](https://github.com/lossyrob/telex/issues/12).
   subprocess courier, full-history export, path-scoped store fingerprint,
   experimental namespace, and current UI semantics remain replaceable until the
   viability gate and the campaign-owned #12 seam accept a production boundary.
+- **Viability is accepted:** the builder wants to productionize the mediated
+  attention loop. The next confidence transition is an accepted design
+  contract, not additional spike implementation.
+- **Campaign mediation is a dogfood convention:** campaign control remains on
+  typed control addresses; selected human-attention messages use
+  `attention:rob` and the Station at `operator:rob`. The current `attention.*`
+  kinds and `campaignAttention` metadata are replaceable inputs to #114, not
+  accepted Telex extension semantics.
 
 ## Open Questions
 
@@ -184,7 +198,7 @@ merged spike's current carry-forward items remain in
 `docs/notes/operator-loop-spike-report.md` and `reconciliation-note.md`; none is
 promoted into a closeout batch before the viability gate.
 
-- **Reply/disposition clarity:** Dogfood showed that replying does not
+- **Promoted to #114 — reply/disposition clarity:** Dogfood showed that replying does not
   obviously complete the human-facing obligation. The builder expected the
   reply to mark the escalation handled and did not understand that **Handle**
   was a separate required action. A later UX polish pass should make the

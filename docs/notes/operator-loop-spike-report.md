@@ -260,10 +260,14 @@ does not promote the experimental namespace or pass the gate automatically.
 - **Terminal inspection:** The builder did not need to inspect the worker
   thread to understand or answer the decision; verification after the run did
   inspect Telex state to assess gate evidence.
-- **Decision:** Pending. The loop worked and showed useful filtering behavior,
-  but one guided synthetic worker is insufficient to pass the gate. Run a
-  focused session with multiple real workers and measure escalation quality and
-  terminal checks avoided before deciding pass, reshape, or stop.
+- **Decision:** Pass. The builder accepted the mediated interaction after the
+  guided run demonstrated human escalation, routine filtering, clarification,
+  route-back, restart continuity, and notification publication, then requested
+  that the campaign orchestrator use `attention:rob` during normal workstream
+  execution. The current launch/orphan friction and reply/disposition clarity
+  gap are accepted inputs to production contract node #114 rather than reasons
+  to extend the viability spike. Broader multi-worker/noisy-load validation
+  remains necessary in the production usability and hardening waves.
 
 ## Deferred carry-forward items
 

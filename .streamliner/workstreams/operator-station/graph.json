@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "Wave 1's mediated-attention spike is merged. The builder viability gate is ready for real multi-session dogfood; no production Station or shared #12 Application Client contract has been accepted.",
+  "summary": "The builder passed the mediated-attention viability gate. Production Station contract node #114 is ready; application work still waits on that contract and the shared #12 application-client-ready checkpoint.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-21T20:43:16Z",
+  "updatedAt": "2026-07-22T03:54:33.639Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -71,7 +71,7 @@
       "type": "gate",
       "title": "Mediated attention loop is worth productionizing",
       "summary": "Builder dogfoods the spike with several real sessions during a focused work period and decides whether it materially reduces terminal tab polling, preserves enough context, routes replies naturally, and filters at the right level. The gate may pass, reshape the boundary, or stop the workstream; no production contract work proceeds before it.",
-      "status": "ready",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -85,11 +85,17 @@
       "type": "research",
       "title": "Production Station and operator-loop contract",
       "summary": "Using spike evidence, establish and document the accepted product boundary: human-attended address semantics; source/provenance conventions; namespaced message kinds and metadata; notification policy; reply/disposition behavior; direct, assisted, and quiet routing modes; operator-agent recovery expectations; identity and safety limits. Contribute application-client requirements to shared issue #12 rather than owning a desktop-only client contract.",
-      "status": "planned",
+      "status": "ready",
       "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 114
+      },
       "dependsOn": [
         "viability-gate"
       ]
@@ -171,7 +177,7 @@
       "id": "viability-proven",
       "title": "Mediated attention loop proven valuable",
       "summary": "A real vertical loop exists and builder dogfooding has established that it is worth productionizing.",
-      "status": "planned",
+      "status": "completed",
       "nodeIds": [
         "operator-loop-spike",
         "viability-gate"
@@ -208,12 +214,12 @@
     "requiredTracker": "github-issue"
   },
   "launchDefaults": {
-    "promptProfileId": "telex-operator-station-implementer-v1",
+    "promptProfileId": "telex-operator-station-implementer-watcher-v2",
     "terminal": {
       "titleTemplate": "TLX-O {githubIssue}"
     },
     "launchAfterInit": true,
     "reviewCompanion": true,
-    "reviewPromptTemplateId": "operator-station-reviewer-v1"
+    "reviewPromptTemplateId": "telex-operator-station-reviewer-watcher-v2"
   }
 }

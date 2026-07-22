@@ -9,8 +9,14 @@ the experiment proved honest attendance and consumption. Review also hardened
 route-back recovery, disposition ordering, source identity, restart projection,
 notification evidence, and the final repository layout.
 
-The merged node proves implementation viability only. Builder dogfood at
-`viability-gate` remains the next confidence transition.
+The merged node proved implementation viability. The builder subsequently
+passed `viability-gate` after guided dogfood exercised human escalation, routine
+resolution, clarification, route-back, restart continuity, and notification
+publication. The builder also chose to use the campaign orchestrator as the
+live `attention:rob` mediator during normal workstream execution.
+
+`station-contract` is now ready as issue #114. It owns promotion from
+experimental evidence into accepted product design.
 
 ## Boundaries
 
@@ -32,8 +38,9 @@ The durable exports are the experimental Station and assignment under
 in `docs/notes/operator-loop-spike-report.md`.
 
 The subprocess courier, full-history export, store fingerprint, experimental
-namespace, and current UI behavior are explicitly not production contracts.
-Issue #12 and `station-contract` remain the promotion authorities.
+namespace, current UI behavior, `attention.*` kinds, and `campaignAttention`
+metadata are explicitly not production contracts. Issue #12 and #114 remain
+the promotion authorities.
 
 ## Context fitness
 
@@ -51,8 +58,9 @@ That would have prevented the late shared-artifact path reconciliation.
 Operator attention was highest-leverage at plan review, the first live demo, and
 the workstream-owned artifact reconciliation. The paired reviewer remained the
 right owner for code-level lifecycle, provenance, and evidence defects. The
-builder's next attention belongs at the viability gate, using the merged loop
-with real sessions rather than reviewing more implementation detail.
+builder's next attention belongs at #114's product-contract reviews, especially
+routing modes, provenance, notification posture, and the reply/disposition UX.
+Campaign attention belongs at the #12 seam review.
 
 ## Inspired vs. recovery interventions
 
@@ -70,21 +78,25 @@ with real sessions rather than reviewing more implementation detail.
 
 ## Closeout observation dispositions
 
-None. The current deferred items are production-contract, hardening, or
-validation concerns owned by #12, `station-contract`, `operational-hardening`,
-or the builder viability gate rather than bounded closeout polish.
+- Reply/disposition clarity: promoted to
+  [#114](https://github.com/lossyrob/telex/issues/114). The production contract
+  must make terminal obligation state explicit and evaluate a combined
+  **Reply & Handle** flow.
+
+Other deferred items remain production-contract or hardening concerns owned by
+#12, #114, or `operational-hardening`.
 
 ## Promotion candidates
 
 - Consolidate the spike's Application Client requirements with Telex Watcher
   evidence: target authority — issue #12
-  - Disposition: deferred with rationale; campaign staging requires both
-    viability reports and independent gate outcomes before accepting the shared
-    client contract.
+  - Disposition: ready for promotion; both product viability gates have passed.
+    #114 will publish the exact Operator Station requirements while campaign
+    orchestration owns the shared contract/checkpoint.
 - Decide whether to promote, rename, or retire the experimental message/source
-  convention: target authority — `station-contract`
-  - Disposition: deferred with rationale; the builder viability gate must first
-    establish that the mediated interaction is worth productionizing.
+  convention: target authority — issue #114
+  - Disposition: promoted to #114; the contract node will accept, revise, or
+    reject the spike and campaign-local conventions.
 - Preserve the lesson that application attendance must prove delivery and
   consumption, not database visibility: target authority — workstream-design
   lesson (`project`)
