@@ -91,6 +91,7 @@
         "senderReady",
         "senders",
         "reconciliation",
+        "diagnosticCategories",
         "registryRevision",
         "retention"
       ],
@@ -132,13 +133,97 @@
         "reconciliation": {
           "$ref": "#/$defs/reconciliation"
         },
+        "diagnosticCategories": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "registry-already-owned",
+              "sender-unready",
+              "reconciliation-blocked",
+              "retention-warning",
+              "inbound-backlog"
+            ]
+          }
+        },
         "registryRevision": {
           "$ref": "#/$defs/nonNegativeCount"
         },
         "retention": {
           "$ref": "#/$defs/retention"
         }
-      }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "const": "starting"
+            },
+            "reconciliation": {
+              "properties": {
+                "status": {
+                  "const": "not-required"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "reconciling"
+            },
+            "reconciliation": {
+              "properties": {
+                "status": {
+                  "const": "running"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "ready"
+            },
+            "reconciliation": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "complete",
+                    "not-required"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "degraded"
+            },
+            "reconciliation": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "complete",
+                    "blocked"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "stopping"
+            }
+          }
+        }
+      ]
     },
     "watch": {
       "type": "object",
@@ -147,6 +232,7 @@
         "watchId",
         "logicalStoreId",
         "registrationRevision",
+        "activatedAt",
         "lifecycle",
         "health",
         "blockedReason",
@@ -172,6 +258,10 @@
         "registrationRevision": {
           "type": "integer",
           "minimum": 1
+        },
+        "activatedAt": {
+          "type": "string",
+          "format": "date-time"
         },
         "lifecycle": {
           "enum": [
@@ -236,10 +326,7 @@
                 "script-drift",
                 "send-failure",
                 "unknown-receipt",
-                "sender-unready",
-                "runtime-interrupted",
-                "retention-warning",
-                "inbound-backlog"
+                "runtime-interrupted"
               ]
             },
             {
@@ -336,6 +423,7 @@
         "address",
         "logicalStoreId",
         "status",
+        "diagnosticCategory",
         "membershipLossReason",
         "leaseEpoch",
         "lastReconciledAt",
@@ -358,10 +446,36 @@
             "blocked"
           ]
         },
+        "diagnosticCategory": {
+          "oneOf": [
+            {
+              "enum": [
+                "membership-loss",
+                "collision",
+                "partial-attachment",
+                "inbound-backlog"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "membershipLossReason": {
-          "type": [
-            "string",
-            "null"
+          "oneOf": [
+            {
+              "enum": [
+                "daemon-restart",
+                "predicate-death",
+                "collision",
+                "deliberate-detach",
+                "needs-attach",
+                "owner-demoted"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "leaseEpoch": {

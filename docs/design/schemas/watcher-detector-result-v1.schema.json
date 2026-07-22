@@ -114,7 +114,7 @@
         "kind": {
           "type": "string",
           "minLength": 3,
-          "pattern": "^(?!\\.)(?!.*\\.$)[^\\u0000-\\u001f\\u007f]+\\.[^\\u0000-\\u001f\\u007f]+$"
+          "pattern": "^[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"
         },
         "subject": {
           "$ref": "#/$defs/nonControlString"

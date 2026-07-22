@@ -143,6 +143,11 @@ active watch. Explicit resume confirms the new policy. This prevents an active
 watch from changing its downstream event vocabulary without an operator
 checkpoint.
 
+Watcher persists `activatedAt` when a registration first becomes active and
+replaces it on every explicit resume. `registrationRevision` is per-watch;
+`registryRevision` is a separate registry-wide change counter. They are
+independent diagnostics and must not be numerically compared.
+
 Registration validates paths, argv, timing bounds, addresses, variable names,
 JSON sizes, script mode/digest, and kind policy before persistence.
 
@@ -305,7 +310,8 @@ kind was allowed by registration policy.
 
 An event kind must:
 
-- be non-empty, namespaced, and free of control characters;
+- use lowercase ASCII letters, digits, and hyphens in two or more dot-separated
+  segments;
 - match `allowedEventKinds` exactly or one configured
   `allowedEventKindPrefixes` entry; and
 - remain within the protocol byte cap.
@@ -467,8 +473,10 @@ Each registration has `maxSafeDowntimeSeconds`:
 - a positive value declares the longest safe recovery gap; and
 - exceeding it pauses the watch with `blockedReason = downtime-gap`.
 
-The elapsed-time reference is the latest successful evaluation, or the current
-activation/resume timestamp for a watch that has never succeeded. Runtime
+The elapsed-time reference is the latest successful evaluation, or persisted
+`activatedAt` for a watch that has never succeeded. A watch registered while the
+runtime is offline uses its registration activation time; an explicit resume
+replaces that timestamp. Runtime
 startup completes interrupted-attempt and containment reconciliation, then
 evaluates the downtime limit **before** placing any overdue watch on the
 scheduler. An unsafe gap therefore cannot run one catch-up attempt first.
@@ -507,8 +515,8 @@ external cleanup/proof followed by explicit resume.
 |---|---|---|---|
 | `idle` | commit valid `nextState`; no send | active/ready | none |
 | accepted `event` | atomic event/state/attempt commit | active/ready | none |
-| accepted terminal event | atomic commit | terminal/terminal | remove when desired |
-| eventless terminal | direct state/attempt commit | terminal/terminal | remove when desired |
+| accepted terminal event | atomic commit | terminal/inactive | remove when desired |
+| eventless terminal | direct state/attempt commit | terminal/inactive | remove when desired |
 | `degraded` | no state/send | active/degraded + backoff | later successful attempt |
 | nonzero exit, malformed/oversize/noncanonical result, timeout | no state/send | active/degraded + backoff | later successful attempt or operator correction |
 | send failure or unknown receipt | no state/event commit | active/degraded + backoff | reconcile sender and retry later |
@@ -650,11 +658,11 @@ The health document includes:
 
 - `schemaVersion`, `observedAt`, and declared `staleAfterSeconds`;
 - runtime ID, PID, start/heartbeat times, status, aggregate sender readiness,
-  per-sender diagnostics, and registry revision;
+  per-sender diagnostics, runtime diagnostic categories, and registry revision;
 - restart reconciliation status and interrupted-runtime/unfinished-attempt/
   containment-pending counts;
-- per-watch logical-store identity, registration revision, lifecycle, and
-  health;
+- per-watch logical-store identity, registration revision, activation time,
+  lifecycle, and health;
 - consecutive failures;
 - last attempt, success, and event times;
 - next attempt;
@@ -675,6 +683,27 @@ membership-loss detail, lease epoch, reconciliation time, pending unconsumed
 count, and inbound actionable count. `senderReady` remains the aggregate
 all-required-senders-ready predicate.
 
+Legal runtime/reconciliation combinations are:
+
+| Runtime status | Reconciliation status | Meaning |
+|---|---|---|
+| `starting` | `not-required` | Runtime setup has not discovered prior interrupted work. |
+| `reconciling` | `running` | Prior runtime/attempt/containment recovery is in progress. |
+| `ready` | `complete` or `not-required` | Reconciliation no longer blocks scheduling; only `ready` is readiness. |
+| `degraded` | `complete` or `blocked` | Runtime can report status but one or more operational conditions block full readiness. |
+| `stopping` | any current value | Shutdown is authoritative; no new scheduling or reattachment begins. |
+
+`reconciliation = blocked` means containment or interrupted-state recovery
+requires operator action and therefore pairs with `runtime.status = degraded`.
+A sender is `ready` after verified attachment, `degraded` during bounded
+transient loss/reconciliation, and `blocked` after collision or uncompensated
+partial attachment requiring operator action.
+
+Sender `membershipLossReason` is `daemon-restart`, `predicate-death`,
+`collision`, `deliberate-detach`, `needs-attach`, `owner-demoted`, or `null`.
+Sender `diagnosticCategory` separately classifies `membership-loss`,
+`collision`, `partial-attachment`, `inbound-backlog`, or `null`.
+
 `blockedReason` is a closed v1 vocabulary:
 
 - `event-kind-not-allowed`;
@@ -683,8 +712,10 @@ all-required-senders-ready predicate.
 - `downtime-gap`; and
 - `orphan-containment-unproven`.
 
-`diagnosticCategory` is the versioned operational category from the health
-schema. New categories require a health-schema revision rather than ad hoc
+Per-watch `diagnosticCategory`, per-sender `diagnosticCategory`, and runtime
+`diagnosticCategories` are separate versioned scopes from the health schema.
+Runtime/sender conditions are not fanned out to every watch that shares an
+address. New categories require a health-schema revision rather than ad hoc
 free-form strings.
 
 Automatic remote health notification is deferred; supervisor-visible health is
@@ -706,6 +737,8 @@ Runtime retention counts all persisted registry rows and estimated bytes.
 Per-watch retention counts that watch's registration/state, attempts,
 diagnostics, and event evidence. `warning` is true when
 `rows >= warningRows` **or** `bytes >= warningBytes`; thresholds are positive.
+Both row and byte thresholds are mandatory in v1 and cannot be disabled
+independently.
 
 Attempts and diagnostic-payload retention, backup, and safe compaction are owned
 by operational hardening. That node must define a capacity model and default
