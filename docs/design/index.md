@@ -23,6 +23,13 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   credential policy, sender identity, normalized events, and the requirements
   exported to the shared Application Client. Load-bearing boundary:
   [ADR 0046](DECISIONS.md#0046--watcher-runs-provider-neutral-trusted-local-detectors-with-receipt-gated-state).
+- **[operator-station.md](operator-station.md)** — the **normative Operator Station
+  application contract**: human-attended address semantics, direct and assisted
+  routing, operator-agent authority, source provenance, notification policy,
+  reply/disposition behavior, recovery, identity, safety, and the requirements
+  exported to the shared Application Client. Load-bearing boundaries:
+  [ADR 0047](DECISIONS.md#0047--operator-station-mediation-remains-application-logic-outside-telex-core)
+  and [ADR 0048](DECISIONS.md#0048--direct-and-assisted-routing-use-exclusive-ingress-attendance).
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — the **visual on-ramp** to the daemon design:
   mermaid diagrams (component map, pull **and push** message delivery, restart/re-attach,
   station liveness, the single-writer epoch fence, authorization) that teach the
@@ -52,9 +59,11 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
 4. `daemon.md` — the precise contracts `daemon-core` and downstream nodes implement.
 5. `watcher.md` — how a provider-neutral headless application executes trusted
    local detectors and commits state only after durable Telex acceptance.
-6. `copilot-bridge-push.md` — how push delivery layers a harness bridge on the daemon's
+6. `operator-station.md` — how a human-facing Station and optional operator agent
+   compose Telex attendance, delivery, threading, and disposition semantics.
+7. `copilot-bridge-push.md` — how push delivery layers a harness bridge on the daemon's
    on-deliver exec (read after `daemon.md` sec.13.2).
-7. `DECISIONS.md` — why each load-bearing choice was made.
+8. `DECISIONS.md` — why each load-bearing choice was made.
 
 ## Open-question resolutions (design-foundation)
 
