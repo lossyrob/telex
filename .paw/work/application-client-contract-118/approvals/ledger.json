@@ -86,8 +86,8 @@
       "responseMessageId": 1817,
       "allocatedAdr": 49,
       "allocationBaseCommit": "7a568c43413fc7aeab6a484b07dce0f0db11d68f",
-      "useCondition": "revision-12-dual-plan-approval-and-allocation-revalidation",
-      "supersededByPlanRevision": 12,
+      "useCondition": "revision-13-dual-plan-approval-and-allocation-revalidation",
+      "supersededByPlanRevision": 13,
       "supersededReason": "mandatory-human-merge-floor"
     },
     {
@@ -116,8 +116,38 @@
       "requestMessageId": 1819,
       "requestedAt": "2026-07-22T13:10:23.604Z",
       "status": "superseded",
+      "feedbackMessageId": 1822,
       "supersededByPlanRevision": 12,
       "supersededReason": "human-merge-floor-sender-ownership"
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-requested",
+      "planRevision": 12,
+      "sourceHead": "8fdfefbbfdaec3a9adcdb1fb796eef1c7edd6e86",
+      "digest": "004b924f1bb306afdd6f13bc3c04ecf04274f18185500ec3401ceedfca277a37",
+      "byteLength": 44028,
+      "approver": "telex://lossyrob/telex/T-A:application-client-orch",
+      "requestMessageId": 1824,
+      "requestedAt": "2026-07-22T13:26:42.908Z",
+      "status": "superseded",
+      "feedbackMessageId": 1827,
+      "supersededByPlanRevision": 13,
+      "supersededReason": "literal-human-address-and-single-use-floor"
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-requested",
+      "planRevision": 12,
+      "sourceHead": "8fdfefbbfdaec3a9adcdb1fb796eef1c7edd6e86",
+      "digest": "004b924f1bb306afdd6f13bc3c04ecf04274f18185500ec3401ceedfca277a37",
+      "byteLength": 44028,
+      "approver": "telex://lossyrob/telex/T-A:campaign-orch",
+      "requestMessageId": 1825,
+      "requestedAt": "2026-07-22T13:26:42.908Z",
+      "status": "superseded",
+      "supersededByPlanRevision": 13,
+      "supersededReason": "literal-human-address-and-single-use-floor"
     }
   ]
 }
