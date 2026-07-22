@@ -5,6 +5,11 @@
 Accepted Operator Station domain contract for
 [issue #114](https://github.com/lossyrob/telex/issues/114).
 
+Load-bearing decisions:
+[ADR 0047](DECISIONS.md#0047--operator-station-mediation-remains-application-logic-outside-telex-core)
+and
+[ADR 0048](DECISIONS.md#0048--direct-and-assisted-routing-use-exclusive-ingress-attendance).
+
 This document is normative for the Operator Station product, the reusable
 operator-agent role, and their use of existing Telex semantics. The shared
 Application Client needed to implement this contract remains owned by
@@ -66,6 +71,9 @@ Operator agent:
 Deployment configuration:
 
 - supplies the ingress and human-facing addresses;
+- uses the ingress address as the operator-agent sender/recipient address in
+  assisted mode; a human response targets the escalation's `from`, which must
+  equal that configured ingress address;
 - selects direct or assisted routing and, for assisted routing, normal or quiet
   policy;
 - owns an ordered transition between occupants without dual ownership.
@@ -118,11 +126,6 @@ This contract does not define:
 **Mediation ID**
 : An application-generated, retry-stable identifier connecting one mediation
   episode across escalation, human reply, and route-back attempts.
-
-**Approved source anchor**
-: The workstream-approved tuple of Station-contract review message ID, source
-  head, and Operator Station domain-bundle digest used to derive the issue #12
-  requirements export.
 
 ## Core invariants
 
@@ -232,12 +235,19 @@ and does not add a router.
    `station stop`.
 3. Verify through station status that the old session no longer owns the
    ingress registration. Do not use operator reset as a routine transition.
+   If the old occupant crashed, wait a configured bounded grace for its
+   session-end/watch-pid liveness path. If the registration remains, verify the
+   recorded old process/session is gone and explicitly stop/detach that exact
+   old station under operator authorization. `Reset` alone is non-destructive
+   and is not a substitute for removing the registration. If the old identity
+   cannot be proved, remain visibly blocked rather than forcing takeover.
 4. Attach the new occupant. An ownership collision fails closed.
 5. Verify receive health and drain the durable backlog.
 6. Mark the new configuration active.
 
-Messages may queue while the ingress address is unoccupied. That gap is honest
-and preferable to competing owners. If the new attach fails, the deployment
+Messages queue durably while the active ingress address is unoccupied under the
+existing [delivery contract](daemon.md#13-delivery-and-seen-dedup). That gap is
+honest and preferable to competing owners. If the new attach fails, the deployment
 either reattaches the old occupant or remains visibly transitioning with a
 durable backlog. It never runs both occupants.
 
@@ -259,12 +269,18 @@ Operator Station presents health as separate axes:
 |---|---|
 | Station receive | healthy, recovering, degraded, stopped, unknown; registration and latest receive error |
 | Delivery/ack | pending count, oldest pending age, ack-pending state, stalled/deaf warning |
-| Operator ingress | attended, unattended, unknown; address and latest status evidence |
+| Operator ingress | attended-healthy, attended-degraded, attended-deaf, attended-with-backlog, unattended, unknown; address, foreign station health, push/wait status, backlog, and latest error evidence |
 | Source resolution | authoritative, captured-only, unavailable, mismatch |
 | Notification posture | enabled, locally suppressed, OS-suppressed when observable, unknown, failed |
 
 The UI may summarize these axes, but it must retain the evidence and must not
 collapse them into an unqualified "online" state.
+
+Assisted-mode operator ingress health uses the existing widened station-status
+projection, including foreign-owned rows, `station_health`, `push_delivery`,
+pending unconsumed, inbound actionable, deaf timing, and waiter/push evidence
+from [daemon.md section 4](daemon.md#4-status-surface-the-frozen-contract-shape).
+Occupancy alone is never the healthy state.
 
 Human availability is `unknown` unless a separate explicit local signal exists.
 It is never inferred from Station occupancy or notification submission.
@@ -320,6 +336,12 @@ Supported v1 messages may add fields. Recipients ignore and preserve unknown
 fields inside a recognized v1 envelope. A different extension ID or major
 version is unsupported.
 
+A message may carry the recognized Operator Station v1 extension alongside
+unknown extensions. The Station applies semantics only from the recognized v1
+dataschema and preserves the unknown blocks as opaque evidence. Unknown
+extensions cannot override core message fields or recognized Operator Station
+fields.
+
 An unsupported message is shown as a feed-only raw diagnostic. If it is a human
 obligation, the obligation remains visible and may be explicitly rejected as
 unsupported; the Station does not auto-handle or auto-reject it.
@@ -333,7 +355,8 @@ unsupported; the Station does not auto-handle or auto-reject it.
 | `operator-station.digest` | operator agent -> Station | Aggregated informational summary | no | yes |
 
 `operator-station.escalation` and `operator-station.human-reply` normally set
-`requiresDisposition: true`. `operator-station.digest` normally does not.
+`requiresDisposition: true`. `operator-station.digest` must not set
+`requiresDisposition: true`.
 
 Clarifications and routed outcomes remain ordinary replies in the raw thread or
 operator-role conventions. The Station does not need to interpret distinct
@@ -352,6 +375,7 @@ An escalation uses:
   "ext": {
     "operator-station": {
       "mediationId": "opaque-retry-stable-id",
+      "operationId": "retry-stable-escalation-send-id",
       "ingressAddress": "configured-ingress-address",
       "humanAddress": "configured-human-address",
       "requestedOutcome": "One concrete question or requested decision",
@@ -386,6 +410,14 @@ The body remains understandable without metadata. It states:
 `recommendation` is operator-authored and must be presented as such. It is not
 source text and is not human approval.
 
+`mediationId` identifies the episode; `operationId` identifies this escalation
+send attempt across retry and replacement.
+
+The escalation's outer `attention` is the urgency of the operator's request to
+the human. It defaults to `next-checkpoint` and may be `interrupt` only when the
+operator judges the human outcome interrupt-worthy. It is not copied
+automatically from a source message.
+
 ### Human-reply envelope
 
 A Station-authored reply stays in the mediated thread and uses:
@@ -417,11 +449,13 @@ The reply is sent from the human address to the operator-agent address with
 `requiresDisposition: true`. `next-checkpoint` is the default attention;
 the human may select `interrupt` only for a genuinely urgent outcome.
 
-`responseType` is:
+`responseType` and `humanDispositionIntent` form this presence matrix:
 
-- `text-reply` when the human supplied reply body text;
-- `disposition-only` when assisted-mode Handle, Defer, Reject, or Close has no
-  human reply text.
+| Station action | `responseType` | `humanDispositionIntent` |
+|---|---|---|
+| Reply | `text-reply` | absent; mediated and raw obligations remain open |
+| Reply & Handle | `text-reply` | required as `handled` |
+| Handle/Defer/Reject/Close without text | `disposition-only` | required as the selected intent |
 
 For `disposition-only`, the Station supplies a concise generated body such as
 "Human deferred this escalation without a textual reply." The message is a
@@ -435,6 +469,38 @@ A digest uses dataschema `urn:telex:operator-station:v1#digest` and carries a
 retry-stable digest ID, a bounded summary period, and source references for each
 included item. A digest never replaces the underlying messages or their
 individual obligations.
+
+```json
+{
+  "extensions": {
+    "operator-station": "urn:telex:operator-station:v1"
+  },
+  "dataschema": "urn:telex:operator-station:v1#digest",
+  "ext": {
+    "operator-station": {
+      "digestId": "retry-stable-digest-id",
+      "windowStartMs": 1780000000000,
+      "windowEndMs": 1780003600000,
+      "items": [
+        {
+          "storeId": "opaque-logical-store-id",
+          "messageId": 123,
+          "threadId": 120,
+          "from": "source-address",
+          "to": "ingress-address",
+          "kind": "status",
+          "sentAtMs": 1780000100000
+        }
+      ]
+    }
+  }
+}
+```
+
+`windowStartMs` is inclusive and `windowEndMs` is exclusive. `items` is
+bounded, and every item uses the same logical-store/message source identity as
+an escalation. The message body summarizes the period and reports truncation
+when the bounded item list omits sources.
 
 ### Experimental and campaign convention disposition
 
@@ -554,8 +620,8 @@ The Station resolves collisions in this order:
 1. OS/application notifications disabled;
 2. explicit user source/address mute;
 3. user quiet schedule or OS focus posture;
-4. supported-kind override;
-5. attention and disposition defaults.
+4. the recognized kind-specific row in the decision matrix, or the
+   attention/disposition fallback when no kind-specific row exists.
 
 `interrupt` does not bypass explicit user or OS suppression. It remains
 prominent in the feed.
@@ -568,7 +634,8 @@ notification presentation, but not obligations.
 An aggregate notification has:
 
 - a configured bounded window;
-- an aggregation key such as source, thread, and kind;
+- an aggregation key that includes at least source address and kind; an
+  implementation may refine it with thread or other declared fields;
 - the count and newest subject;
 - links to every underlying feed row.
 
@@ -608,6 +675,13 @@ For a human obligation the Station offers:
 The selected recipient's disposition is always explicit. Reply does not
 implicitly mutate another recipient's disposition.
 
+In direct mode, Reply and Reply & Handle send an ordinary reply in the raw
+thread from the ingress address. In assisted mode, they send
+`operator-station.human-reply` from the human address to the configured ingress
+address. Assisted plain Reply uses `responseType: text-reply` without
+`humanDispositionIntent`; both the mediated root and raw obligation remain
+open after the operator routes the text.
+
 In direct mode, disposition-only actions apply to the raw obligation locally
 because the Station attends ingress. In assisted mode, every disposition-only
 action first sends a durable `operator-station.human-reply` with
@@ -619,10 +693,13 @@ after that operator notification is durably accepted.
 `Reply & Handle` is a higher-level application operation:
 
 1. Mint or reuse a retry-stable operation ID.
-2. Send `operator-station.human-reply`.
-3. Verify the receipt identifies the expected parent, mediated thread, sender,
-   and operator-agent recipient.
-4. Only after durable reply acceptance, record `handled` for the selected human
+2. Persist the operation ID to restart-safe state before submission.
+3. In direct mode, send an ordinary raw-thread reply from the ingress address.
+   In assisted mode, send `operator-station.human-reply` with
+   `responseType: text-reply` and `humanDispositionIntent: handled`.
+4. Verify the receipt identifies the expected parent/thread, sender, and
+   recipient for the active topology.
+5. Only after durable reply acceptance, record `handled` for the selected human
    obligation.
 
 The Station command handler enforces this order even when the Application
@@ -644,11 +721,12 @@ Handle, Defer, Reject, and Close without human text use the same retry and
 ordering discipline:
 
 1. Mint or reuse a retry-stable operation ID.
-2. Send a disposition-only `operator-station.human-reply` identifying the
+2. Persist the operation ID to restart-safe state before submission.
+3. Send a disposition-only `operator-station.human-reply` identifying the
    intended root disposition and optional human note.
-3. Verify the receipt identifies the expected mediated parent/thread, sender,
+4. Verify the receipt identifies the expected mediated parent/thread, sender,
    and operator-agent recipient.
-4. Only after durable acceptance, apply the intended disposition to the
+5. Only after durable acceptance, apply the intended disposition to the
    mediated root.
 
 If notification send fails, the root remains unchanged. If notification
@@ -674,8 +752,15 @@ separate operator obligation. The operator agent:
 5. acknowledges and terminally handles the human-response message.
 
 For `text-reply`, the operator routes the human text in the raw thread using the
-same mediation ID and a retry-stable route operation ID, then closes the raw
-obligation when appropriate.
+same mediation ID and a retry-stable route operation ID. If
+`humanDispositionIntent` is absent, the raw obligation remains open. If it is
+`handled`, the operator closes the raw obligation after route-back succeeds.
+
+The raw-thread reply is authored by the operator-agent/ingress address and must
+identify the human basis without impersonation. Its body states that it relays
+a human outcome, and its opaque Operator Station metadata carries at least
+`mediationId`, `humanOriginated: true`, the human address, and the mediated
+human-response message ID.
 
 For `disposition-only`:
 
@@ -715,6 +800,11 @@ The operator never guesses a replacement source. It records one of:
   determines no safe route exists;
 - a new directed message only after explicit policy or human confirmation.
 
+If the source address remains active and reachable, the operator posts a
+stale-origin notice in the raw thread before recording `handled`, `rejected`, or
+`closed`. Silent terminal disposition is permitted only when the source is
+unresolvable, retired, or already terminal and no reachable raw thread remains.
+
 The mediated thread shows the outcome. A late response to a closed escalation
 is a new operator obligation and follows the same validation.
 
@@ -736,6 +826,14 @@ Application-local state may implement the projection, but the supported client
 contract owns the identity, receive, ack, and recovery semantics. A local path,
 session UUID, or high-water file is not the shared production contract.
 
+The Station also needs bounded local-scope discovery and cleanup. It can list
+its locally persisted application scopes by logical store identity, configured
+address, and application identity; identify scopes whose store/address
+configuration was replaced; and remove stale local projections only through an
+explicit, evidence-preserving cleanup action. Cleanup never deletes Telex
+messages, dispositions, or another application's scope. This is the Operator
+Station basis for AC-15 local scope discovery/cleanup.
+
 ### Operator-agent replacement
 
 The durable ingress address survives the agent session. A replacement operator:
@@ -756,9 +854,14 @@ Escalation, human response, route-back, and compound disposition operations use
 retry-stable application operation IDs. The shared client must expose whether
 an operation was accepted, duplicated, rejected, or indeterminate.
 
-The operator does not create a second escalation merely because a delivery was
-redelivered. The Station does not send a second reply merely because Handle
-failed.
+An operation ID is persisted to restart-safe state before the corresponding
+send is submitted. Restart restores in-flight operation IDs and reconciles the
+shared-client duplicate window before authoring.
+
+The Station dedupes escalation presentation by
+`(mediationId, operationId, authoring operator address)`. The operator does not
+create a second escalation merely because a delivery was redelivered. The
+Station does not send a second reply merely because Handle failed.
 
 ## Identity, principals, links, and safe actions
 
@@ -824,7 +927,7 @@ semantics, not Station API design.
 | Production extension and provenance | AC-02, AC-04, AC-08, AC-11 |
 | Feed/history | AC-04, AC-05, AC-06, AC-07, AC-14 |
 | Human reply/disposition and route-back | AC-08, AC-09, AC-10, AC-15 |
-| Restart and replacement | AC-01, AC-05, AC-06, AC-07, AC-09, AC-12, AC-14 |
+| Restart and replacement | AC-01, AC-05, AC-06, AC-07, AC-09, AC-12, AC-14, AC-15 |
 | Identity and principals | AC-02, AC-11, AC-13 |
 
 Station-specific behavior that is not exported to #12 includes the desktop
@@ -845,7 +948,10 @@ inputs, not acceptance of that shared contract.
 - implement Reply & Handle with fail-closed ordering and visible partial state;
 - implement assisted disposition-only operator notification before root
   disposition;
+- present the full assisted operator-ingress health states from the widened
+  station-status projection;
 - preserve local read state as separate from ack/disposition;
+- implement explicit local-scope discovery and evidence-preserving cleanup;
 - validate Windows notification behavior and restart continuity.
 
 ### `operator-broker`
@@ -891,6 +997,7 @@ inputs, not acceptance of that shared contract.
 | Optimistic display of just-sent reply | optional, deferred | `station-app` | Must not hide durable receipt/partial state |
 | Reply attention selection | accepted | `station-app`, issue #12 AC-08 | Human reply defaults to next-checkpoint with explicit urgent override |
 | Retry throttling and richer notes | promoted | issue #12 AC-15, `station-app` | Needed for visible and safe recovery |
+| Local scope discovery/cleanup | promoted | issue #12 AC-15, `station-app` | Needed to identify replaced store/address projections without deleting Telex records |
 | Persisted-scope restart artifact capture | deferred | `station-app` validation | Contract requires restart-safe projection; evidence remains downstream |
 | CLI subprocess courier | rejected as production contract | issue #12 | Shared client must replace it |
 | Repeated one-shot waiter supervision | rejected as production contract | issue #12 | Application receive is supported client behavior |
@@ -915,6 +1022,9 @@ Revisit this contract if:
 - production dogfood shows the direct/assisted topology cannot transition
   safely with a durable unoccupied gap;
 - the v1 extension cannot evolve additively;
+- the general EXTENSIONS proposal is accepted with an envelope shape
+  incompatible with `urn:telex:operator-station:v1` (a compatible v1 remains
+  frozen; an incompatible shape requires a v2 extension ID);
 - authenticated principal evidence cannot be presented without overstating
   trust;
 - notification pressure requires a different default matrix;

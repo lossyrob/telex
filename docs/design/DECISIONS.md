@@ -1986,12 +1986,15 @@ attends a distinct human address. Quiet is an assisted policy posture, not anoth
 occupancy topology. Direct/assisted transition is application-owned sequencing over
 existing `Detach`/status/`Register` semantics: remove the old registration, verify
 the unoccupied gap, attach and verify the new occupant, then activate the new
-configuration. Daemon upgrade handoff is not repurposed as a session-routing
-protocol.
+configuration. If the old occupant crashed, the deployment waits a bounded liveness
+grace, verifies the recorded process/session is gone, and explicitly stops/detaches
+that exact old station before retrying. `Reset` alone does not remove membership.
+Daemon upgrade handoff is not repurposed as a session-routing protocol.
 
 **Consequences.** A transition may create a short, visible unoccupied interval, but
 messages queue durably and no two owners compete. Failed attach leaves the deployment
 visibly transitioning or restores the old occupant; it never silently runs both.
-Operator reset remains break-glass rather than a normal mode switch. Multi-device or
-non-exclusive attendance requires a future design change rather than an
-Operator Station exception.
+An unprovable crashed predecessor leaves the transition visibly blocked rather than
+forcing takeover. Operator reset remains diagnostic break-glass rather than a normal
+mode switch or substitute for explicit removal. Multi-device or non-exclusive
+attendance requires a future design change rather than an Operator Station exception.

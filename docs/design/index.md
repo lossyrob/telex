@@ -21,7 +21,9 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   application contract**: human-attended address semantics, direct and assisted
   routing, operator-agent authority, source provenance, notification policy,
   reply/disposition behavior, recovery, identity, safety, and the requirements
-  exported to the shared Application Client.
+  exported to the shared Application Client. Load-bearing boundaries:
+  [ADR 0047](DECISIONS.md#0047--operator-station-mediation-remains-application-logic-outside-telex-core)
+  and [ADR 0048](DECISIONS.md#0048--direct-and-assisted-routing-use-exclusive-ingress-attendance).
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — the **visual on-ramp** to the daemon design:
   mermaid diagrams (component map, pull **and push** message delivery, restart/re-attach,
   station liveness, the single-writer epoch fence, authorization) that teach the
