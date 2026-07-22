@@ -189,6 +189,10 @@ to disposition the shared requirements and publish the
 - Test-support helper packaging is promoted into the accepted Watcher contract:
   `watcher-runtime` must prove the default production package excludes
   `fake_detector` and `fake_telex` while keeping the product crate top-level.
+- PAW PR-sentry bootstrap must run a terminal PR-state check immediately before
+  adding state/activity watches. A PR can merge during detector-bundle and
+  credential preflight; merged/closed state should skip registration rather than
+  leave stale watches or start a Loop fallback.
 
 Continue parking bounded detector-template, diagnostics, CLI, and polling-policy
 improvements here during dogfooding. Any expansion into general automation,

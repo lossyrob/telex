@@ -29,6 +29,11 @@ domain semantics into `docs/design/watcher.md`, four canonical schemas, and ADR
 Downstream implementation is now waiting on campaign acceptance of the shared
 Application Client rather than on unresolved Watcher-domain design.
 
+Post-approval Watcher-sentry preflight also caught that PR #115 had merged before
+its state/activity watches were registered. No watches or Loop fallback were
+started, and the shared runtime remained reusable. Template guidance must make
+terminal state the final check immediately before registration.
+
 ## Boundaries
 
 - **Held:** Provider semantics stayed in editable scripts; Watcher remained
@@ -139,6 +144,8 @@ without changing the already-approved shared-client requirements.
 
 - Test-support helper binaries: promoted through #110 into the
   `watcher-runtime` packaging acceptance checklist.
+- PR-sentry merge-during-preflight: promoted to
+  `detector-template-library` bootstrap guidance and lifecycle tests.
 
 ## Promotion candidates
 
@@ -165,5 +172,6 @@ without changing the already-approved shared-client requirements.
 - Shared Watcher supervision can replace a session-owned PR sentry loop for
   scoped PAW dogfood while a one-shot canonical checker remains authoritative:
   target authority — detector-template guidance and Watcher viability evidence.
-  - Disposition: accepted by the builder viability gate; #110 and the later
-    template node own production contract/guidance.
+  - Disposition: accepted by the builder viability gate; #110 owns the production
+    contract, and the template node must check terminal state immediately before
+    watch registration so merge-during-preflight creates no stale supervisor.
