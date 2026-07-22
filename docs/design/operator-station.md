@@ -229,6 +229,20 @@ membership and lease semantics. It is not daemon upgrade handoff
 ([daemon.md section 11.4](daemon.md#114-ordered-handoff--owner-directed-atomic-transfer-sf3))
 and does not add a router.
 
+Before an assisted-to-direct transition, the deployment inventories every
+unresolved mediated escalation and human-response obligation. The operator
+agent either drains them or writes a durable handoff record containing each
+mediation ID, source reference, mediated root/response IDs, and in-flight
+operation state. The Station confirms that it can reconstruct the obligations
+before the operator detaches.
+
+The former human address remains attended by the Station in a visible
+`mode-inactive/drain-only` state until those obligations are terminal or
+explicitly reassigned. It accepts no new assisted escalation in that state.
+After the Station takes ingress, it uses the handoff plus Telex history to
+complete old route-back work directly. The human address may be detached only
+when its unresolved mediated count is zero.
+
 1. Persist the desired configuration as `transitioning`; do not report the new
    mode as active yet.
 2. The old occupant stops receive activity and explicitly detaches or performs
@@ -420,6 +434,10 @@ source text and is not human approval.
 `mediationId` identifies the episode; `operationId` identifies this escalation
 send attempt across retry and replacement.
 
+An escalation derived from a raw obligation must contain at least one valid
+`sourceMessages` entry. Source-free reminders use an ordinary message or digest
+with their own lifecycle; they are not encoded as an escalation.
+
 The escalation's outer `attention` is the urgency of the operator's request to
 the human. It defaults to `next-checkpoint` and may be `interrupt` only when the
 operator judges the human outcome interrupt-worthy. It is not copied
@@ -581,18 +599,29 @@ On startup and recovery, the Station requests:
 1. every unresolved primary obligation for its configured addresses;
 2. bounded recent history;
 3. thread expansion on demand;
-4. subsequent delta events from a restart-safe cursor.
+4. a snapshot fence/cursor from which subsequent delta events begin.
 
 The Station does not require full-store materialization.
 
-Live and backfill results merge by
-`(logical store identity, message ID, delivery role)`. Duplicate delivery does
-not create a duplicate row, toast, reply, or disposition operation.
+Receive/backfill records are identified by
+`(logical store identity, message ID, recipient address)` or an equivalent
+opaque delivery-row identity. Delivery role is context, not identity. The same
+message may have separate per-recipient acknowledgment and disposition state.
+Presentation may coalesce rows only after preserving each recipient's delivery
+identity and state.
+
+The backfill snapshot and delta stream must share an ordering contract. The
+client supplies either a snapshot fence after which deltas begin, or
+per-axis monotonic versions for delivery, acknowledgment, disposition, and
+health. Overlapping resync and live updates never regress a newer axis value.
+Duplicate delivery does not create a duplicate row, toast, reply, or
+disposition operation.
 
 The Station acknowledges a primary delivery only after it has durably written
-the envelope, delivery role, metadata, disposition requirement, and receive
-cursor to restart-replayable application state. In-memory insertion, rendering,
-or toast submission is not durable ingest.
+the envelope, recipient/delivery-row identity, delivery role, metadata,
+disposition requirement, and receive cursor to restart-replayable application
+state. The acknowledgment capability is bound to that exact recipient delivery.
+In-memory insertion, rendering, or toast submission is not durable ingest.
 
 Local read/unread state is a UI preference. It does not acknowledge delivery or
 disposition an obligation.
@@ -635,6 +664,12 @@ The Station resolves collisions in this order:
 
 `interrupt` does not bypass explicit user or OS suppression. It remains
 prominent in the feed.
+
+When OS focus/quiet posture is `unknown`, the Station falls through to the
+normal kind/attention/disposition matrix and records
+`os-posture-unknown` in notification evidence. Unknown does not suppress a
+toast. A future validated OS integration may refine the observed posture input,
+not this fallback rule.
 
 ### Quiet posture and aggregation
 
@@ -771,21 +806,33 @@ identify the human basis without impersonation. Its body states that it relays
 a human outcome. The ordinary reply carries the recognized Operator Station
 metadata envelope with dataschema
 `urn:telex:operator-station:v1#routed-outcome`; its extension block carries at
-least `mediationId`, `humanOriginated: true`, the human address, and the
-mediated human-response message ID.
+least `mediationId`, a retry-stable route `operationId`,
+`humanOriginated: true`, the human address, and the mediated human-response
+message ID. The route operation ID is persisted before send. After restart or
+operator replacement, the operator reconciles the operation result/receipt
+before advancing the human-response Handle.
 
 For `disposition-only`:
 
 | Human intent | Required raw outcome |
 |---|---|
-| `handled` | send a generic completion only when the source needs notice, then `closed` |
+| `handled` | post a machine-readable completion outcome in the raw thread, then `closed` |
 | `deferred` | record `deferred`; keep the raw obligation open for later human input |
-| `rejected` | notify the source when safely addressable, then `rejected` with the human note |
-| `closed` | notify the source when policy requires it, then `closed` |
+| `rejected` | post a machine-readable rejection outcome with the human note, then `rejected` |
+| `closed` | post a machine-readable closure outcome, then `closed` |
+
+These terminal outcome messages use the
+`urn:telex:operator-station:v1#routed-outcome` metadata carrier with
+`operationId`, `mediationId`, `humanOriginated: true`, and an `outcomeType`
+matching the intended raw disposition.
 
 The operator does not terminally handle the human-response message until the
 required raw reply/disposition succeeds. Operator replacement recovers the
 unresolved human-response message and repeats reconciliation by operation ID.
+
+For a non-stale source, every terminal disposition-only outcome therefore has
+a durable raw-thread route-back record. "No notice needed" is not a terminal
+path. Stale-origin resolution remains the separate audited exception below.
 
 Durable queueing to an active but unoccupied source address counts as accepted
 route-back. Human consumption by the source is not required before the
@@ -894,6 +941,14 @@ hardening.
 
 ### Safe links
 
+Every human-visible surface renders untrusted subjects, bodies, metadata,
+recommendations, captured source fields, digest text, and notification text as
+inert text. Implementations escape markup for the active renderer, remove or
+visibly encode terminal/control sequences and unsafe bidirectional controls,
+and never insert untrusted content into an HTML/markup execution path. A raw
+inspection view may preserve original bytes only when it is separately labeled
+and remains inert.
+
 - Telex message/thread/source actions are internal Station navigation.
 - `https` links may open only after an explicit user action and must display the
   destination.
@@ -917,17 +972,17 @@ semantics, not Station API design.
 | AC-01 | Stable application station identity with explicit attach, detach, reattach/recovery, and typed membership-loss outcomes |
 | AC-02 | Opaque stable logical-store identity with no path, credential, or connection-string exposure |
 | AC-03 | Multi-address lifecycle with explicit partial results and compensation |
-| AC-04 | Streaming/callback/async receive yielding message, delivery-role context, metadata, and ack capability |
+| AC-04 | Streaming/callback/async receive yielding message, recipient/delivery-row identity, delivery-role context, opaque metadata, and an ack capability bound to that exact recipient delivery |
 | AC-05 | Ack-after-durable-ingest and observable ack-pending, deaf, and backlog state |
-| AC-06 | At-least-once duplicate/redelivery identity and restart-safe cursor/resync semantics |
+| AC-06 | At-least-once duplicate/redelivery identity per recipient plus restart-safe snapshot-fence or monotonic per-axis cursor/resync semantics |
 | AC-07 | Unresolved-obligation query plus bounded recent/thread history without full-store materialization |
-| AC-08 | Typed send, reply, read-thread, and per-recipient disposition operations with explicit sender selection |
-| AC-09 | Retry-safe application operation identity/idempotency with an explicit accepted-send duplicate window |
-| AC-10 | Reply/disposition, disposition-only operator notification, and route-back compound semantics with durable ordering, partial outcomes, and recovery handles |
+| AC-08 | Typed send, metadata-bearing reply, read-thread, and per-recipient disposition operations with explicit sender selection and identity-checkable results |
+| AC-09 | Retry-safe application operation identity/idempotency with an explicit accepted-send duplicate window and post-restart operation-result/receipt reconciliation |
+| AC-10 | Reply/disposition, disposition-only operator notification, and route-back compound semantics with durable ordering, partial outcomes, recovery handles, and a machine-readable raw-thread outcome before every non-stale terminal closure |
 | AC-11 | Source resolution using logical-store identity plus message ID, with authoritative/captured/unavailable states |
 | AC-12 | Lifecycle/health projection covering registration, epoch/owner, receive health, pending unconsumed, inbound actionable, ack pending, and detach/recovery outcomes |
 | AC-13 | Backend-profile selection without backend-specific message semantics, covering current SQLite and credentialed Postgres, with authenticated principal provenance when available |
-| AC-14 | Delta-oriented application events and explicit resync/backfill behavior |
+| AC-14 | Delta-oriented application events with a snapshot fence or monotonic per-axis ordering plus explicit resync/backfill behavior that cannot regress workflow state |
 | AC-15 | Receipt identity cross-checks, bounded retry/throttling, and local scope discovery/cleanup |
 
 ### Domain-to-client traceability
@@ -962,6 +1017,8 @@ inputs, not acceptance of that shared contract.
   disposition;
 - present the full assisted operator-ingress health states from the widened
   station-status projection;
+- render every message-derived field inertly across feed, thread, source,
+  digest, notification, and raw-inspection surfaces;
 - preserve local read state as separate from ack/disposition;
 - implement explicit local-scope discovery and evidence-preserving cleanup;
 - validate Windows notification behavior and restart continuity.
