@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-event-metadata-v1.schema.json",
+  "title": "Telex Watcher normalized event metadata v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "watcher",
+    "detector"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "watcher": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "watchId",
+        "eventId",
+        "attemptId",
+        "runtimeId",
+        "logicalStoreId",
+        "registrationRevision",
+        "detectorSchemaVersion",
+        "script"
+      ],
+      "properties": {
+        "watchId": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "eventId": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "attemptId": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "runtimeId": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "logicalStoreId": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "registrationRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "detectorSchemaVersion": {
+          "const": 1
+        },
+        "script": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "mode",
+            "digest"
+          ],
+          "properties": {
+            "mode": {
+              "enum": [
+                "pinned",
+                "follow-path"
+              ]
+            },
+            "digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            }
+          }
+        }
+      }
+    },
+    "detector": true
+  },
+  "$defs": {
+    "nonControlString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    }
+  }
+}

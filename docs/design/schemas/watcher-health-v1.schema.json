@@ -1,0 +1,585 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-health-v1.schema.json",
+  "title": "Telex Watcher health surface v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "observedAt",
+    "staleAfterSeconds",
+    "runtime",
+    "watches"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 1
+    },
+    "observedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "staleAfterSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "runtime": {
+      "$ref": "#/$defs/runtime"
+    },
+    "watches": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/watch"
+      }
+    }
+  },
+  "$defs": {
+    "nullableDateTime": {
+      "oneOf": [
+        {
+          "type": "string",
+          "format": "date-time"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nonNegativeCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "retention": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rows",
+        "bytes",
+        "warningRows",
+        "warningBytes",
+        "warning"
+      ],
+      "properties": {
+        "rows": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "bytes": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "warningRows": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "warningBytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "warning": {
+          "type": "boolean"
+        }
+      }
+    },
+    "runtime": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runtimeId",
+        "pid",
+        "startedAt",
+        "heartbeatAt",
+        "status",
+        "productionReady",
+        "senderReady",
+        "senders",
+        "reconciliation",
+        "diagnosticCategories",
+        "registryRevision",
+        "retention"
+      ],
+      "properties": {
+        "runtimeId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "pid": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "startedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "heartbeatAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "status": {
+          "enum": [
+            "starting",
+            "reconciling",
+            "ready",
+            "degraded",
+            "stopping"
+          ]
+        },
+        "productionReady": {
+          "type": "boolean"
+        },
+        "senderReady": {
+          "type": "boolean"
+        },
+        "senders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sender"
+          }
+        },
+        "reconciliation": {
+          "$ref": "#/$defs/reconciliation"
+        },
+        "diagnosticCategories": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "registry-already-owned",
+              "sender-unready",
+              "reconciliation-blocked",
+              "retention-warning",
+              "inbound-backlog"
+            ]
+          }
+        },
+        "registryRevision": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "retention": {
+          "$ref": "#/$defs/retention"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "status": {
+              "const": "starting"
+            },
+            "productionReady": {
+              "const": false
+            },
+            "reconciliation": {
+              "properties": {
+                "status": {
+                  "const": "not-required"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "reconciling"
+            },
+            "productionReady": {
+              "const": false
+            },
+            "reconciliation": {
+              "properties": {
+                "status": {
+                  "const": "running"
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "ready"
+            },
+            "productionReady": {
+              "const": true
+            },
+            "reconciliation": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "complete",
+                    "not-required"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "degraded"
+            },
+            "productionReady": {
+              "const": false
+            },
+            "reconciliation": {
+              "properties": {
+                "status": {
+                  "enum": [
+                    "complete",
+                    "blocked"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "status": {
+              "const": "stopping"
+            },
+            "productionReady": {
+              "const": false
+            }
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "senders": {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "inboundActionableCount"
+                  ],
+                  "properties": {
+                    "inboundActionableCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "degraded"
+              },
+              "productionReady": {
+                "const": false
+              },
+              "diagnosticCategories": {
+                "contains": {
+                  "const": "inbound-backlog"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "watch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "watchId",
+        "logicalStoreId",
+        "registrationRevision",
+        "activatedAt",
+        "lifecycle",
+        "health",
+        "blockedReason",
+        "consecutiveFailures",
+        "lastAttemptAt",
+        "lastSuccessAt",
+        "lastEventAt",
+        "nextAttemptAt",
+        "senderReady",
+        "diagnosticCategory",
+        "maxSafeDowntimeSeconds",
+        "retention"
+      ],
+      "properties": {
+        "watchId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "logicalStoreId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "registrationRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "activatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lifecycle": {
+          "enum": [
+            "active",
+            "paused",
+            "terminal",
+            "removed"
+          ]
+        },
+        "health": {
+          "enum": [
+            "ready",
+            "degraded",
+            "blocked",
+            "inactive"
+          ]
+        },
+        "blockedReason": {
+          "oneOf": [
+            {
+              "enum": [
+                "event-kind-not-allowed",
+                "event-id-conflict",
+                "pinned-digest-mismatch",
+                "downtime-gap",
+                "orphan-containment-unproven"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "consecutiveFailures": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "lastAttemptAt": {
+          "$ref": "#/$defs/nullableDateTime"
+        },
+        "lastSuccessAt": {
+          "$ref": "#/$defs/nullableDateTime"
+        },
+        "lastEventAt": {
+          "$ref": "#/$defs/nullableDateTime"
+        },
+        "nextAttemptAt": {
+          "$ref": "#/$defs/nullableDateTime"
+        },
+        "senderReady": {
+          "type": "boolean"
+        },
+        "diagnosticCategory": {
+          "oneOf": [
+            {
+              "enum": [
+                "detector-degraded",
+                "process-failure",
+                "malformed-output",
+                "canonicalization-failed",
+                "output-limit",
+                "timeout",
+                "script-drift",
+                "send-failure",
+                "unknown-receipt",
+                "runtime-interrupted"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "maxSafeDowntimeSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "retention": {
+          "$ref": "#/$defs/retention"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "lifecycle": {
+              "const": "active"
+            },
+            "health": {
+              "enum": [
+                "ready",
+                "degraded"
+              ]
+            },
+            "blockedReason": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "lifecycle": {
+              "const": "paused"
+            },
+            "health": {
+              "const": "inactive"
+            },
+            "blockedReason": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "lifecycle": {
+              "const": "paused"
+            },
+            "health": {
+              "const": "blocked"
+            },
+            "blockedReason": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "properties": {
+            "lifecycle": {
+              "const": "terminal"
+            },
+            "health": {
+              "const": "inactive"
+            },
+            "blockedReason": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "lifecycle": {
+              "const": "removed"
+            },
+            "health": {
+              "const": "inactive"
+            },
+            "blockedReason": {
+              "type": "null"
+            }
+          }
+        }
+      ]
+    },
+    "sender": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "logicalStoreId",
+        "status",
+        "diagnosticCategory",
+        "membershipLossReason",
+        "leaseEpoch",
+        "lastReconciledAt",
+        "pendingUnconsumedCount",
+        "inboundActionableCount"
+      ],
+      "properties": {
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "logicalStoreId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "degraded",
+            "blocked"
+          ]
+        },
+        "diagnosticCategory": {
+          "oneOf": [
+            {
+              "enum": [
+                "membership-loss",
+                "collision",
+                "partial-attachment",
+                "inbound-backlog"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "membershipLossReason": {
+          "oneOf": [
+            {
+              "enum": [
+                "daemon-restart",
+                "predicate-death",
+                "collision",
+                "deliberate-detach",
+                "needs-attach",
+                "owner-demoted"
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "leaseEpoch": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "lastReconciledAt": {
+          "$ref": "#/$defs/nullableDateTime"
+        },
+        "pendingUnconsumedCount": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "inboundActionableCount": {
+          "$ref": "#/$defs/nonNegativeCount"
+        }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "interruptedRuntimeCount",
+        "unfinishedAttemptCount",
+        "containmentPendingCount"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "not-required",
+            "running",
+            "complete",
+            "blocked"
+          ]
+        },
+        "interruptedRuntimeCount": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "unfinishedAttemptCount": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "containmentPendingCount": {
+          "$ref": "#/$defs/nonNegativeCount"
+        }
+      }
+    }
+  }
+}
