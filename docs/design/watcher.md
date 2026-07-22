@@ -269,8 +269,8 @@ no negotiation fields.
 | Outcome | Event | State behavior | Lifecycle behavior |
 |---|---|---|---|
 | `idle` | forbidden | Valid `nextState` commits immediately | remains active |
-| `event` | required | Commits only after durable Telex acceptance | remains active |
-| `terminal` | optional | Event-producing state is receipt-gated; eventless state commits directly | becomes terminal after commit |
+| `event` | required | `nextState`, or unchanged prior state when omitted, commits only after durable Telex acceptance | remains active |
+| `terminal` | optional | Event-producing `nextState`, or unchanged prior state when omitted, is receipt-gated; eventless state commits directly when supplied | becomes terminal after commit |
 | `degraded` | forbidden | Must not contain or advance `nextState` | remains active with failure/backoff |
 
 An `idle` state advance asserts that the detector successfully evaluated the
@@ -281,6 +281,11 @@ past work it did not evaluate.
 A bare `terminal` result with neither `event` nor `nextState` is valid. It leaves
 the prior state unchanged, records the attempt, and transitions the watch to
 terminal.
+
+For `event` and event-producing `terminal`, omitted `nextState` means the
+unchanged committed prior state. The sent-event ledger records that prior-state
+hash again as the committed-next-state hash. Omission never creates an
+undefined state.
 
 Process exit status is separate from detector outcome. Nonzero exit is an
 execution failure, not `degraded`.
@@ -337,14 +342,25 @@ read committed prior state
 -> execute detector
 -> validate result, script provenance, and registration policy
 -> normalize fixed-route Telex event
+-> atomically compare committed `(watchId, eventId)` evidence
+   -> matching evidence: record stale-duplicate attempt and return without send
+   -> conflicting evidence: pause/block and return without send
+   -> absent evidence: continue
 -> send through the Application Client
 -> receive typed durable-acceptance receipt
 -> atomically commit next state + sent-event evidence + attempt result
 ```
 
+The committed-event lookup and comparison is one registry transaction after the
+normalized envelope is available and before any Telex send. Exclusive registry
+ownership and per-watch non-overlap make the absent/matching/conflicting branch
+the single pre-send decision point. Matching and conflicting rows return before
+the send path.
+
 Watcher commits event-producing state only when Telex durably accepts the
-message. Current occupancy, a push attempt, recipient consumption, and
-disposition are separate facts and do not control this transaction.
+message. If `nextState` was omitted, the atomic commit uses the unchanged prior
+state. Current occupancy, a push attempt, recipient consumption, and disposition
+are separate facts and do not control this transaction.
 
 If send fails, returns an unknown/malformed result, or cannot prove durable
 acceptance, prior state remains current. The detector may report the same stable
@@ -528,6 +544,7 @@ external cleanup/proof followed by explicit resume.
 | unsafe downtime gap | no execution | paused/blocked | source reconciliation/update + resume |
 | unproven orphan containment | no execution | paused/blocked | operator proof/cleanup + resume |
 | registry already owned | no sender attach, scheduling, or registry mutation | runtime startup fails | stop the owning runtime or select another registry |
+| actionable inbound backlog on a send-only sender | no inbound consume/ack | runtime degraded, `productionReady = false` | repair station capability/routing and clear backlog through the owning Telex workflow |
 
 Repeated degradation must be visible through the health surface before the
 production runtime passes its usability gate. Automatic Telex
@@ -657,8 +674,9 @@ Both return projections conforming to
 The health document includes:
 
 - `schemaVersion`, `observedAt`, and declared `staleAfterSeconds`;
-- runtime ID, PID, start/heartbeat times, status, aggregate sender readiness,
-  per-sender diagnostics, runtime diagnostic categories, and registry revision;
+- runtime ID, PID, start/heartbeat times, status, `productionReady`, aggregate
+  sender readiness, per-sender diagnostics, runtime diagnostic categories, and
+  registry revision;
 - restart reconciliation status and interrupted-runtime/unfinished-attempt/
   containment-pending counts;
 - per-watch logical-store identity, registration revision, activation time,
@@ -675,6 +693,10 @@ Runtime heartbeat updates independently of detector execution. A local service
 supervisor or operator CLI is the first consumer. A stale heartbeat, non-ready
 sender set, blocked watch, or repeated degradation must be visible without
 reading raw registry tables or parsing logs.
+
+`productionReady` is the machine-readable overall production gate. It is true
+only when `runtime.status = ready`. Every other runtime status requires
+`productionReady = false`.
 
 Runtime status is `starting`, `reconciling`, `ready`, `degraded`, or `stopping`.
 The reconciliation object is `not-required`, `running`, `complete`, or
@@ -717,6 +739,13 @@ Per-watch `diagnosticCategory`, per-sender `diagnosticCategory`, and runtime
 Runtime/sender conditions are not fanned out to every watch that shares an
 address. New categories require a health-schema revision rather than ad hoc
 free-form strings.
+
+If any sender reports `inboundActionableCount > 0`, its verified attachment may
+remain `sender.status = ready`, but the runtime must report
+`status = degraded`, `productionReady = false`, and include
+`inbound-backlog` in runtime `diagnosticCategories`. This invariant is encoded in
+the health schema; actionable inbound traffic can never coexist with overall
+production readiness.
 
 Automatic remote health notification is deferred; supervisor-visible health is
 not.

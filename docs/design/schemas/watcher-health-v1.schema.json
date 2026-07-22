@@ -88,6 +88,7 @@
         "startedAt",
         "heartbeatAt",
         "status",
+        "productionReady",
         "senderReady",
         "senders",
         "reconciliation",
@@ -120,6 +121,9 @@
             "degraded",
             "stopping"
           ]
+        },
+        "productionReady": {
+          "type": "boolean"
         },
         "senderReady": {
           "type": "boolean"
@@ -159,6 +163,9 @@
             "status": {
               "const": "starting"
             },
+            "productionReady": {
+              "const": false
+            },
             "reconciliation": {
               "properties": {
                 "status": {
@@ -173,6 +180,9 @@
             "status": {
               "const": "reconciling"
             },
+            "productionReady": {
+              "const": false
+            },
             "reconciliation": {
               "properties": {
                 "status": {
@@ -186,6 +196,9 @@
           "properties": {
             "status": {
               "const": "ready"
+            },
+            "productionReady": {
+              "const": true
             },
             "reconciliation": {
               "properties": {
@@ -204,6 +217,9 @@
             "status": {
               "const": "degraded"
             },
+            "productionReady": {
+              "const": false
+            },
             "reconciliation": {
               "properties": {
                 "status": {
@@ -220,6 +236,46 @@
           "properties": {
             "status": {
               "const": "stopping"
+            },
+            "productionReady": {
+              "const": false
+            }
+          }
+        }
+      ],
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "senders": {
+                "contains": {
+                  "type": "object",
+                  "required": [
+                    "inboundActionableCount"
+                  ],
+                  "properties": {
+                    "inboundActionableCount": {
+                      "type": "integer",
+                      "minimum": 1
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "status": {
+                "const": "degraded"
+              },
+              "productionReady": {
+                "const": false
+              },
+              "diagnosticCategories": {
+                "contains": {
+                  "const": "inbound-backlog"
+                }
+              }
             }
           }
         }

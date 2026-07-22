@@ -21,7 +21,9 @@
         "degraded"
       ]
     },
-    "nextState": true,
+    "nextState": {
+      "$comment": "For event-producing event or terminal results, omission commits the unchanged prior state and binds the prior-state hash as the committed-next-state hash."
+    },
     "event": {
       "$ref": "#/$defs/event"
     }
