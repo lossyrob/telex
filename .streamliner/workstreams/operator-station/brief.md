@@ -183,3 +183,10 @@ lifecycle belongs in its own node, candidate, or follow-on workstream. The
 merged spike's current carry-forward items remain in
 `docs/notes/operator-loop-spike-report.md` and `reconciliation-note.md`; none is
 promoted into a closeout batch before the viability gate.
+
+- **Reply/disposition clarity:** Dogfood showed that replying does not
+  obviously complete the human-facing obligation. The builder expected the
+  reply to mark the escalation handled and did not understand that **Handle**
+  was a separate required action. A later UX polish pass should make the
+  obligation state explicit and evaluate a combined **Reply & Handle** action
+  or another clear post-reply disposition flow.
