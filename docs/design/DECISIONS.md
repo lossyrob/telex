@@ -1939,3 +1939,59 @@ acknowledgement/disposition, terminal-artifact processing, and re-arming one run
 Targeted CI executes the generated launcher contract on macOS and Windows, while the normal
 Linux suite exercises the Unix path. Completed run directories remain as local operational
 artifacts; automated retention/garbage collection is outside this decision.
+
+## 0047 — Operator Station mediation remains application logic outside Telex core
+
+- **Date:** 2026-07-22
+- **Status:** Accepted (issue #114)
+
+**Context.** The Operator Station spike and builder dogfood proved value in a
+human-attended feed, selective operator-agent filtering, recommendations, Windows
+notifications, human replies, and route-back to source workers. Promoting that loop
+could accidentally move human UI, semantic filtering, or workflow execution into the
+message fabric, or treat campaign-local kinds and metadata as core Telex semantics.
+
+**Decision.** Operator Station is an optional application that attends Telex
+addresses, and the operator agent is application logic with bounded authority to
+resolve, clarify, aggregate, recommend, escalate, route back, and disposition.
+Telex core continues to own opaque messages, exclusive attendance, delivery,
+acknowledgment, threading, and disposition without interpreting the
+`urn:telex:operator-station:v1` extension or deciding what deserves human attention.
+The normative product and recovery contract is
+[operator-station.md](operator-station.md); the shared Application Client remains
+owned through issue #12.
+
+**Consequences.** The core `telex` binary gains no desktop dependency, human UI,
+semantic router, command executor, or Station-specific filtering policy. Station and
+operator implementations may evolve independently over one shared semantic client,
+while source provenance and non-impersonation remain mandatory. The experimental
+spike namespace, `campaignAttention`, live campaign addresses, subprocess courier,
+and current UI remain evidence rather than production core contracts.
+
+## 0048 — Direct and assisted routing use exclusive ingress attendance
+
+- **Date:** 2026-07-22
+- **Status:** Accepted (issue #114)
+
+**Context.** Direct operation needs the Station to receive raw obligations, while
+assisted operation needs an operator agent to filter the same worker-facing ingress.
+Allowing both to occupy the ingress simultaneously would make ownership, delivery,
+reply routing, and disposition ambiguous. Existing Telex leases already provide the
+safe exclusive default and durable queue messages while an address is unoccupied.
+
+**Decision.** Direct and assisted are routing topologies over one explicitly
+configured ingress address. In direct mode the Station exclusively attends ingress;
+in assisted mode the operator agent exclusively attends ingress and the Station
+attends a distinct human address. Quiet is an assisted policy posture, not another
+occupancy topology. Direct/assisted transition is application-owned sequencing over
+existing `Detach`/status/`Register` semantics: remove the old registration, verify
+the unoccupied gap, attach and verify the new occupant, then activate the new
+configuration. Daemon upgrade handoff is not repurposed as a session-routing
+protocol.
+
+**Consequences.** A transition may create a short, visible unoccupied interval, but
+messages queue durably and no two owners compete. Failed attach leaves the deployment
+visibly transitioning or restores the old occupant; it never silently runs both.
+Operator reset remains break-glass rather than a normal mode switch. Multi-device or
+non-exclusive attendance requires a future design change rather than an
+Operator Station exception.
