@@ -101,9 +101,13 @@ Watcher shared-client requirements were dual-approved and published to
 [issue #12](https://github.com/lossyrob/telex/issues/12#issuecomment-5042702401).
 
 No Watcher implementation node is launch-ready yet. `watcher-runtime` and
-`detector-template-library` are planned but explicitly waiting for campaign/#12
-to disposition the shared requirements and publish the
-`application-client-ready` checkpoint. There is no spike-private fallback.
+`detector-template-library` are planned with resolvable dependencies on
+`telex/application-client/application-client-ready-gate`. Application Client
+workstream [#117](https://github.com/lossyrob/telex/issues/117) is active and
+contract-convergence node [#118](https://github.com/lossyrob/telex/issues/118)
+is the current shared work. Campaign/#12 must disposition the requirements and
+complete that gate before either Watcher node can become ready. There is no
+spike-private fallback.
 
 ## Decisions
 
@@ -167,8 +171,9 @@ to disposition the shared requirements and publish the
   address routing, attention levels, metadata, and Postgres support.
 - Existing Loop skill detector logic and tests as domain examples, excluding its
   owner-bound worker and attached waiter runtime.
-- The campaign's `application-client-ready` checkpoint after #12 dispositions
-  and shared contract convergence.
+- The `telex/application-client/application-client-ready-gate` export from
+  Application Client workstream #117 after contract convergence #118 and #12
+  dispositions.
 
 ### Exports
 

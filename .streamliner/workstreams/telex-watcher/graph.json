@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "Production Watcher contract #110 merged in PR #115 with ADR 0046, four canonical schemas, and a dual-approved #12 requirements export. Runtime/template nodes are waiting for the campaign application-client-ready checkpoint.",
+  "summary": "Production Watcher contract #110 is complete. Runtime/template nodes have resolvable pending dependencies on application-client/application-client-ready-gate while contract-convergence #118 prepares the shared semantic checkpoint.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-22T08:08:51Z",
+  "updatedAt": "2026-07-22T14:18:45Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -124,9 +124,13 @@
       "externalDependsOn": [
         {
           "id": "application-client-ready",
-          "label": "Shared Application Client contract accepted",
-          "url": "https://github.com/lossyrob/telex/issues/12",
-          "status": "pending"
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "application-client-ready-gate"
+          },
+          "label": "Application Client semantic contract accepted (#117/#118)",
+          "url": "https://github.com/lossyrob/telex/issues/118"
         }
       ]
     },
@@ -146,9 +150,13 @@
       "externalDependsOn": [
         {
           "id": "application-client-ready",
-          "label": "Shared Application Client contract accepted",
-          "url": "https://github.com/lossyrob/telex/issues/12",
-          "status": "pending"
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "application-client-ready-gate"
+          },
+          "label": "Application Client semantic contract accepted (#117/#118)",
+          "url": "https://github.com/lossyrob/telex/issues/118"
         }
       ]
     },
