@@ -2,7 +2,7 @@
 
 ## Revision and source freeze
 
-This is revision 9 of the execution plan. Its approval identity is the Git
+This is revision 10 of the execution plan. Its approval identity is the Git
 commit that contains these exact `Plan.md` bytes and the lowercase SHA-256 of
 those bytes encoded as UTF-8 without a BOM, LF line endings, and exactly one
 trailing LF.
@@ -30,7 +30,7 @@ canonical when an export predates the merged contract.
 | Operator Station | `5042612298` | `5044388908` | `0722051760bab569d3f947fd7b29f2dabe13ef77` | `2d99e552292a4401d3403540b6d2eaa90272282d` |
 
 Canonical source-comment body digests refetched from GitHub at revision 5 and
-unchanged through revision 9:
+unchanged through revision 10:
 
 | Comment | SHA-256 |
 |---|---|
@@ -122,7 +122,9 @@ equivalent on this backend.
 The contract will preserve the strongest compatible pressure from both domains:
 
 1. Stable application responsibility and configured addresses remain distinct
-   from fresh, never-reused runtime or process identity.
+   from fresh, never-reused runtime or process identity. Lifecycle is explicit:
+   attach, detach, typed reattach/recovery, and deliberate detach are distinct
+   operations.
 2. Process-bound liveness supports typed PID plus process-start-time predicates.
 3. Multi-address attach, reconcile, and detach must support the source-required
    atomic-or-compensable outcome: success is atomic, while failure returns
@@ -136,9 +138,16 @@ The contract will preserve the strongest compatible pressure from both domains:
    rather than parsing CLI output.
 5. Membership-loss reasons distinguish daemon restart, predicate death,
    collision, deliberate detach, unknown or `NeedsAttach`, and owner demotion.
+   Collision exposes current owner and epoch plus bounded retry/reset guidance;
+   the client never hides force takeover or silently replaces another live
+   application. Restart recovery uses explicit reattachment without a resident
+   per-application waiter, and deliberately detached membership is never
+   automatically resurrected.
 6. Sender selection is explicit for every message operation.
 7. Send-only and bidirectional capabilities are explicit. Send-only membership
-   does not advertise inbound application attendance.
+   does not advertise inbound application attendance. A send addressed to a
+   send-only application responsibility receives the address policy's
+   unoccupied or rejected result, never a false application-delivered result.
 8. Durable acceptance, occupancy at acceptance, push attempt or acceptance,
    exact recipient delivery-row transport acknowledgment, and workflow
    disposition remain separate typed axes.
@@ -204,10 +213,10 @@ the source requirement; a row cannot be accepted because only one facet maps.
 | W-07 | 6, 13 |
 | W-08 | 3, 5, 17, 18 |
 | W-09 | 8 |
-| W-10 | 7 |
+| W-10 | 7, 8, 13, 17 |
 | W-11 | 9, 10, 13 |
 | W-12 | 17 |
-| W-13 | 5, 17 |
+| W-13 | 1, 4, 5, 17 |
 | W-14 | 11, 14 |
 | W-15 | 15, 16 |
 | AC-01 | 1, 3, 5 |
@@ -279,12 +288,15 @@ The candidate repository bundle will contain:
 2. `docs/design/application-client-crosswalk.md`
    - complete Watcher and Operator requirement dispositions;
    - historical issue #12 proposal dispositions and blocking effects.
-3. `docs/design/index.md`
+3. `docs/design/history/application-client-issue-12-original.md`
+   - exact canonical bytes of the pre-convergence issue #12 body;
+   - historical evidence only, not normative contract authority.
+4. `docs/design/index.md`
    - normative Application Client entry and links.
-4. `docs/design/DECISIONS.md`
+5. `docs/design/DECISIONS.md`
    - only if campaign orchestration confirms that a new load-bearing ADR is
      required and allocates its number dynamically.
-5. `docs/design/application-client.bundle.json`
+6. `docs/design/application-client.bundle.json`
    - canonical manifest for the approved Application Client-owned repository
      content.
 
@@ -337,6 +349,8 @@ BOM, LF line endings, and exactly one trailing LF. Its schema is:
 - `checkpointScope`: `design-only`;
 - `sourceProvenance`: the two domain export/addendum comment IDs, merge commits,
   canonical final source heads, and exact source-comment digests;
+- `historicalIssue12`: committed path, UTF-8 byte length, and SHA-256 of the
+  exact canonical pre-convergence issue #12 body;
 - `files`: repository-relative Application Client-owned paths, sorted by
   byte-lexicographic order of their UTF-8 path bytes;
 - each file entry: `path`, UTF-8 byte length, and lowercase SHA-256.
@@ -347,7 +361,8 @@ approval requires a schema-version decision and complete bundle re-approval.
 
 The manifest is compact JSON with no insignificant whitespace and exactly one
 trailing LF. Object keys use this fixed ordinal order:
-`schemaVersion`, `checkpointScope`, `sourceProvenance`, `files`. Each
+`schemaVersion`, `checkpointScope`, `sourceProvenance`, `historicalIssue12`,
+`files`. Each
 `sourceProvenance` entry uses `domain`, `requirementExportComment`,
 `mergedSourceAddendumComment`, `mergeCommit`, `canonicalFinalHead`, and
 `sourceCommentDigests`; the domain entries sort by UTF-8 byte-lexicographic
@@ -359,6 +374,10 @@ sort by ascending numeric `commentId`. Each `files` entry uses fixed key order
 Unicode normalization. The manifest generator is the sole writer;
 independently reproducing these bytes is required before approval.
 
+`historicalIssue12` uses fixed key order `path`, `byteLength`, `sha256`. Its
+path is `docs/design/history/application-client-issue-12-original.md`, and its
+digest must match the corresponding `files` entry.
+
 The manifest does not list itself or embed its own digest, avoiding circular
 identity. The review identity is the tuple:
 
@@ -369,8 +388,9 @@ metadata envelope. A manifest digest without its candidate source head is not
 an approval identity.
 
 The file set includes the normative design, crosswalk, design index, and any
-allocated ADR contribution. It excludes `.paw`, shared Streamliner artifacts,
-issue bodies, review output, and generated transport evidence.
+allocated ADR contribution plus the exact historical issue #12 artifact. It
+excludes `.paw`, shared Streamliner artifacts, the replacement issue body,
+review output, and generated transport evidence.
 
 Any byte change to a listed file requires:
 
@@ -423,7 +443,11 @@ include:
 
 Before replacement, fetch the existing issue #12 body into
 `publication/issue-12-body.pre.md`, canonicalize it, and record its digest in
-the approval ledger and historical-proposal crosswalk provenance.
+the approval ledger and historical-proposal crosswalk provenance. Copy those
+exact canonical bytes without wrapper text to
+`docs/design/history/application-client-issue-12-original.md`, include that
+artifact and digest in the candidate manifest, and link it from the replacement
+issue #12 body as the durable historical input.
 
 Publication review identity is:
 
@@ -447,7 +471,7 @@ Immediately before posting:
     body without approval.
 
 Every `gh` command will set
-`$env:GH_TOKEN = gh auth token --user lossyrob`. Publication writes use
+`$env:GH_CONFIG_DIR = "$env:APPDATA\gh-pub"`. Publication writes use
 `--body-file` and never console-round-trip the approved Markdown. No PR
 assignees will be added or modified.
 
@@ -717,17 +741,20 @@ The node is done only when all of the following are true:
    digest, followed by matching Application Client and campaign approvals.
 6. Application Client and campaign approved the same exact issue #12
    publication bytes, and the fetched published body matches that digest.
-7. The checkpoint text and machine-readable manifest state design-only scope
+7. The exact pre-convergence issue #12 body is committed as a retrievable
+   historical artifact, linked from the replacement body, and its digest
+   matches both `historicalIssue12` and the manifest file entry.
+8. The checkpoint text and machine-readable manifest state design-only scope
    and do not claim implementation, conformance, consumer integration, or
    production readiness.
-8. Final configured PAW review is complete; the current PR head has verified
+9. Final configured PAW review is complete; the current PR head has verified
    `PAW Review: +1`, green CI, clean mergeability, and zero unresolved review
    threads.
-9. The canonical field report and approval inventory have durable Telex
+10. The canonical field report and approval inventory have durable Telex
    retrieval records, `merge-ready` and `node-merge-ready` are delivered, and
    exactly one Watcher-or-Loop sentry mode is active under canonical lifecycle
    handling.
-10. The worker has not merged the PR. After orchestration merges it, exactly one
+11. The worker has not merged the PR. After orchestration merges it, exactly one
     reconciliation request and the campaign merge status are sent as specified.
 
 ## Success Criteria
@@ -745,6 +772,9 @@ The node is done only when all of the following are true:
   and exact publication bytes.
 - Issue #12 is published from approved bytes and the fetched canonical body
   matches the approved digest.
+- The exact historical issue #12 body remains retrievable from the committed
+  history artifact and its manifest identity matches the replacement body's
+  link and provenance.
 - `application-client-ready` unlocks semantic downstream promotion and planning
   only; it does not claim implementation, conformance, consumer integration, or
   production usability. The manifest records `checkpointScope: design-only`,
