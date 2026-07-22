@@ -282,6 +282,13 @@ pending unconsumed, inbound actionable, deaf timing, and waiter/push evidence
 from [daemon.md section 4](daemon.md#4-status-surface-the-frozen-contract-shape).
 Occupancy alone is never the healthy state.
 
+`attended-healthy` means the receive path is armed or successfully delivering
+with no stalled backlog. `attended-degraded` means the path is recovering,
+stale-accepted, or reporting recent failures before the deaf threshold.
+`attended-deaf` means delivery is failing past the configured deaf threshold.
+`attended-with-backlog` means actionable work is queued without a healthy drain;
+it takes precedence over the generic degraded label.
+
 Human availability is `unknown` unless a separate explicit local signal exists.
 It is never inferred from Station occupancy or notification submission.
 
@@ -456,6 +463,9 @@ the human may select `interrupt` only for a genuinely urgent outcome.
 | Reply | `text-reply` | absent; mediated and raw obligations remain open |
 | Reply & Handle | `text-reply` | required as `handled` |
 | Handle/Defer/Reject/Close without text | `disposition-only` | required as the selected intent |
+
+This matrix applies to assisted mode. Direct mode uses ordinary raw-thread
+replies and local raw-message disposition rather than the human-reply envelope.
 
 For `disposition-only`, the Station supplies a concise generated body such as
 "Human deferred this escalation without a textual reply." The message is a
@@ -758,9 +768,11 @@ same mediation ID and a retry-stable route operation ID. If
 
 The raw-thread reply is authored by the operator-agent/ingress address and must
 identify the human basis without impersonation. Its body states that it relays
-a human outcome, and its opaque Operator Station metadata carries at least
-`mediationId`, `humanOriginated: true`, the human address, and the mediated
-human-response message ID.
+a human outcome. The ordinary reply carries the recognized Operator Station
+metadata envelope with dataschema
+`urn:telex:operator-station:v1#routed-outcome`; its extension block carries at
+least `mediationId`, `humanOriginated: true`, the human address, and the
+mediated human-response message ID.
 
 For `disposition-only`:
 
