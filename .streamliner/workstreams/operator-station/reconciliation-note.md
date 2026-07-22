@@ -25,6 +25,11 @@ The workstream is now waiting on the campaign-owned
 `application-client-ready` checkpoint. `station-app` and `operator-broker`
 remain planned rather than ready.
 
+Campaign orchestration formed Application Client workstream #117 and launched
+contract-convergence node #118. The Operator Station orchestrator is a required
+consumer reviewer of the exact candidate bundle/crosswalk. The local dependency
+now targets that workstream's `application-client-ready-gate`.
+
 ## Boundaries
 
 - **Held:** The Station remained a separate optional application; filtering
@@ -76,8 +81,8 @@ right owner for detailed lifecycle, provenance, recovery, and safety defects.
 
 The builder's next attention belongs at the later production usability gate.
 Campaign attention now belongs at #12 convergence and formation of the shared
-Application Client enabling work/checkpoint. Operator workstream execution is
-waiting rather than requesting another worker launch.
+Application Client contract/checkpoint through #117/#118. Operator workstream
+execution is waiting rather than requesting another worker launch.
 
 ## Inspired vs. recovery interventions
 

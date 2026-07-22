@@ -117,10 +117,17 @@ raw-thread outcomes for terminal assisted responses.
 
 No Operator Station node is launch-ready now. `station-app` and
 `operator-broker` are planned under the accepted domain contract but both wait
-on the campaign-owned `application-client-ready` checkpoint. The next action is
-campaign convergence of the merged Watcher and Operator requirements in #12;
-after that checkpoint lands, reconcile and promote the two production nodes for
-parallel execution.
+on the campaign-owned `application-client-ready` checkpoint.
+
+Campaign orchestration has formed the
+[Application Client workstream #117](https://github.com/lossyrob/telex/issues/117)
+and launched
+[contract-convergence node #118](https://github.com/lossyrob/telex/issues/118).
+The Operator Station orchestrator will independently review the candidate
+contract bundle and crosswalk to ensure final AC-01 through AC-15 pressure is
+preserved. `application-client-ready` means semantic acceptance, not client
+implementation completion. After its gate lands, reconcile and promote the two
+production nodes for coordinated execution.
 
 ## Decisions
 
@@ -177,9 +184,10 @@ parallel execution.
 
 ## Open Questions
 
-- When will campaign convergence accept the shared Application Client contract
-  in #12 and publish `application-client-ready`? Until then, no production
-  Operator Station node is launchable.
+- Will #118's candidate shared contract preserve all final Operator AC-01
+  through AC-15 semantics and receive consumer/campaign approval? Until
+  `application-client-ready-gate` completes, no production Operator Station
+  node is launchable.
 
 ## Imports and Exports
 

@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-22T09:54:11Z",
+  "updatedAt": "2026-07-22T10:22:04Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -124,8 +124,13 @@
       "externalDependsOn": [
         {
           "id": "application-client-ready",
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "application-client-ready-gate"
+          },
           "label": "Shared Application Client checkpoint from issue #12",
-          "url": "https://github.com/lossyrob/telex/issues/12",
+          "url": "https://github.com/lossyrob/telex/issues/117",
           "status": "pending"
         }
       ]
@@ -146,8 +151,13 @@
       "externalDependsOn": [
         {
           "id": "application-client-ready",
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "application-client-ready-gate"
+          },
           "label": "Shared Application Client checkpoint from issue #12",
-          "url": "https://github.com/lossyrob/telex/issues/12",
+          "url": "https://github.com/lossyrob/telex/issues/117",
           "status": "pending"
         }
       ]
