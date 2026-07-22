@@ -1,5 +1,12 @@
 # Application Client Contract Convergence Plan
 
+## Revision and source freeze
+
+This is revision 2 of the execution plan. Its approval identity is the Git
+commit that contains these exact `Plan.md` bytes and the lowercase SHA-256 of
+those bytes encoded as UTF-8 without a BOM, LF line endings, and exactly one
+trailing LF.
+
 ## Objective
 
 Converge the merged Telex Watcher and Operator Station requirements into one
@@ -13,9 +20,28 @@ fallback seam.
 
 ## Authoritative Inputs
 
-The work starts from remote `main` commit
-`7a568c43413fc7aeab6a484b07dce0f0db11d68f` and must refresh remote `main`
-at every source-freeze boundary.
+The domain-source freeze is the following immutable provenance tuple. Issue
+comments are the requirement exports; the named final source heads are
+canonical when an export predates the merged contract.
+
+| Domain | Requirement export | Merged-source addendum | Merge commit | Canonical final source head |
+|---|---|---|---|---|
+| Watcher | `5042702401` | `5043498697` | `09aa6f45f213b45207adc4cf80676dcce91250da` | `e007a8067b3b91b5c57a2a756ce878e310595a05` |
+| Operator Station | `5042612298` | `5044388908` | `0722051760bab569d3f947fd7b29f2dabe13ef77` | `2d99e552292a4401d3403540b6d2eaa90272282d` |
+
+The Watcher export references
+`9df7d25c41b2eca827361db11a7a01c416721d36`, which predates the final
+Watcher source. Before drafting this plan, the worker compared
+`9df7d25c...` with `e007a806...` and confirmed the final-source changes
+clarify omitted event `nextState`, add the pre-send evidence fence, and make
+actionable inbound backlog degrade `productionReady`. The working tree's
+Watcher and Operator design content has no diff from the respective final
+source heads. The candidate must preserve those final semantics.
+
+At every source-freeze boundary, fetch the repository, verify these object
+identities and their design-file content, reread the four exports/addenda, and
+compare the current issue #12 body. A later `main` commit is not an authority
+to substitute for either canonical domain source.
 
 Normative and planning sources:
 
@@ -77,7 +103,8 @@ The contract will preserve the strongest compatible pressure from both domains:
     identity, an explicit accepted-send/local-commit duplicate window, and
     post-restart operation-result and receipt reconciliation.
 15. Source identity is `(opaque logical-store identity, message ID)` and never
-    aliases a same-number message from another store.
+    aliases a same-number message from another store; resolution distinguishes
+    authoritative, captured-only, mismatch, and unavailable states.
 16. Backend or profile selection preserves one semantic contract for SQLite and
     credentialed Postgres and carries authenticated-principal provenance when
     available.
@@ -87,6 +114,15 @@ The contract will preserve the strongest compatible pressure from both domains:
 18. Local discovery, bounded retry or throttling, receipt identity
     cross-checking, and application-scope cleanup are available without CLI
     parsing or raw daemon IPC.
+19. Delta-oriented message, delivery, disposition, health, and recovery events
+    have an explicit snapshot fence or monotonic per-axis ordering and
+    resync/backfill path that cannot regress workflow state.
+20. Compound reply, disposition, notification, and route-back operations
+    preserve durable ordering, expose partial or indeterminate results and
+    recovery handles, and support the Operator requirement for a
+    machine-readable raw-thread outcome before a non-stale terminal assisted
+    closure. The client supplies general primitives; it does not own Station
+    routing policy or human UX.
 
 Watcher detector/runtime behavior and Operator Station UX, mediation,
 notification, routing-policy, and presentation semantics remain outside the
@@ -159,10 +195,13 @@ are removed from the final PR according to `commit-and-clean`.
 
 ## Dynamic ADR Allocation
 
-After both external plan approvals and before editing
-`docs/design/DECISIONS.md`, send campaign orchestration a
-disposition-required ADR allocation request describing the proposed
-load-bearing decision. Use only the number returned by campaign orchestration.
+The one supported API-neutral Application Client semantic boundary, including
+the explicit send-only/bidirectional capability split and prohibition on
+product-private fallbacks, is a proposed load-bearing decision. After both
+external plan approvals and before editing `docs/design/DECISIONS.md`, request
+campaign orchestration to allocate an ADR number or explicitly determine that
+an ADR is not required. The request names the decision but never proposes a
+number. Use only a number returned by campaign orchestration.
 
 If campaign orchestration determines that the normative design is sufficient
 without a new ADR, do not edit the decision log. Any change in the ADR decision
@@ -174,14 +213,16 @@ changes the candidate bundle and its manifest.
 BOM, LF line endings, and exactly one trailing LF. Its schema is:
 
 - `schemaVersion`: `1`;
+- `sourceProvenance`: the two domain export/addendum comment IDs, merge commits,
+  and canonical final source heads in the source-freeze table;
 - `files`: repository-relative Application Client-owned paths, sorted by
   ordinal path order;
 - each file entry: `path`, UTF-8 byte length, and lowercase SHA-256.
 
-The manifest does not list itself and does not embed a source commit or its own
-digest, avoiding circular identity. The review identity is the tuple:
+The manifest does not list itself or embed its own digest, avoiding circular
+identity. The review identity is the tuple:
 
-`(source head commit, SHA-256 of exact manifest bytes)`.
+`(candidate source-head commit, SHA-256 of exact manifest bytes)`.
 
 The file set includes the normative design, crosswalk, design index, and any
 allocated ADR contribution. It excludes `.paw`, shared Streamliner artifacts,
@@ -193,6 +234,10 @@ Any byte change to a listed file requires:
 2. committing the changed candidate;
 3. using the new source head and manifest digest;
 4. invalidating all earlier consumer and shared approvals.
+
+The candidate source head is the commit containing the listed contract files
+and manifest. The immutable domain-source provenance remains part of the
+manifest and is independently rechecked before every approval request.
 
 ## Exact Issue #12 Publication
 
@@ -222,13 +267,15 @@ Immediately before posting:
 4. stop and reconfirm if any relevant source changed;
 5. post only with `gh issue edit 12 --body-file <approved-file>`;
 6. fetch the published body;
-7. canonicalize transport line endings and trailing newline only;
+7. encode the fetched body with the same UTF-8/LF/exactly-one-trailing-LF rule
+   used for the approved file;
 8. verify the fetched digest equals the approved digest;
 9. stop on mismatch rather than repairing the body without approval.
 
 Every `gh` command will set
-`$env:GH_CONFIG_DIR = "$env:APPDATA\gh-pub"`. No PR assignees will be added or
-modified.
+`$env:GH_TOKEN = gh auth token --user lossyrob`. Publication writes use
+`--body-file` and never console-round-trip the approved Markdown. No PR
+assignees will be added or modified.
 
 ## Gate Sequence
 
@@ -246,18 +293,17 @@ modified.
 
 ### Gate 2: External Exact-Plan Approval
 
-Send the exact reviewed `Plan.md` bytes separately to:
+Commit the reviewed plan, calculate its SHA-256 from the exact byte definition
+at the top of this document, and send the plan revision, candidate source-head
+commit, digest, and full exact bytes separately to:
 
 1. Application Client workstream orchestration.
 2. Campaign orchestration.
 
-Each Telex message will use:
-
-- kind `plan-review-requested`;
-- attention `next-checkpoint`;
-- disposition required;
-- metadata containing plan revision, artifact path, and lowercase SHA-256;
-- body loaded directly from the reviewed `Plan.md`.
+Each Telex message will use a subject identifying the plan review,
+`next-checkpoint` attention, required disposition, metadata containing plan
+revision, artifact path, candidate source head, and lowercase SHA-256, and a
+body loaded directly from the reviewed `Plan.md`.
 
 Implementation begins only after both recipients approve the same revision and
 digest. A byte change invalidates both approvals. Conflicting feedback is sent
@@ -267,7 +313,9 @@ silently.
 ### Gate 3: Candidate Contract and Consumer Approval
 
 1. Refresh remote `main` and inspect changes to all required sources and shared
-   files. Preserve latest-main content; do not overwrite orchestrator changes.
+   files. Revalidate the immutable source tuple; preserve latest-main content
+   without treating it as a substitute for the final domain heads or
+   overwriting orchestrator changes.
 2. Request the ADR decision and number from campaign orchestration before any
    decision-log edit.
 3. Create the design, crosswalk, index contribution, optional allocated ADR,
@@ -278,8 +326,9 @@ silently.
    orchestration as disposition-required
    `consumer-contract-review-requested` messages.
 7. Include source head, bundle digest, manifest path, contract paths,
-   disposition totals, and the complete candidate content or an exact immutable
-   representation within Telex size limits.
+   disposition totals, immutable domain-source provenance, and the complete
+   candidate content or an exact immutable representation within Telex size
+   limits.
 8. Resolve every finding. Require both consumers to approve the same source
    head and bundle digest.
 
@@ -310,8 +359,8 @@ and digest verification sequence.
 3. Run the configured non-interactive society-of-thought final review over the
    branch diff with the same specialist, model, interaction, and perspectives
    as planning review.
-4. Resolve all blocking findings and rerun consumer, shared-bundle, and
-   publication gates after any semantically relevant repair.
+4. Resolve all blocking findings and rerun every invalidated consumer,
+   shared-bundle, and publication gate after any semantic or byte change.
 5. Use `paw-pr` for artifact cleanup, selective staging, push, and final PR
    creation.
 6. Use `Closes #118` only if every contract, checkpoint, publication, approval,
@@ -320,7 +369,7 @@ and digest verification sequence.
 ### Gate 7: Paired Review and PR Sentry
 
 1. After push, green CI, and clean mergeability, send `review-ready` to
-   `telex://lossyrob/telex/T-A:app-client-review-118`.
+   `T-A:app-client-review-118`.
 2. Read every real GitHub review and require a verified `PAW Review: +1` for the
    current head.
 3. Treat semantically relevant review repairs as bundle/publication changes and
