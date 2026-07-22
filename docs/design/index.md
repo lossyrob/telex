@@ -21,7 +21,8 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   contract**: trusted local detector execution, versioned request/result schemas,
   receipt-gated state and deduplication, watch lifecycle and health, script and
   credential policy, sender identity, normalized events, and the requirements
-  exported to the shared Application Client.
+  exported to the shared Application Client. Load-bearing boundary:
+  [ADR 0046](DECISIONS.md#0046--watcher-runs-provider-neutral-trusted-local-detectors-with-receipt-gated-state).
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — the **visual on-ramp** to the daemon design:
   mermaid diagrams (component map, pull **and push** message delivery, restart/re-attach,
   station liveness, the single-writer epoch fence, authorization) that teach the

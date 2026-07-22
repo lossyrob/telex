@@ -12,11 +12,18 @@ The implemented vertical spike and its evidence remain documented in
 contract promotes the successful semantics and explicitly excludes the spike's
 private integration seams.
 
+The load-bearing boundary is recorded in
+[ADR 0046](DECISIONS.md#0046--watcher-runs-provider-neutral-trusted-local-detectors-with-receipt-gated-state).
+
 Mechanism-level Telex membership, liveness, lease, delivery, receipt, and
 disposition semantics remain governed by [daemon.md](daemon.md). Telex core
 treats Watcher event metadata as opaque. The namespacing guidance in
 [EXTENSIONS.md](proposals/EXTENSIONS.md) is compatible with this contract but
 remains a proposal and is not an interpretation dependency for Watcher.
+
+The **Telex Watcher application** is unrelated to the daemon message-recipient
+category named `watchers`. This document does not extend or reinterpret that
+recipient role.
 
 ## Product boundary
 
@@ -92,6 +99,14 @@ The first production runtime supports one process per registry. A runtime may
 serve many watches and many stable sender addresses. Multi-host ownership or
 failover for one registry/watch is deferred.
 
+Before sender attachment, scheduling, reconciliation, or registry mutation, the
+runtime must acquire exclusive ownership keyed by the canonical physical
+registry identity. Ownership is process-lifetime and PID/start-time reuse-safe.
+A second runtime fails startup nonzero without touching sender membership or
+registry state and exposes a supervisor-visible `registry-already-owned`
+diagnostic. This application lock is separate from the Telex daemon's store
+ownership and lease epoch.
+
 ## Watch registration
 
 A production registration contains the following policy.
@@ -146,6 +161,20 @@ Lifecycle is authoritative and intentionally small:
 the watch to `paused` with `health = blocked` and a typed reason. Recovery
 requires a registration/script correction followed by explicit resume, or
 removal.
+
+Legal lifecycle/health combinations are:
+
+| Lifecycle | Health | Meaning |
+|---|---|---|
+| `active` | `ready` | Eligible and operating normally. |
+| `active` | `degraded` | Eligible, but the latest bounded attempt or sender condition failed. |
+| `paused` | `inactive` | Explicit operator pause. |
+| `paused` | `blocked` | Automatic non-transient safety/configuration pause with typed `blockedReason`. |
+| `terminal` | `inactive` | Detector completed; no further scheduling. |
+| `removed` | `inactive` | Administratively removed; provenance retained. |
+
+Every other combination is invalid. `blockedReason` is non-null only for
+`paused`/`blocked`.
 
 A single-event watch is represented by an event-producing `terminal` result.
 Watcher does not need a second single-shot lifecycle engine.
@@ -216,10 +245,19 @@ The outer request/result objects are strict. Unknown fields are rejected.
 Detector `parameters`, `state`, `nextState`, and `event.metadata` remain
 arbitrary JSON.
 
+All opaque values must be valid I-JSON and RFC 8785 canonicalizable. The parser
+rejects duplicate object member names, invalid Unicode, non-finite numbers, and
+numbers outside the canonicalizer's supported interoperable range. Registration
+rejects noncanonicalizable `parameters`/`initialState` before persistence.
+Detector output that cannot be canonicalized is
+`diagnosticCategory = canonicalization-failed`: no send or state advancement,
+and normal bounded failure backoff applies.
+
 Any field addition, removal, shape change, or semantic change requires a new
 `schemaVersion`. V1 is not extended additively. The initial runtime accepts v1
 only and rejects every other version without state advancement. Concurrent
-version selection and migration require a later contract revision.
+version selection and migration require a later contract revision; v1 reserves
+no negotiation fields.
 
 ### Outcomes
 
@@ -234,6 +272,10 @@ An `idle` state advance asserts that the detector successfully evaluated the
 source and intentionally classified all observations through the new cursor as
 non-actionable. This includes ignored observations. A detector must not advance
 past work it did not evaluate.
+
+A bare `terminal` result with neither `event` nor `nextState` is valid. It leaves
+the prior state unchanged, records the attempt, and transitions the watch to
+terminal.
 
 Process exit status is separate from detector outcome. Nonzero exit is an
 execution failure, not `degraded`.
@@ -267,6 +309,12 @@ An event kind must:
 - match `allowedEventKinds` exactly or one configured
   `allowedEventKindPrefixes` entry; and
 - remain within the protocol byte cap.
+
+A kind has at least two dot-separated segments; additional depth remains
+application vocabulary. An allowed prefix is normalized lowercase text ending
+in `.` and matches the event kind by exact UTF-8 byte prefix. This makes
+`github.pull-request.` authorize that namespace while preventing a short partial
+token from authorizing an unrelated segment.
 
 A mismatch is a non-transient policy failure. Watcher records the attempt,
 pauses the watch with `health = blocked` and
@@ -376,6 +424,11 @@ Detector processes start from a cleared environment plus:
 Registration stores variable names, never values. Values are read at each
 attempt. Credentials never appear in detector request JSON.
 
+One runtime process serves many watches, so allowlists select names from that
+runtime's environment; they do not create separate secret-value domains.
+Mutually untrusted watches or watches requiring different values for the same
+name must run under separate supervised runtime environments/registries.
+
 An operator may use a named credential wrapper as part of the registered command.
 Watcher does not interpret the wrapper or provider.
 
@@ -414,6 +467,12 @@ Each registration has `maxSafeDowntimeSeconds`:
 - a positive value declares the longest safe recovery gap; and
 - exceeding it pauses the watch with `blockedReason = downtime-gap`.
 
+The elapsed-time reference is the latest successful evaluation, or the current
+activation/resume timestamp for a watch that has never succeeded. Runtime
+startup completes interrupted-attempt and containment reconciliation, then
+evaluates the downtime limit **before** placing any overdue watch on the
+scheduler. An unsafe gap therefore cannot run one catch-up attempt first.
+
 The health record retains last successful evaluation, detected downtime, and the
 declared limit. Watcher does not silently resume as healthy after an unsafe gap.
 Operator correction and explicit resume are required.
@@ -439,6 +498,8 @@ is fixed:
 
 Runtime and hardening nodes own Windows/Unix mechanisms and destructive evidence.
 The default Telex coordination daemon is never used for destructive proof.
+There is no automatic or unaudited safety override: operator recovery requires
+external cleanup/proof followed by explicit resume.
 
 ## Failure and recovery
 
@@ -449,7 +510,7 @@ The default Telex coordination daemon is never used for destructive proof.
 | accepted terminal event | atomic commit | terminal/terminal | remove when desired |
 | eventless terminal | direct state/attempt commit | terminal/terminal | remove when desired |
 | `degraded` | no state/send | active/degraded + backoff | later successful attempt |
-| nonzero exit, malformed/oversize result, timeout | no state/send | active/degraded + backoff | later successful attempt or operator correction |
+| nonzero exit, malformed/oversize/noncanonical result, timeout | no state/send | active/degraded + backoff | later successful attempt or operator correction |
 | send failure or unknown receipt | no state/event commit | active/degraded + backoff | reconcile sender and retry later |
 | pinned mismatch | detector not started | paused/blocked | repin/update + resume |
 | follow-path drift | no state/send | active/degraded + backoff | stable file; repeated drift may lead operator to pause |
@@ -458,6 +519,7 @@ The default Telex coordination daemon is never used for destructive proof.
 | sender partial/unready | no affected watch execution/send | active/degraded runtime | reconcile/compensate |
 | unsafe downtime gap | no execution | paused/blocked | source reconciliation/update + resume |
 | unproven orphan containment | no execution | paused/blocked | operator proof/cleanup + resume |
+| registry already owned | no sender attach, scheduling, or registry mutation | runtime startup fails | stop the owning runtime or select another registry |
 
 Repeated degradation must be visible through the health surface before the
 production runtime passes its usability gate. Automatic Telex
@@ -478,8 +540,8 @@ Before a watch can send, the runtime:
 - reconciles senders at startup, registry revision, periodically, and after
   typed membership loss;
 - remains non-ready on partial attachment;
-- performs at most one bounded reconcile-and-send retry after typed membership
-  loss;
+- uses a caller-bounded reconcile-and-send retry budget after typed membership
+  loss; Watcher configures that budget to one retry in v1;
 - never force-takes an address; and
 - detaches every known sender on graceful shutdown.
 
@@ -550,6 +612,11 @@ Prior/next state hashes and normalized-envelope hash remain in the local audit
 ledger. The message carries the identifiers and script provenance recipients need
 for deduplication and source inspection without exposing detector state.
 
+Watcher preserves the v1 detector body and Unicode subject semantics after the
+existing control-character validation; it does not perform display-oriented
+rewriting. Telex recipients/renderers own safe escaping of bidi/control display
+effects, link handling, and the no-execution boundary.
+
 ## Durable acceptance and receipts
 
 The Application Client must return a typed receipt that distinguishes:
@@ -582,9 +649,12 @@ Both return projections conforming to
 The health document includes:
 
 - `schemaVersion`, `observedAt`, and declared `staleAfterSeconds`;
-- runtime ID, PID, start/heartbeat times, status, sender readiness, and registry
-  revision;
-- per-watch logical-store identity, lifecycle, and health;
+- runtime ID, PID, start/heartbeat times, status, aggregate sender readiness,
+  per-sender diagnostics, and registry revision;
+- restart reconciliation status and interrupted-runtime/unfinished-attempt/
+  containment-pending counts;
+- per-watch logical-store identity, registration revision, lifecycle, and
+  health;
 - consecutive failures;
 - last attempt, success, and event times;
 - next attempt;
@@ -597,6 +667,25 @@ Runtime heartbeat updates independently of detector execution. A local service
 supervisor or operator CLI is the first consumer. A stale heartbeat, non-ready
 sender set, blocked watch, or repeated degradation must be visible without
 reading raw registry tables or parsing logs.
+
+Runtime status is `starting`, `reconciling`, `ready`, `degraded`, or `stopping`.
+The reconciliation object is `not-required`, `running`, `complete`, or
+`blocked`. Sender entries identify address, logical store, status, typed
+membership-loss detail, lease epoch, reconciliation time, pending unconsumed
+count, and inbound actionable count. `senderReady` remains the aggregate
+all-required-senders-ready predicate.
+
+`blockedReason` is a closed v1 vocabulary:
+
+- `event-kind-not-allowed`;
+- `event-id-conflict`;
+- `pinned-digest-mismatch`;
+- `downtime-gap`; and
+- `orphan-containment-unproven`.
+
+`diagnosticCategory` is the versioned operational category from the health
+schema. New categories require a health-schema revision rather than ad hoc
+free-form strings.
 
 Automatic remote health notification is deferred; supervisor-visible health is
 not.
@@ -612,6 +701,11 @@ Until operational hardening defines safe compaction and backup:
 - no destructive event-ledger GC is allowed;
 - health exposes retained rows/bytes and configurable warning thresholds; and
 - threshold state is visible to operators.
+
+Runtime retention counts all persisted registry rows and estimated bytes.
+Per-watch retention counts that watch's registration/state, attempts,
+diagnostics, and event evidence. `warning` is true when
+`rows >= warningRows` **or** `bytes >= warningBytes`; thresholds are positive.
 
 Attempts and diagnostic-payload retention, backup, and safe compaction are owned
 by operational hardening. That node must define a capacity model and default
@@ -635,7 +729,8 @@ The shared Application Client must support:
 5. **Typed membership loss.** Daemon restart, predicate death, collision, and
    deliberate detach remain distinguishable.
 6. **Bounded reconcile-and-send.** One semantic operation can repair typed
-   membership loss and retry once without parsing CLI stderr or exposing raw IPC.
+   membership loss under a caller-selected bounded retry budget without parsing
+   CLI stderr or exposing raw IPC. Watcher selects one retry in v1.
 7. **Explicit sender selection.** Multi-address applications do not rely on
    ambiguous default-from inference.
 8. **Observable collision.** Current owner/epoch and retry/reset guidance are
@@ -720,6 +815,9 @@ feature or an equivalent test-only package.
 | Provider-wide budgets | Runtime supplies generic concurrency/cadence/jitter/backoff only. | Templates/hardening own provider credential budgets. |
 | Abrupt-death platform proof | Behavior frozen here; OS mechanisms and destructive proof deferred. | Runtime/hardening; uncertain containment blocks the watch. |
 | Template compatibility | Templates declare schema/template version, provenance, and replay limits; copied scripts are user-owned. | Detector-template-library. |
+| Exclusive registry ownership | One PID/start-time-safe process-lifetime owner is required; contention fails startup before Telex or registry mutation. | Runtime; prevents split-brain state/send commits. |
+| Canonical JSON failures | Opaque JSON is restricted to the I-JSON/RFC 8785 canonicalizable subset; failure is visible and non-advancing. | Runtime/templates; deterministic evidence requires a portable pre-image. |
+| Send-only inbound anomalies | Normal sends to send-only stations are unoccupied/rejected; any interim backlog is a sender-health error and production-gate failure, never silently consumed. | #12 owns station capability; runtime/hardening own diagnostics. |
 | Hosted ingestion, sandboxing, signed catalogs, multi-host failover, remote admin, rich UI | Deferred/out of scope. | Separate future work; no pressure on this contract. |
 
 ## Downstream implementation checklist
@@ -728,6 +826,8 @@ feature or an equivalent test-only package.
 
 - Where are registration revisions, lifecycle, opaque state, attempts, event
   ledger, runtime records, and health persisted?
+- Which canonical registry identity and PID/start-time-safe lock enforce one
+  mutation owner, and what supervisor diagnostic is emitted on contention?
 - How are backend/profile selection and opaque logical-store identity threaded
   through registration, membership, receipts, ledger evidence, and health?
 - How are the four schemas represented and checked in CI?

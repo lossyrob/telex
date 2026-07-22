@@ -67,10 +67,12 @@
           "$ref": "#/$defs/nonNegativeCount"
         },
         "warningRows": {
-          "$ref": "#/$defs/nonNegativeCount"
+          "type": "integer",
+          "minimum": 1
         },
         "warningBytes": {
-          "$ref": "#/$defs/nonNegativeCount"
+          "type": "integer",
+          "minimum": 1
         },
         "warning": {
           "type": "boolean"
@@ -87,6 +89,8 @@
         "heartbeatAt",
         "status",
         "senderReady",
+        "senders",
+        "reconciliation",
         "registryRevision",
         "retention"
       ],
@@ -110,6 +114,7 @@
         "status": {
           "enum": [
             "starting",
+            "reconciling",
             "ready",
             "degraded",
             "stopping"
@@ -117,6 +122,15 @@
         },
         "senderReady": {
           "type": "boolean"
+        },
+        "senders": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/sender"
+          }
+        },
+        "reconciliation": {
+          "$ref": "#/$defs/reconciliation"
         },
         "registryRevision": {
           "$ref": "#/$defs/nonNegativeCount"
@@ -132,6 +146,7 @@
       "required": [
         "watchId",
         "logicalStoreId",
+        "registrationRevision",
         "lifecycle",
         "health",
         "blockedReason",
@@ -154,6 +169,10 @@
           "type": "string",
           "minLength": 1
         },
+        "registrationRevision": {
+          "type": "integer",
+          "minimum": 1
+        },
         "lifecycle": {
           "enum": [
             "active",
@@ -167,15 +186,23 @@
             "ready",
             "degraded",
             "blocked",
-            "paused",
-            "terminal",
-            "removed"
+            "inactive"
           ]
         },
         "blockedReason": {
-          "type": [
-            "string",
-            "null"
+          "oneOf": [
+            {
+              "enum": [
+                "event-kind-not-allowed",
+                "event-id-conflict",
+                "pinned-digest-mismatch",
+                "downtime-gap",
+                "orphan-containment-unproven"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "consecutiveFailures": {
@@ -197,9 +224,27 @@
           "type": "boolean"
         },
         "diagnosticCategory": {
-          "type": [
-            "string",
-            "null"
+          "oneOf": [
+            {
+              "enum": [
+                "detector-degraded",
+                "process-failure",
+                "malformed-output",
+                "canonicalization-failed",
+                "output-limit",
+                "timeout",
+                "script-drift",
+                "send-failure",
+                "unknown-receipt",
+                "sender-unready",
+                "runtime-interrupted",
+                "retention-warning",
+                "inbound-backlog"
+              ]
+            },
+            {
+              "type": "null"
+            }
           ]
         },
         "maxSafeDowntimeSeconds": {
@@ -211,6 +256,158 @@
         },
         "retention": {
           "$ref": "#/$defs/retention"
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "lifecycle": {
+              "const": "active"
+            },
+            "health": {
+              "enum": [
+                "ready",
+                "degraded"
+              ]
+            },
+            "blockedReason": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "lifecycle": {
+              "const": "paused"
+            },
+            "health": {
+              "const": "inactive"
+            },
+            "blockedReason": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "lifecycle": {
+              "const": "paused"
+            },
+            "health": {
+              "const": "blocked"
+            },
+            "blockedReason": {
+              "type": "string"
+            }
+          }
+        },
+        {
+          "properties": {
+            "lifecycle": {
+              "const": "terminal"
+            },
+            "health": {
+              "const": "inactive"
+            },
+            "blockedReason": {
+              "type": "null"
+            }
+          }
+        },
+        {
+          "properties": {
+            "lifecycle": {
+              "const": "removed"
+            },
+            "health": {
+              "const": "inactive"
+            },
+            "blockedReason": {
+              "type": "null"
+            }
+          }
+        }
+      ]
+    },
+    "sender": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address",
+        "logicalStoreId",
+        "status",
+        "membershipLossReason",
+        "leaseEpoch",
+        "lastReconciledAt",
+        "pendingUnconsumedCount",
+        "inboundActionableCount"
+      ],
+      "properties": {
+        "address": {
+          "type": "string",
+          "minLength": 1
+        },
+        "logicalStoreId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "status": {
+          "enum": [
+            "ready",
+            "degraded",
+            "blocked"
+          ]
+        },
+        "membershipLossReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "leaseEpoch": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "lastReconciledAt": {
+          "$ref": "#/$defs/nullableDateTime"
+        },
+        "pendingUnconsumedCount": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "inboundActionableCount": {
+          "$ref": "#/$defs/nonNegativeCount"
+        }
+      }
+    },
+    "reconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "interruptedRuntimeCount",
+        "unfinishedAttemptCount",
+        "containmentPendingCount"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "not-required",
+            "running",
+            "complete",
+            "blocked"
+          ]
+        },
+        "interruptedRuntimeCount": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "unfinishedAttemptCount": {
+          "$ref": "#/$defs/nonNegativeCount"
+        },
+        "containmentPendingCount": {
+          "$ref": "#/$defs/nonNegativeCount"
         }
       }
     }

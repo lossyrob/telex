@@ -2,6 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://telex.dev/schema/watcher-detector-request-v1.schema.json",
   "title": "Telex Watcher detector request v1",
+  "$comment": "All opaque JSON values must be valid I-JSON and RFC 8785 canonicalizable. Duplicate object member names and values outside that subset are rejected by the runtime before execution.",
   "type": "object",
   "additionalProperties": false,
   "required": [
