@@ -27,20 +27,22 @@ long-lived task occupying the session?
 **Theater.** The Telex application layer: non-agent stations, deterministic event
 producers, human recipients, and the shared programmatic client they consume.
 
-**State.** Both builder viability gates have passed. Watcher contract node
-[#110](https://github.com/lossyrob/telex/issues/110) is in execution, and
-Operator Station contract node
-[#114](https://github.com/lossyrob/telex/issues/114) is launch-ready. The live
-campaign mediation path now spans campaign control → `attention:rob` →
-`operator:rob`. Production runtime/application work remains blocked on the two
-contracts and the shared `application-client-ready` checkpoint.
+**State.** Both builder viability gates and both production domain-contract
+nodes are complete and reconciled. The shared
+[Application Client workstream #117](https://github.com/lossyrob/telex/issues/117)
+is formed, and contract-convergence node
+[#118](https://github.com/lossyrob/telex/issues/118) is ready to reconcile the
+merged requirements through issue #12 and publish `application-client-ready`.
+The live campaign mediation path spans campaign control → `attention:rob` →
+`operator:rob`. Production product nodes remain blocked on that checkpoint.
 
 ## Covering workstreams
 
 | Workstream | Tracker | Outcome | Current first move |
 |---|---|---|---|
-| Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Human-attended Telex endpoint plus an optional operator-agent filter and reply loop. | Viability passed at main `49de1b2`; launch production contract node [#114](https://github.com/lossyrob/telex/issues/114) while retaining #12 as shared-client owner. |
-| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral deterministic detectors emit Telex messages without session-owned background tasks. | Viability passed through reconciliation [PR #112](https://github.com/lossyrob/telex/pull/112); contract node [#110](https://github.com/lossyrob/telex/issues/110) is active with the opt-in Watcher-backed v2 prompt pair. |
+| Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Human-attended Telex endpoint plus an optional operator-agent filter and reply loop. | Contract #114 / PR #116 is merged and reconciled; `station-app` and `operator-broker` wait on `application-client-ready`. |
+| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral deterministic detectors emit Telex messages without session-owned background tasks. | Contract #110 / PR #115 is merged and reconciled; `watcher-runtime` and `detector-template-library` wait on `application-client-ready`. |
+| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Launch contract-convergence [#118](https://github.com/lossyrob/telex/issues/118), disposition both merged domain exports through #12, and publish `application-client-ready`. |
 
 ## Shared seam
 
@@ -52,9 +54,11 @@ send, receive, reply, disposition, backend selection, and provenance.
 The product spikes must not wait for this seam: they may use current CLI or Rust
 library integration and must report every shortcut. After viability evidence is
 available, #12 is revised and promoted as the single owner of the shared contract.
-If implementation becomes workstream-sized, it is formed as a third enabling
-workstream and exports an `application-client-ready` checkpoint consumed by both
-product workstreams.
+The seam is now formed as the third enabling
+[Application Client workstream #117](https://github.com/lossyrob/telex/issues/117).
+Issue #12 remains the sole semantic owner. Node #118 first publishes the
+API-neutral `application-client-ready` checkpoint; later workstream nodes
+implement and validate the supported core and binding.
 
 Neither Operator Station nor Telex Watcher may independently freeze a competing
 public client API.
@@ -106,12 +110,12 @@ Both gates produce evidence for #12:
 
 ### Stage 3 — Contract convergence and shared application-client checkpoint
 
-Watcher contract node #110 and Operator contract node #114 may proceed in
-parallel. Each must export application-specific requirements without freezing a
-competing shared API. Consolidate both accepted contracts and spike/gate
-evidence into #12, then accept one semantic Application Client contract and, if
-needed, form its enabling workstream. Production app nodes wait on the resulting
-`application-client-ready` checkpoint.
+Watcher contract node #110 and Operator contract node #114 completed in
+parallel, each exporting merged-source requirements without freezing a
+competing shared API. Application Client node #118 now consolidates both
+accepted contracts and spike/gate evidence into #12, records explicit
+dispositions, and accepts one semantic contract. Product nodes wait on the
+resulting `application-client-ready` checkpoint.
 
 ### Stage 4 — Parallel production applications
 
@@ -186,14 +190,15 @@ collapse into noise, and no session-bound polling task is required.
 
 ## Current next actions
 
-1. Complete active Watcher contract node #110 using the v2 Watcher-backed prompt
-   pair with v1 fallback and the shared externally supervised runtime.
-2. Launch Operator Station contract node #114 and preserve the boundary between
-   Station/operator design, campaign mediation convention, and shared #12
-   requirements.
-3. Consolidate #110, #114, and both accepted gate outcomes into #12; decide
-   whether to form the shared Application Client enabling workstream and export
-   `application-client-ready`.
-4. Keep production `station-app` and `watcher-runtime` nodes blocked until their
-   viability gate and the shared `application-client-ready` checkpoint permit
-   promotion.
+1. Launch Application Client contract-convergence node
+   [#118](https://github.com/lossyrob/telex/issues/118) under workstream
+   [#117](https://github.com/lossyrob/telex/issues/117).
+2. Disposition every merged Watcher and Operator shared-client requirement,
+   land the API-neutral design contract, and publish
+   `application-client-ready` through issue #12.
+3. Reconcile that checkpoint into both product workstreams, then promote/detail
+   `station-app`, `operator-broker`, `watcher-runtime`, and
+   `detector-template-library` for coordinated execution.
+4. Detail the Application Client core, first binding, and conformance nodes from
+   the accepted contract; do not allow a product-private fallback while shared
+   implementation is in progress.

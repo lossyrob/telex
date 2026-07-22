@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "id": "application-client",
+  "projectKey": "telex",
+  "title": "Telex Application Client (supported long-lived application integration)",
+  "summary": "Contract-convergence node #118 is ready to reconcile the merged Watcher and Operator requirements through issue #12 and publish application-client-ready.",
+  "status": "active",
+  "attention": "focus",
+  "createdAt": "2026-07-22T10:05:00Z",
+  "updatedAt": "2026-07-22T10:05:00Z",
+  "trackingIssue": {
+    "owner": "lossyrob",
+    "repo": "telex",
+    "number": 117
+  },
+  "repos": [
+    {
+      "id": "telex",
+      "owner": "lossyrob",
+      "name": "telex",
+      "role": "primary"
+    }
+  ],
+  "designRefs": [
+    {
+      "repoId": "telex",
+      "path": "docs/design/index.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/daemon.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/watcher.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/operator-station.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/DECISIONS.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "PRODUCT-THESIS.md"
+    },
+    {
+      "repoId": "telex",
+      "path": ".streamliner/shaping/roadmap.md"
+    },
+    {
+      "repoId": "telex",
+      "path": ".streamliner/workstreams/telex-watcher/brief.md"
+    },
+    {
+      "repoId": "telex",
+      "path": ".streamliner/workstreams/operator-station/brief.md"
+    }
+  ],
+  "nodes": [
+    {
+      "id": "contract-convergence",
+      "type": "research",
+      "title": "Converge shared Application Client contract",
+      "summary": "Reconcile every merged Watcher and Operator requirement through issue #12, land one API-neutral normative contract and explicit dispositions, and prepare the application-client-ready checkpoint without selecting bindings or implementing production code.",
+      "status": "ready",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 118
+      },
+      "dependsOn": []
+    },
+    {
+      "id": "application-client-ready-gate",
+      "type": "gate",
+      "title": "Shared semantic contract accepted",
+      "summary": "Campaign validates the merged contract, per-requirement dispositions, consumer approvals, merged-source provenance, and exact issue #12 publication before exporting application-client-ready to both product workstreams.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "contract-convergence"
+      ]
+    },
+    {
+      "id": "client-core",
+      "type": "task",
+      "title": "Supported Application Client core",
+      "summary": "Implement the accepted semantic contract as one supported application client core over existing Telex daemon/backends, including lifecycle, capability, send/receive, operations, identity, health, recovery, and backend selection. Sketch; detail after application-client-ready.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "application-client-ready-gate"
+      ]
+    },
+    {
+      "id": "first-binding",
+      "type": "task",
+      "title": "First supported language binding",
+      "summary": "Expose the accepted client core through the first binding required by Operator Station and SDK-hosted applications while preserving semantic parity and avoiding binding-specific forks. Sketch; detail after the core export is accepted.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "client-core"
+      ]
+    },
+    {
+      "id": "client-conformance",
+      "type": "task",
+      "title": "Application Client conformance and migration",
+      "summary": "Prove the supported core and binding against SQLite/Postgres, restart and membership loss, multi-address compensation, send-only/bidirectional capability, delivery-row identity, receipt-state separation, retry-safe operations, ordered resync, and migration away from temporary seams. Sketch; detail after implementation shape is known.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "client-core",
+        "first-binding"
+      ]
+    },
+    {
+      "id": "consumer-integration-gate",
+      "type": "gate",
+      "title": "Supported client is consumable by both product workstreams",
+      "summary": "Operator Station and Watcher validate the supported client against their merged contracts and confirm no product-private integration seam is required before product integration continues.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "client-conformance"
+      ]
+    },
+    {
+      "id": "operational-hardening",
+      "type": "task",
+      "title": "Application Client operational hardening",
+      "summary": "Harden packaging, install/upgrade, diagnostics, cleanup, resource bounds, credentialed Postgres, delayed or duplicated delivery, process replacement, and additional binding ergonomics after both consumers can integrate. Sketch; detail after the consumer gate.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "consumer-integration-gate"
+      ]
+    },
+    {
+      "id": "closure-gate",
+      "type": "gate",
+      "title": "Application Client workstream reconciled",
+      "summary": "Builder accepts the supported client, conformance evidence, consumer integration, migration guidance, and operational hardening, then reconciles durable lessons into both product workstreams and campaign closure.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "operational-hardening"
+      ]
+    }
+  ],
+  "checkpoints": [
+    {
+      "id": "application-client-ready",
+      "title": "Shared Application Client semantic contract accepted",
+      "summary": "Issue #12 contains the merged contract and explicit dispositions, allowing Operator Station and Watcher to detail and coordinate production implementation without private seams.",
+      "status": "planned",
+      "nodeIds": [
+        "contract-convergence",
+        "application-client-ready-gate"
+      ]
+    },
+    {
+      "id": "supported-client",
+      "title": "Supported client core and binding consumable",
+      "summary": "The accepted contract has a supported implementation, first binding, conformance evidence, and consumer validation.",
+      "status": "planned",
+      "nodeIds": [
+        "client-core",
+        "first-binding",
+        "client-conformance",
+        "consumer-integration-gate"
+      ]
+    },
+    {
+      "id": "closure-ready",
+      "title": "Application Client operationally validated",
+      "summary": "The shared client has survived operational hardening and its exports are reconciled into both product workstreams.",
+      "status": "planned",
+      "nodeIds": [
+        "operational-hardening",
+        "closure-gate"
+      ]
+    }
+  ],
+  "presentation": {
+    "shortName": "TLX-A",
+    "color": "#8e5bd9"
+  },
+  "launchPolicy": {
+    "requiredTracker": "github-issue"
+  },
+  "launchDefaults": {
+    "promptProfileId": "telex-application-client-implementer-watcher-v1",
+    "terminal": {
+      "titleTemplate": "TLX-A {githubIssue}"
+    },
+    "launchAfterInit": true,
+    "reviewCompanion": true,
+    "reviewPromptTemplateId": "telex-application-client-reviewer-watcher-v1"
+  }
+}
