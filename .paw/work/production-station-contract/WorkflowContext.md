@@ -38,4 +38,4 @@ Issue URL: https://github.com/lossyrob/telex/issues/114
 Remote: origin
 Artifact Lifecycle: commit-and-clean
 Artifact Paths: auto-derived
-Additional Inputs: none
+Additional Inputs: streamliner-context=C:/Users/robemanuele/proj/telex/telex-production-station-contract/.paw/work/production-station-contract/streamliner/context.md
