@@ -8,8 +8,8 @@
 // telex embeds these bytes (include_str!) and writes them into the session
 // extension dir on `telex copilot attach --copilot-bridge`. A new live session
 // runs `extensions_reload` once; a resumed session discovers the retained file
-// during startup. `telex copilot detach` removes the file (and the agent reloads
-// to unload it immediately when needed).
+// during startup. `telex copilot detach` removes the file and sends an authenticated
+// stop request; heartbeat binding checks provide fallback shutdown.
 //
 // Transport (Option A): a per-session OS named pipe (Windows) / unix domain
 // socket (POSIX). The endpoint path is derived from the Copilot session id so it
@@ -104,6 +104,41 @@ const endpoint =
   platform() === "win32"
     ? { kind: "pipe", path: `\\\\.\\pipe\\telex-bridge-${sessionId}` }
     : { kind: "unix", path: join(registryDir, `${sessionId}.sock`) };
+let server;
+let heartbeatTimer;
+
+async function cleanup({ removeRegistry = false } = {}) {
+  try {
+    clearInterval(heartbeatTimer);
+  } catch {}
+  try {
+    server?.close();
+  } catch {}
+  // Only modify the registry/socket if they still point at THIS process, so a
+  // /clear reload (old process SIGTERM'd after the new one rewrote the registry and rebound the
+  // same session-derived endpoint) does not delete the newer bridge's registry/socket and make
+  // push report "no live bridge".
+  try {
+    const raw = await readFile(registryPath, "utf8");
+    if (JSON.parse(raw).pid === process.pid) {
+      if (removeRegistry) {
+        await rm(registryPath, { force: true });
+      }
+      if (endpoint.kind === "unix") {
+        await rm(endpoint.path, { force: true }).catch(() => {});
+      }
+    }
+  } catch {}
+}
+
+async function cleanupOnSignal() {
+  stopping = true;
+  await runLifecycle(async () => {
+    await cleanup({ removeRegistry: !(await bridgeBindingExists()) });
+  });
+}
+process.once("SIGTERM", cleanupOnSignal);
+process.once("SIGINT", cleanupOnSignal);
 
 function writeResponse(socket, value) {
   try {
@@ -236,7 +271,7 @@ async function handleConnection(socket) {
   socket.on("error", () => {});
 }
 
-const server = createServer(handleConnection);
+server = createServer(handleConnection);
 
 // On POSIX a stale socket file blocks listen(); remove it first.
 if (endpoint.kind === "unix") {
@@ -325,7 +360,7 @@ if (!(await bridgeBindingExists())) {
 }
 
 await writeRegistry();
-const heartbeatTimer = setInterval(async () => {
+heartbeatTimer = setInterval(async () => {
   if (stopping) return;
   await runLifecycle(async () => {
     if (stopping) return;
@@ -344,36 +379,3 @@ heartbeatTimer.unref?.();
 await session.log(
   `telex-bridge ready for ${sessionId} on ${endpoint.kind} ${endpoint.path}`,
 );
-
-const cleanup = async ({ removeRegistry = false } = {}) => {
-  try {
-    clearInterval(heartbeatTimer);
-  } catch {}
-  try {
-    server.close();
-  } catch {}
-  // Only modify the registry/socket if they still point at THIS process, so a
-  // /clear reload (old process SIGTERM'd after the new one rewrote the registry and rebound the
-  // same session-derived endpoint) does not delete the newer bridge's registry/socket and make
-  // push report "no live bridge".
-  try {
-    const raw = await readFile(registryPath, "utf8");
-    if (JSON.parse(raw).pid === process.pid) {
-      if (removeRegistry) {
-        await rm(registryPath, { force: true });
-      }
-      if (endpoint.kind === "unix") {
-        await rm(endpoint.path, { force: true }).catch(() => {});
-      }
-    }
-  } catch {}
-};
-
-const cleanupOnSignal = async () => {
-  stopping = true;
-  await runLifecycle(async () => {
-    await cleanup({ removeRegistry: !(await bridgeBindingExists()) });
-  });
-};
-process.once("SIGTERM", cleanupOnSignal);
-process.once("SIGINT", cleanupOnSignal);

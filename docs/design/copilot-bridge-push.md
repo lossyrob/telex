@@ -201,12 +201,12 @@ The full lifecycle:
   `extension.mjs` into the session extension dir and registers the daemon
   on-deliver handler. The agent calls `extensions_reload` to load it.
 - **Unbind** -- `telex --address <addr> copilot detach` deregisters the handler and **removes the
-  `extension.mjs`** (so it will not reload on a later resume); the agent calls
-  `extensions_reload` to unload the live process now. Removal is **ref-counted
-  to the session's last telex binding**: one bridge serves all of a session's
-  addresses, so it is removed only when the final binding for that session goes
-  away. Both steps live in the `copilot.rs` boundary, so the daemon stays
-  agnostic.
+  `extension.mjs`** (so it will not reload on a later resume) and sends an authenticated stop
+  request to the live bridge. If that request cannot reach it, the bridge self-stops when its next
+  heartbeat sees the missing final binding; `extensions_reload` is only immediate-unload recovery.
+  Removal is **ref-counted to the session's last telex binding**: one bridge serves all of a
+  session's addresses, so it is removed only when the final binding for that session goes away.
+  Both steps live in the `copilot.rs` boundary, so the daemon stays agnostic.
 - **No elevated permission** -- the bridge requests no `skipPermission` and
   needs no agent tool for delivery (the pipe is the interface). So a (re)load is
   **silent** -- no permission prompt. This is what makes the orphan case below

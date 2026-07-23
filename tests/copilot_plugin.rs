@@ -473,6 +473,19 @@ fn bridge_extension_preserves_resumable_registry_and_stops_after_final_unbind() 
             "bridge extension must preserve lifecycle contract marker {required:?}"
         );
     }
+    let design = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("docs/design/copilot-bridge-push.md"),
+    )
+    .expect("read bridge design");
+    for obsolete in [
+        "agent calls `extensions_reload` to unload",
+        "self-exit remain **deferred**",
+    ] {
+        assert!(
+            !design.contains(obsolete),
+            "bridge design must not retain obsolete lifecycle wording {obsolete:?}"
+        );
+    }
 }
 
 #[test]

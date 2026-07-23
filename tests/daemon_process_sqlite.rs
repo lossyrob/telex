@@ -3417,7 +3417,12 @@ fn real_process_copilot_resume_blocks_stale_live_bridge_before_backlog_rearm() {
     )
     .assert_success("queue backlog before stale resume");
 
-    let (_, _, registry_path) = copilot_bridge_paths(&copilot_home, session);
+    let (extension_dir, _, registry_path) = copilot_bridge_paths(&copilot_home, session);
+    std::fs::write(
+        extension_dir.join("extension.mjs"),
+        b"old retained extension",
+    )
+    .expect("write old retained extension");
     std::fs::write(
         &registry_path,
         serde_json::to_vec(&serde_json::json!({
@@ -3440,6 +3445,13 @@ fn real_process_copilot_resume_blocks_stale_live_bridge_before_backlog_rearm() {
             && stale_resume.stderr.contains("extensions_reload"),
         "stale resume must provide reload recovery guidance: {}",
         stale_resume.stderr
+    );
+    let refreshed_extension = std::fs::read_to_string(extension_dir.join("extension.mjs"))
+        .expect("read refreshed retained extension");
+    assert!(
+        refreshed_extension.contains("bridgeProtocol")
+            && !refreshed_extension.contains("old retained extension"),
+        "stale resume must materialize current bytes before requesting reload"
     );
 
     let status = env.run_with_session(

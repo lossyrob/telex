@@ -85,7 +85,7 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
         CopilotCmd::Drain(args) => drain(ctx, args).await,
         CopilotCmd::Detach(args) => detach(ctx, args).await,
         CopilotCmd::Fallback(cmd) => fallback(ctx, cmd).await,
-        CopilotCmd::Gc(args) => gc(ctx, args),
+        CopilotCmd::Gc(args) => gc(ctx, args).await,
     }
 }
 
@@ -180,6 +180,13 @@ fn bridge_extension_dir(session_id: &str) -> Result<PathBuf> {
         .join(BRIDGE_EXTENSION_NAME))
 }
 
+fn bridge_extension_transaction_dir(session_id: &str) -> Result<PathBuf> {
+    Ok(copilot_home_dir()?
+        .join("session-state")
+        .join(session_id)
+        .join("telex-bridge-transaction"))
+}
+
 fn bridge_bindings_path(session_id: &str) -> Result<PathBuf> {
     Ok(copilot_home_dir()?
         .join("telex-bridge")
@@ -206,11 +213,10 @@ fn write_bridge_extension(session_id: &str) -> Result<()> {
         .parent()
         .ok_or_else(|| anyhow!("bridge extension directory has no parent"))?;
     std::fs::create_dir_all(parent)?;
-    let staging = parent.join(format!(
-        "{BRIDGE_EXTENSION_NAME}.{}.staging",
-        std::process::id()
-    ));
-    let backup = parent.join(format!("{BRIDGE_EXTENSION_NAME}.backup"));
+    let transaction_dir = bridge_extension_transaction_dir(session_id)?;
+    std::fs::create_dir_all(&transaction_dir)?;
+    let staging = transaction_dir.join(format!("{}.staging", std::process::id()));
+    let backup = transaction_dir.join("backup");
     let _ = std::fs::remove_dir_all(&staging);
     if !dir.exists() && backup.exists() {
         std::fs::rename(&backup, &dir)
@@ -240,6 +246,7 @@ fn write_bridge_extension(session_id: &str) -> Result<()> {
             if had_existing {
                 let _ = std::fs::remove_dir_all(&backup);
             }
+            let _ = std::fs::remove_dir(&transaction_dir);
             Ok(())
         }
         Err(e) => {
@@ -329,6 +336,9 @@ fn remove_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
 /// destructive lifecycle paths such as final-binding detach, fallback transition, rollback, and GC.
 fn remove_bridge_extension(session_id: &str) {
     if let Ok(dir) = bridge_extension_dir(session_id) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    if let Ok(dir) = bridge_extension_transaction_dir(session_id) {
         let _ = std::fs::remove_dir_all(dir);
     }
     if let Ok(registry) = bridge_registry_path(session_id) {
@@ -1206,6 +1216,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     if bridge_provisioned && !matches!(result, Ok(0)) {
         if let Ok(address) = ctx.cfg.require_address(&ctx.address) {
             if let Ok(true) = remove_bridge_binding(&session, &address) {
+                stop_bridge_best_effort(&session).await;
                 remove_bridge_extension(&session);
             }
         }
@@ -1216,6 +1227,11 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
 async fn resume(ctx: &Ctx, args: CopilotResumeArgs) -> Result<i32> {
     let session = resolve_copilot_session(args.session.as_deref(), None);
     if let Some(session) = session.as_deref() {
+        {
+            let _bridge_lifecycle_lock = acquire_bridge_lifecycle_lock(session)?;
+            write_bridge_extension(session)
+                .context("materializing the current bridge before resume")?;
+        }
         if bridge_is_live(session) {
             if let Some(detail) = bridge_version_mismatch(session) {
                 eprintln!(
@@ -1817,7 +1833,7 @@ fn skill(args: CopilotSkillArgs) -> Result<i32> {
     Ok(0)
 }
 
-fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
+async fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
     let sessions = match args.session {
         Some(session) => vec![session],
         None => discover_bridge_sessions()?,
@@ -1855,6 +1871,7 @@ fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
         } else if args.dry_run {
             ("would_remove", "stale bridge files".to_string())
         } else {
+            stop_bridge_best_effort(&session).await;
             remove_bridge_extension(&session);
             ("removed", "stale bridge files".to_string())
         };
@@ -3836,8 +3853,8 @@ mod tests {
         assert_eq!(got[0].address, "active");
     }
 
-    #[test]
-    fn copilot_gc_keeps_corrupt_bindings_unless_forced() {
+    #[tokio::test]
+    async fn copilot_gc_keeps_corrupt_bindings_unless_forced() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let prior_home = std::env::var_os("TELEX_COPILOT_HOME");
         let copilot_home =
@@ -3882,6 +3899,7 @@ mod tests {
                 force: false,
             },
         )
+        .await
         .expect("non-force gc");
         assert!(
             path.exists() && extension_dir.exists() && registry_path.exists(),
@@ -3896,6 +3914,7 @@ mod tests {
                 force: true,
             },
         )
+        .await
         .expect("forced gc");
         assert!(
             !path.exists() && !extension_dir.exists() && !registry_path.exists(),
@@ -3939,10 +3958,9 @@ mod tests {
         )));
 
         let prior_extension = extension;
-        let staging = extension_dir.parent().unwrap().join(format!(
-            "{BRIDGE_EXTENSION_NAME}.{}.staging",
-            std::process::id()
-        ));
+        let transaction_dir = bridge_extension_transaction_dir(session).expect("transaction dir");
+        std::fs::create_dir_all(&transaction_dir).expect("create transaction dir");
+        let staging = transaction_dir.join(format!("{}.staging", std::process::id()));
         std::fs::write(&staging, b"block staging directory").expect("create staging blocker");
         assert!(write_bridge_extension(session).is_err());
         assert_eq!(
@@ -3952,10 +3970,7 @@ mod tests {
         );
         assert!(extension_dir.join("busy-state.mjs").exists());
         std::fs::remove_file(&staging).expect("remove staging blocker");
-        let backup = extension_dir
-            .parent()
-            .unwrap()
-            .join(format!("{BRIDGE_EXTENSION_NAME}.backup"));
+        let backup = transaction_dir.join("backup");
         std::fs::rename(&extension_dir, &backup).expect("simulate interrupted directory swap");
         write_bridge_extension(session).expect("recover interrupted directory swap");
         assert!(extension_dir.join("extension.mjs").exists());
