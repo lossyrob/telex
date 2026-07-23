@@ -216,8 +216,9 @@ The full lifecycle:
   transient turn-guard state but intentionally preserves the extension, registry, and bindings.
   Copilot discovers the retained extension during startup, and `copilot resume` re-arms push
   registration plus backlog delivery without requiring an in-session reload. If startup discovery
-  does not produce a live heartbeat, `extensions_reload` remains the recovery step for the
-  already-running session.
+  does not produce a live current-version heartbeat, `extensions_reload` remains the recovery step
+  for the already-running session. The extension preserves its last heartbeat registry on ordinary
+  shutdown when bindings remain; the heartbeat is transient and is recreated on resume.
 - **Orphan safety (closed without detach)** -- if a session is killed, closed, or never resumed
   before `telex --address <addr> copilot detach`, the file persists. Mitigations, in order of cost:
   (a) silent load
@@ -267,7 +268,7 @@ The full lifecycle:
 | Resident Node process (~25 MB) once loaded | Only for telex sessions, only after bind; non-telex pay zero |
 | `/clear` reloads the bridge (in-memory state lost) | Endpoint is derived from session id (named pipe) so it is stable; the daemon registration is daemon-side and survives `/clear`; one idempotent re-load re-arms |
 | Delivery racing a reload gap | Lazy endpoint resolution + daemon retry redelivers; named pipe keeps the endpoint stable so the window is tiny |
-| Stale registry on hard kill (SIGKILL skips cleanup) | `telex copilot push` treats a dead endpoint as a failed delivery -> daemon retry; the bridge best-effort removes its registry entry on SIGTERM/SIGINT, and explicit `copilot detach` / fallback / rollback / GC clean up. Ordinary `sessionEnd` preserves it for resume. |
+| Stale registry on hard kill (SIGKILL skips cleanup) | `telex copilot push` treats a dead endpoint as a failed delivery -> daemon retry. The bridge preserves the registry on ordinary signal shutdown while bindings remain, but removes it after detach/fallback/rollback/GC removes the final binding. A hard-kill registry ages out of live status within the heartbeat window. |
 | `extensions_reload` is global (restarts all extensions) | Acceptable; reload is idempotent and infrequent (bind, `/clear`) |
 | Address mapping | telex owns address -> session mapping via `attach`; the Copilot-side registry is keyed by session id and correlated by the handler |
 | Bridge bytes drift from protocol | telex embeds the bridge (`include_str!`) so it is versioned with the daemon |

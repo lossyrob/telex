@@ -79,8 +79,9 @@ yours to make.
    backstop may re-check it only every few minutes if it stays unacked.
 
    Troubleshooting CC observer turns: if CC traffic is visible in `telex inbox` but is not arriving
-   as Copilot turns, the bridge was probably bound without CC wake or the extension was not reloaded.
-   Re-run the bind with the CC flag, then run `extensions_reload`:
+   as Copilot turns, the bridge was probably bound without CC wake or is not live. Re-run the bind
+   with the CC flag; run `extensions_reload` only if recovery is needed in the already-running
+   session:
 
    ```sh
    telex --address <addr> copilot attach --copilot-bridge --wake-on-cc --description "<what this session is doing>"

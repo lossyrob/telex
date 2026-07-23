@@ -436,10 +436,33 @@ fn binary_owned_copilot_skill_uses_prepared_cross_platform_fallback() {
             "Copilot skill must document prepared fallback contract {required:?}"
         );
     }
+
     for removed_manual_wrapper in ["telex-wait-once.ps1", "param("] {
         assert!(
             !copilot_skill.contains(removed_manual_wrapper),
             "Copilot skill must not require the old agent-authored wrapper {removed_manual_wrapper:?}"
+        );
+    }
+}
+
+#[test]
+fn bridge_extension_preserves_resumable_registry_and_stops_after_final_unbind() {
+    let extension = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("copilot/bridge/extension.mjs"),
+    )
+    .expect("read bridge extension");
+    for required in [
+        "TELEX_COPILOT_HOME",
+        "bindingsPath",
+        "bridgeBindingExists",
+        "removeRegistry: !(await bridgeBindingExists())",
+        "removeRegistry: true",
+        "bridgeProtocol",
+        "telexBuildId",
+    ] {
+        assert!(
+            extension.contains(required),
+            "bridge extension must preserve lifecycle contract marker {required:?}"
         );
     }
 }

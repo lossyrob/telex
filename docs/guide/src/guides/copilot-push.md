@@ -65,8 +65,9 @@ with `--wake-on-cc`:
 telex --address <addr> copilot attach --copilot-bridge --wake-on-cc --description "<work>"
 ```
 
-Then run `extensions_reload` as usual. Without `--wake-on-cc`, CC copies are still
-buffered and visible in `telex inbox --all`, but are not delivered as turns.
+Run `extensions_reload` only if this is first-time provisioning or recovery in the
+already-running session. Without `--wake-on-cc`, CC copies are still buffered and
+visible in `telex inbox --all`, but are not delivered as turns.
 (`telex wait --wake-on-cc` is the separate pull-mode equivalent for non-Copilot
 harnesses.)
 
@@ -85,7 +86,8 @@ On resume, Copilot discovers the retained extension during startup; run
 `telex --address <addr> copilot resume --description "<work>"` to re-arm push and
 rescan unacknowledged backlog. Use `extensions_reload` only for first-time
 provisioning or recovery when the retained bridge is not live in an already-running
-session.
+session, including the first resume after a Telex upgrade when the live bridge reports
+an older build or protocol.
 
 Inspect stale bridge files left by other sessions with `telex copilot gc --dry-run`.
 Use `telex copilot gc --force` only after verifying a retained session will not resume.

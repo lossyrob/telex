@@ -7,9 +7,10 @@
 - **Runtime directory (daemon IPC and lease state):** a per-user runtime directory
   (on Windows under `%LOCALAPPDATA%\telex\run`; on Unix a per-user socket/runtime
   directory).
-- **Copilot bridge files:** in the Copilot session's extension directory; retained
-  across resumable session end and removed by final-binding `telex copilot detach`,
-  fallback/rollback cleanup, or `telex copilot gc`.
+- **Copilot bridge extension:** in the Copilot session's extension directory.
+- **Copilot bridge registry and bindings:** under the Copilot home `telex-bridge`
+  directory. Durable files are retained across resumable session end and removed by
+  final-binding `telex copilot detach`, fallback/rollback cleanup, or `telex copilot gc`.
 
 ## Trust model
 
