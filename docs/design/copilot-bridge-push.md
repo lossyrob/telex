@@ -220,15 +220,11 @@ The full lifecycle:
   for the already-running session. The extension preserves its last heartbeat registry on ordinary
   shutdown when bindings remain; the heartbeat is transient and is recreated on resume.
 - **Orphan safety (closed without detach)** -- if a session is killed, closed, or never resumed
-  before `telex --address <addr> copilot detach`, the file persists. Mitigations, in order of cost:
-  (a) silent load
-  means it is harmless if unused; (b) a `telex copilot gc` (or an attach-time sweep)
-  prunes session-bridge dirs whose session ids telex no longer binds; (c) optionally
-  the bridge self-exits on load if telex shows no binding for its session id, keeping
-  orphan memory near zero. **v1 ships (a) only** -- silent-load-is-harmless plus the
-  explicit cleanup paths (`copilot detach`, fallback transition, attach-failure rollback, and
-  `telex copilot gc` remove the extension dir / registry / bindings). Attach-time sweep and
-  self-exit remain **deferred** (ADR 0039).
+  before `telex --address <addr> copilot detach`, the file persists. A loaded bridge checks the
+  durable bindings file at startup and on each heartbeat; after final unbind it removes its live
+  registry/socket and exits. Explicit cleanup paths (`copilot detach`, fallback transition,
+  attach-failure rollback, and `telex copilot gc`) remove the extension dir / registry / bindings.
+  Attach-time sweeping of unrelated abandoned sessions remains deferred (ADR 0039).
 
 ## Effect on sessions that do not use this
 

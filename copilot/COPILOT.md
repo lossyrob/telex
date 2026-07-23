@@ -132,9 +132,10 @@ yours to make.
    ```
 
    This detaches the address and, when it was the last binding, removes the bridge files so
-   it will not reload on a later resume. The already-loaded bridge stays live until the next
-   `extensions_reload` or session end; run `extensions_reload` once after detach if you want
-   it unloaded immediately.
+   it will not reload on a later resume. The already-loaded bridge receives an explicit stop
+   request and also self-stops when its next heartbeat observes the missing final binding.
+   Run `extensions_reload` after detach only if you need immediate unload recovery after the
+   explicit stop could not reach the live extension.
 
    Ordinary session end is resumable: it marks daemon attendance idle and clears transient
    turn-guard state, but retains the extension, bindings, and registry for startup discovery.

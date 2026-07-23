@@ -188,6 +188,18 @@ fn bridge_bindings_path(session_id: &str) -> Result<PathBuf> {
 
 /// Write the embedded bridge extension into the session's extension discovery dir. An
 /// already-running session uses `extensions_reload` only for first-time or recovery loading.
+fn render_bridge_extension(build_id: &str) -> Result<String> {
+    let build_id = serde_json::to_string(build_id)?
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029");
+    Ok(BRIDGE_EXTENSION_MJS
+        .replace(
+            "__TELEX_BRIDGE_PROTOCOL__",
+            &COPILOT_BRIDGE_PROTOCOL.to_string(),
+        )
+        .replace("\"__TELEX_BUILD_ID__\"", &build_id))
+}
+
 fn write_bridge_extension(session_id: &str) -> Result<()> {
     let dir = bridge_extension_dir(session_id)?;
     let parent = dir
@@ -198,19 +210,16 @@ fn write_bridge_extension(session_id: &str) -> Result<()> {
         "{BRIDGE_EXTENSION_NAME}.{}.staging",
         std::process::id()
     ));
-    let backup = parent.join(format!(
-        "{BRIDGE_EXTENSION_NAME}.{}.backup",
-        std::process::id()
-    ));
+    let backup = parent.join(format!("{BRIDGE_EXTENSION_NAME}.backup"));
     let _ = std::fs::remove_dir_all(&staging);
-    let _ = std::fs::remove_dir_all(&backup);
+    if !dir.exists() && backup.exists() {
+        std::fs::rename(&backup, &dir)
+            .context("recovering interrupted bridge extension replacement")?;
+    } else if dir.exists() && backup.exists() {
+        std::fs::remove_dir_all(&backup).context("removing completed bridge extension backup")?;
+    }
     std::fs::create_dir(&staging)?;
-    let extension = BRIDGE_EXTENSION_MJS
-        .replace(
-            "__TELEX_BRIDGE_PROTOCOL__",
-            &COPILOT_BRIDGE_PROTOCOL.to_string(),
-        )
-        .replace("__TELEX_BUILD_ID__", crate::install::BUILD_ID);
+    let extension = render_bridge_extension(crate::install::BUILD_ID)?;
     if let Err(e) = std::fs::write(staging.join("extension.mjs"), extension) {
         let _ = std::fs::remove_dir_all(&staging);
         return Err(e.into());
@@ -221,7 +230,10 @@ fn write_bridge_extension(session_id: &str) -> Result<()> {
     }
     let had_existing = dir.exists();
     if had_existing {
-        std::fs::rename(&dir, &backup)?;
+        if let Err(e) = std::fs::rename(&dir, &backup) {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(e.into());
+        }
     }
     match std::fs::rename(&staging, &dir) {
         Ok(()) => {
@@ -232,7 +244,12 @@ fn write_bridge_extension(session_id: &str) -> Result<()> {
         }
         Err(e) => {
             if had_existing {
-                let _ = std::fs::rename(&backup, &dir);
+                if let Err(restore) = std::fs::rename(&backup, &dir) {
+                    let _ = std::fs::remove_dir_all(&staging);
+                    return Err(anyhow!(
+                        "installing bridge extension failed ({e}); restoring prior extension also failed ({restore})"
+                    ));
+                }
             }
             let _ = std::fs::remove_dir_all(&staging);
             Err(e.into())
@@ -430,6 +447,7 @@ async fn detach(ctx: &Ctx, args: CopilotDetachArgs) -> Result<i32> {
     .await?;
     if let Some(address) = address {
         if let Ok(true) = remove_bridge_binding(&session, &address) {
+            stop_bridge_best_effort(&session).await;
             remove_bridge_extension(&session);
         }
     }
@@ -543,8 +561,15 @@ fn bridge_is_live(session_id: &str) -> bool {
 }
 
 fn bridge_version_mismatch(session_id: &str) -> Option<String> {
-    let raw = std::fs::read_to_string(bridge_registry_path(session_id).ok()?).ok()?;
-    let registry: BridgeRegistry = serde_json::from_str(&raw).ok()?;
+    let path = bridge_registry_path(session_id).ok()?;
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) => return Some(format!("registry {} is unreadable: {e}", path.display())),
+    };
+    let registry: BridgeRegistry = match serde_json::from_str(&raw) {
+        Ok(registry) => registry,
+        Err(e) => return Some(format!("registry {} is invalid: {e}", path.display())),
+    };
     let protocol_matches = registry.bridge_protocol == Some(COPILOT_BRIDGE_PROTOCOL);
     let build_matches = registry.telex_build_id.as_deref() == Some(crate::install::BUILD_ID);
     if protocol_matches && build_matches {
@@ -1042,6 +1067,40 @@ async fn bridge_roundtrip(path: &str, request_line: &str) -> Result<String> {
     Ok(response)
 }
 
+async fn stop_bridge_best_effort(session_id: &str) {
+    let result = async {
+        let registry_path = bridge_registry_path(session_id)?;
+        let raw = std::fs::read_to_string(&registry_path)?;
+        let registry: BridgeRegistry = serde_json::from_str(&raw)?;
+        let secret = registry
+            .secret
+            .ok_or_else(|| anyhow!("bridge registry has no secret"))?;
+        let request = serde_json::to_string(&serde_json::json!({
+            "action": "stop",
+            "secret": secret,
+        }))?;
+        let endpoint = bridge_endpoint_path(session_id)?;
+        let response =
+            tokio::time::timeout(BRIDGE_PUSH_TIMEOUT, bridge_roundtrip(&endpoint, &request))
+                .await
+                .map_err(|_| anyhow!("timed out stopping bridge"))??;
+        let response: BridgePushResponse = serde_json::from_str(response.trim())?;
+        if !response.ok {
+            return Err(anyhow!(
+                "bridge rejected stop: {}",
+                response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
+            ));
+        }
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    if let Err(e) = result {
+        eprintln!("telex copilot: bridge stop did not complete before cleanup: {e}");
+    }
+}
+
 async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     if args.wake_on_cc && !args.copilot_bridge {
         eprintln!("telex copilot attach: --wake-on-cc requires --copilot-bridge");
@@ -1156,7 +1215,17 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
 
 async fn resume(ctx: &Ctx, args: CopilotResumeArgs) -> Result<i32> {
     let session = resolve_copilot_session(args.session.as_deref(), None);
-    let result = attach(
+    if let Some(session) = session.as_deref() {
+        if bridge_is_live(session) {
+            if let Some(detail) = bridge_version_mismatch(session) {
+                eprintln!(
+                    "telex copilot resume: the live bridge is version-stale ({detail}); run `extensions_reload` to load the retained current extension, then retry `copilot resume`"
+                );
+                return Ok(1);
+            }
+        }
+    }
+    attach(
         ctx,
         CopilotAttachArgs {
             session: args.session,
@@ -1168,17 +1237,7 @@ async fn resume(ctx: &Ctx, args: CopilotResumeArgs) -> Result<i32> {
             wake_on_cc: args.wake_on_cc,
         },
     )
-    .await;
-    if matches!(result, Ok(0)) {
-        if let Some(session) = session {
-            if let Some(detail) = bridge_version_mismatch(&session) {
-                eprintln!(
-                    "telex copilot resume: the live bridge is version-stale ({detail}); run `extensions_reload` to load the retained current extension into this already-running session"
-                );
-            }
-        }
-    }
-    result
+    .await
 }
 
 async fn fallback(ctx: &Ctx, cmd: CopilotFallbackCmd) -> Result<i32> {
@@ -1399,7 +1458,10 @@ async fn fallback_run_inner(ctx: &Ctx, manifest: &FallbackManifest, run_dir: &Pa
     }
 
     match remove_bridge_binding(&manifest.session_id, &manifest.address) {
-        Ok(true) => remove_bridge_extension(&manifest.session_id),
+        Ok(true) => {
+            stop_bridge_best_effort(&manifest.session_id).await;
+            remove_bridge_extension(&manifest.session_id);
+        }
         Ok(false) => {}
         Err(e) => {
             return Err(anyhow!(
@@ -3867,6 +3929,14 @@ mod tests {
             "const telexBuildId = \"{}\";",
             crate::install::BUILD_ID
         )));
+        let unusual_build_id = "candidate\"build\\windows\u{2028}";
+        let unusual = render_bridge_extension(unusual_build_id).expect("render unusual build id");
+        assert!(unusual.contains(&format!(
+            "const telexBuildId = {};",
+            serde_json::to_string(unusual_build_id)
+                .unwrap()
+                .replace('\u{2028}', "\\u2028")
+        )));
 
         let prior_extension = extension;
         let staging = extension_dir.parent().unwrap().join(format!(
@@ -3881,6 +3951,16 @@ mod tests {
             prior_extension
         );
         assert!(extension_dir.join("busy-state.mjs").exists());
+        std::fs::remove_file(&staging).expect("remove staging blocker");
+        let backup = extension_dir
+            .parent()
+            .unwrap()
+            .join(format!("{BRIDGE_EXTENSION_NAME}.backup"));
+        std::fs::rename(&extension_dir, &backup).expect("simulate interrupted directory swap");
+        write_bridge_extension(session).expect("recover interrupted directory swap");
+        assert!(extension_dir.join("extension.mjs").exists());
+        assert!(extension_dir.join("busy-state.mjs").exists());
+        assert!(!backup.exists());
 
         restore_env("TELEX_COPILOT_HOME", prior_home);
         let _ = std::fs::remove_dir_all(copilot_home);

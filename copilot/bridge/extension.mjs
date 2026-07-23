@@ -90,6 +90,14 @@ const secret = randomBytes(32).toString("hex");
 const registryPath = join(registryDir, `${sessionId}.json`);
 const bridgeProtocol = Number("__TELEX_BRIDGE_PROTOCOL__");
 const telexBuildId = "__TELEX_BUILD_ID__";
+let lifecycleQueue = Promise.resolve();
+let stopping = false;
+
+function runLifecycle(operation) {
+  const next = lifecycleQueue.then(operation, operation);
+  lifecycleQueue = next.catch(() => {});
+  return next;
+}
 
 // Derive the same-user endpoint from the session id (stable across reloads).
 const endpoint =
@@ -157,6 +165,14 @@ async function handleConnection(socket) {
     if (typeof input.secret !== "string" || input.secret !== secret) {
       writeResponse(socket, { ok: false, error: "unauthorized" });
       socket.end();
+      return;
+    }
+    if (input.action === "stop") {
+      stopping = true;
+      await runLifecycle(() => cleanup({ removeRegistry: true }));
+      writeResponse(socket, { ok: true, sessionId, stopped: true });
+      socket.end();
+      setImmediate(() => process.exit(0));
       return;
     }
     if (typeof input.prompt !== "string" || input.prompt.trim() === "") {
@@ -310,11 +326,17 @@ if (!(await bridgeBindingExists())) {
 
 await writeRegistry();
 const heartbeatTimer = setInterval(async () => {
-  if (!(await bridgeBindingExists())) {
-    await cleanup({ removeRegistry: true });
-    process.exit(0);
-  }
-  await writeRegistry().catch(() => {});
+  if (stopping) return;
+  await runLifecycle(async () => {
+    if (stopping) return;
+    if (!(await bridgeBindingExists())) {
+      stopping = true;
+      await cleanup({ removeRegistry: true });
+      setImmediate(() => process.exit(0));
+      return;
+    }
+    await writeRegistry();
+  }).catch(() => {});
 }, 15000);
 // Never let the heartbeat keep the process alive on its own.
 heartbeatTimer.unref?.();
@@ -348,7 +370,10 @@ const cleanup = async ({ removeRegistry = false } = {}) => {
 };
 
 const cleanupOnSignal = async () => {
-  await cleanup({ removeRegistry: !(await bridgeBindingExists()) });
+  stopping = true;
+  await runLifecycle(async () => {
+    await cleanup({ removeRegistry: !(await bridgeBindingExists()) });
+  });
 };
 process.once("SIGTERM", cleanupOnSignal);
 process.once("SIGINT", cleanupOnSignal);

@@ -443,6 +443,12 @@ fn binary_owned_copilot_skill_uses_prepared_cross_platform_fallback() {
             "Copilot skill must not require the old agent-authored wrapper {removed_manual_wrapper:?}"
         );
     }
+    for obsolete in ["stays live until the next", "Session end also removes"] {
+        assert!(
+            !copilot_skill.contains(obsolete),
+            "Copilot skill must not retain obsolete bridge lifecycle wording {obsolete:?}"
+        );
+    }
 }
 
 #[test]
@@ -459,6 +465,8 @@ fn bridge_extension_preserves_resumable_registry_and_stops_after_final_unbind() 
         "removeRegistry: true",
         "bridgeProtocol",
         "telexBuildId",
+        "input.action === \"stop\"",
+        "runLifecycle",
     ] {
         assert!(
             extension.contains(required),

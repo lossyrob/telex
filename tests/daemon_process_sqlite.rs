@@ -3241,8 +3241,17 @@ fn real_process_copilot_session_end_preserves_bridge_until_explicit_detach() {
     assert!(extension_dir.join("extension.mjs").exists());
     assert!(extension_dir.join("busy-state.mjs").exists());
     assert!(bindings_path.exists());
-    std::fs::write(&registry_path, b"invalid registry fixture")
-        .expect("write retained registry fixture");
+    std::fs::write(
+        &registry_path,
+        serde_json::to_vec(&serde_json::json!({
+            "sessionId": session,
+            "secret": "fixture-secret",
+            "bridgeProtocol": telex::commands::copilot::COPILOT_BRIDGE_PROTOCOL,
+            "telexBuildId": env!("TELEX_BUILD_ID"),
+        }))
+        .unwrap(),
+    )
+    .expect("write retained registry fixture");
 
     let turn_guard_root = env.run_dir.join("copilot").join("turn-guard");
     std::fs::create_dir_all(&turn_guard_root).expect("create turn-guard fixture root");
@@ -3351,6 +3360,124 @@ fn real_process_copilot_session_end_preserves_bridge_until_explicit_detach() {
         bindings_path.exists(),
         registry_path.exists()
     );
+}
+
+#[test]
+fn real_process_copilot_resume_blocks_stale_live_bridge_before_backlog_rearm() {
+    let env = ProcessEnv::new("real-copilot-stale-bridge");
+    let session = "real-copilot-stale-bridge-session";
+    let address = "addr:real-copilot-stale-bridge";
+    let sender = "real-copilot-stale-bridge-sender";
+    let sender_address = "addr:real-copilot-stale-bridge-sender";
+    let copilot_home = env.root.join("copilot-home");
+    std::fs::create_dir_all(&copilot_home).expect("create isolated Copilot home");
+    let configure_copilot = |cmd: &mut Command| {
+        cmd.env_remove("TELEX_SESSION_ID")
+            .env("TELEX_COPILOT_HOME", &copilot_home)
+            .env("HOME", &copilot_home)
+            .env("USERPROFILE", &copilot_home)
+            .env("COPILOT_AGENT_SESSION_ID", session);
+    };
+
+    let mut attach = env.command_with_session("ignored");
+    configure_copilot(&mut attach);
+    attach.args([
+        "--json",
+        "--address",
+        address,
+        "copilot",
+        "attach",
+        "--copilot-bridge",
+    ]);
+    run_command_with_capture(attach, &env.root, Duration::from_secs(8))
+        .assert_success("initial bridge attach");
+
+    let mut session_end = env.command_with_session("ignored");
+    configure_copilot(&mut session_end);
+    session_end.args(["--json", "copilot", "session-end"]);
+    run_command_with_capture(session_end, &env.root, Duration::from_secs(8))
+        .assert_success("session-end before stale resume");
+
+    env.attach(sender, sender_address);
+    env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_address,
+            "send",
+            "--session",
+            sender,
+            "--to",
+            address,
+            "--body",
+            "queued before stale bridge resume",
+        ],
+        Duration::from_secs(5),
+    )
+    .assert_success("queue backlog before stale resume");
+
+    let (_, _, registry_path) = copilot_bridge_paths(&copilot_home, session);
+    std::fs::write(
+        &registry_path,
+        serde_json::to_vec(&serde_json::json!({
+            "sessionId": session,
+            "secret": "stale-secret",
+            "bridgeProtocol": 0,
+            "telexBuildId": "old-build",
+        }))
+        .unwrap(),
+    )
+    .expect("write stale live registry");
+
+    let mut stale_resume = env.command_with_session("ignored");
+    configure_copilot(&mut stale_resume);
+    stale_resume.args(["--json", "--address", address, "copilot", "resume"]);
+    let stale_resume = run_command_with_capture(stale_resume, &env.root, Duration::from_secs(8));
+    stale_resume.assert_failure("stale live bridge resume");
+    assert!(
+        stale_resume.stderr.contains("version-stale")
+            && stale_resume.stderr.contains("extensions_reload"),
+        "stale resume must provide reload recovery guidance: {}",
+        stale_resume.stderr
+    );
+
+    let status = env.run_with_session(
+        session,
+        ["--json", "station", "status", "--session", session],
+        Duration::from_secs(5),
+    );
+    status.assert_success("station status after blocked stale resume");
+    assert_eq!(
+        status.json("station status after blocked stale resume")["stations"][0]
+            .get("idle")
+            .and_then(Value::as_bool),
+        Some(true),
+        "stale live bridge must be rejected before backlog re-arm"
+    );
+
+    std::fs::write(
+        &registry_path,
+        serde_json::to_vec(&serde_json::json!({
+            "sessionId": session,
+            "secret": "current-secret",
+            "bridgeProtocol": telex::commands::copilot::COPILOT_BRIDGE_PROTOCOL,
+            "telexBuildId": env!("TELEX_BUILD_ID"),
+        }))
+        .unwrap(),
+    )
+    .expect("write current registry");
+    let mut current_resume = env.command_with_session("ignored");
+    configure_copilot(&mut current_resume);
+    current_resume.args(["--json", "--address", address, "copilot", "resume"]);
+    run_command_with_capture(current_resume, &env.root, Duration::from_secs(8))
+        .assert_success("current live bridge resume");
+
+    let mut detach = env.command_with_session("ignored");
+    configure_copilot(&mut detach);
+    detach.args(["--json", "--address", address, "copilot", "detach"]);
+    run_command_with_capture(detach, &env.root, Duration::from_secs(8))
+        .assert_success("detach stale-version test bridge");
 }
 
 #[test]
