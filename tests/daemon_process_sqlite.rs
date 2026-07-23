@@ -3493,6 +3493,31 @@ fn real_process_copilot_resume_blocks_stale_live_bridge_before_backlog_rearm() {
 }
 
 #[test]
+fn real_process_rejected_copilot_resume_leaves_no_new_bridge_artifacts() {
+    let env = ProcessEnv::new("real-copilot-rejected-resume");
+    let session = "real-copilot-rejected-resume-session";
+    let copilot_home = env.root.join("copilot-home");
+    std::fs::create_dir_all(&copilot_home).expect("create isolated Copilot home");
+    let (extension_dir, bindings_path, registry_path) =
+        copilot_bridge_paths(&copilot_home, session);
+
+    let mut resume = env.command_with_session("ignored");
+    resume
+        .env_remove("TELEX_SESSION_ID")
+        .env("TELEX_COPILOT_HOME", &copilot_home)
+        .env("HOME", &copilot_home)
+        .env("USERPROFILE", &copilot_home)
+        .env("COPILOT_AGENT_SESSION_ID", session)
+        .args(["--json", "copilot", "resume"]);
+    let rejected = run_command_with_capture(resume, &env.root, Duration::from_secs(8));
+    rejected.assert_failure("copilot resume without address");
+    assert!(
+        !extension_dir.exists() && !bindings_path.exists() && !registry_path.exists(),
+        "rejected resume must not leave newly provisioned bridge artifacts"
+    );
+}
+
+#[test]
 fn real_process_failed_bridge_registration_rolls_back_all_bridge_state() {
     let env = ProcessEnv::new("real-copilot-bridge-rollback");
     let session = "real-copilot-bridge-rollback-session";

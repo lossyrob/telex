@@ -1225,10 +1225,34 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
 }
 
 async fn resume(ctx: &Ctx, args: CopilotResumeArgs) -> Result<i32> {
-    let session = resolve_copilot_session(args.session.as_deref(), None);
+    let attach_args = CopilotAttachArgs {
+        session: args.session,
+        description: args.description,
+        scope: args.scope,
+        tags: args.tags,
+        occupant: args.occupant,
+        copilot_bridge: true,
+        wake_on_cc: args.wake_on_cc,
+    };
+    let session = resolve_copilot_session(attach_args.session.as_deref(), None);
+    if let Some(session) = session.as_deref() {
+        let address = match ctx.cfg.require_address(&ctx.address) {
+            Ok(address) => address,
+            Err(_) => return attach(ctx, attach_args).await,
+        };
+        if let Ok(store_key) = ctx.store_key() {
+            if let Ok(Some(member)) = daemon_member_status(&store_key, session, &address).await {
+                if member.live_waiters_count > 0 {
+                    return attach(ctx, attach_args).await;
+                }
+            }
+        }
+    }
+    let mut created_extension = false;
     if let Some(session) = session.as_deref() {
         {
             let _bridge_lifecycle_lock = acquire_bridge_lifecycle_lock(session)?;
+            created_extension = !bridge_extension_dir(session)?.exists();
             write_bridge_extension(session)
                 .context("materializing the current bridge before resume")?;
         }
@@ -1241,19 +1265,19 @@ async fn resume(ctx: &Ctx, args: CopilotResumeArgs) -> Result<i32> {
             }
         }
     }
-    attach(
-        ctx,
-        CopilotAttachArgs {
-            session: args.session,
-            description: args.description,
-            scope: args.scope,
-            tags: args.tags,
-            occupant: args.occupant,
-            copilot_bridge: true,
-            wake_on_cc: args.wake_on_cc,
-        },
-    )
-    .await
+    let result = attach(ctx, attach_args).await;
+    if created_extension && !matches!(result, Ok(0)) {
+        if let Some(session) = session.as_deref() {
+            let _bridge_lifecycle_lock = acquire_bridge_lifecycle_lock(session)?;
+            if read_bridge_bindings(session)
+                .map(|bindings| bindings.is_empty())
+                .unwrap_or(false)
+            {
+                remove_bridge_extension(session);
+            }
+        }
+    }
+    result
 }
 
 async fn fallback(ctx: &Ctx, cmd: CopilotFallbackCmd) -> Result<i32> {
