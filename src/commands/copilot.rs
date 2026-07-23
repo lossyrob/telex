@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::cli::{
     AttachArgs, CopilotAttachArgs, CopilotCmd, CopilotDetachArgs, CopilotDrainArgs,
@@ -24,11 +24,12 @@ use crate::model::{now_ms, Attention};
 use crate::output::emit;
 
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
-const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "The telex push bridge is not live. Run `extensions_reload` to load it. If `extensions_reload` is unavailable, enable Copilot Extensions under `/experimental`; then re-provision with `telex --address <station> copilot resume` and run `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch its returned command; or detach with `telex --address <station> copilot detach`.";
+const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "The telex push bridge is not live. Re-provision with `telex --address <station> copilot resume`. If the retained extension is still not live in this already-running session, enable Copilot Extensions under `/experimental` and run `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch its returned command; or detach with `telex --address <station> copilot detach`.";
 const TURN_GUARD_DISABLED: &str = "turn_guard_disabled";
 const HOOK_LOG_FILE: &str = "hook-events.ndjson";
 const HOOK_LOG_ROTATE_BYTES: u64 = 1_048_576;
 const LOCK_STALE_AFTER: Duration = Duration::from_secs(5 * 60);
+const BRIDGE_LIFECYCLE_LOCK_TIMEOUT: Duration = Duration::from_secs(30);
 const FALLBACK_MANIFEST_VERSION: u32 = 1;
 const FALLBACK_PROTOCOL_VERSION: (u16, u16) = (1, 4);
 const FALLBACK_MANIFEST_FILE: &str = "fallback.json";
@@ -84,7 +85,7 @@ pub async fn run(ctx: &Ctx, cmd: CopilotCmd) -> Result<i32> {
         CopilotCmd::Drain(args) => drain(ctx, args).await,
         CopilotCmd::Detach(args) => detach(ctx, args).await,
         CopilotCmd::Fallback(cmd) => fallback(ctx, cmd).await,
-        CopilotCmd::Gc(args) => gc(ctx, args),
+        CopilotCmd::Gc(args) => gc(ctx, args).await,
     }
 }
 
@@ -139,9 +140,36 @@ const BRIDGE_BUSY_STATE_MJS: &str = include_str!("../../copilot/bridge/busy-stat
 const BRIDGE_EXTENSION_NAME: &str = "telex-bridge";
 
 fn copilot_home_dir() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("TELEX_COPILOT_HOME").filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
     dirs::home_dir()
         .map(|home| home.join(".copilot"))
         .ok_or_else(|| anyhow::anyhow!("no home directory"))
+}
+
+fn bridge_lifecycle_path(session_id: &str) -> Result<PathBuf> {
+    Ok(copilot_home_dir()?
+        .join("telex-bridge")
+        .join(format!("{session_id}.lifecycle.json")))
+}
+
+fn acquire_bridge_lifecycle_lock(session_id: &str) -> Result<StateLock> {
+    let path = bridge_lifecycle_path(session_id)?;
+    let deadline = Instant::now() + BRIDGE_LIFECYCLE_LOCK_TIMEOUT;
+    loop {
+        match StateLock::acquire(&path) {
+            Ok(lock) => return Ok(lock),
+            Err(e)
+                if e.downcast_ref::<std::io::Error>()
+                    .is_some_and(|e| e.kind() == std::io::ErrorKind::AlreadyExists)
+                    && Instant::now() < deadline =>
+            {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            Err(e) => return Err(e.context("acquiring Copilot bridge lifecycle lock")),
+        }
+    }
 }
 
 fn bridge_extension_dir(session_id: &str) -> Result<PathBuf> {
@@ -152,21 +180,88 @@ fn bridge_extension_dir(session_id: &str) -> Result<PathBuf> {
         .join(BRIDGE_EXTENSION_NAME))
 }
 
+fn bridge_extension_transaction_dir(session_id: &str) -> Result<PathBuf> {
+    Ok(copilot_home_dir()?
+        .join("session-state")
+        .join(session_id)
+        .join("telex-bridge-transaction"))
+}
+
 fn bridge_bindings_path(session_id: &str) -> Result<PathBuf> {
     Ok(copilot_home_dir()?
         .join("telex-bridge")
         .join(format!("{session_id}.bindings.json")))
 }
 
-/// Write the embedded bridge extension into the session's extension discovery dir. The agent
-/// still runs `extensions_reload` to load it (telex cannot trigger a reload).
+/// Write the embedded bridge extension into the session's extension discovery dir. An
+/// already-running session uses `extensions_reload` only for first-time or recovery loading.
+fn render_bridge_extension(build_id: &str) -> Result<String> {
+    let build_id = serde_json::to_string(build_id)?
+        .replace('\u{2028}', "\\u2028")
+        .replace('\u{2029}', "\\u2029");
+    Ok(BRIDGE_EXTENSION_MJS
+        .replace(
+            "__TELEX_BRIDGE_PROTOCOL__",
+            &COPILOT_BRIDGE_PROTOCOL.to_string(),
+        )
+        .replace("\"__TELEX_BUILD_ID__\"", &build_id))
+}
+
 fn write_bridge_extension(session_id: &str) -> Result<()> {
     let dir = bridge_extension_dir(session_id)?;
-    std::fs::create_dir_all(&dir)?;
-    std::fs::write(dir.join("extension.mjs"), BRIDGE_EXTENSION_MJS)?;
-    // The busy/idle state machine `extension.mjs` imports as `./busy-state.mjs`.
-    std::fs::write(dir.join("busy-state.mjs"), BRIDGE_BUSY_STATE_MJS)?;
-    Ok(())
+    let parent = dir
+        .parent()
+        .ok_or_else(|| anyhow!("bridge extension directory has no parent"))?;
+    std::fs::create_dir_all(parent)?;
+    let transaction_dir = bridge_extension_transaction_dir(session_id)?;
+    std::fs::create_dir_all(&transaction_dir)?;
+    let staging = transaction_dir.join(format!("{}.staging", std::process::id()));
+    let backup = transaction_dir.join("backup");
+    let _ = std::fs::remove_dir_all(&staging);
+    if !dir.exists() && backup.exists() {
+        std::fs::rename(&backup, &dir)
+            .context("recovering interrupted bridge extension replacement")?;
+    } else if dir.exists() && backup.exists() {
+        std::fs::remove_dir_all(&backup).context("removing completed bridge extension backup")?;
+    }
+    std::fs::create_dir(&staging)?;
+    let extension = render_bridge_extension(crate::install::BUILD_ID)?;
+    if let Err(e) = std::fs::write(staging.join("extension.mjs"), extension) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e.into());
+    }
+    if let Err(e) = std::fs::write(staging.join("busy-state.mjs"), BRIDGE_BUSY_STATE_MJS) {
+        let _ = std::fs::remove_dir_all(&staging);
+        return Err(e.into());
+    }
+    let had_existing = dir.exists();
+    if had_existing {
+        if let Err(e) = std::fs::rename(&dir, &backup) {
+            let _ = std::fs::remove_dir_all(&staging);
+            return Err(e.into());
+        }
+    }
+    match std::fs::rename(&staging, &dir) {
+        Ok(()) => {
+            if had_existing {
+                let _ = std::fs::remove_dir_all(&backup);
+            }
+            let _ = std::fs::remove_dir(&transaction_dir);
+            Ok(())
+        }
+        Err(e) => {
+            if had_existing {
+                if let Err(restore) = std::fs::rename(&backup, &dir) {
+                    let _ = std::fs::remove_dir_all(&staging);
+                    return Err(anyhow!(
+                        "installing bridge extension failed ({e}); restoring prior extension also failed ({restore})"
+                    ));
+                }
+            }
+            let _ = std::fs::remove_dir_all(&staging);
+            Err(e.into())
+        }
+    }
 }
 
 /// Read a session's bridge bindings. Returns an empty list only when the file is genuinely
@@ -237,10 +332,13 @@ fn remove_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
     }
 }
 
-/// Remove the session's bridge extension, registry, and bindings (best effort). Called on
-/// last-binding detach and on session end so a bridge never reloads on a later resume.
+/// Remove the session's bridge extension, registry, and bindings (best effort). Called only by
+/// destructive lifecycle paths such as final-binding detach, fallback transition, rollback, and GC.
 fn remove_bridge_extension(session_id: &str) {
     if let Ok(dir) = bridge_extension_dir(session_id) {
+        let _ = std::fs::remove_dir_all(dir);
+    }
+    if let Ok(dir) = bridge_extension_transaction_dir(session_id) {
         let _ = std::fs::remove_dir_all(dir);
     }
     if let Ok(registry) = bridge_registry_path(session_id) {
@@ -348,6 +446,7 @@ async fn detach(ctx: &Ctx, args: CopilotDetachArgs) -> Result<i32> {
             return Ok(1);
         }
     };
+    let _bridge_lifecycle_lock = acquire_bridge_lifecycle_lock(&session)?;
     let address = ctx.cfg.require_address(&ctx.address).ok();
     let code = crate::commands::detach::run(
         ctx,
@@ -358,6 +457,7 @@ async fn detach(ctx: &Ctx, args: CopilotDetachArgs) -> Result<i32> {
     .await?;
     if let Some(address) = address {
         if let Ok(true) = remove_bridge_binding(&session, &address) {
+            stop_bridge_best_effort(&session).await;
             remove_bridge_extension(&session);
         }
     }
@@ -404,6 +504,10 @@ struct BridgeRegistry {
     secret: Option<String>,
     #[serde(rename = "maxRequestBytes", default)]
     max_request_bytes: Option<usize>,
+    #[serde(rename = "bridgeProtocol", default)]
+    bridge_protocol: Option<u32>,
+    #[serde(rename = "telexBuildId", default)]
+    telex_build_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -437,16 +541,13 @@ fn attention_to_send_mode(attention: &str) -> &'static str {
 }
 
 fn bridge_registry_path(session_id: &str) -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    Ok(home
-        .join(".copilot")
+    Ok(copilot_home_dir()?
         .join("telex-bridge")
         .join(format!("{session_id}.json")))
 }
 
 fn bridge_root_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    Ok(home.join(".copilot").join("telex-bridge"))
+    Ok(copilot_home_dir()?.join("telex-bridge"))
 }
 
 /// Whether this session's bridge is actually live: the heartbeat-refreshed registry file exists
@@ -469,6 +570,31 @@ fn bridge_is_live(session_id: &str) -> bool {
     }
 }
 
+fn bridge_version_mismatch(session_id: &str) -> Option<String> {
+    let path = bridge_registry_path(session_id).ok()?;
+    let raw = match std::fs::read_to_string(&path) {
+        Ok(raw) => raw,
+        Err(e) => return Some(format!("registry {} is unreadable: {e}", path.display())),
+    };
+    let registry: BridgeRegistry = match serde_json::from_str(&raw) {
+        Ok(registry) => registry,
+        Err(e) => return Some(format!("registry {} is invalid: {e}", path.display())),
+    };
+    let protocol_matches = registry.bridge_protocol == Some(COPILOT_BRIDGE_PROTOCOL);
+    let build_matches = registry.telex_build_id.as_deref() == Some(crate::install::BUILD_ID);
+    if protocol_matches && build_matches {
+        None
+    } else {
+        Some(format!(
+            "live protocol/build {:?}/{:?}, current {}/{}",
+            registry.bridge_protocol,
+            registry.telex_build_id,
+            COPILOT_BRIDGE_PROTOCOL,
+            crate::install::BUILD_ID
+        ))
+    }
+}
+
 /// The per-session bridge endpoint, derived from the session id exactly as the bridge derives
 /// it. `telex copilot push` connects here rather than trusting the registry file's path.
 #[cfg(windows)]
@@ -478,10 +604,7 @@ fn bridge_endpoint_path(session_id: &str) -> Result<String> {
 
 #[cfg(unix)]
 fn bridge_endpoint_path(session_id: &str) -> Result<String> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    Ok(home
-        .join(".copilot")
-        .join("telex-bridge")
+    Ok(bridge_root_dir()?
         .join(format!("{session_id}.sock"))
         .to_string_lossy()
         .into_owned())
@@ -954,6 +1077,40 @@ async fn bridge_roundtrip(path: &str, request_line: &str) -> Result<String> {
     Ok(response)
 }
 
+async fn stop_bridge_best_effort(session_id: &str) {
+    let result = async {
+        let registry_path = bridge_registry_path(session_id)?;
+        let raw = std::fs::read_to_string(&registry_path)?;
+        let registry: BridgeRegistry = serde_json::from_str(&raw)?;
+        let secret = registry
+            .secret
+            .ok_or_else(|| anyhow!("bridge registry has no secret"))?;
+        let request = serde_json::to_string(&serde_json::json!({
+            "action": "stop",
+            "secret": secret,
+        }))?;
+        let endpoint = bridge_endpoint_path(session_id)?;
+        let response =
+            tokio::time::timeout(BRIDGE_PUSH_TIMEOUT, bridge_roundtrip(&endpoint, &request))
+                .await
+                .map_err(|_| anyhow!("timed out stopping bridge"))??;
+        let response: BridgePushResponse = serde_json::from_str(response.trim())?;
+        if !response.ok {
+            return Err(anyhow!(
+                "bridge rejected stop: {}",
+                response
+                    .error
+                    .unwrap_or_else(|| "unknown error".to_string())
+            ));
+        }
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    if let Err(e) = result {
+        eprintln!("telex copilot: bridge stop did not complete before cleanup: {e}");
+    }
+}
+
 async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     if args.wake_on_cc && !args.copilot_bridge {
         eprintln!("telex copilot attach: --wake-on-cc requires --copilot-bridge");
@@ -967,6 +1124,11 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
             );
             return Ok(1);
         }
+    };
+    let _bridge_lifecycle_lock = if args.copilot_bridge {
+        Some(acquire_bridge_lifecycle_lock(&session)?)
+    } else {
+        None
     };
     // Avoid provisioning bridge files when the authoritative daemon gate will reject the
     // transition. If no daemon is currently reachable, the register path below remains the
@@ -1054,6 +1216,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     if bridge_provisioned && !matches!(result, Ok(0)) {
         if let Ok(address) = ctx.cfg.require_address(&ctx.address) {
             if let Ok(true) = remove_bridge_binding(&session, &address) {
+                stop_bridge_best_effort(&session).await;
                 remove_bridge_extension(&session);
             }
         }
@@ -1062,19 +1225,59 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
 }
 
 async fn resume(ctx: &Ctx, args: CopilotResumeArgs) -> Result<i32> {
-    attach(
-        ctx,
-        CopilotAttachArgs {
-            session: args.session,
-            description: args.description,
-            scope: args.scope,
-            tags: args.tags,
-            occupant: args.occupant,
-            copilot_bridge: true,
-            wake_on_cc: args.wake_on_cc,
-        },
-    )
-    .await
+    let attach_args = CopilotAttachArgs {
+        session: args.session,
+        description: args.description,
+        scope: args.scope,
+        tags: args.tags,
+        occupant: args.occupant,
+        copilot_bridge: true,
+        wake_on_cc: args.wake_on_cc,
+    };
+    let session = resolve_copilot_session(attach_args.session.as_deref(), None);
+    if let Some(session) = session.as_deref() {
+        let address = match ctx.cfg.require_address(&ctx.address) {
+            Ok(address) => address,
+            Err(_) => return attach(ctx, attach_args).await,
+        };
+        if let Ok(store_key) = ctx.store_key() {
+            if let Ok(Some(member)) = daemon_member_status(&store_key, session, &address).await {
+                if member.live_waiters_count > 0 {
+                    return attach(ctx, attach_args).await;
+                }
+            }
+        }
+    }
+    let mut created_extension = false;
+    if let Some(session) = session.as_deref() {
+        {
+            let _bridge_lifecycle_lock = acquire_bridge_lifecycle_lock(session)?;
+            created_extension = !bridge_extension_dir(session)?.exists();
+            write_bridge_extension(session)
+                .context("materializing the current bridge before resume")?;
+        }
+        if bridge_is_live(session) {
+            if let Some(detail) = bridge_version_mismatch(session) {
+                eprintln!(
+                    "telex copilot resume: the live bridge is version-stale ({detail}); run `extensions_reload` to load the retained current extension, then retry `copilot resume`"
+                );
+                return Ok(1);
+            }
+        }
+    }
+    let result = attach(ctx, attach_args).await;
+    if created_extension && !matches!(result, Ok(0)) {
+        if let Some(session) = session.as_deref() {
+            let _bridge_lifecycle_lock = acquire_bridge_lifecycle_lock(session)?;
+            if read_bridge_bindings(session)
+                .map(|bindings| bindings.is_empty())
+                .unwrap_or(false)
+            {
+                remove_bridge_extension(session);
+            }
+        }
+    }
+    result
 }
 
 async fn fallback(ctx: &Ctx, cmd: CopilotFallbackCmd) -> Result<i32> {
@@ -1215,6 +1418,7 @@ async fn fallback_run(ctx: &Ctx, args: CopilotFallbackRunArgs) -> Result<i32> {
 
 async fn fallback_run_inner(ctx: &Ctx, manifest: &FallbackManifest, run_dir: &Path) -> Result<i32> {
     validate_current_fallback_run(manifest)?;
+    let bridge_lifecycle_lock = acquire_bridge_lifecycle_lock(&manifest.session_id)?;
     let run_ctx = Ctx {
         cfg: crate::config::Config::resolve(
             manifest.backend_selector.clone(),
@@ -1294,7 +1498,10 @@ async fn fallback_run_inner(ctx: &Ctx, manifest: &FallbackManifest, run_dir: &Pa
     }
 
     match remove_bridge_binding(&manifest.session_id, &manifest.address) {
-        Ok(true) => remove_bridge_extension(&manifest.session_id),
+        Ok(true) => {
+            stop_bridge_best_effort(&manifest.session_id).await;
+            remove_bridge_extension(&manifest.session_id);
+        }
         Ok(false) => {}
         Err(e) => {
             return Err(anyhow!(
@@ -1302,6 +1509,7 @@ async fn fallback_run_inner(ctx: &Ctx, manifest: &FallbackManifest, run_dir: &Pa
             ))
         }
     }
+    drop(bridge_lifecycle_lock);
 
     let min_attention = manifest
         .min_attention
@@ -1443,9 +1651,6 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
     }
 
     cleanup_turn_guard_state_best_effort(&session);
-    if failed.is_empty() {
-        remove_bridge_extension(&session);
-    }
     let outcome = if failed.is_empty() {
         "session_end"
     } else {
@@ -1652,13 +1857,14 @@ fn skill(args: CopilotSkillArgs) -> Result<i32> {
     Ok(0)
 }
 
-fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
+async fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
     let sessions = match args.session {
         Some(session) => vec![session],
         None => discover_bridge_sessions()?,
     };
     let mut entries = Vec::new();
     for session in sessions {
+        let _bridge_lifecycle_lock = acquire_bridge_lifecycle_lock(&session)?;
         let live = bridge_is_live(&session);
         let bindings = match read_bridge_bindings(&session) {
             Ok(bindings) => bindings,
@@ -1689,6 +1895,7 @@ fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
         } else if args.dry_run {
             ("would_remove", "stale bridge files".to_string())
         } else {
+            stop_bridge_best_effort(&session).await;
             remove_bridge_extension(&session);
             ("removed", "stale bridge files".to_string())
         };
@@ -3373,11 +3580,10 @@ mod tests {
                     assert_in_order(
                         reason,
                         &[
-                            "Run `extensions_reload` to load it",
-                            "If `extensions_reload` is unavailable",
-                            "enable Copilot Extensions under `/experimental`",
                             "copilot resume",
-                            "run `extensions_reload`",
+                            "still not live",
+                            "enable Copilot Extensions under `/experimental`",
+                            "extensions_reload",
                             "supported pull fallback",
                             "copilot fallback prepare",
                             "copilot detach",
@@ -3671,15 +3877,33 @@ mod tests {
         assert_eq!(got[0].address, "active");
     }
 
-    #[test]
-    fn copilot_gc_keeps_corrupt_bindings_unless_forced() {
+    #[tokio::test]
+    async fn copilot_gc_keeps_corrupt_bindings_unless_forced() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_home = std::env::var_os("TELEX_COPILOT_HOME");
+        let copilot_home =
+            std::env::temp_dir().join(format!("telex-copilot-gc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&copilot_home);
+        std::env::set_var("TELEX_COPILOT_HOME", &copilot_home);
         let session = format!("gc-corrupt-bindings-{}", std::process::id());
         let path = bridge_bindings_path(&session).expect("bindings path");
+        let extension_dir = bridge_extension_dir(&session).expect("extension dir");
+        let registry_path = bridge_registry_path(&session).expect("registry path");
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("create bridge root");
         }
+        std::fs::create_dir_all(&extension_dir).expect("create extension dir");
+        std::fs::write(extension_dir.join("extension.mjs"), b"fixture")
+            .expect("write extension fixture");
+        std::fs::write(extension_dir.join("busy-state.mjs"), b"fixture")
+            .expect("write busy-state fixture");
         std::fs::write(&path, b"not-json").expect("write corrupt bindings");
+        let registry = File::create(&registry_path).expect("write stale registry fixture");
+        registry
+            .set_times(std::fs::FileTimes::new().set_modified(
+                std::time::SystemTime::now() - BRIDGE_LIVENESS_WINDOW - Duration::from_secs(1),
+            ))
+            .expect("age registry fixture");
         let ctx = Ctx {
             cfg: crate::config::Config {
                 backend_selector: None,
@@ -3699,10 +3923,11 @@ mod tests {
                 force: false,
             },
         )
+        .await
         .expect("non-force gc");
         assert!(
-            path.exists(),
-            "corrupt bindings should be treated as shared unless forced"
+            path.exists() && extension_dir.exists() && registry_path.exists(),
+            "corrupt bindings should preserve the complete bridge state unless forced"
         );
 
         gc(
@@ -3713,7 +3938,139 @@ mod tests {
                 force: true,
             },
         )
+        .await
         .expect("forced gc");
-        assert!(!path.exists(), "forced gc removes corrupt bindings");
+        assert!(
+            !path.exists() && !extension_dir.exists() && !registry_path.exists(),
+            "forced gc removes the complete corrupt bridge state"
+        );
+        restore_env("TELEX_COPILOT_HOME", prior_home);
+        let _ = std::fs::remove_dir_all(copilot_home);
+    }
+
+    #[test]
+    fn bridge_extension_materialization_is_versioned_and_preserves_existing_on_staging_failure() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_home = std::env::var_os("TELEX_COPILOT_HOME");
+        let copilot_home =
+            std::env::temp_dir().join(format!("telex-copilot-extension-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&copilot_home);
+        std::env::set_var("TELEX_COPILOT_HOME", &copilot_home);
+        let session = "versioned-extension";
+
+        write_bridge_extension(session).expect("write versioned bridge extension");
+        let extension_dir = bridge_extension_dir(session).expect("extension dir");
+        let extension =
+            std::fs::read_to_string(extension_dir.join("extension.mjs")).expect("read extension");
+        assert!(!extension.contains("__TELEX_BRIDGE_PROTOCOL__"));
+        assert!(!extension.contains("__TELEX_BUILD_ID__"));
+        assert!(extension.contains(&format!(
+            "const bridgeProtocol = Number(\"{}\");",
+            COPILOT_BRIDGE_PROTOCOL
+        )));
+        assert!(extension.contains(&format!(
+            "const telexBuildId = \"{}\";",
+            crate::install::BUILD_ID
+        )));
+        let unusual_build_id = "candidate\"build\\windows\u{2028}";
+        let unusual = render_bridge_extension(unusual_build_id).expect("render unusual build id");
+        assert!(unusual.contains(&format!(
+            "const telexBuildId = {};",
+            serde_json::to_string(unusual_build_id)
+                .unwrap()
+                .replace('\u{2028}', "\\u2028")
+        )));
+
+        let prior_extension = extension;
+        let transaction_dir = bridge_extension_transaction_dir(session).expect("transaction dir");
+        std::fs::create_dir_all(&transaction_dir).expect("create transaction dir");
+        let staging = transaction_dir.join(format!("{}.staging", std::process::id()));
+        std::fs::write(&staging, b"block staging directory").expect("create staging blocker");
+        assert!(write_bridge_extension(session).is_err());
+        assert_eq!(
+            std::fs::read_to_string(extension_dir.join("extension.mjs"))
+                .expect("read preserved extension"),
+            prior_extension
+        );
+        assert!(extension_dir.join("busy-state.mjs").exists());
+        std::fs::remove_file(&staging).expect("remove staging blocker");
+        let backup = transaction_dir.join("backup");
+        std::fs::rename(&extension_dir, &backup).expect("simulate interrupted directory swap");
+        write_bridge_extension(session).expect("recover interrupted directory swap");
+        assert!(extension_dir.join("extension.mjs").exists());
+        assert!(extension_dir.join("busy-state.mjs").exists());
+        assert!(!backup.exists());
+
+        restore_env("TELEX_COPILOT_HOME", prior_home);
+        let _ = std::fs::remove_dir_all(copilot_home);
+    }
+
+    #[test]
+    fn bridge_version_mismatch_detects_legacy_registry_and_accepts_current_identity() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_home = std::env::var_os("TELEX_COPILOT_HOME");
+        let copilot_home =
+            std::env::temp_dir().join(format!("telex-copilot-version-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&copilot_home);
+        std::env::set_var("TELEX_COPILOT_HOME", &copilot_home);
+        let session = "bridge-version-check";
+        let registry_path = bridge_registry_path(session).expect("registry path");
+        std::fs::create_dir_all(registry_path.parent().unwrap()).expect("create registry root");
+
+        std::fs::write(
+            &registry_path,
+            serde_json::to_vec(&serde_json::json!({
+                "sessionId": session,
+                "secret": "legacy"
+            }))
+            .unwrap(),
+        )
+        .expect("write legacy registry");
+        assert!(bridge_version_mismatch(session).is_some());
+
+        std::fs::write(
+            &registry_path,
+            serde_json::to_vec(&serde_json::json!({
+                "sessionId": session,
+                "secret": "current",
+                "bridgeProtocol": COPILOT_BRIDGE_PROTOCOL,
+                "telexBuildId": crate::install::BUILD_ID
+            }))
+            .unwrap(),
+        )
+        .expect("write current registry");
+        assert!(bridge_version_mismatch(session).is_none());
+
+        restore_env("TELEX_COPILOT_HOME", prior_home);
+        let _ = std::fs::remove_dir_all(copilot_home);
+    }
+
+    #[test]
+    fn bridge_lifecycle_lock_waits_for_the_current_transition() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_home = std::env::var_os("TELEX_COPILOT_HOME");
+        let copilot_home =
+            std::env::temp_dir().join(format!("telex-copilot-lock-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&copilot_home);
+        std::env::set_var("TELEX_COPILOT_HOME", &copilot_home);
+        let first = acquire_bridge_lifecycle_lock("serialized-session").expect("first lock");
+        let (tx, rx) = std::sync::mpsc::channel();
+        let waiter = std::thread::spawn(move || {
+            let second = acquire_bridge_lifecycle_lock("serialized-session").expect("second lock");
+            tx.send(()).expect("signal second lock");
+            drop(second);
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(
+            rx.try_recv().is_err(),
+            "second lifecycle transition must wait for the first"
+        );
+        drop(first);
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("second transition should acquire after release");
+        waiter.join().expect("join lifecycle waiter");
+
+        restore_env("TELEX_COPILOT_HOME", prior_home);
+        let _ = std::fs::remove_dir_all(copilot_home);
     }
 }

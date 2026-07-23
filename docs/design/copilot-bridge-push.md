@@ -201,27 +201,30 @@ The full lifecycle:
   `extension.mjs` into the session extension dir and registers the daemon
   on-deliver handler. The agent calls `extensions_reload` to load it.
 - **Unbind** -- `telex --address <addr> copilot detach` deregisters the handler and **removes the
-  `extension.mjs`** (so it will not reload on a later resume); the agent calls
-  `extensions_reload` to unload the live process now. Removal is **ref-counted
-  to the session's last telex binding**: one bridge serves all of a session's
-  addresses, so it is removed only when the final binding for that session goes
-  away. Both steps live in the `copilot.rs` boundary, so the daemon stays
-  agnostic.
+  `extension.mjs`** (so it will not reload on a later resume) and sends an authenticated stop
+  request to the live bridge. If that request cannot reach it, the bridge self-stops when its next
+  heartbeat sees the missing final binding; `extensions_reload` is only immediate-unload recovery.
+  Removal is **ref-counted to the session's last telex binding**: one bridge serves all of a
+  session's addresses, so it is removed only when the final binding for that session goes away.
+  Both steps live in the `copilot.rs` boundary, so the daemon stays agnostic.
 - **No elevated permission** -- the bridge requests no `skipPermission` and
   needs no agent tool for delivery (the pipe is the interface). So a (re)load is
   **silent** -- no permission prompt. This is what makes the orphan case below
   painless. (Observed: a `skipPermission` debug tool triggered an
   elevated-permission prompt on every resume; dropping it removes the prompt.)
-- **Orphan safety (closed without detach)** -- if a session is killed or closed
-  before `telex --address <addr> copilot detach`, the file persists and the bridge
-  reloads silently on the next resume. Mitigations, in order of cost: (a) silent load
-  means it is harmless if unused; (b) a `telex copilot gc` (or an attach-time sweep)
-  prunes session-bridge dirs whose session ids telex no longer binds; (c) optionally
-  the bridge self-exits on load if telex shows no binding for its session id, keeping
-  orphan memory near zero. **v1 ships (a) only** -- silent-load-is-harmless plus the
-  explicit cleanup paths (`copilot detach`, Copilot `sessionEnd`, and attach-failure
-  rollback each remove the extension dir / registry / bindings); (b) `telex copilot gc`
-  / attach-time sweep and (c) self-exit are **deferred** (ADR 0039).
+- **Resumable close** -- ordinary Copilot `sessionEnd` marks daemon membership idle and clears
+  transient turn-guard state but intentionally preserves the extension, registry, and bindings.
+  Copilot discovers the retained extension during startup, and `copilot resume` re-arms push
+  registration plus backlog delivery without requiring an in-session reload. If startup discovery
+  does not produce a live current-version heartbeat, `extensions_reload` remains the recovery step
+  for the already-running session. The extension preserves its last heartbeat registry on ordinary
+  shutdown when bindings remain; the heartbeat is transient and is recreated on resume.
+- **Orphan safety (closed without detach)** -- if a session is killed, closed, or never resumed
+  before `telex --address <addr> copilot detach`, the file persists. A loaded bridge checks the
+  durable bindings file at startup and on each heartbeat; after final unbind it removes its live
+  registry/socket and exits. Explicit cleanup paths (`copilot detach`, fallback transition,
+  attach-failure rollback, and `telex copilot gc`) remove the extension dir / registry / bindings.
+  Attach-time sweeping of unrelated abandoned sessions remains deferred (ADR 0039).
 
 ## Effect on sessions that do not use this
 
@@ -261,7 +264,7 @@ The full lifecycle:
 | Resident Node process (~25 MB) once loaded | Only for telex sessions, only after bind; non-telex pay zero |
 | `/clear` reloads the bridge (in-memory state lost) | Endpoint is derived from session id (named pipe) so it is stable; the daemon registration is daemon-side and survives `/clear`; one idempotent re-load re-arms |
 | Delivery racing a reload gap | Lazy endpoint resolution + daemon retry redelivers; named pipe keeps the endpoint stable so the window is tiny |
-| Stale registry on hard kill (SIGKILL skips cleanup) | `telex copilot push` treats a dead endpoint as a failed delivery -> daemon retry; the bridge best-effort removes its registry entry on SIGTERM/SIGINT, and explicit `copilot detach` / `sessionEnd` clean up. A GC / health-probe pruner is deferred (ADR 0039) |
+| Stale registry on hard kill (SIGKILL skips cleanup) | `telex copilot push` treats a dead endpoint as a failed delivery -> daemon retry. The bridge preserves the registry on ordinary signal shutdown while bindings remain, but removes it after detach/fallback/rollback/GC removes the final binding. A hard-kill registry ages out of live status within the heartbeat window. |
 | `extensions_reload` is global (restarts all extensions) | Acceptable; reload is idempotent and infrequent (bind, `/clear`) |
 | Address mapping | telex owns address -> session mapping via `attach`; the Copilot-side registry is keyed by session id and correlated by the handler |
 | Bridge bytes drift from protocol | telex embeds the bridge (`include_str!`) so it is versioned with the daemon |
