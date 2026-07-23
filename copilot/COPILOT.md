@@ -40,19 +40,26 @@ yours to make.
    CC push is opt-in, live-only, and notification-only: historical CC backlog is not
    replayed, and CC messages still do not require a terminal disposition from the observer.
 
-   If you resume a Copilot session and the bridge files or heartbeat are gone, repair the
-   station with the resume verb, then reload extensions:
+   On normal Copilot resume, the retained session-scoped extension is discovered during startup.
+   Re-arm daemon attendance and rescan queued unacked backlog with:
 
    ```sh
    telex --address <addr> copilot resume --description "<what this session is doing>"
    ```
 
-   `copilot resume` is an explicit re-provision of the same push bridge registration that
-   `copilot attach --copilot-bridge` creates; it also re-scans queued unacked backlog.
+   `copilot resume` explicitly re-provisions the same push registration that
+   `copilot attach --copilot-bridge` creates. It retains/re-writes the same bridge files and
+   re-scans queued unacked backlog; it does not normally require an in-session extension reload.
 
-2. **Load the bridge into the live session (one agent tool call).**
+2. **Load the bridge into an already-running session when provisioning or recovering.**
 
-   Run the `extensions_reload` tool. telex cannot trigger a reload, so you do this once.
+   After the first `copilot attach --copilot-bridge` in a live session, run the
+   `extensions_reload` tool once. Telex cannot trigger a reload.
+
+   A normal close/resume does not need this step because Copilot discovers the retained extension
+   during startup. If the bridge heartbeat is missing after startup, run `copilot resume` and then
+   `extensions_reload` as recovery provisioning into the already-running session.
+
    If `extensions_reload` is unavailable:
 
    1. Enable Copilot Extensions under `/experimental`.
@@ -64,11 +71,12 @@ yours to make.
    fallback below or detach the station with `telex --address <addr> copilot detach`.
 
    After `/clear` (which reloads extensions and clears the conversation), **re-provision first** --
-   re-run `telex --address <addr> copilot attach --copilot-bridge` and then `extensions_reload` --
-   so the daemon re-delivers any message that was queued but not yet acked when you cleared. A
-   re-attach (or a new session taking over the address) is what re-delivers unacked messages; while
-   the same session stays continuously attached, an already-accepted message is **not** re-pushed on
-   the fast cadence -- a long backstop may re-check it only every few minutes if it stays unacked.
+   re-run `telex --address <addr> copilot resume` -- so the daemon re-delivers any message that was
+   queued but not yet acked when you cleared. Run `extensions_reload` only if the retained extension
+   is not live in the already-running session. A re-attach (or a new session taking over the
+   address) is what re-delivers unacked messages; while the same session stays continuously
+   attached, an already-accepted message is **not** re-pushed on the fast cadence -- a long
+   backstop may re-check it only every few minutes if it stays unacked.
 
    Troubleshooting CC observer turns: if CC traffic is visible in `telex inbox` but is not arriving
    as Copilot turns, the bridge was probably bound without CC wake or the extension was not reloaded.
@@ -125,7 +133,12 @@ yours to make.
    This detaches the address and, when it was the last binding, removes the bridge files so
    it will not reload on a later resume. The already-loaded bridge stays live until the next
    `extensions_reload` or session end; run `extensions_reload` once after detach if you want
-   it unloaded immediately. Session end also removes the files.
+   it unloaded immediately.
+
+   Ordinary session end is resumable: it marks daemon attendance idle and clears transient
+   turn-guard state, but retains the extension, bindings, and registry for startup discovery.
+   If a closed session will not resume, explicitly detach before closing or use forced GC after
+   verifying the session is gone.
 
    To inspect or clean orphaned bridge files from sessions that closed without detach:
 

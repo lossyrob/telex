@@ -6,9 +6,10 @@
 // re-arming a `telex wait` waiter.
 //
 // telex embeds these bytes (include_str!) and writes them into the session
-// extension dir on `telex copilot attach --copilot-bridge`; the agent then runs
-// the `extensions_reload` tool once to load it. `telex copilot detach` removes
-// the file (and the agent reloads to unload).
+// extension dir on `telex copilot attach --copilot-bridge`. A new live session
+// runs `extensions_reload` once; a resumed session discovers the retained file
+// during startup. `telex copilot detach` removes the file (and the agent reloads
+// to unload it immediately when needed).
 //
 // Transport (Option A): a per-session OS named pipe (Windows) / unix domain
 // socket (POSIX). The endpoint path is derived from the Copilot session id so it

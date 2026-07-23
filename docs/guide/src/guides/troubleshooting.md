@@ -36,11 +36,12 @@ the owner can attend it again.
 
 ## Copilot: messages do not arrive as turns
 
-The push bridge may not be loaded. If `extensions_reload` is unavailable, enable
-Copilot Extensions under `/experimental`. Then re-provision with
-`telex --address <addr> copilot resume` and run `extensions_reload`. If Copilot
-Extensions cannot be enabled, push is unavailable; use the supported
-[Copilot pull fallback](copilot-push.md#fallback) with
+The push bridge may not be loaded. A normal resume discovers the retained
+extension during startup; first run `telex --address <addr> copilot resume` to
+re-arm push and rescan backlog. If the heartbeat is still missing in the
+already-running session, enable Copilot Extensions under `/experimental` and run
+`extensions_reload`. If Copilot Extensions cannot be enabled, push is unavailable;
+use the supported [Copilot pull fallback](copilot-push.md#fallback) with
 `telex --address <addr> copilot fallback prepare`, or detach with
 `telex --address <addr> copilot detach`.
 

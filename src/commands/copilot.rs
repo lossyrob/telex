@@ -139,6 +139,9 @@ const BRIDGE_BUSY_STATE_MJS: &str = include_str!("../../copilot/bridge/busy-stat
 const BRIDGE_EXTENSION_NAME: &str = "telex-bridge";
 
 fn copilot_home_dir() -> Result<PathBuf> {
+    if let Some(path) = std::env::var_os("TELEX_COPILOT_HOME").filter(|path| !path.is_empty()) {
+        return Ok(PathBuf::from(path));
+    }
     dirs::home_dir()
         .map(|home| home.join(".copilot"))
         .ok_or_else(|| anyhow::anyhow!("no home directory"))
@@ -237,8 +240,8 @@ fn remove_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
     }
 }
 
-/// Remove the session's bridge extension, registry, and bindings (best effort). Called on
-/// last-binding detach and on session end so a bridge never reloads on a later resume.
+/// Remove the session's bridge extension, registry, and bindings (best effort). Called only by
+/// destructive lifecycle paths such as final-binding detach, fallback transition, rollback, and GC.
 fn remove_bridge_extension(session_id: &str) {
     if let Ok(dir) = bridge_extension_dir(session_id) {
         let _ = std::fs::remove_dir_all(dir);
@@ -437,16 +440,13 @@ fn attention_to_send_mode(attention: &str) -> &'static str {
 }
 
 fn bridge_registry_path(session_id: &str) -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    Ok(home
-        .join(".copilot")
+    Ok(copilot_home_dir()?
         .join("telex-bridge")
         .join(format!("{session_id}.json")))
 }
 
 fn bridge_root_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    Ok(home.join(".copilot").join("telex-bridge"))
+    Ok(copilot_home_dir()?.join("telex-bridge"))
 }
 
 /// Whether this session's bridge is actually live: the heartbeat-refreshed registry file exists
@@ -1443,9 +1443,6 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
     }
 
     cleanup_turn_guard_state_best_effort(&session);
-    if failed.is_empty() {
-        remove_bridge_extension(&session);
-    }
     let outcome = if failed.is_empty() {
         "session_end"
     } else {
@@ -3674,11 +3671,23 @@ mod tests {
     #[test]
     fn copilot_gc_keeps_corrupt_bindings_unless_forced() {
         let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let prior_home = std::env::var_os("TELEX_COPILOT_HOME");
+        let copilot_home =
+            std::env::temp_dir().join(format!("telex-copilot-gc-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&copilot_home);
+        std::env::set_var("TELEX_COPILOT_HOME", &copilot_home);
         let session = format!("gc-corrupt-bindings-{}", std::process::id());
         let path = bridge_bindings_path(&session).expect("bindings path");
+        let extension_dir = bridge_extension_dir(&session).expect("extension dir");
+        let registry_path = bridge_registry_path(&session).expect("registry path");
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).expect("create bridge root");
         }
+        std::fs::create_dir_all(&extension_dir).expect("create extension dir");
+        std::fs::write(extension_dir.join("extension.mjs"), b"fixture")
+            .expect("write extension fixture");
+        std::fs::write(extension_dir.join("busy-state.mjs"), b"fixture")
+            .expect("write busy-state fixture");
         std::fs::write(&path, b"not-json").expect("write corrupt bindings");
         let ctx = Ctx {
             cfg: crate::config::Config {
@@ -3714,6 +3723,11 @@ mod tests {
             },
         )
         .expect("forced gc");
-        assert!(!path.exists(), "forced gc removes corrupt bindings");
+        assert!(
+            !path.exists() && !extension_dir.exists() && !registry_path.exists(),
+            "forced gc removes the complete corrupt bridge state"
+        );
+        restore_env("TELEX_COPILOT_HOME", prior_home);
+        let _ = std::fs::remove_dir_all(copilot_home);
     }
 }
