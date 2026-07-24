@@ -2034,3 +2034,36 @@ mode switch or substitute for explicit removal. Existing mediated work cannot be
 stranded merely because the deployment selects direct mode. Multi-device or
 non-exclusive attendance requires a future design change rather than an Operator
 Station exception.
+
+## 0049 — One API-neutral Application Client contract governs explicit station capabilities and forbids private fallbacks
+
+- **Date:** 2026-07-24
+- **Status:** Accepted (pending validation)
+
+**Context.** Watcher and Operator Station need one supported client boundary but put
+different pressure on it: Watcher is send-only and commits local state on durable
+acceptance, while Operator Station is bidirectional and requires exact-delivery
+acknowledgment, unresolved recovery, source resolution, and ordered compound
+operations. Campaign allocation request `1812`, disposition `909`, and response `1817`
+reserved ADR 0049 for this decision. Without a shared semantic contract, either product
+could preserve only its own pressure through CLI parsing, raw daemon IPC, or a private
+client that diverges from the other.
+
+**Decision.** Telex has one API-neutral Application Client contract in
+[application-client.md](application-client.md). Stable application responsibility is
+distinct from fresh runtime identity; send-only and bidirectional capabilities are
+explicit; lifecycle, receipt, exact-recipient delivery, acknowledgment, disposition,
+retry/restart, source, backend, health, and resync semantics are shared. The client
+supplies general typed primitives and never imports Watcher detector policy or Operator
+Station human-routing policy. Missing shared semantics block the affected consumer;
+CLI parsing, raw private IPC, spike helpers, and product-private client forks are not
+supported fallback seams.
+
+**Consequences.** The complete Watcher W-01 through W-15 and Operator AC-01 through
+AC-15 disposition is preserved in
+[application-client-crosswalk.md](application-client-crosswalk.md). Detailed client
+core, binding, conformance, consumer integration, and hardening work follows this
+contract and must prove both capabilities without weakening either domain. The
+`application-client-ready` checkpoint is design-only: it unlocks that downstream work
+but does not claim an implementation, binding, conformance result, consumer
+integration, or production readiness.

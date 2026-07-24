@@ -35,6 +35,41 @@
       "sha256": "702ebdb1ea81329294c35a452670b2313625142bc0281c9100d8ae892890c9ea"
     }
   ],
+  "gate3Revalidation": {
+    "validatedAt": "2026-07-24T16:30:58.814Z",
+    "authorizationMessageId": 750,
+    "originMain": "a5180eb5884a73ce1df1c7c893af9b8889d646bd",
+    "relevantMainSourceDrift": false,
+    "issue118": {
+      "bodyByteLength": 7608,
+      "bodySha256": "0f042d4303662d7fa2d1d4c9ff137965336771e035805718a76376405d329ef3",
+      "commentCount": 0,
+      "state": "open"
+    },
+    "issue12": {
+      "bodyByteLength": 16175,
+      "bodySha256": "c0a5fed4a1fa894ccc6accedee3e0e66af318a10df4ad27e6f2f065f6881c3dc",
+      "snapshotPath": "publication/issue-12-body.pre.md",
+      "snapshotGitBlob": "3ad98e9f9b455b03fe4582943aabfea47b702505"
+    },
+    "adr0049": {
+      "requestMessageId": 1812,
+      "dispositionId": 909,
+      "responseMessageId": 1817,
+      "title": "One API-neutral Application Client contract governs explicit station capabilities and forbids private fallbacks",
+      "decisionSlug": "application-client-semantic-boundary",
+      "allocationBaseCommit": "7a568c43413fc7aeab6a484b07dce0f0db11d68f",
+      "allocationBaseIsAncestorOfMain": true,
+      "latestDecisionsBlob": "bc8cb3037ec6920fd62afce332c30d70b24abacb",
+      "latestDecisionsHighWater": 48,
+      "numberPresentInDecisionLog": false,
+      "allocationLedgerPath": ".streamliner/shaping/addressable-attention-devbox-handoff.md",
+      "allocationLedgerGitBlob": "d013d200383977c7ff656828de6f6d9d296f38b2",
+      "allocationState": "allocated-not-landed",
+      "reservedToIssue": 118,
+      "collision": false
+    }
+  },
   "planRevision": 20,
   "schemaVersion": 1,
   "sources": [

@@ -17,6 +17,15 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   + Status surface, daemon-native session ownership, the liveness model, the minimal
   upgrade floor, the gating tests, and the consolidated resolutions of the
   design-foundation open questions.
+- **[application-client.md](application-client.md)** — the **normative, API-neutral
+  Application Client contract**: stable responsibility and runtime identity,
+  capability-aware lifecycle, exact delivery and acknowledgment, receipt axes,
+  retry/restart recovery, source identity, backend parity, health, delta/resync,
+  and compound operation semantics. The complete source disposition is in
+  [application-client-crosswalk.md](application-client-crosswalk.md), with the
+  pre-convergence issue #12 body preserved under
+  [history/](history/application-client-issue-12-original.md). Load-bearing
+  boundary: [ADR 0049](DECISIONS.md#0049--one-api-neutral-application-client-contract-governs-explicit-station-capabilities-and-forbids-private-fallbacks).
 - **[watcher.md](watcher.md)** — the **normative Telex Watcher application
   contract**: trusted local detector execution, versioned request/result schemas,
   receipt-gated state and deduplication, watch lifecycle and health, script and
@@ -57,13 +66,15 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
 2. `DESIGN.md` — how the system is shaped.
 3. `ARCHITECTURE.md` — the visual on-ramp (mermaid diagrams) to the local-exchange design.
 4. `daemon.md` — the precise contracts `daemon-core` and downstream nodes implement.
-5. `watcher.md` — how a provider-neutral headless application executes trusted
+5. `application-client.md` — the shared semantic boundary used by long-lived
+   applications, with the requirement crosswalk read alongside it.
+6. `watcher.md` — how a provider-neutral headless application executes trusted
    local detectors and commits state only after durable Telex acceptance.
-6. `operator-station.md` — how a human-facing Station and optional operator agent
+7. `operator-station.md` — how a human-facing Station and optional operator agent
    compose Telex attendance, delivery, threading, and disposition semantics.
-7. `copilot-bridge-push.md` — how push delivery layers a harness bridge on the daemon's
+8. `copilot-bridge-push.md` — how push delivery layers a harness bridge on the daemon's
    on-deliver exec (read after `daemon.md` sec.13.2).
-8. `DECISIONS.md` — why each load-bearing choice was made.
+9. `DECISIONS.md` — why each load-bearing choice was made.
 
 ## Open-question resolutions (design-foundation)
 
