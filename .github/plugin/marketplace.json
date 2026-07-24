@@ -5,13 +5,13 @@
   },
   "metadata": {
     "description": "Marketplace for the Telex Copilot CLI plugin",
-    "version": "0.1.1"
+    "version": "0.1.2"
   },
   "plugins": [
     {
       "name": "telex",
       "description": "Telex Copilot CLI plugin: session lifecycle hooks, turn-end waiter guard, and the canonical Telex skill.",
-      "version": "0.1.1",
+      "version": "0.1.2",
       "source": "copilot/plugin",
       "author": {
         "name": "Rob Emanuele"
