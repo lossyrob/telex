@@ -1,0 +1,111 @@
+{
+  "schemaVersion": 1,
+  "campaign": {
+    "id": "addressable-attention",
+    "issue": 102,
+    "repository": "lossyrob/telex",
+    "mainCommit": "636ecce360de80bbcbc0d18a61d6d6cdbbcf23f3",
+    "authorityState": "prepared-not-transferred",
+    "currentSessionId": "362234a1-1051-48ba-a6f0-0c1fb98eeac0",
+    "futureDevboxAddress": null
+  },
+  "telex": {
+    "version": "0.1.2",
+    "buildId": "636ecce360de80bbcbc0d18a61d6d6cdbbcf23f3",
+    "localBackend": "local",
+    "postgresBackend": "pg-rde-telex",
+    "localCampaignAddress": "telex://lossyrob/telex/T-A:campaign-orch",
+    "localAttentionAddress": "attention:rob",
+    "operatorConsoleAddress": "operator:rob",
+    "laptopHandoffAddress": "telex://lossyrob/telex/T-A:campaign-handoff-laptop"
+  },
+  "workstreams": [
+    {
+      "id": "operator-station",
+      "issue": 92,
+      "status": "active",
+      "completedNode": 114,
+      "mergeCommit": "0722051760bab569d3f947fd7b29f2dabe13ef77",
+      "plannedBlockedNodes": [
+        "station-app",
+        "operator-broker"
+      ],
+      "dependency": "application-client/application-client-ready-gate",
+      "orchestratorAddress": "telex://lossyrob/telex/T-A:operator-station-orch"
+    },
+    {
+      "id": "telex-watcher",
+      "issue": 100,
+      "status": "active",
+      "completedNode": 110,
+      "mergeCommit": "09aa6f45f213b45207adc4cf80676dcce91250da",
+      "plannedBlockedNodes": [
+        "watcher-runtime",
+        "detector-template-library"
+      ],
+      "dependency": "application-client/application-client-ready-gate",
+      "orchestratorAddress": "telex://lossyrob/telex/T-A:watcher-orch"
+    },
+    {
+      "id": "application-client",
+      "issue": 117,
+      "status": "active",
+      "activeNode": 118,
+      "activeNodeId": "contract-convergence",
+      "checkpoint": "application-client-ready-gate",
+      "orchestratorAddress": "telex://lossyrob/telex/T-A:application-client-orch",
+      "branch": "feature/app-client-contract-118",
+      "branchHead": "3d46fc51ed89b98d0032e59b90bb635c1f0f0539",
+      "planRevision": 19,
+      "planBytes": 52830,
+      "planSha256": "812339c56111ec5a1210fd371f3fe62947ae1b06cd79a2b42c764318271b84aa",
+      "transferCheckpointStatus": "requested-message-1885"
+    }
+  ],
+  "adjacentWorkstreams": [
+    {
+      "id": "local-daemon",
+      "issue": 32,
+      "status": "active",
+      "nextGate": "hardening-gate",
+      "campaignOwned": false
+    }
+  ],
+  "adrs": [
+    {
+      "number": 46,
+      "status": "merged",
+      "issue": 110
+    },
+    {
+      "number": 47,
+      "status": "merged",
+      "issue": 114
+    },
+    {
+      "number": 48,
+      "status": "merged",
+      "issue": 114
+    },
+    {
+      "number": 49,
+      "status": "allocated",
+      "issue": 118,
+      "allocationMessageId": 1817,
+      "baseCommit": "7a568c43413fc7aeab6a484b07dce0f0db11d68f"
+    }
+  ],
+  "policies": {
+    "builderReviewsAndMergesPrs": true,
+    "campaignTechnicalApprovalIsMergePermission": false,
+    "privateApplicationClientFallbackAllowed": false,
+    "meaningfulAttentionRoutedToOperatorConsole": true
+  },
+  "transfer": {
+    "helloKind": "campaign-transfer-hello",
+    "packageKind": "campaign-transfer-package",
+    "acceptKind": "campaign-transfer-accept",
+    "authorityKind": "campaign-authority-transferred",
+    "requiresBuilderAuthorityConfirmation": true
+  }
+}
