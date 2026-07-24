@@ -2,7 +2,7 @@
 
 ## Revision and source freeze
 
-This is revision 17 of the execution plan. Its approval identity is the Git
+This is revision 20 of the execution plan. Its approval identity is the Git
 commit that contains these exact `Plan.md` bytes and the lowercase SHA-256 of
 those bytes encoded as UTF-8 without a BOM, LF line endings, and exactly one
 trailing LF.
@@ -30,7 +30,7 @@ canonical when an export predates the merged contract.
 | Operator Station | `5042612298` | `5044388908` | `0722051760bab569d3f947fd7b29f2dabe13ef77` | `2d99e552292a4401d3403540b6d2eaa90272282d` |
 
 Canonical source-comment body digests refetched from GitHub at revision 5 and
-unchanged through revision 17:
+unchanged through revision 20:
 
 | Comment | SHA-256 |
 |---|---|
@@ -114,7 +114,7 @@ expanded or rewritten.
 | Role | Exact Telex address |
 |---|---|
 | Application Client workstream | `telex://lossyrob/telex/T-A:application-client-orch` |
-| Campaign | `telex://lossyrob/telex/T-A:campaign-orch` |
+| Campaign | `telex://lossyrob/telex/T-A:campaign-orch-devbox` |
 | Operator Station consumer | `telex://lossyrob/telex/T-A:operator-station-orch` |
 | Telex Watcher consumer | `telex://lossyrob/telex/T-A:watcher-orch` |
 | Paired reviewer | `telex://lossyrob/telex/T-A:app-client-review-118` |
@@ -325,8 +325,8 @@ The candidate repository bundle will contain:
 4. `docs/design/index.md`
    - normative Application Client entry and links.
 5. `docs/design/DECISIONS.md`
-   - only if campaign orchestration confirms that a new load-bearing ADR is
-     required and allocates its number dynamically.
+   - ADR 0049, using campaign allocation request `1812`, handled disposition
+     `909`, and allocation response `1817`.
 6. `docs/design/application-client.bundle.json`
    - canonical manifest for the approved Application Client-owned repository
      content.
@@ -349,27 +349,30 @@ inventory to Application Client and campaign orchestration. The durable
 retrieval record is the resulting Telex delivery plus its acknowledgment and
 ledger message ID; the local snapshot is not approval evidence.
 
-## Dynamic ADR Allocation
+## ADR 0049 Allocation Authority
 
-The one supported API-neutral Application Client semantic boundary, including
-the explicit send-only/bidirectional capability split and prohibition on
-product-private fallbacks, is a proposed load-bearing decision. After both
-external plan approvals and before editing `docs/design/DECISIONS.md`, request
-campaign orchestration to allocate an ADR number or explicitly determine that
-an ADR is not required. The request names the decision but never proposes a
-number. It includes issue `118`, a stable decision slug, the approved plan
-revision and digest, the current highest ADR number, and an idempotency key. The
-response must be `allocated` with a reserved number, `no-adr-required` with
-rationale, or `blocked` with an owner. Use only a returned allocation.
+Campaign allocation request `1812`, handled disposition `909`, and allocation
+response `1817` are the sole authority for ADR 0049:
 
-If campaign orchestration determines that the normative design is sufficient
-without a new ADR, do not edit the decision log. Any change in the ADR decision
-changes the candidate bundle and its manifest.
+`One API-neutral Application Client contract governs explicit station
+capabilities and forbids private fallbacks`.
 
-Before editing, verify that current remote `main` has not consumed or passed the
-reserved number. On collision or an unanswered request, send one
-disposition-required escalation to campaign orchestration and hold; never guess,
-reuse, or silently omit a required ADR.
+The stable decision slug is `application-client-semantic-boundary`; the
+allocation base is `7a568c43413fc7aeab6a484b07dce0f0db11d68f`, where both
+main and the allocation ledger high-water were 0048. Workstream reconciliation
+at `f6e0deec043308971029ddefc50411ee455fd27a` records ADR 0049 as reserved
+and not landed.
+
+After dual exact-plan approval and immediately before editing
+`docs/design/DECISIONS.md`, refresh remote `main`, re-read the campaign
+allocation ledger/evidence, and reverify that ADR 0049 is still unconsumed,
+reserved to the same decision title/slug, and that no unexpected high-water
+movement or competing reservation exists. Use ADR 0049 only. Do not request
+another number or a `no-adr-required` decision. On collision, invalidation,
+unexpected high-water movement, or ambiguity, hold without editing and ask
+campaign orchestration for an explicit disposition that references request
+`1812`, disposition `909`, and response `1817`; never renumber, reuse, omit, or
+silently reallocate the ADR.
 
 ## Canonical Contract Bundle
 
@@ -378,6 +381,9 @@ BOM, LF line endings, and exactly one trailing LF. Its schema is:
 
 - `schemaVersion`: `1`;
 - `checkpointScope`: `design-only`;
+- `adrAllocation`: ADR number, decision slug, request message ID, allocation
+  title, disposition ID, allocation response ID, allocation base commit,
+  pre-allocation high-water, and `reserved-not-landed` status;
 - `sourceProvenance`: the two domain export/addendum comment IDs, merge commits,
   canonical final source heads, and exact source-comment digests;
 - `historicalIssue12`: committed path, UTF-8 byte length, and SHA-256 of the
@@ -392,8 +398,11 @@ approval requires a schema-version decision and complete bundle re-approval.
 
 The manifest is compact JSON with no insignificant whitespace and exactly one
 trailing LF. Object keys use this fixed ordinal order:
-`schemaVersion`, `checkpointScope`, `sourceProvenance`, `historicalIssue12`,
-`files`. Each
+`schemaVersion`, `checkpointScope`, `adrAllocation`, `sourceProvenance`,
+`historicalIssue12`, `files`. `adrAllocation` uses fixed key order `number`,
+`title`, `decisionSlug`, `requestMessageId`, `dispositionId`,
+`responseMessageId`, `allocationBaseCommit`, `allocationHighWaterBefore`,
+`status`. Each
 `sourceProvenance` entry uses `domain`, `requirementExportComment`,
 `mergedSourceAddendumComment`, `mergeCommit`, `canonicalFinalHead`, and
 `sourceCommentDigests`; the domain entries sort by UTF-8 byte-lexicographic
@@ -550,7 +559,7 @@ at the top of this document, and send the plan revision, candidate source-head
 commit, digest, and full exact bytes separately to:
 
 1. `telex://lossyrob/telex/T-A:application-client-orch`.
-2. `telex://lossyrob/telex/T-A:campaign-orch`.
+2. `telex://lossyrob/telex/T-A:campaign-orch-devbox`.
 
 Each Telex message will use a subject identifying the plan review,
 `next-checkpoint` attention, required disposition, metadata containing plan
@@ -581,9 +590,12 @@ There is no default acceptance while a decision is pending.
    overwriting orchestrator changes. Recompute the four source-comment digests.
    If any authoritative input changed since Gate 2 approval, revise `Plan.md`
    and repeat Gate 2 before continuing.
-2. Request the ADR decision and number from campaign orchestration before any
-   decision-log edit.
-3. Create the design, crosswalk, index contribution, optional allocated ADR,
+2. Revalidate the existing ADR 0049 allocation evidence (`1812`, `909`, `1817`),
+   its title/slug/base, latest `DECISIONS.md`, and the campaign allocation
+   ledger/high-water before any decision-log edit. On collision, invalidation,
+   unexpected high-water movement, competing reservation, or ambiguity, hold
+   for explicit campaign disposition; do not request or choose another number.
+3. Create the design, crosswalk, index contribution, ADR 0049,
    downstream checkpoint/decomposition, and exact issue #12 publication draft.
 4. Commit the candidate.
 5. Generate and commit the canonical bundle manifest.
@@ -617,7 +629,7 @@ binding disposition or leaves the node blocked.
 
 Send the consumer-approved final bundle separately to
 `telex://lossyrob/telex/T-A:application-client-orch` and
-`telex://lossyrob/telex/T-A:campaign-orch`. Require both to approve the same
+`telex://lossyrob/telex/T-A:campaign-orch-devbox`. Require both to approve the same
 source head and bundle digest, record approver identity and message metadata,
 and require each approver to attest retrieval and digest reproduction. Internal
 PAW review and consumer approval do not substitute for this gate.
@@ -626,7 +638,7 @@ PAW review and consumer approval do not substitute for this gate.
 
 Send the complete exact publication bytes separately to
 `telex://lossyrob/telex/T-A:application-client-orch` and
-`telex://lossyrob/telex/T-A:campaign-orch` as disposition-required
+`telex://lossyrob/telex/T-A:campaign-orch-devbox` as disposition-required
 `application-client-contract-publication-review-requested` messages. Include
 publication revision, artifact path, and SHA-256. Require both approvals for the
 same revision and digest, record approver identity and message metadata, then
@@ -795,8 +807,8 @@ blockers, or low-value ticks.
 1. **Freeze and approve the plan**
    - Internal SoT review, exact-byte digest, and dual orchestration approval.
 2. **Author and commit the candidate contract**
-   - Normative design, complete crosswalk, index, optional dynamically
-     allocated ADR, downstream decomposition, publication draft, and manifest.
+   - Normative design, complete crosswalk, index, campaign-allocated ADR 0049,
+     downstream decomposition, publication draft, and manifest.
 3. **Obtain exact consumer and shared-bundle approval**
    - Operator and Watcher approval, then Application Client and campaign
      approval for one source head and bundle digest.
@@ -830,6 +842,9 @@ The final field report will include:
 - source-comment snapshot digests and the pre-publication issue #12 digest;
 - exact checkpoint meaning and downstream node recommendations;
 - design-index and ADR impact;
+- ADR 0049 authority evidence: request `1812`, handled disposition `909`,
+  allocation response `1817`, title, slug, allocation base, latest-main
+  collision check, and allocation-ledger/high-water check;
 - old issue #12 proposal elements accepted, replaced, deferred, or rejected;
 - risks, boundary pressure, and explicit no-private-fallback confirmation;
 - repair/reapproval cycle counts and PR sentry mode evidence;
@@ -869,8 +884,10 @@ The node is done only when all of the following are true:
    strength-preservation field.
 3. Source-freeze evidence, canonicalization tests, candidate manifest, listed
    file digests, and bundle closure reproduce from the approved source head.
-4. The campaign-owned ADR determination is recorded, and any allocated ADR uses
-   the dynamically returned number without collision.
+4. ADR 0049 uses the sole campaign allocation authority (`1812`, disposition
+   `909`, response `1817`); the frozen title/slug/base match, and latest-main
+   plus allocation-ledger/high-water revalidation passed. No alternate number
+   or no-ADR determination was requested.
 5. Operator Station and Watcher approved the same source head and bundle
    digest, followed by matching Application Client and campaign approvals.
 6. Application Client and campaign approved the same exact issue #12

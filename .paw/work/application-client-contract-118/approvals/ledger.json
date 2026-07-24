@@ -82,13 +82,15 @@
       "sourceHead": "7777631a4e6b05ef707e3bca7ac8d236e8330bd5",
       "approver": "telex://lossyrob/telex/T-A:campaign-orch",
       "requestMessageId": 1812,
-      "status": "allocated-after-plan-supersession",
+      "status": "allocated-authoritative",
+      "decisionSlug": "application-client-semantic-boundary",
+      "decisionTitle": "One API-neutral Application Client contract governs explicit station capabilities and forbids private fallbacks",
       "responseMessageId": 1817,
+      "allocationDispositionId": 909,
       "allocatedAdr": 49,
       "allocationBaseCommit": "7a568c43413fc7aeab6a484b07dce0f0db11d68f",
-      "useCondition": "revision-17-dual-plan-approval-and-allocation-revalidation",
-      "supersededByPlanRevision": 17,
-      "supersededReason": "mandatory-human-merge-floor"
+      "allocationHighWaterBefore": 48,
+      "useCondition": "revision-19-dual-plan-approval-and-latest-main-plus-allocation-ledger-revalidation"
     },
     {
       "gate": "external-plan-approval",
@@ -243,6 +245,93 @@
       "supersededByPlanRevision": 17,
       "supersededReason": "subagent-model-policy",
       "requiredReviewModel": "claude-opus-4.8-high"
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-requested",
+      "planRevision": 17,
+      "sourceHead": "3d46fc51ed89b98d0032e59b90bb635c1f0f0539",
+      "digest": "6b0b558252ad9a502da07efaf8a390a1d31945c7a2d2f15bec8b06d2743b3d9b",
+      "byteLength": 51764,
+      "approver": "telex://lossyrob/telex/T-A:application-client-orch",
+      "requestMessageId": 1865,
+      "requestedAt": "2026-07-22T17:25:37.414Z",
+      "reviewModel": "claude-opus-4.8-high",
+      "status": "rejected-superseded",
+      "feedbackMessageId": 1867,
+      "workstreamFeedbackMessageId": 1868,
+      "supersededByPlanRevision": 18,
+      "supersededReason": "adr-0049-allocation-authority"
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-requested",
+      "planRevision": 17,
+      "sourceHead": "3d46fc51ed89b98d0032e59b90bb635c1f0f0539",
+      "digest": "6b0b558252ad9a502da07efaf8a390a1d31945c7a2d2f15bec8b06d2743b3d9b",
+      "byteLength": 51764,
+      "approver": "telex://lossyrob/telex/T-A:campaign-orch",
+      "requestMessageId": 1866,
+      "requestedAt": "2026-07-22T17:25:37.414Z",
+      "reviewModel": "claude-opus-4.8-high",
+      "status": "approved-then-stale-superseded",
+      "approvalMessageId": 1869,
+      "statusMessageId": 1870,
+      "supersededByPlanRevision": 18,
+      "supersededReason": "adr-0049-allocation-authority"
+    },
+    {
+      "gate": "planning-candidate",
+      "planRevision": 18,
+      "digest": "609c28a36c135a4cbfe19b853ec806a7c530d1f770bb25f2719dcff258f8f8df",
+      "status": "superseded-before-request",
+      "supersededByPlanRevision": 19,
+      "supersededReason": "freeze-adr-allocation-title-and-ledger-high-water",
+      "requiredReviewModel": "claude-opus-4.8-high"
+    },
+    {
+      "gate": "planning-candidate",
+      "planRevision": 19,
+      "digest": "812339c56111ec5a1210fd371f3fe62947ae1b06cd79a2b42c764318271b84aa",
+      "byteLength": 52830,
+      "status": "superseded-before-request",
+      "supersededByPlanRevision": 20,
+      "supersededReason": "campaign-devbox-approval-reporting-and-decision-routing",
+      "campaignDecisionMessageId": 735,
+      "revisionAuthorizationMessageId": 736,
+      "requiredReviewModel": "claude-opus-4.8-high"
+    },
+    {
+      "gate": "planning-candidate",
+      "planRevision": 20,
+      "status": "gate-1-review-configured",
+      "campaignDecisionMessageId": 735,
+      "revisionAuthorizationMessageId": 736,
+      "campaignRoutingAddress": "telex://lossyrob/telex/T-A:campaign-orch-devbox",
+      "adrAllocationRequestMessageId": 1812,
+      "adrAllocationDispositionId": 909,
+      "adrAllocationResponseMessageId": 1817,
+      "requiredReviewModel": "claude-opus-4.8-high"
+    },
+    {
+      "gate": "internal-plan-review",
+      "kind": "planning-docs-review-configured",
+      "planRevision": 20,
+      "status": "pending",
+      "artifacts": [
+        ".paw/work/application-client-contract-118/Plan.md",
+        ".paw/work/application-client-contract-118/approvals/ledger.json",
+        ".paw/work/application-client-contract-118/inputs/source-freeze.json"
+      ],
+      "specialist": "general-reviewer",
+      "reviewModel": "claude-opus-4.8-high",
+      "interactionMode": "parallel",
+      "perspectives": [
+        "premortem",
+        "retrospective"
+      ],
+      "perspectiveCap": 2,
+      "interactive": false
     }
   ]
 }
