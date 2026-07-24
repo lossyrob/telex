@@ -450,6 +450,70 @@ fn wait_until_path_exists(path: &Path, timeout: Duration) {
     panic!("timed out waiting for {}", path.display());
 }
 
+fn copilot_session_bridge_dir(home: &Path, session: &str) -> PathBuf {
+    home.join(".copilot")
+        .join("session-state")
+        .join(session)
+        .join("extensions")
+        .join("telex-bridge")
+}
+
+fn copilot_bridge_root(home: &Path) -> PathBuf {
+    home.join(".copilot").join("telex-bridge")
+}
+
+fn copilot_bridge_bindings_path(home: &Path, session: &str) -> PathBuf {
+    copilot_bridge_root(home).join(format!("{session}.bindings.json"))
+}
+
+fn copilot_bridge_registry_path(home: &Path, session: &str) -> PathBuf {
+    copilot_bridge_root(home).join(format!("{session}.json"))
+}
+
+fn copilot_turn_guard_state_path(env: &ProcessEnv, session: &str) -> PathBuf {
+    env.run_dir
+        .join("copilot")
+        .join("turn-guard")
+        .join(format!("{session}.json"))
+}
+
+fn configure_copilot_home(cmd: &mut Command, home: &Path) {
+    cmd.env("HOME", home).env("USERPROFILE", home);
+}
+
+fn copilot_runtime_home(env: &ProcessEnv) -> PathBuf {
+    env.home.clone()
+}
+
+struct CopilotBridgeArtifacts {
+    bridge_dir: PathBuf,
+    bindings: PathBuf,
+    registry: PathBuf,
+}
+
+impl CopilotBridgeArtifacts {
+    fn for_env(env: &ProcessEnv, session: &str) -> Self {
+        let home = copilot_runtime_home(env);
+        Self {
+            bridge_dir: copilot_session_bridge_dir(&home, session),
+            bindings: copilot_bridge_bindings_path(&home, session),
+            registry: copilot_bridge_registry_path(&home, session),
+        }
+    }
+
+    fn cleanup(&self) {
+        let _ = std::fs::remove_dir_all(&self.bridge_dir);
+        let _ = std::fs::remove_file(&self.bindings);
+        let _ = std::fs::remove_file(&self.registry);
+    }
+}
+
+impl Drop for CopilotBridgeArtifacts {
+    fn drop(&mut self) {
+        self.cleanup();
+    }
+}
+
 fn wait_until_daemon_lists_waiter(env: &ProcessEnv, waiter_pid: u32, timeout: Duration) {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
@@ -3147,10 +3211,9 @@ fn real_process_copilot_bridge_refresh_keeps_push_liveness_unanchored() {
     let address = "addr:real-copilot-bridge-refresh";
 
     let mut bridge = env.command_with_session("ignored");
+    configure_copilot_home(&mut bridge, &env.home);
     bridge
         .env_remove("TELEX_SESSION_ID")
-        .env("HOME", &env.home)
-        .env("USERPROFILE", &env.home)
         .env("COPILOT_AGENT_SESSION_ID", session)
         .env("COPILOT_LOADER_PID", u32::MAX.to_string())
         .env("TELEX_SESSION_PID", u32::MAX.to_string())
@@ -3168,10 +3231,9 @@ fn real_process_copilot_bridge_refresh_keeps_push_liveness_unanchored() {
     bridge.assert_success("initial copilot bridge attach");
 
     let mut plain = env.command_with_session("ignored");
+    configure_copilot_home(&mut plain, &env.home);
     plain
         .env_remove("TELEX_SESSION_ID")
-        .env("HOME", &env.home)
-        .env("USERPROFILE", &env.home)
         .env("COPILOT_AGENT_SESSION_ID", session)
         .env("COPILOT_LOADER_PID", std::process::id().to_string())
         .env("TELEX_SESSION_PID", std::process::id().to_string())
@@ -3209,6 +3271,156 @@ fn real_process_copilot_bridge_refresh_keeps_push_liveness_unanchored() {
             .map(Vec::len),
         Some(0),
         "plain refresh must not add loader/session watch-pid anchors to preserved bridge push"
+    );
+}
+
+#[test]
+fn real_process_copilot_session_end_preserves_bridge_state_until_detach() {
+    let env = ProcessEnv::new("real-copilot-bridge-session-end");
+    let session = format!("real-copilot-bridge-session-end-{}", std::process::id());
+    let address = format!(
+        "addr:real-copilot-bridge-session-end-{}",
+        std::process::id()
+    );
+    let artifacts = CopilotBridgeArtifacts::for_env(&env, &session);
+    artifacts.cleanup();
+
+    let mut attach_cmd = env.command_with_session("ignored");
+    configure_copilot_home(&mut attach_cmd, &env.home);
+    attach_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", &session)
+        .env("COPILOT_LOADER_PID", u32::MAX.to_string())
+        .args([
+            "--json",
+            "--address",
+            address.as_str(),
+            "copilot",
+            "attach",
+            "--copilot-bridge",
+            "--description",
+            "copilot bridge preserve across session end",
+        ]);
+    let attach = run_command_with_capture(attach_cmd, &env.root, Duration::from_secs(8));
+    attach.assert_success("copilot bridge attach before session end");
+
+    let extension = artifacts.bridge_dir.join("extension.mjs");
+    let bindings = &artifacts.bindings;
+    let registry = &artifacts.registry;
+    wait_until_path_exists(&extension, Duration::from_secs(3));
+    wait_until_path_exists(bindings, Duration::from_secs(3));
+    std::fs::write(
+        registry,
+        serde_json::to_vec(&serde_json::json!({
+            "sessionId": &session,
+            "secret": "process-test-secret",
+            "maxRequestBytes": 1048576
+        }))
+        .expect("bridge registry json"),
+    )
+    .expect("write simulated live bridge registry");
+    assert!(
+        registry.exists(),
+        "test registry should exist before session end"
+    );
+
+    let guard_state = copilot_turn_guard_state_path(&env, &session);
+    std::fs::create_dir_all(guard_state.parent().expect("turn guard parent"))
+        .expect("create turn guard dir");
+    std::fs::write(
+        &guard_state,
+        br#"{"nudges":1,"last_decision":"coverage_gap","updated_at_ms":1}"#,
+    )
+    .expect("write turn guard state");
+
+    let mut end_cmd = env.command_with_session("ignored");
+    configure_copilot_home(&mut end_cmd, &env.home);
+    end_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", &session)
+        .args(["--json", "copilot", "session-end"]);
+    let ended = run_command_with_capture(end_cmd, &env.root, Duration::from_secs(8));
+    ended.assert_success("copilot session-end preserves bridge state");
+    assert!(extension.exists(), "session-end must retain extension.mjs");
+    assert!(bindings.exists(), "session-end must retain bridge bindings");
+    assert!(registry.exists(), "session-end must retain bridge registry");
+    assert!(
+        !guard_state.exists(),
+        "session-end still clears transient turn-guard state"
+    );
+
+    let ended_status = env.run_with_session(
+        &session,
+        ["--json", "station", "status", "--session", session.as_str()],
+        Duration::from_secs(5),
+    );
+    ended_status.assert_success("station status after session end");
+    let ended_status_json = ended_status.json("station status after session end");
+    assert_eq!(
+        ended_status_json["stations"][0]
+            .get("idle")
+            .and_then(Value::as_bool),
+        Some(true),
+        "session-end should mark daemon membership idle: {ended_status_json}"
+    );
+
+    let mut resume_cmd = env.command_with_session("ignored");
+    configure_copilot_home(&mut resume_cmd, &env.home);
+    resume_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", &session)
+        .args([
+            "--json",
+            "--address",
+            address.as_str(),
+            "copilot",
+            "resume",
+            "--description",
+            "resume after preserved bridge startup discovery",
+        ]);
+    let resumed = run_command_with_capture(resume_cmd, &env.root, Duration::from_secs(8));
+    resumed.assert_success("copilot resume after preserved bridge state");
+
+    let resumed_status = env.run_with_session(
+        &session,
+        ["--json", "station", "status", "--session", session.as_str()],
+        Duration::from_secs(5),
+    );
+    resumed_status.assert_success("station status after copilot resume");
+    let resumed_status_json = resumed_status.json("station status after copilot resume");
+    let resumed_station = &resumed_status_json["stations"][0];
+    assert_eq!(
+        resumed_station.get("idle").and_then(Value::as_bool),
+        Some(false),
+        "copilot resume should re-arm daemon attendance: {resumed_status_json}"
+    );
+    assert_eq!(
+        resumed_station
+            .get("push_registered")
+            .and_then(Value::as_bool),
+        Some(true),
+        "copilot resume should restore push registration: {resumed_status_json}"
+    );
+
+    let mut detach_cmd = env.command_with_session("ignored");
+    configure_copilot_home(&mut detach_cmd, &env.home);
+    detach_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", &session)
+        .args(["--json", "--address", address.as_str(), "copilot", "detach"]);
+    let detached = run_command_with_capture(detach_cmd, &env.root, Duration::from_secs(8));
+    detached.assert_success("copilot detach removes final bridge binding");
+    assert!(
+        !artifacts.bridge_dir.exists(),
+        "final-binding detach must remove the bridge extension dir"
+    );
+    assert!(
+        !bindings.exists(),
+        "final-binding detach must remove bridge bindings"
+    );
+    assert!(
+        !registry.exists(),
+        "final-binding detach must remove bridge registry"
     );
 }
 

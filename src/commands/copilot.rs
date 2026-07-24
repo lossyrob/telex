@@ -139,9 +139,26 @@ const BRIDGE_BUSY_STATE_MJS: &str = include_str!("../../copilot/bridge/busy-stat
 const BRIDGE_EXTENSION_NAME: &str = "telex-bridge";
 
 fn copilot_home_dir() -> Result<PathBuf> {
-    dirs::home_dir()
+    copilot_profile_home_dir()
         .map(|home| home.join(".copilot"))
         .ok_or_else(|| anyhow::anyhow!("no home directory"))
+}
+
+fn copilot_profile_home_dir() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        env_path("USERPROFILE")
+            .or_else(|| env_path("HOME"))
+            .or_else(dirs::home_dir)
+    }
+    #[cfg(not(windows))]
+    {
+        env_path("HOME").or_else(dirs::home_dir)
+    }
+}
+
+fn env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name).and_then(|value| (!value.is_empty()).then(|| PathBuf::from(value)))
 }
 
 fn bridge_extension_dir(session_id: &str) -> Result<PathBuf> {
@@ -238,7 +255,8 @@ fn remove_bridge_binding(session_id: &str, address: &str) -> Result<bool> {
 }
 
 /// Remove the session's bridge extension, registry, and bindings (best effort). Called on
-/// last-binding detach and on session end so a bridge never reloads on a later resume.
+/// deliberately destructive transitions: last-binding detach, fallback downgrade, failed
+/// provisioning rollback, and GC.
 fn remove_bridge_extension(session_id: &str) {
     if let Ok(dir) = bridge_extension_dir(session_id) {
         let _ = std::fs::remove_dir_all(dir);
@@ -437,16 +455,13 @@ fn attention_to_send_mode(attention: &str) -> &'static str {
 }
 
 fn bridge_registry_path(session_id: &str) -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    Ok(home
-        .join(".copilot")
+    Ok(copilot_home_dir()?
         .join("telex-bridge")
         .join(format!("{session_id}.json")))
 }
 
 fn bridge_root_dir() -> Result<PathBuf> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    Ok(home.join(".copilot").join("telex-bridge"))
+    Ok(copilot_home_dir()?.join("telex-bridge"))
 }
 
 /// Whether this session's bridge is actually live: the heartbeat-refreshed registry file exists
@@ -478,9 +493,7 @@ fn bridge_endpoint_path(session_id: &str) -> Result<String> {
 
 #[cfg(unix)]
 fn bridge_endpoint_path(session_id: &str) -> Result<String> {
-    let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("no home directory"))?;
-    Ok(home
-        .join(".copilot")
+    Ok(copilot_home_dir()?
         .join("telex-bridge")
         .join(format!("{session_id}.sock"))
         .to_string_lossy()
@@ -1443,9 +1456,6 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
     }
 
     cleanup_turn_guard_state_best_effort(&session);
-    if failed.is_empty() {
-        remove_bridge_extension(&session);
-    }
     let outcome = if failed.is_empty() {
         "session_end"
     } else {
@@ -2820,7 +2830,7 @@ mod tests {
         assert!(doc.contains("supported pull"));
         assert!(doc.contains("fallback below"));
         let unavailable_recovery = doc
-            .split_once("If `extensions_reload` is unavailable:")
+            .split_once("If `extensions_reload` is unavailable")
             .expect("skill should explain unavailable extensions_reload recovery")
             .1;
         assert_in_order(
