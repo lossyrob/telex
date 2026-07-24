@@ -31,16 +31,23 @@ First enable **Copilot Extensions** under `/experimental`. Copilot exposes the
 telex --address <addr> copilot attach --copilot-bridge --description "<work>"
 ```
 
-Then run the `extensions_reload` tool once (the agent does this; telex cannot
-trigger a reload). After that, delivered telex messages arrive as new turns
-labelled `[telex] from <addr> (<attention>)`.
+Then run the `extensions_reload` tool once for first-time provisioning into the
+already-running session (the agent does this; telex cannot trigger a reload).
+After that, delivered telex messages arrive as new turns labelled `[telex] from
+<addr> (<attention>)`.
 
-If `extensions_reload` is unavailable, enable Copilot Extensions under
-`/experimental`, re-provision with
-`telex --address <addr> copilot resume --description "<work>"`, and then run
+On normal Copilot close/resume, Telex preserves the session-scoped bridge files
+so Copilot can load them during startup. After startup, run
+`telex --address <addr> copilot resume --description "<work>"` to re-arm daemon
+attendance and rescan unacked backlog; this normal path does not depend on an
+in-session `extensions_reload`.
+
+If `extensions_reload` is unavailable during first-time or recovery provisioning,
+enable Copilot Extensions under `/experimental`, re-provision with `telex
+--address <addr> copilot resume --description "<work>"`, and then run
 `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported
-[pull fallback](#fallback) or detach with
-`telex --address <addr> copilot detach`.
+[pull fallback](#fallback) or detach with `telex --address <addr> copilot
+detach`.
 
 ## Receive and disposition
 
@@ -76,7 +83,8 @@ telex --address <addr> copilot detach
 ```
 
 This detaches the address and, when it was the last binding, removes the bridge
-files so nothing reloads on a later resume. Session end also removes them.
+files so nothing reloads on a later resume. Ordinary session end preserves them
+for startup extension discovery on resume.
 
 Inspect stale bridge files left by other sessions with `telex copilot gc --dry-run`.
 

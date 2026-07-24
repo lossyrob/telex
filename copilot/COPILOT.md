@@ -40,20 +40,26 @@ yours to make.
    CC push is opt-in, live-only, and notification-only: historical CC backlog is not
    replayed, and CC messages still do not require a terminal disposition from the observer.
 
-   If you resume a Copilot session and the bridge files or heartbeat are gone, repair the
-   station with the resume verb, then reload extensions:
+   On normal Copilot close/resume, Telex keeps these session-scoped bridge files
+   so Copilot can discover and load the extension during session startup. After
+   startup, re-arm daemon attendance and rescan unacked backlog with:
 
    ```sh
    telex --address <addr> copilot resume --description "<what this session is doing>"
    ```
 
-   `copilot resume` is an explicit re-provision of the same push bridge registration that
-   `copilot attach --copilot-bridge` creates; it also re-scans queued unacked backlog.
+   `copilot resume` re-provisions the same push bridge registration that `copilot
+   attach --copilot-bridge` creates; it also re-scans queued unacked backlog.
 
 2. **Load the bridge into the live session (one agent tool call).**
 
-   Run the `extensions_reload` tool. telex cannot trigger a reload, so you do this once.
-   If `extensions_reload` is unavailable:
+   Run the `extensions_reload` tool after first-time bridge provisioning into an
+   already-running Copilot session. telex cannot trigger a reload, so you do this
+   once. Normal close/resume uses startup extension discovery instead and does not
+   depend on an in-session reload.
+
+   If `extensions_reload` is unavailable during first-time or recovery
+   provisioning:
 
    1. Enable Copilot Extensions under `/experimental`.
    2. Re-provision the station with
@@ -125,7 +131,9 @@ yours to make.
    This detaches the address and, when it was the last binding, removes the bridge files so
    it will not reload on a later resume. The already-loaded bridge stays live until the next
    `extensions_reload` or session end; run `extensions_reload` once after detach if you want
-   it unloaded immediately. Session end also removes the files.
+   it unloaded immediately. Ordinary session end is resumable: it marks daemon membership idle
+   and clears transient turn-guard state, but preserves the session bridge files for startup
+   discovery on resume.
 
    To inspect or clean orphaned bridge files from sessions that closed without detach:
 

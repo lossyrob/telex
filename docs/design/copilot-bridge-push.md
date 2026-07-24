@@ -218,10 +218,10 @@ The full lifecycle:
   means it is harmless if unused; (b) a `telex copilot gc` (or an attach-time sweep)
   prunes session-bridge dirs whose session ids telex no longer binds; (c) optionally
   the bridge self-exits on load if telex shows no binding for its session id, keeping
-  orphan memory near zero. **v1 ships (a) only** -- silent-load-is-harmless plus the
-  explicit cleanup paths (`copilot detach`, Copilot `sessionEnd`, and attach-failure
-  rollback each remove the extension dir / registry / bindings); (b) `telex copilot gc`
-  / attach-time sweep and (c) self-exit are **deferred** (ADR 0039).
+  orphan memory near zero. **v1 ships silent-load-is-harmless plus explicit cleanup**
+  (`copilot detach`, fallback transition, `telex copilot gc`, and attach-failure
+  rollback each remove the extension dir / registry / bindings); attach-time sweep
+  and self-exit are **deferred** (ADR 0039).
 
 ## Effect on sessions that do not use this
 
@@ -261,7 +261,7 @@ The full lifecycle:
 | Resident Node process (~25 MB) once loaded | Only for telex sessions, only after bind; non-telex pay zero |
 | `/clear` reloads the bridge (in-memory state lost) | Endpoint is derived from session id (named pipe) so it is stable; the daemon registration is daemon-side and survives `/clear`; one idempotent re-load re-arms |
 | Delivery racing a reload gap | Lazy endpoint resolution + daemon retry redelivers; named pipe keeps the endpoint stable so the window is tiny |
-| Stale registry on hard kill (SIGKILL skips cleanup) | `telex copilot push` treats a dead endpoint as a failed delivery -> daemon retry; the bridge best-effort removes its registry entry on SIGTERM/SIGINT, and explicit `copilot detach` / `sessionEnd` clean up. A GC / health-probe pruner is deferred (ADR 0039) |
+| Stale registry on hard kill (SIGKILL skips cleanup) | `telex copilot push` treats a dead endpoint as a failed delivery -> daemon retry; the bridge best-effort removes its registry entry on SIGTERM/SIGINT, while explicit `copilot detach` and `telex copilot gc` clean up abandoned files. Ordinary `sessionEnd` preserves bridge state for resumable startup discovery. |
 | `extensions_reload` is global (restarts all extensions) | Acceptable; reload is idempotent and infrequent (bind, `/clear`) |
 | Address mapping | telex owns address -> session mapping via `attach`; the Copilot-side registry is keyed by session id and correlated by the handler |
 | Bridge bytes drift from protocol | telex embeds the bridge (`include_str!`) so it is versioned with the daemon |
