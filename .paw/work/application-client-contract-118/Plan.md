@@ -363,6 +363,17 @@ main and the allocation ledger high-water were 0048. Workstream reconciliation
 at `f6e0deec043308971029ddefc50411ee455fd27a` records ADR 0049 as reserved
 and not landed.
 
+The allocation ledger's revision-19 use-condition is a frozen historical
+annotation from before revision 19 was superseded without an approval request.
+For current consumption, revision-20 dual exact-plan approval supersedes only
+that revision pin; latest-main and allocation-ledger/high-water revalidation
+remain mandatory. Campaign decision `735` and revision authorization `736`
+designate `telex://lossyrob/telex/T-A:campaign-orch-devbox` as the current
+custodian for decisions formerly routed to
+`telex://lossyrob/telex/T-A:campaign-orch`. The historical sender address stays
+immutable, and the ADR authority remains the message-ID tuple `1812`, `909`,
+`1817`.
+
 After dual exact-plan approval and immediately before editing
 `docs/design/DECISIONS.md`, refresh remote `main`, re-read the campaign
 allocation ledger/evidence, and reverify that ADR 0049 is still unconsumed,
@@ -548,6 +559,12 @@ edit a published checkpoint.
 4. Resolve every blocking planning finding.
 5. Re-canonicalize and commit the exact reviewed `Plan.md`.
 
+Before Gate 2, record the final revision-20 byte length and digest in the
+approval ledger. Any later byte change makes that Gate 1 identity stale and
+requires canonicalization, both configured perspective reviews, and a new
+planning-gate record before approval is requested. A byte change after a Gate 2
+request requires a new plan revision and dual reapproval.
+
 If the pinned model is unavailable, do not substitute silently. Request a
 campaign-orchestration disposition for a successor model, revise
 `WorkflowContext.md` and this plan, and repeat the affected exact-plan approval.
@@ -555,7 +572,7 @@ campaign-orchestration disposition for a successor model, revise
 ### Gate 2: External Exact-Plan Approval
 
 Commit the reviewed plan, calculate its SHA-256 from the exact byte definition
-at the top of this document, and send the plan revision, candidate source-head
+at the top of this document, and send the plan revision, plan source-head
 commit, digest, and full exact bytes separately to:
 
 1. `telex://lossyrob/telex/T-A:application-client-orch`.
@@ -563,11 +580,11 @@ commit, digest, and full exact bytes separately to:
 
 Each Telex message will use a subject identifying the plan review,
 `next-checkpoint` attention, required disposition, metadata containing plan
-revision, artifact path, candidate source head, and lowercase SHA-256, and a
+revision, artifact path, plan source head, and lowercase SHA-256, and a
 body loaded directly from the reviewed `Plan.md`.
 
 Before sending, calculate the complete Telex payload size. If the full plan
-cannot fit below Telex's IPC cap, send the candidate source head, the immutable
+cannot fit below Telex's IPC cap, send the plan source head, the immutable
 Git blob ID and path for `Plan.md`, its SHA-256, and retrieval instructions
 instead. An approver must retrieve that exact blob, reproduce the SHA-256, and
 attest both facts; digest-only approval is forbidden.

@@ -305,9 +305,18 @@
       "gate": "planning-candidate",
       "planRevision": 20,
       "status": "gate-1-review-configured",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "c514abe05a46cd55eef84f967c343d08378a0926",
+      "digest": "fc0cfee6809644b71f26f2a0a8bf7c4b419c678a267739bed8a768d00bb9297f",
+      "byteLength": 53872,
       "campaignDecisionMessageId": 735,
       "revisionAuthorizationMessageId": 736,
       "campaignRoutingAddress": "telex://lossyrob/telex/T-A:campaign-orch-devbox",
+      "historicalCampaignAuthorityAddress": "telex://lossyrob/telex/T-A:campaign-orch",
+      "currentCampaignCustodianAddress": "telex://lossyrob/telex/T-A:campaign-orch-devbox",
+      "adrAuthorityAnchor": "1812/909/1817",
+      "adrAllocationUseCondition": "revision-20-dual-plan-approval-and-latest-main-plus-allocation-ledger-revalidation",
+      "supersedesHistoricalUseConditionRevisionPin": 19,
       "adrAllocationRequestMessageId": 1812,
       "adrAllocationDispositionId": 909,
       "adrAllocationResponseMessageId": 1817,
@@ -332,6 +341,49 @@
       ],
       "perspectiveCap": 2,
       "interactive": false
+    },
+    {
+      "gate": "internal-plan-review",
+      "kind": "planning-docs-review-completed",
+      "planRevision": 20,
+      "status": "passed",
+      "completedAt": "2026-07-24T16:16:00.701Z",
+      "initialCandidateSourceHead": "6eb34625ab9d7fa1e9b62173452921e54fd1d98e",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "c514abe05a46cd55eef84f967c343d08378a0926",
+      "digest": "fc0cfee6809644b71f26f2a0a8bf7c4b419c678a267739bed8a768d00bb9297f",
+      "byteLength": 53872,
+      "specialist": "general-reviewer",
+      "reviewModel": "claude-opus-4.8-high",
+      "interactionMode": "parallel",
+      "perspectives": [
+        "premortem",
+        "retrospective"
+      ],
+      "perspectiveCap": 2,
+      "interactive": false,
+      "mustFixCount": 0,
+      "shouldFixCount": 0,
+      "considerCount": 2,
+      "reviewSynthesisPath": ".paw/work/application-client-contract-118/reviews/planning/REVIEW-SYNTHESIS.md"
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-ready",
+      "planRevision": 20,
+      "status": "ready-to-request",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "c514abe05a46cd55eef84f967c343d08378a0926",
+      "digest": "fc0cfee6809644b71f26f2a0a8bf7c4b419c678a267739bed8a768d00bb9297f",
+      "byteLength": 53872,
+      "approvers": [
+        "telex://lossyrob/telex/T-A:application-client-orch",
+        "telex://lossyrob/telex/T-A:campaign-orch-devbox"
+      ],
+      "attention": "next-checkpoint",
+      "requiresDisposition": true,
+      "requiresExactBlobRetrieval": true,
+      "requiresDigestReproduction": true
     }
   ]
 }
