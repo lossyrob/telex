@@ -604,9 +604,10 @@ impl TelexCli {
         json: bool,
         stdin: Option<Vec<u8>>,
     ) -> CommandSpec {
+        let [selector_flag, selector_value] = self.config.selector_args();
         let mut args = vec![
-            "--db".into(),
-            self.config.database_path.as_os_str().to_os_string(),
+            selector_flag,
+            selector_value,
             "--address".into(),
             address.into(),
         ];
@@ -614,17 +615,15 @@ impl TelexCli {
             args.push("--json".into());
         }
         args.append(&mut verb_args);
-        let env = BTreeMap::from([
+        let mut env = BTreeMap::from([
             (
                 "TELEX_SESSION_ID".to_string(),
                 self.session_id.clone().into(),
             ),
             ("TELEX_ADDRESS".to_string(), address.into()),
-            (
-                "TELEX_OPERATOR_SPIKE_DB".to_string(),
-                self.config.database_path.as_os_str().to_os_string(),
-            ),
         ]);
+        let (selector_env, selector_value) = self.config.selector_env();
+        env.insert(selector_env.to_string(), selector_value);
         CommandSpec { args, env, stdin }
     }
 
@@ -965,23 +964,36 @@ fn configure_windows_process(_command: &mut Command) {}
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::StoreSelector;
     use std::path::PathBuf;
 
-    fn adapter() -> TelexCli {
+    fn sqlite_adapter() -> TelexCli {
         let config = Arc::new(RuntimeConfig {
             station_address: "operator:rob".into(),
             ingress_address: "attention:rob".into(),
             telex_executable: "telex".into(),
-            database_path: PathBuf::from(r"C:\store\operator.sqlite"),
+            store_selector: StoreSelector::Sqlite(PathBuf::from(r"C:\store\operator.sqlite")),
             store_fingerprint: "sha256:active".into(),
             scope_key: "scope".into(),
         });
         TelexCli::new(config, "session-123".into())
     }
 
+    fn backend_adapter() -> TelexCli {
+        let config = Arc::new(RuntimeConfig {
+            station_address: "operator:rob".into(),
+            ingress_address: "attention:rob".into(),
+            telex_executable: "telex".into(),
+            store_selector: StoreSelector::Backend("pg-rde-telex".into()),
+            store_fingerprint: "sha256:postgres".into(),
+            scope_key: "scope".into(),
+        });
+        TelexCli::new(config, "session-123".into())
+    }
+
     #[test]
-    fn every_child_gets_required_environment_and_explicit_selectors() {
-        let cli = adapter();
+    fn sqlite_child_gets_required_environment_and_explicit_selector() {
+        let cli = sqlite_adapter();
         let spec = cli.spec(&["read", "--id", "7", "--full"], "operator:rob", true);
         let args: Vec<_> = spec
             .args
@@ -1004,6 +1016,32 @@ mod tests {
             spec.env["TELEX_OPERATOR_SPIKE_DB"],
             r"C:\store\operator.sqlite"
         );
+        assert!(!spec.env.contains_key("TELEX_OPERATOR_SPIKE_BACKEND"));
+    }
+
+    #[test]
+    fn backend_child_gets_required_environment_and_explicit_selector() {
+        let cli = backend_adapter();
+        let spec = cli.spec(&["read", "--id", "7", "--full"], "operator:rob", true);
+        let args: Vec<_> = spec
+            .args
+            .iter()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            &args[..5],
+            &[
+                "--backend",
+                "pg-rde-telex",
+                "--address",
+                "operator:rob",
+                "--json"
+            ]
+        );
+        assert_eq!(spec.env["TELEX_SESSION_ID"], "session-123");
+        assert_eq!(spec.env["TELEX_ADDRESS"], "operator:rob");
+        assert_eq!(spec.env["TELEX_OPERATOR_SPIKE_BACKEND"], "pg-rde-telex");
+        assert!(!spec.env.contains_key("TELEX_OPERATOR_SPIKE_DB"));
     }
 
     #[test]
@@ -1016,11 +1054,11 @@ mod tests {
           "subject": null, "body": "hello", "sent_at_ms": 1, "buffered_at_ms": 2,
           "lease_epoch": 3, "waiter_exit_ms": 4, "future_field": {"ok": true}
         }"#;
-        assert_eq!(adapter().parse_wait_payload(valid).unwrap().id, 9);
+        assert_eq!(sqlite_adapter().parse_wait_payload(valid).unwrap().id, 9);
         let missing_id = valid.replace("\"id\": 9,", "");
-        assert!(adapter().parse_wait_payload(&missing_id).is_err());
+        assert!(sqlite_adapter().parse_wait_payload(&missing_id).is_err());
         let wrong_type = valid.replace("\"thread_id\": 9", "\"thread_id\": \"9\"");
-        assert!(adapter().parse_wait_payload(&wrong_type).is_err());
+        assert!(sqlite_adapter().parse_wait_payload(&wrong_type).is_err());
     }
 
     #[test]

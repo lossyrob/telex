@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
@@ -10,11 +11,17 @@ pub const DEFAULT_INGRESS_ADDRESS: &str = "attention:rob";
 pub const DEFAULT_TELEX_EXECUTABLE: &str = "telex";
 
 #[derive(Clone, Debug)]
+pub enum StoreSelector {
+    Sqlite(PathBuf),
+    Backend(String),
+}
+
+#[derive(Clone, Debug)]
 pub struct RuntimeConfig {
     pub station_address: String,
     pub ingress_address: String,
     pub telex_executable: String,
-    pub database_path: PathBuf,
+    pub store_selector: StoreSelector,
     pub store_fingerprint: String,
     pub scope_key: String,
 }
@@ -51,12 +58,27 @@ impl RuntimeConfig {
     pub fn from_env() -> Result<Self, String> {
         let database_path = env::var_os("TELEX_OPERATOR_SPIKE_DB")
             .filter(|value| !value.is_empty())
-            .map(PathBuf::from)
-            .ok_or_else(|| {
-                "TELEX_OPERATOR_SPIKE_DB is required and must name an existing SQLite database"
-                    .to_string()
-            })?;
-        let store_fingerprint = fingerprint_database(&database_path)?;
+            .map(PathBuf::from);
+        let backend = nonempty_env("TELEX_OPERATOR_SPIKE_BACKEND");
+        let (store_selector, store_fingerprint) = match (database_path, backend) {
+            (Some(_), Some(_)) => return Err(
+                "TELEX_OPERATOR_SPIKE_DB and TELEX_OPERATOR_SPIKE_BACKEND are mutually exclusive"
+                    .into(),
+            ),
+            (Some(path), None) => {
+                let fingerprint = fingerprint_database(&path)?;
+                (StoreSelector::Sqlite(path), fingerprint)
+            }
+            (None, Some(backend)) => {
+                let fingerprint = fingerprint_backend(&backend);
+                (StoreSelector::Backend(backend), fingerprint)
+            }
+            (None, None) => {
+                return Err(
+                    "TELEX_OPERATOR_SPIKE_DB or TELEX_OPERATOR_SPIKE_BACKEND is required".into(),
+                )
+            }
+        };
         let station_address = nonempty_env("TELEX_OPERATOR_SPIKE_ADDRESS")
             .unwrap_or_else(|| DEFAULT_STATION_ADDRESS.to_string());
         let ingress_address = nonempty_env("TELEX_OPERATOR_SPIKE_INGRESS")
@@ -68,7 +90,7 @@ impl RuntimeConfig {
             station_address,
             ingress_address,
             telex_executable,
-            database_path,
+            store_selector,
             store_fingerprint,
             scope_key,
         })
@@ -87,8 +109,29 @@ impl RuntimeConfig {
     }
 
     pub fn redact(&self, value: &str) -> String {
-        let raw = self.database_path.to_string_lossy();
-        value.replace(raw.as_ref(), "<operator-spike-db>")
+        match &self.store_selector {
+            StoreSelector::Sqlite(path) => {
+                let raw = path.to_string_lossy();
+                value.replace(raw.as_ref(), "<operator-spike-db>")
+            }
+            StoreSelector::Backend(_) => value.to_string(),
+        }
+    }
+
+    pub fn selector_args(&self) -> [OsString; 2] {
+        match &self.store_selector {
+            StoreSelector::Sqlite(path) => ["--db".into(), path.as_os_str().to_os_string()],
+            StoreSelector::Backend(name) => ["--backend".into(), name.into()],
+        }
+    }
+
+    pub fn selector_env(&self) -> (&'static str, OsString) {
+        match &self.store_selector {
+            StoreSelector::Sqlite(path) => {
+                ("TELEX_OPERATOR_SPIKE_DB", path.as_os_str().to_os_string())
+            }
+            StoreSelector::Backend(name) => ("TELEX_OPERATOR_SPIKE_BACKEND", OsString::from(name)),
+        }
     }
 }
 
@@ -158,6 +201,11 @@ pub fn fingerprint_database(path: &Path) -> Result<String, String> {
     Ok(fingerprint_normalized_path(&canonical.to_string_lossy()))
 }
 
+pub fn fingerprint_backend(name: &str) -> String {
+    let normalized = format!("backend:{}", name.trim().to_ascii_lowercase());
+    format!("sha256:{:x}", Sha256::digest(normalized.as_bytes()))
+}
+
 fn fingerprint_normalized_path(path: &str) -> String {
     let stripped = path
         .strip_prefix(r"\\?\")
@@ -214,6 +262,15 @@ mod tests {
     }
 
     #[test]
+    fn backend_fingerprint_is_opaque_and_case_insensitive() {
+        let first = fingerprint_backend("pg-rde-telex");
+        let second = fingerprint_backend("PG-RDE-TELEX");
+        assert_eq!(first, second);
+        assert!(first.starts_with("sha256:"));
+        assert!(!first.contains("pg-rde-telex"));
+    }
+
+    #[test]
     fn persisted_state_is_scoped_by_address_and_fingerprint() {
         let root = project_test_dir("scope");
         fs::create_dir_all(&root).unwrap();
@@ -221,7 +278,7 @@ mod tests {
             station_address: "operator:rob".into(),
             ingress_address: "attention:rob".into(),
             telex_executable: "telex".into(),
-            database_path: PathBuf::from("not-persisted.sqlite"),
+            store_selector: StoreSelector::Sqlite(PathBuf::from("not-persisted.sqlite")),
             store_fingerprint: "sha256:aaa".into(),
             scope_key: scope_key("operator:rob", "sha256:aaa"),
         };

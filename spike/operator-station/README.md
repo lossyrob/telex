@@ -19,10 +19,11 @@ future Application Client work in issue #12.
 - Rust stable with MSVC build tools
 - Python 3 for the optional Action Center evidence extractor
 - `telex` 0.1.0-compatible CLI on `PATH`
-- An existing, isolated SQLite store in `TELEX_OPERATOR_SPIKE_DB`
+- Either an existing SQLite store in `TELEX_OPERATOR_SPIKE_DB` or a configured
+  backend profile in `TELEX_OPERATOR_SPIKE_BACKEND`
 
-The database path is used only to invoke Telex. The UI and persisted local state
-expose a SHA-256 store fingerprint, never the path.
+The selector is used only to invoke Telex. The UI and persisted local state
+expose a SHA-256 store fingerprint, never a database path or backend target.
 
 ## Run
 
@@ -37,6 +38,20 @@ cargo test --manifest-path .\src-tauri\Cargo.toml
 npm run tauri dev
 Pop-Location
 ```
+
+For a configured PostgreSQL backend:
+
+```powershell
+$env:TELEX_OPERATOR_SPIKE_BACKEND = "pg-rde-telex"
+$env:TELEX_OPERATOR_SPIKE_ADDRESS = "operator:rob"
+
+Push-Location .\spike\operator-station
+npm run tauri dev
+Pop-Location
+```
+
+`TELEX_OPERATOR_SPIKE_DB` and `TELEX_OPERATOR_SPIKE_BACKEND` are mutually
+exclusive.
 
 Optional configuration:
 
