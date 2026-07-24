@@ -507,6 +507,38 @@
       "publicationDraftByteLength": 6765,
       "publicationDraftDigest": "6a5619ad727285758e838222ad10841da746fb3b13b6a2228f6373c6f187bce7",
       "sourceHeadState": "commit-pending"
+    },
+    {
+      "gate": "candidate-bundle",
+      "kind": "candidate-bundle-committed",
+      "status": "consumer-review-ready",
+      "committedAt": "2026-07-24T16:56:19.564Z",
+      "sourceHead": "ba2bcbe42274030ed20079f3bab9955f54a8667e",
+      "manifestPath": "docs/design/application-client.bundle.json",
+      "manifestGitBlob": "add4d8f9b21889e4000d765acc60eb53cb20edff",
+      "manifestByteLength": 2411,
+      "manifestDigest": "ca7a96e0bb23b1ed1f536180a43d8af377f574c20e903645c88b1d5f475ba2cf",
+      "manifestFileCount": 5,
+      "bundleClosurePaths": [
+        "docs/design/DECISIONS.md",
+        "docs/design/application-client-crosswalk.md",
+        "docs/design/application-client.md",
+        "docs/design/history/application-client-issue-12-original.md",
+        "docs/design/index.md",
+        "docs/design/application-client.bundle.json"
+      ],
+      "crosswalkRowCount": 30,
+      "acceptedCount": 30,
+      "deferredCount": 0,
+      "rejectedCount": 0,
+      "watcherDomainReview": "passed",
+      "operatorDomainReview": "passed",
+      "mustFixCount": 0,
+      "shouldFixCount": 0,
+      "planApprovalMessageIds": [
+        748,
+        749
+      ]
     }
   ]
 }
