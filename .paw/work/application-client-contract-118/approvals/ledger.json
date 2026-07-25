@@ -589,6 +589,50 @@
       "stationHealth": "attended_push",
       "pushRegistered": true,
       "pendingUnconsumedCount": 0
+    },
+    {
+      "gate": "consumer-contract-approval",
+      "kind": "consumer-review-attempt-superseded",
+      "consumerDomain": "operator-station",
+      "requestMessageId": 754,
+      "status": "rejected-hold-superseded",
+      "supersededAt": "2026-07-25T20:50:28.450Z",
+      "supersededReason": "consumer-session-held-for-explicit-campaign-builder-authorization",
+      "campaignAuthorizationMessageId": 794
+    },
+    {
+      "gate": "consumer-contract-approval",
+      "kind": "consumer-review-attempt-superseded",
+      "consumerDomain": "watcher",
+      "requestMessageId": 755,
+      "status": "rejected-hold-superseded",
+      "supersededAt": "2026-07-25T20:50:28.450Z",
+      "supersededReason": "consumer-session-held-for-explicit-campaign-builder-authorization",
+      "campaignAuthorizationMessageId": 794
+    },
+    {
+      "gate": "consumer-contract-approval",
+      "kind": "consumer-review-reissue-blocked",
+      "status": "blocked",
+      "blockedAt": "2026-07-25T20:50:28.450Z",
+      "campaignAuthorizationMessageId": 794,
+      "sourceHead": "ba2bcbe42274030ed20079f3bab9955f54a8667e",
+      "manifestDigest": "ca7a96e0bb23b1ed1f536180a43d8af377f574c20e903645c88b1d5f475ba2cf",
+      "operatorStation": {
+        "address": "telex://lossyrob/telex/T-A:operator-station-orch",
+        "stationHealth": "unattended_with_backlog",
+        "pushRegistered": true,
+        "pendingUnconsumedCount": 1
+      },
+      "watcherStation": {
+        "address": "telex://lossyrob/telex/T-A:watcher-orch",
+        "stationHealth": "unattended_with_backlog",
+        "pushRegistered": true,
+        "pendingUnconsumedCount": 1
+      },
+      "applicationClientBlockerMessageId": 796,
+      "campaignBlockerMessageId": 797,
+      "requiredResolution": "resume both consumer orchestrators to attended_push with zero pending backlog or explicitly change the approved routing rule"
     }
   ]
 }
