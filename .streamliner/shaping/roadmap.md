@@ -31,10 +31,14 @@ producers, human recipients, and the shared programmatic client they consume.
 nodes are complete and reconciled. The shared
 [Application Client workstream #117](https://github.com/lossyrob/telex/issues/117)
 is formed, and contract-convergence node
-[#118](https://github.com/lossyrob/telex/issues/118) is ready to reconcile the
+[#118](https://github.com/lossyrob/telex/issues/118) is in progress to reconcile the
 merged requirements through issue #12 and publish `application-client-ready`.
 The live campaign mediation path spans campaign control → `attention:rob` →
 `operator:rob`. Production product nodes remain blocked on that checkpoint.
+Campaign orchestration transfer to a devbox is prepared in
+[`addressable-attention-devbox-handoff.md`](addressable-attention-devbox-handoff.md);
+authority remains with the laptop until the explicit PostgreSQL-backed transfer
+handshake and builder confirmation complete.
 
 ## Covering workstreams
 

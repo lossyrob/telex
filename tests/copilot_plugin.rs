@@ -428,6 +428,7 @@ fn binary_owned_copilot_skill_uses_prepared_cross_platform_fallback() {
         "copilot fallback prepare",
         "launcher.command",
         "delivery_mode",
+        "startup extension discovery",
         "fully detached",
         "version.build_id",
     ] {
