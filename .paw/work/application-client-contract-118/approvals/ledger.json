@@ -633,6 +633,75 @@
       "applicationClientBlockerMessageId": 796,
       "campaignBlockerMessageId": 797,
       "requiredResolution": "resume both consumer orchestrators to attended_push with zero pending backlog or explicitly change the approved routing rule"
+    },
+    {
+      "gate": "candidate-bundle",
+      "kind": "candidate-bundle-invalidated",
+      "status": "superseded-by-semantic-repair",
+      "invalidatedAt": "2026-07-25T21:07:19.291Z",
+      "sourceHead": "ba2bcbe42274030ed20079f3bab9955f54a8667e",
+      "manifestDigest": "ca7a96e0bb23b1ed1f536180a43d8af377f574c20e903645c88b1d5f475ba2cf",
+      "findingMessageId": 800,
+      "finding": "W-15 requires stable opaque logical-store identity on status, receipt/result, and receive records; AC-C17 omitted the status projection facet",
+      "applicationClientValidationMessageId": 803,
+      "campaignFindingMessageId": 804,
+      "applicationClientDecisionMessageId": 807,
+      "campaignDecisionMessageId": 808,
+      "operatorApprovalMessageIds": [
+        799,
+        805
+      ],
+      "operatorApprovalStatus": "approval-received-but-not-counted-superseded-by-semantic-repair",
+      "watcherFindingStatus": "accepted-repaired",
+      "requiresFreshConsumerReviews": true
+    },
+    {
+      "gate": "candidate-source-fidelity-review",
+      "kind": "domain-rereview-completed",
+      "domain": "watcher",
+      "status": "passed",
+      "completedAt": "2026-07-25T21:07:19.291Z",
+      "reviewModel": "claude-opus-4.8-high",
+      "requirementsReviewed": 15,
+      "mustFixCount": 0,
+      "shouldFixCount": 0,
+      "finding800Resolved": true,
+      "manifestDigestReproduced": "abe8abb8f5be5544651d18e1c535b16a94ff99690b835b7c08bb3541292b0e87",
+      "perFileIdentitiesReproduced": true,
+      "productBoundaryPreserved": true
+    },
+    {
+      "gate": "candidate-source-fidelity-review",
+      "kind": "domain-rereview-completed",
+      "domain": "operator-station",
+      "status": "passed",
+      "completedAt": "2026-07-25T21:07:19.291Z",
+      "reviewModel": "claude-opus-4.8-high",
+      "requirementsReviewed": 15,
+      "mustFixCount": 0,
+      "shouldFixCount": 0,
+      "manifestDigestReproduced": "abe8abb8f5be5544651d18e1c535b16a94ff99690b835b7c08bb3541292b0e87",
+      "perFileIdentitiesReproduced": true,
+      "productBoundaryPreserved": true
+    },
+    {
+      "gate": "candidate-bundle",
+      "kind": "consumer-review-ready",
+      "status": "ready-to-commit",
+      "completedAt": "2026-07-25T21:07:19.291Z",
+      "manifestPath": "docs/design/application-client.bundle.json",
+      "manifestByteLength": 2411,
+      "manifestDigest": "abe8abb8f5be5544651d18e1c535b16a94ff99690b835b7c08bb3541292b0e87",
+      "manifestFileCount": 5,
+      "crosswalkRowCount": 30,
+      "acceptedCount": 30,
+      "deferredCount": 0,
+      "rejectedCount": 0,
+      "watcherDomainRereview": "passed",
+      "operatorDomainRereview": "passed",
+      "mustFixCount": 0,
+      "shouldFixCount": 0,
+      "sourceHeadState": "commit-pending"
     }
   ]
 }

@@ -352,6 +352,7 @@ client can cite authenticated evidence; otherwise it is `unverified` or
 
 Health projection MUST cover:
 
+- logical store identity for each address or membership projection;
 - configured responsibility and station capability;
 - runtime identity and liveness predicates;
 - registration, lease owner, and lease epoch;
@@ -365,6 +366,9 @@ Health projection MUST cover:
 Projection MUST retain evidence for each degraded state. It MUST NOT collapse
 membership occupancy, application readiness, operator attendance, notification
 submission, and human availability into one `online` value.
+
+Every status or health record for an address or membership MUST carry the same
+stable, opaque logical store identity used by receive and operation results.
 
 ### AC-C18: Discovery, retry, and cleanup are bounded and scoped
 
