@@ -999,6 +999,26 @@
       "historicalIssue12Digest": "c0a5fed4a1fa894ccc6accedee3e0e66af318a10df4ad27e6f2f065f6881c3dc",
       "currentIssue12SnapshotMatchesHistorical": true,
       "sourceHeadState": "commit-pending"
+    },
+    {
+      "gate": "publication-approval",
+      "kind": "publication-candidate-committed",
+      "status": "review-ready",
+      "committedAt": "2026-07-25T21:30:58.059Z",
+      "publicationRevision": 1,
+      "sourceHead": "ee999dab46b0a8a67f09f3a4bdf6b8203ee21c2d",
+      "artifactPath": ".paw/work/application-client-contract-118/publication/issue-12-body.md",
+      "gitBlob": "89f22602d61e77464a98a224ad2505708a2e0f9c",
+      "byteLength": 7059,
+      "digest": "a7857aebd125e94c487b2ddac6e807f5dc9df7a4d934c2dd9277268c9093e14e",
+      "canonicalization": "utf8-no-bom-lf-one-trailing-lf-v1",
+      "bundleSourceHead": "8854e5e36ac5c18320b208d1a90bffaffbff33a5",
+      "bundleManifestGitBlob": "04c294f0790a5ba764354def07d1108575918d2e",
+      "bundleManifestDigest": "abe8abb8f5be5544651d18e1c535b16a94ff99690b835b7c08bb3541292b0e87",
+      "applicationClientGate4ApprovalMessageId": 823,
+      "campaignGate4ApprovalMessageId": 824,
+      "historicalIssue12ByteLength": 16175,
+      "historicalIssue12Digest": "c0a5fed4a1fa894ccc6accedee3e0e66af318a10df4ad27e6f2f065f6881c3dc"
     }
   ]
 }
