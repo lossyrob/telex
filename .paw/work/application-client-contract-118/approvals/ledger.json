@@ -1213,6 +1213,44 @@
       "applicationClientMessageId": 835,
       "campaignMessageId": 836,
       "requiresDisposition": true
+    },
+    {
+      "gate": "publication",
+      "kind": "publication-verification-accepted",
+      "status": "passed",
+      "acceptedAt": "2026-07-25T21:46:06.623Z",
+      "acceptanceMessageId": 837,
+      "publicationUrl": "https://github.com/lossyrob/telex/issues/12",
+      "publicationRevision": 1,
+      "publicationSourceHead": "ee999dab46b0a8a67f09f3a4bdf6b8203ee21c2d",
+      "publicationGitBlob": "89f22602d61e77464a98a224ad2505708a2e0f9c",
+      "byteLength": 7059,
+      "digest": "a7857aebd125e94c487b2ddac6e807f5dc9df7a4d934c2dd9277268c9093e14e",
+      "fetchedDigest": "a7857aebd125e94c487b2ddac6e807f5dc9df7a4d934c2dd9277268c9093e14e",
+      "fetchedExactMatch": true,
+      "replacementCharacterFound": false,
+      "publicationEvidenceCommit": "89aa0b0f9f4aa669c92564e60ec7e6c7dfd813e6",
+      "applicationClientCompletionMessageId": 835,
+      "campaignCompletionMessageId": 836,
+      "applicationClientApprovalMessageId": 829,
+      "campaignApprovalMessageId": 832,
+      "readyForGate": 6
+    },
+    {
+      "gate": "final-review",
+      "kind": "gate-6-authorized",
+      "status": "in-progress",
+      "authorizationMessageId": 837,
+      "reviewMode": "society-of-thought",
+      "specialist": "general-reviewer",
+      "reviewModel": "claude-opus-4.8-high",
+      "interactionMode": "parallel",
+      "perspectives": [
+        "premortem",
+        "retrospective"
+      ],
+      "perspectiveCap": 2,
+      "interactive": false
     }
   ]
 }
