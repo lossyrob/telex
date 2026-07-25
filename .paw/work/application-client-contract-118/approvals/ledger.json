@@ -1199,6 +1199,20 @@
       "applicationClientApprovalMessageId": 829,
       "campaignApprovalMessageId": 832,
       "allPublicationLinksReachable": true
+    },
+    {
+      "gate": "publication",
+      "kind": "publication-complete-evidence-delivered",
+      "status": "pending-disposition",
+      "deliveredAt": "2026-07-25T21:44:30.279Z",
+      "publicationUrl": "https://github.com/lossyrob/telex/issues/12",
+      "publicationRevision": 1,
+      "publicationEvidenceHead": "89aa0b0f9f4aa669c92564e60ec7e6c7dfd813e6",
+      "publicationDigest": "a7857aebd125e94c487b2ddac6e807f5dc9df7a4d934c2dd9277268c9093e14e",
+      "fetchedDigest": "a7857aebd125e94c487b2ddac6e807f5dc9df7a4d934c2dd9277268c9093e14e",
+      "applicationClientMessageId": 835,
+      "campaignMessageId": 836,
+      "requiresDisposition": true
     }
   ]
 }
