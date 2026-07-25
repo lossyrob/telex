@@ -8,15 +8,22 @@ deployment exists.
 
 ## Normative contract
 
-- [Application Client contract](https://github.com/lossyrob/telex/blob/main/docs/design/application-client.md)
-- [Watcher and Operator requirement crosswalk](https://github.com/lossyrob/telex/blob/main/docs/design/application-client-crosswalk.md)
-- [Canonical bundle manifest](https://github.com/lossyrob/telex/blob/main/docs/design/application-client.bundle.json)
-- [ADR 0049](https://github.com/lossyrob/telex/blob/main/docs/design/DECISIONS.md#0049--one-api-neutral-application-client-contract-governs-explicit-station-capabilities-and-forbids-private-fallbacks)
-- [Exact pre-convergence issue body](https://github.com/lossyrob/telex/blob/main/docs/design/history/application-client-issue-12-original.md)
+- [Application Client contract](https://github.com/lossyrob/telex/blob/8854e5e36ac5c18320b208d1a90bffaffbff33a5/docs/design/application-client.md)
+- [Watcher and Operator requirement crosswalk](https://github.com/lossyrob/telex/blob/8854e5e36ac5c18320b208d1a90bffaffbff33a5/docs/design/application-client-crosswalk.md)
+- [Canonical bundle manifest](https://github.com/lossyrob/telex/blob/8854e5e36ac5c18320b208d1a90bffaffbff33a5/docs/design/application-client.bundle.json)
+- [ADR 0049](https://github.com/lossyrob/telex/blob/8854e5e36ac5c18320b208d1a90bffaffbff33a5/docs/design/DECISIONS.md#0049--one-api-neutral-application-client-contract-governs-explicit-station-capabilities-and-forbids-private-fallbacks)
+- [Exact pre-convergence issue body](https://github.com/lossyrob/telex/blob/8854e5e36ac5c18320b208d1a90bffaffbff33a5/docs/design/history/application-client-issue-12-original.md)
 
-The immutable candidate source head and exact manifest digest are carried by the
-consumer, shared-bundle, and publication approval records. The manifest is the
-machine-readable source of file membership and byte identities.
+Publication revision: `1`.
+
+- bundle source head:
+  `8854e5e36ac5c18320b208d1a90bffaffbff33a5`;
+- manifest Git blob:
+  `04c294f0790a5ba764354def07d1108575918d2e`;
+- manifest SHA-256:
+  `abe8abb8f5be5544651d18e1c535b16a94ff99690b835b7c08bb3541292b0e87`.
+
+The manifest is the machine-readable source of file membership and byte identities.
 
 ## Merged-source provenance
 
