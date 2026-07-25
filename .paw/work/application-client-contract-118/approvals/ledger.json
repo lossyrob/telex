@@ -1306,6 +1306,24 @@
       "applicationClientMessageId": 838,
       "campaignMessageId": 839,
       "requiresDisposition": true
+    },
+    {
+      "gate": "final-review",
+      "kind": "final-review-evidence-accepted",
+      "status": "accepted",
+      "acceptedAt": "2026-07-25T22:09:47.152Z",
+      "acceptanceMessageId": 840,
+      "acceptedMessageId": 839,
+      "approver": "telex://lossyrob/telex/T-A:campaign-orch-devbox",
+      "evidenceSourceHead": "4dac79a95ca9fa9c8a4010e54d617609c3c38349",
+      "evidenceDigest": "80de8930f66898814b7f474e9015c8bc00436d3408c4745b72b62661ba803e5a",
+      "reviewVerdict": "pass",
+      "mustFixCount": 0,
+      "shouldFixCount": 0,
+      "prPreparationAuthorized": true,
+      "pairedReviewerWakeAuthorized": false,
+      "sentryAuthorized": false,
+      "mergeAuthorized": false
     }
   ]
 }

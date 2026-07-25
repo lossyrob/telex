@@ -8,6 +8,7 @@ Execution Mode: worktree
 Repository Identity: github.com/lossyrob/telex@c8f0041e7a632c46552f18ff0f8de0535bb9123a
 Execution Binding: worktree:application-client-contract-118:feature/app-client-contract-118
 Workflow Mode: custom
+Workflow Identity: paw
 Review Strategy: local
 Review Policy: final-pr-only
 Session Policy: continuous
