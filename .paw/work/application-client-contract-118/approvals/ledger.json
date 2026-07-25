@@ -702,6 +702,45 @@
       "mustFixCount": 0,
       "shouldFixCount": 0,
       "sourceHeadState": "commit-pending"
+    },
+    {
+      "gate": "candidate-bundle",
+      "kind": "candidate-bundle-committed",
+      "status": "consumer-review-ready",
+      "committedAt": "2026-07-25T21:08:58.985Z",
+      "sourceHead": "8854e5e36ac5c18320b208d1a90bffaffbff33a5",
+      "manifestPath": "docs/design/application-client.bundle.json",
+      "manifestGitBlob": "04c294f0790a5ba764354def07d1108575918d2e",
+      "manifestByteLength": 2411,
+      "manifestDigest": "abe8abb8f5be5544651d18e1c535b16a94ff99690b835b7c08bb3541292b0e87",
+      "manifestFileCount": 5,
+      "supersedesSourceHead": "ba2bcbe42274030ed20079f3bab9955f54a8667e",
+      "supersedesManifestDigest": "ca7a96e0bb23b1ed1f536180a43d8af377f574c20e903645c88b1d5f475ba2cf",
+      "repairFindingMessageId": 800,
+      "applicationClientRepairAuthorizationMessageIds": [
+        803,
+        807
+      ],
+      "campaignRepairAuthorizationMessageIds": [
+        804,
+        808
+      ],
+      "consumerReviewAuthorization": {
+        "campaignMessageId": 791,
+        "operatorMessageId": 792,
+        "watcherMessageId": 793,
+        "campaignTransferMessageId": 794
+      },
+      "operatorStationHealth": "attended_push",
+      "operatorPushRegistered": true,
+      "operatorPendingUnconsumedCount": 0,
+      "watcherStationHealth": "attended_push",
+      "watcherPushRegistered": true,
+      "watcherPendingUnconsumedCount": 0,
+      "watcherDomainRereview": "passed",
+      "operatorDomainRereview": "passed",
+      "mustFixCount": 0,
+      "shouldFixCount": 0
     }
   ]
 }
