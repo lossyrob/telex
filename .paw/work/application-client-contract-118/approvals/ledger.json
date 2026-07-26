@@ -1569,6 +1569,26 @@
         ".paw/work/application-client-contract-118/reviews/planning/REVIEW-general-reviewer-retrospective-r21-rereview.md"
       ],
       "sourceHeadState": "commit-pending"
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-ready",
+      "planRevision": 21,
+      "status": "ready-to-request",
+      "sourceHead": "d691d5867f413c8fe5b119d8432f302ac5c9669f",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "742915acef976b099d26249ad2e9dc1d97c01ccb",
+      "digest": "c628579e0aa6c8dec09233d8deb752fb48b7504f7209b1626f4b9fbcb9f95749",
+      "byteLength": 63409,
+      "approvers": [
+        "telex://lossyrob/telex/T-A:application-client-orch",
+        "telex://lossyrob/telex/T-A:campaign-orch-devbox"
+      ],
+      "attention": "next-checkpoint",
+      "requiresDisposition": true,
+      "requiresExactBlobRetrieval": true,
+      "requiresDigestReproduction": true,
+      "durableDocsChanged": false
     }
   ]
 }
