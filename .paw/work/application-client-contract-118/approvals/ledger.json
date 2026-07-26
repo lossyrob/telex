@@ -1937,6 +1937,26 @@
         ".paw/work/application-client-contract-118/reviews/planning/REVIEW-SYNTHESIS-R23.md"
       ],
       "sourceHeadState": "commit-pending"
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-ready",
+      "planRevision": 23,
+      "status": "ready-to-request",
+      "sourceHead": "216a4fb2fcae9067e2c89aae450458fd12220dc7",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "fb41b71aee69aeec9b8d175af57b9eb12ad1bba4",
+      "digest": "3b5e6d6620a160e1590cbb4d99cbcf9c5004e046843df4cd7f6698bfa83a2979",
+      "byteLength": 67414,
+      "approvers": [
+        "telex://lossyrob/telex/T-A:application-client-orch",
+        "telex://lossyrob/telex/T-A:campaign-orch-devbox"
+      ],
+      "attention": "next-checkpoint",
+      "requiresDisposition": true,
+      "requiresExactBlobRetrieval": true,
+      "requiresDigestReproduction": true,
+      "durableDocsChanged": false
     }
   ]
 }
