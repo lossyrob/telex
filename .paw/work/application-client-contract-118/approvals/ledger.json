@@ -1629,6 +1629,65 @@
       "requiresExactBlobRetrieval": true,
       "requiresDigestReproduction": true,
       "durableDocsChanged": false
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-rejected",
+      "planRevision": 21,
+      "status": "rejected-superseded",
+      "sourceHead": "d691d5867f413c8fe5b119d8432f302ac5c9669f",
+      "gitBlob": "742915acef976b099d26249ad2e9dc1d97c01ccb",
+      "digest": "c628579e0aa6c8dec09233d8deb752fb48b7504f7209b1626f4b9fbcb9f95749",
+      "byteLength": 63409,
+      "applicationClientRequestMessageId": 914,
+      "campaignRequestMessageId": 915,
+      "campaignApprovalMessageId": 916,
+      "applicationClientRejectionMessageId": 917,
+      "operatorFeedbackMessageId": 908,
+      "supersededByPlanRevision": 22,
+      "supersededReason": "human-floor-address-and-normativity-consistency"
+    },
+    {
+      "gate": "planning-candidate",
+      "planRevision": 22,
+      "status": "gate-1-review-configured",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "c068beefec643107995105cfd7909e55c008f959",
+      "digest": "d5bbac548fadf7976ca069f43306a4a8593800283dfc860d5b28f73cbc28414a",
+      "byteLength": 64664,
+      "operatorFeedbackMessageId": 908,
+      "repairAuthorizationMessageId": 913,
+      "revision21RejectionMessageId": 917,
+      "pathMoveFrom": "docs/design/application-client-crosswalk.md",
+      "pathMoveTo": "docs/notes/application-client/requirements-crosswalk.md",
+      "traceabilityClassification": "non-normative",
+      "soleNormativeAuthority": "docs/design/application-client.md",
+      "humanFloorDestination": "operator:rob",
+      "humanFloorDestinationScope": "pr-123-only",
+      "campaignDestinationOverrideMessageId": 904,
+      "adrAuthorityAnchor": "1812/909/1817",
+      "requiredReviewModel": "claude-opus-4.8-high"
+    },
+    {
+      "gate": "internal-plan-review",
+      "kind": "planning-docs-review-configured",
+      "planRevision": 22,
+      "status": "pending",
+      "artifacts": [
+        ".paw/work/application-client-contract-118/Plan.md",
+        ".paw/work/application-client-contract-118/approvals/ledger.json",
+        ".paw/work/application-client-contract-118/inputs/source-freeze.json",
+        ".paw/work/application-client-contract-118/WorkflowContext.md"
+      ],
+      "specialist": "general-reviewer",
+      "reviewModel": "claude-opus-4.8-high",
+      "interactionMode": "parallel",
+      "perspectives": [
+        "premortem",
+        "retrospective"
+      ],
+      "perspectiveCap": 2,
+      "interactive": false
     }
   ]
 }
