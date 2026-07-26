@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::watch;
 
-const STATUS_INTERVAL: Duration = Duration::from_secs(5);
+const STATUS_INTERVAL: Duration = Duration::from_secs(30);
 const ACK_BUDGET: Duration = Duration::from_secs(15);
 const ACK_ATTEMPTS: usize = 3;
 const ACK_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(4);
