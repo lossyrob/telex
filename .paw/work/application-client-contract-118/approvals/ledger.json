@@ -1844,6 +1844,21 @@
       "supersededReason": "operator-address-provenance-and-direct-delivery-semantics"
     },
     {
+      "gate": "external-plan-approval",
+      "kind": "late-plan-approval-stale",
+      "planRevision": 22,
+      "status": "approved-after-rejection-stale",
+      "requestMessageId": 920,
+      "campaignApprovalMessageId": 922,
+      "applicationClientStaleDispositionMessageId": 923,
+      "sourceHead": "611fc34cc6fd77f70685d4ea048bee1c549ea401",
+      "gitBlob": "7b2b293a284a88f6d375e32bb329619dcf462466",
+      "digest": "4c0729fc2602368d26de3b08c7b472aa0f0f040cf4e4c9e23ca7e7907a14d3ea",
+      "byteLength": 65515,
+      "supersededByPlanRevision": 23,
+      "durableEditsAuthorized": false
+    },
+    {
       "gate": "planning-candidate",
       "planRevision": 23,
       "status": "gate-1-review-configured",
