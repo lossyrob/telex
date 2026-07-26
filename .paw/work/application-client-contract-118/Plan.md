@@ -134,8 +134,9 @@ Every T-A operational approval or review request uses the literal URI address
 and first verifies that the target is attended. For PR #123 only, the human
 operator directly instructed Application Client orchestration to use the exact
 durable address `operator:rob`; campaign accepted that task-specific override
-in `904`. It is not a T-A URI, must not be expanded or rewritten, and does not
-establish a rule for any other PR or future floor.
+in `904`, based on operator feedback `908`. It is not a T-A URI, must not be
+expanded or rewritten, and does not establish a rule for any other PR or future
+floor.
 
 | Role | Exact Telex address |
 |---|---|
@@ -883,9 +884,15 @@ for PR #123.
    `908` and campaign decision `904` make this the task-specific destination
    for every fresh PR #123 evidence packet unless the human operator explicitly
    revokes it. The override is not a global rule for another PR. Immediately
-   before sending, the workstream refreshes that exact station's attendance and
-   bridge health, requires live `attended_push`, and rejects any normalized or
-   expanded address. It then holds for durable received evidence and the human
+   before sending, the workstream queries Telex status on backend
+   `pg-rde-telex` with `--address operator:rob`, requires a daemon member,
+   `delivery_mode: push`, `station_health: attended_push`,
+   `push_registered: true`, `push_delivery: no_backlog`, and
+   `pending_unconsumed_count: 0`, and rejects any normalized or expanded
+   address. If any required health field is absent or non-matching, it sends a
+   blocker to campaign and the worker and holds without sending the human-floor
+   request. It records the exact status output, lease/occupancy evidence, and
+   send receipt. It then holds for durable received evidence and the human
    disposition. The worker records the request and evidence but never authors
    the request.
 9. Campaign orchestration mediates the explicit human disposition. Campaign
@@ -927,6 +934,12 @@ for PR #123.
    approved source head outside `main`, retain the PR commit as the frozen
    checkpoint and record the successful link check; if a link fails, mark the
    publication stale and run the approved supersession process.
+16. The same campaign-owned post-merge check recomputes
+   `docs/notes/application-client/requirements-crosswalk.md` and
+   `docs/design/application-client.bundle.json`, requires the note's
+   byteLength/SHA-256 to match the manifest entry, and confirms the issue #12
+   supporting-traceability link resolves to that exact note. Any mismatch marks
+   the checkpoint stale and starts the supersession process.
 
 At every stage, the worker sends current blockers, `decision-needed` evidence,
 and material blocker changes to Application Client and campaign orchestration.

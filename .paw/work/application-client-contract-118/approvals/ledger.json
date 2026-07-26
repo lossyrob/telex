@@ -1342,6 +1342,20 @@
       "mergeAuthorized": false
     },
     {
+      "gate": "planning-authorization",
+      "kind": "human-floor-repair-authorized",
+      "status": "plan-only",
+      "messageId": 912,
+      "from": "telex://lossyrob/telex/T-A:application-client-orch",
+      "prNumber": 123,
+      "repair": "move-crosswalk-to-docs-notes",
+      "pathMoveFrom": "docs/design/application-client-crosswalk.md",
+      "pathMoveTo": "docs/notes/application-client/requirements-crosswalk.md",
+      "classification": "non-normative-requirements-traceability-provenance",
+      "durableEditsAuthorized": false,
+      "requiresFreshPlanRevision": 21
+    },
+    {
       "gate": "external-plan-approval",
       "kind": "plan-approval-superseded",
       "planRevision": 20,
@@ -1688,6 +1702,53 @@
       ],
       "perspectiveCap": 2,
       "interactive": false
+    },
+    {
+      "gate": "internal-plan-review",
+      "kind": "planning-review-findings-applied",
+      "planRevision": 22,
+      "status": "rereview-pending",
+      "initialCandidateGitBlob": "c068beefec643107995105cfd7909e55c008f959",
+      "initialCandidateDigest": "d5bbac548fadf7976ca069f43306a4a8593800283dfc860d5b28f73cbc28414a",
+      "initialCandidateByteLength": 64664,
+      "repairedCandidateGitBlob": "3ff29b97fe6c8d6e6bd58c822d5f8cd7086ac8f0",
+      "repairedCandidateDigest": "be5cc63182b4c3d51e44bddf794a73f9bccad735b42cc631cdff4127476cacb4",
+      "repairedCandidateByteLength": 65356,
+      "mustFixApplied": 0,
+      "shouldFixApplied": 1,
+      "considerQuickWinsApplied": 3
+    },
+    {
+      "gate": "internal-plan-review",
+      "kind": "planning-docs-review-completed",
+      "planRevision": 22,
+      "status": "passed",
+      "completedAt": "2026-07-26T06:05:32.732Z",
+      "initialCandidateSourceHead": "c02bed92ee10e63c98c6e329a1c65d77d27a3559",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "7b2b293a284a88f6d375e32bb329619dcf462466",
+      "digest": "4c0729fc2602368d26de3b08c7b472aa0f0f040cf4e4c9e23ca7e7907a14d3ea",
+      "byteLength": 65515,
+      "specialist": "general-reviewer",
+      "reviewModel": "claude-opus-4.8-high",
+      "interactionMode": "parallel",
+      "perspectives": [
+        "premortem",
+        "retrospective"
+      ],
+      "perspectiveCap": 2,
+      "interactive": false,
+      "mustFixCount": 0,
+      "shouldFixCount": 0,
+      "considerCount": 0,
+      "reviewArtifacts": [
+        ".paw/work/application-client-contract-118/reviews/planning/REVIEW-general-reviewer-premortem-r22.md",
+        ".paw/work/application-client-contract-118/reviews/planning/REVIEW-general-reviewer-retrospective-r22.md",
+        ".paw/work/application-client-contract-118/reviews/planning/REVIEW-general-reviewer-premortem-r22-rereview.md",
+        ".paw/work/application-client-contract-118/reviews/planning/REVIEW-general-reviewer-retrospective-r22-rereview.md",
+        ".paw/work/application-client-contract-118/reviews/planning/REVIEW-SYNTHESIS-R22.md"
+      ],
+      "sourceHeadState": "commit-pending"
     }
   ]
 }
