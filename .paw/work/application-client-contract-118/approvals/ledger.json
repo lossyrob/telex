@@ -1356,6 +1356,24 @@
       "requiresFreshPlanRevision": 21
     },
     {
+      "gate": "human-merge-floor-routing",
+      "kind": "human-floor-routing-authorized",
+      "status": "task-specific-accepted",
+      "prNumber": 123,
+      "destination": "operator:rob",
+      "scope": "pr-123-only",
+      "directHumanInstructionChannel": "outside-telex",
+      "applicationClientInstructionRecordMessageId": 901,
+      "campaignDecisionRequestMessageId": 902,
+      "campaignRoutingDecisionMessageId": 904,
+      "documentationPlacementFeedbackMessageId": 908,
+      "documentationFeedbackIsRoutingAuthority": false,
+      "deliverySemantics": "direct-durable-send-receipt-plus-human-disposition",
+      "copilotAttendanceRequired": false,
+      "queuedUnoccupiedIsPendingRequest": true,
+      "explicitHumanDispositionRequired": true
+    },
+    {
       "gate": "external-plan-approval",
       "kind": "plan-approval-superseded",
       "planRevision": 20,
@@ -1872,6 +1890,53 @@
       ],
       "perspectiveCap": 2,
       "interactive": false
+    },
+    {
+      "gate": "internal-plan-review",
+      "kind": "planning-review-findings-applied",
+      "planRevision": 23,
+      "status": "rereview-pending",
+      "initialCandidateGitBlob": "3899d7ce5327e4ebe7d2a2249b2b7d37388f045c",
+      "initialCandidateDigest": "bbf10ab4ae593b97061838bacec5610d5b42987e8eab77c66cb78cd886966480",
+      "initialCandidateByteLength": 67154,
+      "repairedCandidateGitBlob": "fb41b71aee69aeec9b8d175af57b9eb12ad1bba4",
+      "repairedCandidateDigest": "3b5e6d6620a160e1590cbb4d99cbcf9c5004e046843df4cd7f6698bfa83a2979",
+      "repairedCandidateByteLength": 67414,
+      "mustFixApplied": 0,
+      "shouldFixApplied": 0,
+      "considerQuickWinsApplied": 4
+    },
+    {
+      "gate": "internal-plan-review",
+      "kind": "planning-docs-review-completed",
+      "planRevision": 23,
+      "status": "passed",
+      "completedAt": "2026-07-26T06:36:23.854Z",
+      "initialCandidateSourceHead": "76f6062331af26f22d0f6f13aa3ff4106f517df8",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "fb41b71aee69aeec9b8d175af57b9eb12ad1bba4",
+      "digest": "3b5e6d6620a160e1590cbb4d99cbcf9c5004e046843df4cd7f6698bfa83a2979",
+      "byteLength": 67414,
+      "specialist": "general-reviewer",
+      "reviewModel": "claude-opus-4.8-high",
+      "interactionMode": "parallel",
+      "perspectives": [
+        "premortem",
+        "retrospective"
+      ],
+      "perspectiveCap": 2,
+      "interactive": false,
+      "mustFixCount": 0,
+      "shouldFixCount": 0,
+      "considerCount": 0,
+      "reviewArtifacts": [
+        ".paw/work/application-client-contract-118/reviews/planning/REVIEW-general-reviewer-premortem-r23.md",
+        ".paw/work/application-client-contract-118/reviews/planning/REVIEW-general-reviewer-retrospective-r23.md",
+        ".paw/work/application-client-contract-118/reviews/planning/REVIEW-general-reviewer-premortem-r23-rereview.md",
+        ".paw/work/application-client-contract-118/reviews/planning/REVIEW-general-reviewer-retrospective-r23-rereview.md",
+        ".paw/work/application-client-contract-118/reviews/planning/REVIEW-SYNTHESIS-R23.md"
+      ],
+      "sourceHeadState": "commit-pending"
     }
   ]
 }

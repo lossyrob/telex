@@ -98,7 +98,7 @@
       "changesRequestedMessageId": 909,
       "applicationClientRoutingDecisionMessageId": 901,
       "campaignRoutingDecisionRequestMessageId": 902,
-      "campaignDestinationOverrideMessageId": 904,
+      "campaignRoutingDecisionMessageId": 904,
       "destination": "operator:rob",
       "deliverySemantics": "direct-durable-operator-routing",
       "status": "changes-requested-not-approved"

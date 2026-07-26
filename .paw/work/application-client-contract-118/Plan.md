@@ -19,7 +19,8 @@ The documentation-placement repair is sourced from operator feedback `908` and
 authorized by Application Client messages `909`, `911`, `912`, and `913`.
 The separate human-floor destination override was directly instructed by the
 human operator outside Telex, durably recorded by Application Client decision
-`901` after decision request `902`, and accepted by campaign in `904`.
+`901`, raised to campaign as decision request `902`, and accepted by campaign
+in `904`.
 Revision-21 campaign approval `916` is stale because Application Client
 rejected that plan in `917`; revision-22 requests `919`/`920` are stale because
 Application Client rejected that plan in `921`.
@@ -1100,6 +1101,10 @@ The final field report will include:
 - confirmation that campaign technical approval and PR #115/#116 were not used
   as merge authorization;
 - process feedback for PAW, Telex, paired review, and checkpoint revalidation.
+- a downstream recommendation for a lightweight CI/main manifest-reproduction
+  check so future edits to
+  `docs/notes/application-client/requirements-crosswalk.md` cannot silently
+  desynchronize `docs/design/application-client.bundle.json`.
 
 ## Definition of Done
 
