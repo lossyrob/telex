@@ -1769,6 +1769,46 @@
       "requiresExactBlobRetrieval": true,
       "requiresDigestReproduction": true,
       "durableDocsChanged": false
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-requested",
+      "planRevision": 22,
+      "status": "pending",
+      "sourceHead": "611fc34cc6fd77f70685d4ea048bee1c549ea401",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "7b2b293a284a88f6d375e32bb329619dcf462466",
+      "digest": "4c0729fc2602368d26de3b08c7b472aa0f0f040cf4e4c9e23ca7e7907a14d3ea",
+      "byteLength": 65515,
+      "approver": "telex://lossyrob/telex/T-A:application-client-orch",
+      "requestMessageId": 919,
+      "requestedAt": "2026-07-26T06:08:43.110Z",
+      "attention": "next-checkpoint",
+      "requiresDisposition": true,
+      "bodyContainsExactPlanBytes": true,
+      "requiresExactBlobRetrieval": true,
+      "requiresDigestReproduction": true,
+      "durableDocsChanged": false
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-requested",
+      "planRevision": 22,
+      "status": "pending",
+      "sourceHead": "611fc34cc6fd77f70685d4ea048bee1c549ea401",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "7b2b293a284a88f6d375e32bb329619dcf462466",
+      "digest": "4c0729fc2602368d26de3b08c7b472aa0f0f040cf4e4c9e23ca7e7907a14d3ea",
+      "byteLength": 65515,
+      "approver": "telex://lossyrob/telex/T-A:campaign-orch-devbox",
+      "requestMessageId": 920,
+      "requestedAt": "2026-07-26T06:08:43.110Z",
+      "attention": "next-checkpoint",
+      "requiresDisposition": true,
+      "bodyContainsExactPlanBytes": true,
+      "requiresExactBlobRetrieval": true,
+      "requiresDigestReproduction": true,
+      "durableDocsChanged": false
     }
   ]
 }
