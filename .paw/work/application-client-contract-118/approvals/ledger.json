@@ -1809,6 +1809,69 @@
       "requiresExactBlobRetrieval": true,
       "requiresDigestReproduction": true,
       "durableDocsChanged": false
+    },
+    {
+      "gate": "external-plan-approval",
+      "kind": "plan-review-rejected",
+      "planRevision": 22,
+      "status": "rejected-superseded",
+      "sourceHead": "611fc34cc6fd77f70685d4ea048bee1c549ea401",
+      "gitBlob": "7b2b293a284a88f6d375e32bb329619dcf462466",
+      "digest": "4c0729fc2602368d26de3b08c7b472aa0f0f040cf4e4c9e23ca7e7907a14d3ea",
+      "byteLength": 65515,
+      "applicationClientRequestMessageId": 919,
+      "campaignRequestMessageId": 920,
+      "applicationClientRejectionMessageId": 921,
+      "supersededByPlanRevision": 23,
+      "supersededReason": "operator-address-provenance-and-direct-delivery-semantics"
+    },
+    {
+      "gate": "planning-candidate",
+      "planRevision": 23,
+      "status": "gate-1-review-configured",
+      "artifactPath": ".paw/work/application-client-contract-118/Plan.md",
+      "gitBlob": "3899d7ce5327e4ebe7d2a2249b2b7d37388f045c",
+      "digest": "bbf10ab4ae593b97061838bacec5610d5b42987e8eab77c66cb78cd886966480",
+      "byteLength": 67154,
+      "documentationPlacementFeedbackMessageId": 908,
+      "applicationClientRoutingDecisionMessageId": 901,
+      "campaignRoutingDecisionRequestMessageId": 902,
+      "campaignRoutingDecisionMessageId": 904,
+      "repairAuthorizationMessageId": 913,
+      "revision21RejectionMessageId": 917,
+      "revision22RejectionMessageId": 921,
+      "pathMoveFrom": "docs/design/application-client-crosswalk.md",
+      "pathMoveTo": "docs/notes/application-client/requirements-crosswalk.md",
+      "traceabilityClassification": "non-normative",
+      "soleNormativeAuthority": "docs/design/application-client.md",
+      "humanFloorDestination": "operator:rob",
+      "humanFloorDestinationScope": "pr-123-only",
+      "humanFloorDeliverySemantics": "direct-durable-send-receipt-plus-human-disposition",
+      "operatorStatusIsAuditOnly": true,
+      "queuedUnoccupiedIsPendingRequest": true,
+      "adrAuthorityAnchor": "1812/909/1817",
+      "requiredReviewModel": "claude-opus-4.8-high"
+    },
+    {
+      "gate": "internal-plan-review",
+      "kind": "planning-docs-review-configured",
+      "planRevision": 23,
+      "status": "pending",
+      "artifacts": [
+        ".paw/work/application-client-contract-118/Plan.md",
+        ".paw/work/application-client-contract-118/approvals/ledger.json",
+        ".paw/work/application-client-contract-118/inputs/source-freeze.json",
+        ".paw/work/application-client-contract-118/WorkflowContext.md"
+      ],
+      "specialist": "general-reviewer",
+      "reviewModel": "claude-opus-4.8-high",
+      "interactionMode": "parallel",
+      "perspectives": [
+        "premortem",
+        "retrospective"
+      ],
+      "perspectiveCap": 2,
+      "interactive": false
     }
   ]
 }

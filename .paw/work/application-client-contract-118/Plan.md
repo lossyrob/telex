@@ -2,27 +2,32 @@
 
 ## Revision and source freeze
 
-This is revision 22 of the execution plan. Its approval identity is the Git
+This is revision 23 of the execution plan. Its approval identity is the Git
 commit that contains these exact `Plan.md` bytes and the lowercase SHA-256 of
 those bytes encoded as UTF-8 without a BOM, LF line endings, and exactly one
 trailing LF.
 
-Revision 22 supersedes rejected revision 21 and is the human-floor repair plan
-for PR #123. It moves only the
+Revision 23 supersedes rejected revisions 21 and 22 and is the human-floor
+repair plan for PR #123. It moves only the
 requirements crosswalk from the normative design layer to
 `docs/notes/application-client/requirements-crosswalk.md`, where it is
 non-normative requirements traceability and provenance. The normative
 Application Client contract, ADR 0049, bundle manifest, design index entry, and
 exact historical issue #12 snapshot remain under `docs/design/`.
 
-The repair is sourced from operator feedback `908` and authorized by Application
-Client messages `909`, `911`, `912`, and `913`. Revision-21 campaign approval
-`916` is stale because Application Client rejected that plan in `917`.
+The documentation-placement repair is sourced from operator feedback `908` and
+authorized by Application Client messages `909`, `911`, `912`, and `913`.
+The separate human-floor destination override was directly instructed by the
+human operator outside Telex, durably recorded by Application Client decision
+`901` after decision request `902`, and accepted by campaign in `904`.
+Revision-21 campaign approval `916` is stale because Application Client
+rejected that plan in `917`; revision-22 requests `919`/`920` are stale because
+Application Client rejected that plan in `921`.
 Human-floor request `897` was not approved. The current PR head
 `d921d6cdd58db856df3b8eacef908c11cf46ed25`, all Gate 3 through Gate 7
 approvals/evidence, and the published issue #12 body are historical evidence
 only after repair begins; none can authorize merge. Durable repository bytes
-must not change until revision-22 Gate 2 approvals are current.
+must not change until revision-23 Gate 2 approvals are current.
 
 ## Objective
 
@@ -47,7 +52,7 @@ canonical when an export predates the merged contract.
 | Operator Station | `5042612298` | `5044388908` | `0722051760bab569d3f947fd7b29f2dabe13ef77` | `2d99e552292a4401d3403540b6d2eaa90272282d` |
 
 Canonical source-comment body digests refetched from GitHub at revision 5 and
-unchanged through revision 22:
+unchanged through revision 23:
 
 | Comment | SHA-256 |
 |---|---|
@@ -68,9 +73,9 @@ Canonical design-file Git blob identities:
 | Formation base | `0db1b1839c1fea62507b593f2b2c96e50bdc529a` | Application Client workstream formation. |
 | Current planning/branch base | `f6e0deec043308971029ddefc50411ee455fd27a` | Preserves the Operator and Watcher consumer gate updates plus Application Client builder-resume/ADR-0049 reconciliation. These planning-only movements do not revise W-01 through W-15 or AC-01 through AC-15. |
 | Builder resume | Telex `1857` relayed by `1860` | Supersedes the scope pause. Application Client shared artifacts now record active planning and ADR 0049 reservation; further reconciliation remains orchestrator-owned and is not performed in this branch. |
-| Revision-22 repair baseline | PR #123 head `d921d6cdd58db856df3b8eacef908c11cf46ed25` | Six-path design-only PR is green and reviewed but held after human-floor changes requested. Its bundle, publication, review, and floor evidence are stale for the relocation repair. |
+| Revision-23 repair baseline | PR #123 head `d921d6cdd58db856df3b8eacef908c11cf46ed25` | Six-path design-only PR is green and reviewed but held after human-floor changes requested. Its bundle, publication, review, and floor evidence are stale for the relocation repair. |
 
-At revision-22 plan freeze, the live issue #12 body is the previously approved
+At revision-23 plan freeze, the live issue #12 body is the previously approved
 publication revision 1: 7,059 canonical bytes with SHA-256
 `a7857aebd125e94c487b2ddac6e807f5dc9df7a4d934c2dd9277268c9093e14e`.
 It remains live while planning and Gate 2 run. The repair must not edit issue
@@ -134,9 +139,12 @@ Every T-A operational approval or review request uses the literal URI address
 and first verifies that the target is attended. For PR #123 only, the human
 operator directly instructed Application Client orchestration to use the exact
 durable address `operator:rob`; campaign accepted that task-specific override
-in `904`, based on operator feedback `908`. It is not a T-A URI, must not be
-expanded or rewritten, and does not establish a rule for any other PR or future
-floor.
+in decision `904` after request `902`, with the direct instruction durably
+recorded by Application Client decision `901`. Operator feedback `908` is only
+the documentation-placement concern and is not routing provenance.
+`operator:rob` is not a T-A URI, must not be expanded or rewritten, and does
+not establish a rule for any other PR or future floor. It is direct durable
+operator routing and is not modeled as a Copilot `attended_push` station.
 
 | Role | Exact Telex address |
 |---|---|
@@ -446,7 +454,7 @@ The allocation ledger's revision-19 use-condition is a frozen historical
 annotation from before revision 19 was superseded without an approval request.
 Revision-20 approval satisfied the prior repair cycle and revision-21 campaign
 approval `916` covered rejected bytes; both are stale for this path relocation.
-For current consumption, revision-22 dual exact-plan approval supersedes the
+For current consumption, revision-23 dual exact-plan approval supersedes the
 revision pin; latest-main and allocation-ledger/high-water revalidation remain
 mandatory. Campaign decision `735` and revision authorizations `736` and `913`
 designate `telex://lossyrob/telex/T-A:campaign-orch-devbox` as the current
@@ -648,9 +656,13 @@ edit a published checkpoint.
    - perspectives: `premortem`, `retrospective`;
    - perspective cap: `2`.
    The review must verify that the task-specific PR #123 human-floor
-   destination bytes are exactly `operator:rob`, follow operator feedback
-   `908` and campaign acceptance `904`, and are never normalized to a T-A URI.
-   It must also verify that only Application Client orchestration
+   destination bytes are exactly `operator:rob`, follow Application Client
+   decision `901`, decision request `902`, and campaign acceptance `904`, and
+   are never normalized to a T-A URI. It must verify that this is direct durable
+   operator routing: no Copilot daemon-member/push-health precondition, a
+   `delivered` or `queued-unoccupied` send receipt creates a pending request,
+   only an explicit direct human reply/disposition can approve it, and a send
+   error blocks the floor. It must also verify that only Application Client orchestration
    authors bounded human-attention milestones and that the worker sends only
    authoritative T-A evidence/status packets. Before human approval, only
    `merge-floor-ready` / `node-merge-floor-ready` are permitted with
@@ -665,7 +677,7 @@ edit a published checkpoint.
 4. Resolve every blocking planning finding.
 5. Re-canonicalize and commit the exact reviewed `Plan.md`.
 
-Before Gate 2, record the final revision-22 byte length and digest in the
+Before Gate 2, record the final revision-23 byte length and digest in the
 approval ledger. Any later byte change makes that Gate 1 identity stale and
 requires canonicalization, both configured perspective reviews, and a new
 planning-gate record before approval is requested. A byte change after a Gate 2
@@ -695,12 +707,13 @@ Git blob ID and path for `Plan.md`, its SHA-256, and retrieval instructions
 instead. An approver must retrieve that exact blob, reproduce the SHA-256, and
 attest both facts; digest-only approval is forbidden.
 
-Durable relocation edits begin only after both recipients approve revision 22
+Durable relocation edits begin only after both recipients approve revision 23
 and the same digest. Approval records include the approving Telex
 address/principal, message ID, timestamp, and exact-byte attestation and are
-single-use for that revision. Revision-20 approvals `748` and `749`, revision-21 campaign approval `916`, and
-revision-21 rejection `917` remain historical and do not authorize this
-repair. A byte change invalidates both revision-22 approvals.
+single-use for that revision. Revision-20 approvals `748` and `749`, revision-21 campaign approval `916` /
+rejection `917`, and revision-22 requests `919`/`920` / rejection `921` remain
+historical and do not authorize this repair. A byte change invalidates both
+revision-23 approvals.
 
 Conflicting feedback is sent to all affected orchestrators as
 `decision-needed`; no conflict is resolved silently. After two unresolved
@@ -880,21 +893,23 @@ for PR #123.
    identities, and the checkpoint-revalidation contract/evidence.
 8. Application Client orchestration independently rechecks that packet and is
    the only owner authorized to send the disposition-required
-   `attention.merge-floor` request to exact `operator:rob`. Operator feedback
-   `908` and campaign decision `904` make this the task-specific destination
-   for every fresh PR #123 evidence packet unless the human operator explicitly
-   revokes it. The override is not a global rule for another PR. Immediately
-   before sending, the workstream queries Telex status on backend
-   `pg-rde-telex` with `--address operator:rob`, requires a daemon member,
-   `delivery_mode: push`, `station_health: attended_push`,
-   `push_registered: true`, `push_delivery: no_backlog`, and
-   `pending_unconsumed_count: 0`, and rejects any normalized or expanded
-   address. If any required health field is absent or non-matching, it sends a
-   blocker to campaign and the worker and holds without sending the human-floor
-   request. It records the exact status output, lease/occupancy evidence, and
-   send receipt. It then holds for durable received evidence and the human
-   disposition. The worker records the request and evidence but never authors
-   the request.
+   `attention.merge-floor` request to exact `operator:rob`. Application Client
+   decision `901`, decision request `902`, and campaign decision `904` make
+   this the task-specific destination for every fresh PR #123 evidence packet
+   unless the human operator explicitly revokes it. The override is not a
+   global rule for another PR. Immediately before sending, the workstream
+   queries and records Telex status on backend `pg-rde-telex` with
+   `--address operator:rob` for audit, but does not require a daemon member,
+   push delivery mode, station health, push registration, or backlog fields.
+   It rejects any normalized or expanded address, then sends exactly one
+   request. A successful `delivered` or `queued-unoccupied` Telex receipt is a
+   valid pending human-floor request; `queued-unoccupied` is not approval and
+   requires waiting for the direct human reply/disposition. A send error is a
+   hard blocker that is reported to campaign and the worker. The workstream
+   records the status snapshot, exact send receipt, and eventual direct human
+   reply/disposition. It does not send a duplicate request for the same
+   evidence packet. The worker records the request and evidence but never
+   authors the request.
 9. Campaign orchestration mediates the explicit human disposition. Campaign
    technical approvals, recommendations, or prior PR #115/#116 outcomes never
    satisfy this floor.
@@ -956,12 +971,13 @@ Repairs are coalesced before requesting another review cycle. Exact-byte
 approval remains mandatory for every affected artifact; whitespace,
 punctuation, and non-normative prose do not receive a silent exemption.
 
-Revision 22 invalidates every prior approval whose identity includes the plan,
+Revision 23 invalidates every prior approval whose identity includes the plan,
 bundle membership/path, publication links, PR head, review, or floor packet:
 
 - revision-20 Gate 2 approvals `748` and `749`;
 - revision-21 requests `914`/`915`, campaign approval `916`, and Application
   Client rejection `917`;
+- revision-22 requests `919`/`920` and Application Client rejection `921`;
 - consumer approvals `813` plus supplements `817`/`820`, and `814`;
 - shared-bundle approvals `823` and `824`;
 - publication approvals `829`, `832`, and `834`, plus live publication
@@ -970,7 +986,7 @@ bundle membership/path, publication links, PR head, review, or floor packet:
 - PR head review evidence `863`, merge-floor packets `890`/`891`, acceptances
   `893`/`894`, and human-floor request `897`.
 
-The ledger preserves these as historical/superseded records. Revision-22 Gate 2
+The ledger preserves these as historical/superseded records. Revision-23 Gate 2
 must complete before any durable path edit. After the repair, Gates 3 through 7
 rerun in order against new exact identities. The currently published issue #12
 body remains visible but is stale for the repaired path until publication
@@ -996,9 +1012,10 @@ human disposition for the same exact evidence identity. The worker never
 appears as sender of `attention.merge-floor`; no technical approval or
 recommendation is recorded as a human-floor substitute. Invalidation records
 identify the changed evidence axis and superseding packet/request/disposition.
-The floor-request record also captures the literal destination, pre-send
-`attended_push` health evidence, durable received evidence, and the human
-disposition evidence.
+The floor-request record also captures the exact destination, pre-send status
+snapshot (including absent optional station fields), Telex send receipt
+(`delivered` or `queued-unoccupied`), direct human reply/disposition evidence,
+and confirmation that no duplicate request was sent.
 After human approval, the ledger separately records the worker-authored
 `merge-ready` and `node-merge-ready` message IDs, their
 `humanFloorStatus: approved` / `mergeAuthorized: true` metadata, and the three
@@ -1068,8 +1085,9 @@ The final field report will include:
 - workstream-authored `attention.merge-floor` request ID, explicit human
   approval disposition ID, and campaign merge-authorization ID with both
   required citations;
-- exact `operator:rob` pre-send attendance/bridge-health evidence and durable
-  received evidence for the workstream-authored floor request;
+- exact `operator:rob` pre-send status snapshot, send receipt outcome, and
+  direct human reply/disposition evidence for the workstream-authored floor
+  request;
 - confirmation that the worker recorded but did not author the human-floor
   request;
 - any floor invalidation axis and the superseding packet, workstream request,
@@ -1118,10 +1136,11 @@ The node is done only when all of the following are true:
     sentry or waiter active, then held. Application Client orchestration
     independently rechecked it and authored the disposition-required
     `attention.merge-floor`
-    request to exact `operator:rob` only after refreshing and verifying live
-    `attended_push` health without normalization; the worker recorded but did
-    not author that request. Durable received evidence exists before the human
-    disposition is accepted.
+    request to exact `operator:rob` after recording a direct-address status
+    snapshot and obtaining a successful `delivered` or `queued-unoccupied`
+    send receipt without normalization; the worker recorded but did not author
+    that request. An explicit direct human reply/disposition exists before the
+    human approval is accepted.
 11. The workstream-authored floor request has explicit human approval routed by
     campaign, and any campaign merge authorization cites both that request ID
     and the human approval disposition ID. Technical campaign approval alone and
@@ -1170,8 +1189,10 @@ The node is done only when all of the following are true:
 - Merge authorization includes workstream-owned human-floor evidence; the
   worker never authors the floor request, and technical campaign approval alone
   never authorizes merge.
-- The workstream floor request uses exact `operator:rob` for PR #123, follows a
-  fresh `attended_push` health check, and has durable received evidence.
+- The workstream floor request uses exact `operator:rob` for PR #123, records a
+  fresh status snapshot without imposing Copilot push-health requirements,
+  records a successful `delivered` or `queued-unoccupied` send receipt, avoids
+  duplicates, and waits for an explicit direct human reply/disposition.
 - Application Client orchestration, not the worker, owns the bounded
   human-attention milestones and blocker routing; excluded low-value events are
   not sent to `operator:rob`.

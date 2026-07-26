@@ -94,10 +94,13 @@
     },
     "humanFloor": {
       "requestMessageId": 897,
-      "operatorReplyMessageId": 908,
+      "documentationPlacementFeedbackMessageId": 908,
       "changesRequestedMessageId": 909,
+      "applicationClientRoutingDecisionMessageId": 901,
+      "campaignRoutingDecisionRequestMessageId": 902,
       "campaignDestinationOverrideMessageId": 904,
       "destination": "operator:rob",
+      "deliverySemantics": "direct-durable-operator-routing",
       "status": "changes-requested-not-approved"
     },
     "repairDecisionMessageIds": [
@@ -106,7 +109,8 @@
       911,
       912,
       913,
-      917
+      917,
+      921
     ],
     "pathMove": {
       "from": "docs/design/application-client-crosswalk.md",
@@ -114,7 +118,7 @@
       "classification": "non-normative-requirements-traceability-provenance"
     }
   },
-  "planRevision": 22,
+  "planRevision": 23,
   "schemaVersion": 1,
   "sources": [
     {
