@@ -346,14 +346,23 @@ The candidate repository bundle will contain:
 2. `docs/notes/application-client/requirements-crosswalk.md`
    - complete Watcher and Operator requirement dispositions;
    - historical issue #12 proposal dispositions and blocking effects;
-   - explicitly non-normative requirements traceability/provenance.
+   - explicitly non-normative requirements traceability/provenance;
+   - a header naming the immutable source freeze, manifest membership, and the
+     rule that any byte change requires regenerating
+     `docs/design/application-client.bundle.json` and rerunning affected exact
+     approval gates. This distinguishes tracked evidence from informal
+     spike/research notes elsewhere under `docs/notes/`.
 3. `docs/design/history/application-client-issue-12-original.md`
    - exact canonical bytes of the pre-convergence issue #12 body;
    - historical evidence only, not normative contract authority.
 4. `docs/design/index.md`
    - normative Application Client entry;
-   - link to the non-normative traceability note without classifying it as a
-     design contract.
+   - update the Documents bullet to the new path and explicitly classify it as
+     non-normative traceability/provenance;
+   - reword Reading order item 5 so reading the traceability note alongside the
+     contract does not imply the note belongs to the normative design layer;
+   - reconcile the Scope note so `docs/design/` remains the design layer while
+     the manifest-linked traceability evidence lives under `docs/notes/`.
 5. `docs/design/DECISIONS.md`
    - ADR 0049, using campaign allocation request `1812`, handled disposition
      `909`, and allocation response `1817`.
@@ -556,7 +565,7 @@ include:
   product-private clients as fallback seams.
 
 Before replacement, fetch the existing issue #12 body (publication revision 1)
-into `publication/issue-12-body.pre.md`, canonicalize it, and record its 7,059
+into `publication/issue-12-body.rev1.pre.md`, canonicalize it, and record its 7,059
 byte / `a7857aebd125e94c487b2ddac6e807f5dc9df7a4d934c2dd9277268c9093e14e`
 identity as the repair pre-body. Do not copy it over
 `docs/design/history/application-client-issue-12-original.md`. That historical
@@ -568,6 +577,12 @@ must replace only the crosswalk location/classification and immutable repaired
 source identities needed by this path move; it must preserve the accepted
 contract semantics, 30/0/0 disposition totals, historical snapshot link, and
 design-only checkpoint meaning.
+
+The revision-1 publication bytes remain durably addressable after cleanup via
+source head `ee999dab46b0a8a67f09f3a4bdf6b8203ee21c2d` and blob
+`89f22602d61e77464a98a224ad2505708a2e0f9c`. Revision-2 publication approval
+and evidence records must cite those identities in addition to the repair
+pre-body digest.
 
 Publication review identity is:
 
@@ -705,6 +720,11 @@ There is no default acceptance while a decision is pending.
    `docs/design/application-client-crosswalk.md` path must be absent.
    Unexpected paths block approval until removed, assigned to another owner, or
    deliberately added to the manifest and traceability rationale.
+   Run a repository-wide literal search for
+   `docs/design/application-client-crosswalk.md`. The only permitted hits are
+   historical/supersession evidence under `.paw`; no durable repository path may
+   reference the old location. Any out-of-scope durable hit is escalated to both
+   orchestrators before approval rather than left dangling.
 6. Send the complete candidate separately to Operator Station and Telex Watcher
    orchestration at `telex://lossyrob/telex/T-A:operator-station-orch` and
    `telex://lossyrob/telex/T-A:watcher-orch` as disposition-required
@@ -737,6 +757,17 @@ PAW review and consumer approval do not substitute for this gate.
 
 ### Gate 5: Exact Issue #12 Publication Approval
 
+Before requesting publication approval:
+
+1. commit and push the new bundle source head and publication source head to
+   `origin/feature/app-client-contract-118`;
+2. verify both commit SHAs resolve through the GitHub API;
+3. verify every embedded immutable `blob/<sha>/...` link, including
+   `docs/notes/application-client/requirements-crosswalk.md`, resolves and
+   reproduces the expected Git blob;
+4. record the remote ref/head, commit lookups, link/blob results, and
+   reachability timestamp in the ledger.
+
 Send the complete exact publication bytes separately to
 `telex://lossyrob/telex/T-A:application-client-orch` and
 `telex://lossyrob/telex/T-A:campaign-orch-devbox` as disposition-required
@@ -745,6 +776,10 @@ publication revision, artifact path, and SHA-256. Require both approvals for the
 same revision and digest, record approver identity and message metadata, then
 perform the pre-body snapshot, re-read, on-disk preflight, post, fetch,
 canonicalize, and digest verification sequence.
+
+Immediately before `gh issue edit`, repeat the commit/link reachability check.
+Any missing commit or link blocks publication without changing the approved
+bytes.
 
 Before sending, calculate the complete Telex payload size. If the exact
 publication body cannot fit below the IPC cap, commit the canonical publication
@@ -756,6 +791,9 @@ exact blob before attesting; digest-only approval is forbidden.
 
 1. Verify all implementation work TODOs are complete.
 2. Run repository documentation checks applicable to changed Markdown and JSON.
+   Include a repository-wide literal search proving no durable reference to
+   `docs/design/application-client-crosswalk.md` remains, and diff all three
+   `docs/design/index.md` touch points against the base.
 3. Run the configured non-interactive society-of-thought final review over the
    branch diff with the same specialist, model, interaction, and perspectives
    as planning review.
@@ -868,6 +906,12 @@ owns any corresponding human-value PR-opened message to `attention:rob`.
    disposition.
    Application Client orchestration owns human-attention merged/closed,
    node/workstream completion, and reconciliation milestones.
+15. Campaign orchestration performs a post-merge immutable-link durability
+   check before branch deletion or closure: every issue #12 permalink must
+   resolve and reproduce the manifest-listed blob. If squash merge leaves the
+   approved source head outside `main`, retain the PR commit as the frozen
+   checkpoint and record the successful link check; if a link fails, mark the
+   publication stale and run the approved supersession process.
 
 At every stage, the worker sends current blockers, `decision-needed` evidence,
 and material blocker changes to Application Client and campaign orchestration.
