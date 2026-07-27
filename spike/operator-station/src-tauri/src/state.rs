@@ -222,12 +222,12 @@ impl Runtime {
 
     pub async fn set_occupancy(
         &self,
-        station: AddressOccupancy,
-        ingress: AddressOccupancy,
+        station: Option<AddressOccupancy>,
+        ingress: Option<AddressOccupancy>,
     ) -> Result<(), String> {
         let mut data = self.data.write().await;
-        data.station_occupancy = Some(station);
-        data.ingress_occupancy = Some(ingress);
+        data.station_occupancy = station;
+        data.ingress_occupancy = ingress;
         drop(data);
         self.emit_state().await
     }

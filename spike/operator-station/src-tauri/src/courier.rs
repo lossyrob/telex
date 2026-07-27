@@ -616,6 +616,22 @@ async fn status_loop(runtime: Arc<Runtime>) {
 }
 
 async fn refresh_status(runtime: &Arc<Runtime>) {
+    if runtime.config.uses_named_backend() {
+        let station = AddressOccupancy {
+            address: runtime.config.station_address.clone(),
+            occupied: true,
+            age_secs: 0.0,
+            occupant: None,
+            station_health: Some("application-attached".into()),
+            pending_unconsumed_count: None,
+            live_waiters_count: None,
+            error: None,
+            refreshed_at_ms: now_ms(),
+        };
+        let _ = runtime.set_occupancy(Some(station), None).await;
+        return;
+    }
+
     let (station_result, ingress_result, station_runtime_result) = tokio::join!(
         runtime.cli.address_status(&runtime.config.station_address),
         runtime.cli.address_status(&runtime.config.ingress_address),
@@ -629,7 +645,7 @@ async fn refresh_status(runtime: &Arc<Runtime>) {
         station.live_waiters_count = detail.live_waiters_count;
     }
     let ingress = result_or_error(&runtime.config.ingress_address, ingress_result, runtime);
-    let _ = runtime.set_occupancy(station, ingress).await;
+    let _ = runtime.set_occupancy(Some(station), Some(ingress)).await;
     if station_runtime_recovered && runtime.daemon_hung_paused().await {
         runtime
             .diagnostic(

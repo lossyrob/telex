@@ -184,6 +184,12 @@ export default function App() {
     if (selectedId !== null) void loadThread(selectedId);
   }, [loadThread, selectedId]);
 
+  useEffect(() => {
+    if (selectedId !== null && thread?.selected.id === selectedId) {
+      markRead(selectedId);
+    }
+  }, [markRead, selectedId, thread?.selected.id]);
+
   const selected = useMemo(
     () => state.messages.find((message) => message.id === selectedId) ?? null,
     [selectedId, state.messages],
