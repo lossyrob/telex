@@ -37,8 +37,13 @@ export default function App() {
   const [replyBody, setReplyBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [readIds, setReadIds] = useState<Set<number>>(() => new Set());
   const threadCache = useRef(new Map<number, ThreadView>());
   const threadRequests = useRef(new Map<number, Promise<ThreadView>>());
+  const readStorageKey =
+    state.config.storeFingerprint === "loading"
+      ? null
+      : `operator-station:read:${state.config.storeFingerprint}:${state.config.stationAddress}`;
 
   const getThread = useCallback((messageId: number): Promise<ThreadView> => {
     const cached = threadCache.current.get(messageId);
@@ -75,6 +80,61 @@ export default function App() {
   );
 
   useEffect(() => {
+    if (!readStorageKey) return;
+    try {
+      const stored = JSON.parse(localStorage.getItem(readStorageKey) ?? "[]");
+      setReadIds(
+        new Set(
+          Array.isArray(stored)
+            ? stored.filter((value): value is number => Number.isSafeInteger(value))
+            : [],
+        ),
+      );
+    } catch {
+      setReadIds(new Set());
+    }
+  }, [readStorageKey]);
+
+  const updateReadIds = useCallback(
+    (update: (current: Set<number>) => Set<number>) => {
+      setReadIds((current) => {
+        const next = update(current);
+        if (next === current || !readStorageKey) return next;
+        localStorage.setItem(
+          readStorageKey,
+          JSON.stringify([...next].sort((left, right) => left - right)),
+        );
+        return next;
+      });
+    },
+    [readStorageKey],
+  );
+
+  const markRead = useCallback(
+    (messageId: number) => {
+      updateReadIds((current) => {
+        if (current.has(messageId)) return current;
+        const next = new Set(current);
+        next.add(messageId);
+        return next;
+      });
+    },
+    [updateReadIds],
+  );
+
+  const markUnread = useCallback(
+    (messageId: number) => {
+      updateReadIds((current) => {
+        if (!current.has(messageId)) return current;
+        const next = new Set(current);
+        next.delete(messageId);
+        return next;
+      });
+    },
+    [updateReadIds],
+  );
+
+  useEffect(() => {
     let active = true;
     const unlisteners: Array<() => void> = [];
 
@@ -82,7 +142,6 @@ export default function App() {
       .then((next) => {
         if (!active) return;
         setState(next);
-        setSelectedId((current) => current ?? next.messages[0]?.id ?? null);
         prefetchThreads(next.messages);
       })
       .catch((cause: unknown) => {
@@ -92,7 +151,6 @@ export default function App() {
     void listen<StationState>("station-state", (event) => {
       if (!active) return;
       setState(event.payload);
-      setSelectedId((current) => current ?? event.payload.messages[0]?.id ?? null);
       prefetchThreads(event.payload.messages);
     }).then((unlisten) => unlisteners.push(unlisten));
 
@@ -103,7 +161,6 @@ export default function App() {
         messages: mergeMessages(current.messages, [event.payload]),
       }));
       threadCache.current.delete(event.payload.id);
-      setSelectedId((current) => current ?? event.payload.id);
     }).then((unlisten) => unlisteners.push(unlisten));
 
     return () => {
@@ -130,6 +187,10 @@ export default function App() {
   const selected = useMemo(
     () => state.messages.find((message) => message.id === selectedId) ?? null,
     [selectedId, state.messages],
+  );
+  const unreadCount = useMemo(
+    () => state.messages.filter((message) => !readIds.has(message.id)).length,
+    [readIds, state.messages],
   );
 
   const runAction = useCallback(
@@ -302,7 +363,9 @@ export default function App() {
           <div className="pane-heading">
             <div>
               <h2>Feed</h2>
-              <span>{state.messages.length} loaded</span>
+              <span>
+                {state.messages.length} loaded · {unreadCount} unread
+              </span>
             </div>
             <button
               className="secondary"
@@ -316,16 +379,24 @@ export default function App() {
             {state.messages.length === 0 ? (
               <p className="empty">No Station messages yet.</p>
             ) : (
-              state.messages.map((message) => (
-                <button
-                  className={`feed-card ${message.id === selectedId ? "selected" : ""}`}
-                  key={message.id}
-                  onClick={() => setSelectedId(message.id)}
-                  type="button"
-                >
+              state.messages.map((message) => {
+                const unread = !readIds.has(message.id);
+                return (
+                  <button
+                    className={`feed-card ${message.id === selectedId ? "selected" : ""} ${unread ? "unread" : "read"}`}
+                    key={message.id}
+                    onClick={() => {
+                      setSelectedId(message.id);
+                      markRead(message.id);
+                    }}
+                    type="button"
+                  >
                   <div className="card-meta">
-                    <span className={`attention ${message.attention}`}>
-                      {message.attention}
+                    <span className="card-meta-left">
+                      {unread ? <span aria-label="Unread" className="unread-dot" /> : null}
+                      <span className={`attention ${message.attention}`}>
+                        {message.attention}
+                      </span>
                     </span>
                     <span>{formatTimestamp(message.sentAtMs)}</span>
                   </div>
@@ -342,9 +413,13 @@ export default function App() {
                     {message.latestDisposition ? (
                       <span>{message.latestDisposition}</span>
                     ) : null}
+                    <span className={`read-label ${unread ? "unread" : ""}`}>
+                      {unread ? "Unread" : "Read"}
+                    </span>
                   </div>
-                </button>
-              ))
+                  </button>
+                );
+              })
             )}
           </div>
         </aside>
@@ -357,7 +432,16 @@ export default function App() {
                   <p className="eyebrow">Mediated thread #{selected.threadId}</p>
                   <h2>{selected.subject || selected.kind}</h2>
                 </div>
-                <span className="kind">{selected.kind}</span>
+                <div className="thread-heading-actions">
+                  <span className="kind">{selected.kind}</span>
+                  <button
+                    className="secondary"
+                    onClick={() => markUnread(selected.id)}
+                    type="button"
+                  >
+                    Mark unread
+                  </button>
+                </div>
               </div>
 
               <SourceReferences sources={thread.sources} />

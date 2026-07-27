@@ -187,10 +187,21 @@ button {
   background: #f3f4ff;
 }
 
+.feed-card.unread {
+  border-left: 5px solid #4054c7;
+  background: #fbfbff;
+}
+
+.feed-card.read {
+  border-left: 5px solid transparent;
+}
+
 .card-meta,
+.card-meta-left,
 .card-footer,
 .thread-header,
-.composer-actions {
+.composer-actions,
+.thread-heading-actions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -201,6 +212,15 @@ button {
   margin-bottom: 8px;
   color: #6b7686;
   font-size: 11px;
+}
+
+.unread-dot {
+  width: 9px;
+  height: 9px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: #4054c7;
+  box-shadow: 0 0 0 3px #e5e8ff;
 }
 
 .attention {
@@ -252,6 +272,20 @@ button {
   flex-wrap: wrap;
   color: #788292;
   font-size: 11px;
+}
+
+.read-label {
+  margin-left: auto;
+}
+
+.read-label.unread {
+  color: #4054c7;
+  font-weight: 700;
+}
+
+.thread-heading-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .actionable {
