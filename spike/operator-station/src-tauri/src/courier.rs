@@ -396,12 +396,14 @@ async fn process_delivery(runtime: &Arc<Runtime>, stdout: &str) -> Result<Delive
     let ingest = runtime.ingest_live(thread.message).await?;
     progress.mark_ingested()?;
 
-    if ingest.toast_eligible {
+    if ingest.sound_eligible {
         if let Err(error) = sound::play_new_message() {
             runtime
                 .diagnostic("error", "new-message-sound-failed", error)
                 .await;
         }
+    }
+    if ingest.toast_eligible {
         match toast::show(&ingest.message) {
             Ok(()) => {
                 runtime.set_toast_error(None).await?;

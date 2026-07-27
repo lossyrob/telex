@@ -383,7 +383,7 @@ impl TelexCli {
                 "--session".into(),
                 self.session_id.clone().into(),
                 "--timeout-ms".into(),
-                "30000".into(),
+                "1800000".into(),
             ],
             &self.config.station_address,
             true,

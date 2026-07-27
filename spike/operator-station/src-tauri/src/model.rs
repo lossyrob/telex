@@ -255,18 +255,25 @@ impl StationMessage {
     }
 
     pub fn toast_eligible(&self, station_address: &str) -> bool {
-        if self.to != station_address
-            || self.delivery_role != "to"
-            || self.delivered_to != station_address
-        {
+        if !self.is_primary_delivery(station_address) {
             return false;
         }
         match self.attention.as_str() {
             "interrupt" => true,
-            "next-checkpoint" if self.requires_disposition_for_current_recipient => true,
+            "next-checkpoint" => true,
             "fyi" => false,
             _ => self.kind == ESCALATION_KIND && self.requires_disposition_for_current_recipient,
         }
+    }
+
+    pub fn sound_eligible(&self, station_address: &str) -> bool {
+        self.is_primary_delivery(station_address)
+    }
+
+    fn is_primary_delivery(&self, station_address: &str) -> bool {
+        self.to == station_address
+            && self.delivery_role == "to"
+            && self.delivered_to == station_address
     }
 }
 
@@ -403,10 +410,18 @@ mod tests {
     fn toast_policy_is_narrow_and_primary_only() {
         assert!(message("interrupt", "note", false, "to").toast_eligible("operator:rob"));
         assert!(message("next-checkpoint", "note", true, "to").toast_eligible("operator:rob"));
+        assert!(message("next-checkpoint", "note", false, "to").toast_eligible("operator:rob"));
         assert!(message("background", ESCALATION_KIND, true, "to").toast_eligible("operator:rob"));
         assert!(!message("fyi", ESCALATION_KIND, true, "to").toast_eligible("operator:rob"));
         assert!(!message("interrupt", "note", false, "cc").toast_eligible("operator:rob"));
         assert!(!message("background", "note", false, "to").toast_eligible("operator:rob"));
+    }
+
+    #[test]
+    fn sound_policy_covers_every_new_primary_delivery() {
+        assert!(message("fyi", "status", false, "to").sound_eligible("operator:rob"));
+        assert!(message("background", "note", false, "to").sound_eligible("operator:rob"));
+        assert!(!message("interrupt", "note", false, "cc").sound_eligible("operator:rob"));
     }
 
     #[test]

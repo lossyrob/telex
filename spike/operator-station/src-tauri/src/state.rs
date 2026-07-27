@@ -41,6 +41,7 @@ pub struct Runtime {
 #[derive(Debug)]
 pub struct IngestResult {
     pub message: StationMessage,
+    pub sound_eligible: bool,
     pub toast_eligible: bool,
 }
 
@@ -160,6 +161,9 @@ impl Runtime {
             scope.high_water()
         };
         let is_new = !self.data.read().await.messages.contains_key(&message.id);
+        let sound_eligible = is_new
+            && message.id > prior_high_water
+            && message.sound_eligible(&self.config.station_address);
         let toast_eligible = is_new
             && message.id > prior_high_water
             && message.toast_eligible(&self.config.station_address);
@@ -178,6 +182,7 @@ impl Runtime {
         self.emit_state().await?;
         Ok(IngestResult {
             message,
+            sound_eligible,
             toast_eligible,
         })
     }

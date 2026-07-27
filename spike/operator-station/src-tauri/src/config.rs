@@ -103,7 +103,7 @@ impl RuntimeConfig {
             telex_executable: self.telex_executable.clone(),
             store_fingerprint: self.store_fingerprint.clone(),
             session_id: session_id.to_string(),
-            courier_timeout_ms: 30_000,
+            courier_timeout_ms: 1_800_000,
             status_refresh_ms: 30_000,
         }
     }
