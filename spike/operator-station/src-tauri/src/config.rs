@@ -133,6 +133,10 @@ impl RuntimeConfig {
             StoreSelector::Backend(name) => ("TELEX_OPERATOR_SPIKE_BACKEND", OsString::from(name)),
         }
     }
+
+    pub fn uses_named_backend(&self) -> bool {
+        matches!(self.store_selector, StoreSelector::Backend(_))
+    }
 }
 
 impl LocalScope {

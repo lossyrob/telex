@@ -53,6 +53,10 @@ Pop-Location
 `TELEX_OPERATOR_SPIKE_DB` and `TELEX_OPERATOR_SPIKE_BACKEND` are mutually
 exclusive.
 
+For the PostgreSQL demo, startup uses the bounded 200-message inbox so the
+application can establish its live waiter promptly. The SQLite spike path
+retains the original full-export recovery proof.
+
 Optional configuration:
 
 | Variable | Default |

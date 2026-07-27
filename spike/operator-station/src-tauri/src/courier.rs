@@ -84,7 +84,18 @@ async fn startup(runtime: &Arc<Runtime>) -> Result<(), String> {
         .await;
     runtime.emit_state().await?;
 
-    let (export, inbox) = tokio::try_join!(runtime.cli.export_history(), runtime.cli.inbox())?;
+    let (export, inbox) = if runtime.config.uses_named_backend() {
+        runtime
+            .diagnostic(
+                "info",
+                "bounded-postgres-backfill",
+                "named backend startup uses the bounded 200-message inbox; full export remains a SQLite spike proof",
+            )
+            .await;
+        (Vec::new(), runtime.cli.inbox().await?)
+    } else {
+        tokio::try_join!(runtime.cli.export_history(), runtime.cli.inbox())?
+    };
     let high_water = export
         .iter()
         .chain(inbox.iter())
@@ -590,6 +601,7 @@ async fn wait_for_retry_or_delay(
 async fn status_loop(runtime: Arc<Runtime>) {
     let mut interval = tokio::time::interval(STATUS_INTERVAL);
     let mut shutdown = runtime.shutdown_receiver();
+    interval.tick().await;
     loop {
         tokio::select! {
             _ = interval.tick() => {

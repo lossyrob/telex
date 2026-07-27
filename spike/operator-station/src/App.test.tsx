@@ -92,10 +92,14 @@ describe("App", () => {
     expect(screen.getByText("1 loaded · 1 unread")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Choose a release path/ }));
     expect(await screen.findByText("Reply to operator agent")).toBeInTheDocument();
-    expect(screen.getByText("1 loaded · 0 unread")).toBeInTheDocument();
-    expect(
-      JSON.parse(localStorage.getItem(`operator-station:read:${fingerprint}:operator:rob`) ?? "[]"),
-    ).toEqual([2]);
+    await waitFor(() => {
+      expect(screen.getByText("1 loaded · 0 unread")).toBeInTheDocument();
+      expect(
+        JSON.parse(
+          localStorage.getItem(`operator-station:read:${fingerprint}:operator:rob`) ?? "[]",
+        ),
+      ).toEqual([2]);
+    });
 
     fireEvent.change(
       screen.getByPlaceholderText("Type the decision or instruction..."),
