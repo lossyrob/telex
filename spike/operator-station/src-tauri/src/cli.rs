@@ -466,8 +466,7 @@ impl TelexCli {
         );
         let parsed: ReceiptWire = self.run_json(spec).await?;
         let receipt: SentReceipt = parsed.into();
-        let sent = self.read_full(receipt.id).await?;
-        if !sent.message.requires_disposition {
+        if receipt.requires_disposition != Some(true) {
             return Err("telex reply did not preserve the required return-path obligation".into());
         }
         Ok(receipt)

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { formatTimestamp, mergeMessages } from "./model";
 import type {
+  DispositionRecord,
+  SentReceipt,
   SourceReferenceView,
   StationMessage,
   StationState,
@@ -151,24 +153,107 @@ export default function App() {
 
   const sendReply = () => {
     if (!selected || !replyBody.trim()) return;
-    void runAction(async () => {
-      await invoke("reply_to", {
-        messageId: selected.id,
-        body: replyBody.trim(),
-      });
-      setReplyBody("");
-    });
+    const body = replyBody.trim();
+    setBusy(true);
+    setError(null);
+    void invoke<SentReceipt>("reply_to", {
+      messageId: selected.id,
+      body,
+    })
+      .then((receipt) => {
+        const now = Date.now();
+        const optimisticReply: StationMessage = {
+          id: receipt.id,
+          threadId: receipt.threadId,
+          parentId: receipt.parentId,
+          from: receipt.from ?? state.config.stationAddress,
+          to: receipt.to,
+          deliveredTo: null,
+          primaryTo: receipt.to,
+          cc: [],
+          deliveryRole: null,
+          kind: "operator-station-spike.human-reply",
+          attention: receipt.attention ?? "background",
+          requiresDisposition: receipt.requiresDisposition ?? true,
+          requiresDispositionForCurrentRecipient: false,
+          subject: selected.subject ? `Re: ${selected.subject}` : "Human reply",
+          body,
+          metadata: null,
+          sentAtMs: now,
+          createdAtMs: now,
+          latestDisposition: null,
+          actionable: false,
+          ackPending: false,
+        };
+        setThread((current) => {
+          if (!current || current.selected.id !== selected.id) return current;
+          const next = {
+            ...current,
+            thread: [
+              ...current.thread,
+              { message: optimisticReply, dispositions: [] },
+            ],
+          };
+          threadCache.current.set(selected.id, next);
+          return next;
+        });
+        setReplyBody("");
+      })
+      .catch((cause: unknown) => setError(String(cause)))
+      .finally(() => setBusy(false));
   };
 
   const disposition = (dispositionState: "deferred" | "handled" | "closed") => {
     if (!selected) return;
-    void runAction(() =>
-      invoke("set_disposition", {
-        messageId: selected.id,
-        dispositionState,
-        note: `Station marked ${dispositionState}`,
-      }),
-    );
+    setBusy(true);
+    setError(null);
+    void invoke<DispositionRecord>("set_disposition", {
+      messageId: selected.id,
+      dispositionState,
+      note: `Station marked ${dispositionState}`,
+    })
+      .then((record) => {
+        const terminal = ["handled", "closed", "rejected"].includes(record.state);
+        setState((current) => ({
+          ...current,
+          messages: current.messages.map((message) =>
+            message.id === record.messageId
+              ? {
+                  ...message,
+                  latestDisposition: record.state,
+                  actionable: !terminal,
+                }
+              : message,
+          ),
+        }));
+        setThread((current) => {
+          if (!current) return current;
+          const updateMessage = (message: StationMessage) =>
+            message.id === record.messageId
+              ? {
+                  ...message,
+                  latestDisposition: record.state,
+                  actionable: !terminal,
+                }
+              : message;
+          const next = {
+            ...current,
+            selected: updateMessage(current.selected),
+            thread: current.thread.map((item) =>
+              item.message.id === record.messageId
+                ? {
+                    message: updateMessage(item.message),
+                    dispositions: [...item.dispositions, record],
+                  }
+                : item,
+            ),
+          };
+          threadCache.current.set(current.selected.id, next);
+          return next;
+        });
+      })
+      .catch((cause: unknown) => setError(String(cause)))
+      .finally(() => setBusy(false));
   };
 
   return (

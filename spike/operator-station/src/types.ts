@@ -63,6 +63,18 @@ export interface StationState {
   status: StationRuntimeStatus;
 }
 
+export interface SentReceipt {
+  receipt: string;
+  id: number;
+  threadId: number;
+  parentId: number | null;
+  to: string;
+  from: string | null;
+  attention: string | null;
+  requiresDisposition: boolean | null;
+  occupied: boolean | null;
+}
+
 export interface ThreadItem {
   message: StationMessage;
   dispositions: DispositionRecord[];
