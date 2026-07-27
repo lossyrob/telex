@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { formatTimestamp, mergeMessages } from "./model";
 import type {
@@ -35,6 +35,42 @@ export default function App() {
   const [replyBody, setReplyBody] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const threadCache = useRef(new Map<number, ThreadView>());
+  const threadRequests = useRef(new Map<number, Promise<ThreadView>>());
+
+  const getThread = useCallback((messageId: number): Promise<ThreadView> => {
+    const cached = threadCache.current.get(messageId);
+    if (cached) return Promise.resolve(cached);
+
+    const pending = threadRequests.current.get(messageId);
+    if (pending) return pending;
+
+    const request = invoke<ThreadView>("read_thread", { messageId })
+      .then((next) => {
+        threadCache.current.set(messageId, next);
+        return next;
+      })
+      .finally(() => {
+        threadRequests.current.delete(messageId);
+      });
+    threadRequests.current.set(messageId, request);
+    return request;
+  }, []);
+
+  const prefetchThreads = useCallback(
+    (messages: StationMessage[]) => {
+      void (async () => {
+        for (const message of messages.slice(0, 20)) {
+          try {
+            await getThread(message.id);
+          } catch {
+            // Foreground selection reports errors; speculative prefetch stays silent.
+          }
+        }
+      })();
+    },
+    [getThread],
+  );
 
   useEffect(() => {
     let active = true;
@@ -45,6 +81,7 @@ export default function App() {
         if (!active) return;
         setState(next);
         setSelectedId((current) => current ?? next.messages[0]?.id ?? null);
+        prefetchThreads(next.messages);
       })
       .catch((cause: unknown) => {
         if (active) setError(String(cause));
@@ -54,6 +91,7 @@ export default function App() {
       if (!active) return;
       setState(event.payload);
       setSelectedId((current) => current ?? event.payload.messages[0]?.id ?? null);
+      prefetchThreads(event.payload.messages);
     }).then((unlisten) => unlisteners.push(unlisten));
 
     void listen<StationMessage>("station-delivery", (event) => {
@@ -62,6 +100,7 @@ export default function App() {
         ...current,
         messages: mergeMessages(current.messages, [event.payload]),
       }));
+      threadCache.current.delete(event.payload.id);
       setSelectedId((current) => current ?? event.payload.id);
     }).then((unlisten) => unlisteners.push(unlisten));
 
@@ -69,18 +108,18 @@ export default function App() {
       active = false;
       for (const unlisten of unlisteners) unlisten();
     };
-  }, []);
+  }, [prefetchThreads]);
 
   const loadThread = useCallback(async (messageId: number) => {
     setError(null);
     try {
-      const next = await invoke<ThreadView>("read_thread", { messageId });
+      const next = await getThread(messageId);
       setThread(next);
     } catch (cause) {
       setThread(null);
       setError(String(cause));
     }
-  }, []);
+  }, [getThread]);
 
   useEffect(() => {
     if (selectedId !== null) void loadThread(selectedId);
@@ -97,6 +136,7 @@ export default function App() {
       setError(null);
       try {
         await action();
+        if (selectedId !== null) threadCache.current.delete(selectedId);
         const next = await invoke<StationState>("initial_state");
         setState(next);
         if (selectedId !== null) await loadThread(selectedId);

@@ -1,5 +1,6 @@
 use crate::cli::{WaitExecution, WaitPayload};
 use crate::model::{AddressOccupancy, CourierPhase, StationMessage};
+use crate::sound;
 use crate::state::Runtime;
 use crate::toast;
 use std::collections::BTreeMap;
@@ -396,6 +397,11 @@ async fn process_delivery(runtime: &Arc<Runtime>, stdout: &str) -> Result<Delive
     progress.mark_ingested()?;
 
     if ingest.toast_eligible {
+        if let Err(error) = sound::play_new_message() {
+            runtime
+                .diagnostic("error", "new-message-sound-failed", error)
+                .await;
+        }
         match toast::show(&ingest.message) {
             Ok(()) => {
                 runtime.set_toast_error(None).await?;

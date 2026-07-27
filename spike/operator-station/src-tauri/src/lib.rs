@@ -2,6 +2,7 @@ mod cli;
 mod config;
 mod courier;
 mod model;
+mod sound;
 mod state;
 mod toast;
 mod tray;

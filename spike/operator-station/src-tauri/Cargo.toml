@@ -29,6 +29,7 @@ custom-protocol = ["tauri/custom-protocol"]
 windows = { version = "0.58", features = [
   "Data_Xml_Dom",
   "UI_Notifications",
+  "Win32_Media_Audio",
   "Win32_UI_Shell",
 ] }
 winreg = "0.52"
