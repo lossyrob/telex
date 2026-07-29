@@ -67,7 +67,7 @@ impl IsolatedTelexPlane {
         let repo = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .canonicalize()
             .expect("canonical repository root");
-        let dedicated_root = repo.join("target").join("operator-station-lifecycle-tests");
+        let dedicated_root = std::env::temp_dir().join("telex-operator-station-tests");
         std::fs::create_dir_all(&dedicated_root).expect("create dedicated lifecycle test root");
         let dedicated_root = dedicated_root
             .canonicalize()
