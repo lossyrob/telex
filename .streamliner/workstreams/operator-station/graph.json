@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "Operator-broker #128 is in progress on a clean never-commit/--yolo launch. Both stations are attended_push; reviewer correction 1144 is handled, while implementer correction 1143 is normally queued behind its active validation turn.",
+  "summary": "Operator-broker #128 is in PR review. Both stations are attended_push, scope corrections 1143/1144 are handled, and PR #130 is CI-green and mergeable at head 313a5b4b76e21b984ff5c9abb4951a227129148b.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-29T18:01:30Z",
+  "updatedAt": "2026-07-29T19:24:30Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
