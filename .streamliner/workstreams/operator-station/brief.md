@@ -143,13 +143,27 @@ Campaign corrected the active profile to `never-commit` and ordered a stop
 before implementation. Both replacement sessions were ended, their exact
 processes/stations were stopped, and launch claims were cleared.
 
-The preserved worktree contains only PAW initialization state:
-`50dbe86` and `5cff47f` add/adjust
-`.paw/work/operator-broker-128/WorkflowContext.md`; generated
-`streamliner/context.md` remains untracked. No product implementation edits
-occurred. `operator-broker` is blocked until campaign/operator authority chooses
-a clean never-commit repair that preserves this evidence without silently
-rewriting or deleting the worktree.
+The polluted PAW initialization branch is preserved locally as
+`forensic/paw-init-operator-broker-128`; its generated Streamliner context was
+copied to private session diagnostics. A clean preparation-only run
+`6aa58815-6ca1-441a-b8df-6b763b034481` recreated the normal derived worktree and
+branch at current `origin/main` with `Artifact Lifecycle: never-commit`, no
+tracked PAW files, no workflow commits, and resolved CLI args `["--yolo"]`.
+
+Final paired launch run `24cbafa6-8708-4c12-8f96-4a495682418a` launched the
+implementer and reviewer. Implementer session
+`d66d0295-854c-41df-a6a8-5c684160961d` is `attended_push`, but scope correction
+message `1143` remains pending behind an active validation turn. Reviewer
+session `a1b159a8-4b9e-469b-99d8-baa725d394ec` attached its bridge to the local
+SQLite backend instead of the campaign plane; orchestration repaired the same
+live session in place by detaching local and attaching
+`telex://lossyrob/telex/T-A:operator-review-128` on `pg-rde-telex`. Reviewer is
+now `attended_push`, pending zero, and correction `1144` is handled. The node
+is operationally `working-with-queued-control-message`: campaign accepted that
+implementer correction `1143` may remain pending behind the visible long-running
+validation turn. The healthy session continues uninterrupted and will consume
+and disposition the correction at its next natural checkpoint. No lifecycle
+action is taken solely for that queued message.
 
 `station-app` remains planned and held. The current graph still targets the
 pending `application-client-ready-gate`; no cross-workstream dependency geometry
@@ -232,9 +246,6 @@ review is required before applying that proposal.
 
 - Will campaign/operator authority accept the issue #12 checkpoint update for
   clean PR #126 and export `application-client-ready` to this workstream?
-- Which authorized repair should convert the preserved `operator-broker`
-  worktree from tracked `commit-and-clean` PAW state to the required
-  `never-commit` lifecycle without losing forensic evidence?
 - Proposed for review: replace `station-app`'s current external dependency on
   `application-client-ready-gate` with Application Client
   `client-conformance`. Is that the correct supported/conformant implementation
