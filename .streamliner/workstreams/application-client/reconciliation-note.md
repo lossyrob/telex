@@ -38,7 +38,7 @@ traceability location, manifest blob
 `25f27401100a89b1e90dba46b44973a3e3d43908`, and SHA-256
 `085deed89cef1741fb6967bbd9f5e87e4f9cf104917518a234006c35b0f62296`.
 
-Issue #124 is folded into promoted client-core issue #129 rather than becoming a
+Issue #124 is folded into active client-core issue #129 rather than becoming a
 separate node. The core must choose and document the extensible typed
 membership-loss model, align W-05 and AC-C05, regenerate affected manifest
 metadata, and preserve explicit downstream conformance coverage.
@@ -79,7 +79,7 @@ downstream node geometry.
 
 - Issue #12 stale supporting-traceability link and manifest identity: resolved in
   publication revision 2; `application-client-ready-gate` completed.
-- W-05 taxonomy wording: issue #124 remains open but is folded into promoted
+- W-05 taxonomy wording: issue #124 remains open but is folded into active
   client-core issue #129; no separate node or session.
 - Polluted PR #123 forensic branch/worktree: deferred with rationale until explicit
   operator cleanup authorization.

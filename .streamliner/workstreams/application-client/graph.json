@@ -3,11 +3,11 @@
   "id": "application-client",
   "projectKey": "telex",
   "title": "Telex Application Client (supported long-lived application integration)",
-  "summary": "The clean application-client-ready checkpoint is accepted in issue #12 publication revision 2. Supported client-core tracker #129 is promoted with issue #124 folded into scope; first-binding and later nodes remain held on genuine dependencies.",
+  "summary": "The clean application-client-ready checkpoint is accepted in issue #12 publication revision 2. Supported client-core issue #129 is active with issue #124 folded into scope; first-binding and later nodes remain held on genuine dependencies.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-07-29T15:08:15Z",
+  "updatedAt": "2026-07-29T15:22:20Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -108,8 +108,8 @@
       "id": "client-core",
       "type": "task",
       "title": "Supported Application Client core",
-      "summary": "Promoted as issue #129: implement AC-C01 through AC-C20 as one supported typed core over existing daemon and SQLite/Postgres backends. Fold in #124 by documenting an extensible typed membership-loss model, aligning W-05/AC-C05, regenerating manifest metadata, and preserving downstream conformance coverage.",
-      "status": "ready",
+      "summary": "Active as issue #129: implement AC-C01 through AC-C20 as one supported typed core over existing daemon and SQLite/Postgres backends. Fold in #124 by documenting an extensible typed membership-loss model, aligning W-05/AC-C05, regenerating manifest metadata, and preserving downstream conformance coverage.",
+      "status": "in-progress",
       "attention": "focus",
       "repoIds": [
         "telex"

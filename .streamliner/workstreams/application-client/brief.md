@@ -108,14 +108,16 @@ manifest blob `25f27401100a89b1e90dba46b44973a3e3d43908`, and SHA-256
 `085deed89cef1741fb6967bbd9f5e87e4f9cf104917518a234006c35b0f62296`.
 The `application-client-ready` checkpoint and gate are complete.
 
-The supported `client-core` node is promoted as
+The supported `client-core` node is active as
 [#129](https://github.com/lossyrob/telex/issues/129). Issue
 [#124](https://github.com/lossyrob/telex/issues/124) is folded into that node as
 a bounded documentation/conformance obligation: choose and document the
 extensible typed membership-loss model, align W-05 with AC-C05, regenerate
 affected manifest metadata, and preserve explicit downstream conformance
-coverage. `first-binding` remains held until #129 and #124 are complete and
-reconciled; later nodes remain held on their declared dependencies.
+coverage. The configured v2 implementation and review companion were launched
+through the Streamliner broker. `first-binding` remains held until #129 and #124
+are complete and reconciled; later nodes remain held on their declared
+dependencies.
 
 ## Decisions
 
