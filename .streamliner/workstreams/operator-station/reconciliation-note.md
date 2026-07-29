@@ -90,6 +90,12 @@ the PR is mergeable. Review ownership remains with the paired reviewer; the
 workstream orchestrator records state and boundary pressure rather than
 duplicating the code review.
 
+Review 4812665371 posted two must-fix and two non-blocking findings. The blocking
+items align the packaged role with already accepted Operator Station semantics:
+required `outcomeType` on disposition-only routed outcomes and exact,
+cross-session-reproducible operation-ID derivation bytes. They do not reopen the
+workstream boundary or shared Application Client contract.
+
 ## Boundaries
 
 - **Held:** The Station remained a separate optional application; filtering

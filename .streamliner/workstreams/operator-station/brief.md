@@ -173,6 +173,14 @@ protocol capability fence, and isolated lifecycle validation are now owned by
 the paired reviewer. Both implementer and reviewer stations remain
 `attended_push`.
 
+The first paired review pass is
+[review 4812665371](https://github.com/lossyrob/telex/pull/130#pullrequestreview-4812665371):
+two must-fix and two non-blocking findings. The blockers require the packaged
+disposition-only routed outcome to carry its `outcomeType` and require the
+documented operation-ID byte derivation to match the lifecycle fixture exactly.
+These are issue-scoped contract-conformance repairs, not a change to the shared
+Application Client seam or Operator Station boundary.
+
 `station-app` remains planned and held. The current graph still targets the
 pending `application-client-ready-gate`; no cross-workstream dependency geometry
 was silently changed. The proposed replacement is an explicit dependency on

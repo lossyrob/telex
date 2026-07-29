@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "Operator-broker #128 is in PR review. Both stations are attended_push, scope corrections 1143/1144 are handled, and PR #130 is CI-green and mergeable at head 313a5b4b76e21b984ff5c9abb4951a227129148b.",
+  "summary": "Operator-broker #128 is responding to PR #130 review at head 313a5b4b76e21b984ff5c9abb4951a227129148b. CI is green; reviewer posted two node-scoped must-fix findings and two non-blocking findings.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-29T19:24:30Z",
+  "updatedAt": "2026-07-29T20:32:30Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
