@@ -101,15 +101,21 @@ dirty forensic worktree must not be removed without explicit cleanup
 authorization.
 
 Issue [#12](https://github.com/lossyrob/telex/issues/12) remains the semantic
-contract owner and still publishes the prior immutable checkpoint. Its
-supporting traceability link and manifest identity refer to the superseded
-pre-repair path, so the `application-client-ready-gate` remains pending an
-orchestrator-owned checkpoint reconciliation. Later core, binding, conformance,
-integration, and hardening nodes remain planned and blocked on that gate.
+contract owner. Publication revision 2 now points to clean PR #126 authority:
+the normative contract and ADR 0049 at merge `62c2b23`, non-normative
+traceability at `docs/notes/application-client/requirements-crosswalk.md`,
+manifest blob `25f27401100a89b1e90dba46b44973a3e3d43908`, and SHA-256
+`085deed89cef1741fb6967bbd9f5e87e4f9cf104917518a234006c35b0f62296`.
+The `application-client-ready` checkpoint and gate are complete.
 
-Issue [#124](https://github.com/lossyrob/telex/issues/124) tracks the
-non-blocking W-05 membership-loss taxonomy wording alignment. Its placement in
-the next implementation/conformance geometry remains an orchestration decision.
+The supported `client-core` node is promoted as
+[#129](https://github.com/lossyrob/telex/issues/129). Issue
+[#124](https://github.com/lossyrob/telex/issues/124) is folded into that node as
+a bounded documentation/conformance obligation: choose and document the
+extensible typed membership-loss model, align W-05 with AC-C05, regenerate
+affected manifest metadata, and preserve explicit downstream conformance
+coverage. `first-binding` remains held until #129 and #124 are complete and
+reconciled; later nodes remain held on their declared dependencies.
 
 ## Decisions
 
@@ -135,9 +141,8 @@ the next implementation/conformance geometry remains an orchestration decision.
 - **Builder approved the workstream shape:** #117 and #118 remain the execution
   geometry around issue #12; the scope pause is closed, but no pause-era plan
   approval carries forward.
-- **ADR 0049 is allocated, not accepted:** campaign reserved the number for the
-  shared semantic boundary; the worker may use it only after the exact plan gate
-  and latest-main collision check.
+- **ADR 0049 is accepted:** clean PR #126 landed the shared API-neutral semantic
+  boundary and issue #12 publication revision 2 cites that clean authority.
 - **Shared artifacts follow primary-main ownership:** workers use feature
   worktrees; only the Application Client workstream orchestrator reconciles this
   brief, graph, and related Streamliner state from the primary main checkout.
@@ -151,19 +156,20 @@ the next implementation/conformance geometry remains an orchestration decision.
 - **Future node launches use the Streamliner launch broker:** the workstream's v2
   implementer/reviewer defaults are resolved and launched through
   `/api/launch-preparations/runs`, not hand-written terminal prompts.
+- **Core and binding remain sequential:** `client-core` implements the shared
+  typed semantic boundary first; `first-binding` is not promoted until the core
+  and folded #124 obligation are merged and reconciled.
+- **Issue #124 is part of client-core:** no separate node or session is created.
+  The core PR closes #124 and reports the resulting manifest identity for
+  orchestrator-owned issue #12 reconciliation.
 
 ## Open Questions
 
-- After semantic acceptance, should the supported Rust client core and first
-  binding be one PAW-sized node or sequential nodes with a stable core export?
 - Is TypeScript/napi-rs the first required binding for both Station and SDK use,
   or should the first implementation expose Rust plus a narrower TypeScript
   surface and defer other languages?
 - Which conformance evidence is required before product integration PRs may
   merge, beyond the earlier semantic `application-client-ready` checkpoint?
-- Should issue #124 be absorbed as a small pre-core documentation node, or be a
-  declared dependency/acceptance item for `client-core` or
-  `client-conformance`?
 
 ## Imports and Exports
 
@@ -188,12 +194,10 @@ the next implementation/conformance geometry remains an orchestration decision.
 
 ## Closeout Observations
 
-- Issue #12's supporting-traceability link and manifest identity are stale
-  relative to merged PR #126. Promote this to the pending
-  `application-client-ready-gate`; do not silently edit the contract-owner
-  checkpoint.
-- W-05 taxonomy wording is promoted to issue #124. Decide its graph dependency
-  before launching implementation or conformance work.
+- Issue #12 publication revision 2 now reflects clean PR #126 authority; the
+  `application-client-ready` checkpoint and gate are complete.
+- W-05 taxonomy wording in issue #124 is folded into promoted client-core issue
+  #129. The implementation PR must close #124 before `first-binding` promotion.
 - Polluted PR #123 and its dirty worktree are deferred with rationale for
   protocol forensics; cleanup requires explicit operator authorization.
 - The clean #118 implementation worktree is also deferred for cleanup until the

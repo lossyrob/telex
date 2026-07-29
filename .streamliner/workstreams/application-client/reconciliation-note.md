@@ -32,12 +32,16 @@ The contract, ADR 0049, 30-row traceability note, W-15 repair, historical issue
 snapshot, and manifest landed cleanly. The bundle manifest is
 `085deed89cef1741fb6967bbd9f5e87e4f9cf104917518a234006c35b0f62296`.
 
-The `application-client-ready` export is not fully reconciled yet. Issue #12 still
-points at the superseded crosswalk path and prior manifest identity. That checkpoint
-update belongs to the workstream/gate authority, not an implementation worker.
+The `application-client-ready` export is now reconciled. Issue #12 publication
+revision 2 points to clean PR #126 authority, the non-normative requirements
+traceability location, manifest blob
+`25f27401100a89b1e90dba46b44973a3e3d43908`, and SHA-256
+`085deed89cef1741fb6967bbd9f5e87e4f9cf104917518a234006c35b0f62296`.
 
-Issue #124 preserves the non-blocking W-05 taxonomy wording follow-up. Its dependency
-on core or conformance work remains to be shaped.
+Issue #124 is folded into promoted client-core issue #129 rather than becoming a
+separate node. The core must choose and document the extensible typed
+membership-loss model, align W-05 and AC-C05, regenerate affected manifest
+metadata, and preserve explicit downstream conformance coverage.
 
 ## Context fitness
 
@@ -73,9 +77,10 @@ downstream node geometry.
 
 ## Closeout observation dispositions
 
-- Issue #12 stale supporting-traceability link and manifest identity: promoted to
-  the pending `application-client-ready-gate`; operator/orchestrator action required.
-- W-05 taxonomy wording: promoted to issue #124; open.
+- Issue #12 stale supporting-traceability link and manifest identity: resolved in
+  publication revision 2; `application-client-ready-gate` completed.
+- W-05 taxonomy wording: issue #124 remains open but is folded into promoted
+  client-core issue #129; no separate node or session.
 - Polluted PR #123 forensic branch/worktree: deferred with rationale until explicit
   operator cleanup authorization.
 - Clean #118 worktree/branch cleanup: deferred with rationale until explicit

@@ -3,11 +3,11 @@
   "id": "application-client",
   "projectKey": "telex",
   "title": "Telex Application Client (supported long-lived application integration)",
-  "summary": "Contract convergence completed through clean PR #126 and issue #118. The application-client-ready gate remains pending checkpoint reconciliation in issue #12; later implementation, binding, conformance, integration, and hardening nodes remain blocked.",
+  "summary": "The clean application-client-ready checkpoint is accepted in issue #12 publication revision 2. Supported client-core tracker #129 is promoted with issue #124 folded into scope; first-binding and later nodes remain held on genuine dependencies.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-07-29T14:48:09Z",
+  "updatedAt": "2026-07-29T15:08:15Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -25,6 +25,18 @@
     {
       "repoId": "telex",
       "path": "docs/design/index.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/application-client.md"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/design/application-client.bundle.json"
+    },
+    {
+      "repoId": "telex",
+      "path": "docs/notes/application-client/requirements-crosswalk.md"
     },
     {
       "repoId": "telex",
@@ -82,8 +94,8 @@
       "id": "application-client-ready-gate",
       "type": "gate",
       "title": "Shared semantic contract accepted",
-      "summary": "Pending semantic gate: campaign validates the merged contract, per-requirement dispositions, consumer approvals, merged-source provenance, ADR 0049, and exact issue #12 publication before exporting application-client-ready to both product workstreams.",
-      "status": "planned",
+      "summary": "Completed after issue #12 publication revision 2 was verified against clean PR #126 authority: normative contract and ADR 0049 at merge 62c2b23, non-normative traceability under docs/notes, manifest blob 25f2740, and SHA-256 085deed8.",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -96,12 +108,18 @@
       "id": "client-core",
       "type": "task",
       "title": "Supported Application Client core",
-      "summary": "Implement the accepted semantic contract as one supported application client core over existing Telex daemon/backends, including lifecycle, capability, send/receive, operations, identity, health, recovery, and backend selection. Sketch; detail after application-client-ready.",
-      "status": "planned",
-      "attention": "watch",
+      "summary": "Promoted as issue #129: implement AC-C01 through AC-C20 as one supported typed core over existing daemon and SQLite/Postgres backends. Fold in #124 by documenting an extensible typed membership-loss model, aligning W-05/AC-C05, regenerating manifest metadata, and preserving downstream conformance coverage.",
+      "status": "ready",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 129
+      },
       "dependsOn": [
         "application-client-ready-gate"
       ]
@@ -110,7 +128,7 @@
       "id": "first-binding",
       "type": "task",
       "title": "First supported language binding",
-      "summary": "Expose the accepted client core through the first binding required by Operator Station and SDK-hosted applications while preserving semantic parity and avoiding binding-specific forks. Sketch; detail after the core export is accepted.",
+      "summary": "Held until client-core issue #129 and folded issue #124 are merged, reconciled, and accepted. Then expose the supported core through the first binding required by Operator Station and SDK-hosted applications while preserving semantic parity and avoiding binding-specific forks.",
       "status": "planned",
       "attention": "watch",
       "repoIds": [
@@ -182,8 +200,8 @@
     {
       "id": "application-client-ready",
       "title": "Shared Application Client semantic contract accepted",
-      "summary": "Pending: issue #12 must contain the approved merged contract and explicit dispositions before Operator Station and Watcher may detail and coordinate production implementation without private seams.",
-      "status": "planned",
+      "summary": "Completed: issue #12 publication revision 2 points to the clean PR #126 contract bundle, non-normative traceability location, and verified manifest identity. Detailed supported-core implementation may proceed without private seams.",
+      "status": "completed",
       "nodeIds": [
         "contract-convergence",
         "application-client-ready-gate"
