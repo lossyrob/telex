@@ -115,19 +115,26 @@ They include per-recipient delivery identity, exact-recipient acknowledgment,
 ordered resync, retry-safe metadata-bearing operations, and machine-readable
 raw-thread outcomes for terminal assisted responses.
 
-No Operator Station node is launch-ready now. `station-app` and
-`operator-broker` are planned under the accepted domain contract but both wait
-on the campaign-owned `application-client-ready` checkpoint.
+The campaign-owned `application-client-ready` checkpoint is now published on
+[#12](https://github.com/lossyrob/telex/issues/12). Contract-convergence issue
+[#118](https://github.com/lossyrob/telex/issues/118) closed when the clean,
+product-only [PR #126](https://github.com/lossyrob/telex/pull/126) merged at
+`62c2b23cc3d54877226f46df44d6036b7dffa380`. Polluted PR #123 remains closed
+without merge as protocol-forensics evidence and is not product authority.
 
-Campaign orchestration has formed the
-[Application Client workstream #117](https://github.com/lossyrob/telex/issues/117)
-and launched
-[contract-convergence node #118](https://github.com/lossyrob/telex/issues/118).
-The Operator Station orchestrator will independently review the candidate
-contract bundle and crosswalk to ensure final AC-01 through AC-15 pressure is
-preserved. `application-client-ready` means semantic acceptance, not client
-implementation completion. After its gate lands, reconcile and promote the two
-production nodes for coordinated execution.
+The semantic checkpoint resolves the external design dependency for
+`station-app` and `operator-broker`, but it does not provide the shared client
+core, first binding, conformance evidence, or consumer integration. No Operator
+Station node is active. Both production nodes remain planned sketches and are
+ready for orchestrator promotion/detailing, not worker launch. Before promotion,
+the operator and campaign must decide whether they execute in parallel with
+Application Client implementation or gain an explicit dependency on a later
+supported-client checkpoint. New launches remain held until campaign/operator
+GO.
+
+Issue #12 still links its supporting crosswalk at the pre-repair design path.
+Application Client orchestration owns that non-semantic tracker correction; the
+normative contract and design-only checkpoint are already published.
 
 ## Decisions
 
@@ -178,16 +185,25 @@ production nodes for coordinated execution.
   escalation, human-response, digest, and routed-outcome metadata for the
   Station/operator applications. Telex core still carries it opaquely.
 - **Shared client dependency remains external:** #12 owns AC-01 through AC-15
-  convergence and the `application-client-ready` checkpoint; this workstream
-  must not implement a competing client or start production application work
-  before that checkpoint.
+  convergence and the `application-client-ready` checkpoint. The semantic gate
+  is complete, but this workstream must not implement a competing client or use
+  temporary CLI/raw-IPC seams while the supported core and binding are still
+  pending.
+- **Clean shared-contract authority:** PR #126 and main at
+  `62c2b23cc3d54877226f46df44d6036b7dffa380` are the product authority for the
+  Application Client contract. Closed PR #123 is preserved only for protocol
+  forensics.
+- **Node launches use Streamliner launch preparation:** Future implementer and
+  reviewer sessions use the configured v2 graph defaults and
+  `POST /api/launch-preparations/runs`. This orchestrator does not directly
+  launch node terminals or synthesize worker prompts.
 
 ## Open Questions
 
-- Will #118's candidate shared contract preserve all final Operator AC-01
-  through AC-15 semantics and receive consumer/campaign approval? Until
-  `application-client-ready-gate` completes, no production Operator Station
-  node is launchable.
+- Should `station-app` and `operator-broker` execute in parallel with
+  Application Client core/binding work under the accepted semantic contract, or
+  should their implementation gain an explicit dependency on the later
+  supported-client or consumer-integration checkpoint?
 
 ## Imports and Exports
 
@@ -196,10 +212,10 @@ production nodes for coordinated execution.
 - The local-daemon workstream's local-exchange lifecycle, durable delivery,
   attention, reply, disposition, and Postgres behavior.
 - The accepted Operator Station design and ADR 0047/0048.
-- The campaign's `application-client-ready` checkpoint, owned through issue #12,
-  before production Station integration begins.
-- Existing Telex client/library and backend traits used only as experimental
-  seams until the shared Application Client contract is accepted.
+- The accepted, design-only `application-client-ready` checkpoint owned through
+  issue #12.
+- The still-pending supported Application Client core, first binding,
+  conformance, and consumer-integration exports from workstream #117.
 - Streamliner Desktop's Tauri tray/feed/notification patterns as reference code,
   not as a package or service dependency.
 - `telex-console` feed, address, thread, and provenance presentation concepts.

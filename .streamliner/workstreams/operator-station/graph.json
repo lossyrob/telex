@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "The production Operator Station contract is merged. Station and operator-agent implementation remain planned and blocked on the campaign's shared #12 application-client-ready checkpoint.",
+  "summary": "The production contract and design-only application-client-ready checkpoint are merged. Station and operator-agent nodes remain planned pending promotion, shared-client implementation sequencing, and campaign/operator GO.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-22T10:22:04Z",
+  "updatedAt": "2026-07-29T14:38:32Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -131,7 +131,7 @@
           },
           "label": "Shared Application Client checkpoint from issue #12",
           "url": "https://github.com/lossyrob/telex/issues/117",
-          "status": "pending"
+          "status": "completed"
         }
       ]
     },
@@ -158,7 +158,7 @@
           },
           "label": "Shared Application Client checkpoint from issue #12",
           "url": "https://github.com/lossyrob/telex/issues/117",
-          "status": "pending"
+          "status": "completed"
         }
       ]
     },

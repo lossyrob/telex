@@ -21,14 +21,16 @@ mediated loop into intended product design. The corrected Operator Station
 AC-01 through AC-15 export and merged-source addendum are published on issue
 #12.
 
-The workstream is now waiting on the campaign-owned
-`application-client-ready` checkpoint. `station-app` and `operator-broker`
-remain planned rather than ready.
+The campaign-owned `application-client-ready` checkpoint is now published.
+Contract-convergence issue #118 completed through clean product-only PR #126,
+merged at `62c2b23cc3d54877226f46df44d6036b7dffa380`. Polluted PR #123 was closed
+without merge and preserved for protocol forensics.
 
-Campaign orchestration formed Application Client workstream #117 and launched
-contract-convergence node #118. The Operator Station orchestrator is a required
-consumer reviewer of the exact candidate bundle/crosswalk. The local dependency
-now targets that workstream's `application-client-ready-gate`.
+The shared semantic dependency is satisfied, so `station-app` and
+`operator-broker` are promotion candidates rather than externally blocked
+sketches. They remain planned because the workstream has not yet decided how
+their implementation should sequence against the still-pending shared client
+core, binding, conformance, and consumer-integration work.
 
 ## Boundaries
 
@@ -72,6 +74,12 @@ design index, decision log, and shared-client tracker concurrently. The final
 paired review also showed that replied-to findings and resolved GitHub threads
 are separate merge-floor evidence.
 
+The first Application Client PR exposed a context-authority failure: a worker
+treated workstream gates, approval evidence, and workflow recovery as product
+branch deliverables. The clean replacement proved that node missions must stay
+separate from orchestration state, with PAW and approval evidence kept
+off-branch unless the product explicitly requires it.
+
 ## Attention allocation
 
 Operator attention was highest-leverage at plan review, the first live demo,
@@ -79,10 +87,10 @@ the domain-contract review, the exact #12 export review, and the
 workstream-owned artifact reconciliations. The paired reviewer remained the
 right owner for detailed lifecycle, provenance, recovery, and safety defects.
 
-The builder's next attention belongs at the later production usability gate.
-Campaign attention now belongs at #12 convergence and formation of the shared
-Application Client contract/checkpoint through #117/#118. Operator workstream
-execution is waiting rather than requesting another worker launch.
+The builder's next attention belongs at production-node promotion and the later
+usability gate. Campaign/operator attention is needed now to decide shared-client
+implementation sequencing and to authorize the next launch. No worker launch is
+requested by this reconciliation.
 
 ## Inspired vs. recovery interventions
 
@@ -105,6 +113,10 @@ execution is waiting rather than requesting another worker launch.
 - **Recovery:** Paired review found per-recipient delivery identity,
   terminal route-back, restart-safe metadata operations, unresolved-work
   handoff, and inert-rendering gaps in the initial contract.
+- **Recovery:** PR #123 mixed worker implementation with workstream gates,
+  ledgers, and approval artifacts. Clean PR #126 restored a product-only change;
+  future nodes must use the Streamliner launch broker and route new gates or
+  workflow rewinds back to orchestration.
 
 ## Closeout observation dispositions
 
@@ -120,8 +132,9 @@ Other deferred items remain production-contract or hardening concerns owned by
 - Consolidate the spike's Application Client requirements with Telex Watcher
   evidence: target authority — issue #12
   - Disposition: landed as the corrected Operator Station domain export and
-    merge-SHA addendum on #12; campaign convergence still owns acceptance and
-    the checkpoint.
+    merge-SHA addendum on #12; the shared semantic checkpoint is published and
+    clean PR #126 is merged. Application Client orchestration still owns the
+    non-semantic supporting-crosswalk link correction.
 - Decide whether to promote, rename, or retire the experimental message/source
   convention: target authority — issue #114
   - Disposition: landed in `docs/design/operator-station.md`; the experimental
@@ -132,3 +145,8 @@ Other deferred items remain production-contract or hardening concerns owned by
   lesson (`project`)
   - Disposition: landed in this reconciliation note, the spike report, the
     Operator Station contract, and AC-04/AC-05.
+- Keep worker missions separate from workstream gates and workflow evidence:
+  target authority — workstream-design lesson (`streamliner`)
+  - Disposition: landed in the campaign's updated launch protocol and v2
+    Operator implementer/reviewer defaults; future launches use Streamliner's
+    launch-preparations API.
