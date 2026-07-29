@@ -5,7 +5,7 @@ use sha2::{Digest, Sha256};
 use std::ffi::OsStr;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -58,6 +58,7 @@ struct IsolatedTelexPlane {
     run_dir: PathBuf,
     state_dir: PathBuf,
     bin: PathBuf,
+    daemon: Option<Child>,
     cleaned: bool,
 }
 
@@ -100,7 +101,7 @@ impl IsolatedTelexPlane {
         }
 
         let bin = worktree_telex_bin();
-        let plane = Self {
+        let mut plane = Self {
             repo,
             dedicated_root,
             run_root,
@@ -110,10 +111,12 @@ impl IsolatedTelexPlane {
             run_dir,
             state_dir,
             bin,
+            daemon: None,
             cleaned: false,
         };
         plane.assert_isolated();
         plane.configure_backend();
+        plane.start_daemon();
         plane
     }
 
@@ -206,6 +209,50 @@ impl IsolatedTelexPlane {
                 .map(|arg| arg.as_ref().to_string_lossy().into_owned()),
         );
         self.run(session, all)
+    }
+
+    fn start_daemon(&mut self) {
+        let stdout_path = self.run_root.join("daemon.stdout.log");
+        let stderr_path = self.run_root.join("daemon.stderr.log");
+        let stdout = std::fs::File::create(&stdout_path).expect("create isolated daemon stdout");
+        let stderr = std::fs::File::create(&stderr_path).expect("create isolated daemon stderr");
+        let mut command = self.command("daemon");
+        command
+            .args(["daemon", "serve"])
+            .stdin(Stdio::null())
+            .stdout(Stdio::from(stdout))
+            .stderr(Stdio::from(stderr));
+        self.daemon = Some(command.spawn().expect("start isolated worktree daemon"));
+
+        let deadline = Instant::now() + Duration::from_secs(15);
+        while Instant::now() < deadline {
+            if let Some(status) = self
+                .daemon
+                .as_mut()
+                .expect("isolated daemon child")
+                .try_wait()
+                .expect("poll isolated daemon startup")
+            {
+                let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+                panic!("isolated worktree daemon exited during startup with {status}: {stderr}");
+            }
+            let status = self.run_backend("bootstrap", ["daemon", "status"]);
+            let daemon_version =
+                serde_json::from_str::<Value>(&status.stdout)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("daemon_version")
+                            .and_then(Value::as_str)
+                            .map(str::to_string)
+                    });
+            if status.status.success() && daemon_version.is_some() {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let stderr = std::fs::read_to_string(&stderr_path).unwrap_or_default();
+        panic!("isolated worktree daemon did not become ready: {stderr}");
     }
 
     fn attach(&self, session: &str, address: &str) {
@@ -416,23 +463,29 @@ impl IsolatedTelexPlane {
         self.cleaned = true;
     }
 
-    fn stop_daemon(&self) -> Result<(), String> {
+    fn stop_daemon(&mut self) -> Result<(), String> {
         let _ = self.run_backend("cleanup", ["daemon", "stop", "--drain"]);
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
-            let status = self.run_backend("cleanup", ["daemon", "status"]);
-            if !status.status.success() {
-                return Ok(());
-            }
-            let running = serde_json::from_str::<Value>(&status.stdout)
-                .ok()
-                .and_then(|value| value.get("running").and_then(Value::as_bool));
-            if running == Some(false) {
+            if let Some(child) = self.daemon.as_mut() {
+                if child
+                    .try_wait()
+                    .map_err(|error| error.to_string())?
+                    .is_some()
+                {
+                    self.daemon = None;
+                    return Ok(());
+                }
+            } else {
                 return Ok(());
             }
             std::thread::sleep(Duration::from_millis(50));
         }
-        Err("daemon remained running after the cleanup deadline".to_string())
+        if let Some(mut child) = self.daemon.take() {
+            child.kill().map_err(|error| error.to_string())?;
+            child.wait().map_err(|error| error.to_string())?;
+        }
+        Ok(())
     }
 }
 
