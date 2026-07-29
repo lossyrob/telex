@@ -96,6 +96,13 @@ required `outcomeType` on disposition-only routed outcomes and exact,
 cross-session-reproducible operation-ID derivation bytes. They do not reopen the
 workstream boundary or shared Application Client contract.
 
+The re-review passed with the verified automated +1 marker at
+`961e51e5a7d8da4a4867b2ae01efe75af47476b3`; CI is green and no blocker remains.
+GitHub thread state still showed all four discussions unresolved, including one
+non-outdated thread, so orchestration treated thread resolution as separate
+merge-floor evidence and requested implementer reconciliation before campaign
+merge authorization.
+
 ## Boundaries
 
 - **Held:** The Station remained a separate optional application; filtering
