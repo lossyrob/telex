@@ -1,7 +1,7 @@
 {
   "manifestSchemaVersion": 1,
   "templateId": "local-file-json",
-  "templateVersion": "1.1.0",
+  "templateVersion": "1.1.1",
   "detectorProtocolVersion": 1,
   "evidenceNormalizationVersion": 2,
   "runtimeRequirement": {
@@ -11,7 +11,7 @@
   },
   "librarySource": {
     "path": "local-file-json/detector.ps1",
-    "sha256": "d819f65a70a2c93cb9d0122345fdcda081ad5dcfa88700282fe00847c8087f5e",
+    "sha256": "3fa1fda32f4561b9c30a93a6f3e19982acefb936dbc3639613c1f0792f168ccb",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
@@ -39,7 +39,7 @@
       "synthetic": "This template has no synthetic snapshot event; emitInitialSnapshot is not a supported parameter."
     },
     "diagnostics": "File, parse, and configuration failures return schema-valid degraded results and write a structured detectorDiagnostic JSON record to stderr only.",
-    "classification": "Document version and message fields are optional. A missing observed field never matches an expected null."
+    "classification": "parameters.expectedValue is required and may be an explicit JSON null. Document version and message fields are optional. A missing observed field never matches an expected null."
   },
   "credentials": {
     "policy": "No credential environment variables are used. File authorization is the operating-system identity of the trusted Watcher process.",

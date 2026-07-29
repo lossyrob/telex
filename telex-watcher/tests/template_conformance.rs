@@ -1069,6 +1069,25 @@ fn http_json_scalar_null_and_missing_semantics_are_distinct() {
         .contains(r#""code":"configuration-invalid""#));
 }
 
+#[test]
+fn local_file_json_expected_value_is_required() {
+    let omitted = run_detector(
+        "local-file-json",
+        json!({
+            "inputPath": fixture("local-file-json", "ready.json"),
+            "sourceId": "omitted",
+            "field": "ready"
+        }),
+        json!({}),
+    );
+    assert_eq!(omitted.result["outcome"], "degraded");
+    assert!(omitted.result.get("nextState").is_none());
+    assert!(omitted.stderr.contains(r#""code":"configuration-invalid""#));
+    assert!(omitted
+        .stderr
+        .contains("parameters.expectedValue is required"));
+}
+
 fn run_preflight(script: &str, arguments: &[String]) -> Output {
     let mut test_arguments = vec!["-TestMode".to_string()];
     test_arguments.extend_from_slice(arguments);
@@ -1253,6 +1272,35 @@ fn preflight_declared_terminal_is_eventless_and_mismatch_is_structured() {
     assert_eq!(declared_terminal.result["outcome"], "terminal");
     assert!(declared_terminal.parsed.event.is_none());
 
+    let github_activity_open = run_preflight(
+        "github-pr-preflight.ps1",
+        &[
+            "-Repository".into(),
+            "example/repo".into(),
+            "-PullRequestNumber".into(),
+            "43".into(),
+            "-FixturePath".into(),
+            fixture("github-pr-external-activity", "activity.json"),
+            "-Now".into(),
+            "2026-07-29T12:00:00Z".into(),
+        ],
+    );
+    let mut github_activity_evidence = read_output_json(&github_activity_open);
+    github_activity_evidence["terminal"] = true.into();
+    let external_declared_terminal = run_detector(
+        "github-pr-external-activity",
+        json!({
+            "fixturePath": fixture("github-pr-external-activity", "activity.json"),
+            "repository": "example/repo",
+            "pullRequestNumber": 43,
+            "selfLogin": "self-login",
+            "ignoredLogins": ["example-bot"]
+        }),
+        json!({"preflight": github_activity_evidence}),
+    );
+    assert_eq!(external_declared_terminal.result["outcome"], "terminal");
+    assert!(external_declared_terminal.parsed.event.is_none());
+
     let azure_open = run_preflight(
         "azure-devops-pr-preflight.ps1",
         &[
@@ -1310,6 +1358,33 @@ fn preflight_declared_terminal_is_eventless_and_mismatch_is_structured() {
         json!({"preflight": mismatched.clone()}),
     );
     let repeated = run_detector("github-pr", parameters, json!({"preflight": mismatched}));
+    for run in [&first, &repeated] {
+        assert_eq!(run.result["outcome"], "degraded");
+        assert!(run.result.get("nextState").is_none());
+        assert!(run
+            .stderr
+            .contains(r#""code":"preflight-identity-mismatch""#));
+    }
+
+    let mut external_mismatch = read_output_json(&github_activity_open);
+    external_mismatch["templateIds"] = json!(["github-pr"]);
+    let external_parameters = json!({
+        "fixturePath": fixture("github-pr-external-activity", "activity.json"),
+        "repository": "example/repo",
+        "pullRequestNumber": 43,
+        "selfLogin": "self-login",
+        "ignoredLogins": ["example-bot"]
+    });
+    let first = run_detector(
+        "github-pr-external-activity",
+        external_parameters.clone(),
+        json!({"preflight": external_mismatch.clone()}),
+    );
+    let repeated = run_detector(
+        "github-pr-external-activity",
+        external_parameters,
+        json!({"preflight": external_mismatch}),
+    );
     for run in [&first, &repeated] {
         assert_eq!(run.result["outcome"], "degraded");
         assert!(run.result.get("nextState").is_none());

@@ -11,7 +11,7 @@
   "scriptPath": "<DETECTOR-PATH>",
   "workingDirectory": "<TEMPLATE-DIRECTORY>",
   "scriptMode": "pinned",
-  "scriptDigest": "d819f65a70a2c93cb9d0122345fdcda081ad5dcfa88700282fe00847c8087f5e",
+  "scriptDigest": "3fa1fda32f4561b9c30a93a6f3e19982acefb936dbc3639613c1f0792f168ccb",
   "backendProfile": "default",
   "sender": "watcher@example.invalid",
   "target": "recipient@example.invalid",

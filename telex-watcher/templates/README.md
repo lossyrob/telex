@@ -227,10 +227,11 @@ manifest owns provider-specific budget assumptions.
   its child with the detector environment that Watcher already sanitized and
   allowlisted; it has no parameter-driven secret pass-through.
 
-The HTTP/JSON matcher accepts only scalar `expectedValue` values (including
-explicit JSON null). A missing field is distinct from a present null and never
-matches. Azure DevOps vote `-5` is waiting-for-author, not rejection; the
-default `blockingReviewerVoteAtMost` is `-10`.
+The HTTP/JSON and local-file JSON matchers require an explicit scalar
+`expectedValue` (including explicit JSON null). Omitting it is a configuration
+error. A missing field is distinct from a present null and never matches.
+Azure DevOps vote `-5` is waiting-for-author, not rejection; the default
+`blockingReviewerVoteAtMost` is `-10`.
 
 Increasing frequency multiplies manifest `callsPerAttempt` across every watch
 sharing a credential. Account for provider quotas and keep intervals at or

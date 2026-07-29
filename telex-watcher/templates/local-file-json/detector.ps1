@@ -20,7 +20,11 @@ try {
     }
     $document = Get-Content -Raw (Resolve-DetectorPath $inputPath) | ConvertFrom-Json -AsHashtable
     $field = [string](Get-DetectorParameter -Request $request -Name 'field' -Default 'ready')
-    $expectedValue = Get-DetectorParameter -Request $request -Name 'expectedValue' -Default $true
+    $parameters = $request.watch.parameters
+    if ($parameters -isnot [System.Collections.IDictionary] -or -not $parameters.Contains('expectedValue')) {
+        throw 'configuration-invalid: parameters.expectedValue is required and may be an explicit JSON null.'
+    }
+    $expectedValue = $parameters['expectedValue']
     if (
         $expectedValue -is [System.Collections.IDictionary] -or
         $expectedValue -is [System.Collections.IList]

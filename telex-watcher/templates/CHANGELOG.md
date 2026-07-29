@@ -1,5 +1,14 @@
 # Detector template library changelog
 
+## 2026-07-29 cycle-2 quick wins
+
+- `local-file-json` template version 1.1.1, detector protocol 1, evidence
+  normalization 2.
+- `local-file-json` now fails closed with a configuration diagnostic when
+  `expectedValue` is omitted, matching `http-json`.
+- Added direct conformance coverage for external-activity GitHub PR preflight
+  terminal and identity-mismatch handling.
+
 ## 2026-07-29 review fixes
 
 - `github-pr` template version 1.1.0, detector protocol 1, evidence
