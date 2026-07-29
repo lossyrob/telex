@@ -165,6 +165,14 @@ validation turn. The healthy session continues uninterrupted and will consume
 and disposition the correction at its next natural checkpoint. No lifecycle
 action is taken solely for that queued message.
 
+The implementer consumed and handled correction `1143` at that checkpoint, then
+opened [PR #130](https://github.com/lossyrob/telex/pull/130) at
+`313a5b4b76e21b984ff5c9abb4951a227129148b`. CI is green and GitHub reports the
+PR mergeable. The reusable role, production v1 metadata-bearing reply support,
+protocol capability fence, and isolated lifecycle validation are now owned by
+the paired reviewer. Both implementer and reviewer stations remain
+`attended_push`.
+
 `station-app` remains planned and held. The current graph still targets the
 pending `application-client-ready-gate`; no cross-workstream dependency geometry
 was silently changed. The proposed replacement is an explicit dependency on
