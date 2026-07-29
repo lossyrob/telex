@@ -466,9 +466,7 @@ impl TelexCli {
         );
         let parsed: ReceiptWire = self.run_json(spec).await?;
         let receipt: SentReceipt = parsed.into();
-        if receipt.requires_disposition != Some(true) {
-            return Err("telex reply did not preserve the required return-path obligation".into());
-        }
+        validate_reply_receipt(&receipt, message_id, &self.config.station_address)?;
         Ok(receipt)
     }
 
@@ -944,6 +942,23 @@ async fn join_utf8(
     String::from_utf8(bytes).map_err(|error| format!("telex {label} is not UTF-8: {error}"))
 }
 
+fn validate_reply_receipt(
+    receipt: &SentReceipt,
+    parent_id: i64,
+    station_address: &str,
+) -> Result<(), String> {
+    if !matches!(receipt.receipt.as_str(), "delivered" | "queued-unoccupied")
+        || receipt.id < 1
+        || receipt.thread_id < 1
+        || receipt.parent_id != Some(parent_id)
+        || receipt.to.trim().is_empty()
+        || receipt.from.as_deref() != Some(station_address)
+    {
+        return Err("telex reply receipt does not match the requested return path".into());
+    }
+    Ok(())
+}
+
 fn now_ms() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -1041,6 +1056,38 @@ mod tests {
         assert_eq!(spec.env["TELEX_ADDRESS"], "operator:rob");
         assert_eq!(spec.env["TELEX_OPERATOR_SPIKE_BACKEND"], "pg-rde-telex");
         assert!(!spec.env.contains_key("TELEX_OPERATOR_SPIKE_DB"));
+    }
+
+    #[test]
+    fn reply_receipt_does_not_require_optional_disposition_echo() {
+        let receipt = SentReceipt {
+            receipt: "delivered".into(),
+            id: 20,
+            thread_id: 7,
+            parent_id: Some(7),
+            to: "operator:agent".into(),
+            from: Some("operator:rob".into()),
+            attention: None,
+            requires_disposition: None,
+            occupied: Some(true),
+        };
+        assert!(validate_reply_receipt(&receipt, 7, "operator:rob").is_ok());
+    }
+
+    #[test]
+    fn reply_receipt_rejects_wrong_parent_or_sender() {
+        let receipt = SentReceipt {
+            receipt: "queued-unoccupied".into(),
+            id: 20,
+            thread_id: 7,
+            parent_id: Some(8),
+            to: "operator:agent".into(),
+            from: Some("operator:other".into()),
+            attention: None,
+            requires_disposition: None,
+            occupied: Some(false),
+        };
+        assert!(validate_reply_receipt(&receipt, 7, "operator:rob").is_err());
     }
 
     #[test]
