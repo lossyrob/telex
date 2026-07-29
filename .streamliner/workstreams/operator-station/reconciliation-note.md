@@ -69,6 +69,15 @@ reviewer is live but waiting for input before Telex attachment. Readiness
 therefore remains blocked without rewriting the current WorkflowContext or
 stopping current work.
 
+Campaign authorized an in-place reviewer repair. The exact reviewer window
+showed its bridge had attached to local SQLite rather than `pg-rde-telex`.
+Orchestration detached only the local station and re-provisioned the same
+session/address on PostgreSQL. Reviewer session
+`a1b159a8-4b9e-469b-99d8-baa725d394ec` is now `attended_push` with zero backlog
+and handled correction `1144`. Implementer correction `1143` remains queued
+behind a long-running validation turn, which was preserved rather than
+interrupted.
+
 ## Boundaries
 
 - **Held:** The Station remained a separate optional application; filtering

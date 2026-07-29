@@ -153,12 +153,14 @@ tracked PAW files, no workflow commits, and resolved CLI args `["--yolo"]`.
 Final paired launch run `24cbafa6-8708-4c12-8f96-4a495682418a` launched the
 implementer and reviewer. Implementer session
 `d66d0295-854c-41df-a6a8-5c684160961d` is `attended_push`, but scope correction
-message `1143` remains pending. Reviewer session
-`a1b159a8-4b9e-469b-99d8-baa725d394ec` is live and
-`waiting_for_input` before attaching
-`telex://lossyrob/telex/T-A:operator-review-128`; correction `1144` remains
-queued. The node remains blocked until both stations are `attended_push` with
-zero backlog and both corrections have terminal dispositions.
+message `1143` remains pending behind an active validation turn. Reviewer
+session `a1b159a8-4b9e-469b-99d8-baa725d394ec` attached its bridge to the local
+SQLite backend instead of the campaign plane; orchestration repaired the same
+live session in place by detaching local and attaching
+`telex://lossyrob/telex/T-A:operator-review-128` on `pg-rde-telex`. Reviewer is
+now `attended_push`, pending zero, and correction `1144` is handled. The node
+remains blocked only until implementer correction `1143` is terminally
+dispositioned; the healthy implementation turn is not interrupted.
 
 `station-app` remains planned and held. The current graph still targets the
 pending `application-client-ready-gate`; no cross-workstream dependency geometry

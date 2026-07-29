@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "Operator-broker #128 has a clean never-commit worktree and final --yolo launch. The implementer is attended_push but has an unconsumed scope correction; the reviewer is live but waiting for input before Telex attachment, so launch readiness remains blocked.",
+  "summary": "Operator-broker #128 has a clean never-commit/--yolo launch. Reviewer in-place repair is complete on pg-rde-telex with correction 1144 handled; implementer is attended_push but correction 1143 remains deferred behind its active validation turn.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-29T17:02:30Z",
+  "updatedAt": "2026-07-29T17:59:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
