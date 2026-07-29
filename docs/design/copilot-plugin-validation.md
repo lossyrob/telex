@@ -2,7 +2,7 @@
 
 Validation target: issue #41, local-daemon `copilot-plugin` node; extended by issue #61,
 `harness-skill-layout` node (nested Copilot plugin root), and issue #79 (drain-launch
-plugin/binary skew detection).
+plugin/binary skew detection), and issue #128 (the reusable Operator Station role).
 
 Verified with GitHub Copilot CLI 1.0.66-1 (issue #41), re-verified with GitHub Copilot
 CLI 1.0.69-2 (issue #61, nested marketplace `source`), and re-verified with 1.0.72-1
@@ -16,8 +16,11 @@ release tag are owned by the public-release gate (#59), which this node precedes
 
 | Acceptance / risk | Evidence |
 |---|---|
-| Marketplace installs and exposes a plugin skill | `.github/plugin/marketplace.json` declares marketplace `telex` and plugin `telex` with nested `"source": "copilot/plugin"`. Isolated verification: `copilot --config-dir <temp> plugin marketplace add <repo>` followed by `copilot --config-dir <temp> plugin install telex@telex` reports `Installed 1 skill`; the installed plugin skill resolves from the nested `copilot/plugin/skills/telex`. See the issue #61 evidence block below. |
-| CLI and plugin skill stay non-divergent | The installed binary owns the version-matched instructions (`telex skill` / `telex copilot skill`); `copilot/plugin/skills/telex/SKILL.md` is a thin bootstrap that defers to the binary. `tests/copilot_plugin.rs` asserts it stays a small bootstrap (not a copy) and is the only plugin `SKILL.md`. This supersedes the former byte-identical mirror (PR #55 / ADR 0040). |
+| Marketplace installs and exposes plugin skills | `.github/plugin/marketplace.json` declares marketplace `telex` and plugin `telex` with nested `"source": "copilot/plugin"`. The issue #61 isolated evidence below reported one skill before issue #128; the current package contract contains the `telex` and `operator-station` skill directories and requires both. |
+| CLI and plugin skills stay non-divergent | The installed binary owns version-matched command syntax (`telex skill` / `telex copilot skill`); `copilot/plugin/skills/telex/SKILL.md` remains a thin bootstrap. The sibling `operator-station` skill contains role policy, ordering, evidence, and capability gates while requiring the same runtime workflow. `tests/copilot_plugin.rs` distinguishes and validates both contracts. |
+| Operator role is packaged and discoverable | `copilot/plugin/skills/operator-station/SKILL.md` has valid frontmatter, explicit backend/ingress/human/policy inputs, fail-closed topology checks, production-v1 envelopes, retry-stable identity, durable recovery evidence, transition handoff, stale-origin, and non-impersonation rules. |
+| Operator compatibility review is release-coupled | `compatibility-v0.1.2.json` records the package/plugin versions, Operator Station extension, identity derivation, workflow signature, accepted send receipts, reconciliation outcomes, and required runtime capabilities. Plugin and release contract tests require an explicit fixture update on version drift. |
+| Operator lifecycle validation is isolated | `tests/operator_station_lifecycle.rs` uses one wrapper, the absolute worktree binary, and unique absolute home/database/install/run paths under a dedicated test root. It exercises real Telex messages and dispositions plus deterministic envelope, ordering, recovery, stale-origin, digest, handoff, and replacement assertions; it does not claim model-quality validation. The live human-response cases author ordinary raw-thread replies with opaque `urn:telex:operator-station:v1#routed-outcome` metadata and verify the stored envelope through the isolated backend. |
 | Hooks are contributed by a real plugin manifest | `copilot/plugin/plugin.json` declares `hooks.json`; `copilot/plugin/hooks.json` declares `sessionEnd` and `agentStop` command hooks. `sessionEnd` and `turn-guard` invoke hidden Rust adapters directly. The drain entry uses inline PowerShell plus a small POSIX launcher to forward stdin to the binary-owned adapter and translate pre-dispatch failure into Copilot hook JSON. Inline PowerShell avoids a nested script execution-policy boundary. |
 | Same-semver binary skew is diagnosable | `telex --version` includes a source build identifier, `telex --json version` exposes it as `version.build_id`, and versioned-install manifests retain it. Published release jobs set and verify the identifier against `GITHUB_SHA`. Git fallback is accepted only when the canonical Git top-level equals the Telex manifest directory; metadata-less copies, including copies nested under unrelated repositories, report `unknown`. The absent manifest-local `.git` path is watched so a same-target build refreshes identity if that source tree later becomes a standalone checkout. |
 | Notification content enrichment is omitted | Detached waiter stdout is not delivered to the agent, so enrichment would be useful only if the notification hook could locate the completed `--out-dir`. A local spike found the notification hook payload exposes only notification metadata and not a stable `--out-dir` path; sync/agent-read shell completions already carry stdout in context. `hooks.json` intentionally does not install a notification hook. |
@@ -61,6 +64,9 @@ no Copilot mechanics), leaving room for future sibling harness plugin roots.
 
 Empirical verification (nested-source behavior on GitHub Copilot CLI 1.0.69-2; plugin
 contents re-verified on 1.0.72-1, Windows, isolated `--config-dir`):
+
+The install counts in this historical issue #61 evidence predate the issue #128
+Operator Station skill. A current install smoke should report two skills.
 
 | Check | Evidence |
 |---|---|

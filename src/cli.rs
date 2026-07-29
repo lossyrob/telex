@@ -317,7 +317,7 @@ pub struct ReplyArgs {
     /// The message id being replied to.
     #[arg(long)]
     pub to_message: i64,
-    /// Reply body (inline). Body/subject are capped below the 1 MiB IPC frame.
+    /// Reply body (inline). Body/subject/metadata are capped below the 1 MiB IPC frame.
     #[arg(long)]
     pub body: Option<String>,
     /// Read the reply body from a UTF-8 file (`-` = stdin); capped below the 1 MiB IPC frame.
@@ -346,6 +346,9 @@ pub struct ReplyArgs {
     /// Message kind/profile label.
     #[arg(long, default_value = "note")]
     pub kind: String,
+    /// Arbitrary JSON metadata; counted with body/subject against the IPC payload cap.
+    #[arg(long)]
+    pub metadata: Option<String>,
     /// Stable session identity for daemon membership.
     #[arg(long, env = "TELEX_SESSION_ID")]
     pub session: Option<String>,
@@ -1060,6 +1063,28 @@ mod tests {
             Command::Copilot(CopilotCmd::Fallback(CopilotFallbackCmd::Run(
                 CopilotFallbackRunArgs { .. }
             )))
+        ));
+    }
+
+    #[test]
+    fn reply_metadata_flag_parses_as_opaque_text() {
+        let cli = Cli::try_parse_from([
+            "telex",
+            "reply",
+            "--to-message",
+            "42",
+            "--body",
+            "routed outcome",
+            "--metadata",
+            r#"{"dataschema":"urn:example"}"#,
+        ])
+        .unwrap();
+        assert!(matches!(
+            cli.command,
+            Command::Reply(ReplyArgs {
+                metadata: Some(metadata),
+                ..
+            }) if metadata == r#"{"dataschema":"urn:example"}"#
         ));
     }
 

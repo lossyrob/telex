@@ -11,7 +11,8 @@ One small binary, `telex`. Carries its own usage instructions for agents: run
 
 The repository also ships a Copilot CLI plugin marketplace (`.github/plugin/`)
 whose plugin lives under `copilot/plugin/` (`plugin.json` + `hooks.json` +
-bootstrap skill). All Copilot-specific content is nested under `copilot/`
+general bootstrap and Operator Station role skills). All Copilot-specific content is
+nested under `copilot/`
 (`COPILOT.md`, the `bridge/` source, and `plugin/`), so the repository root stays
 harness-neutral with room for future sibling harness plugins. The plugin maps Copilot
 session env into generic telex session inputs, handles non-destructive
@@ -92,6 +93,14 @@ under `copilot/plugin`). See the
 [Copilot CLI push delivery guide](https://lossyrob.github.io/telex/guides/copilot-push.html)
 for CC-observer opt-in (`--wake-on-cc`), the session-env mapping, teardown, and
 compatibility notes.
+
+The plugin also ships the reusable `operator-station` assisted-mode role. Invoke it
+with an explicit named backend, worker-facing ingress address, distinct human-facing
+address, and `normal` or `quiet` policy. The role loads exact command syntax from
+`telex copilot skill`, fails closed when required receipt/thread/health capabilities are
+missing, and records retry and recovery evidence in durable Telex history. See
+[`copilot/plugin/README.md`](copilot/plugin/README.md) for configuration and
+diagnostics.
 
 ## Watch the line (TUI)
 

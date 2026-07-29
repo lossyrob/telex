@@ -711,7 +711,8 @@ SEND
      [--metadata <json>]`
   Send a message. Prints a receipt stating delivered/queued-unoccupied/rejected-retired
   plus the new message id.
-- `telex reply --to-message <id> --body <s> [--attention ...] [--requires-disposition]`
+- `telex reply --to-message <id> --body <s> [--attention ...] [--requires-disposition]
+     [--metadata <json>]`
   Reply; threads under the parent (inherits thread_id, sets parent_id).
 
 DISPOSITION (flat verbs; all take `--id <message-id>` and optional `--note <s>`)

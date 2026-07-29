@@ -1,0 +1,29 @@
+{
+  "fixture_schema": "operator-station-compatibility-v1",
+  "telex_package_version": "0.1.2",
+  "plugin_version": "0.1.2",
+  "operator_contract_version": "urn:telex:operator-station:v1",
+  "identity_derivation_version": "operator-station-op-v1",
+  "workflow_command": "telex copilot skill",
+  "workflow_signature": "telex-copilot-v0.1.2/operator-station-op-v1",
+  "compatibility_mode": "capability-gated",
+  "accepted_send_receipts": [
+    "delivered",
+    "queued-unoccupied"
+  ],
+  "reconciliation_outcomes": [
+    "accepted",
+    "duplicate",
+    "rejected",
+    "indeterminate"
+  ],
+  "required_runtime_capabilities": [
+    "explicit-backend-and-sender",
+    "full-thread-and-disposition-history",
+    "metadata-bearing-send-and-reply",
+    "exact-message-parent-thread-sender-recipient-receipt",
+    "foreign-station-health-and-backlog"
+  ],
+  "known_runtime_blocks": [],
+  "validation_scope": "deterministic-envelope-ordering-recovery-not-model-quality"
+}

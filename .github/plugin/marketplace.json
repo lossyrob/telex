@@ -10,7 +10,7 @@
   "plugins": [
     {
       "name": "telex",
-      "description": "Telex Copilot CLI plugin: session lifecycle hooks, turn-end waiter guard, and the canonical Telex skill.",
+      "description": "Telex Copilot CLI plugin: session lifecycle hooks, the canonical Telex bootstrap, and the reusable Operator Station role skill.",
       "version": "0.1.2",
       "source": "copilot/plugin",
       "author": {
@@ -18,7 +18,7 @@
       },
       "repository": "https://github.com/lossyrob/telex",
       "license": "MIT",
-      "keywords": ["telex", "copilot", "hooks", "skill", "agent-session"]
+      "keywords": ["telex", "copilot", "hooks", "skill", "agent-session", "operator-station"]
     }
   ]
 }

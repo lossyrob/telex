@@ -1,12 +1,12 @@
 {
   "name": "telex",
-  "description": "Telex Copilot CLI plugin: session lifecycle hooks, push-delivery bridge provisioning, and a bootstrap skill that loads version-matched instructions from the installed telex binary.",
+  "description": "Telex Copilot CLI plugin: session lifecycle hooks, push-delivery bridge provisioning, the version-matched Telex bootstrap, and the reusable Operator Station role.",
   "version": "0.1.2",
   "author": {
     "name": "Rob Emanuele"
   },
   "license": "MIT",
-  "keywords": ["telex", "copilot", "hooks", "skill", "agent-session"],
+  "keywords": ["telex", "copilot", "hooks", "skill", "agent-session", "operator-station"],
   "hooks": "hooks.json",
   "skills": "skills/"
 }

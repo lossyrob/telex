@@ -263,6 +263,8 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cc: Option<String>,
         body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<String>,
     },
     Status {
         #[serde(default)]
@@ -1092,6 +1094,47 @@ mod tests {
         assert_eq!(
             serde_json::to_value(request).unwrap()["replace_on_deliver"],
             new_wire["replace_on_deliver"]
+        );
+    }
+
+    #[test]
+    fn reply_metadata_is_additive_and_round_trips() {
+        let old_wire = serde_json::json!({
+            "op": "reply",
+            "store_key": "sqlite:test.db",
+            "session_id": "s1",
+            "message_id": 42,
+            "kind": "note",
+            "attention": "background",
+            "requires_disposition": false,
+            "body": "reply"
+        });
+        let request: Request = serde_json::from_value(old_wire).unwrap();
+        assert!(matches!(request, Request::Reply { metadata: None, .. }));
+
+        let metadata = r#"{"opaque":true}"#;
+        let new_wire = serde_json::json!({
+            "op": "reply",
+            "store_key": "sqlite:test.db",
+            "session_id": "s1",
+            "message_id": 42,
+            "kind": "note",
+            "attention": "background",
+            "requires_disposition": false,
+            "body": "reply",
+            "metadata": metadata
+        });
+        let request: Request = serde_json::from_value(new_wire.clone()).unwrap();
+        assert!(matches!(
+            &request,
+            Request::Reply {
+                metadata: Some(value),
+                ..
+            } if value == metadata
+        ));
+        assert_eq!(
+            serde_json::to_value(request).unwrap()["metadata"],
+            new_wire["metadata"]
         );
     }
 

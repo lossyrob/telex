@@ -31,6 +31,25 @@ fn plugin_manifest_declares_hooks_and_root_skill_source() {
             .exists(),
         "root SKILL.md is the canonical skill source"
     );
+    assert!(
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("copilot/plugin/skills/operator-station/SKILL.md")
+            .exists(),
+        "the plugin must package the Operator Station role skill"
+    );
+    let skills_root = Path::new(env!("CARGO_MANIFEST_DIR")).join("copilot/plugin/skills");
+    let mut packaged_skills: Vec<_> = std::fs::read_dir(&skills_root)
+        .expect("list packaged skills")
+        .filter_map(Result::ok)
+        .filter(|entry| entry.path().join("SKILL.md").is_file())
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect();
+    packaged_skills.sort();
+    assert_eq!(
+        packaged_skills,
+        ["operator-station", "telex"],
+        "the release plugin must discover both first-class skills"
+    );
 }
 
 #[test]
@@ -304,6 +323,12 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
         .join("skills")
         .join("telex")
         .join("SKILL.md");
+    let operator_skill = root
+        .join("copilot")
+        .join("plugin")
+        .join("skills")
+        .join("operator-station")
+        .join("SKILL.md");
     // Today the only skill files are the neutral root SKILL.md and the Copilot plugin
     // bootstrap. Rather than pin the exact 2-element snapshot (which the first sibling
     // harness PR would have to edit — see ADR 0044), enforce the invariant the ADR states:
@@ -319,6 +344,11 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
     assert!(
         skill_files.contains(&plugin_skill),
         "the Copilot plugin bootstrap must exist at copilot/plugin/skills/telex/SKILL.md"
+    );
+    assert!(
+        skill_files.contains(&operator_skill),
+        "the Operator Station role must exist at \
+         copilot/plugin/skills/operator-station/SKILL.md"
     );
     for f in &skill_files {
         let rel = f.strip_prefix(root).unwrap_or(f);
@@ -378,6 +408,130 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
             "bootstrap should not embed detailed section {forbidden:?}; that lives in the binary"
         );
     }
+}
+
+#[test]
+fn operator_station_skill_contract_is_complete_and_versioned() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let skill_path = root.join("copilot/plugin/skills/operator-station/SKILL.md");
+    let fixture_path =
+        root.join("copilot/plugin/skills/operator-station/compatibility-v0.1.2.json");
+    let skill = std::fs::read_to_string(&skill_path)
+        .expect("read Operator Station skill")
+        .replace("\r\n", "\n");
+    let fixture: Value = serde_json::from_str(
+        &std::fs::read_to_string(&fixture_path).expect("read Operator Station fixture"),
+    )
+    .expect("Operator Station compatibility fixture parses");
+
+    assert!(
+        skill.starts_with("---\n"),
+        "skill must start with YAML frontmatter"
+    );
+    let frontmatter_end = skill[4..]
+        .find("\n---\n")
+        .map(|index| index + 4)
+        .expect("skill frontmatter closes");
+    let frontmatter = &skill[4..frontmatter_end];
+    assert!(frontmatter
+        .lines()
+        .any(|line| line == "name: operator-station"));
+    assert!(frontmatter
+        .lines()
+        .any(|line| line.starts_with("description: ") && line.len() > "description: ".len()));
+
+    for heading in [
+        "## Authority boundary",
+        "## Topology",
+        "## Identity and retry",
+        "## Evidence and recovery",
+        "## Transition handoff",
+        "## Stale origin",
+        "## Non-impersonation",
+        "## Compatibility",
+        "## Isolated validation",
+    ] {
+        assert!(
+            skill.contains(heading),
+            "Operator Station rationale heading {heading:?} is required"
+        );
+    }
+
+    for required in [
+        "telex copilot skill",
+        "`backend`",
+        "`ingress_address`",
+        "`human_address`",
+        "`policy`",
+        "`normal` or `quiet`",
+        "urn:telex:operator-station:v1",
+        "operator-station-op-v1",
+        "operator-station.escalation",
+        "operator-station.human-reply",
+        "operator-station.digest",
+        "accepted",
+        "duplicate",
+        "rejected",
+        "indeterminate",
+        "attended-deaf",
+        "attended-with-backlog",
+        "mode",
+        "mediationId",
+        "operationId",
+        "sourceMessages",
+        "route-back",
+        "pending-digest",
+        "humanOriginated: true",
+        "mode-inactive",
+        "direct-mode",
+        "docs/design/operator-station.md",
+    ] {
+        assert!(
+            skill.contains(required),
+            "Operator Station skill is missing invariant sentinel {required:?}"
+        );
+    }
+
+    for forbidden in [
+        "operator-station-spike",
+        "application-client-ready",
+        "private Application Client",
+        "raw IPC",
+        "telex --address <",
+        "telex send --",
+        "telex reply --",
+    ] {
+        assert!(
+            !skill.contains(forbidden),
+            "Operator Station skill must not embed retired/private/frozen surface {forbidden:?}"
+        );
+    }
+
+    assert_eq!(
+        fixture["fixture_schema"],
+        "operator-station-compatibility-v1"
+    );
+    assert_eq!(
+        fixture["operator_contract_version"],
+        "urn:telex:operator-station:v1"
+    );
+    assert_eq!(
+        fixture["identity_derivation_version"],
+        "operator-station-op-v1"
+    );
+    assert_eq!(fixture["workflow_command"], "telex copilot skill");
+    assert_eq!(
+        fixture["workflow_signature"],
+        "telex-copilot-v0.1.2/operator-station-op-v1"
+    );
+    assert_eq!(
+        fixture["validation_scope"],
+        "deterministic-envelope-ordering-recovery-not-model-quality"
+    );
+    assert_eq!(fixture["compatibility_mode"], "capability-gated");
+    assert!(fixture["known_runtime_blocks"]
+        .as_array()
+        .is_some_and(Vec::is_empty));
 }
 
 #[test]
@@ -473,6 +627,24 @@ fn plugin_version_is_consistent_across_manifest_marketplace_and_bootstrap() {
     assert!(
         bootstrap.contains(&format!("--plugin-version {manifest_version}")),
         "bootstrap `--plugin-version` example must match plugin.json version {manifest_version}"
+    );
+    let fixture: Value = serde_json::from_str(
+        &std::fs::read_to_string(
+            Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("copilot/plugin/skills/operator-station/compatibility-v0.1.2.json"),
+        )
+        .expect("read Operator Station compatibility fixture"),
+    )
+    .expect("Operator Station compatibility fixture parses");
+    assert_eq!(
+        fixture["plugin_version"].as_str(),
+        Some(manifest_version),
+        "Operator Station fixture plugin_version must match plugin.json"
+    );
+    assert_eq!(
+        fixture["telex_package_version"].as_str(),
+        Some(manifest_version),
+        "Operator Station fixture package version must match plugin.json"
     );
 }
 

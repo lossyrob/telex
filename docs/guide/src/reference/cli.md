@@ -348,18 +348,20 @@ Usage: telex.exe reply [OPTIONS] --to-message <TO_MESSAGE>
 Options:
       --backend <BACKEND>        Configured backend to use, by name (default: the configured default backend) [env: TELEX_BACKEND=]
       --to-message <TO_MESSAGE>  The message id being replied to
-      --body <BODY>              Reply body (inline). Body/subject are capped below the 1 MiB IPC frame
+      --body <BODY>              Reply body (inline). Body/subject/metadata are capped below the 1 MiB IPC frame
       --db <DB>                  Override the SQLite path for this invocation (sqlite backends only) [env: TELEX_DB=]
       --address <ADDRESS>        Address to operate on (default for commands that act on one address) [env: TELEX_ADDRESS=]
-      --body-file <BODY_FILE>    Read the reply body from UTF-8 (`-` stdin); capped below the 1 MiB IPC frame
+      --body-file <BODY_FILE>    Read the reply body from a UTF-8 file (`-` = stdin); capped below the 1 MiB IPC frame
+      --body-stdin               Read the reply body from stdin (UTF-8). Equivalent to `--body-file -`. On Windows / PowerShell, run `$OutputEncoding = [System.Text.Encoding]::UTF8` before piping non-ASCII content, or write a UTF-8 file and use `--body-file <path>` instead
       --json                     Force JSON output
       --subject <SUBJECT>        Subject (defaults to "Re: <parent subject>")
-      --cc <CC>                  CC addresses (visible observers). May be repeated and/or comma-separated
       --text                     Force concise text output
+      --cc <CC>                  CC addresses (visible observers). May be repeated and/or comma-separated
       --attention <ATTENTION>    Attention level [default: background]
       --requires-disposition     Mark that the recipient must disposition this reply
       --from <FROM>              Sender address (defaults to the global --address if set)
       --kind <KIND>              Message kind/profile label [default: note]
+      --metadata <METADATA>      Arbitrary JSON metadata; counted with body/subject against the IPC payload cap
       --session <SESSION>        Stable session identity for daemon membership [env: TELEX_SESSION_ID=]
   -h, --help                     Print help
 ```
@@ -759,4 +761,3 @@ Options:
 The `telex copilot` and `telex daemon` command families serve the plugin
 adapter and operators, and are omitted from the list above. Document them
 from the binary with `telex copilot --help` and `telex daemon --help`.
-

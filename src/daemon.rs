@@ -3762,6 +3762,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             subject,
             cc,
             body,
+            metadata,
         } => {
             reply_message(
                 state.clone(),
@@ -3775,6 +3776,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 subject,
                 cc,
                 body,
+                metadata,
             )
             .await
         }
@@ -5190,12 +5192,15 @@ async fn reply_message(
     subject: Option<String>,
     cc: Option<String>,
     body: String,
+    metadata: Option<String>,
 ) -> Response {
     let attention = match Attention::parse(&attention) {
         Ok(attention) => attention,
         Err(e) => return proto::incompatible(e.to_string()),
     };
-    if let Err(response) = validate_message_payload_size(&body, subject.as_deref(), None) {
+    if let Err(response) =
+        validate_message_payload_size(&body, subject.as_deref(), metadata.as_deref())
+    {
         return response;
     }
     let backend = match state.backend_for(&store_key).await {
@@ -5247,7 +5252,7 @@ async fn reply_message(
         requires_disposition,
         subject,
         body,
-        metadata: None,
+        metadata,
         sent_at_ms: now_ms(),
     };
     let row = match backend.insert_message(&new).await {
@@ -7964,6 +7969,7 @@ mod p3_tests {
                 subject: None,
                 cc: None,
                 body: "reply".to_string(),
+                metadata: None,
             },
         )
         .await;
@@ -8014,6 +8020,40 @@ mod p3_tests {
         );
 
         let parent_id = insert_test_message(&backend, "addr:a", None).await;
+        let reply_body = "x".repeat(proto::MAX_MESSAGE_BODY_METADATA_BYTES - 1);
+        let reply = request(
+            state.clone(),
+            Request::Reply {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                from_addr: Some("addr:a".to_string()),
+                message_id: parent_id,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                cc: None,
+                body: reply_body,
+                metadata: Some("yz".to_string()),
+            },
+        )
+        .await;
+        assert!(matches!(
+            reply,
+            Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
+        ));
+        assert!(backend.inbox("sender", true, 100).await.unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn reply_metadata_round_trips_to_backend() {
+        let state = test_state("reply-metadata");
+        let store = store_key("reply-metadata");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let parent_id = insert_test_message(&backend, "addr:a", None).await;
+        let metadata = r#"{"opaque":{"schema":"urn:example","accepted":true}}"#;
+
         let reply = request(
             state,
             Request::Reply {
@@ -8026,14 +8066,22 @@ mod p3_tests {
                 requires_disposition: false,
                 subject: None,
                 cc: None,
-                body: too_large,
+                body: "reply".to_string(),
+                metadata: Some(metadata.to_string()),
             },
         )
         .await;
-        assert!(matches!(
-            reply,
-            Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
-        ));
+        let reply_id = match reply {
+            Response::Sent { receipt } => receipt.id,
+            other => panic!("expected sent reply, got {other:?}"),
+        };
+        let stored = backend
+            .get_message(reply_id)
+            .await
+            .unwrap()
+            .expect("stored reply");
+        assert_eq!(stored.parent_id, Some(parent_id));
+        assert_eq!(stored.metadata.as_deref(), Some(metadata));
     }
 
     #[tokio::test]

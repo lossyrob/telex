@@ -817,4 +817,25 @@ fn plugin_versions_track_the_crate_version() {
         "copilot/plugin/skills/telex/SKILL.md `--plugin-version` example must match \
          Cargo.toml [package].version ({crate_version})"
     );
+
+    let operator_fixture: Value = serde_json::from_str(&read(
+        "copilot/plugin/skills/operator-station/compatibility-v0.1.2.json",
+    ))
+    .expect("Operator Station compatibility fixture parses");
+    assert_eq!(
+        operator_fixture["telex_package_version"].as_str(),
+        Some(crate_version.as_str()),
+        "a Telex version change requires explicit Operator Station compatibility review"
+    );
+    assert_eq!(
+        operator_fixture["plugin_version"].as_str(),
+        Some(crate_version.as_str()),
+        "a plugin version change requires explicit Operator Station compatibility review"
+    );
+    let expected_signature = format!("telex-copilot-v{crate_version}/operator-station-op-v1");
+    assert_eq!(
+        operator_fixture["workflow_signature"].as_str(),
+        Some(expected_signature.as_str()),
+        "Operator Station supported workflow signature must attest the release version"
+    );
 }

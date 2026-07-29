@@ -74,6 +74,7 @@ async fn reply_once(
             subject: args.subject.clone(),
             cc: normalize_cc(&args.cc),
             body,
+            metadata: args.metadata.clone(),
         })
         .await?)
 }
