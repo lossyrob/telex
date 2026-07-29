@@ -73,6 +73,15 @@ function ConvertTo-CompactJson {
 function ConvertTo-CanonicalJsonValue {
     param($Value)
 
+    if ($Value -is [DateTimeOffset]) {
+        return $Value.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    }
+    if ($Value -is [DateTime]) {
+        if ($Value.Kind -eq [DateTimeKind]::Unspecified) {
+            throw 'canonical-json-invalid: DateTime values must include an offset or UTC kind.'
+        }
+        return ([DateTimeOffset]$Value).ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture)
+    }
     if ($Value -is [System.Collections.IDictionary]) {
         $keys = [string[]]@($Value.Keys | ForEach-Object { [string]$_ })
         [Array]::Sort($keys, [System.StringComparer]::Ordinal)
@@ -94,7 +103,12 @@ function ConvertTo-CanonicalJsonValue {
 
 function ConvertTo-CanonicalJson {
     param($Value)
-    return ConvertTo-CompactJson -Value (ConvertTo-CanonicalJsonValue -Value $Value)
+
+    $canonical = ConvertTo-CanonicalJsonValue -Value $Value
+    if ($null -eq $canonical) {
+        return 'null'
+    }
+    return [System.Text.Json.JsonSerializer]::Serialize($canonical, $canonical.GetType())
 }
 
 function Get-Sha256 {
@@ -149,6 +163,32 @@ function Test-Rfc3339Timestamp {
         [Globalization.DateTimeStyles]::RoundtripKind,
         [ref]$parsed
     )
+}
+
+function ConvertTo-Rfc3339Utc {
+    param($Value)
+
+    if ($Value -is [DateTimeOffset]) {
+        $parsed = $Value
+    }
+    elseif ($Value -is [DateTime]) {
+        if ($Value.Kind -eq [DateTimeKind]::Unspecified) {
+            throw 'invalid-rfc3339: timestamp must include an explicit offset.'
+        }
+        $parsed = [DateTimeOffset]$Value
+    }
+    else {
+        $text = [string]$Value
+        if (-not (Test-Rfc3339Timestamp -Value $text)) {
+            throw 'invalid-rfc3339: timestamp must include an explicit offset.'
+        }
+        $parsed = [DateTimeOffset]::Parse(
+            $text,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [Globalization.DateTimeStyles]::RoundtripKind
+        )
+    }
+    return $parsed.ToUniversalTime().ToString('o', [Globalization.CultureInfo]::InvariantCulture)
 }
 
 function Assert-DetectorTestMode {
@@ -280,4 +320,4 @@ function Write-EventlessTerminal {
     })
 }
 
-Export-ModuleMember -Function Read-DetectorRequest, Get-DetectorParameter, Get-OptionalValue, Resolve-DetectorPath, ConvertTo-CompactJson, ConvertTo-CanonicalJson, Get-Sha256, Get-OpaqueCursor, Get-StateCursor, Get-PreflightEvidence, Test-Rfc3339Timestamp, Assert-DetectorTestMode, Write-TestTransportRecord, New-EventId, Write-DetectorResult, Write-Degraded, Write-SnapshotResult, Write-EventlessTerminal
+Export-ModuleMember -Function Read-DetectorRequest, Get-DetectorParameter, Get-OptionalValue, Resolve-DetectorPath, ConvertTo-CompactJson, ConvertTo-CanonicalJson, Get-Sha256, Get-OpaqueCursor, Get-StateCursor, Get-PreflightEvidence, Test-Rfc3339Timestamp, ConvertTo-Rfc3339Utc, Assert-DetectorTestMode, Write-TestTransportRecord, New-EventId, Write-DetectorResult, Write-Degraded, Write-SnapshotResult, Write-EventlessTerminal

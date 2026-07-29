@@ -4,7 +4,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $helperPath = Join-Path $PSScriptRoot '..\shared\DetectorCommon.psm1'
-$expectedHelperSha256 = 'd7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c'
+$expectedHelperSha256 = 'cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1'
 if ((Get-FileHash $helperPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHelperSha256) {
     [Console]::Error.WriteLine('detectorDiagnostic={"schemaVersion":1,"code":"shared-helper-digest-mismatch","message":"Pinned shared helper digest mismatch."}')
     [Console]::Out.WriteLine('{"schemaVersion":1,"outcome":"degraded"}')

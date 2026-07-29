@@ -3,10 +3,11 @@ param()
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
-$helperPath = Join-Path $PSScriptRoot '..\shared\DetectorCommon.psm1'
-$boundedCommandPath = Join-Path $PSScriptRoot '..\shared\BoundedCommand.psm1'
-$expectedHelperSha256 = 'd7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c'
-$expectedBoundedCommandSha256 = '656274b91788bb95aec585f6ed099a4754ad2722c6576bd2ce9c521faf960bdf'
+$sharedPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'shared'
+$helperPath = Join-Path $sharedPath 'DetectorCommon.psm1'
+$boundedCommandPath = Join-Path $sharedPath 'BoundedCommand.psm1'
+$expectedHelperSha256 = 'cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1'
+$expectedBoundedCommandSha256 = '2ee2894ba3ca0e7cb4e3a5ccf6e05dc9a7a31b305aa5c0334b3fe5bf39e5b0a9'
 if (
     (Get-FileHash $helperPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHelperSha256 -or
     (Get-FileHash $boundedCommandPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedBoundedCommandSha256

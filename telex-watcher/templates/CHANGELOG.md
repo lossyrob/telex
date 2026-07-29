@@ -1,5 +1,16 @@
 # Detector template library changelog
 
+## 2026-07-29 cross-platform conformance
+
+- `azure-devops-pr` template version 1.1.1, detector protocol 1, evidence
+  normalization 3.
+- Normalized provider timestamps without local-time conversion, made canonical
+  cursor serialization and evidence ordering culture-independent, and pinned
+  detector product files to LF bytes on every Git checkout.
+- Made local-command helper resolution platform-neutral and strengthened
+  conformance coverage for timezone, culture, line-ending, and argv execution
+  assumptions.
+
 ## 2026-07-29 guide placement
 
 - Moved the concise agent checklist from the reserved `SKILL.md` filename to

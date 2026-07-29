@@ -11,15 +11,15 @@
   },
   "librarySource": {
     "path": "local-command/detector.ps1",
-    "sha256": "57a0c7e5f3cac39e4ee37aaafdf888189353173316c8feea91638c0a71747f25",
+    "sha256": "f69300383f1f20e3270bc7eea48c861c1f54c333d8c33c279cc20de77522863d",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
-        "sha256": "d7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c"
+        "sha256": "cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1"
       },
       {
         "path": "shared/BoundedCommand.psm1",
-        "sha256": "656274b91788bb95aec585f6ed099a4754ad2722c6576bd2ce9c521faf960bdf"
+        "sha256": "2ee2894ba3ca0e7cb4e3a5ccf6e05dc9a7a31b305aa5c0334b3fe5bf39e5b0a9"
       }
     ]
   },

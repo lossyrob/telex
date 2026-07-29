@@ -4,7 +4,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $helperPath = Join-Path $PSScriptRoot '..\shared\DetectorCommon.psm1'
-$expectedHelperSha256 = 'd7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c'
+$expectedHelperSha256 = 'cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1'
 if ((Get-FileHash $helperPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHelperSha256) {
     [Console]::Error.WriteLine('detectorDiagnostic={"schemaVersion":1,"code":"shared-helper-digest-mismatch","message":"Pinned shared helper digest mismatch."}')
     [Console]::Out.WriteLine('{"schemaVersion":1,"outcome":"degraded"}')
@@ -121,31 +121,39 @@ try {
     $request = Read-DetectorRequest
     $data = Get-AzureDevOpsPrData -Request $request
     $pr = $data.pullRequest
-    $reviewers = @(@((Get-OptionalValue -Object $pr -Name 'reviewers' -Default @())) | ForEach-Object {
+    $reviewers = [object[]]@(@((Get-OptionalValue -Object $pr -Name 'reviewers' -Default @())) | ForEach-Object {
         [ordered]@{
             id = [string](Get-OptionalValue -Object $_ -Name 'id' -Default '')
             displayName = [string](Get-OptionalValue -Object $_ -Name 'displayName' -Default '')
             vote = [int](Get-OptionalValue -Object $_ -Name 'vote' -Default 0)
             required = [bool](Get-OptionalValue -Object $_ -Name 'isRequired' -Default $false)
         }
-    } | Sort-Object id)
-    $threads = @(@($data.threads) | ForEach-Object {
+    })
+    [Array]::Sort[object]($reviewers, [System.Comparison[object]]{
+        param($left, $right)
+        return [StringComparer]::Ordinal.Compare([string]$left.id, [string]$right.id)
+    })
+    $threads = [object[]]@(@($data.threads) | ForEach-Object {
         [ordered]@{
             id = [int](Get-OptionalValue -Object $_ -Name 'id' -Default 0)
             status = [string](Get-OptionalValue -Object $_ -Name 'status' -Default '')
             isDeleted = [bool](Get-OptionalValue -Object $_ -Name 'isDeleted' -Default $false)
         }
-    } | Sort-Object id)
+    })
+    [Array]::Sort[object]($threads, [System.Comparison[object]]{
+        param($left, $right)
+        return ([int64]$left.id).CompareTo([int64]$right.id)
+    })
     $blockingVoteAtMost = [int](Get-DetectorParameter -Request $request -Name 'blockingReviewerVoteAtMost' -Default -10)
     if ($blockingVoteAtMost -gt -5 -or $blockingVoteAtMost -lt -10) {
         throw 'configuration-invalid: blockingReviewerVoteAtMost must be between -10 and -5.'
     }
     $blockingVotes = @($reviewers | Where-Object { $_.vote -le $blockingVoteAtMost })
-    $creationDateValue = [string](Get-OptionalValue -Object $pr -Name 'creationDate' -Default '')
-    if ([string]::IsNullOrWhiteSpace($creationDateValue)) {
+    $creationDateValue = Get-OptionalValue -Object $pr -Name 'creationDate' -Default ''
+    if ([string]::IsNullOrWhiteSpace([string]$creationDateValue)) {
         throw 'parse-drift: pull request creationDate is missing.'
     }
-    $creationDate = ([DateTimeOffset]$creationDateValue).ToUniversalTime().ToString('o')
+    $creationDate = ConvertTo-Rfc3339Utc -Value $creationDateValue
     $status = [string](Get-OptionalValue -Object $pr -Name 'status' -Default '')
     $mergeStatus = [string](Get-OptionalValue -Object $pr -Name 'mergeStatus' -Default '')
     $draft = [bool](Get-OptionalValue -Object $pr -Name 'isDraft' -Default $false)
@@ -173,7 +181,7 @@ try {
     }
 
     $evidence = [ordered]@{
-        evidenceNormalizationVersion = 2
+        evidenceNormalizationVersion = 3
         provider = 'azure-devops'
         organization = [string](Get-DetectorParameter -Request $request -Name 'organization' -Default '')
         project = [string](Get-DetectorParameter -Request $request -Name 'project' -Default '')

@@ -1,6 +1,6 @@
-# Force LF line endings for text files on every platform, regardless of each
-# developer's local core.autocrlf setting.
-* text=auto eol=lf
+# Detector templates are shipped as exact bytes and their manifests pin script
+# digests, so checkout conversion must never vary by platform.
+telex-watcher/templates/** text eol=lf
 
 # Shell scripts must stay LF because they execute in Unix-like environments.
 *.sh text eol=lf

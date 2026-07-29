@@ -397,6 +397,25 @@ fn canonical_schema_validator_enforces_load_bearing_constraints() {
 #[test]
 fn manifests_and_registration_samples_are_strict_and_consistent() {
     let manifest_schema = read_json(&templates_root().join("manifest.schema.json"));
+    let attributes =
+        fs::read_to_string(repository_root().join(".gitattributes")).expect("git attributes");
+    assert!(
+        attributes
+            .lines()
+            .any(|line| line == "telex-watcher/templates/** text eol=lf"),
+        "template product files must have checkout-stable LF bytes"
+    );
+    let mut product_files = Vec::new();
+    collect_files(&templates_root(), &mut product_files);
+    for path in product_files {
+        let bytes =
+            fs::read(&path).unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        assert!(
+            !bytes.windows(2).any(|pair| pair == b"\r\n"),
+            "{} must use LF line endings",
+            path.display()
+        );
+    }
     let required_registration_fields = [
         "id",
         "detectorSchemaVersion",
@@ -611,8 +630,8 @@ fn fixture_detectors_emit_declared_kinds_with_stable_ids_and_suppress_replay() {
         (
             "azure-devops-pr",
             (
-                "19104ba1e199900423b8bf0232e595f2bea69189ef939806398287e00fc73b74",
-                "azure-devops-pr:73:19104ba1e199900423b8bf02",
+                "985685e50683ac11de09e32091149396ab6c176fbe7aca950020082072d9606a",
+                "azure-devops-pr:73:985685e50683ac11de09e320",
             ),
         ),
         (
@@ -677,6 +696,13 @@ fn fixture_detectors_emit_declared_kinds_with_stable_ids_and_suppress_replay() {
                 let expected = pinned.get(template_id).expect("pinned evidence");
                 assert_eq!(cursor, expected.0, "{template_id} cursor changed");
                 assert_eq!(event_id, expected.1, "{template_id} event ID changed");
+                if template_id == "azure-devops-pr" {
+                    assert_eq!(
+                        first.result["event"]["metadata"]["creationDate"],
+                        "2026-07-19T11:00:00.0000000+00:00",
+                        "Azure DevOps timestamps must retain their provider instant"
+                    );
+                }
             }
         }
         assert_eq!(
@@ -722,9 +748,17 @@ fn read_capture(path: &Path) -> Vec<Value> {
 fn canonical_cursor_is_independent_of_object_insertion_order() {
     let helper = path_text(templates_root().join("shared").join("DetectorCommon.psm1"));
     let script = format!(
-        "Import-Module '{}'; $a=[ordered]@{{z=1;a=[ordered]@{{b=2;a=1}}}}; \
-         $b=[ordered]@{{a=[ordered]@{{a=1;b=2}};z=1}}; \
-         @((Get-OpaqueCursor $a),(Get-OpaqueCursor $b)) | ConvertTo-Json -Compress",
+        "Import-Module '{}'; \
+         $a=[ordered]@{{z=1;a=[ordered]@{{b=2;a=1}};decimal=[decimal]'1234.5'}}; \
+         $b=[ordered]@{{decimal=[decimal]'1234.5';a=[ordered]@{{a=1;b=2}};z=1}}; \
+         $original=[Globalization.CultureInfo]::CurrentCulture; \
+         try {{ \
+             [Globalization.CultureInfo]::CurrentCulture=[Globalization.CultureInfo]::GetCultureInfo('fr-FR'); \
+             $first=Get-OpaqueCursor $a; \
+             [Globalization.CultureInfo]::CurrentCulture=[Globalization.CultureInfo]::GetCultureInfo('tr-TR'); \
+             $second=Get-OpaqueCursor $b; \
+             @($first,$second) | ConvertTo-Json -Compress \
+         }} finally {{ [Globalization.CultureInfo]::CurrentCulture=$original }}",
         helper.replace('\'', "''")
     );
     let output = Command::new("pwsh")
@@ -738,6 +772,27 @@ fn canonical_cursor_is_independent_of_object_insertion_order() {
     );
     let cursors: Value = serde_json::from_slice(&output.stdout).expect("cursor JSON");
     assert_eq!(cursors[0], cursors[1]);
+
+    let utc = run_detector_with_env(
+        "azure-devops-pr",
+        primary_parameters("azure-devops-pr"),
+        json!({}),
+        &[("TZ", "UTC")],
+    );
+    let pacific = run_detector_with_env(
+        "azure-devops-pr",
+        primary_parameters("azure-devops-pr"),
+        json!({}),
+        &[("TZ", "Pacific/Auckland")],
+    );
+    assert_eq!(
+        utc.result["nextState"]["cursor"], pacific.result["nextState"]["cursor"],
+        "Azure DevOps cursor must not depend on the detector timezone"
+    );
+    assert_eq!(
+        utc.result["event"]["metadata"]["creationDate"],
+        pacific.result["event"]["metadata"]["creationDate"]
+    );
 }
 
 #[test]
@@ -990,6 +1045,16 @@ fn edge_case_classification_and_local_evidence_are_stable() {
     });
     let first = run_detector("local-command", changing_parameters.clone(), json!({}));
     let second = run_detector("local-command", changing_parameters.clone(), json!({}));
+    assert_eq!(
+        first.result["outcome"], "event",
+        "portable local-command fixture failed: {}",
+        first.stderr
+    );
+    assert_eq!(
+        second.result["outcome"], "event",
+        "portable local-command fixture failed: {}",
+        second.stderr
+    );
     assert_ne!(
         first.result["event"]["body"],
         second.result["event"]["body"]
