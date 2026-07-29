@@ -237,6 +237,9 @@ pub enum DeliveryOutcome {
     /// No delivery row exists for `(message_id, recipient)`; inserts nothing.
     /// Returned only after confirming current ownership.
     AckNoOp,
+    /// A delivery exists for `(message_id, recipient)`, but its durable row identity
+    /// does not match the caller's exact-delivery handle.
+    DeliveryMismatch,
     /// Caller is not the current epoch owner. Precedence-winning and fatal for the caller:
     /// the daemon must self-demote on this outcome, even if the message is already consumed.
     NotOwner,
@@ -273,7 +276,7 @@ pub struct Occupancy {
     pub occupant: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct MessageRow {
     pub id: i64,
     pub thread_id: i64,
@@ -323,7 +326,7 @@ pub struct DispositionRow {
 /// `deliveries` row per recipient at insert time (`insert_message` fan-out); the row is *pending*
 /// until consumed. Distinct from a disposition: consumption is "reached a live `wait` / was
 /// auto-consumed", not "acted on". (Schema: `deliveries`, added in DECISIONS 0010.)
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct DeliveryRow {
     pub id: i64,
     pub message_id: i64,
@@ -339,6 +342,139 @@ pub struct DeliveryRow {
     /// also marks an unconsumed row consumed. Because `occupant` is effectively always NULL,
     /// treat `consumed_at_ms.is_some()` as "consumed", not necessarily "delivered to a waiter".
     pub consumed_at_ms: Option<i64>,
+}
+
+/// Durable application-operation input. The backend is already scoped to one
+/// physical store, but the opaque logical store id remains part of the key so a
+/// copied record cannot be reconciled against another store accidentally.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NewApplicationOperation {
+    pub logical_store_id: String,
+    pub application_responsibility: String,
+    pub operation_id: String,
+    pub operation_kind: String,
+    pub sender: String,
+    pub recipients_json: String,
+    pub payload_fingerprint: String,
+    pub retry_budget: i64,
+    pub created_at_ms: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ApplicationOperationRecord {
+    pub logical_store_id: String,
+    pub application_responsibility: String,
+    pub operation_id: String,
+    pub operation_kind: String,
+    pub sender: String,
+    pub recipients_json: String,
+    pub payload_fingerprint: String,
+    pub retry_budget: i64,
+    pub state: String,
+    pub result_json: Option<String>,
+    pub recovery_json: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub completed_at_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug)]
+pub enum ApplicationOperationBegin {
+    Started(ApplicationOperationRecord),
+    Replay(ApplicationOperationRecord),
+    FingerprintMismatch(ApplicationOperationRecord),
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NewCompoundStepRecord {
+    pub logical_store_id: String,
+    pub application_responsibility: String,
+    pub operation_id: String,
+    pub step_id: String,
+    pub position: i64,
+    pub step_kind: String,
+    pub prerequisites_json: String,
+    pub declaration_json: String,
+    pub created_at_ms: i64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct CompoundStepRecord {
+    pub logical_store_id: String,
+    pub application_responsibility: String,
+    pub operation_id: String,
+    pub step_id: String,
+    pub position: i64,
+    pub step_kind: String,
+    pub prerequisites_json: String,
+    pub declaration_json: String,
+    pub state: String,
+    pub outcome_json: Option<String>,
+    pub recovery_json: Option<String>,
+    pub created_at_ms: i64,
+    pub updated_at_ms: i64,
+    pub completed_at_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StateDeltaRecord {
+    pub version: i64,
+    pub axis: String,
+    pub entity_id: String,
+    pub payload_json: String,
+    pub at_ms: i64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum HistoryOrder {
+    Ascending,
+    Descending,
+}
+
+#[derive(Clone, Debug)]
+pub struct HistoryQuery {
+    pub recipient: Option<String>,
+    pub unresolved_only: bool,
+    pub thread_id: Option<i64>,
+    pub since_ms: Option<i64>,
+    pub after_message_id: Option<i64>,
+    pub limit: i64,
+    pub order: HistoryOrder,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct HistoryRecord {
+    pub message: MessageRow,
+    pub delivery: Option<DeliveryRow>,
+    pub latest_disposition: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ApplicationRecordScope {
+    pub logical_store_id: String,
+    pub application_responsibility: String,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct RetentionPolicy {
+    pub completed_before_ms: i64,
+    pub max_delete: i64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct CleanupReport {
+    pub operations_deleted: i64,
+    pub compound_steps_deleted: i64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct ApplicationStorageStats {
+    pub operation_rows: i64,
+    pub compound_step_rows: i64,
+    pub delta_rows: i64,
+    pub oldest_operation_at_ms: Option<i64>,
+    pub oldest_compound_step_at_ms: Option<i64>,
+    pub oldest_delta_at_ms: Option<i64>,
 }
 
 /// A message plus its current disposition status, for inbox listing.

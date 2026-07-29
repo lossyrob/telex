@@ -446,8 +446,10 @@ impl WaitOutcome {
                 requires_disposition_for_current_recipient,
                 subject,
                 body,
+                metadata,
                 sent_at_ms,
                 buffered_at_ms,
+                delivery_id,
                 lease_epoch,
             } => {
                 let waiter_exit_ms = now_ms();
@@ -467,8 +469,10 @@ impl WaitOutcome {
                     "requires_disposition_for_current_recipient": requires_disposition_for_current_recipient,
                     "subject": subject,
                     "body": body,
+                    "metadata": metadata,
                     "sent_at_ms": sent_at_ms,
                     "buffered_at_ms": buffered_at_ms,
+                    "delivery_id": delivery_id,
                     "lease_epoch": lease_epoch,
                     "waiter_exit_ms": waiter_exit_ms,
                     "backend_ms": buffered_at_ms - sent_at_ms,
@@ -789,8 +793,10 @@ mod tests {
             requires_disposition_for_current_recipient: false,
             subject: None,
             body: "hello".to_string(),
+            metadata: None,
             sent_at_ms: now_ms(),
             buffered_at_ms: now_ms(),
+            delivery_id: Some(1),
             lease_epoch: Some(2),
         }
     }

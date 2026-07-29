@@ -161,6 +161,10 @@ Membership-loss projection MUST distinguish at least:
 - `owner-demoted`;
 - `unknown`.
 
+The taxonomy is extensible. Implementations MUST preserve every known reason
+without collapsing it into `unknown`, and MUST retain an explicit unknown or raw
+forward-compatible representation when a newer reason is not recognized.
+
 A collision result MUST expose the current owner identity and lease epoch when
 available, plus bounded retry, reset, or wait guidance. The client MUST NOT hide
 force takeover and MUST NOT silently replace another live application. If the

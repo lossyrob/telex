@@ -139,6 +139,14 @@ pub struct CapabilityScope {
     pub scope: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum StationCapability {
+    SendOnly,
+    #[default]
+    Bidirectional,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
     pub protocol_version: ProtocolVersion,
@@ -197,6 +205,23 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "is_false")]
         on_deliver_wake_on_cc: bool,
     },
+    ApplicationRegister {
+        store_key: String,
+        address: String,
+        session_id: String,
+        occupant: String,
+        capability: StationCapability,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        watch_pids: Vec<WatchPidSpec>,
+        #[serde(default)]
+        recovery: bool,
+    },
     Detach {
         store_key: String,
         session_id: String,
@@ -232,6 +257,13 @@ pub enum Request {
         address: String,
         message_id: i64,
     },
+    ApplicationAck {
+        store_key: String,
+        session_id: String,
+        address: String,
+        message_id: i64,
+        delivery_id: i64,
+    },
     Send {
         store_key: String,
         session_id: String,
@@ -263,6 +295,22 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cc: Option<String>,
         body: String,
+    },
+    ApplicationReply {
+        store_key: String,
+        session_id: String,
+        from_addr: String,
+        message_id: i64,
+        kind: String,
+        attention: String,
+        requires_disposition: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cc: Option<String>,
+        body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<String>,
     },
     Status {
         #[serde(default)]
@@ -336,8 +384,12 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subject: Option<String>,
         body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<String>,
         sent_at_ms: i64,
         buffered_at_ms: i64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        delivery_id: Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lease_epoch: Option<i64>,
     },
@@ -458,6 +510,8 @@ pub struct MemberStatus {
     pub backend: String,
     pub session_id: String,
     pub address: String,
+    #[serde(default)]
+    pub capability: StationCapability,
     pub occupant: String,
     pub host: String,
     pub waiters: usize,

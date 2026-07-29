@@ -9,6 +9,8 @@
 //!         `telex_schema_version` table.
 //!         The `NOT NULL` constraint on `lease_epoch` is the store-level hard-fail barrier that
 //!         prevents old (non-epoch) binaries from writing to a migrated store (§3.4).
+//!   v3 — supported Application Client operation, compound-step, state-version,
+//!         and ordered-delta stores. The migration is additive and idempotent.
 
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
@@ -19,7 +21,7 @@ use std::sync::{Arc, Mutex};
 use super::{Backend, Capabilities, WaitCandidate, WaitFetchOptions};
 use crate::model::*;
 
-pub const CURRENT_SCHEMA_VERSION: i64 = 2;
+pub const CURRENT_SCHEMA_VERSION: i64 = 3;
 
 // ---------------------------------------------------------------------------
 // Store advisory lock
@@ -820,10 +822,10 @@ fn do_schema(c: &Connection) -> Result<()> {
         );
     }
 
-    // Already up to date; still verify/add idempotent v2 invariants that older
+    // Already up to date; still verify/add idempotent invariants that older
     // builds may have missed before they wrote the same schema version.
     if current_version == CURRENT_SCHEMA_VERSION {
-        ensure_v2_invariants(c)?;
+        ensure_v3_invariants(c)?;
         return Ok(());
     }
 
@@ -980,7 +982,7 @@ fn do_schema(c: &Connection) -> Result<()> {
             version   INTEGER NOT NULL
         );",
     )?;
-    ensure_v2_invariants(c)?;
+    ensure_v3_invariants(c)?;
     c.execute(
         "INSERT INTO telex_schema_version (singleton, version) VALUES (1, ?1)
          ON CONFLICT(singleton) DO UPDATE SET version = MAX(version, ?1)",
@@ -1036,6 +1038,140 @@ fn ensure_v2_invariants(c: &Connection) -> Result<()> {
     backfill_terminal_disposition_consumption_once(c)?;
     raise_clock_hwm_to_existing_timestamps(c)?;
     Ok(())
+}
+
+fn ensure_v3_invariants(c: &Connection) -> Result<()> {
+    ensure_v2_invariants(c)?;
+    c.execute_batch(
+        "CREATE TABLE IF NOT EXISTS application_operations (
+             logical_store_id           TEXT NOT NULL,
+             application_responsibility TEXT NOT NULL,
+             operation_id               TEXT NOT NULL,
+             operation_kind             TEXT NOT NULL,
+             sender                     TEXT NOT NULL,
+             recipients_json            TEXT NOT NULL,
+             payload_fingerprint        TEXT NOT NULL,
+             retry_budget               INTEGER NOT NULL,
+             state                      TEXT NOT NULL,
+             result_json                TEXT,
+             recovery_json              TEXT,
+             created_at_ms              INTEGER NOT NULL,
+             updated_at_ms              INTEGER NOT NULL,
+             completed_at_ms            INTEGER,
+             PRIMARY KEY(logical_store_id, application_responsibility, operation_id)
+         );
+         CREATE INDEX IF NOT EXISTS application_operations_cleanup_idx
+             ON application_operations(
+                logical_store_id, application_responsibility, completed_at_ms, updated_at_ms
+             );
+         CREATE TABLE IF NOT EXISTS application_compound_steps (
+             logical_store_id           TEXT NOT NULL,
+             application_responsibility TEXT NOT NULL,
+             operation_id               TEXT NOT NULL,
+             step_id                    TEXT NOT NULL,
+             position                   INTEGER NOT NULL,
+             step_kind                  TEXT NOT NULL,
+             prerequisites_json         TEXT NOT NULL,
+             declaration_json           TEXT NOT NULL,
+             state                      TEXT NOT NULL,
+             outcome_json               TEXT,
+             recovery_json              TEXT,
+             created_at_ms              INTEGER NOT NULL,
+             updated_at_ms              INTEGER NOT NULL,
+             completed_at_ms            INTEGER,
+             PRIMARY KEY(
+                logical_store_id, application_responsibility, operation_id, step_id
+             )
+         );
+         CREATE INDEX IF NOT EXISTS application_compound_steps_cleanup_idx
+             ON application_compound_steps(
+                logical_store_id, application_responsibility, completed_at_ms, updated_at_ms
+             );
+         CREATE TABLE IF NOT EXISTS application_state_version (
+             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+             version   INTEGER NOT NULL
+         );
+         INSERT INTO application_state_version(singleton, version)
+             VALUES (1, 0) ON CONFLICT(singleton) DO NOTHING;
+         CREATE TABLE IF NOT EXISTS application_state_deltas (
+             version      INTEGER PRIMARY KEY,
+             axis         TEXT NOT NULL,
+             entity_id    TEXT NOT NULL,
+             payload_json TEXT NOT NULL,
+             at_ms        INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS application_state_deltas_axis_idx
+             ON application_state_deltas(axis, version);",
+    )?;
+    Ok(())
+}
+
+fn append_state_delta_inner(
+    c: &Connection,
+    axis: &str,
+    entity_id: &str,
+    payload_json: &str,
+) -> Result<StateDeltaRecord> {
+    let version: i64 = c.query_row(
+        "UPDATE application_state_version
+         SET version = version + 1
+         WHERE singleton=1
+         RETURNING version",
+        [],
+        |row| row.get(0),
+    )?;
+    let at_ms = next_clock_hwm(c)?;
+    c.execute(
+        "INSERT INTO application_state_deltas(version, axis, entity_id, payload_json, at_ms)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        params![version, axis, entity_id, payload_json, at_ms],
+    )?;
+    persist_clock_hwm(c, at_ms)?;
+    Ok(StateDeltaRecord {
+        version,
+        axis: axis.to_string(),
+        entity_id: entity_id.to_string(),
+        payload_json: payload_json.to_string(),
+        at_ms,
+    })
+}
+
+fn map_application_operation(r: &rusqlite::Row) -> rusqlite::Result<ApplicationOperationRecord> {
+    Ok(ApplicationOperationRecord {
+        logical_store_id: r.get(0)?,
+        application_responsibility: r.get(1)?,
+        operation_id: r.get(2)?,
+        operation_kind: r.get(3)?,
+        sender: r.get(4)?,
+        recipients_json: r.get(5)?,
+        payload_fingerprint: r.get(6)?,
+        retry_budget: r.get(7)?,
+        state: r.get(8)?,
+        result_json: r.get(9)?,
+        recovery_json: r.get(10)?,
+        created_at_ms: r.get(11)?,
+        updated_at_ms: r.get(12)?,
+        completed_at_ms: r.get(13)?,
+    })
+}
+
+fn map_compound_step(r: &rusqlite::Row) -> rusqlite::Result<CompoundStepRecord> {
+    Ok(CompoundStepRecord {
+        logical_store_id: r.get(0)?,
+        application_responsibility: r.get(1)?,
+        operation_id: r.get(2)?,
+        step_id: r.get(3)?,
+        position: r.get(4)?,
+        step_kind: r.get(5)?,
+        prerequisites_json: r.get(6)?,
+        declaration_json: r.get(7)?,
+        state: r.get(8)?,
+        outcome_json: r.get(9)?,
+        recovery_json: r.get(10)?,
+        created_at_ms: r.get(11)?,
+        updated_at_ms: r.get(12)?,
+        completed_at_ms: r.get(13)?,
+    })
 }
 
 fn raise_clock_hwm_to_existing_timestamps(c: &Connection) -> Result<()> {
@@ -1951,6 +2087,77 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn mark_delivery_consumed_if_current_owner(
+        &self,
+        recipient: &str,
+        owner_instance_id: &str,
+        lease_epoch: i64,
+        message_id: i64,
+        delivery_id: i64,
+    ) -> Result<DeliveryOutcome> {
+        let (rec, owner) = (recipient.to_owned(), owner_instance_id.to_owned());
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let lease_state: Option<(i64, Option<String>)> = c
+                    .query_row(
+                        "SELECT lease_epoch, owner_instance_id FROM leases WHERE address=?1",
+                        params![rec],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?;
+                let is_owner = lease_state.is_some_and(|(epoch, current_owner)| {
+                    epoch == lease_epoch && current_owner.as_deref() == Some(owner.as_str())
+                });
+                if !is_owner {
+                    return Ok(DeliveryOutcome::NotOwner);
+                }
+
+                materialize_pending_delivery_rows_for_recipient(c, &rec)?;
+                let row: Option<(i64, Option<i64>)> = c
+                    .query_row(
+                        "SELECT id, consumed_at_ms
+                         FROM deliveries
+                         WHERE message_id=?1 AND recipient=?2",
+                        params![message_id, rec],
+                        |r| Ok((r.get(0)?, r.get(1)?)),
+                    )
+                    .optional()?;
+                match row {
+                    None => Ok(DeliveryOutcome::AckNoOp),
+                    Some((actual_id, _)) if actual_id != delivery_id => {
+                        Ok(DeliveryOutcome::DeliveryMismatch)
+                    }
+                    Some((_, Some(_))) => Ok(DeliveryOutcome::AlreadyConsumed),
+                    Some((_, None)) => {
+                        let now = next_clock_hwm(c)?;
+                        let updated = c.execute(
+                            "UPDATE deliveries
+                             SET consumed_at_ms=?1
+                             WHERE id=?2 AND message_id=?3 AND recipient=?4
+                               AND consumed_at_ms IS NULL",
+                            params![now, delivery_id, message_id, rec],
+                        )?;
+                        if updated == 0 {
+                            return Ok(DeliveryOutcome::AlreadyConsumed);
+                        }
+                        persist_clock_hwm(c, now)?;
+                        append_state_delta_inner(
+                            c,
+                            "acknowledgment",
+                            &format!("delivery:{delivery_id}"),
+                            &format!(
+                                "{{\"delivery_id\":{delivery_id},\"message_id\":{message_id},\"recipient\":{}}}",
+                                serde_json::to_string(&rec)?
+                            ),
+                        )?;
+                        Ok(DeliveryOutcome::Marked)
+                    }
+                }
+            })
+        })
+        .await
+    }
+
     async fn durable_clock_now_ms(&self) -> Result<i64> {
         self.run(|c| with_immediate_transaction(c, advance_clock_hwm))
             .await
@@ -2136,7 +2343,7 @@ impl Backend for SqliteBackend {
             // Recipient-first: pending delivery rows are the source of delivery work. Legacy
             // no-row messages are materialized above before any emission.
             let sql = format!(
-                "SELECT {MSG_COLS_M} FROM deliveries d \
+                "SELECT {MSG_COLS_M}, d.id AS delivery_id FROM deliveries d \
                  JOIN messages m ON m.id=d.message_id \
                  WHERE d.recipient=?1 \
                   AND d.consumed_at_ms IS NULL \
@@ -2176,13 +2383,14 @@ impl Backend for SqliteBackend {
             );
             let mut candidates = c
                 .prepare(&primary_sql)?
-                .query_map(params![a.as_str()], map_message)?
-                .map(|row| row.map(WaitCandidate::primary))
+                .query_map(params![a.as_str()], |row| {
+                    Ok(WaitCandidate::primary(map_message(row)?, row.get(14)?))
+                })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
 
             if options.wake_on_cc {
                 let cc_sql = format!(
-                    "SELECT {MSG_COLS_M} FROM deliveries d \
+                    "SELECT {MSG_COLS_M}, d.id AS delivery_id FROM deliveries d \
                      JOIN messages m ON m.id=d.message_id \
                      WHERE d.recipient=?1 \
                       AND d.consumed_at_ms IS NOT NULL \
@@ -2194,15 +2402,21 @@ impl Backend for SqliteBackend {
                 );
                 let cc_messages = c
                     .prepare(&cc_sql)?
-                    .query_map(params![a.as_str(), options.cc_after_ms], map_message)?
+                    .query_map(params![a.as_str(), options.cc_after_ms], |row| {
+                        Ok((map_message(row)?, row.get::<_, i64>(14)?))
+                    })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
-                candidates.extend(cc_messages.into_iter().filter_map(|message| {
-                    // The SQL predicate is recipient-row based; keep the parsed delivery-role
-                    // check as the authority so comma-string false positives and acked primaries
-                    // cannot become CC wake candidates.
-                    (delivery_role(&a, &message.to_addr, message.cc.as_deref()) == "cc")
-                        .then(|| WaitCandidate::cc_notification(message))
-                }));
+                candidates.extend(
+                    cc_messages
+                        .into_iter()
+                        .filter_map(|(message, delivery_id)| {
+                            // The SQL predicate is recipient-row based; keep the parsed delivery-role
+                            // check as the authority so comma-string false positives and acked primaries
+                            // cannot become CC wake candidates.
+                            (delivery_role(&a, &message.to_addr, message.cc.as_deref()) == "cc")
+                                .then(|| WaitCandidate::cc_notification(message, Some(delivery_id)))
+                        }),
+                );
             }
 
             candidates.sort_by_key(|candidate| candidate.message.id);
@@ -2289,6 +2503,12 @@ impl Backend for SqliteBackend {
                         params![id, recipient, now, consumed_at_ms],
                     )?;
                 }
+                append_state_delta_inner(
+                    c,
+                    "message",
+                    &format!("message:{id}"),
+                    &format!("{{\"message_id\":{id}}}"),
+                )?;
 
                 let row = c.query_row(
                     &format!("SELECT {MSG_COLS} FROM messages WHERE id=?1"),
@@ -2441,6 +2661,16 @@ impl Backend for SqliteBackend {
                     )?;
                     persist_clock_hwm(c, now)?;
                 }
+                append_state_delta_inner(
+                    c,
+                    "disposition",
+                    &format!("message:{message_id}:recipient:{r}"),
+                    &format!(
+                        "{{\"message_id\":{message_id},\"recipient\":{},\"state\":{}}}",
+                        serde_json::to_string(&r)?,
+                        serde_json::to_string(&s)?
+                    ),
+                )?;
                 Ok(DispositionRow {
                     id,
                     message_id,
@@ -2505,6 +2735,630 @@ impl Backend for SqliteBackend {
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
             Ok(rows)
+        })
+        .await
+    }
+
+    async fn delivery_for_recipient(
+        &self,
+        message_id: i64,
+        recipient: &str,
+    ) -> Result<Option<DeliveryRow>> {
+        let recipient = recipient.to_string();
+        self.run(move |c| {
+            materialize_pending_delivery_rows_for_recipient(c, &recipient)?;
+            Ok(c.query_row(
+                "SELECT id, message_id, recipient, occupant, delivered_at_ms, consumed_at_ms
+                 FROM deliveries WHERE message_id=?1 AND recipient=?2",
+                params![message_id, recipient],
+                |r| {
+                    Ok(DeliveryRow {
+                        id: r.get(0)?,
+                        message_id: r.get(1)?,
+                        recipient: r.get(2)?,
+                        occupant: r.get(3)?,
+                        delivered_at_ms: r.get(4)?,
+                        consumed_at_ms: r.get(5)?,
+                    })
+                },
+            )
+            .optional()?)
+        })
+        .await
+    }
+
+    async fn begin_application_operation(
+        &self,
+        operation: &NewApplicationOperation,
+    ) -> Result<ApplicationOperationBegin> {
+        let operation = operation.clone();
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let existing = c
+                    .query_row(
+                        "SELECT logical_store_id, application_responsibility, operation_id,
+                                operation_kind, sender, recipients_json, payload_fingerprint,
+                                retry_budget, state, result_json, recovery_json, created_at_ms,
+                                updated_at_ms, completed_at_ms
+                         FROM application_operations
+                         WHERE logical_store_id=?1 AND application_responsibility=?2
+                           AND operation_id=?3",
+                        params![
+                            operation.logical_store_id,
+                            operation.application_responsibility,
+                            operation.operation_id
+                        ],
+                        map_application_operation,
+                    )
+                    .optional()?;
+                if let Some(existing) = existing {
+                    return if existing.payload_fingerprint == operation.payload_fingerprint {
+                        Ok(ApplicationOperationBegin::Replay(existing))
+                    } else {
+                        Ok(ApplicationOperationBegin::FingerprintMismatch(existing))
+                    };
+                }
+
+                c.execute(
+                    "INSERT INTO application_operations(
+                         logical_store_id, application_responsibility, operation_id,
+                         operation_kind, sender, recipients_json, payload_fingerprint,
+                         retry_budget, state, created_at_ms, updated_at_ms
+                     ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'pending',?9,?9)",
+                    params![
+                        operation.logical_store_id,
+                        operation.application_responsibility,
+                        operation.operation_id,
+                        operation.operation_kind,
+                        operation.sender,
+                        operation.recipients_json,
+                        operation.payload_fingerprint,
+                        operation.retry_budget,
+                        operation.created_at_ms
+                    ],
+                )?;
+                append_state_delta_inner(
+                    c,
+                    "operation",
+                    &format!("operation:{}", operation.operation_id),
+                    &format!(
+                        "{{\"operation_id\":{},\"state\":\"pending\"}}",
+                        serde_json::to_string(&operation.operation_id)?
+                    ),
+                )?;
+                let inserted = c.query_row(
+                    "SELECT logical_store_id, application_responsibility, operation_id,
+                            operation_kind, sender, recipients_json, payload_fingerprint,
+                            retry_budget, state, result_json, recovery_json, created_at_ms,
+                            updated_at_ms, completed_at_ms
+                     FROM application_operations
+                     WHERE logical_store_id=?1 AND application_responsibility=?2
+                       AND operation_id=?3",
+                    params![
+                        operation.logical_store_id,
+                        operation.application_responsibility,
+                        operation.operation_id
+                    ],
+                    map_application_operation,
+                )?;
+                Ok(ApplicationOperationBegin::Started(inserted))
+            })
+        })
+        .await
+    }
+
+    async fn application_operation(
+        &self,
+        logical_store_id: &str,
+        application_responsibility: &str,
+        operation_id: &str,
+    ) -> Result<Option<ApplicationOperationRecord>> {
+        let (store, responsibility, operation) = (
+            logical_store_id.to_string(),
+            application_responsibility.to_string(),
+            operation_id.to_string(),
+        );
+        self.run(move |c| {
+            Ok(c.query_row(
+                "SELECT logical_store_id, application_responsibility, operation_id,
+                        operation_kind, sender, recipients_json, payload_fingerprint,
+                        retry_budget, state, result_json, recovery_json, created_at_ms,
+                        updated_at_ms, completed_at_ms
+                 FROM application_operations
+                 WHERE logical_store_id=?1 AND application_responsibility=?2
+                   AND operation_id=?3",
+                params![store, responsibility, operation],
+                map_application_operation,
+            )
+            .optional()?)
+        })
+        .await
+    }
+
+    async fn complete_application_operation(
+        &self,
+        logical_store_id: &str,
+        application_responsibility: &str,
+        operation_id: &str,
+        state: &str,
+        result_json: Option<&str>,
+        recovery_json: Option<&str>,
+    ) -> Result<ApplicationOperationRecord> {
+        let (store, responsibility, operation, state, result, recovery) = (
+            logical_store_id.to_string(),
+            application_responsibility.to_string(),
+            operation_id.to_string(),
+            state.to_string(),
+            result_json.map(str::to_string),
+            recovery_json.map(str::to_string),
+        );
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let now = next_clock_hwm(c)?;
+                let changed = c.execute(
+                    "UPDATE application_operations
+                     SET state=?4, result_json=?5, recovery_json=?6,
+                         updated_at_ms=?7, completed_at_ms=?7
+                     WHERE logical_store_id=?1 AND application_responsibility=?2
+                       AND operation_id=?3",
+                    params![
+                        store,
+                        responsibility,
+                        operation,
+                        state,
+                        result,
+                        recovery,
+                        now
+                    ],
+                )?;
+                if changed == 0 {
+                    bail!("application operation does not exist");
+                }
+                persist_clock_hwm(c, now)?;
+                append_state_delta_inner(
+                    c,
+                    "operation",
+                    &format!("operation:{operation}"),
+                    &format!(
+                        "{{\"operation_id\":{},\"state\":{}}}",
+                        serde_json::to_string(&operation)?,
+                        serde_json::to_string(&state)?
+                    ),
+                )?;
+                Ok(c.query_row(
+                    "SELECT logical_store_id, application_responsibility, operation_id,
+                            operation_kind, sender, recipients_json, payload_fingerprint,
+                            retry_budget, state, result_json, recovery_json, created_at_ms,
+                            updated_at_ms, completed_at_ms
+                     FROM application_operations
+                     WHERE logical_store_id=?1 AND application_responsibility=?2
+                       AND operation_id=?3",
+                    params![store, responsibility, operation],
+                    map_application_operation,
+                )?)
+            })
+        })
+        .await
+    }
+
+    async fn declare_compound_steps(
+        &self,
+        steps: &[NewCompoundStepRecord],
+    ) -> Result<Vec<CompoundStepRecord>> {
+        let steps = steps.to_vec();
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                for step in &steps {
+                    let existing: Option<(String, String, String, i64)> = c
+                        .query_row(
+                            "SELECT step_kind, prerequisites_json, declaration_json, position
+                             FROM application_compound_steps
+                             WHERE logical_store_id=?1 AND application_responsibility=?2
+                               AND operation_id=?3 AND step_id=?4",
+                            params![
+                                step.logical_store_id,
+                                step.application_responsibility,
+                                step.operation_id,
+                                step.step_id
+                            ],
+                            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                        )
+                        .optional()?;
+                    if let Some(existing) = existing {
+                        if existing
+                            != (
+                                step.step_kind.clone(),
+                                step.prerequisites_json.clone(),
+                                step.declaration_json.clone(),
+                                step.position,
+                            )
+                        {
+                            bail!("compound step declaration mismatch for {}", step.step_id);
+                        }
+                        continue;
+                    }
+                    c.execute(
+                        "INSERT INTO application_compound_steps(
+                             logical_store_id, application_responsibility, operation_id,
+                             step_id, position, step_kind, prerequisites_json,
+                             declaration_json, state, created_at_ms, updated_at_ms
+                         ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,'pending',?9,?9)",
+                        params![
+                            step.logical_store_id,
+                            step.application_responsibility,
+                            step.operation_id,
+                            step.step_id,
+                            step.position,
+                            step.step_kind,
+                            step.prerequisites_json,
+                            step.declaration_json,
+                            step.created_at_ms
+                        ],
+                    )?;
+                    append_state_delta_inner(
+                        c,
+                        "compound",
+                        &format!("operation:{}:step:{}", step.operation_id, step.step_id),
+                        &format!(
+                            "{{\"operation_id\":{},\"step_id\":{},\"state\":\"pending\"}}",
+                            serde_json::to_string(&step.operation_id)?,
+                            serde_json::to_string(&step.step_id)?
+                        ),
+                    )?;
+                }
+                if steps.is_empty() {
+                    return Ok(Vec::new());
+                }
+                let first = &steps[0];
+                let mut stmt = c.prepare(
+                    "SELECT logical_store_id, application_responsibility, operation_id,
+                            step_id, position, step_kind, prerequisites_json, declaration_json,
+                            state, outcome_json, recovery_json, created_at_ms, updated_at_ms,
+                            completed_at_ms
+                     FROM application_compound_steps
+                     WHERE logical_store_id=?1 AND application_responsibility=?2
+                       AND operation_id=?3
+                     ORDER BY position, step_id",
+                )?;
+                let records = stmt
+                    .query_map(
+                        params![
+                            first.logical_store_id,
+                            first.application_responsibility,
+                            first.operation_id
+                        ],
+                        map_compound_step,
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(records)
+            })
+        })
+        .await
+    }
+
+    async fn compound_steps(
+        &self,
+        logical_store_id: &str,
+        application_responsibility: &str,
+        operation_id: &str,
+    ) -> Result<Vec<CompoundStepRecord>> {
+        let (store, responsibility, operation) = (
+            logical_store_id.to_string(),
+            application_responsibility.to_string(),
+            operation_id.to_string(),
+        );
+        self.run(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT logical_store_id, application_responsibility, operation_id,
+                        step_id, position, step_kind, prerequisites_json, declaration_json,
+                        state, outcome_json, recovery_json, created_at_ms, updated_at_ms,
+                        completed_at_ms
+                 FROM application_compound_steps
+                 WHERE logical_store_id=?1 AND application_responsibility=?2
+                   AND operation_id=?3
+                 ORDER BY position, step_id",
+            )?;
+            let records = stmt
+                .query_map(params![store, responsibility, operation], map_compound_step)?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(records)
+        })
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn complete_compound_step(
+        &self,
+        logical_store_id: &str,
+        application_responsibility: &str,
+        operation_id: &str,
+        step_id: &str,
+        state: &str,
+        outcome_json: Option<&str>,
+        recovery_json: Option<&str>,
+    ) -> Result<CompoundStepRecord> {
+        let (store, responsibility, operation, step, state, outcome, recovery) = (
+            logical_store_id.to_string(),
+            application_responsibility.to_string(),
+            operation_id.to_string(),
+            step_id.to_string(),
+            state.to_string(),
+            outcome_json.map(str::to_string),
+            recovery_json.map(str::to_string),
+        );
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let now = next_clock_hwm(c)?;
+                let changed = c.execute(
+                    "UPDATE application_compound_steps
+                     SET state=?5, outcome_json=?6, recovery_json=?7,
+                         updated_at_ms=?8, completed_at_ms=?8
+                     WHERE logical_store_id=?1 AND application_responsibility=?2
+                       AND operation_id=?3 AND step_id=?4",
+                    params![
+                        store,
+                        responsibility,
+                        operation,
+                        step,
+                        state,
+                        outcome,
+                        recovery,
+                        now
+                    ],
+                )?;
+                if changed == 0 {
+                    bail!("compound step does not exist");
+                }
+                persist_clock_hwm(c, now)?;
+                append_state_delta_inner(
+                    c,
+                    "compound",
+                    &format!("operation:{operation}:step:{step}"),
+                    &format!(
+                        "{{\"operation_id\":{},\"step_id\":{},\"state\":{}}}",
+                        serde_json::to_string(&operation)?,
+                        serde_json::to_string(&step)?,
+                        serde_json::to_string(&state)?
+                    ),
+                )?;
+                Ok(c.query_row(
+                    "SELECT logical_store_id, application_responsibility, operation_id,
+                            step_id, position, step_kind, prerequisites_json, declaration_json,
+                            state, outcome_json, recovery_json, created_at_ms, updated_at_ms,
+                            completed_at_ms
+                     FROM application_compound_steps
+                     WHERE logical_store_id=?1 AND application_responsibility=?2
+                       AND operation_id=?3 AND step_id=?4",
+                    params![store, responsibility, operation, step],
+                    map_compound_step,
+                )?)
+            })
+        })
+        .await
+    }
+
+    async fn append_state_delta(
+        &self,
+        axis: &str,
+        entity_id: &str,
+        payload_json: &str,
+    ) -> Result<StateDeltaRecord> {
+        let (axis, entity, payload) = (
+            axis.to_string(),
+            entity_id.to_string(),
+            payload_json.to_string(),
+        );
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| append_state_delta_inner(c, &axis, &entity, &payload))
+        })
+        .await
+    }
+
+    async fn current_state_version(&self) -> Result<i64> {
+        self.run(|c| {
+            Ok(c.query_row(
+                "SELECT version FROM application_state_version WHERE singleton=1",
+                [],
+                |r| r.get(0),
+            )?)
+        })
+        .await
+    }
+
+    async fn state_deltas(&self, after_version: i64, limit: i64) -> Result<Vec<StateDeltaRecord>> {
+        self.run(move |c| {
+            let mut stmt = c.prepare(
+                "SELECT version, axis, entity_id, payload_json, at_ms
+                 FROM application_state_deltas
+                 WHERE version>?1 ORDER BY version LIMIT ?2",
+            )?;
+            let records = stmt
+                .query_map(params![after_version, limit.max(1)], |r| {
+                    Ok(StateDeltaRecord {
+                        version: r.get(0)?,
+                        axis: r.get(1)?,
+                        entity_id: r.get(2)?,
+                        payload_json: r.get(3)?,
+                        at_ms: r.get(4)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(records)
+        })
+        .await
+    }
+
+    async fn history_page(&self, query: &HistoryQuery) -> Result<Vec<HistoryRecord>> {
+        let query = query.clone();
+        self.run(move |c| {
+            if query.unresolved_only && query.recipient.is_none() {
+                bail!("unresolved history requires an exact recipient");
+            }
+            let order = match query.order {
+                HistoryOrder::Ascending => "ASC",
+                HistoryOrder::Descending => "DESC",
+            };
+            let sql = format!(
+                "SELECT {MSG_COLS_M},
+                        d.id, d.message_id, d.recipient, d.occupant,
+                        d.delivered_at_ms, d.consumed_at_ms,
+                        (SELECT disp.state FROM dispositions disp
+                         WHERE disp.message_id=m.id
+                           AND disp.recipient=?1
+                         ORDER BY disp.id DESC LIMIT 1) AS latest_disp
+                 FROM messages m
+                 LEFT JOIN deliveries d
+                   ON d.message_id=m.id AND ?1 IS NOT NULL AND d.recipient=?1
+                 WHERE (?1 IS NULL OR d.id IS NOT NULL)
+                   AND (?2=0 OR (
+                        m.to_addr=?1
+                        AND m.requires_disposition=1
+                        AND COALESCE((SELECT disp.state FROM dispositions disp
+                                      WHERE disp.message_id=m.id AND disp.recipient=?1
+                                      ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({})
+                   ))
+                   AND (?3 IS NULL OR m.thread_id=?3 OR m.id=?3)
+                   AND (?4 IS NULL OR m.created_at_ms>=?4)
+                   AND (?5 IS NULL OR m.id>?5)
+                 ORDER BY m.id {order}
+                 LIMIT ?6",
+                terminal_dispositions_sql_list()
+            );
+            let recipient = query.recipient;
+            let mut stmt = c.prepare(&sql)?;
+            let records = stmt
+                .query_map(
+                    params![
+                        recipient,
+                        query.unresolved_only as i64,
+                        query.thread_id,
+                        query.since_ms,
+                        query.after_message_id,
+                        query.limit.max(1)
+                    ],
+                    |r| {
+                        let message = map_message(r)?;
+                        let delivery_id: Option<i64> = r.get(14)?;
+                        let delivery = delivery_id
+                            .map(|id| -> rusqlite::Result<DeliveryRow> {
+                                Ok(DeliveryRow {
+                                    id,
+                                    message_id: r.get(15)?,
+                                    recipient: r.get(16)?,
+                                    occupant: r.get(17)?,
+                                    delivered_at_ms: r.get(18)?,
+                                    consumed_at_ms: r.get(19)?,
+                                })
+                            })
+                            .transpose()?;
+                        Ok(HistoryRecord {
+                            message,
+                            delivery,
+                            latest_disposition: r.get(20)?,
+                        })
+                    },
+                )?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(records)
+        })
+        .await
+    }
+
+    async fn cleanup_application_records(
+        &self,
+        scope: &ApplicationRecordScope,
+        policy: RetentionPolicy,
+    ) -> Result<CleanupReport> {
+        let scope = scope.clone();
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let max_delete = policy.max_delete.max(0);
+                let operations_deleted = c.execute(
+                    "DELETE FROM application_operations
+                     WHERE rowid IN (
+                         SELECT o.rowid FROM application_operations o
+                         WHERE o.logical_store_id=?1 AND o.application_responsibility=?2
+                           AND o.completed_at_ms IS NOT NULL AND o.completed_at_ms<?3
+                           AND NOT EXISTS (
+                               SELECT 1 FROM application_compound_steps s
+                               WHERE s.logical_store_id=o.logical_store_id
+                                 AND s.application_responsibility=o.application_responsibility
+                                 AND s.operation_id=o.operation_id
+                                 AND s.completed_at_ms IS NULL
+                           )
+                         ORDER BY completed_at_ms
+                         LIMIT ?4
+                     )",
+                    params![
+                        scope.logical_store_id,
+                        scope.application_responsibility,
+                        policy.completed_before_ms,
+                        max_delete
+                    ],
+                )? as i64;
+                let compound_steps_deleted = c.execute(
+                    "DELETE FROM application_compound_steps
+                     WHERE rowid IN (
+                         SELECT s.rowid FROM application_compound_steps s
+                         WHERE s.logical_store_id=?1 AND s.application_responsibility=?2
+                           AND s.completed_at_ms IS NOT NULL AND s.completed_at_ms<?3
+                           AND NOT EXISTS (
+                               SELECT 1 FROM application_compound_steps pending
+                               WHERE pending.logical_store_id=s.logical_store_id
+                                 AND pending.application_responsibility=s.application_responsibility
+                                 AND pending.operation_id=s.operation_id
+                                 AND pending.completed_at_ms IS NULL
+                           )
+                         ORDER BY completed_at_ms
+                         LIMIT ?4
+                     )",
+                    params![
+                        scope.logical_store_id,
+                        scope.application_responsibility,
+                        policy.completed_before_ms,
+                        max_delete
+                    ],
+                )? as i64;
+                Ok(CleanupReport {
+                    operations_deleted,
+                    compound_steps_deleted,
+                })
+            })
+        })
+        .await
+    }
+
+    async fn application_storage_stats(
+        &self,
+        scope: &ApplicationRecordScope,
+    ) -> Result<ApplicationStorageStats> {
+        let scope = scope.clone();
+        self.run(move |c| {
+            let (operation_rows, oldest_operation_at_ms) = c.query_row(
+                "SELECT COUNT(*), MIN(created_at_ms) FROM application_operations
+                 WHERE logical_store_id=?1 AND application_responsibility=?2",
+                params![scope.logical_store_id, scope.application_responsibility],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            let (compound_step_rows, oldest_compound_step_at_ms) = c.query_row(
+                "SELECT COUNT(*), MIN(created_at_ms) FROM application_compound_steps
+                 WHERE logical_store_id=?1 AND application_responsibility=?2",
+                params![scope.logical_store_id, scope.application_responsibility],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            let (delta_rows, oldest_delta_at_ms) = c.query_row(
+                "SELECT COUNT(*), MIN(at_ms) FROM application_state_deltas",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )?;
+            Ok(ApplicationStorageStats {
+                operation_rows,
+                compound_step_rows,
+                delta_rows,
+                oldest_operation_at_ms,
+                oldest_compound_step_at_ms,
+                oldest_delta_at_ms,
+            })
         })
         .await
     }

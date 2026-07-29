@@ -13,8 +13,8 @@ use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
     DeafStationStatus, DeliveryMode, EpochStatus, HandshakeError, HelloAck, IdleStationStatus,
     LiveWaiterStatus, MemberStatus, NeedsAttachReason, PushDeliveryHealth, RecentErrorStatus,
-    Request, Response, RetentionStatus, SentReceipt, StationHealth, StoreStatus, WaiterOutcome,
-    WatchPidRole, WatchPidSpec, WatchPidStatus, ON_DELIVER_DEFERRED_EXIT,
+    Request, Response, RetentionStatus, SentReceipt, StationCapability, StationHealth, StoreStatus,
+    WaiterOutcome, WatchPidRole, WatchPidSpec, WatchPidStatus, ON_DELIVER_DEFERRED_EXIT,
     ON_DELIVER_PERMANENT_EXIT,
 };
 use crate::model::{
@@ -457,6 +457,7 @@ impl DeliveryAdmissionTestControl {
 #[derive(Clone, Debug)]
 struct MemberRecord {
     address: String,
+    capability: StationCapability,
     store_key: String,
     backend: String,
     session_id: String,
@@ -896,11 +897,12 @@ impl DaemonState {
     }
 
     fn has_address_member(&self, store_key: &str, address: &str) -> bool {
-        self.members
-            .lock()
-            .unwrap()
-            .values()
-            .any(|m| m.store_key == store_key && m.address == address && !m.idle)
+        self.members.lock().unwrap().values().any(|m| {
+            m.store_key == store_key
+                && m.address == address
+                && !m.idle
+                && m.capability == StationCapability::Bidirectional
+        })
     }
 
     fn note_backlog_for_unattended_address(&self, store_key: &str, address: &str) {
@@ -1458,6 +1460,7 @@ impl MemberRecord {
             backend: self.backend.clone(),
             session_id: self.session_id.clone(),
             address: self.address.clone(),
+            capability: self.capability,
             occupant: self.occupant.clone(),
             host: self.host.clone(),
             waiters: self.waiters,
@@ -3677,6 +3680,37 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 on_deliver,
                 replace_on_deliver,
                 on_deliver_wake_on_cc,
+                None,
+            )
+            .await
+        }
+        Request::ApplicationRegister {
+            store_key,
+            address,
+            session_id,
+            occupant,
+            capability,
+            description,
+            scope,
+            tags,
+            watch_pids,
+            recovery,
+        } => {
+            register_member(
+                state.clone(),
+                store_key,
+                address,
+                session_id,
+                occupant,
+                description,
+                scope,
+                tags,
+                watch_pids,
+                recovery,
+                None,
+                false,
+                false,
+                Some(capability),
             )
             .await
         }
@@ -3722,6 +3756,23 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             address,
             message_id,
         } => ack_message(state.clone(), store_key, session_id, address, message_id).await,
+        Request::ApplicationAck {
+            store_key,
+            session_id,
+            address,
+            message_id,
+            delivery_id,
+        } => {
+            ack_exact_delivery(
+                state.clone(),
+                store_key,
+                session_id,
+                address,
+                message_id,
+                delivery_id,
+            )
+            .await
+        }
         Request::Send {
             store_key,
             session_id,
@@ -3775,6 +3826,36 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 subject,
                 cc,
                 body,
+                None,
+            )
+            .await
+        }
+        Request::ApplicationReply {
+            store_key,
+            session_id,
+            from_addr,
+            message_id,
+            kind,
+            attention,
+            requires_disposition,
+            subject,
+            cc,
+            body,
+            metadata,
+        } => {
+            reply_message(
+                state.clone(),
+                store_key,
+                session_id,
+                Some(from_addr),
+                message_id,
+                kind,
+                attention,
+                requires_disposition,
+                subject,
+                cc,
+                body,
+                metadata,
             )
             .await
         }
@@ -3796,6 +3877,7 @@ async fn register_member(
     on_deliver: Option<Vec<String>>,
     replace_on_deliver: bool,
     on_deliver_wake_on_cc: bool,
+    capability: Option<StationCapability>,
 ) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
@@ -3843,6 +3925,9 @@ async fn register_member(
                 refreshed.description = description;
                 refreshed.scope = scope;
                 refreshed.tags = tags;
+                if let Some(capability) = capability {
+                    refreshed.capability = capability;
+                }
                 let preserving_on_deliver =
                     !replace_on_deliver && on_deliver.is_none() && existing.on_deliver.is_some();
                 refreshed.watch_pids = if preserving_on_deliver {
@@ -4075,6 +4160,7 @@ async fn register_member(
     };
     let record = MemberRecord {
         address: address.clone(),
+        capability: capability.unwrap_or_default(),
         store_key: store_key.clone(),
         backend: backend.kind().to_string(),
         session_id: session_id.clone(),
@@ -4557,6 +4643,11 @@ async fn wait_for_message_with_idle_ttl(
     }
 
     match state.get_member(&store_key, &session_id, &address) {
+        Some(member) if member.capability == StationCapability::SendOnly => {
+            return proto::unsupported(format!(
+                "address {address} is attached with send-only capability"
+            ));
+        }
         Some(member) if member.on_deliver.is_some() => {
             state.push_recent_error(
                 "DeliveryModeConflict",
@@ -4615,6 +4706,11 @@ async fn wait_for_message_with_idle_ttl(
     // Repeat the member/mode checks after all async preflight work. The opposite-mode recheck and
     // waiter installation below share the same per-station admission guard.
     match state.get_member(&store_key, &session_id, &address) {
+        Some(member) if member.capability == StationCapability::SendOnly => {
+            return proto::unsupported(format!(
+                "address {address} is attached with send-only capability"
+            ));
+        }
         Some(member) if member.on_deliver.is_some() => {
             state.push_recent_error(
                 "DeliveryModeConflict",
@@ -4767,6 +4863,7 @@ async fn wait_for_message_with_idle_ttl(
                 parsed_min_attention,
             )
         }) {
+            let delivery_id = candidate.delivery_id;
             let row = candidate.message;
             let current = match state.get_member(&store_key, &session_id, &address) {
                 Some(member) => member,
@@ -4815,8 +4912,10 @@ async fn wait_for_message_with_idle_ttl(
                 requires_disposition_for_current_recipient,
                 subject: row.subject,
                 body: row.body,
+                metadata: row.metadata,
                 sent_at_ms: row.sent_at_ms,
                 buffered_at_ms: now_ms(),
+                delivery_id,
                 lease_epoch: Some(current.lease_epoch),
             };
             return match proto::json_line_frame_len(&response) {
@@ -4961,6 +5060,36 @@ async fn ack_message(
     address: String,
     message_id: i64,
 ) -> Response {
+    ack_message_inner(state, store_key, session_id, address, message_id, None).await
+}
+
+async fn ack_exact_delivery(
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+    address: String,
+    message_id: i64,
+    delivery_id: i64,
+) -> Response {
+    ack_message_inner(
+        state,
+        store_key,
+        session_id,
+        address,
+        message_id,
+        Some(delivery_id),
+    )
+    .await
+}
+
+async fn ack_message_inner(
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+    address: String,
+    message_id: i64,
+    delivery_id: Option<i64>,
+) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
     }
@@ -5024,15 +5153,30 @@ async fn ack_message(
             }
         }
     };
-    match backend
-        .mark_consumed_if_current_owner(
-            &address,
-            &member.owner_instance_id,
-            member.lease_epoch,
-            message_id,
-        )
-        .await
-    {
+    let outcome = match delivery_id {
+        Some(delivery_id) => {
+            backend
+                .mark_delivery_consumed_if_current_owner(
+                    &address,
+                    &member.owner_instance_id,
+                    member.lease_epoch,
+                    message_id,
+                    delivery_id,
+                )
+                .await
+        }
+        None => {
+            backend
+                .mark_consumed_if_current_owner(
+                    &address,
+                    &member.owner_instance_id,
+                    member.lease_epoch,
+                    message_id,
+                )
+                .await
+        }
+    };
+    match outcome {
         Ok(outcome) => {
             if outcome == DeliveryOutcome::NotOwner {
                 self_demote_member(
@@ -5190,12 +5334,15 @@ async fn reply_message(
     subject: Option<String>,
     cc: Option<String>,
     body: String,
+    metadata: Option<String>,
 ) -> Response {
     let attention = match Attention::parse(&attention) {
         Ok(attention) => attention,
         Err(e) => return proto::incompatible(e.to_string()),
     };
-    if let Err(response) = validate_message_payload_size(&body, subject.as_deref(), None) {
+    if let Err(response) =
+        validate_message_payload_size(&body, subject.as_deref(), metadata.as_deref())
+    {
         return response;
     }
     let backend = match state.backend_for(&store_key).await {
@@ -5247,7 +5394,7 @@ async fn reply_message(
         requires_disposition,
         subject,
         body,
-        metadata: None,
+        metadata,
         sent_at_ms: now_ms(),
     };
     let row = match backend.insert_message(&new).await {
@@ -7527,6 +7674,78 @@ mod p3_tests {
 
     async fn request(state: Arc<DaemonState>, request: Request) -> Response {
         handle_request(state, request).await.0
+    }
+
+    #[tokio::test]
+    async fn send_only_application_membership_is_not_inbound_attendance() {
+        let state = test_state("application-send-only");
+        let store = store_key("application-send-only");
+        let address = "addr:sender-only";
+        let registered = request(
+            state.clone(),
+            Request::ApplicationRegister {
+                store_key: store.clone(),
+                address: address.to_string(),
+                session_id: "application-runtime".to_string(),
+                occupant: "application".to_string(),
+                capability: StationCapability::SendOnly,
+                description: None,
+                scope: None,
+                tags: None,
+                watch_pids: Vec::new(),
+                recovery: false,
+            },
+        )
+        .await;
+        assert!(matches!(registered, Response::Registered { .. }));
+
+        let sent = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "application-runtime".to_string(),
+                from_addr: Some(address.to_string()),
+                to_addr: address.to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: "must remain queued".to_string(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            sent,
+            Response::Sent {
+                receipt: SentReceipt {
+                    occupied: Some(false),
+                    ref receipt,
+                    ..
+                }
+            } if receipt == "queued-unoccupied"
+        ));
+
+        let wait = request(
+            state,
+            Request::Wait {
+                store_key: store,
+                session_id: "application-runtime".to_string(),
+                address: address.to_string(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: false,
+                timeout_ms: Some(1),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            wait,
+            Response::Error { ref code, .. } if code == proto::ERROR_UNSUPPORTED
+        ));
     }
 
     #[tokio::test]
