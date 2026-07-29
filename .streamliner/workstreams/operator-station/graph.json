@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "The production contract and clean Application Client contract convergence are merged. Station and operator-agent nodes remain blocked on campaign/operator reconciliation and acceptance of the application-client-ready checkpoint.",
+  "summary": "The production contract and clean Application Client contract convergence are merged. Operator-broker issue #128 is promoted for staged execution; station-app remains held pending an explicit supported/conformant client export.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-29T14:53:29Z",
+  "updatedAt": "2026-07-29T15:03:52Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -139,26 +139,32 @@
       "id": "operator-broker",
       "type": "task",
       "title": "Reusable operator-agent role and routing policy",
-      "summary": "Package and document a reusable operator-agent role that attends worker-facing ingress addresses, resolves or clarifies routine messages, aggregates and summarizes related traffic, escalates human obligations with source provenance and recommendations, receives human replies, routes outcomes back, and dispositions both raw and mediated messages. It remains a reference integrator rather than Telex core behavior. Sketch; detail at promotion after station-contract.",
-      "status": "planned",
+      "summary": "Package and validate the reusable assisted-mode operator-agent role: explicit ingress/human configuration, normal and quiet policy, resolution and clarification, production-v1 escalation/digest metadata, retry-stable human-response route-back, replacement recovery, stale-origin handling, source trust, and non-impersonation without becoming Telex core or a private Application Client.",
+      "status": "ready",
       "attention": "watch",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 128
+      },
       "dependsOn": [
         "station-contract"
       ],
       "externalDependsOn": [
         {
-          "id": "application-client-ready",
+          "id": "application-client-contract",
           "target": {
             "projectKey": "telex",
             "workstreamId": "application-client",
-            "nodeId": "application-client-ready-gate"
+            "nodeId": "contract-convergence"
           },
-          "label": "Shared Application Client checkpoint from issue #12",
-          "url": "https://github.com/lossyrob/telex/issues/117",
-          "status": "pending"
+          "label": "Accepted API-neutral Application Client semantic contract from clean PR #126",
+          "url": "https://github.com/lossyrob/telex/issues/118",
+          "status": "completed"
         }
       ]
     },

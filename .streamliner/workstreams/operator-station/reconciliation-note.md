@@ -28,8 +28,14 @@ without merge and preserved for protocol forensics.
 The campaign-owned `application-client-ready` gate remains pending because
 issue #12 still carries the pre-repair crosswalk path and manifest identity.
 Campaign/operator authority must reconcile and accept the clean checkpoint
-before it is exported to Operator Station. `station-app` and `operator-broker`
-therefore remain externally blocked planned sketches, not promotion candidates.
+before it is exported to Operator Station.
+
+Campaign staged execution subsequently promoted `operator-broker` as issue
+#128. It may proceed from the accepted semantic contract because it packages an
+agent-session role and routing policy, not the non-agent shared client.
+`station-app` remains held. A proposed dependency change from the semantic gate
+to Application Client `client-conformance` is recorded for review but not
+applied.
 
 ## Boundaries
 
@@ -86,10 +92,10 @@ the domain-contract review, the exact #12 export review, and the
 workstream-owned artifact reconciliations. The paired reviewer remained the
 right owner for detailed lifecycle, provenance, recovery, and safety defects.
 
-Campaign/operator attention belongs first at the clean issue #12 checkpoint
-reconciliation and acceptance decision. After that gate, attention can move to
-production-node promotion, shared-client implementation sequencing, and the
-later usability gate. No worker launch is requested by this reconciliation.
+Operator attention belongs at the `operator-broker` output review while
+campaign/operator authority resolves the clean issue #12 checkpoint and the
+proposed `station-app` dependency. The later usability gate still owns combined
+Station/broker acceptance.
 
 ## Inspired vs. recovery interventions
 
@@ -116,6 +122,9 @@ later usability gate. No worker launch is requested by this reconciliation.
   ledgers, and approval artifacts. Clean PR #126 restored a product-only change;
   future nodes must use the Streamliner launch broker and route new gates or
   workflow rewinds back to orchestration.
+- **Inspired:** Staging `operator-broker` separately preserves useful parallelism:
+  the agent-role package can be built against accepted semantics while the
+  desktop waits for a supported/conformant client export.
 
 ## Closeout observation dispositions
 

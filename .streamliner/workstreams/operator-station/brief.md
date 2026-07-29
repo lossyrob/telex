@@ -127,12 +127,19 @@ checkpoint body, but it still identifies the pre-repair crosswalk path and
 manifest. Campaign/operator authority must reconcile and accept the checkpoint
 against clean PR #126 before it is exported to this workstream.
 
-No Operator Station node is active or promotion-ready. `station-app` and
-`operator-broker` remain planned sketches blocked by the pending semantic gate.
-After that gate passes, the operator and campaign must still decide whether
-implementation executes in parallel with Application Client core/binding work
-or gains an explicit dependency on a later supported-client checkpoint. New
-launches remain held until campaign/operator GO.
+Campaign orchestration authorized staged execution. `operator-broker` is
+promoted and detailed in
+[#128](https://github.com/lossyrob/telex/issues/128). It may proceed from the
+accepted API-neutral semantic contract in clean PR #126 because it packages an
+agent-session role and routing policy rather than the non-agent Application
+Client.
+
+`station-app` remains planned and held. The current graph still targets the
+pending `application-client-ready-gate`; no cross-workstream dependency geometry
+was silently changed. The proposed replacement is an explicit dependency on
+Application Client `client-conformance`, whose completion should provide the
+supported/conformant implementation export the desktop needs. Campaign/operator
+review is required before applying that proposal.
 
 ## Decisions
 
@@ -195,15 +202,19 @@ launches remain held until campaign/operator GO.
   reviewer sessions use the configured v2 graph defaults and
   `POST /api/launch-preparations/runs`. This orchestrator does not directly
   launch node terminals or synthesize worker prompts.
+- **Staged production execution:** `operator-broker` may execute in parallel
+  with Application Client core/binding work because it is an agent-session role
+  built from the accepted semantic contract. `station-app` remains held for a
+  supported/conformant client export.
 
 ## Open Questions
 
 - Will campaign/operator authority accept the issue #12 checkpoint update for
   clean PR #126 and export `application-client-ready` to this workstream?
-- Should `station-app` and `operator-broker` execute in parallel with
-  Application Client core/binding work under the accepted semantic contract, or
-  should their implementation gain an explicit dependency on the later
-  supported-client or consumer-integration checkpoint?
+- Proposed for review: replace `station-app`'s current external dependency on
+  `application-client-ready-gate` with Application Client
+  `client-conformance`. Is that the correct supported/conformant implementation
+  export, or should the later `consumer-integration-gate` be required instead?
 
 ## Imports and Exports
 
