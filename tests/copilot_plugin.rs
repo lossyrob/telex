@@ -449,6 +449,10 @@ fn operator_station_skill_contract_is_complete_and_versioned() {
         "## Non-impersonation",
         "## Compatibility",
         "## Isolated validation",
+        "derivationVersion=22:operator-station-op-v1",
+        "resolve: `storeId`, `rawMessageId`, `ingressAddress`",
+        "sorted by numeric message ID ascending",
+        "`outcomeType`, exactly matching the intended raw disposition",
     ] {
         assert!(
             skill.contains(heading),

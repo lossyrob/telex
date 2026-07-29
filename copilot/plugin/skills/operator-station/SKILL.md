@@ -98,21 +98,31 @@ Never silently suppress work and never describe mere occupancy as healthy.
 
 ## Identity and retry
 
-All application identities use derivation version `operator-station-op-v1`. Serialize
-UTF-8 values exactly as stored, one `field=<UTF-8-byte-length>:<value>` line in the
-listed order, with no case, path, whitespace, Unicode, or address normalization. The
-length prefix makes embedded delimiters unambiguous. The stable identifier is
+All application identities use derivation version `operator-station-op-v1`. Canonical
+bytes are UTF-8 lines terminated by LF, including the final line:
+
+```text
+derivationVersion=22:operator-station-op-v1
+purpose=<UTF-8-byte-length>:<purpose>
+<purpose-specific fields in the exact order below>
+```
+
+Each field line is `field=<UTF-8-byte-length>:<value>\n`. Serialize values exactly as
+stored, with no case, path, whitespace, Unicode, or address normalization. The length
+prefix makes embedded delimiters unambiguous. The stable identifier is
 `operator-station-op-v1/<purpose>/<lowercase-sha256-of-canonical-bytes>`.
 
 Canonical inputs are:
 
+- resolve: `storeId`, `rawMessageId`, `ingressAddress`;
 - mediation: `storeId`, `rawMessageId`, `ingressAddress`, `humanAddress`;
 - escalation: `mediationId`, `rootRawMessageId`;
 - clarification: `storeId`, `rawMessageId`, `clarificationOrdinal`, where the ordinal
   is counted from durable raw-thread clarification history;
 - route-back or disposition-only outcome: `mediationId`, `humanResponseMessageId`;
-- digest: `storeId`, `windowStartMs`, `windowEndMs`, then sorted `sourceMessageId`
-  lines from the source set frozen in durable pending-digest evidence.
+- digest: `storeId`, `windowStartMs`, `windowEndMs`, then repeated `sourceMessageId`
+  lines sorted by numeric message ID ascending from the source set frozen in durable
+  pending-digest evidence.
 
 Carry the derivation version with every operation record and envelope. Changing fields,
 ordering, encoding, or hashing requires a new derivation version and compatibility
@@ -254,9 +264,12 @@ human-response message ID. Without a human disposition intent, leave raw and med
 roots open. With `handled`, close the raw obligation only after route-back acceptance.
 
 For `disposition-only`, persist a route operation and emit a machine-readable raw-thread
-routed outcome before any non-stale terminal disposition. `handled`, `rejected`, and
-`closed` require that route-back record first. `deferred` remains open. Do not terminally
-handle the human-response obligation until the required raw operation succeeds.
+routed outcome before any non-stale disposition. Its extension block must include
+`outcomeType`, exactly matching the intended raw disposition: `handled`, `deferred`,
+`rejected`, or `closed`. `handled`, `rejected`, and `closed` require that route-back
+record first. `deferred` remains open. A missing or mismatched `outcomeType` blocks the
+transition. Do not terminally handle the human-response obligation until the required
+raw operation succeeds.
 
 For every send, check expected parent, thread, sender, and recipient. An indeterminate or
 mismatched receipt never advances either obligation. Before any terminal disposition,

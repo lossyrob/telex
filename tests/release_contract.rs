@@ -838,4 +838,16 @@ fn plugin_versions_track_the_crate_version() {
         Some(expected_signature.as_str()),
         "Operator Station supported workflow signature must attest the release version"
     );
+    let releasing = read("docs/developing/releasing.md");
+    for required in [
+        "copilot/plugin/skills/operator-station/compatibility.json",
+        "copilot/plugin/skills/operator-station/SKILL.md",
+        "tests/operator_station_lifecycle.rs",
+        "telex-copilot-v<package-version>/operator-station-op-v1",
+    ] {
+        assert!(
+            releasing.contains(required),
+            "release runbook must include Operator Station compatibility surface {required:?}"
+        );
+    }
 }

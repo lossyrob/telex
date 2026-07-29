@@ -15,7 +15,11 @@ const HUMAN: &str = "validation:human-station";
 const WORKER: &str = "validation:worker";
 const HANDOFF_WORKER: &str = "validation:handoff-worker";
 const EXTENSION_ID: &str = "urn:telex:operator-station:v1";
-const WORKFLOW_SIGNATURE: &str = "telex-copilot-v0.1.2/operator-station-op-v1";
+const WORKFLOW_SIGNATURE: &str = concat!(
+    "telex-copilot-v",
+    env!("CARGO_PKG_VERSION"),
+    "/operator-station-op-v1"
+);
 const STALE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
 
 static NEXT_RUN: AtomicUsize = AtomicUsize::new(1);
@@ -1346,37 +1350,44 @@ fn restrict_directory(path: &Path) {
 
 fn run_with_timeout(mut command: Command, timeout: Duration) -> RunOutput {
     let mut child = command.spawn().expect("spawn worktree telex command");
+    let stdout = child.stdout.take().expect("captured stdout");
+    let stderr = child.stderr.take().expect("captured stderr");
+    let stdout_reader = std::thread::spawn(move || read_stream(stdout, "stdout"));
+    let stderr_reader = std::thread::spawn(move || read_stream(stderr, "stderr"));
     let deadline = Instant::now() + timeout;
+    let mut timed_out = false;
     let status = loop {
         if let Some(status) = child.try_wait().expect("poll worktree telex command") {
             break status;
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
-            let _ = child.wait();
-            panic!("worktree telex command timed out after {timeout:?}");
+            timed_out = true;
+            break child
+                .wait()
+                .expect("wait for timed-out worktree telex command");
         }
         std::thread::sleep(Duration::from_millis(25));
     };
-    let mut stdout = String::new();
-    let mut stderr = String::new();
-    child
-        .stdout
-        .take()
-        .expect("captured stdout")
-        .read_to_string(&mut stdout)
-        .expect("read worktree telex stdout");
-    child
-        .stderr
-        .take()
-        .expect("captured stderr")
-        .read_to_string(&mut stderr)
-        .expect("read worktree telex stderr");
+    let stdout = stdout_reader.join().expect("join stdout reader");
+    let stderr = stderr_reader.join().expect("join stderr reader");
+    assert!(
+        !timed_out,
+        "worktree telex command timed out after {timeout:?}; stdout={stdout} stderr={stderr}"
+    );
     RunOutput {
         status,
         stdout,
         stderr,
     }
+}
+
+fn read_stream(mut stream: impl Read, label: &str) -> String {
+    let mut output = String::new();
+    stream
+        .read_to_string(&mut output)
+        .unwrap_or_else(|error| panic!("read worktree telex {label}: {error}"));
+    output
 }
 
 fn message_id(receipt: &Value) -> i64 {

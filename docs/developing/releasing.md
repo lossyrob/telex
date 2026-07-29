@@ -55,6 +55,12 @@ to the matrix and an install.sh case arm is a self-contained follow-up.
   - `.github/plugin/marketplace.json` (`metadata.version` and the plugin `version`)
   - `copilot/plugin/plugin.json` (`version`)
   - the `--plugin-version` example in `copilot/plugin/skills/telex/SKILL.md`
+  - `copilot/plugin/skills/operator-station/compatibility.json`
+    (`telex_package_version`, `plugin_version`, and `workflow_signature`)
+  - the current compatibility version/signature text in
+    `copilot/plugin/skills/operator-station/SKILL.md`
+  - Operator Station lifecycle expectations derived from
+    `env!("CARGO_PKG_VERSION")` in `tests/operator_station_lifecycle.rs`
 
   (The plugin/binary compatibility check is version-matched, so drift here surfaces
   to users. A future improvement is to derive these from a single source.)
@@ -67,6 +73,9 @@ Run through this before pushing a tag:
 - [ ] Bump `Cargo.toml` `version` to the release version; run a build so `Cargo.lock`
       updates; commit.
 - [ ] Bump the plugin/marketplace version strings listed above to match.
+- [ ] Review the stable Operator Station compatibility fixture and packaged skill;
+      confirm the workflow signature is
+      `telex-copilot-v<package-version>/operator-station-op-v1`.
 - [ ] `cargo test --workspace` is green (includes `tests/release_contract.rs`).
 - [ ] Trigger a `workflow_dispatch` run of **Release** and confirm all matrix legs
       build/package/checksum/upload artifacts — pay attention to the
