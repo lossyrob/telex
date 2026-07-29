@@ -819,7 +819,7 @@ fn plugin_versions_track_the_crate_version() {
     );
 
     let operator_fixture: Value = serde_json::from_str(&read(
-        "copilot/plugin/skills/operator-station/compatibility-v0.1.2.json",
+        "copilot/plugin/skills/operator-station/compatibility.json",
     ))
     .expect("Operator Station compatibility fixture parses");
     assert_eq!(

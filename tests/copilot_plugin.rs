@@ -414,8 +414,7 @@ fn plugin_skill_is_thin_bootstrap_that_defers_to_the_binary() {
 fn operator_station_skill_contract_is_complete_and_versioned() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR"));
     let skill_path = root.join("copilot/plugin/skills/operator-station/SKILL.md");
-    let fixture_path =
-        root.join("copilot/plugin/skills/operator-station/compatibility-v0.1.2.json");
+    let fixture_path = root.join("copilot/plugin/skills/operator-station/compatibility.json");
     let skill = std::fs::read_to_string(&skill_path)
         .expect("read Operator Station skill")
         .replace("\r\n", "\n");
@@ -526,7 +525,7 @@ fn operator_station_skill_contract_is_complete_and_versioned() {
     );
     assert_eq!(
         fixture["validation_scope"],
-        "deterministic-envelope-ordering-recovery-not-model-quality"
+        "deterministic-envelope-lifecycle-recovery-not-model-quality"
     );
     assert_eq!(fixture["compatibility_mode"], "capability-gated");
     assert!(fixture["required_runtime_capabilities"]
@@ -640,7 +639,7 @@ fn plugin_version_is_consistent_across_manifest_marketplace_and_bootstrap() {
     let fixture: Value = serde_json::from_str(
         &std::fs::read_to_string(
             Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("copilot/plugin/skills/operator-station/compatibility-v0.1.2.json"),
+                .join("copilot/plugin/skills/operator-station/compatibility.json"),
         )
         .expect("read Operator Station compatibility fixture"),
     )

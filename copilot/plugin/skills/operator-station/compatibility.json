@@ -26,5 +26,5 @@
     "foreign-station-health-and-backlog"
   ],
   "known_runtime_blocks": [],
-  "validation_scope": "deterministic-envelope-ordering-recovery-not-model-quality"
+  "validation_scope": "deterministic-envelope-lifecycle-recovery-not-model-quality"
 }

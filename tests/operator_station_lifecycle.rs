@@ -427,8 +427,23 @@ impl IsolatedTelexPlane {
 impl Drop for IsolatedTelexPlane {
     fn drop(&mut self) {
         if !self.cleaned {
-            let _ = self.stop_daemon();
-            let _ = remove_directory_with_retry(&self.run_root, Duration::from_secs(5));
+            let cleanup = self.stop_daemon().and_then(|()| {
+                remove_directory_with_retry(&self.run_root, Duration::from_secs(5))
+                    .map_err(|error| error.to_string())
+            });
+            if let Err(error) = cleanup {
+                if std::thread::panicking() {
+                    eprintln!(
+                        "isolated Operator Station cleanup failed during unwind for {}: {error}",
+                        self.run_root.display()
+                    );
+                } else {
+                    panic!(
+                        "isolated Operator Station cleanup failed for {}: {error}",
+                        self.run_root.display()
+                    );
+                }
+            }
         }
     }
 }
@@ -438,7 +453,7 @@ fn isolated_operator_station_lifecycle_preserves_v1_invariants() {
     let mut plane = IsolatedTelexPlane::new();
 
     let fixture: Value = serde_json::from_str(include_str!(
-        "../copilot/plugin/skills/operator-station/compatibility-v0.1.2.json"
+        "../copilot/plugin/skills/operator-station/compatibility.json"
     ))
     .expect("compatibility fixture parses");
     let version = plane.run("compatibility", ["--json", "version"]);

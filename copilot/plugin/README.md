@@ -44,7 +44,7 @@ completion evidence. Missing metadata-bearing replies, exact receipt identity, o
 history, or foreign-station health is a blocked compatibility condition.
 
 The checked-in
-`skills/operator-station/compatibility-v0.1.2.json` fixture ties the role to the Telex
+`skills/operator-station/compatibility.json` fixture ties the role to the Telex
 and plugin release. Package version changes require explicit fixture and contract-test
 review. Compatibility is capability-gated: routed outcomes require the
 `reply_metadata_p11` daemon capability. Missing capability support leaves
