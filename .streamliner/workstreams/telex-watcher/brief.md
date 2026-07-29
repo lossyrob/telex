@@ -120,13 +120,14 @@ orchestration owns updating that link to
 alignment remains tracked in
 [#124](https://github.com/lossyrob/telex/issues/124).
 
-No Watcher implementation worker is active, and campaign/operator GO is required
-before any new launch. `detector-template-library` is the next node eligible for
-detailed promotion under the accepted contract. `watcher-runtime` is not yet
-launch-ready: production integration still needs the supported Application
-Client core, binding, and conformance work, while its current graph dependency
-names only the design-only `application-client-ready-gate`. That dependency and
-the parallel-versus-staged node shape require orchestrator/operator review before
+Campaign authorized staged execution: `detector-template-library` is promoted
+through tracker
+[#127](https://github.com/lossyrob/telex/issues/127) and may proceed independently
+under the accepted semantic contract. `watcher-runtime` remains held:
+production integration still needs the supported Application Client core,
+binding, and conformance work, while its current graph dependency names only the
+design-only `application-client-ready-gate`. Campaign directed orchestration to
+propose, not silently apply, a replacement cross-workstream dependency before
 runtime launch. There is no spike-private fallback.
 
 ## Decisions

@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "Application Client's design-only checkpoint landed through clean PR #126. No Watcher worker is active; detector-template-library is next eligible for detailed promotion, while watcher-runtime needs a reviewed dependency on the supported client implementation. New launches await campaign/operator GO.",
+  "summary": "Detector-template-library is promoted through issue #127 for staged execution under the accepted contract. Watcher-runtime remains held pending a reviewed dependency on an explicit supported/conformant Application Client export.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-29T15:02:00Z",
+  "updatedAt": "2026-07-29T15:10:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -138,12 +138,18 @@
       "id": "detector-template-library",
       "type": "task",
       "title": "Agent-authored detector templates and skill guidance",
-      "summary": "Package editable, tested detector templates and agent guidance for GitHub PRs, Azure DevOps PRs, HTTP/JSON, and command/file conditions. Templates demonstrate protocol and safe state practice without moving provider semantics into the runtime. Sketch; detail after watcher-contract.",
-      "status": "planned",
+      "summary": "Deliver editable, tested GitHub PR, Azure DevOps PR, HTTP/JSON, and command/file detector templates plus agent guidance, schema conformance, provenance, cursor/replay, downtime, and terminal-state practices without moving provider semantics into the runtime.",
+      "status": "ready",
       "attention": "watch",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 127
+      },
       "dependsOn": [
         "watcher-contract"
       ],
