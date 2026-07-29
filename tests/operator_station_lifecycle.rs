@@ -209,19 +209,30 @@ impl IsolatedTelexPlane {
     }
 
     fn attach(&self, session: &str, address: &str) {
-        let out = self.run_backend(
-            session,
-            [
-                "--address",
-                address,
-                "attach",
-                "--session",
+        let mut last = None;
+        for attempt in 1..=3 {
+            let out = self.run_backend(
                 session,
-                "--description",
-                "isolated Operator Station lifecycle validation",
-            ],
-        );
-        out.assert_success(&format!("attach {session} to {address}"));
+                [
+                    "--address",
+                    address,
+                    "attach",
+                    "--session",
+                    session,
+                    "--description",
+                    "isolated Operator Station lifecycle validation",
+                ],
+            );
+            if out.status.success() {
+                return;
+            }
+            last = Some(out);
+            if attempt < 3 {
+                std::thread::sleep(Duration::from_millis(250));
+            }
+        }
+        last.expect("attach attempt")
+            .assert_success(&format!("attach {session} to {address} after bounded retries"));
     }
 
     fn stop_station(&self, session: &str, address: &str) {
