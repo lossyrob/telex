@@ -45,8 +45,18 @@ initially attended by the temporary preparation session rather than the launched
 worker; orchestration detached that stale registration after the preparation
 session ended. Both launched sessions remained live and graph-bound, but neither
 registered its assigned Telex control station during the bounded startup wait.
-The node is in progress with degraded control-channel reachability, and the
-launch-profile/broker interaction is escalated for campaign review.
+That launch was treated as degraded, and the launch-profile/broker interaction
+was escalated for campaign review.
+
+Campaign ordered a fresh corrected-profile relaunch. Run
+`686fc37a-43b8-496c-a086-29fc0f094527` created replacement sessions, and the
+reviewer reached Telex. A later profile correction established that all active
+v2 implementers must use `Artifact Lifecycle: never-commit`; the preserved
+WorkflowContext still said `commit-and-clean`, with PAW-only commits `50dbe86`
+and `5cff47f` already on the branch. Both replacements were stopped before
+product implementation, their claims and stations were cleared, and the
+worktree was preserved unchanged. The node is now blocked on an authorized
+lifecycle repair.
 
 ## Boundaries
 
@@ -133,6 +143,11 @@ Station/broker acceptance.
   ledgers, and approval artifacts. Clean PR #126 restored a product-only change;
   future nodes must use the Streamliner launch broker and route new gates or
   workflow rewinds back to orchestration.
+- **Recovery:** The first #128 broker launches inherited `commit-and-clean` PAW
+  metadata and created workflow-only commits before product work. Campaign
+  corrected the profile to `never-commit`; orchestration stopped the sessions
+  and preserved the branch for explicit repair rather than silently rewriting
+  it.
 - **Inspired:** Staging `operator-broker` separately preserves useful parallelism:
   the agent-role package can be built against accepted semantics while the
   desktop waits for a supported/conformant client export.

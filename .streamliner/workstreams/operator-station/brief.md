@@ -134,17 +134,22 @@ accepted API-neutral semantic contract in clean PR #126 because it packages an
 agent-session role and routing policy rather than the non-agent Application
 Client.
 
-Streamliner launch-preparation run
-`1aec0d88-bdb2-41e8-b69f-acee8e6b47bc` launched the paired implementation and
-review sessions in `telex-operator-broker-128` on
-`feature/operator-broker-128`. The assigned control addresses are
-`telex://lossyrob/telex/T-A:operator-impl-128` and
-`telex://lossyrob/telex/T-A:operator-review-128`. Both sessions are live and
-graph-bound. During preparation, the temporary PAW-init session incorrectly
-attached the implementer address and then ended; orchestration detached that
-stale station. Neither launched worker registered its assigned Telex station
-within the subsequent bounded startup window, so the Telex control channel is
-currently degraded and campaign orchestration has been notified.
+Initial launch run `1aec0d88-bdb2-41e8-b69f-acee8e6b47bc` produced unbound
+sessions and was stopped. Corrected-profile relaunch run
+`686fc37a-43b8-496c-a086-29fc0f094527` produced replacement sessions, but the
+preserved WorkflowContext still declared `Artifact Lifecycle:
+commit-and-clean` and the feature branch already contained two PAW-only commits.
+Campaign corrected the active profile to `never-commit` and ordered a stop
+before implementation. Both replacement sessions were ended, their exact
+processes/stations were stopped, and launch claims were cleared.
+
+The preserved worktree contains only PAW initialization state:
+`50dbe86` and `5cff47f` add/adjust
+`.paw/work/operator-broker-128/WorkflowContext.md`; generated
+`streamliner/context.md` remains untracked. No product implementation edits
+occurred. `operator-broker` is blocked until campaign/operator authority chooses
+a clean never-commit repair that preserves this evidence without silently
+rewriting or deleting the worktree.
 
 `station-app` remains planned and held. The current graph still targets the
 pending `application-client-ready-gate`; no cross-workstream dependency geometry
@@ -218,11 +223,18 @@ review is required before applying that proposal.
   with Application Client core/binding work because it is an agent-session role
   built from the accepted semantic contract. `station-app` remains held for a
   supported/conformant client export.
+- **PAW evidence stays off the product branch:** Future `operator-broker`
+  launches use `Artifact Lifecycle: never-commit`. The current tracked PAW-only
+  commits are preserved pending an explicit repair decision; no worker resumes
+  from them automatically.
 
 ## Open Questions
 
 - Will campaign/operator authority accept the issue #12 checkpoint update for
   clean PR #126 and export `application-client-ready` to this workstream?
+- Which authorized repair should convert the preserved `operator-broker`
+  worktree from tracked `commit-and-clean` PAW state to the required
+  `never-commit` lifecycle without losing forensic evidence?
 - Proposed for review: replace `station-app`'s current external dependency on
   `application-client-ready-gate` with Application Client
   `client-conformance`. Is that the correct supported/conformant implementation
