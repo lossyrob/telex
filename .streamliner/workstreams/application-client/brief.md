@@ -78,34 +78,38 @@ The workstream is part of the
 and is tracked by parent issue
 [#117](https://github.com/lossyrob/telex/issues/117).
 
-Both consumer domain contracts are merged and durably reconciled:
+The contract-convergence node is complete. Clean replacement
+[PR #126](https://github.com/lossyrob/telex/pull/126) merged to `main` as
+`62c2b23` and closed
+[#118](https://github.com/lossyrob/telex/issues/118). The merged product state:
 
-- Watcher #110 / PR #115, ADR 0046, four canonical schemas, requirements
-  [export](https://github.com/lossyrob/telex/issues/12#issuecomment-5042702401),
-  and merged-source
-  [addendum](https://github.com/lossyrob/telex/issues/12#issuecomment-5043498697).
-- Operator Station #114 / PR #116, ADR 0047/0048, corrected requirements
-  [export](https://github.com/lossyrob/telex/issues/12#issuecomment-5042612298),
-  and merged-source
-  [addendum](https://github.com/lossyrob/telex/issues/12#issuecomment-5044388908).
+- adds the API-neutral Application Client contract and ADR 0049;
+- preserves the exact pre-convergence issue #12 body;
+- keeps `docs/design/application-client.md` as the sole normative semantic
+  authority;
+- stores the 30-row requirements mapping under
+  `docs/notes/application-client/requirements-crosswalk.md` as durable,
+  non-normative traceability/provenance;
+- preserves 30 accepted, 0 deferred, 0 rejected mappings and the W-15
+  status-provenance repair;
+- adds the design-only bundle manifest with SHA-256
+  `085deed89cef1741fb6967bbd9f5e87e4f9cf104917518a234006c35b0f62296`.
 
-The builder explicitly approved retaining this workstream and
-`contract-convergence` node
-[#118](https://github.com/lossyrob/telex/issues/118) after the campaign's scope
-review. The node is active in planning. Planning-reviewed plan revision 14 is
-committed at `626a80a`; requests sent before the scope pause were closed, and a
-fresh exact-plan request must receive both Application Client and campaign
-approval before contract work begins.
+Polluted [PR #123](https://github.com/lossyrob/telex/pull/123) was closed
+without merge and remains preserved for protocol forensics. Its branch and
+dirty forensic worktree must not be removed without explicit cleanup
+authorization.
 
-Campaign orchestration allocated ADR 0049 for the shared API-neutral semantic
-boundary. The number is reserved but the ADR is not yet landed; use remains
-gated on exact plan approval and latest-main collision revalidation. Issue #12
-remains the sole semantic owner and has not published
-`application-client-ready`.
+Issue [#12](https://github.com/lossyrob/telex/issues/12) remains the semantic
+contract owner and still publishes the prior immutable checkpoint. Its
+supporting traceability link and manifest identity refer to the superseded
+pre-repair path, so the `application-client-ready-gate` remains pending an
+orchestrator-owned checkpoint reconciliation. Later core, binding, conformance,
+integration, and hardening nodes remain planned and blocked on that gate.
 
-The `application-client-ready-gate` is pending. All later client, binding,
-conformance, integration, and hardening nodes remain planned and blocked on
-that semantic checkpoint.
+Issue [#124](https://github.com/lossyrob/telex/issues/124) tracks the
+non-blocking W-05 membership-loss taxonomy wording alignment. Its placement in
+the next implementation/conformance geometry remains an orchestration decision.
 
 ## Decisions
 
@@ -137,6 +141,16 @@ that semantic checkpoint.
 - **Shared artifacts follow primary-main ownership:** workers use feature
   worktrees; only the Application Client workstream orchestrator reconciles this
   brief, graph, and related Streamliner state from the primary main checkout.
+- **Traceability is supporting evidence, not design authority:** the requirements
+  crosswalk lives under `docs/notes`; `docs/design/application-client.md` alone
+  defines the intended Application Client semantics.
+- **Workers execute node missions, not workstream gates:** checkpoint, campaign
+  approval, issue-publication, human-attention, and workflow-rewind state remain
+  orchestrator-owned. PAW plans, ledgers, snapshots, transcripts, and approval
+  evidence stay off product branches unless explicitly named as deliverables.
+- **Future node launches use the Streamliner launch broker:** the workstream's v2
+  implementer/reviewer defaults are resolved and launched through
+  `/api/launch-preparations/runs`, not hand-written terminal prompts.
 
 ## Open Questions
 
@@ -147,6 +161,9 @@ that semantic checkpoint.
   surface and defer other languages?
 - Which conformance evidence is required before product integration PRs may
   merge, beyond the earlier semantic `application-client-ready` checkpoint?
+- Should issue #124 be absorbed as a small pre-core documentation node, or be a
+  declared dependency/acceptance item for `client-core` or
+  `client-conformance`?
 
 ## Imports and Exports
 
@@ -161,7 +178,7 @@ that semantic checkpoint.
 ### Exports
 
 - One accepted API-neutral Application Client semantic contract.
-- Per-requirement dispositions and crosswalk on issue #12.
+- Per-requirement dispositions in a durable, non-normative traceability note.
 - The `application-client-ready` checkpoint consumed by Operator Station and
   Telex Watcher.
 - A supported client core, first binding, and conformance evidence for later
@@ -171,7 +188,17 @@ that semantic checkpoint.
 
 ## Closeout Observations
 
-Keep API convenience, additional bindings, and consumer-specific ergonomics out
-of the contract node unless they expose a missing semantic. Any requirement that
-cannot be accepted must name its blocked consumer and owner rather than being
-softened into ambiguous shared wording.
+- Issue #12's supporting-traceability link and manifest identity are stale
+  relative to merged PR #126. Promote this to the pending
+  `application-client-ready-gate`; do not silently edit the contract-owner
+  checkpoint.
+- W-05 taxonomy wording is promoted to issue #124. Decide its graph dependency
+  before launching implementation or conformance work.
+- Polluted PR #123 and its dirty worktree are deferred with rationale for
+  protocol forensics; cleanup requires explicit operator authorization.
+- The clean #118 implementation worktree is also deferred for cleanup until the
+  operator requests it.
+- Keep API convenience, additional bindings, and consumer-specific ergonomics
+  out of contract work unless they expose a missing semantic. Any requirement
+  that cannot be accepted must name its blocked consumer and owner rather than
+  being softened into ambiguous shared wording.

@@ -3,11 +3,11 @@
   "id": "application-client",
   "projectKey": "telex",
   "title": "Telex Application Client (supported long-lived application integration)",
-  "summary": "Builder-approved contract-convergence node #118 is active in exact-plan review; ADR 0049 is reserved, application-client-ready remains pending, and all later nodes are planned but blocked on that semantic gate.",
+  "summary": "Contract convergence completed through clean PR #126 and issue #118. The application-client-ready gate remains pending checkpoint reconciliation in issue #12; later implementation, binding, conformance, integration, and hardening nodes remain blocked.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-07-22T14:45:07Z",
+  "updatedAt": "2026-07-29T14:48:09Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -64,8 +64,8 @@
       "id": "contract-convergence",
       "type": "research",
       "title": "Converge shared Application Client contract",
-      "summary": "Active planning for issue #118: obtain fresh dual exact approval for planning-reviewed revision 14 at commit 626a80a, then reconcile every merged Watcher and Operator requirement through issue #12. ADR 0049 is allocated but not landed; no contract or publication work begins before the plan gate.",
-      "status": "in-progress",
+      "summary": "Completed through issue #118 and clean PR #126 (merge 62c2b23): API-neutral contract, ADR 0049, non-normative requirements traceability, historical issue #12 snapshot, design index, and reproducible design-only manifest landed without workflow artifacts.",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -220,12 +220,12 @@
     "requiredTracker": "github-issue"
   },
   "launchDefaults": {
-    "promptProfileId": "telex-application-client-implementer-watcher-v1",
+    "promptProfileId": "telex-application-client-implementer-watcher-v2",
     "terminal": {
       "titleTemplate": "TLX-A {githubIssue}"
     },
     "launchAfterInit": true,
     "reviewCompanion": true,
-    "reviewPromptTemplateId": "telex-application-client-reviewer-watcher-v1"
+    "reviewPromptTemplateId": "telex-application-client-reviewer-watcher-v2"
   }
 }
