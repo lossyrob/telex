@@ -231,8 +231,9 @@ impl IsolatedTelexPlane {
                 std::thread::sleep(Duration::from_millis(250));
             }
         }
-        last.expect("attach attempt")
-            .assert_success(&format!("attach {session} to {address} after bounded retries"));
+        last.expect("attach attempt").assert_success(&format!(
+            "attach {session} to {address} after bounded retries"
+        ));
     }
 
     fn stop_station(&self, session: &str, address: &str) {
