@@ -2,7 +2,6 @@
   "apiVersion": "User-supplied JSON API; fixture shape v1",
   "capturedAgainst": "sanitized fixture contract v1",
   "service": {
-    "ready": true,
-    "status": "healthy"
+    "status": "unknown"
   }
 }

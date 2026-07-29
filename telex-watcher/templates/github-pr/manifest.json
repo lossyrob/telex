@@ -1,9 +1,9 @@
 {
   "manifestSchemaVersion": 1,
   "templateId": "github-pr",
-  "templateVersion": "1.0.0",
+  "templateVersion": "1.1.0",
   "detectorProtocolVersion": 1,
-  "evidenceNormalizationVersion": 1,
+  "evidenceNormalizationVersion": 2,
   "runtimeRequirement": {
     "command": "pwsh",
     "minimumVersion": "7.4",
@@ -11,11 +11,11 @@
   },
   "librarySource": {
     "path": "github-pr/detector.ps1",
-    "sha256": "2ecd18c47d472c4365517b6d5aa36f1facf9c5e56a90da98048b00feb215e9a5",
+    "sha256": "43a60bfc85db46570def0b17c33dd0a7c88b10791c465c2dc10866fa33f87ead",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
-        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+        "sha256": "d7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c"
       }
     ]
   },
@@ -31,12 +31,17 @@
   ],
   "cursor": {
     "stateField": "cursor",
-    "strategy": "sha256-compact-normalized-json",
+    "strategy": "sha256-recursive-key-sorted-json-v1",
     "replay": "The cursor covers PR identity, head SHA, state, draft flag, merge state, review decision, and sorted checks. An unchanged cursor returns idle."
   },
   "semantics": {
-    "terminal": "Merged or closed PRs return terminal. If terminalization occurs after a successful preflight but before the first attempt, the first result is eventless terminal.",
-    "duplicates": "Event IDs are deterministic from PR number and normalized cursor. At-least-once delivery can repeat the same event ID; recipients must deduplicate it."
+    "terminal": "Merged or closed PRs return terminal. If preflight declares terminal, or terminalization occurs after safe preflight but before the first attempt, the result is eventless terminal.",
+    "duplicates": "Event IDs are deterministic from PR number and normalized cursor. At-least-once delivery can repeat the same event ID; recipients must deduplicate it.",
+    "initialEmission": {
+      "actionable": "A naturally actionable attention, ready-to-merge, or completion condition emits on the first attempt even when emitInitialSnapshot is false.",
+      "synthetic": "The synthetic github.pull-request.snapshot baseline emits only when emitInitialSnapshot is true. The pinned registration keeps it false and does not authorize the snapshot kind."
+    },
+    "diagnostics": "Identity, authentication, provider, and configuration failures return schema-valid degraded results and write a structured detectorDiagnostic JSON record to stderr only."
   },
   "credentials": {
     "policy": "Use the GitHub CLI credential store or allowlist GH_TOKEN. Never put a token in parameters, state, fixtures, or registrations.",
@@ -44,10 +49,11 @@
     "optionalEnvironmentVariables": [
       "GH_TOKEN"
     ],
+    "conditionalRequirements": [],
     "forbiddenInRequest": true
   },
   "provider": {
-    "apiVersion": "GitHub CLI pr-view JSON field set v1",
+    "apiVersion": "gh >=2.55.0 pr view --json contract v1",
     "callsPerAttempt": 1
   },
   "scheduling": {

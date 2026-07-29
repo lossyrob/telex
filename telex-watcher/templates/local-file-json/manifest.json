@@ -1,9 +1,9 @@
 {
   "manifestSchemaVersion": 1,
   "templateId": "local-file-json",
-  "templateVersion": "1.0.0",
+  "templateVersion": "1.1.0",
   "detectorProtocolVersion": 1,
-  "evidenceNormalizationVersion": 1,
+  "evidenceNormalizationVersion": 2,
   "runtimeRequirement": {
     "command": "pwsh",
     "minimumVersion": "7.4",
@@ -11,11 +11,11 @@
   },
   "librarySource": {
     "path": "local-file-json/detector.ps1",
-    "sha256": "ae9eaad295b031b62b5e7f04695604928bb3819547f951ab418289aca0994b93",
+    "sha256": "d819f65a70a2c93cb9d0122345fdcda081ad5dcfa88700282fe00847c8087f5e",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
-        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+        "sha256": "d7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c"
       }
     ]
   },
@@ -28,17 +28,24 @@
   ],
   "cursor": {
     "stateField": "cursor",
-    "strategy": "sha256-compact-normalized-json",
-    "replay": "The cursor covers stable source ID, field, expected and observed values, match state, and document version. An unchanged file returns idle."
+    "strategy": "sha256-recursive-key-sorted-json-v1",
+    "replay": "The cursor covers stable source ID, field, expected value, field presence, observed value, match state, and optional document version. An unchanged file returns idle."
   },
   "semantics": {
     "terminal": "This continuing local condition never returns terminal; remove or pause it when the condition no longer matters.",
-    "duplicates": "Event IDs are deterministic from source ID and normalized cursor. Recipients must deduplicate repeated event IDs."
+    "duplicates": "Event IDs are deterministic from source ID and normalized cursor. Recipients must deduplicate repeated event IDs.",
+    "initialEmission": {
+      "actionable": "An already-matched scalar condition emits on the first attempt.",
+      "synthetic": "This template has no synthetic snapshot event; emitInitialSnapshot is not a supported parameter."
+    },
+    "diagnostics": "File, parse, and configuration failures return schema-valid degraded results and write a structured detectorDiagnostic JSON record to stderr only.",
+    "classification": "Document version and message fields are optional. A missing observed field never matches an expected null."
   },
   "credentials": {
     "policy": "No credential environment variables are used. File authorization is the operating-system identity of the trusted Watcher process.",
     "requiredEnvironmentVariables": [],
     "optionalEnvironmentVariables": [],
+    "conditionalRequirements": [],
     "forbiddenInRequest": true
   },
   "provider": {

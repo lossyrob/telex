@@ -6,12 +6,12 @@
     "-NoLogo",
     "-NoProfile",
     "-File",
-    "C:\\path\\to\\telex-watcher\\templates\\github-pr\\detector.ps1"
+    "<DETECTOR-PATH>"
   ],
-  "scriptPath": "C:\\path\\to\\telex-watcher\\templates\\github-pr\\detector.ps1",
-  "workingDirectory": "C:\\path\\to\\telex-watcher\\templates\\github-pr",
+  "scriptPath": "<DETECTOR-PATH>",
+  "workingDirectory": "<TEMPLATE-DIRECTORY>",
   "scriptMode": "pinned",
-  "scriptDigest": "2ecd18c47d472c4365517b6d5aa36f1facf9c5e56a90da98048b00feb215e9a5",
+  "scriptDigest": "43a60bfc85db46570def0b17c33dd0a7c88b10791c465c2dc10866fa33f87ead",
   "backendProfile": "default",
   "sender": "watcher@example.invalid",
   "target": "recipient@example.invalid",
@@ -22,8 +22,7 @@
   "allowedEventKinds": [
     "github.pull-request.attention",
     "github.pull-request.completed",
-    "github.pull-request.ready-to-merge",
-    "github.pull-request.snapshot"
+    "github.pull-request.ready-to-merge"
   ],
   "allowedEventKindPrefixes": [],
   "environmentAllowlist": [
@@ -34,23 +33,6 @@
     "pullRequestNumber": 123,
     "emitInitialSnapshot": false
   },
-  "initialState": {
-    "preflight": {
-      "schemaVersion": 1,
-      "provider": "github",
-      "templateIds": [
-        "github-pr",
-        "github-pr-external-activity"
-      ],
-      "observedAt": "2026-07-29T12:00:00Z",
-      "terminal": false,
-      "state": "OPEN",
-      "identity": {
-        "repository": "OWNER/REPOSITORY",
-        "pullRequestNumber": 123,
-        "headSha": "REPLACE-WITH-PREFLIGHT-HEAD-SHA"
-      }
-    }
-  },
+  "initialState": {},
   "maxSafeDowntimeSeconds": 900
 }

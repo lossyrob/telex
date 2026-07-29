@@ -6,10 +6,10 @@
     "-NoLogo",
     "-NoProfile",
     "-File",
-    "C:\\path\\to\\telex-watcher\\templates\\http-json\\detector.ps1"
+    "<DETECTOR-PATH>"
   ],
-  "scriptPath": "C:\\path\\to\\telex-watcher\\templates\\http-json\\detector.ps1",
-  "workingDirectory": "C:\\path\\to\\telex-watcher\\templates\\http-json",
+  "scriptPath": "<DETECTOR-PATH>",
+  "workingDirectory": "<TEMPLATE-DIRECTORY>",
   "scriptMode": "follow-path",
   "backendProfile": "default",
   "sender": "watcher@example.invalid",
@@ -30,8 +30,7 @@
     "sourceId": "example-service-status",
     "fieldPath": "service.ready",
     "expectedValue": true,
-    "authentication": "bearer",
-    "emitInitialSnapshot": true
+    "authentication": "bearer"
   },
   "initialState": {},
   "maxSafeDowntimeSeconds": 300

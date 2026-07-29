@@ -26,6 +26,7 @@ uuid = { version = "1", features = ["v4"] }
 [dev-dependencies]
 # Enables the paused/auto-advancing test clock used to prove reconcile backoff is bounded.
 tokio = { version = "1", features = ["test-util"] }
+jsonschema = { version = "0.49.2", default-features = false }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

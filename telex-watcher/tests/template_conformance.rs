@@ -2,7 +2,6 @@
 #[allow(dead_code)]
 mod protocol;
 
-use chrono::DateTime;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
@@ -68,242 +67,66 @@ fn manifest(template_id: &str) -> Value {
     read_json(&templates_root().join(template_id).join("manifest.json"))
 }
 
-fn validate(schema: &Value, instance: &Value, root: &Value, path: &str) -> Result<(), String> {
-    if let Some(allowed) = schema.as_bool() {
-        return if allowed {
-            Ok(())
-        } else {
-            Err(format!("{path}: schema is false"))
-        };
-    }
-    let object = schema
-        .as_object()
-        .ok_or_else(|| format!("{path}: schema is not an object or boolean"))?;
-
-    if let Some(reference) = object.get("$ref").and_then(Value::as_str) {
-        let pointer = reference
-            .strip_prefix('#')
-            .ok_or_else(|| format!("{path}: only local refs are supported"))?;
-        let target = root
-            .pointer(pointer)
-            .ok_or_else(|| format!("{path}: unresolved ref {reference}"))?;
-        return validate(target, instance, root, path);
-    }
-
-    if let Some(all_of) = object.get("allOf").and_then(Value::as_array) {
-        for branch in all_of {
-            validate(branch, instance, root, path)?;
-        }
-    }
-    if let Some(condition) = object.get("if") {
-        if validate(condition, instance, root, path).is_ok() {
-            if let Some(then_schema) = object.get("then") {
-                validate(then_schema, instance, root, path)?;
-            }
-        } else if let Some(else_schema) = object.get("else") {
-            validate(else_schema, instance, root, path)?;
-        }
-    }
-    if let Some(not_schema) = object.get("not") {
-        if validate(not_schema, instance, root, path).is_ok() {
-            return Err(format!("{path}: matched forbidden schema"));
-        }
-    }
-    if let Some(any_of) = object.get("anyOf").and_then(Value::as_array) {
-        if !any_of
-            .iter()
-            .any(|branch| validate(branch, instance, root, path).is_ok())
-        {
-            return Err(format!("{path}: did not match anyOf"));
-        }
-    }
-
-    if let Some(expected) = object.get("const") {
-        if instance != expected {
-            return Err(format!("{path}: expected const {expected}, got {instance}"));
-        }
-    }
-    if let Some(values) = object.get("enum").and_then(Value::as_array) {
-        if !values.contains(instance) {
-            return Err(format!("{path}: value {instance} is not in enum"));
-        }
-    }
-    if let Some(kind) = object.get("type") {
-        let matches = match kind {
-            Value::String(name) => type_matches(name, instance),
-            Value::Array(names) => names
-                .iter()
-                .filter_map(Value::as_str)
-                .any(|name| type_matches(name, instance)),
-            _ => false,
-        };
-        if !matches {
-            return Err(format!("{path}: type mismatch for {kind}, got {instance}"));
-        }
-    }
-
-    if let Some(required) = object.get("required").and_then(Value::as_array) {
-        let instance_object = instance
-            .as_object()
-            .ok_or_else(|| format!("{path}: required applies to a non-object"))?;
-        for name in required.iter().filter_map(Value::as_str) {
-            if !instance_object.contains_key(name) {
-                return Err(format!("{path}: missing required property {name}"));
-            }
-        }
-    }
-    if let Some(properties) = object.get("properties").and_then(Value::as_object) {
-        if let Some(instance_object) = instance.as_object() {
-            for (name, property_schema) in properties {
-                if let Some(value) = instance_object.get(name) {
-                    validate(property_schema, value, root, &format!("{path}.{name}"))?;
-                }
-            }
-            if object.get("additionalProperties") == Some(&Value::Bool(false)) {
-                for name in instance_object.keys() {
-                    if !properties.contains_key(name) {
-                        return Err(format!("{path}: unknown property {name}"));
-                    }
-                }
-            }
-        }
-    }
-
-    if let Some(items) = object.get("items") {
-        if let Some(array) = instance.as_array() {
-            for (index, value) in array.iter().enumerate() {
-                validate(items, value, root, &format!("{path}[{index}]"))?;
-            }
-        }
-    }
-    if let Some(min_items) = object.get("minItems").and_then(Value::as_u64) {
-        if instance.as_array().map_or(0, Vec::len) < min_items as usize {
-            return Err(format!("{path}: fewer than {min_items} items"));
-        }
-    }
-    if object.get("uniqueItems") == Some(&Value::Bool(true)) {
-        if let Some(array) = instance.as_array() {
-            let unique: BTreeSet<String> = array.iter().map(Value::to_string).collect();
-            if unique.len() != array.len() {
-                return Err(format!("{path}: duplicate array item"));
-            }
-        }
-    }
-    if let Some(min_length) = object.get("minLength").and_then(Value::as_u64) {
-        if instance.as_str().map_or(0, |text| text.chars().count()) < min_length as usize {
-            return Err(format!("{path}: string shorter than {min_length}"));
-        }
-    }
-    if let Some(minimum) = object.get("minimum").and_then(Value::as_i64) {
-        if let Some(value) = instance.as_i64() {
-            if value < minimum {
-                return Err(format!("{path}: {value} is less than {minimum}"));
-            }
-        }
-    }
-    if let Some(pattern) = object.get("pattern").and_then(Value::as_str) {
-        let text = instance
-            .as_str()
-            .ok_or_else(|| format!("{path}: pattern applies to non-string"))?;
-        if !pattern_matches(pattern, text) {
-            return Err(format!("{path}: {text:?} does not match {pattern}"));
-        }
-    }
-    if object.get("format").and_then(Value::as_str) == Some("date-time") {
-        let text = instance
-            .as_str()
-            .ok_or_else(|| format!("{path}: date-time applies to non-string"))?;
-        DateTime::parse_from_rfc3339(text)
-            .map_err(|error| format!("{path}: invalid date-time: {error}"))?;
-    }
-    Ok(())
-}
-
-fn type_matches(expected: &str, value: &Value) -> bool {
-    match expected {
-        "object" => value.is_object(),
-        "array" => value.is_array(),
-        "string" => value.is_string(),
-        "integer" => value.as_i64().is_some() || value.as_u64().is_some(),
-        "number" => value.is_number(),
-        "boolean" => value.is_boolean(),
-        "null" => value.is_null(),
-        other => panic!("unsupported schema type {other}"),
-    }
-}
-
-fn pattern_matches(pattern: &str, text: &str) -> bool {
-    match pattern {
-        "^[^\\u0000-\\u001f\\u007f]+$" => {
-            !text.is_empty() && !text.chars().any(|ch| ch <= '\u{1f}' || ch == '\u{7f}')
-        }
-        "^[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$" => {
-            let parts: Vec<_> = text.split('.').collect();
-            parts.len() >= 2
-                && parts.iter().all(|part| {
-                    !part.is_empty()
-                        && part
-                            .chars()
-                            .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '-')
-                        && part
-                            .chars()
-                            .next()
-                            .is_some_and(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
-                })
-        }
-        "^[0-9a-f]{64}$" => {
-            text.len() == 64
-                && text
-                    .bytes()
-                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-        }
-        "^[a-z0-9]+(?:-[a-z0-9]+)*$" => text.split('-').all(|part| {
-            !part.is_empty()
-                && part
-                    .chars()
-                    .all(|ch| ch.is_ascii_lowercase() || ch.is_ascii_digit())
-        }),
-        "^[0-9]+\\.[0-9]+\\.[0-9]+$" => {
-            let parts: Vec<_> = text.split('.').collect();
-            parts.len() == 3
-                && parts
-                    .iter()
-                    .all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
-        }
-        "^7\\.[0-9]+$" => text.strip_prefix("7.").is_some_and(|minor| {
-            !minor.is_empty() && minor.bytes().all(|byte| byte.is_ascii_digit())
-        }),
-        "^(?![A-Za-z]:|[/\\\\]).+$" => {
-            !text.is_empty()
-                && !text.starts_with('/')
-                && !text.starts_with('\\')
-                && !(text.len() >= 2
-                    && text.as_bytes()[0].is_ascii_alphabetic()
-                    && text.as_bytes()[1] == b':')
-        }
-        "^[A-Z_][A-Z0-9_]*$" => {
-            text.bytes()
-                .next()
-                .is_some_and(|byte| byte == b'_' || byte.is_ascii_uppercase())
-                && text
-                    .bytes()
-                    .all(|byte| byte == b'_' || byte.is_ascii_uppercase() || byte.is_ascii_digit())
-        }
-        other => panic!("unsupported schema pattern {other}"),
-    }
-}
-
 fn assert_valid(schema: &Value, instance: &Value, label: &str) {
-    validate(schema, instance, schema, "$")
-        .unwrap_or_else(|error| panic!("{label} failed schema validation: {error}"));
+    let validator = jsonschema::draft202012::options()
+        .should_validate_formats(true)
+        .build(schema)
+        .unwrap_or_else(|error| panic!("{label} schema compilation failed: {error}"));
+    if let Err(error) = validator.validate(instance) {
+        panic!("{label} failed schema validation: {error}");
+    }
+}
+
+fn is_valid(schema: &Value, instance: &Value) -> bool {
+    jsonschema::draft202012::options()
+        .should_validate_formats(true)
+        .build(schema)
+        .expect("compile JSON Schema")
+        .is_valid(instance)
 }
 
 struct DetectorRun {
     result: Value,
     parsed: protocol::ValidatedResult,
+    stderr: String,
 }
 
 fn run_detector(template_id: &str, parameters: Value, state: Value) -> DetectorRun {
+    run_detector_with_env(template_id, parameters, state, &[])
+}
+
+fn inherit_test_baseline(command: &mut Command) {
+    for key in [
+        "PATH",
+        "PATHEXT",
+        "SystemRoot",
+        "SystemDrive",
+        "WINDIR",
+        "ComSpec",
+        "HOME",
+        "USERPROFILE",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "APPDATA",
+        "LOCALAPPDATA",
+        "TMP",
+        "TEMP",
+        "TMPDIR",
+        "LANG",
+        "LC_ALL",
+    ] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+}
+
+fn run_detector_with_env(
+    template_id: &str,
+    parameters: Value,
+    state: Value,
+    environment: &[(&str, &str)],
+) -> DetectorRun {
     let manifest = manifest(template_id);
     let script_path = templates_root().join(
         manifest["librarySource"]["path"]
@@ -332,7 +155,8 @@ fn run_detector(template_id: &str, parameters: Value, state: Value) -> DetectorR
         &format!("{template_id} request"),
     );
 
-    let mut child = Command::new("pwsh")
+    let mut command = Command::new("pwsh");
+    command
         .args(["-NoLogo", "-NoProfile", "-File"])
         .arg(&script_path)
         .current_dir(
@@ -343,6 +167,13 @@ fn run_detector(template_id: &str, parameters: Value, state: Value) -> DetectorR
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        .env_clear();
+    inherit_test_baseline(&mut command);
+    command.env("TELEX_WATCHER_TEST", "1");
+    for (name, value) in environment {
+        command.env(name, value);
+    }
+    let mut child = command
         .spawn()
         .unwrap_or_else(|error| panic!("start {}: {error}", script_path.display()));
     child
@@ -371,7 +202,11 @@ fn run_detector(template_id: &str, parameters: Value, state: Value) -> DetectorR
     );
     let parsed = protocol::parse_result(&output.stdout)
         .unwrap_or_else(|error| panic!("{template_id} runtime parser: {error}"));
-    DetectorRun { result, parsed }
+    DetectorRun {
+        result,
+        parsed,
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+    }
 }
 
 fn fixture(template_id: &str, name: &str) -> String {
@@ -383,59 +218,81 @@ fn fixture(template_id: &str, name: &str) -> String {
     )
 }
 
+fn registration(template_id: &str, sample: &str) -> Value {
+    read_json(
+        &templates_root()
+            .join(template_id)
+            .join("registrations")
+            .join(sample),
+    )
+}
+
 fn primary_parameters(template_id: &str) -> Value {
+    let mut parameters = registration(template_id, "pinned.json")["parameters"].clone();
+    let object = parameters.as_object_mut().expect("registration parameters");
     match template_id {
-        "github-pr" => json!({
-            "fixturePath": fixture(template_id, "github-pr-ready.json"),
-            "repository": "example/repo",
-            "emitInitialSnapshot": true
-        }),
-        "github-pr-external-activity" => json!({
-            "fixturePath": fixture(template_id, "activity.json"),
-            "repository": "example/repo",
-            "selfLogin": "self-login",
-            "ignoredLogins": ["example-bot"],
-            "emitInitialSnapshot": true
-        }),
-        "azure-devops-pr" => json!({
-            "fixturePath": fixture(template_id, "azure-devops-pr-ready.json"),
-            "organization": "example-organization",
-            "project": "example-project",
-            "repositoryId": "example-repository",
-            "emitInitialSnapshot": true
-        }),
-        "http-json" => json!({
-            "fixturePath": fixture(template_id, "condition-met.json"),
-            "sourceId": "example",
-            "fieldPath": "service.ready",
-            "expectedValue": true,
-            "emitInitialSnapshot": true
-        }),
-        "local-file-json" => json!({
-            "inputPath": fixture(template_id, "ready.json"),
-            "sourceId": "example",
-            "field": "ready",
-            "expectedValue": true,
-            "emitInitialSnapshot": true
-        }),
-        "local-command" => json!({
-            "command": [
-                "pwsh",
-                "-NoLogo",
-                "-NoProfile",
-                "-File",
-                fixture(template_id, "condition-met.ps1")
-            ],
-            "workingDirectory": path_text(templates_root().join(template_id).join("fixtures")),
-            "sourceId": "example",
-            "conditionExitCodes": [0],
-            "successExitCodes": [1],
-            "commandTimeoutSeconds": 20,
-            "maxOutputChars": 16384,
-            "emitInitialSnapshot": true
-        }),
+        "github-pr" => {
+            object.insert(
+                "fixturePath".into(),
+                fixture(template_id, "github-pr-ready.json").into(),
+            );
+            object.insert("repository".into(), "example/repo".into());
+            object.insert("pullRequestNumber".into(), 42.into());
+        }
+        "github-pr-external-activity" => {
+            object.insert(
+                "fixturePath".into(),
+                fixture(template_id, "activity.json").into(),
+            );
+            object.insert("repository".into(), "example/repo".into());
+            object.insert("pullRequestNumber".into(), 43.into());
+            object.insert("selfLogin".into(), "self-login".into());
+        }
+        "azure-devops-pr" => {
+            object.insert(
+                "fixturePath".into(),
+                fixture(template_id, "azure-devops-pr-ready.json").into(),
+            );
+            object.insert("organization".into(), "example-organization".into());
+            object.insert("project".into(), "example-project".into());
+            object.insert("repositoryId".into(), "example-repository".into());
+            object.insert("pullRequestId".into(), 73.into());
+        }
+        "http-json" => {
+            object.insert(
+                "fixturePath".into(),
+                fixture(template_id, "condition-met.json").into(),
+            );
+            object.insert("sourceId".into(), "example".into());
+            object.insert("authentication".into(), "none".into());
+        }
+        "local-file-json" => {
+            object.insert(
+                "inputPath".into(),
+                fixture(template_id, "ready.json").into(),
+            );
+            object.insert("sourceId".into(), "example".into());
+        }
+        "local-command" => {
+            object.insert(
+                "command".into(),
+                json!([
+                    "pwsh",
+                    "-NoLogo",
+                    "-NoProfile",
+                    "-File",
+                    fixture(template_id, "condition-met.ps1")
+                ]),
+            );
+            object.insert(
+                "workingDirectory".into(),
+                path_text(templates_root().join(template_id).join("fixtures")).into(),
+            );
+            object.insert("sourceId".into(), "example".into());
+        }
         _ => unreachable!(),
     }
+    parameters
 }
 
 fn event_variants(template_id: &str) -> Vec<Value> {
@@ -449,8 +306,7 @@ fn event_variants(template_id: &str) -> Vec<Value> {
             }),
             json!({
                 "fixturePath": fixture(template_id, "github-pr-attention.json"),
-                "repository": "example/repo",
-                "emitInitialSnapshot": true
+                "repository": "example/repo"
             }),
             json!({
                 "fixturePath": fixture(template_id, "github-pr-terminal.json"),
@@ -465,21 +321,22 @@ fn event_variants(template_id: &str) -> Vec<Value> {
                 "organization": "example-organization",
                 "project": "example-project",
                 "repositoryId": "example-repository",
-                "emitInitialSnapshot": true
+                "emitInitialSnapshot": true,
+                "emitInitialCreatedEvent": false
             }),
             json!({
                 "fixturePath": fixture(template_id, "azure-devops-pr-neutral.json"),
                 "organization": "example-organization",
                 "project": "example-project",
                 "repositoryId": "example-repository",
-                "emitInitialCreatedEvent": true
+                "emitInitialCreatedEvent": true,
+                "emitInitialSnapshot": false
             }),
             json!({
                 "fixturePath": fixture(template_id, "azure-devops-pr-attention.json"),
                 "organization": "example-organization",
                 "project": "example-project",
-                "repositoryId": "example-repository",
-                "emitInitialSnapshot": true
+                "repositoryId": "example-repository"
             }),
             json!({
                 "fixturePath": fixture(template_id, "azure-devops-pr-terminal.json"),
@@ -515,27 +372,26 @@ fn canonical_schema_validator_enforces_load_bearing_constraints() {
     assert_valid(&request_schema, &request, "canonical request");
     let mut unknown_request = request.clone();
     unknown_request["unexpected"] = Value::Bool(true);
-    assert!(validate(&request_schema, &unknown_request, &request_schema, "$").is_err());
+    assert!(!is_valid(&request_schema, &unknown_request));
 
     assert_valid(
         &result_schema,
         &json!({"schemaVersion": 1, "outcome": "idle", "nextState": {}}),
         "canonical idle result",
     );
-    assert!(validate(
+    assert!(!is_valid(
         &result_schema,
-        &json!({"schemaVersion": 1, "outcome": "event"}),
+        &json!({"schemaVersion": 1, "outcome": "event"})
+    ));
+    assert!(!is_valid(
         &result_schema,
-        "$"
-    )
-    .is_err());
-    assert!(validate(
-        &result_schema,
-        &json!({"schemaVersion": 1, "outcome": "degraded", "nextState": {}}),
-        &result_schema,
-        "$"
-    )
-    .is_err());
+        &json!({"schemaVersion": 1, "outcome": "degraded", "nextState": {}})
+    ));
+    assert_valid(
+        &json!({"type": "string", "pattern": "^provider-[0-9]{2}$"}),
+        &json!("provider-71"),
+        "arbitrary JSON Schema regex",
+    );
 }
 
 #[test]
@@ -575,10 +431,17 @@ fn manifests_and_registration_samples_are_strict_and_consistent() {
             .as_object_mut()
             .expect("manifest object")
             .remove("templateVersion");
-        assert!(validate(&manifest_schema, &missing, &manifest_schema, "$").is_err());
+        assert!(!is_valid(&manifest_schema, &missing));
         let mut unknown = manifest.clone();
         unknown["unexpected"] = Value::Bool(true);
-        assert!(validate(&manifest_schema, &unknown, &manifest_schema, "$").is_err());
+        assert!(!is_valid(&manifest_schema, &unknown));
+        let mut relocated = manifest.clone();
+        relocated["derivedFrom"]["reconciliation"] = json!("guidance/RECONCILE.md");
+        assert_valid(
+            &manifest_schema,
+            &relocated,
+            &format!("{template_id} relocated reconciliation"),
+        );
 
         assert_eq!(manifest["templateId"], template_id);
         let source_path = templates_root().join(
@@ -616,6 +479,15 @@ fn manifests_and_registration_samples_are_strict_and_consistent() {
             )
             .map(|value| value.as_str().expect("environment name").to_owned())
             .collect();
+        for requirement in manifest["credentials"]["conditionalRequirements"]
+            .as_array()
+            .expect("conditional requirements")
+        {
+            assert!(
+                json_string_set(&requirement["requires"]).is_subset(&allowed_credentials),
+                "{template_id} conditionally requires an undeclared credential"
+            );
+        }
 
         for (sample, mode) in [
             ("pinned.json", "pinned"),
@@ -643,9 +515,29 @@ fn manifests_and_registration_samples_are_strict_and_consistent() {
                     .find(|item| item.as_str() == registration["scriptPath"].as_str()),
                 Some(&registration["scriptPath"])
             );
+            let registration_kinds = json_string_set(&registration["allowedEventKinds"]);
+            assert!(
+                registration_kinds.is_subset(&allowed_kinds),
+                "{template_id}/{sample} authorizes a kind outside the manifest"
+            );
+            let mut expected_kinds = allowed_kinds.clone();
+            for (parameter, kind) in [
+                ("emitInitialSnapshot", "github.pull-request.snapshot"),
+                ("emitInitialSnapshot", "azure-devops.pull-request.snapshot"),
+                (
+                    "emitInitialCreatedEvent",
+                    "azure-devops.pull-request.created",
+                ),
+            ] {
+                if expected_kinds.contains(kind)
+                    && registration["parameters"][parameter].as_bool() != Some(true)
+                {
+                    expected_kinds.remove(kind);
+                }
+            }
             assert_eq!(
-                json_string_set(&registration["allowedEventKinds"]),
-                allowed_kinds
+                registration_kinds, expected_kinds,
+                "{template_id}/{sample} must be least-privilege for synthetic kinds"
             );
             assert!(registration["allowedEventKindPrefixes"]
                 .as_array()
@@ -668,6 +560,28 @@ fn manifests_and_registration_samples_are_strict_and_consistent() {
                 registration_credentials.is_subset(&allowed_credentials),
                 "{template_id}/{sample} uses an undeclared credential"
             );
+            for requirement in manifest["credentials"]["conditionalRequirements"]
+                .as_array()
+                .expect("conditional requirements")
+            {
+                let parameter = requirement["when"]["parameter"]
+                    .as_str()
+                    .expect("condition parameter");
+                if registration["parameters"][parameter] == requirement["when"]["equals"] {
+                    assert!(
+                        json_string_set(&requirement["requires"])
+                            .is_subset(&registration_credentials),
+                        "{template_id}/{sample} omits a conditionally required credential"
+                    );
+                }
+            }
+            assert_eq!(registration["scriptPath"], "<DETECTOR-PATH>");
+            assert_eq!(registration["workingDirectory"], "<TEMPLATE-DIRECTORY>");
+            assert_eq!(registration["initialState"], json!({}));
+            assert!(
+                !registration.to_string().contains("REPLACE-WITH-"),
+                "{template_id}/{sample} contains a stale replacement marker"
+            );
             if mode == "pinned" {
                 assert_eq!(registration["scriptDigest"], source_digest);
             } else {
@@ -683,43 +597,43 @@ fn fixture_detectors_emit_declared_kinds_with_stable_ids_and_suppress_replay() {
         (
             "github-pr",
             (
-                "fea74673f43e09fa6ac1b8b9cc706e8bae385ca057f34444d1b4401002f3fcac",
-                "github-pr:42:fea74673f43e09fa6ac1b8b9",
+                "017b2629b85ccd4dcb4eca4898fa84cc2996b3e6dbbed61c4be59f65d5e30171",
+                "github-pr:42:017b2629b85ccd4dcb4eca48",
             ),
         ),
         (
             "github-pr-external-activity",
             (
-                "9653ad4bd3e56e3e7ad056cfe1fb27143ccfa2e242ce250d2c3394a812637e51",
-                "github-pr-activity:43:9653ad4bd3e56e3e7ad056cf",
+                "48028f1174c6ccebaed866ec7176f89177c17ce1a6be9e8c8076a8766cee375a",
+                "github-pr-activity:43:48028f1174c6ccebaed866ec",
             ),
         ),
         (
             "azure-devops-pr",
             (
-                "4c52efe282b9722ca630d6466a1da445f51df1e8703b1c2e7df78ddd2f682210",
-                "azure-devops-pr:73:4c52efe282b9722ca630d646",
+                "19104ba1e199900423b8bf0232e595f2bea69189ef939806398287e00fc73b74",
+                "azure-devops-pr:73:19104ba1e199900423b8bf02",
             ),
         ),
         (
             "http-json",
             (
-                "e5fd747256369e7672370c914a0f20f416383660a4346f7a1edd00d6e06f43f4",
-                "http-json:example:e5fd747256369e7672370c91",
+                "5c46396891a798218ffd568b8aa3e7f942f9362ce7a004d11a7c18157a03d04e",
+                "http-json:example:5c46396891a798218ffd568b",
             ),
         ),
         (
             "local-file-json",
             (
-                "4e4cac22c77c33156c7c608fc1d967b621b931207e38f5770736c2135b163e5a",
-                "local-file-json:example:4e4cac22c77c33156c7c608f",
+                "5fa0d25475fe8e8c2a7ae9dcc8dac6f7d31586e54d15ed0e9101b681cf99ee48",
+                "local-file-json:example:5fa0d25475fe8e8c2a7ae9dc",
             ),
         ),
         (
             "local-command",
             (
-                "ddaeac79e5128de3babb442b29737124abfe1c1bcd14bafa9834b3538a1ea36a",
-                "local-command:example:ddaeac79e5128de3babb442b",
+                "632c0d44266fc389e6947848fa3eddecc6519c34093045eba8727cb78db80357",
+                "local-command:example:632c0d44266fc389e6947848",
             ),
         ),
     ]);
@@ -773,11 +687,406 @@ fn fixture_detectors_emit_declared_kinds_with_stable_ids_and_suppress_replay() {
     }
 }
 
+fn with_parameter(mut parameters: Value, name: &str, value: Value) -> Value {
+    parameters
+        .as_object_mut()
+        .expect("parameter object")
+        .insert(name.to_owned(), value);
+    parameters
+}
+
+fn capture_path(name: &str) -> PathBuf {
+    let directory = repository_root()
+        .join("target")
+        .join("template-conformance-artifacts");
+    fs::create_dir_all(&directory).expect("create conformance artifact directory");
+    let path = directory.join(name);
+    if path.exists() {
+        fs::remove_file(&path).expect("remove stale transport capture");
+    }
+    path
+}
+
+fn read_capture(path: &Path) -> Vec<Value> {
+    let text = fs::read_to_string(path)
+        .unwrap_or_else(|error| panic!("read capture {}: {error}", path.display()));
+    let records = text
+        .lines()
+        .map(|line| serde_json::from_str(line).expect("transport record JSON"))
+        .collect();
+    fs::remove_file(path).expect("remove transport capture");
+    records
+}
+
+#[test]
+fn canonical_cursor_is_independent_of_object_insertion_order() {
+    let helper = path_text(templates_root().join("shared").join("DetectorCommon.psm1"));
+    let script = format!(
+        "Import-Module '{}'; $a=[ordered]@{{z=1;a=[ordered]@{{b=2;a=1}}}}; \
+         $b=[ordered]@{{a=[ordered]@{{a=1;b=2}};z=1}}; \
+         @((Get-OpaqueCursor $a),(Get-OpaqueCursor $b)) | ConvertTo-Json -Compress",
+        helper.replace('\'', "''")
+    );
+    let output = Command::new("pwsh")
+        .args(["-NoLogo", "-NoProfile", "-Command", &script])
+        .output()
+        .expect("run canonical cursor probe");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cursors: Value = serde_json::from_slice(&output.stdout).expect("cursor JSON");
+    assert_eq!(cursors[0], cursors[1]);
+}
+
+#[test]
+fn provider_transports_are_network_free_versioned_and_credential_safe() {
+    for template_id in ["github-pr", "github-pr-external-activity"] {
+        let capture = capture_path(&format!("{template_id}-transport.jsonl"));
+        let parameters = with_parameter(
+            primary_parameters(template_id),
+            "testTransportCapturePath",
+            path_text(&capture).into(),
+        );
+        assert!(!parameters.to_string().contains("github-test-token"));
+        let run = run_detector_with_env(
+            template_id,
+            parameters,
+            json!({}),
+            &[("GH_TOKEN", "github-test-token")],
+        );
+        assert!(matches!(
+            run.result["outcome"].as_str(),
+            Some("event" | "terminal")
+        ));
+        let records = read_capture(&capture);
+        assert_eq!(
+            records.len(),
+            manifest(template_id)["provider"]["callsPerAttempt"]
+                .as_u64()
+                .expect("call count") as usize
+        );
+        let record = &records[0];
+        assert_eq!(record["transport"], "gh-cli");
+        assert_eq!(record["executable"], "gh");
+        assert_eq!(record["body"], Value::Null);
+        assert_eq!(record["credentialEnvironment"], json!(["GH_TOKEN"]));
+        assert!(!record.to_string().contains("github-test-token"));
+        assert!(record["arguments"]
+            .as_array()
+            .expect("gh args")
+            .iter()
+            .any(|value| value == "--json"));
+    }
+
+    for (name, bearer, pat, environment, expected_authorization) in [
+        (
+            "ado-bearer",
+            true,
+            false,
+            ("AZURE_DEVOPS_ACCESS_TOKEN", "ado-bearer-token"),
+            "Bearer ado-bearer-token",
+        ),
+        (
+            "ado-pat",
+            false,
+            true,
+            ("AZURE_DEVOPS_EXT_PAT", "pat-token"),
+            "Basic OnBhdC10b2tlbg==",
+        ),
+    ] {
+        let capture = capture_path(&format!("{name}-transport.jsonl"));
+        let mut parameters = primary_parameters("azure-devops-pr");
+        parameters["allowBearerAuthentication"] = bearer.into();
+        parameters["allowPatAuthentication"] = pat.into();
+        parameters["testTransportCapturePath"] = path_text(&capture).into();
+        assert!(!parameters.to_string().contains(environment.1));
+        let run = run_detector_with_env("azure-devops-pr", parameters, json!({}), &[environment]);
+        assert_eq!(run.result["outcome"], "event");
+        let records = read_capture(&capture);
+        assert_eq!(
+            records.len(),
+            manifest("azure-devops-pr")["provider"]["callsPerAttempt"]
+                .as_u64()
+                .expect("ADO call count") as usize
+        );
+        for record in records {
+            let uri = record["uri"].as_str().expect("ADO URI");
+            assert!(uri.starts_with("https://"));
+            assert!(uri.contains("api-version=7.1"));
+            assert_eq!(record["method"], "GET");
+            assert_eq!(record["body"], Value::Null);
+            assert_eq!(record["headers"]["Authorization"], expected_authorization);
+            let mut without_headers = record.clone();
+            without_headers["headers"] = json!({});
+            assert!(!without_headers.to_string().contains(environment.1));
+        }
+    }
+
+    for (name, authentication, header_name, environment, expected_header, expected_value) in [
+        (
+            "http-bearer",
+            "bearer",
+            None,
+            Some(("HTTP_JSON_BEARER_TOKEN", "http-bearer-token")),
+            "Authorization",
+            "Bearer http-bearer-token",
+        ),
+        (
+            "http-header",
+            "header",
+            Some("X-Api-Key"),
+            Some(("HTTP_JSON_HEADER_VALUE", "http-header-token")),
+            "X-Api-Key",
+            "http-header-token",
+        ),
+    ] {
+        let capture = capture_path(&format!("{name}-transport.jsonl"));
+        let mut parameters = primary_parameters("http-json");
+        parameters["authentication"] = authentication.into();
+        parameters["url"] = "https://api.example.invalid/status".into();
+        parameters["testTransportCapturePath"] = path_text(&capture).into();
+        if let Some(header_name) = header_name {
+            parameters["headerName"] = header_name.into();
+        }
+        let environment = environment.expect("HTTP credential");
+        assert!(!parameters.to_string().contains(environment.1));
+        let run = run_detector_with_env("http-json", parameters, json!({}), &[environment]);
+        assert_eq!(run.result["outcome"], "event");
+        let records = read_capture(&capture);
+        assert_eq!(
+            records.len(),
+            manifest("http-json")["provider"]["callsPerAttempt"]
+                .as_u64()
+                .expect("HTTP call count") as usize
+        );
+        let record = &records[0];
+        assert!(record["uri"]
+            .as_str()
+            .expect("HTTP URI")
+            .starts_with("https://"));
+        assert_eq!(record["method"], "GET");
+        assert_eq!(record["body"], Value::Null);
+        assert_eq!(record["maximumRedirection"], 0);
+        assert_eq!(record["headers"][expected_header], expected_value);
+        let mut without_headers = record.clone();
+        without_headers["headers"] = json!({});
+        assert!(!without_headers.to_string().contains(environment.1));
+    }
+
+    let capture = capture_path("http-none-transport.jsonl");
+    let mut parameters = primary_parameters("http-json");
+    parameters["authentication"] = "none".into();
+    parameters["url"] = "https://api.example.invalid/status".into();
+    parameters["testTransportCapturePath"] = path_text(&capture).into();
+    let run = run_detector("http-json", parameters, json!({}));
+    assert_eq!(run.result["outcome"], "event");
+    let records = read_capture(&capture);
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0]["headers"], json!({}));
+}
+
+#[test]
+fn credential_modes_fail_closed_without_the_manifest_required_environment() {
+    let capture = capture_path("ado-missing-credential.jsonl");
+    let mut ado = primary_parameters("azure-devops-pr");
+    ado["testTransportCapturePath"] = path_text(&capture).into();
+    let missing_ado = run_detector("azure-devops-pr", ado, json!({}));
+    assert_eq!(missing_ado.result["outcome"], "degraded");
+    assert!(missing_ado
+        .stderr
+        .contains(r#""code":"missing-credential""#));
+    assert!(!capture.exists());
+
+    let capture = capture_path("http-missing-credential.jsonl");
+    let mut http = primary_parameters("http-json");
+    http["authentication"] = "bearer".into();
+    http["url"] = "https://api.example.invalid/status".into();
+    http["testTransportCapturePath"] = path_text(&capture).into();
+    let missing_http = run_detector("http-json", http, json!({}));
+    assert_eq!(missing_http.result["outcome"], "degraded");
+    assert!(missing_http
+        .stderr
+        .contains(r#""code":"missing-credential""#));
+    assert!(!capture.exists());
+
+    let capture = capture_path("ado-invalid-auth-mode.jsonl");
+    let mut ado = primary_parameters("azure-devops-pr");
+    ado["allowBearerAuthentication"] = false.into();
+    ado["allowPatAuthentication"] = false.into();
+    ado["testTransportCapturePath"] = path_text(&capture).into();
+    let invalid_mode = run_detector("azure-devops-pr", ado, json!({}));
+    assert_eq!(invalid_mode.result["outcome"], "degraded");
+    assert!(invalid_mode
+        .stderr
+        .contains(r#""code":"credential-policy""#));
+    assert!(!capture.exists());
+}
+
+#[test]
+fn edge_case_classification_and_local_evidence_are_stable() {
+    let waiting = run_detector(
+        "azure-devops-pr",
+        json!({
+            "fixturePath": fixture("azure-devops-pr", "azure-devops-pr-waiting-for-author.json"),
+            "organization": "example-organization",
+            "project": "example-project",
+            "repositoryId": "example-repository",
+            "blockingReviewerVoteAtMost": -10
+        }),
+        json!({}),
+    );
+    assert_eq!(waiting.result["outcome"], "idle");
+    assert!(waiting.parsed.event.is_none());
+
+    let no_activity_parameters = json!({
+        "fixturePath": fixture("github-pr-external-activity", "no-external-activity.json"),
+        "repository": "example/repo",
+        "selfLogin": "self-login",
+        "ignoredLogins": ["example-bot"]
+    });
+    let no_activity = run_detector(
+        "github-pr-external-activity",
+        no_activity_parameters.clone(),
+        json!({}),
+    );
+    assert_eq!(no_activity.result["outcome"], "idle");
+    let no_activity_repeated = run_detector(
+        "github-pr-external-activity",
+        no_activity_parameters,
+        no_activity.result["nextState"].clone(),
+    );
+    assert_eq!(no_activity_repeated.result["outcome"], "idle");
+    assert_eq!(
+        no_activity.result["nextState"]["cursor"],
+        no_activity_repeated.result["nextState"]["cursor"]
+    );
+
+    let versionless = run_detector(
+        "local-file-json",
+        json!({
+            "inputPath": fixture("local-file-json", "ready-versionless.json"),
+            "sourceId": "versionless",
+            "field": "ready",
+            "expectedValue": true
+        }),
+        json!({}),
+    );
+    assert_eq!(versionless.result["outcome"], "event");
+    assert_eq!(versionless.result["event"]["metadata"]["version"], "");
+
+    let changing_parameters = json!({
+        "command": [
+            "pwsh", "-NoLogo", "-NoProfile", "-File",
+            fixture("local-command", "condition-met-changing-output.ps1")
+        ],
+        "workingDirectory": path_text(templates_root().join("local-command").join("fixtures")),
+        "sourceId": "changing-output",
+        "conditionExitCodes": [0],
+        "successExitCodes": [1],
+        "commandTimeoutSeconds": 20,
+        "maxOutputChars": 16384
+    });
+    let first = run_detector("local-command", changing_parameters.clone(), json!({}));
+    let second = run_detector("local-command", changing_parameters.clone(), json!({}));
+    assert_ne!(
+        first.result["event"]["body"],
+        second.result["event"]["body"]
+    );
+    assert_eq!(
+        first.result["nextState"]["cursor"],
+        second.result["nextState"]["cursor"]
+    );
+    assert_eq!(first.result["event"]["id"], second.result["event"]["id"]);
+    let replay = run_detector(
+        "local-command",
+        changing_parameters,
+        first.result["nextState"].clone(),
+    );
+    assert_eq!(replay.result["outcome"], "idle");
+    assert!(replay.parsed.event.is_none());
+
+    let environment = run_detector_with_env(
+        "local-command",
+        json!({
+            "command": [
+                "pwsh", "-NoLogo", "-NoProfile", "-File",
+                fixture("local-command", "environment-check.ps1")
+            ],
+            "workingDirectory": path_text(templates_root().join("local-command").join("fixtures")),
+            "sourceId": "environment",
+            "conditionExitCodes": [0],
+            "successExitCodes": [1],
+            "commandTimeoutSeconds": 20,
+            "maxOutputChars": 16384
+        }),
+        json!({}),
+        &[("TELEX_ALLOWED_SENTINEL", "allowed")],
+    );
+    assert_eq!(environment.result["outcome"], "event");
+}
+
+#[test]
+fn http_json_scalar_null_and_missing_semantics_are_distinct() {
+    let null_parameters = json!({
+        "fixturePath": fixture("http-json", "null-value.json"),
+        "sourceId": "null",
+        "fieldPath": "service.ready",
+        "expectedValue": null,
+        "authentication": "none"
+    });
+    let present_null = run_detector("http-json", null_parameters, json!({}));
+    assert_eq!(present_null.result["outcome"], "event");
+
+    let missing = run_detector(
+        "http-json",
+        json!({
+            "fixturePath": fixture("http-json", "missing-field.json"),
+            "sourceId": "missing",
+            "fieldPath": "service.ready",
+            "expectedValue": null,
+            "authentication": "none"
+        }),
+        json!({}),
+    );
+    assert_eq!(missing.result["outcome"], "idle");
+
+    let object_expected = run_detector(
+        "http-json",
+        json!({
+            "fixturePath": fixture("http-json", "condition-met.json"),
+            "sourceId": "object",
+            "fieldPath": "service",
+            "expectedValue": {"ready": true},
+            "authentication": "none"
+        }),
+        json!({}),
+    );
+    assert_eq!(object_expected.result["outcome"], "degraded");
+    assert!(object_expected
+        .stderr
+        .contains(r#""code":"configuration-invalid""#));
+}
+
 fn run_preflight(script: &str, arguments: &[String]) -> Output {
-    Command::new("pwsh")
+    let mut test_arguments = vec!["-TestMode".to_string()];
+    test_arguments.extend_from_slice(arguments);
+    run_preflight_raw(script, &test_arguments, &[])
+}
+
+fn run_preflight_raw(script: &str, arguments: &[String], environment: &[(&str, &str)]) -> Output {
+    let mut command = Command::new("pwsh");
+    command
         .args(["-NoLogo", "-NoProfile", "-File"])
         .arg(templates_root().join("shared").join(script))
         .args(arguments)
+        .env_clear();
+    inherit_test_baseline(&mut command);
+    for (name, value) in environment {
+        command.env(name, value);
+    }
+    command
         .output()
         .unwrap_or_else(|error| panic!("run {script}: {error}"))
 }
@@ -914,6 +1223,219 @@ fn pr_preflight_blocks_terminal_registration_and_closes_the_first_attempt_race()
     );
 }
 
+#[test]
+fn preflight_declared_terminal_is_eventless_and_mismatch_is_structured() {
+    let github_open = run_preflight(
+        "github-pr-preflight.ps1",
+        &[
+            "-Repository".into(),
+            "example/repo".into(),
+            "-PullRequestNumber".into(),
+            "42".into(),
+            "-FixturePath".into(),
+            fixture("github-pr", "github-pr-ready.json"),
+            "-Now".into(),
+            "2026-07-29T12:00:00Z".into(),
+        ],
+    );
+    let mut github_evidence = read_output_json(&github_open);
+    github_evidence["terminal"] = true.into();
+    let declared_terminal = run_detector(
+        "github-pr",
+        json!({
+            "fixturePath": fixture("github-pr", "github-pr-ready.json"),
+            "repository": "example/repo",
+            "pullRequestNumber": 42,
+            "emitInitialSnapshot": false
+        }),
+        json!({"preflight": github_evidence}),
+    );
+    assert_eq!(declared_terminal.result["outcome"], "terminal");
+    assert!(declared_terminal.parsed.event.is_none());
+
+    let azure_open = run_preflight(
+        "azure-devops-pr-preflight.ps1",
+        &[
+            "-Organization".into(),
+            "example-organization".into(),
+            "-Project".into(),
+            "example-project".into(),
+            "-RepositoryId".into(),
+            "example-repository".into(),
+            "-PullRequestId".into(),
+            "73".into(),
+            "-FixturePath".into(),
+            fixture("azure-devops-pr", "azure-devops-pr-ready.json"),
+            "-Now".into(),
+            "2026-07-29T12:00:00Z".into(),
+        ],
+    );
+    let mut azure_evidence = read_output_json(&azure_open);
+    azure_evidence["terminal"] = true.into();
+    let declared_terminal = run_detector(
+        "azure-devops-pr",
+        json!({
+            "fixturePath": fixture("azure-devops-pr", "azure-devops-pr-ready.json"),
+            "organization": "example-organization",
+            "project": "example-project",
+            "repositoryId": "example-repository",
+            "pullRequestId": 73
+        }),
+        json!({"preflight": azure_evidence}),
+    );
+    assert_eq!(declared_terminal.result["outcome"], "terminal");
+    assert!(declared_terminal.parsed.event.is_none());
+
+    let mismatched = json!({
+        "schemaVersion": 1,
+        "provider": "github",
+        "templateIds": ["github-pr-external-activity"],
+        "observedAt": "2026-07-29T12:00:00Z",
+        "terminal": false,
+        "state": "OPEN",
+        "identity": {
+            "repository": "example/repo",
+            "pullRequestNumber": 42,
+            "headSha": "0123456789abcdef0123456789abcdef01234567"
+        }
+    });
+    let parameters = json!({
+        "fixturePath": fixture("github-pr", "github-pr-ready.json"),
+        "repository": "example/repo",
+        "pullRequestNumber": 42
+    });
+    let first = run_detector(
+        "github-pr",
+        parameters.clone(),
+        json!({"preflight": mismatched.clone()}),
+    );
+    let repeated = run_detector("github-pr", parameters, json!({"preflight": mismatched}));
+    for run in [&first, &repeated] {
+        assert_eq!(run.result["outcome"], "degraded");
+        assert!(run.result.get("nextState").is_none());
+        assert!(run
+            .stderr
+            .contains(r#""code":"preflight-identity-mismatch""#));
+    }
+
+    let parameter_fallback = run_detector(
+        "github-pr",
+        json!({
+            "fixturePath": fixture("github-pr", "github-pr-ready.json"),
+            "repository": "example/repo",
+            "pullRequestNumber": 42,
+            "preflight": {
+                "terminal": true
+            }
+        }),
+        json!({}),
+    );
+    assert_eq!(parameter_fallback.result["outcome"], "event");
+    assert_eq!(
+        parameter_fallback.result["event"]["kind"],
+        "github.pull-request.ready-to-merge"
+    );
+
+    let invalid_timestamp = run_detector(
+        "github-pr",
+        json!({
+            "fixturePath": fixture("github-pr", "github-pr-ready.json"),
+            "repository": "example/repo",
+            "pullRequestNumber": 42
+        }),
+        json!({
+            "preflight": {
+                "schemaVersion": 1,
+                "provider": "github",
+                "templateIds": ["github-pr"],
+                "observedAt": "2026-07-29T12:00:00",
+                "terminal": false,
+                "state": "OPEN",
+                "identity": {
+                    "repository": "example/repo",
+                    "pullRequestNumber": 42
+                }
+            }
+        }),
+    );
+    assert_eq!(invalid_timestamp.result["outcome"], "degraded");
+    assert!(invalid_timestamp
+        .stderr
+        .contains(r#""code":"preflight-identity-mismatch""#));
+}
+
+#[test]
+fn preflight_test_seams_rfc3339_and_exit_codes_are_explicit() {
+    let without_test_mode = run_preflight_raw(
+        "github-pr-preflight.ps1",
+        &[
+            "-Repository".into(),
+            "example/repo".into(),
+            "-PullRequestNumber".into(),
+            "42".into(),
+            "-FixturePath".into(),
+            fixture("github-pr", "github-pr-ready.json"),
+        ],
+        &[],
+    );
+    assert_eq!(without_test_mode.status.code(), Some(5));
+    assert!(String::from_utf8_lossy(&without_test_mode.stderr).contains("test-mode-required"));
+
+    let invalid_now = run_preflight(
+        "github-pr-preflight.ps1",
+        &[
+            "-Repository".into(),
+            "example/repo".into(),
+            "-PullRequestNumber".into(),
+            "42".into(),
+            "-FixturePath".into(),
+            fixture("github-pr", "github-pr-ready.json"),
+            "-Now".into(),
+            "not-a-timestamp".into(),
+        ],
+    );
+    assert_eq!(invalid_now.status.code(), Some(5));
+    assert!(String::from_utf8_lossy(&invalid_now.stderr).contains("invalid-rfc3339"));
+
+    let missing_fixture = run_preflight(
+        "azure-devops-pr-preflight.ps1",
+        &[
+            "-Organization".into(),
+            "example-organization".into(),
+            "-Project".into(),
+            "example-project".into(),
+            "-RepositoryId".into(),
+            "example-repository".into(),
+            "-PullRequestId".into(),
+            "73".into(),
+            "-FixturePath".into(),
+            fixture("azure-devops-pr", "missing.json"),
+        ],
+    );
+    assert_eq!(missing_fixture.status.code(), Some(5));
+    assert!(String::from_utf8_lossy(&missing_fixture.stderr).contains("fixture-parse-failure"));
+
+    let missing_credential = run_preflight_raw(
+        "azure-devops-pr-preflight.ps1",
+        &[
+            "-Organization".into(),
+            "example-organization".into(),
+            "-Project".into(),
+            "example-project".into(),
+            "-RepositoryId".into(),
+            "example-repository".into(),
+            "-PullRequestId".into(),
+            "73".into(),
+            "-Authentication".into(),
+            "bearer".into(),
+        ],
+        &[],
+    );
+    assert_eq!(missing_credential.status.code(), Some(4));
+    assert!(String::from_utf8_lossy(&missing_credential.stderr)
+        .contains("provider-auth-transport-failure"));
+}
+
 fn read_output_json(output: &Output) -> Value {
     serde_json::from_slice(&output.stdout).expect("preflight output JSON")
 }
@@ -928,6 +1450,23 @@ fn collect_files(root: &Path, files: &mut Vec<PathBuf>) {
         } else {
             files.push(path);
         }
+    }
+}
+
+fn collect_json_strings<'a>(value: &'a Value, strings: &mut Vec<&'a str>) {
+    match value {
+        Value::String(text) => strings.push(text),
+        Value::Array(items) => {
+            for item in items {
+                collect_json_strings(item, strings);
+            }
+        }
+        Value::Object(object) => {
+            for item in object.values() {
+                collect_json_strings(item, strings);
+            }
+        }
+        _ => {}
     }
 }
 
@@ -948,14 +1487,7 @@ fn heading_anchor(heading: &str) -> String {
 
 #[test]
 fn fixtures_changelog_and_skill_guidance_remain_sanitized_and_current() {
-    let mut fixture_files = Vec::new();
-    for template_id in TEMPLATE_IDS {
-        collect_files(
-            &templates_root().join(template_id).join("fixtures"),
-            &mut fixture_files,
-        );
-    }
-    let forbidden = [
+    let fixture_forbidden = [
         "github.com/",
         "dev.azure.com/",
         "authorization:",
@@ -965,20 +1497,129 @@ fn fixtures_changelog_and_skill_guidance_remain_sanitized_and_current() {
         "c:\\users\\",
         "/home/",
     ];
-    for path in fixture_files {
-        let text = fs::read_to_string(&path)
-            .unwrap_or_else(|error| panic!("read fixture {}: {error}", path.display()));
-        let lowered = text.to_ascii_lowercase();
-        for fragment in forbidden {
+    let broad_forbidden = [
+        "ghp_",
+        "github_pat_",
+        "bearer ey",
+        "c:\\users\\",
+        "/home/",
+        "\u{fffd}",
+        "replace-with-",
+    ];
+    let allowed_placeholders = BTreeSet::from([
+        "<DETECTOR-PATH>",
+        "<TEMPLATE-DIRECTORY>",
+        "<INPUT-JSON-PATH>",
+        "<OBSERVATIONAL-COMMAND>",
+        "<COMMAND-WORKING-DIRECTORY>",
+    ]);
+
+    for template_id in TEMPLATE_IDS {
+        let manifest = manifest(template_id);
+        let api_version = manifest["provider"]["apiVersion"]
+            .as_str()
+            .expect("provider API version");
+        let mut fixture_files = Vec::new();
+        collect_files(
+            &templates_root().join(template_id).join("fixtures"),
+            &mut fixture_files,
+        );
+        for path in fixture_files {
+            let text = fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read fixture {}: {error}", path.display()));
+            let lowered = text.to_ascii_lowercase();
+            for fragment in fixture_forbidden {
+                assert!(
+                    !lowered.contains(fragment),
+                    "{} contains unsanitized fragment {fragment}",
+                    path.display()
+                );
+            }
+            if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
+                let fixture: Value = serde_json::from_str(&text)
+                    .unwrap_or_else(|error| panic!("fixture {} JSON: {error}", path.display()));
+                assert_eq!(
+                    fixture["apiVersion"],
+                    api_version,
+                    "{} API version must match the manifest",
+                    path.display()
+                );
+                assert!(
+                    fixture["capturedAgainst"]
+                        .as_str()
+                        .is_some_and(|value| !value.is_empty()),
+                    "{} must declare capturedAgainst",
+                    path.display()
+                );
+            } else {
+                assert!(
+                    text.lines()
+                        .any(|line| line == format!("# apiVersion: {api_version}")),
+                    "{} must declare fixture API version",
+                    path.display()
+                );
+                assert!(
+                    text.lines()
+                        .any(|line| line.starts_with("# capturedAgainst: ")),
+                    "{} must declare capturedAgainst",
+                    path.display()
+                );
+            }
+        }
+
+        for sample in ["pinned.json", "development.json"] {
+            let path = templates_root()
+                .join(template_id)
+                .join("registrations")
+                .join(sample);
+            let text = fs::read_to_string(&path).expect("registration text");
+            let lowered = text.to_ascii_lowercase();
+            for fragment in broad_forbidden {
+                assert!(
+                    !lowered.contains(fragment),
+                    "{} contains unsanitized fragment {fragment}",
+                    path.display()
+                );
+            }
+            let registration: Value = serde_json::from_str(&text).expect("registration JSON");
+            let mut strings = Vec::new();
+            collect_json_strings(&registration, &mut strings);
+            for value in strings {
+                if value.starts_with('<') || value.ends_with('>') {
+                    assert!(
+                        allowed_placeholders.contains(value),
+                        "{} contains undocumented placeholder {value}",
+                        path.display()
+                    );
+                }
+            }
+        }
+
+        let manifest_path = templates_root().join(template_id).join("manifest.json");
+        let manifest_text = fs::read_to_string(&manifest_path).expect("manifest text");
+        for fragment in broad_forbidden {
             assert!(
-                !lowered.contains(fragment),
+                !manifest_text.to_ascii_lowercase().contains(fragment),
+                "{} contains unsanitized fragment {fragment}",
+                manifest_path.display()
+            );
+        }
+    }
+
+    for helper in [
+        "DetectorCommon.psm1",
+        "BoundedCommand.psm1",
+        "github-pr-preflight.ps1",
+        "azure-devops-pr-preflight.ps1",
+    ] {
+        let path = templates_root().join("shared").join(helper);
+        let text = fs::read_to_string(&path).expect("shared helper text");
+        for fragment in broad_forbidden {
+            assert!(
+                !text.to_ascii_lowercase().contains(fragment),
                 "{} contains unsanitized fragment {fragment}",
                 path.display()
             );
-        }
-        if path.extension().and_then(|extension| extension.to_str()) == Some("json") {
-            serde_json::from_str::<Value>(&text)
-                .unwrap_or_else(|error| panic!("fixture {} JSON: {error}", path.display()));
         }
     }
 

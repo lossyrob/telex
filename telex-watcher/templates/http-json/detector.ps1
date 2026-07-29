@@ -4,15 +4,15 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $helperPath = Join-Path $PSScriptRoot '..\shared\DetectorCommon.psm1'
-$expectedHelperSha256 = '611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428'
+$expectedHelperSha256 = 'd7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c'
 if ((Get-FileHash $helperPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHelperSha256) {
-    [Console]::Error.WriteLine('detector degraded: shared-helper-digest-mismatch')
+    [Console]::Error.WriteLine('detectorDiagnostic={"schemaVersion":1,"code":"shared-helper-digest-mismatch","message":"Pinned shared helper digest mismatch."}')
     [Console]::Out.WriteLine('{"schemaVersion":1,"outcome":"degraded"}')
     exit 0
 }
 Import-Module $helperPath -Force
 
-function Get-JsonField {
+function Get-JsonFieldResult {
     param($Document, [string]$Path)
 
     $value = $Document
@@ -25,18 +25,57 @@ function Get-JsonField {
             $value = $value[[int]$segment]
             continue
         }
-        return $null
+        return [ordered]@{ present = $false; value = $null }
     }
-    return $value
+    return [ordered]@{ present = $true; value = $value }
+}
+
+function Test-JsonScalar {
+    param($Value)
+    return $null -eq $Value -or (
+        $Value -isnot [System.Collections.IDictionary] -and
+        $Value -isnot [System.Collections.IList]
+    )
+}
+
+function Invoke-HttpJsonGet {
+    param(
+        [hashtable]$Request,
+        [string]$Uri,
+        [hashtable]$Headers,
+        [string]$FixtureContent
+    )
+
+    $capturePath = [string](Get-DetectorParameter -Request $Request -Name 'testTransportCapturePath' -Default '')
+    if (-not [string]::IsNullOrWhiteSpace($capturePath)) {
+        Write-TestTransportRecord -Request $Request -Record ([ordered]@{
+            transport = 'https'
+            method = 'GET'
+            uri = $Uri
+            headers = $Headers
+            body = $null
+            maximumRedirection = 0
+            timeoutSeconds = 20
+        })
+        return [pscustomobject]@{ Content = $FixtureContent }
+    }
+    return Invoke-WebRequest -Method Get -Uri $Uri -Headers $Headers -MaximumRedirection 0 -TimeoutSec 20
 }
 
 try {
     $request = Read-DetectorRequest
+    Assert-DetectorTestMode -Request $request -ParameterNames @('fixturePath', 'testTransportCapturePath')
     $fixturePath = [string](Get-DetectorParameter -Request $request -Name 'fixturePath' -Default '')
+    $capturePath = [string](Get-DetectorParameter -Request $request -Name 'testTransportCapturePath' -Default '')
+    $fixtureContent = $null
     if (-not [string]::IsNullOrWhiteSpace($fixturePath)) {
-        $content = Get-Content -Raw (Resolve-DetectorPath $fixturePath)
+        $fixtureContent = Get-Content -Raw (Resolve-DetectorPath $fixturePath)
+        if ([string]::IsNullOrWhiteSpace($capturePath)) {
+            $content = $fixtureContent
+        }
     }
-    else {
+
+    if ([string]::IsNullOrWhiteSpace($fixturePath) -or -not [string]::IsNullOrWhiteSpace($capturePath)) {
         $url = [string](Get-DetectorParameter -Request $request -Name 'url')
         if (-not $url.StartsWith('https://', [System.StringComparison]::OrdinalIgnoreCase)) {
             throw 'transport-policy: parameters.url must use HTTPS.'
@@ -62,13 +101,17 @@ try {
         elseif ($authMode -ne 'none') {
             throw "credential-policy: unsupported authentication mode '$authMode'."
         }
+        if (-not [string]::IsNullOrWhiteSpace($capturePath) -and $null -eq $fixtureContent) {
+            throw 'test-transport-invalid: fixturePath is required with testTransportCapturePath.'
+        }
         try {
-            $response = Invoke-WebRequest -Method Get -Uri $url -Headers $headers -MaximumRedirection 0 -TimeoutSec 20
+            $response = Invoke-HttpJsonGet -Request $request -Uri $url -Headers $headers -FixtureContent $fixtureContent
         }
         catch {
             $status = 0
-            if ($null -ne $_.Exception.Response) {
-                $status = [int]$_.Exception.Response.StatusCode
+            $responseProperty = $_.Exception.PSObject.Properties['Response']
+            if ($null -ne $responseProperty -and $null -ne $responseProperty.Value) {
+                $status = [int]$responseProperty.Value.StatusCode
             }
             if ($status -in @(401, 403)) {
                 throw "authorization-denied: HTTPS GET returned status $status."
@@ -78,6 +121,9 @@ try {
             }
             if ($status -ge 300 -and $status -lt 400) {
                 throw "redirect-rejected: HTTPS GET returned status $status."
+            }
+            if ($_.Exception.Message -match '^(?:test-transport-invalid|missing-credential|credential-policy|transport-policy):') {
+                throw
             }
             throw "provider-failure: HTTPS GET failed with status $status."
         }
@@ -94,18 +140,27 @@ try {
     }
     $fieldPath = [string](Get-DetectorParameter -Request $request -Name 'fieldPath')
     if ([string]::IsNullOrWhiteSpace($fieldPath)) {
-        throw 'Set parameters.fieldPath to a dot-separated JSON field path.'
+        throw 'configuration-invalid: set parameters.fieldPath to a dot-separated JSON field path.'
     }
-    $expectedValue = Get-DetectorParameter -Request $request -Name 'expectedValue'
-    $observedValue = Get-JsonField -Document $document -Path $fieldPath
-    $matched = (ConvertTo-CompactJson $observedValue) -eq (ConvertTo-CompactJson $expectedValue)
+    $parameters = $request.watch.parameters
+    if ($parameters -isnot [System.Collections.IDictionary] -or -not $parameters.Contains('expectedValue')) {
+        throw 'configuration-invalid: parameters.expectedValue is required and may be an explicit JSON null.'
+    }
+    $expectedValue = $parameters['expectedValue']
+    if (-not (Test-JsonScalar -Value $expectedValue)) {
+        throw 'configuration-invalid: parameters.expectedValue must be a JSON scalar or null.'
+    }
+    $fieldResult = Get-JsonFieldResult -Document $document -Path $fieldPath
+    $observedValue = $fieldResult.value
+    $matched = [bool]$fieldResult.present -and (ConvertTo-CanonicalJson $observedValue) -eq (ConvertTo-CanonicalJson $expectedValue)
     $sourceId = [string](Get-DetectorParameter -Request $request -Name 'sourceId' -Default 'https-json')
     $evidence = [ordered]@{
-        evidenceNormalizationVersion = 1
+        evidenceNormalizationVersion = 2
         provider = 'http-json'
         sourceId = $sourceId
         fieldPath = $fieldPath
         expectedValue = $expectedValue
+        fieldPresent = [bool]$fieldResult.present
         observedValue = $observedValue
         matched = $matched
     }
@@ -116,7 +171,7 @@ try {
             id = New-EventId -Provider 'http-json' -Scope $sourceId -Cursor $cursor
             kind = 'http.json.condition-met'
             subject = "HTTP JSON condition '$fieldPath' matched"
-            body = 'The configured read-only JSON condition matched its expected value.'
+            body = 'The configured read-only JSON scalar condition matched its expected value.'
             metadata = [ordered]@{
                 provider = 'http-json'
                 sourceId = $sourceId

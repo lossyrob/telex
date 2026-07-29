@@ -6,10 +6,10 @@
     "-NoLogo",
     "-NoProfile",
     "-File",
-    "C:\\path\\to\\telex-watcher\\templates\\github-pr-external-activity\\detector.ps1"
+    "<DETECTOR-PATH>"
   ],
-  "scriptPath": "C:\\path\\to\\telex-watcher\\templates\\github-pr-external-activity\\detector.ps1",
-  "workingDirectory": "C:\\path\\to\\telex-watcher\\templates\\github-pr-external-activity",
+  "scriptPath": "<DETECTOR-PATH>",
+  "workingDirectory": "<TEMPLATE-DIRECTORY>",
   "scriptMode": "follow-path",
   "backendProfile": "default",
   "sender": "watcher@example.invalid",
@@ -31,26 +31,8 @@
     "selfLogin": "YOUR-GITHUB-LOGIN",
     "ignoredLogins": [
       "example-bot"
-    ],
-    "emitInitialSnapshot": true
+    ]
   },
-  "initialState": {
-    "preflight": {
-      "schemaVersion": 1,
-      "provider": "github",
-      "templateIds": [
-        "github-pr",
-        "github-pr-external-activity"
-      ],
-      "observedAt": "2026-07-29T12:00:00Z",
-      "terminal": false,
-      "state": "OPEN",
-      "identity": {
-        "repository": "OWNER/REPOSITORY",
-        "pullRequestNumber": 123,
-        "headSha": "REPLACE-WITH-PREFLIGHT-HEAD-SHA"
-      }
-    }
-  },
+  "initialState": {},
   "maxSafeDowntimeSeconds": 3600
 }

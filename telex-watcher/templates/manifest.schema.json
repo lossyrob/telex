@@ -109,7 +109,7 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "reconciliation": {
-          "const": "../RECONCILING-CUSTOMIZATIONS.md"
+          "$ref": "#/$defs/relativePath"
         }
       }
     },
@@ -135,7 +135,7 @@
           "const": "cursor"
         },
         "strategy": {
-          "const": "sha256-compact-normalized-json"
+          "const": "sha256-recursive-key-sorted-json-v1"
         },
         "replay": {
           "$ref": "#/$defs/nonEmptyString"
@@ -147,13 +147,37 @@
       "additionalProperties": false,
       "required": [
         "terminal",
-        "duplicates"
+        "duplicates",
+        "initialEmission",
+        "diagnostics"
       ],
       "properties": {
         "terminal": {
           "$ref": "#/$defs/nonEmptyString"
         },
         "duplicates": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "initialEmission": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "actionable",
+            "synthetic"
+          ],
+          "properties": {
+            "actionable": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "synthetic": {
+              "$ref": "#/$defs/nonEmptyString"
+            }
+          }
+        },
+        "diagnostics": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "classification": {
           "$ref": "#/$defs/nonEmptyString"
         }
       }
@@ -165,6 +189,7 @@
         "policy",
         "requiredEnvironmentVariables",
         "optionalEnvironmentVariables",
+        "conditionalRequirements",
         "forbiddenInRequest"
       ],
       "properties": {
@@ -176,6 +201,44 @@
         },
         "optionalEnvironmentVariables": {
           "$ref": "#/$defs/environmentNames"
+        },
+        "conditionalRequirements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "when",
+              "requires"
+            ],
+            "properties": {
+              "when": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "parameter",
+                  "equals"
+                ],
+                "properties": {
+                  "parameter": {
+                    "$ref": "#/$defs/nonEmptyString"
+                  },
+                  "equals": {
+                    "type": [
+                      "string",
+                      "integer",
+                      "number",
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "requires": {
+                "$ref": "#/$defs/nonEmptyEnvironmentNames"
+              }
+            }
+          }
         },
         "forbiddenInRequest": {
           "const": true
@@ -246,6 +309,15 @@
     },
     "environmentNames": {
       "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z_][A-Z0-9_]*$"
+      }
+    },
+    "nonEmptyEnvironmentNames": {
+      "type": "array",
+      "minItems": 1,
       "uniqueItems": true,
       "items": {
         "type": "string",

@@ -4,32 +4,86 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $helperPath = Join-Path $PSScriptRoot '..\shared\DetectorCommon.psm1'
-$expectedHelperSha256 = '611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428'
+$expectedHelperSha256 = 'd7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c'
 if ((Get-FileHash $helperPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHelperSha256) {
-    [Console]::Error.WriteLine('detector degraded: shared-helper-digest-mismatch')
+    [Console]::Error.WriteLine('detectorDiagnostic={"schemaVersion":1,"code":"shared-helper-digest-mismatch","message":"Pinned shared helper digest mismatch."}')
     [Console]::Out.WriteLine('{"schemaVersion":1,"outcome":"degraded"}')
     exit 0
 }
 Import-Module $helperPath -Force
 
+function Get-GitHubPrData {
+    param(
+        [hashtable]$Request,
+        [string[]]$Fields
+    )
+
+    Assert-DetectorTestMode -Request $Request -ParameterNames @('fixturePath', 'testTransportCapturePath')
+    $fixturePath = [string](Get-DetectorParameter -Request $Request -Name 'fixturePath' -Default '')
+    $capturePath = [string](Get-DetectorParameter -Request $Request -Name 'testTransportCapturePath' -Default '')
+    if (-not [string]::IsNullOrWhiteSpace($fixturePath) -and [string]::IsNullOrWhiteSpace($capturePath)) {
+        return Get-Content -Raw (Resolve-DetectorPath $fixturePath) | ConvertFrom-Json -AsHashtable
+    }
+
+    $repository = [string](Get-DetectorParameter -Request $Request -Name 'repository')
+    $number = Get-DetectorParameter -Request $Request -Name 'pullRequestNumber'
+    if (
+        [string]::IsNullOrWhiteSpace($repository) -or
+        $repository -in @('OWNER/REPOSITORY', '<GITHUB-REPOSITORY>') -or
+        $null -eq $number
+    ) {
+        throw 'configuration-invalid: set concrete repository and pullRequestNumber values.'
+    }
+    $arguments = @('pr', 'view', [string]$number, '--repo', $repository, '--json', ($Fields -join ','))
+    if (-not [string]::IsNullOrWhiteSpace($capturePath)) {
+        if ([string]::IsNullOrWhiteSpace($fixturePath)) {
+            throw 'test-transport-invalid: fixturePath is required with testTransportCapturePath.'
+        }
+        Write-TestTransportRecord -Request $Request -Record ([ordered]@{
+            transport = 'gh-cli'
+            executable = 'gh'
+            arguments = $arguments
+            credentialEnvironment = @($(if (-not [string]::IsNullOrWhiteSpace($env:GH_TOKEN)) { 'GH_TOKEN' }))
+            headers = [ordered]@{}
+            body = $null
+        })
+        return Get-Content -Raw (Resolve-DetectorPath $fixturePath) | ConvertFrom-Json -AsHashtable
+    }
+
+    $raw = & gh @arguments 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "provider-failure: gh pr view failed: $($raw -join [Environment]::NewLine)"
+    }
+    return ($raw -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
+}
+
+function Test-GitHubPreflight {
+    param(
+        [System.Collections.IDictionary]$Preflight,
+        [string]$TemplateId,
+        [string]$Repository,
+        [int]$PullRequestNumber
+    )
+
+    if (
+        [int](Get-OptionalValue -Object $Preflight -Name 'schemaVersion' -Default 0) -ne 1 -or
+        [string](Get-OptionalValue -Object $Preflight -Name 'provider' -Default '') -ne 'github' -or
+        -not (Test-Rfc3339Timestamp -Value (Get-OptionalValue -Object $Preflight -Name 'observedAt' -Default '')) -or
+        $TemplateId -notin @((Get-OptionalValue -Object $Preflight -Name 'templateIds' -Default @())) -or
+        [string](Get-OptionalValue -Object (Get-OptionalValue -Object $Preflight -Name 'identity') -Name 'repository' -Default '') -ne $Repository -or
+        [int](Get-OptionalValue -Object (Get-OptionalValue -Object $Preflight -Name 'identity') -Name 'pullRequestNumber' -Default 0) -ne $PullRequestNumber
+    ) {
+        return $false
+    }
+    return $true
+}
+
 try {
     $request = Read-DetectorRequest
-    $fixturePath = Get-DetectorParameter -Request $request -Name 'fixturePath'
-    if ($fixturePath) {
-        $pr = Get-Content -Raw (Resolve-DetectorPath ([string]$fixturePath)) | ConvertFrom-Json -AsHashtable
-    }
-    else {
-        $repository = [string](Get-DetectorParameter -Request $request -Name 'repository')
-        $number = Get-DetectorParameter -Request $request -Name 'pullRequestNumber'
-        if ([string]::IsNullOrWhiteSpace($repository) -or $null -eq $number) {
-            throw 'Set parameters.repository and parameters.pullRequestNumber, or provide parameters.fixturePath.'
-        }
-        $raw = & gh pr view $number --repo $repository --json number,title,url,state,isDraft,mergeStateStatus,reviewDecision,statusCheckRollup,author,comments,reviews,headRefOid 2>&1
-        if ($LASTEXITCODE -ne 0) {
-            throw "gh pr view failed: $($raw -join [Environment]::NewLine)"
-        }
-        $pr = ($raw -join [Environment]::NewLine) | ConvertFrom-Json -AsHashtable
-    }
+    $pr = Get-GitHubPrData -Request $request -Fields @(
+        'number', 'title', 'url', 'state', 'isDraft', 'mergeStateStatus', 'reviewDecision',
+        'statusCheckRollup', 'author', 'comments', 'reviews', 'headRefOid'
+    )
 
     $checks = @($pr.statusCheckRollup | ForEach-Object {
         [ordered]@{
@@ -69,7 +123,7 @@ try {
     }
 
     $evidence = [ordered]@{
-        evidenceNormalizationVersion = 1
+        evidenceNormalizationVersion = 2
         provider = 'github'
         repository = [string](Get-DetectorParameter -Request $request -Name 'repository' -Default '')
         number = [int]$pr.number
@@ -84,14 +138,15 @@ try {
     $preflight = Get-PreflightEvidence -Request $request
     if ($null -eq (Get-StateCursor $request) -and $preflight -is [System.Collections.IDictionary]) {
         $repository = [string](Get-DetectorParameter -Request $request -Name 'repository' -Default '')
-        if (
-            [string]$preflight.provider -ne 'github' -or
-            [int]$preflight.identity.pullRequestNumber -ne [int]$pr.number -or
-            [string]$preflight.identity.repository -ne $repository
-        ) {
-            throw 'preflight-identity-mismatch: GitHub evidence does not match this watch.'
+        if (-not (Test-GitHubPreflight -Preflight $preflight -TemplateId 'github-pr' -Repository $repository -PullRequestNumber ([int]$pr.number))) {
+            Write-Degraded -Code 'preflight-identity-mismatch' -Message 'GitHub preflight evidence does not match this watch, template, or RFC3339 timestamp.'
+            return
         }
-        if (-not [bool]$preflight.terminal -and $terminal) {
+        if ([bool](Get-OptionalValue -Object $preflight -Name 'terminal' -Default $false)) {
+            Write-EventlessTerminal -Evidence $evidence
+            return
+        }
+        if ($terminal) {
             Write-EventlessTerminal -Evidence $evidence
             return
         }

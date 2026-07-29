@@ -6,10 +6,10 @@
     "-NoLogo",
     "-NoProfile",
     "-File",
-    "C:\\path\\to\\telex-watcher\\templates\\azure-devops-pr\\detector.ps1"
+    "<DETECTOR-PATH>"
   ],
-  "scriptPath": "C:\\path\\to\\telex-watcher\\templates\\azure-devops-pr\\detector.ps1",
-  "workingDirectory": "C:\\path\\to\\telex-watcher\\templates\\azure-devops-pr",
+  "scriptPath": "<DETECTOR-PATH>",
+  "workingDirectory": "<TEMPLATE-DIRECTORY>",
   "scriptMode": "follow-path",
   "backendProfile": "default",
   "sender": "watcher@example.invalid",
@@ -36,27 +36,10 @@
     "pullRequestId": 123,
     "allowBearerAuthentication": true,
     "allowPatAuthentication": false,
-    "emitInitialCreatedEvent": false,
+    "blockingReviewerVoteAtMost": -10,
+    "emitInitialCreatedEvent": true,
     "emitInitialSnapshot": true
   },
-  "initialState": {
-    "preflight": {
-      "schemaVersion": 1,
-      "provider": "azure-devops",
-      "templateIds": [
-        "azure-devops-pr"
-      ],
-      "observedAt": "2026-07-29T12:00:00Z",
-      "terminal": false,
-      "state": "active",
-      "identity": {
-        "organization": "AZURE-DEVOPS-ORGANIZATION",
-        "project": "AZURE-DEVOPS-PROJECT",
-        "repositoryId": "AZURE-DEVOPS-REPOSITORY-ID",
-        "pullRequestId": 123,
-        "sourceCommit": "REPLACE-WITH-PREFLIGHT-SOURCE-COMMIT"
-      }
-    }
-  },
+  "initialState": {},
   "maxSafeDowntimeSeconds": 1800
 }

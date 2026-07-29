@@ -1,9 +1,9 @@
 {
   "manifestSchemaVersion": 1,
   "templateId": "local-command",
-  "templateVersion": "1.0.0",
+  "templateVersion": "1.1.0",
   "detectorProtocolVersion": 1,
-  "evidenceNormalizationVersion": 1,
+  "evidenceNormalizationVersion": 2,
   "runtimeRequirement": {
     "command": "pwsh",
     "minimumVersion": "7.4",
@@ -11,11 +11,15 @@
   },
   "librarySource": {
     "path": "local-command/detector.ps1",
-    "sha256": "784f0212e5464d1cccd88f2b23ae79345561446328510b6ddc4cb8b5598251fe",
+    "sha256": "57a0c7e5f3cac39e4ee37aaafdf888189353173316c8feea91638c0a71747f25",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
-        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+        "sha256": "d7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c"
+      },
+      {
+        "path": "shared/BoundedCommand.psm1",
+        "sha256": "656274b91788bb95aec585f6ed099a4754ad2722c6576bd2ce9c521faf960bdf"
       }
     ]
   },
@@ -28,17 +32,24 @@
   ],
   "cursor": {
     "stateField": "cursor",
-    "strategy": "sha256-compact-normalized-json",
-    "replay": "The cursor covers source ID, wrapped exit code, bounded stdout hash, and condition classification. Unchanged output returns idle."
+    "strategy": "sha256-recursive-key-sorted-json-v1",
+    "replay": "The cursor covers source ID, wrapped exit code, and condition classification. Diagnostic stdout changes alone do not create a new event."
   },
   "semantics": {
     "terminal": "This continuing observational command never returns terminal. Unexpected exit, timeout, or output overflow returns degraded without state advancement.",
-    "duplicates": "Event IDs are deterministic from source ID and normalized cursor. Recipients must deduplicate repeated event IDs."
+    "duplicates": "Event IDs are deterministic from source ID and normalized cursor. Recipients must deduplicate repeated event IDs.",
+    "initialEmission": {
+      "actionable": "A condition exit code emits on the first attempt.",
+      "synthetic": "This template has no synthetic snapshot event; emitInitialSnapshot is not a supported parameter."
+    },
+    "diagnostics": "Command and configuration failures return schema-valid degraded results and write a structured detectorDiagnostic JSON record to stderr only.",
+    "classification": "The child inherits the detector environment already cleared and rebuilt by Watcher from its safe baseline plus the registration allowlist. Stdout is event text but not cursor evidence; stderr is diagnostic-only and excluded from evidence and events."
   },
   "credentials": {
     "policy": "No credential variables are supplied by this template. If the fixed command needs credentials, use a reviewed wrapper and explicitly revise the copied manifest and registration allowlist.",
     "requiredEnvironmentVariables": [],
     "optionalEnvironmentVariables": [],
+    "conditionalRequirements": [],
     "forbiddenInRequest": true
   },
   "provider": {

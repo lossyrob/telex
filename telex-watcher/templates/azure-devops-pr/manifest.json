@@ -1,9 +1,9 @@
 {
   "manifestSchemaVersion": 1,
   "templateId": "azure-devops-pr",
-  "templateVersion": "1.0.0",
+  "templateVersion": "1.1.0",
   "detectorProtocolVersion": 1,
-  "evidenceNormalizationVersion": 1,
+  "evidenceNormalizationVersion": 2,
   "runtimeRequirement": {
     "command": "pwsh",
     "minimumVersion": "7.4",
@@ -11,11 +11,11 @@
   },
   "librarySource": {
     "path": "azure-devops-pr/detector.ps1",
-    "sha256": "7f6642f3f84733e88c0e64f73c1e3f5c5a9b8d0c8b0a1975c0f49535b0f78001",
+    "sha256": "d356bea898e370d60cdcf01210a0d4205ab07f52ebd09d1fe9851406755c4f6f",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
-        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+        "sha256": "d7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c"
       }
     ]
   },
@@ -32,12 +32,18 @@
   ],
   "cursor": {
     "stateField": "cursor",
-    "strategy": "sha256-compact-normalized-json",
+    "strategy": "sha256-recursive-key-sorted-json-v1",
     "replay": "The cursor covers PR identity, creation time, status, source commit, merge status, sorted reviewers, and sorted thread state. An unchanged cursor returns idle."
   },
   "semantics": {
-    "terminal": "Completed or abandoned PRs return terminal. A terminal transition after successful preflight but before the first attempt returns eventless terminal.",
-    "duplicates": "Event IDs are deterministic from PR ID and normalized cursor. Recipients must deduplicate repeated event IDs."
+    "terminal": "Completed or abandoned PRs return terminal. Preflight-declared terminal and a terminal transition after safe preflight but before the first attempt return eventless terminal.",
+    "duplicates": "Event IDs are deterministic from PR ID and normalized cursor. Recipients must deduplicate repeated event IDs.",
+    "initialEmission": {
+      "actionable": "A naturally actionable attention, ready-to-merge, or completion condition emits on the first attempt even when emitInitialSnapshot and emitInitialCreatedEvent are false.",
+      "synthetic": "Created and snapshot baseline events emit only when their corresponding parameters are true. The pinned registration keeps both false and authorizes neither kind."
+    },
+    "diagnostics": "Identity, authentication, provider, and configuration failures return schema-valid degraded results and write a structured detectorDiagnostic JSON record to stderr only.",
+    "classification": "Reviewer votes at or below blockingReviewerVoteAtMost are blocking. The default is -10, so Azure DevOps vote -5 (waiting for author) is not classified as rejection."
   },
   "credentials": {
     "policy": "Select exactly one mode: bearer with AZURE_DEVOPS_ACCESS_TOKEN or PAT with AZURE_DEVOPS_EXT_PAT. Allowlist only the selected variable.",
@@ -45,6 +51,26 @@
     "optionalEnvironmentVariables": [
       "AZURE_DEVOPS_ACCESS_TOKEN",
       "AZURE_DEVOPS_EXT_PAT"
+    ],
+    "conditionalRequirements": [
+      {
+        "when": {
+          "parameter": "allowBearerAuthentication",
+          "equals": true
+        },
+        "requires": [
+          "AZURE_DEVOPS_ACCESS_TOKEN"
+        ]
+      },
+      {
+        "when": {
+          "parameter": "allowPatAuthentication",
+          "equals": true
+        },
+        "requires": [
+          "AZURE_DEVOPS_EXT_PAT"
+        ]
+      }
     ],
     "forbiddenInRequest": true
   },

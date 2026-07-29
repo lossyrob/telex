@@ -23,17 +23,21 @@ stdout, and exits zero after communicating `idle`, `event`, `terminal`, or
   to the Watcher runtime.
 - A detector observes only. It must not merge, approve, comment, mutate a file
   as a reaction, queue a build, or expose a configurable follow-up action.
-- Credentials are inherited only through explicit environment variable names.
-  Values never belong in requests, state, fixtures, manifests, registrations,
-  event metadata, or diagnostics.
+- Watcher clears the detector environment, restores its documented safe
+  process baseline, and then adds only registration-allowlisted variables.
+  Credential values never belong in requests, state, fixtures, manifests,
+  registrations, event metadata, or diagnostics.
 - Event-producing state is committed by Watcher only after durable Telex
   acceptance. Templates do not implement delivery or receipt logic.
+- Detector stderr is local health evidence only. Watcher redacts allowlisted
+  secret values before retaining diagnostics; stderr is never a Telex event
+  body or cursor input.
 
 ## Select a template
 
 | Template | Use it for | Calls per attempt | Recommended interval | Safe downtime |
 | --- | --- | ---: | ---: | ---: |
-| `github-pr` | PR readiness, attention, completion, and optional first snapshot | 1 | 300 s | 900 s |
+| `github-pr` | PR readiness, attention, completion, and optional synthetic first snapshot | 1 | 300 s | 900 s |
 | `github-pr-external-activity` | Editable policy for substantive activity by identities outside an ignore set | 1 | 300 s | 3600 s |
 | `azure-devops-pr` | Azure DevOps PR review, merge, thread, creation, and completion state | 2 | 300 s | 1800 s |
 | `http-json` | One scalar condition in a bounded read-only HTTPS JSON response | 1 | 60 s | 300 s |
@@ -46,10 +50,15 @@ behavior, and downtime rationale.
 
 ## Copy and customize
 
-1. Copy one template directory and `shared/DetectorCommon.psm1` into a private,
-   reviewed location. Do not edit the library copy in place for one watch.
+1. Copy one template directory and every `librarySource.supportFiles` entry
+   into a private, reviewed location. This always includes
+   `shared/DetectorCommon.psm1`; `local-command` also includes
+   `shared/BoundedCommand.psm1`. Do not edit the library copy in place for one
+   watch.
 2. Record `derivedFrom` with the upstream template ID, template version,
-   detector digest, helper digest, and evidence-normalization version.
+   detector digest, helper digest, and evidence-normalization version. The
+   reconciliation path is any non-empty relative path; the shipped layout uses
+   `../RECONCILING-CUSTOMIZATIONS.md`.
 3. Edit provider policy, parameters, event text, and fixtures. Keep the command
    observational and preserve the canonical stdin/stdout envelope.
 4. If normalized evidence changes, increment the evidence-normalization version
@@ -77,8 +86,10 @@ top-level or nested keys are rejected. Each `manifest.json` declares:
 - detector and helper paths with lowercase SHA-256 digests;
 - `derivedFrom` guidance;
 - exact allowed event kinds;
-- cursor/replay, terminal, and duplicate semantics;
-- credential policy and provider API version;
+- cursor/replay, terminal, duplicate, initial-emission, and diagnostic
+  semantics;
+- credential policy, conditional credential requirements, and provider API
+  version;
 - provider calls per attempt; and
 - recommended/minimum interval plus `maxSafeDowntimeSeconds` and rationale.
 
@@ -97,7 +108,15 @@ Every template ships:
 
 Both include exact `allowedEventKinds`, an empty prefix list,
 `maxSafeDowntimeSeconds`, interval, credentials, and opaque initial state.
-Replace every path, address, backend profile, and provider placeholder.
+Replace every angle-bracket path/command placeholder, address, backend
+profile, and provider identity placeholder. The path tokens are intentionally
+platform-neutral; substitute native absolute paths before registration.
+
+Pinned PR samples are least-privilege. They do not authorize synthetic
+`snapshot` or `created` kinds while their corresponding parameters are false.
+Development samples may opt into and authorize the wider vocabulary. Changing
+an initial-emission parameter requires the coupled allowed-kind policy change,
+which is an operator pause/update/resume checkpoint.
 
 These samples target the production registration contract in
 [`watcher.md`](../../docs/design/watcher.md). The current experimental
@@ -108,10 +127,12 @@ not expand or start the experimental runtime.
 
 ## Event and cursor stability
 
-The shared helper hashes compact normalized evidence and stores the lowercase
-SHA-256 in `nextState.cursor`. Arrays are sorted before hashing. Human-facing
-reason text is not evidence. Event IDs combine provider scope with the first 24
-hex characters of that cursor.
+The shared helper recursively sorts object keys using ordinal comparison,
+serializes compact JSON, and stores its lowercase SHA-256 in
+`nextState.cursor`. Detectors sort set-like arrays before hashing; ordered
+provider arrays retain their order. Human-facing reason text is not evidence.
+Event IDs combine provider scope with the first 24 hex characters of that
+cursor.
 
 - An unchanged cursor returns `idle`, suppressing replay.
 - A changed observation with no event still returns `idle.nextState`; that
@@ -123,12 +144,27 @@ hex characters of that cursor.
 - Changing evidence composition can change cursors and event IDs. Version and
   operate that change explicitly.
 
+## Initial emission semantics
+
+`emitInitialSnapshot` and `emitInitialCreatedEvent` control only synthetic
+baseline events that a PR detector explicitly constructs. They never suppress
+a naturally actionable or terminal condition:
+
+- first-attempt attention, ready-to-merge, completion, matched HTTP/local
+  conditions, and external activity emit normally;
+- GitHub snapshot emits only when `emitInitialSnapshot` is true;
+- Azure DevOps snapshot/created emit only when their respective parameter is
+  true; and
+- templates without a synthetic kind do not accept either parameter.
+
+Preflight-declared terminal remains eventless regardless of those flags.
+
 ## Terminal behavior and PR preflight
 
 The generic GitHub and Azure DevOps templates emit terminal completion events
-after an established watch. The customized GitHub activity template ends with
-an eventless terminal result. All three consume preflight evidence from
-`initialState.preflight` or `parameters.preflight`.
+without preflight or after an established watch. The customized GitHub
+activity template ends with an eventless terminal result. All three consume
+preflight evidence only from `initialState.preflight`.
 
 Run the appropriate helper as the final numbered step immediately before
 registration:
@@ -138,8 +174,7 @@ registration:
 3. Prepare the final registration JSON, but do not register it.
 4. Run `shared/github-pr-preflight.ps1` for either GitHub template, or
    `shared/azure-devops-pr-preflight.ps1` for Azure DevOps.
-5. Abort when the helper exits 3: the PR is already merged, closed, completed,
-   or abandoned.
+5. Apply the preflight exit table below. Only exit 0 permits registration.
 6. Put the helper's JSON object in `initialState.preflight` without editing its
    identity evidence.
 7. Register immediately. Do not perform unrelated work between preflight and
@@ -159,6 +194,23 @@ first detector attempt recognizes the terminal provider state and returns
 eventless `terminal`, so the race cannot leave an active stale watch or send a
 misleading initial completion event.
 
+| Exit | Meaning | Operator action |
+| ---: | --- | --- |
+| 0 | Safe non-terminal observation | Put stdout JSON in `initialState.preflight` and register immediately |
+| 3 | Provider object is already terminal | Abort registration |
+| 4 | Provider authentication or transport failed | Repair credentials/connectivity and rerun |
+| 5 | Test-mode misuse, invalid RFC3339 input, fixture/provider JSON parse, or shape failure | Repair input/tooling and rerun |
+
+`-TestMode`, `-FixturePath`, and `-Now` are hidden conformance-only helper
+arguments. `FixturePath` and `Now` are refused without `-TestMode`, and `Now`
+must be RFC3339. Production registration must use a live helper call.
+
+On preflight identity/template/timestamp mismatch, the detector returns
+schema-valid `degraded` and emits a structured
+`detectorDiagnostic.code=preflight-identity-mismatch` record on stderr. The
+diagnostic repeats until the watch is re-registered with fresh matching
+preflight; it is not a new result-schema or blocked-reason vocabulary.
+
 ## Credentials and rate budgets
 
 The runtime provides generic cadence, jitter, concurrency, and backoff. The
@@ -171,7 +223,14 @@ manifest owns provider-specific budget assumptions.
 - HTTP/JSON uses one HTTPS GET, rejects redirects, limits content to 1 MiB, and
   supports no auth, bearer `HTTP_JSON_BEARER_TOKEN`, or one named header
   `HTTP_JSON_HEADER_VALUE`.
-- Local templates inherit no credentials by default.
+- Local templates inherit no credentials by default. `local-command` starts
+  its child with the detector environment that Watcher already sanitized and
+  allowlisted; it has no parameter-driven secret pass-through.
+
+The HTTP/JSON matcher accepts only scalar `expectedValue` values (including
+explicit JSON null). A missing field is distinct from a present null and never
+matches. Azure DevOps vote `-5` is waiting-for-author, not rejection; the
+default `blockingReviewerVoteAtMost` is `-10`.
 
 Increasing frequency multiplies manifest `callsPerAttempt` across every watch
 sharing a credential. Account for provider quotas and keep intervals at or
@@ -210,9 +269,12 @@ free. To refresh a fixture:
 1. capture the documented provider API version manually;
 2. remove tokens, headers, organizations, repositories, URLs, identities,
    comments, and IDs that are not deliberate examples;
-3. preserve only fields used by normalization or event metadata;
-4. add/update terminal and neutral cases when policy changes; and
-5. run the full template conformance test before committing.
+3. stamp top-level `apiVersion` and `capturedAgainst` metadata compatible with
+   the manifest;
+4. preserve only fields used by normalization or event metadata;
+5. add/update terminal, neutral, missing/null, and no-external-activity cases
+   when policy changes; and
+6. run the full template conformance test before committing.
 
 ## Validation
 
@@ -226,9 +288,12 @@ cargo test -p telex-watcher --test template_conformance
 The Rust test invokes all six detectors with local fixtures, validates generated
 requests/results against the canonical schemas, validates strict manifests,
 checks source and pinned digests, proves stable cursors/event IDs and replay
-suppression, exercises terminal preflight races, compares emitted kinds with
-manifest/registration policy, checks cadence/downtime/credentials, verifies
-changelog versions and documentation links, and rejects unsanitized fixtures.
+suppression, exercises terminal preflight races and explicit exits, tests
+provider transports without network calls, compares emitted kinds with
+least-privilege registration policy, checks cadence/downtime/credential modes,
+validates fixture API metadata, verifies changelog versions and documentation
+links, and rejects unsanitized fixtures, registrations, manifests, and helper
+scripts.
 
 ## Library releases
 

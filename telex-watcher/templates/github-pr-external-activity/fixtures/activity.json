@@ -1,4 +1,6 @@
 {
+  "apiVersion": "gh >=2.55.0 pr view --json contract v1",
+  "capturedAgainst": "gh 2.55.0 or newer",
   "number": 43,
   "title": "Example external review activity",
   "url": "https://github.example.invalid/example/repo/pull/43",

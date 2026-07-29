@@ -1,9 +1,9 @@
 {
   "manifestSchemaVersion": 1,
   "templateId": "github-pr-external-activity",
-  "templateVersion": "1.0.0",
+  "templateVersion": "1.1.0",
   "detectorProtocolVersion": 1,
-  "evidenceNormalizationVersion": 1,
+  "evidenceNormalizationVersion": 2,
   "runtimeRequirement": {
     "command": "pwsh",
     "minimumVersion": "7.4",
@@ -11,11 +11,11 @@
   },
   "librarySource": {
     "path": "github-pr-external-activity/detector.ps1",
-    "sha256": "b27b0040ed173194ee2ab931db92c5c86631112828987f120015843b48476bfa",
+    "sha256": "ec8456b9934308c827b10b4365099ed9c84732983c095a726b8c053d653e77ce",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
-        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+        "sha256": "d7fcef49f32f4057a2495f741d5ecc5e8146ba4609f401723f2d753a71d37c0c"
       }
     ]
   },
@@ -28,12 +28,17 @@
   ],
   "cursor": {
     "stateField": "cursor",
-    "strategy": "sha256-compact-normalized-json",
+    "strategy": "sha256-recursive-key-sorted-json-v1",
     "replay": "The cursor covers PR identity, head SHA, state, ignored identities, and sorted external review/comment identities. Comment text edits do not create a new event."
   },
   "semantics": {
-    "terminal": "Merged or closed PRs return eventless terminal, including a close between preflight and the first attempt.",
-    "duplicates": "Event IDs are deterministic from PR number and normalized activity cursor. Recipients must deduplicate repeated event IDs."
+    "terminal": "Merged or closed PRs return eventless terminal, including preflight-declared terminal and a close between preflight and the first attempt.",
+    "duplicates": "Event IDs are deterministic from PR number and normalized activity cursor. Recipients must deduplicate repeated event IDs.",
+    "initialEmission": {
+      "actionable": "Existing substantive external activity emits on the first attempt because it is a naturally actionable condition.",
+      "synthetic": "This template has no synthetic snapshot or created event."
+    },
+    "diagnostics": "Identity, authentication, provider, and configuration failures return schema-valid degraded results and write a structured detectorDiagnostic JSON record to stderr only."
   },
   "credentials": {
     "policy": "Use the GitHub CLI credential store or allowlist GH_TOKEN. Keep ignored logins in parameters and credentials out of request JSON.",
@@ -41,10 +46,11 @@
     "optionalEnvironmentVariables": [
       "GH_TOKEN"
     ],
+    "conditionalRequirements": [],
     "forbiddenInRequest": true
   },
   "provider": {
-    "apiVersion": "GitHub CLI pr-view JSON field set v1",
+    "apiVersion": "gh >=2.55.0 pr view --json contract v1",
     "callsPerAttempt": 1
   },
   "scheduling": {

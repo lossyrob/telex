@@ -40,6 +40,9 @@ function Get-OptionalValue {
         $Default = $null
     )
 
+    if ($null -eq $Object) {
+        return $Default
+    }
     if ($Object -is [System.Collections.IDictionary]) {
         if ($Object.Contains($Name)) {
             return $Object[$Name]
@@ -67,6 +70,33 @@ function ConvertTo-CompactJson {
     return [string](ConvertTo-Json -InputObject $Value -Depth 30 -Compress)
 }
 
+function ConvertTo-CanonicalJsonValue {
+    param($Value)
+
+    if ($Value -is [System.Collections.IDictionary]) {
+        $keys = [string[]]@($Value.Keys | ForEach-Object { [string]$_ })
+        [Array]::Sort($keys, [System.StringComparer]::Ordinal)
+        $ordered = [ordered]@{}
+        foreach ($key in $keys) {
+            $ordered[$key] = ConvertTo-CanonicalJsonValue -Value $Value[$key]
+        }
+        return $ordered
+    }
+    if ($Value -is [System.Collections.IList] -and $Value -isnot [string]) {
+        $items = [System.Collections.Generic.List[object]]::new()
+        foreach ($item in $Value) {
+            $items.Add((ConvertTo-CanonicalJsonValue -Value $item))
+        }
+        return ,$items.ToArray()
+    }
+    return $Value
+}
+
+function ConvertTo-CanonicalJson {
+    param($Value)
+    return ConvertTo-CompactJson -Value (ConvertTo-CanonicalJsonValue -Value $Value)
+}
+
 function Get-Sha256 {
     param([string]$Text)
 
@@ -77,7 +107,7 @@ function Get-Sha256 {
 
 function Get-OpaqueCursor {
     param($Evidence)
-    $json = ConvertTo-CompactJson -Value $Evidence
+    $json = ConvertTo-CanonicalJson -Value $Evidence
     return Get-Sha256 -Text $json
 }
 
@@ -96,7 +126,72 @@ function Get-PreflightEvidence {
     if ($Request.state -is [System.Collections.IDictionary] -and $Request.state.Contains('preflight')) {
         return $Request.state.preflight
     }
-    return Get-DetectorParameter -Request $Request -Name 'preflight'
+    return $null
+}
+
+function Test-Rfc3339Timestamp {
+    param($Value)
+
+    if ($Value -is [DateTimeOffset]) {
+        return $true
+    }
+    if ($Value -is [DateTime]) {
+        return $Value.Kind -ne [DateTimeKind]::Unspecified
+    }
+    $text = [string]$Value
+    if ($text -notmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$') {
+        return $false
+    }
+    $parsed = [DateTimeOffset]::MinValue
+    return [DateTimeOffset]::TryParse(
+        $text,
+        [Globalization.CultureInfo]::InvariantCulture,
+        [Globalization.DateTimeStyles]::RoundtripKind,
+        [ref]$parsed
+    )
+}
+
+function Assert-DetectorTestMode {
+    param(
+        [hashtable]$Request,
+        [string[]]$ParameterNames
+    )
+
+    $parameters = $Request.watch.parameters
+    foreach ($name in $ParameterNames) {
+        if (
+            $parameters -is [System.Collections.IDictionary] -and
+            $parameters.Contains($name) -and
+            $null -ne $parameters[$name] -and
+            -not [string]::IsNullOrWhiteSpace([string]$parameters[$name]) -and
+            $env:TELEX_WATCHER_TEST -ne '1'
+        ) {
+            throw "test-mode-required: parameters.$name is available only when TELEX_WATCHER_TEST=1."
+        }
+    }
+}
+
+function Write-TestTransportRecord {
+    param(
+        [hashtable]$Request,
+        [System.Collections.IDictionary]$Record
+    )
+
+    $capturePath = [string](Get-DetectorParameter -Request $Request -Name 'testTransportCapturePath' -Default '')
+    if ([string]::IsNullOrWhiteSpace($capturePath)) {
+        return
+    }
+    Assert-DetectorTestMode -Request $Request -ParameterNames @('testTransportCapturePath')
+    $resolved = Resolve-DetectorPath $capturePath
+    $parent = Split-Path -Parent $resolved
+    if (-not [string]::IsNullOrWhiteSpace($parent)) {
+        [IO.Directory]::CreateDirectory($parent) | Out-Null
+    }
+    [IO.File]::AppendAllText(
+        $resolved,
+        "$(ConvertTo-CompactJson -Value $Record)$([Environment]::NewLine)",
+        [Text.UTF8Encoding]::new($false)
+    )
 }
 
 function New-EventId {
@@ -131,9 +226,21 @@ function Write-DetectorResult {
 }
 
 function Write-Degraded {
-    param([string]$Message)
+    param(
+        [string]$Message,
+        [string]$Code = ''
+    )
 
-    [Console]::Error.WriteLine("detector degraded: $Message")
+    if ([string]::IsNullOrWhiteSpace($Code)) {
+        $prefix = ($Message -split ':', 2)[0]
+        $Code = if ($prefix -match '^[a-z0-9]+(?:-[a-z0-9]+)+$') { $prefix } else { 'detector-failure' }
+    }
+    $diagnostic = [ordered]@{
+        schemaVersion = 1
+        code = $Code
+        message = $Message
+    }
+    [Console]::Error.WriteLine("detectorDiagnostic=$(ConvertTo-CompactJson -Value $diagnostic)")
     Write-DetectorResult -Outcome degraded
 }
 
@@ -148,9 +255,6 @@ function Write-SnapshotResult {
     $cursor = Get-OpaqueCursor $Evidence
     $nextState = [ordered]@{ cursor = $cursor }
     $previousCursor = Get-StateCursor $Request
-    $emitInitialEvent =
-        [bool](Get-DetectorParameter -Request $Request -Name 'emitInitialSnapshot' -Default $false) -or
-        [bool](Get-DetectorParameter -Request $Request -Name 'emitInitialCreatedEvent' -Default $false)
 
     if ($previousCursor -eq $cursor) {
         Write-DetectorResult -Outcome idle -NextState $nextState
@@ -158,10 +262,6 @@ function Write-SnapshotResult {
     }
     if ($Terminal) {
         Write-DetectorResult -Outcome terminal -NextState $nextState -Event $Event
-        return
-    }
-    if ($null -eq $previousCursor -and -not $emitInitialEvent) {
-        Write-DetectorResult -Outcome idle -NextState $nextState
         return
     }
     if ($null -eq $Event) {
@@ -180,4 +280,4 @@ function Write-EventlessTerminal {
     })
 }
 
-Export-ModuleMember -Function Read-DetectorRequest, Get-DetectorParameter, Get-OptionalValue, Resolve-DetectorPath, ConvertTo-CompactJson, Get-Sha256, Get-OpaqueCursor, Get-StateCursor, Get-PreflightEvidence, New-EventId, Write-DetectorResult, Write-Degraded, Write-SnapshotResult, Write-EventlessTerminal
+Export-ModuleMember -Function Read-DetectorRequest, Get-DetectorParameter, Get-OptionalValue, Resolve-DetectorPath, ConvertTo-CompactJson, ConvertTo-CanonicalJson, Get-Sha256, Get-OpaqueCursor, Get-StateCursor, Get-PreflightEvidence, Test-Rfc3339Timestamp, Assert-DetectorTestMode, Write-TestTransportRecord, New-EventId, Write-DetectorResult, Write-Degraded, Write-SnapshotResult, Write-EventlessTerminal

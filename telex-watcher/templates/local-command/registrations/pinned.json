@@ -6,12 +6,12 @@
     "-NoLogo",
     "-NoProfile",
     "-File",
-    "C:\\path\\to\\telex-watcher\\templates\\local-command\\detector.ps1"
+    "<DETECTOR-PATH>"
   ],
-  "scriptPath": "C:\\path\\to\\telex-watcher\\templates\\local-command\\detector.ps1",
-  "workingDirectory": "C:\\path\\to\\telex-watcher\\templates\\local-command",
+  "scriptPath": "<DETECTOR-PATH>",
+  "workingDirectory": "<TEMPLATE-DIRECTORY>",
   "scriptMode": "pinned",
-  "scriptDigest": "784f0212e5464d1cccd88f2b23ae79345561446328510b6ddc4cb8b5598251fe",
+  "scriptDigest": "57a0c7e5f3cac39e4ee37aaafdf888189353173316c8feea91638c0a71747f25",
   "backendProfile": "default",
   "sender": "watcher@example.invalid",
   "target": "recipient@example.invalid",
@@ -26,10 +26,10 @@
   "environmentAllowlist": [],
   "parameters": {
     "command": [
-      "C:\\path\\to\\observational-check.exe",
+      "<OBSERVATIONAL-COMMAND>",
       "--json"
     ],
-    "workingDirectory": "C:\\path\\to",
+    "workingDirectory": "<COMMAND-WORKING-DIRECTORY>",
     "sourceId": "example-local-command",
     "conditionExitCodes": [
       0
@@ -38,8 +38,7 @@
       1
     ],
     "commandTimeoutSeconds": 20,
-    "maxOutputChars": 16384,
-    "emitInitialSnapshot": false
+    "maxOutputChars": 16384
   },
   "initialState": {},
   "maxSafeDowntimeSeconds": 300

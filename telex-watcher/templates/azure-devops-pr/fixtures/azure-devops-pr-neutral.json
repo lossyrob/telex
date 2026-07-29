@@ -1,4 +1,6 @@
 {
+  "apiVersion": "Azure DevOps Git REST 7.1",
+  "capturedAgainst": "Azure DevOps Git REST 7.1",
   "pullRequest": {
     "pullRequestId": 74,
     "title": "Example neutral Azure DevOps pull request",

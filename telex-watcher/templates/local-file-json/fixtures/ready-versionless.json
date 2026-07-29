@@ -1,7 +1,6 @@
 {
   "apiVersion": "Local JSON document shape v1",
   "capturedAgainst": "local fixture contract v1",
-  "version": "fixture-v1",
   "ready": true,
-  "message": "The local fixture condition is ready."
+  "message": "The versionless local fixture condition is ready."
 }

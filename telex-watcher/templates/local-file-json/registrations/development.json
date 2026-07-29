@@ -6,10 +6,10 @@
     "-NoLogo",
     "-NoProfile",
     "-File",
-    "C:\\path\\to\\telex-watcher\\templates\\local-file-json\\detector.ps1"
+    "<DETECTOR-PATH>"
   ],
-  "scriptPath": "C:\\path\\to\\telex-watcher\\templates\\local-file-json\\detector.ps1",
-  "workingDirectory": "C:\\path\\to\\telex-watcher\\templates\\local-file-json",
+  "scriptPath": "<DETECTOR-PATH>",
+  "workingDirectory": "<TEMPLATE-DIRECTORY>",
   "scriptMode": "follow-path",
   "backendProfile": "default",
   "sender": "watcher@example.invalid",
@@ -24,11 +24,10 @@
   "allowedEventKindPrefixes": [],
   "environmentAllowlist": [],
   "parameters": {
-    "inputPath": "C:\\path\\to\\input.json",
+    "inputPath": "<INPUT-JSON-PATH>",
     "sourceId": "example-local-file",
     "field": "ready",
-    "expectedValue": true,
-    "emitInitialSnapshot": true
+    "expectedValue": true
   },
   "initialState": {},
   "maxSafeDowntimeSeconds": 300

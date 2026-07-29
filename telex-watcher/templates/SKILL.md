@@ -11,7 +11,8 @@ Use the authoritative [template library README](README.md).
    [registration samples](README.md#registration-samples), allowed kinds,
    credential allowlist, interval, and downtime.
 5. Preserve [event and cursor stability](README.md#event-and-cursor-stability),
-   replay suppression, duplicate IDs, and non-advancing degradation.
+   replay suppression, duplicate IDs, non-advancing degradation, and
+   [initial emission semantics](README.md#initial-emission-semantics).
 6. For PRs, perform the final [terminal preflight](README.md#terminal-behavior-and-pr-preflight)
    immediately before registration and seed `initialState.preflight`.
 7. Review [credentials and rate budgets](README.md#credentials-and-rate-budgets),
