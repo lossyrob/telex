@@ -1662,12 +1662,14 @@ fn principal_provenance(profile: &BackendProfile) -> PrincipalProvenance {
             evidence: Some("local OS principal; backend does not authenticate it".to_string()),
         },
         "postgres" => {
-            let principal = profile
-                .url
-                .as_deref()
-                .and_then(|url| url.parse::<tokio_postgres::Config>().ok())
-                .and_then(|config| config.get_user().map(str::to_string));
-            PrincipalProvenance {
+            #[cfg(feature = "postgres")]
+            {
+                let principal = profile
+                    .url
+                    .as_deref()
+                    .and_then(|url| url.parse::<tokio_postgres::Config>().ok())
+                    .and_then(|config| config.get_user().map(str::to_string));
+                PrincipalProvenance {
                 verification: if principal.is_some() {
                     PrincipalVerification::Unverified
                 } else {
@@ -1678,6 +1680,15 @@ fn principal_provenance(profile: &BackendProfile) -> PrincipalProvenance {
                     "Postgres connection user; authenticated transport evidence is not exposed by the backend"
                         .to_string(),
                 ),
+                }
+            }
+            #[cfg(not(feature = "postgres"))]
+            {
+                PrincipalProvenance {
+                    principal: None,
+                    verification: PrincipalVerification::Unavailable,
+                    evidence: Some("Postgres support is not compiled into this build".to_string()),
+                }
             }
         }
         _ => PrincipalProvenance {
@@ -1716,49 +1727,60 @@ fn canonical_store_material(profile: &BackendProfile, db_override: Option<&str>)
             format!("sqlite:{canonical}")
         }
         "postgres" => {
-            let parsed = profile
-                .url
-                .as_deref()
-                .and_then(|url| url.parse::<tokio_postgres::Config>().ok());
-            if let Some(parsed) = parsed {
-                let hosts = parsed
-                    .get_hosts()
-                    .iter()
-                    .map(|host| match host {
-                        tokio_postgres::config::Host::Tcp(value) => value.to_ascii_lowercase(),
-                        #[cfg(unix)]
-                        tokio_postgres::config::Host::Unix(value) => {
-                            value.to_string_lossy().replace('\\', "/")
-                        }
-                    })
-                    .collect::<Vec<_>>()
-                    .join(",");
-                let ports = if parsed.get_ports().is_empty() {
-                    "5432".to_string()
-                } else {
-                    parsed
-                        .get_ports()
+            #[cfg(feature = "postgres")]
+            {
+                let parsed = profile
+                    .url
+                    .as_deref()
+                    .and_then(|url| url.parse::<tokio_postgres::Config>().ok());
+                if let Some(parsed) = parsed {
+                    let hosts = parsed
+                        .get_hosts()
                         .iter()
-                        .map(u16::to_string)
+                        .map(|host| match host {
+                            tokio_postgres::config::Host::Tcp(value) => value.to_ascii_lowercase(),
+                            #[cfg(unix)]
+                            tokio_postgres::config::Host::Unix(value) => {
+                                value.to_string_lossy().replace('\\', "/")
+                            }
+                        })
                         .collect::<Vec<_>>()
-                        .join(",")
-                };
+                        .join(",");
+                    let ports = if parsed.get_ports().is_empty() {
+                        "5432".to_string()
+                    } else {
+                        parsed
+                            .get_ports()
+                            .iter()
+                            .map(u16::to_string)
+                            .collect::<Vec<_>>()
+                            .join(",")
+                    };
+                    format!(
+                        "postgres:hosts={hosts};ports={ports};db={};schema={}",
+                        parsed.get_dbname().unwrap_or(""),
+                        profile.schema.as_deref().unwrap_or("")
+                    )
+                } else {
+                    format!(
+                        "postgres:unparsed={};schema={}",
+                        profile
+                            .url
+                            .as_deref()
+                            .unwrap_or("")
+                            .split('?')
+                            .next()
+                            .unwrap_or("")
+                            .to_ascii_lowercase(),
+                        profile.schema.as_deref().unwrap_or("")
+                    )
+                }
+            }
+            #[cfg(not(feature = "postgres"))]
+            {
                 format!(
-                    "postgres:hosts={hosts};ports={ports};db={};schema={}",
-                    parsed.get_dbname().unwrap_or(""),
-                    profile.schema.as_deref().unwrap_or("")
-                )
-            } else {
-                format!(
-                    "postgres:unparsed={};schema={}",
-                    profile
-                        .url
-                        .as_deref()
-                        .unwrap_or("")
-                        .split('?')
-                        .next()
-                        .unwrap_or("")
-                        .to_ascii_lowercase(),
+                    "postgres:profile={};schema={}",
+                    profile.target(),
                     profile.schema.as_deref().unwrap_or("")
                 )
             }
@@ -1984,27 +2006,31 @@ mod tests {
             canonical_store_material(&dotted, dotted.path.as_deref())
         );
 
-        let postgres_a = BackendProfile {
-            kind: "postgres".into(),
-            url: Some("postgres://user-a@Example.COM:5432/app?sslmode=require".into()),
-            schema: Some("telex".into()),
-            path: None,
-            auth: None,
-            password_env: None,
-            password_command: None,
-            entra_cred: None,
-            entra_scope: None,
-        };
-        let postgres_b = BackendProfile {
-            url: Some("postgres://user-b@example.com/app?sslmode=prefer".into()),
-            ..postgres_a.clone()
-        };
-        assert_eq!(
-            canonical_store_material(&postgres_a, None),
-            canonical_store_material(&postgres_b, None)
-        );
+        #[cfg(feature = "postgres")]
+        {
+            let postgres_a = BackendProfile {
+                kind: "postgres".into(),
+                url: Some("postgres://user-a@Example.COM:5432/app?sslmode=require".into()),
+                schema: Some("telex".into()),
+                path: None,
+                auth: None,
+                password_env: None,
+                password_command: None,
+                entra_cred: None,
+                entra_scope: None,
+            };
+            let postgres_b = BackendProfile {
+                url: Some("postgres://user-b@example.com/app?sslmode=prefer".into()),
+                ..postgres_a.clone()
+            };
+            assert_eq!(
+                canonical_store_material(&postgres_a, None),
+                canonical_store_material(&postgres_b, None)
+            );
+        }
     }
 
+    #[cfg(feature = "postgres")]
     #[test]
     fn postgres_principal_hint_is_unverified() {
         let profile = BackendProfile {
