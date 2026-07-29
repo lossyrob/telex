@@ -1,0 +1,59 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "github-pr",
+  "templateVersion": "1.0.0",
+  "detectorProtocolVersion": 1,
+  "evidenceNormalizationVersion": 1,
+  "runtimeRequirement": {
+    "command": "pwsh",
+    "minimumVersion": "7.4",
+    "notes": "PowerShell 7.4 or newer and GitHub CLI are required for live observations."
+  },
+  "librarySource": {
+    "path": "github-pr/detector.ps1",
+    "sha256": "2ecd18c47d472c4365517b6d5aa36f1facf9c5e56a90da98048b00feb215e9a5",
+    "supportFiles": [
+      {
+        "path": "shared/DetectorCommon.psm1",
+        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+      }
+    ]
+  },
+  "derivedFrom": {
+    "guidance": "Record this template ID, version, source digest, and evidence-normalization version in every customized copy; recompute installed digests after edits.",
+    "reconciliation": "../RECONCILING-CUSTOMIZATIONS.md"
+  },
+  "allowedEventKinds": [
+    "github.pull-request.attention",
+    "github.pull-request.completed",
+    "github.pull-request.ready-to-merge",
+    "github.pull-request.snapshot"
+  ],
+  "cursor": {
+    "stateField": "cursor",
+    "strategy": "sha256-compact-normalized-json",
+    "replay": "The cursor covers PR identity, head SHA, state, draft flag, merge state, review decision, and sorted checks. An unchanged cursor returns idle."
+  },
+  "semantics": {
+    "terminal": "Merged or closed PRs return terminal. If terminalization occurs after a successful preflight but before the first attempt, the first result is eventless terminal.",
+    "duplicates": "Event IDs are deterministic from PR number and normalized cursor. At-least-once delivery can repeat the same event ID; recipients must deduplicate it."
+  },
+  "credentials": {
+    "policy": "Use the GitHub CLI credential store or allowlist GH_TOKEN. Never put a token in parameters, state, fixtures, or registrations.",
+    "requiredEnvironmentVariables": [],
+    "optionalEnvironmentVariables": [
+      "GH_TOKEN"
+    ],
+    "forbiddenInRequest": true
+  },
+  "provider": {
+    "apiVersion": "GitHub CLI pr-view JSON field set v1",
+    "callsPerAttempt": 1
+  },
+  "scheduling": {
+    "recommendedIntervalSeconds": 300,
+    "minimumIntervalSeconds": 60,
+    "maxSafeDowntimeSeconds": 900,
+    "maxSafeDowntimeRationale": "The template reads current PR state and can miss short-lived check, review, or mergeability transitions; three recommended intervals is the conservative recovery bound."
+  }
+}

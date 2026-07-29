@@ -1,0 +1,16 @@
+{
+  "number": 42,
+  "title": "Example completed pull request",
+  "url": "https://github.example.invalid/example/repo/pull/42",
+  "state": "MERGED",
+  "headRefOid": "0123456789abcdef0123456789abcdef01234567",
+  "isDraft": false,
+  "mergeStateStatus": "UNKNOWN",
+  "reviewDecision": "APPROVED",
+  "author": { "login": "example-author" },
+  "statusCheckRollup": [
+    { "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS" }
+  ],
+  "reviews": [],
+  "comments": []
+}

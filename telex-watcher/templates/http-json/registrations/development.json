@@ -1,0 +1,38 @@
+{
+  "id": "example-http-json-development",
+  "detectorSchemaVersion": 1,
+  "command": [
+    "pwsh",
+    "-NoLogo",
+    "-NoProfile",
+    "-File",
+    "C:\\path\\to\\telex-watcher\\templates\\http-json\\detector.ps1"
+  ],
+  "scriptPath": "C:\\path\\to\\telex-watcher\\templates\\http-json\\detector.ps1",
+  "workingDirectory": "C:\\path\\to\\telex-watcher\\templates\\http-json",
+  "scriptMode": "follow-path",
+  "backendProfile": "default",
+  "sender": "watcher@example.invalid",
+  "target": "recipient@example.invalid",
+  "attention": "fyi",
+  "requiresDisposition": false,
+  "intervalSeconds": 60,
+  "timeoutSeconds": 30,
+  "allowedEventKinds": [
+    "http.json.condition-met"
+  ],
+  "allowedEventKindPrefixes": [],
+  "environmentAllowlist": [
+    "HTTP_JSON_BEARER_TOKEN"
+  ],
+  "parameters": {
+    "url": "https://api.example.invalid/status",
+    "sourceId": "example-service-status",
+    "fieldPath": "service.ready",
+    "expectedValue": true,
+    "authentication": "bearer",
+    "emitInitialSnapshot": true
+  },
+  "initialState": {},
+  "maxSafeDowntimeSeconds": 300
+}

@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-detector-template-manifest-v1.schema.json",
+  "title": "Telex Watcher detector template manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "manifestSchemaVersion",
+    "templateId",
+    "templateVersion",
+    "detectorProtocolVersion",
+    "evidenceNormalizationVersion",
+    "runtimeRequirement",
+    "librarySource",
+    "derivedFrom",
+    "allowedEventKinds",
+    "cursor",
+    "semantics",
+    "credentials",
+    "provider",
+    "scheduling"
+  ],
+  "properties": {
+    "manifestSchemaVersion": {
+      "const": 1
+    },
+    "templateId": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+    },
+    "templateVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
+    "detectorProtocolVersion": {
+      "const": 1
+    },
+    "evidenceNormalizationVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "runtimeRequirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "command",
+        "minimumVersion",
+        "notes"
+      ],
+      "properties": {
+        "command": {
+          "const": "pwsh"
+        },
+        "minimumVersion": {
+          "type": "string",
+          "pattern": "^7\\.[0-9]+$"
+        },
+        "notes": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "librarySource": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "supportFiles"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "supportFiles": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "path",
+              "sha256"
+            ],
+            "properties": {
+              "path": {
+                "$ref": "#/$defs/relativePath"
+              },
+              "sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        }
+      }
+    },
+    "derivedFrom": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "guidance",
+        "reconciliation"
+      ],
+      "properties": {
+        "guidance": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "reconciliation": {
+          "const": "../RECONCILING-CUSTOMIZATIONS.md"
+        }
+      }
+    },
+    "allowedEventKinds": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9][a-z0-9-]*(\\.[a-z0-9][a-z0-9-]*)+$"
+      }
+    },
+    "cursor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "stateField",
+        "strategy",
+        "replay"
+      ],
+      "properties": {
+        "stateField": {
+          "const": "cursor"
+        },
+        "strategy": {
+          "const": "sha256-compact-normalized-json"
+        },
+        "replay": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "semantics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "terminal",
+        "duplicates"
+      ],
+      "properties": {
+        "terminal": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "duplicates": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
+    "credentials": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "requiredEnvironmentVariables",
+        "optionalEnvironmentVariables",
+        "forbiddenInRequest"
+      ],
+      "properties": {
+        "policy": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "requiredEnvironmentVariables": {
+          "$ref": "#/$defs/environmentNames"
+        },
+        "optionalEnvironmentVariables": {
+          "$ref": "#/$defs/environmentNames"
+        },
+        "forbiddenInRequest": {
+          "const": true
+        }
+      }
+    },
+    "provider": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "apiVersion",
+        "callsPerAttempt"
+      ],
+      "properties": {
+        "apiVersion": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "callsPerAttempt": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "scheduling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "recommendedIntervalSeconds",
+        "minimumIntervalSeconds",
+        "maxSafeDowntimeSeconds",
+        "maxSafeDowntimeRationale"
+      ],
+      "properties": {
+        "recommendedIntervalSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "minimumIntervalSeconds": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "maxSafeDowntimeSeconds": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "maxSafeDowntimeRationale": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    }
+  },
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![A-Za-z]:|[/\\\\]).+$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "environmentNames": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Z_][A-Z0-9_]*$"
+      }
+    }
+  }
+}

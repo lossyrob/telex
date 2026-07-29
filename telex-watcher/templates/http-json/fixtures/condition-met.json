@@ -1,0 +1,7 @@
+{
+  "apiVersion": "fixture-v1",
+  "service": {
+    "ready": true,
+    "status": "healthy"
+  }
+}

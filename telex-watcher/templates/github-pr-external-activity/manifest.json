@@ -1,0 +1,56 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "github-pr-external-activity",
+  "templateVersion": "1.0.0",
+  "detectorProtocolVersion": 1,
+  "evidenceNormalizationVersion": 1,
+  "runtimeRequirement": {
+    "command": "pwsh",
+    "minimumVersion": "7.4",
+    "notes": "PowerShell 7.4 or newer and GitHub CLI are required for live observations."
+  },
+  "librarySource": {
+    "path": "github-pr-external-activity/detector.ps1",
+    "sha256": "b27b0040ed173194ee2ab931db92c5c86631112828987f120015843b48476bfa",
+    "supportFiles": [
+      {
+        "path": "shared/DetectorCommon.psm1",
+        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+      }
+    ]
+  },
+  "derivedFrom": {
+    "guidance": "This is intentionally customized provider policy. Preserve the recorded upstream version and digest, document ignored identities, and bump evidence normalization when the activity set changes.",
+    "reconciliation": "../RECONCILING-CUSTOMIZATIONS.md"
+  },
+  "allowedEventKinds": [
+    "github.pull-request.external-activity"
+  ],
+  "cursor": {
+    "stateField": "cursor",
+    "strategy": "sha256-compact-normalized-json",
+    "replay": "The cursor covers PR identity, head SHA, state, ignored identities, and sorted external review/comment identities. Comment text edits do not create a new event."
+  },
+  "semantics": {
+    "terminal": "Merged or closed PRs return eventless terminal, including a close between preflight and the first attempt.",
+    "duplicates": "Event IDs are deterministic from PR number and normalized activity cursor. Recipients must deduplicate repeated event IDs."
+  },
+  "credentials": {
+    "policy": "Use the GitHub CLI credential store or allowlist GH_TOKEN. Keep ignored logins in parameters and credentials out of request JSON.",
+    "requiredEnvironmentVariables": [],
+    "optionalEnvironmentVariables": [
+      "GH_TOKEN"
+    ],
+    "forbiddenInRequest": true
+  },
+  "provider": {
+    "apiVersion": "GitHub CLI pr-view JSON field set v1",
+    "callsPerAttempt": 1
+  },
+  "scheduling": {
+    "recommendedIntervalSeconds": 300,
+    "minimumIntervalSeconds": 60,
+    "maxSafeDowntimeSeconds": 3600,
+    "maxSafeDowntimeRationale": "Reviews and issue comments are normally durable, but the GitHub CLI response is not a promised unbounded history and deleted activity cannot be recovered."
+  }
+}

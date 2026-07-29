@@ -1,0 +1,16 @@
+{
+  "number": 45,
+  "title": "Example pull request needing attention",
+  "url": "https://github.example.invalid/example/repo/pull/45",
+  "state": "OPEN",
+  "headRefOid": "456789abcdef0123456789abcdef0123456789ab",
+  "isDraft": false,
+  "mergeStateStatus": "BLOCKED",
+  "reviewDecision": "CHANGES_REQUESTED",
+  "author": { "login": "example-author" },
+  "statusCheckRollup": [
+    { "name": "build", "status": "COMPLETED", "conclusion": "FAILURE" }
+  ],
+  "reviews": [],
+  "comments": []
+}

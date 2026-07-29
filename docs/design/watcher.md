@@ -839,6 +839,8 @@ The detector-template library must:
 
 GitHub, customized GitHub, Azure DevOps, HTTP/JSON, and local command/file
 templates demonstrate the protocol; they do not become runtime providers.
+The shipped editable library and operating guidance are in
+[`telex-watcher/templates/`](../../telex-watcher/templates/README.md).
 
 ## Schema and packaging conformance
 

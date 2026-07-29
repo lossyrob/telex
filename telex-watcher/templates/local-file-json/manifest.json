@@ -1,0 +1,54 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "local-file-json",
+  "templateVersion": "1.0.0",
+  "detectorProtocolVersion": 1,
+  "evidenceNormalizationVersion": 1,
+  "runtimeRequirement": {
+    "command": "pwsh",
+    "minimumVersion": "7.4",
+    "notes": "PowerShell 7.4 or newer and read access to the configured local file are required."
+  },
+  "librarySource": {
+    "path": "local-file-json/detector.ps1",
+    "sha256": "ae9eaad295b031b62b5e7f04695604928bb3819547f951ab418289aca0994b93",
+    "supportFiles": [
+      {
+        "path": "shared/DetectorCommon.psm1",
+        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+      }
+    ]
+  },
+  "derivedFrom": {
+    "guidance": "Record the upstream template/version/digest, use a stable sourceId instead of hashing host paths, and bump evidence normalization when the file shape or comparison changes.",
+    "reconciliation": "../RECONCILING-CUSTOMIZATIONS.md"
+  },
+  "allowedEventKinds": [
+    "local.file-json.condition-met"
+  ],
+  "cursor": {
+    "stateField": "cursor",
+    "strategy": "sha256-compact-normalized-json",
+    "replay": "The cursor covers stable source ID, field, expected and observed values, match state, and document version. An unchanged file returns idle."
+  },
+  "semantics": {
+    "terminal": "This continuing local condition never returns terminal; remove or pause it when the condition no longer matters.",
+    "duplicates": "Event IDs are deterministic from source ID and normalized cursor. Recipients must deduplicate repeated event IDs."
+  },
+  "credentials": {
+    "policy": "No credential environment variables are used. File authorization is the operating-system identity of the trusted Watcher process.",
+    "requiredEnvironmentVariables": [],
+    "optionalEnvironmentVariables": [],
+    "forbiddenInRequest": true
+  },
+  "provider": {
+    "apiVersion": "Local JSON document shape v1",
+    "callsPerAttempt": 1
+  },
+  "scheduling": {
+    "recommendedIntervalSeconds": 30,
+    "minimumIntervalSeconds": 10,
+    "maxSafeDowntimeSeconds": 300,
+    "maxSafeDowntimeRationale": "Only current file contents are observable and intermediate writes can be lost; ten recommended intervals is the conservative bound."
+  }
+}

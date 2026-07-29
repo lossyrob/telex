@@ -1,0 +1,62 @@
+{
+  "id": "example-azure-devops-pr-development",
+  "detectorSchemaVersion": 1,
+  "command": [
+    "pwsh",
+    "-NoLogo",
+    "-NoProfile",
+    "-File",
+    "C:\\path\\to\\telex-watcher\\templates\\azure-devops-pr\\detector.ps1"
+  ],
+  "scriptPath": "C:\\path\\to\\telex-watcher\\templates\\azure-devops-pr\\detector.ps1",
+  "workingDirectory": "C:\\path\\to\\telex-watcher\\templates\\azure-devops-pr",
+  "scriptMode": "follow-path",
+  "backendProfile": "default",
+  "sender": "watcher@example.invalid",
+  "target": "recipient@example.invalid",
+  "attention": "next-checkpoint",
+  "requiresDisposition": false,
+  "intervalSeconds": 300,
+  "timeoutSeconds": 30,
+  "allowedEventKinds": [
+    "azure-devops.pull-request.attention",
+    "azure-devops.pull-request.completed",
+    "azure-devops.pull-request.created",
+    "azure-devops.pull-request.ready-to-merge",
+    "azure-devops.pull-request.snapshot"
+  ],
+  "allowedEventKindPrefixes": [],
+  "environmentAllowlist": [
+    "AZURE_DEVOPS_ACCESS_TOKEN"
+  ],
+  "parameters": {
+    "organization": "AZURE-DEVOPS-ORGANIZATION",
+    "project": "AZURE-DEVOPS-PROJECT",
+    "repositoryId": "AZURE-DEVOPS-REPOSITORY-ID",
+    "pullRequestId": 123,
+    "allowBearerAuthentication": true,
+    "allowPatAuthentication": false,
+    "emitInitialCreatedEvent": false,
+    "emitInitialSnapshot": true
+  },
+  "initialState": {
+    "preflight": {
+      "schemaVersion": 1,
+      "provider": "azure-devops",
+      "templateIds": [
+        "azure-devops-pr"
+      ],
+      "observedAt": "2026-07-29T12:00:00Z",
+      "terminal": false,
+      "state": "active",
+      "identity": {
+        "organization": "AZURE-DEVOPS-ORGANIZATION",
+        "project": "AZURE-DEVOPS-PROJECT",
+        "repositoryId": "AZURE-DEVOPS-REPOSITORY-ID",
+        "pullRequestId": 123,
+        "sourceCommit": "REPLACE-WITH-PREFLIGHT-SOURCE-COMMIT"
+      }
+    }
+  },
+  "maxSafeDowntimeSeconds": 1800
+}

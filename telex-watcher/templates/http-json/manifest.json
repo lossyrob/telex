@@ -1,0 +1,57 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "http-json",
+  "templateVersion": "1.0.0",
+  "detectorProtocolVersion": 1,
+  "evidenceNormalizationVersion": 1,
+  "runtimeRequirement": {
+    "command": "pwsh",
+    "minimumVersion": "7.4",
+    "notes": "PowerShell 7.4 or newer is required; live URLs must use HTTPS."
+  },
+  "librarySource": {
+    "path": "http-json/detector.ps1",
+    "sha256": "e6886a9cb7a5ead5a6db081b35f885952f414f59c104ffe3d8b0faedfafd3372",
+    "supportFiles": [
+      {
+        "path": "shared/DetectorCommon.psm1",
+        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+      }
+    ]
+  },
+  "derivedFrom": {
+    "guidance": "Record the upstream template/version/digest and the provider's real API version. Specialize field normalization and bump evidence normalization before relying on provider-specific object shapes.",
+    "reconciliation": "../RECONCILING-CUSTOMIZATIONS.md"
+  },
+  "allowedEventKinds": [
+    "http.json.condition-met"
+  ],
+  "cursor": {
+    "stateField": "cursor",
+    "strategy": "sha256-compact-normalized-json",
+    "replay": "The cursor covers source ID, field path, expected value, observed value, and match state. An unchanged response returns idle."
+  },
+  "semantics": {
+    "terminal": "This continuing condition template never returns terminal; remove or pause the watch when the condition no longer matters.",
+    "duplicates": "Event IDs are deterministic from source ID and normalized cursor. Recipients must deduplicate repeated event IDs."
+  },
+  "credentials": {
+    "policy": "Use no authentication, bearer via HTTP_JSON_BEARER_TOKEN, or one named header via HTTP_JSON_HEADER_VALUE. Bearer and named-header modes are mutually exclusive.",
+    "requiredEnvironmentVariables": [],
+    "optionalEnvironmentVariables": [
+      "HTTP_JSON_BEARER_TOKEN",
+      "HTTP_JSON_HEADER_VALUE"
+    ],
+    "forbiddenInRequest": true
+  },
+  "provider": {
+    "apiVersion": "User-supplied JSON API; shipped fixture shape v1",
+    "callsPerAttempt": 1
+  },
+  "scheduling": {
+    "recommendedIntervalSeconds": 60,
+    "minimumIntervalSeconds": 30,
+    "maxSafeDowntimeSeconds": 300,
+    "maxSafeDowntimeRationale": "A generic current-state endpoint may not retain transient condition history; five recommended intervals is the default safe gap until provider-specific evidence proves otherwise."
+  }
+}

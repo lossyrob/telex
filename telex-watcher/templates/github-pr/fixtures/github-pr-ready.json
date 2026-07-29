@@ -1,0 +1,17 @@
+{
+  "number": 42,
+  "title": "Example ready pull request",
+  "url": "https://github.example.invalid/example/repo/pull/42",
+  "state": "OPEN",
+  "headRefOid": "0123456789abcdef0123456789abcdef01234567",
+  "isDraft": false,
+  "mergeStateStatus": "CLEAN",
+  "reviewDecision": "APPROVED",
+  "author": { "login": "example-author" },
+  "statusCheckRollup": [
+    { "name": "build", "status": "COMPLETED", "conclusion": "SUCCESS" },
+    { "name": "test", "status": "COMPLETED", "conclusion": "SUCCESS" }
+  ],
+  "reviews": [],
+  "comments": []
+}

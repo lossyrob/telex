@@ -1,0 +1,22 @@
+{
+  "pullRequest": {
+    "pullRequestId": 75,
+    "title": "Example Azure DevOps pull request needing attention",
+    "creationDate": "2026-07-19T13:00:00Z",
+    "status": "active",
+    "isDraft": false,
+    "mergeStatus": "conflicts",
+    "lastMergeSourceCommit": { "commitId": "456789abcdef0123456789abcdef0123456789ab" },
+    "reviewers": [
+      {
+        "id": "33333333-3333-3333-3333-333333333333",
+        "displayName": "Example Required Reviewer",
+        "vote": -10,
+        "isRequired": true
+      }
+    ]
+  },
+  "threads": [
+    { "id": 2, "status": "active", "isDeleted": false }
+  ]
+}

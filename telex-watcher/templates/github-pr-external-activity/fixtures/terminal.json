@@ -1,0 +1,10 @@
+{
+  "number": 43,
+  "title": "Example completed external activity pull request",
+  "url": "https://github.example.invalid/example/repo/pull/43",
+  "state": "CLOSED",
+  "headRefOid": "abcdef0123456789abcdef0123456789abcdef01",
+  "author": { "login": "example-author" },
+  "reviews": [],
+  "comments": []
+}

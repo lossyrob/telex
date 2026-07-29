@@ -1,0 +1,57 @@
+{
+  "id": "example-github-pr-external-activity",
+  "detectorSchemaVersion": 1,
+  "command": [
+    "pwsh",
+    "-NoLogo",
+    "-NoProfile",
+    "-File",
+    "C:\\path\\to\\telex-watcher\\templates\\github-pr-external-activity\\detector.ps1"
+  ],
+  "scriptPath": "C:\\path\\to\\telex-watcher\\templates\\github-pr-external-activity\\detector.ps1",
+  "workingDirectory": "C:\\path\\to\\telex-watcher\\templates\\github-pr-external-activity",
+  "scriptMode": "pinned",
+  "scriptDigest": "b27b0040ed173194ee2ab931db92c5c86631112828987f120015843b48476bfa",
+  "backendProfile": "default",
+  "sender": "watcher@example.invalid",
+  "target": "recipient@example.invalid",
+  "attention": "next-checkpoint",
+  "requiresDisposition": false,
+  "intervalSeconds": 300,
+  "timeoutSeconds": 30,
+  "allowedEventKinds": [
+    "github.pull-request.external-activity"
+  ],
+  "allowedEventKindPrefixes": [],
+  "environmentAllowlist": [
+    "GH_TOKEN"
+  ],
+  "parameters": {
+    "repository": "OWNER/REPOSITORY",
+    "pullRequestNumber": 123,
+    "selfLogin": "YOUR-GITHUB-LOGIN",
+    "ignoredLogins": [
+      "example-bot"
+    ],
+    "emitInitialSnapshot": false
+  },
+  "initialState": {
+    "preflight": {
+      "schemaVersion": 1,
+      "provider": "github",
+      "templateIds": [
+        "github-pr",
+        "github-pr-external-activity"
+      ],
+      "observedAt": "2026-07-29T12:00:00Z",
+      "terminal": false,
+      "state": "OPEN",
+      "identity": {
+        "repository": "OWNER/REPOSITORY",
+        "pullRequestNumber": 123,
+        "headSha": "REPLACE-WITH-PREFLIGHT-HEAD-SHA"
+      }
+    }
+  },
+  "maxSafeDowntimeSeconds": 3600
+}

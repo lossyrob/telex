@@ -1,0 +1,35 @@
+{
+  "id": "example-local-file-json-development",
+  "detectorSchemaVersion": 1,
+  "command": [
+    "pwsh",
+    "-NoLogo",
+    "-NoProfile",
+    "-File",
+    "C:\\path\\to\\telex-watcher\\templates\\local-file-json\\detector.ps1"
+  ],
+  "scriptPath": "C:\\path\\to\\telex-watcher\\templates\\local-file-json\\detector.ps1",
+  "workingDirectory": "C:\\path\\to\\telex-watcher\\templates\\local-file-json",
+  "scriptMode": "follow-path",
+  "backendProfile": "default",
+  "sender": "watcher@example.invalid",
+  "target": "recipient@example.invalid",
+  "attention": "fyi",
+  "requiresDisposition": false,
+  "intervalSeconds": 30,
+  "timeoutSeconds": 10,
+  "allowedEventKinds": [
+    "local.file-json.condition-met"
+  ],
+  "allowedEventKindPrefixes": [],
+  "environmentAllowlist": [],
+  "parameters": {
+    "inputPath": "C:\\path\\to\\input.json",
+    "sourceId": "example-local-file",
+    "field": "ready",
+    "expectedValue": true,
+    "emitInitialSnapshot": true
+  },
+  "initialState": {},
+  "maxSafeDowntimeSeconds": 300
+}

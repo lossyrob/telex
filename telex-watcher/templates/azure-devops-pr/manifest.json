@@ -1,0 +1,61 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "azure-devops-pr",
+  "templateVersion": "1.0.0",
+  "detectorProtocolVersion": 1,
+  "evidenceNormalizationVersion": 1,
+  "runtimeRequirement": {
+    "command": "pwsh",
+    "minimumVersion": "7.4",
+    "notes": "PowerShell 7.4 or newer is required."
+  },
+  "librarySource": {
+    "path": "azure-devops-pr/detector.ps1",
+    "sha256": "7f6642f3f84733e88c0e64f73c1e3f5c5a9b8d0c8b0a1975c0f49535b0f78001",
+    "supportFiles": [
+      {
+        "path": "shared/DetectorCommon.psm1",
+        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+      }
+    ]
+  },
+  "derivedFrom": {
+    "guidance": "Record the upstream template/version/digest and selected authentication mode. Recompute digests and bump evidence normalization when reviewer, thread, or merge-state composition changes.",
+    "reconciliation": "../RECONCILING-CUSTOMIZATIONS.md"
+  },
+  "allowedEventKinds": [
+    "azure-devops.pull-request.attention",
+    "azure-devops.pull-request.completed",
+    "azure-devops.pull-request.created",
+    "azure-devops.pull-request.ready-to-merge",
+    "azure-devops.pull-request.snapshot"
+  ],
+  "cursor": {
+    "stateField": "cursor",
+    "strategy": "sha256-compact-normalized-json",
+    "replay": "The cursor covers PR identity, creation time, status, source commit, merge status, sorted reviewers, and sorted thread state. An unchanged cursor returns idle."
+  },
+  "semantics": {
+    "terminal": "Completed or abandoned PRs return terminal. A terminal transition after successful preflight but before the first attempt returns eventless terminal.",
+    "duplicates": "Event IDs are deterministic from PR ID and normalized cursor. Recipients must deduplicate repeated event IDs."
+  },
+  "credentials": {
+    "policy": "Select exactly one mode: bearer with AZURE_DEVOPS_ACCESS_TOKEN or PAT with AZURE_DEVOPS_EXT_PAT. Allowlist only the selected variable.",
+    "requiredEnvironmentVariables": [],
+    "optionalEnvironmentVariables": [
+      "AZURE_DEVOPS_ACCESS_TOKEN",
+      "AZURE_DEVOPS_EXT_PAT"
+    ],
+    "forbiddenInRequest": true
+  },
+  "provider": {
+    "apiVersion": "Azure DevOps Git REST 7.1",
+    "callsPerAttempt": 2
+  },
+  "scheduling": {
+    "recommendedIntervalSeconds": 300,
+    "minimumIntervalSeconds": 60,
+    "maxSafeDowntimeSeconds": 1800,
+    "maxSafeDowntimeRationale": "Current reviewer votes and merge status can change between observations even though threads are durable; six recommended intervals is the conservative bound."
+  }
+}

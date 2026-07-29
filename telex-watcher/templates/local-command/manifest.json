@@ -1,0 +1,54 @@
+{
+  "manifestSchemaVersion": 1,
+  "templateId": "local-command",
+  "templateVersion": "1.0.0",
+  "detectorProtocolVersion": 1,
+  "evidenceNormalizationVersion": 1,
+  "runtimeRequirement": {
+    "command": "pwsh",
+    "minimumVersion": "7.4",
+    "notes": "PowerShell 7.4 or newer and the fixed observational command are required."
+  },
+  "librarySource": {
+    "path": "local-command/detector.ps1",
+    "sha256": "784f0212e5464d1cccd88f2b23ae79345561446328510b6ddc4cb8b5598251fe",
+    "supportFiles": [
+      {
+        "path": "shared/DetectorCommon.psm1",
+        "sha256": "611f0dc780fd771db29cd95187c6d79d9b527ea1581f3dbb466ccc8883bc8428"
+      }
+    ]
+  },
+  "derivedFrom": {
+    "guidance": "Record the upstream template/version/digest, keep argv fixed and observational, and bump evidence normalization when exit-code or output classification changes.",
+    "reconciliation": "../RECONCILING-CUSTOMIZATIONS.md"
+  },
+  "allowedEventKinds": [
+    "local.command.condition-met"
+  ],
+  "cursor": {
+    "stateField": "cursor",
+    "strategy": "sha256-compact-normalized-json",
+    "replay": "The cursor covers source ID, wrapped exit code, bounded stdout hash, and condition classification. Unchanged output returns idle."
+  },
+  "semantics": {
+    "terminal": "This continuing observational command never returns terminal. Unexpected exit, timeout, or output overflow returns degraded without state advancement.",
+    "duplicates": "Event IDs are deterministic from source ID and normalized cursor. Recipients must deduplicate repeated event IDs."
+  },
+  "credentials": {
+    "policy": "No credential variables are supplied by this template. If the fixed command needs credentials, use a reviewed wrapper and explicitly revise the copied manifest and registration allowlist.",
+    "requiredEnvironmentVariables": [],
+    "optionalEnvironmentVariables": [],
+    "forbiddenInRequest": true
+  },
+  "provider": {
+    "apiVersion": "Local argv process contract v1",
+    "callsPerAttempt": 1
+  },
+  "scheduling": {
+    "recommendedIntervalSeconds": 60,
+    "minimumIntervalSeconds": 10,
+    "maxSafeDowntimeSeconds": 300,
+    "maxSafeDowntimeRationale": "A generic command usually exposes current state only and can miss transient conditions; five recommended intervals is the default safe gap."
+  }
+}
