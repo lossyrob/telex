@@ -1561,7 +1561,7 @@ fn heading_anchor(heading: &str) -> String {
 }
 
 #[test]
-fn fixtures_changelog_and_skill_guidance_remain_sanitized_and_current() {
+fn fixtures_changelog_and_agent_guidance_remain_sanitized_and_current() {
     let fixture_forbidden = [
         "github.com/",
         "dev.azure.com/",
@@ -1712,13 +1712,18 @@ fn fixtures_changelog_and_skill_guidance_remain_sanitized_and_current() {
     }
 
     let readme = fs::read_to_string(templates_root().join("README.md")).expect("template README");
+    assert!(
+        readme.contains("[detector template checklist](AGENT.md)"),
+        "README must link to the concise agent checklist"
+    );
     let anchors: BTreeSet<String> = readme
         .lines()
         .filter_map(|line| line.strip_prefix("## "))
         .map(heading_anchor)
         .collect();
-    let skill = fs::read_to_string(templates_root().join("SKILL.md")).expect("template skill");
-    let mut remainder = skill.as_str();
+    let agent_guide =
+        fs::read_to_string(templates_root().join("AGENT.md")).expect("template agent guide");
+    let mut remainder = agent_guide.as_str();
     let marker = "(README.md#";
     let mut link_count = 0;
     while let Some(start) = remainder.find(marker) {
@@ -1727,14 +1732,14 @@ fn fixtures_changelog_and_skill_guidance_remain_sanitized_and_current() {
         let anchor = &after[..end];
         assert!(
             anchors.contains(anchor),
-            "SKILL link does not resolve: {anchor}"
+            "AGENT link does not resolve: {anchor}"
         );
         link_count += 1;
         remainder = &after[end + 1..];
     }
     assert!(
         link_count >= 8,
-        "SKILL must link to authoritative README sections"
+        "AGENT must link to authoritative README sections"
     );
     assert!(templates_root()
         .join("RECONCILING-CUSTOMIZATIONS.md")

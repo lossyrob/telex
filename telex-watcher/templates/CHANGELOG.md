@@ -1,5 +1,10 @@
 # Detector template library changelog
 
+## 2026-07-29 guide placement
+
+- Moved the concise agent checklist from the reserved `SKILL.md` filename to
+  [AGENT.md](AGENT.md), with the template README remaining authoritative.
+
 ## 2026-07-29 cycle-2 quick wins
 
 - `local-file-json` template version 1.1.1, detector protocol 1, evidence

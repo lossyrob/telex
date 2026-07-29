@@ -15,6 +15,9 @@ Every detector reads one request from stdin, writes exactly one result to
 stdout, and exits zero after communicating `idle`, `event`, `terminal`, or
 `degraded`.
 
+Agents can use the concise [detector template checklist](AGENT.md) while
+working through this authoritative guide.
+
 ## Trust and product boundary
 
 - Review every copied script, manifest, fixture, argv, environment allowlist,
