@@ -18,8 +18,9 @@ use crate::daemon_ipc::{
     ON_DELIVER_PERMANENT_EXIT,
 };
 use crate::model::{
-    cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient, Attention,
-    DeliveryOutcome, EpochClaimResult, MessageRow, NewMessage, STATUS_RETIRED,
+    cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient,
+    ApplicationMessageOperation, Attention, DeliveryOutcome, EpochClaimResult, MessageRow,
+    NewMessage, STATUS_RETIRED,
 };
 #[cfg(feature = "postgres")]
 use anyhow::Context;
@@ -3799,6 +3800,40 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 subject,
                 body,
                 metadata,
+                None,
+            )
+            .await
+        }
+        Request::ApplicationSend {
+            store_key,
+            session_id,
+            from_addr,
+            to_addr,
+            cc,
+            kind,
+            attention,
+            requires_disposition,
+            subject,
+            body,
+            metadata,
+            logical_store_id,
+            application_responsibility,
+            operation_id,
+        } => {
+            send_message(
+                state.clone(),
+                store_key,
+                session_id,
+                Some(from_addr),
+                to_addr,
+                cc,
+                kind,
+                attention,
+                requires_disposition,
+                subject,
+                body,
+                metadata,
+                Some((logical_store_id, application_responsibility, operation_id)),
             )
             .await
         }
@@ -3827,6 +3862,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 cc,
                 body,
                 None,
+                None,
             )
             .await
         }
@@ -3842,6 +3878,9 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             cc,
             body,
             metadata,
+            logical_store_id,
+            application_responsibility,
+            operation_id,
         } => {
             reply_message(
                 state.clone(),
@@ -3856,6 +3895,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 cc,
                 body,
                 metadata,
+                Some((logical_store_id, application_responsibility, operation_id)),
             )
             .await
         }
@@ -3926,6 +3966,15 @@ async fn register_member(
                 refreshed.scope = scope;
                 refreshed.tags = tags;
                 if let Some(capability) = capability {
+                    if capability != existing.capability {
+                        return proto::error_response(
+                            proto::ERROR_COLLISION,
+                            format!(
+                                "address {address} is already attached with {:?} capability; detach before changing capability",
+                                existing.capability
+                            ),
+                        );
+                    }
                     refreshed.capability = capability;
                 }
                 let preserving_on_deliver =
@@ -3974,7 +4023,7 @@ async fn register_member(
                         ),
                     );
                     return proto::error_response(
-                        proto::ERROR_INCOMPATIBLE,
+                        proto::ERROR_COLLISION,
                         format!(
                             "address {address} has a live pull waiter; stop the station before preserving push"
                         ),
@@ -4032,7 +4081,7 @@ async fn register_member(
         .cloned()
     {
         return proto::error_response(
-            proto::ERROR_INCOMPATIBLE,
+            proto::ERROR_COLLISION,
             format!(
                 "address {} is already attended by session {} in this daemon",
                 conflict.address, conflict.session_id
@@ -5232,6 +5281,7 @@ async fn send_message(
     subject: Option<String>,
     body: String,
     metadata: Option<String>,
+    application_operation: Option<(String, String, String)>,
 ) -> Response {
     let attention = match Attention::parse(&attention) {
         Ok(attention) => attention,
@@ -5286,7 +5336,22 @@ async fn send_message(
         metadata,
         sent_at_ms: now_ms(),
     };
-    let row = match backend.insert_message(&new).await {
+    let row = match application_operation {
+        Some((logical_store_id, application_responsibility, operation_id)) => {
+            backend
+                .insert_application_message(
+                    &new,
+                    &ApplicationMessageOperation {
+                        logical_store_id,
+                        application_responsibility,
+                        operation_id,
+                    },
+                )
+                .await
+        }
+        None => backend.insert_message(&new).await,
+    };
+    let row = match row {
         Ok(row) => row,
         Err(e) => return proto::internal(format!("inserting message: {e:#}")),
     };
@@ -5335,6 +5400,7 @@ async fn reply_message(
     cc: Option<String>,
     body: String,
     metadata: Option<String>,
+    application_operation: Option<(String, String, String)>,
 ) -> Response {
     let attention = match Attention::parse(&attention) {
         Ok(attention) => attention,
@@ -5397,7 +5463,22 @@ async fn reply_message(
         metadata,
         sent_at_ms: now_ms(),
     };
-    let row = match backend.insert_message(&new).await {
+    let row = match application_operation {
+        Some((logical_store_id, application_responsibility, operation_id)) => {
+            backend
+                .insert_application_message(
+                    &new,
+                    &ApplicationMessageOperation {
+                        logical_store_id,
+                        application_responsibility,
+                        operation_id,
+                    },
+                )
+                .await
+        }
+        None => backend.insert_message(&new).await,
+    };
+    let row = match row {
         Ok(row) => row,
         Err(e) => return proto::internal(format!("inserting reply: {e:#}")),
     };
@@ -7746,6 +7827,39 @@ mod p3_tests {
             wait,
             Response::Error { ref code, .. } if code == proto::ERROR_UNSUPPORTED
         ));
+    }
+
+    #[tokio::test]
+    async fn application_membership_capability_change_requires_detach() {
+        let state = test_state("application-capability-change");
+        let store = store_key("application-capability-change");
+        let register = |capability| Request::ApplicationRegister {
+            store_key: store.clone(),
+            address: "addr:app".to_string(),
+            session_id: "application-runtime".to_string(),
+            occupant: "application".to_string(),
+            capability,
+            description: None,
+            scope: None,
+            tags: None,
+            watch_pids: Vec::new(),
+            recovery: false,
+        };
+        assert!(matches!(
+            request(state.clone(), register(StationCapability::Bidirectional)).await,
+            Response::Registered { .. }
+        ));
+        assert!(matches!(
+            request(state.clone(), register(StationCapability::SendOnly)).await,
+            Response::Error { ref code, .. } if code == proto::ERROR_COLLISION
+        ));
+        assert_eq!(
+            state
+                .get_member(&store, "application-runtime", "addr:app")
+                .unwrap()
+                .capability,
+            StationCapability::Bidirectional
+        );
     }
 
     #[tokio::test]

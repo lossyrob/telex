@@ -16,7 +16,7 @@ use crate::model::{
 use crate::profiles::BackendProfile;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::fmt;
 use std::sync::{Arc, Mutex};
 
@@ -397,13 +397,17 @@ impl ApplicationClient {
             crate::profiles::resolve(config.backend.as_deref(), config.db_override.as_deref())
                 .map_err(unavailable)?;
         let store_key = crate::profiles::store_key(&profile, config.db_override.as_deref());
+        let logical_store_id = LogicalStoreId::derive(&canonical_store_material(
+            &profile,
+            config.db_override.as_deref(),
+        ));
         let backend = crate::profiles::build(&profile, config.db_override.as_deref())
             .await
             .map_err(unavailable)?;
         Ok(Self {
             responsibility: config.responsibility,
             runtime_id: RuntimeId::fresh()?,
-            logical_store_id: LogicalStoreId::derive(&store_key),
+            logical_store_id,
             store_key,
             profile,
             backend,
@@ -582,7 +586,10 @@ impl ApplicationClient {
                 "daemon does not support the Application Client protocol extension".to_string(),
             );
         }
-        if message.contains("already owned") || message.contains("already attended") {
+        if code == crate::daemon_ipc::ERROR_COLLISION
+            || message.contains("already owned")
+            || message.contains("already attended")
+        {
             let lease = self.backend.get_lease(address).await.ok().flatten();
             return ApplicationClientError::Collision(CollisionEvidence {
                 address: address.to_string(),
@@ -598,6 +605,9 @@ impl ApplicationClient {
                 Some(NeedsAttachReason::DeliberatelyDetached) => {
                     MembershipLossReason::DeliberateDetach
                 }
+                Some(NeedsAttachReason::Unknown) => MembershipLossReason::Unknown {
+                    raw_reason: Some(message.to_string()),
+                },
                 None if code == crate::daemon_ipc::ERROR_NEEDS_ATTACH => {
                     MembershipLossReason::NeedsAttach
                 }
@@ -675,6 +685,28 @@ impl ApplicationClient {
                 result.replayed = true;
                 return Ok(result);
             }
+            ApplicationOperationBegin::Replay(existing)
+                if matches!(existing.state.as_str(), "pending" | "indeterminate") =>
+            {
+                if let Some(reconciled) = self.reconcile_operation(&request.operation_id).await? {
+                    if reconciled.state == "accepted" {
+                        let mut result: SendResult = serde_json::from_str(
+                            reconciled.result_json.as_deref().ok_or_else(|| {
+                                ApplicationClientError::Unavailable(
+                                    "reconciled operation has no durable result".to_string(),
+                                )
+                            })?,
+                        )
+                        .map_err(invalid)?;
+                        result.replayed = true;
+                        return Ok(result);
+                    }
+                }
+                return Err(ApplicationClientError::Indeterminate {
+                    detail: format!("operation remains {}", existing.state),
+                    recovery: self.recovery_handle(request.operation_id),
+                });
+            }
             ApplicationOperationBegin::Replay(existing) if existing.state == "needs-attach" => {}
             ApplicationOperationBegin::Replay(existing) => {
                 return Err(ApplicationClientError::Indeterminate {
@@ -685,10 +717,10 @@ impl ApplicationClient {
             ApplicationOperationBegin::Started(_) => {}
         }
 
-        let daemon_request = Request::Send {
+        let daemon_request = Request::ApplicationSend {
             store_key: self.store_key.clone(),
             session_id: self.runtime_id.0.clone(),
-            from_addr: Some(request.sender.clone()),
+            from_addr: request.sender.clone(),
             to_addr: request.to.clone(),
             cc: normalize_cc(&request.cc),
             kind: request.kind.clone(),
@@ -697,6 +729,9 @@ impl ApplicationClient {
             subject: request.subject.clone(),
             body: request.body.clone(),
             metadata: request.metadata.clone(),
+            logical_store_id: self.logical_store_id.0.clone(),
+            application_responsibility: self.responsibility.0.clone(),
+            operation_id: request.operation_id.0.clone(),
         };
         let response = match self.request(daemon_request, false).await {
             Ok(response) => response,
@@ -760,19 +795,7 @@ impl ApplicationClient {
                     .registration_error(&request.sender, &code, &message, needs_attach_reason)
                     .await;
                 let error_json = serde_json::to_string(&error).map_err(invalid)?;
-                let state = if matches!(
-                    error,
-                    ApplicationClientError::MembershipLost {
-                        reason: MembershipLossReason::DaemonRestart
-                            | MembershipLossReason::NeedsAttach
-                            | MembershipLossReason::PredicateDeath,
-                        ..
-                    }
-                ) {
-                    "needs-attach"
-                } else {
-                    "rejected"
-                };
+                let state = operation_state_for_error(&error);
                 self.backend
                     .complete_application_operation(
                         &self.logical_store_id.0,
@@ -829,6 +852,28 @@ impl ApplicationClient {
                 result.replayed = true;
                 return Ok(result);
             }
+            ApplicationOperationBegin::Replay(existing)
+                if matches!(existing.state.as_str(), "pending" | "indeterminate") =>
+            {
+                if let Some(reconciled) = self.reconcile_operation(&request.operation_id).await? {
+                    if reconciled.state == "accepted" {
+                        let mut result: SendResult = serde_json::from_str(
+                            reconciled.result_json.as_deref().ok_or_else(|| {
+                                ApplicationClientError::Unavailable(
+                                    "reconciled reply operation has no durable result".to_string(),
+                                )
+                            })?,
+                        )
+                        .map_err(invalid)?;
+                        result.replayed = true;
+                        return Ok(result);
+                    }
+                }
+                return Err(ApplicationClientError::Indeterminate {
+                    detail: format!("reply operation remains {}", existing.state),
+                    recovery: self.recovery_handle(request.operation_id),
+                });
+            }
             ApplicationOperationBegin::Replay(existing) if existing.state == "needs-attach" => {}
             ApplicationOperationBegin::Replay(existing) => {
                 return Err(ApplicationClientError::Indeterminate {
@@ -853,6 +898,9 @@ impl ApplicationClient {
                     cc: normalize_cc(&request.cc),
                     body: request.body,
                     metadata: request.metadata,
+                    logical_store_id: self.logical_store_id.0.clone(),
+                    application_responsibility: self.responsibility.0.clone(),
+                    operation_id: request.operation_id.0.clone(),
                 },
                 false,
             )
@@ -898,11 +946,7 @@ impl ApplicationClient {
                     .registration_error(&request.sender, &code, &message, needs_attach_reason)
                     .await;
                 let error_json = serde_json::to_string(&error).map_err(invalid)?;
-                let state = if matches!(error, ApplicationClientError::MembershipLost { .. }) {
-                    "needs-attach"
-                } else {
-                    "rejected"
-                };
+                let state = operation_state_for_error(&error);
                 self.backend
                     .complete_application_operation(
                         &self.logical_store_id.0,
@@ -1213,6 +1257,14 @@ impl ApplicationClient {
         &self,
         source: &SourceReference,
     ) -> Result<SourceResolution, ApplicationClientError> {
+        self.resolve_source_with_capture(source, None).await
+    }
+
+    pub async fn resolve_source_with_capture(
+        &self,
+        source: &SourceReference,
+        captured: Option<crate::model::MessageRow>,
+    ) -> Result<SourceResolution, ApplicationClientError> {
         if source.logical_store_id != self.logical_store_id {
             return Ok(SourceResolution::Mismatch);
         }
@@ -1224,7 +1276,9 @@ impl ApplicationClient {
                 .map_err(unavailable)?
             {
                 Some(message) => SourceResolution::Authoritative(message),
-                None => SourceResolution::Unavailable,
+                None => captured
+                    .map(SourceResolution::CapturedOnly)
+                    .unwrap_or(SourceResolution::Unavailable),
             },
         )
     }
@@ -1233,14 +1287,61 @@ impl ApplicationClient {
         &self,
         operation_id: &OperationId,
     ) -> Result<Option<ApplicationOperationRecord>, ApplicationClientError> {
-        self.backend
+        let record = self
+            .backend
             .application_operation(
                 &self.logical_store_id.0,
                 &self.responsibility.0,
                 &operation_id.0,
             )
             .await
-            .map_err(unavailable)
+            .map_err(unavailable)?;
+        let Some(record) = record else {
+            return Ok(None);
+        };
+        if matches!(record.state.as_str(), "pending" | "indeterminate") {
+            if let Some(message) = self
+                .backend
+                .application_operation_message(
+                    &self.logical_store_id.0,
+                    &self.responsibility.0,
+                    &operation_id.0,
+                )
+                .await
+                .map_err(unavailable)?
+            {
+                let result = SendResult {
+                    logical_store_id: self.logical_store_id.clone(),
+                    operation_id: operation_id.clone(),
+                    message_id: message.id,
+                    thread_id: message.thread_id,
+                    sender: message.from_addr.unwrap_or(record.sender.clone()),
+                    recipient: message.to_addr,
+                    axes: ReceiptAxes {
+                        durable_acceptance: EvidenceState::Accepted,
+                        occupied_at_acceptance: None,
+                        push_acceptance: EvidenceState::Unknown,
+                        recipient_consumption: EvidenceState::Unknown,
+                        workflow_disposition: EvidenceState::Unknown,
+                    },
+                    replayed: true,
+                };
+                return self
+                    .backend
+                    .complete_application_operation(
+                        &self.logical_store_id.0,
+                        &self.responsibility.0,
+                        &operation_id.0,
+                        "accepted",
+                        Some(&serde_json::to_string(&result).map_err(invalid)?),
+                        None,
+                    )
+                    .await
+                    .map(Some)
+                    .map_err(unavailable);
+            }
+        }
+        Ok(Some(record))
     }
 
     pub async fn delta_page(
@@ -1536,7 +1637,8 @@ fn health_projection(
         attended_but_deaf: member.map(|member| member.deaf_warn).unwrap_or(false),
         recovering: local.recovering,
         degraded: actionable > 0
-            || pending > 0
+            || local.recovering
+            || member.map(|member| member.deaf_warn).unwrap_or(false)
             || (local.handle.capability == StationCapability::Bidirectional && !receive_ready),
         stopped_or_unattended: member
             .map(|member| {
@@ -1559,22 +1661,118 @@ fn principal_provenance(profile: &BackendProfile) -> PrincipalProvenance {
             verification: PrincipalVerification::Unverified,
             evidence: Some("local OS principal; backend does not authenticate it".to_string()),
         },
+        "postgres" => {
+            let principal = profile
+                .url
+                .as_deref()
+                .and_then(|url| url.parse::<tokio_postgres::Config>().ok())
+                .and_then(|config| config.get_user().map(str::to_string));
+            PrincipalProvenance {
+                verification: if principal.is_some() {
+                    PrincipalVerification::Unverified
+                } else {
+                    PrincipalVerification::Unavailable
+                },
+                principal,
+                evidence: Some(
+                    "Postgres connection user; authenticated transport evidence is not exposed by the backend"
+                        .to_string(),
+                ),
+            }
+        }
         _ => PrincipalProvenance {
             principal: None,
             verification: PrincipalVerification::Unavailable,
-            evidence: Some(
-                "selected backend does not currently expose authenticated principal evidence"
-                    .to_string(),
-            ),
+            evidence: None,
         },
     }
 }
 
+fn operation_state_for_error(error: &ApplicationClientError) -> &'static str {
+    match error {
+        ApplicationClientError::MembershipLost {
+            reason:
+                MembershipLossReason::DaemonRestart
+                | MembershipLossReason::PredicateDeath
+                | MembershipLossReason::NeedsAttach
+                | MembershipLossReason::OwnerDemoted,
+            ..
+        } => "needs-attach",
+        _ => "rejected",
+    }
+}
+
+fn canonical_store_material(profile: &BackendProfile, db_override: Option<&str>) -> String {
+    match profile.kind.as_str() {
+        "sqlite" => {
+            let store_key = crate::profiles::store_key(profile, db_override);
+            let path = store_key.strip_prefix("sqlite:").unwrap_or(&store_key);
+            let canonical = std::fs::canonicalize(path)
+                .unwrap_or_else(|_| std::path::PathBuf::from(path))
+                .to_string_lossy()
+                .replace('\\', "/");
+            #[cfg(windows)]
+            let canonical = canonical.to_ascii_lowercase();
+            format!("sqlite:{canonical}")
+        }
+        "postgres" => {
+            let parsed = profile
+                .url
+                .as_deref()
+                .and_then(|url| url.parse::<tokio_postgres::Config>().ok());
+            if let Some(parsed) = parsed {
+                let hosts = parsed
+                    .get_hosts()
+                    .iter()
+                    .map(|host| match host {
+                        tokio_postgres::config::Host::Tcp(value) => value.to_ascii_lowercase(),
+                        #[cfg(unix)]
+                        tokio_postgres::config::Host::Unix(value) => {
+                            value.to_string_lossy().replace('\\', "/")
+                        }
+                    })
+                    .collect::<Vec<_>>()
+                    .join(",");
+                let ports = if parsed.get_ports().is_empty() {
+                    "5432".to_string()
+                } else {
+                    parsed
+                        .get_ports()
+                        .iter()
+                        .map(u16::to_string)
+                        .collect::<Vec<_>>()
+                        .join(",")
+                };
+                format!(
+                    "postgres:hosts={hosts};ports={ports};db={};schema={}",
+                    parsed.get_dbname().unwrap_or(""),
+                    profile.schema.as_deref().unwrap_or("")
+                )
+            } else {
+                format!(
+                    "postgres:unparsed={};schema={}",
+                    profile
+                        .url
+                        .as_deref()
+                        .unwrap_or("")
+                        .split('?')
+                        .next()
+                        .unwrap_or("")
+                        .to_ascii_lowercase(),
+                    profile.schema.as_deref().unwrap_or("")
+                )
+            }
+        }
+        other => format!("{other}:{}", profile.target()),
+    }
+}
+
 fn payload_fingerprint(request: &SendRequest) -> Result<String, ApplicationClientError> {
+    let cc = normalize_cc(&request.cc);
     let canonical = serde_json::to_vec(&(
         &request.sender,
         &request.to,
-        &request.cc,
+        &cc,
         &request.kind,
         &request.attention,
         request.requires_disposition,
@@ -1590,10 +1788,11 @@ fn payload_fingerprint(request: &SendRequest) -> Result<String, ApplicationClien
 }
 
 fn reply_fingerprint(request: &ReplyRequest) -> Result<String, ApplicationClientError> {
+    let cc = normalize_cc(&request.cc);
     let canonical = serde_json::to_vec(&(
         &request.sender,
         request.message_id,
-        &request.cc,
+        &cc,
         &request.kind,
         &request.attention,
         request.requires_disposition,
@@ -1652,14 +1851,68 @@ fn validate_compound(steps: &[CompoundStep]) -> Result<(), ApplicationClientErro
             )));
         }
     }
+    let mut indegree: BTreeMap<&str, usize> = steps
+        .iter()
+        .map(|step| (step.step_id.as_str(), step.prerequisites.len()))
+        .collect();
+    let mut dependents: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for step in steps {
+        for prerequisite in &step.prerequisites {
+            dependents
+                .entry(prerequisite.as_str())
+                .or_default()
+                .push(step.step_id.as_str());
+        }
+    }
+    let mut ready: VecDeque<&str> = indegree
+        .iter()
+        .filter_map(|(step_id, count)| (*count == 0).then_some(*step_id))
+        .collect();
+    let mut visited = 0;
+    while let Some(step_id) = ready.pop_front() {
+        visited += 1;
+        for dependent in dependents.get(step_id).into_iter().flatten() {
+            let count = indegree.get_mut(dependent).expect("declared compound step");
+            *count -= 1;
+            if *count == 0 {
+                ready.push_back(dependent);
+            }
+        }
+    }
+    if visited != steps.len() {
+        return Err(ApplicationClientError::InvalidRequest(
+            "compound step declaration contains a dependency cycle".to_string(),
+        ));
+    }
     Ok(())
 }
 
-fn unavailable(_error: impl fmt::Display) -> ApplicationClientError {
-    ApplicationClientError::Unavailable(
-        "backend or daemon operation failed; inspect Telex diagnostics for redacted detail"
-            .to_string(),
-    )
+fn unavailable(error: impl fmt::Display) -> ApplicationClientError {
+    let detail = error.to_string();
+    let lower = detail.to_ascii_lowercase();
+    let category = if lower.contains("schema version") {
+        "schema-version"
+    } else if lower.contains("timeout") || lower.contains("timed out") {
+        "timeout"
+    } else if lower.contains("connect") || lower.contains("connection") {
+        "connection"
+    } else if lower.contains("disk") || lower.contains("database is full") {
+        "storage"
+    } else if lower.contains("unauthorized") || lower.contains("permission") {
+        "authorization"
+    } else if lower.contains("protocol") || lower.contains("incompatible") {
+        "protocol"
+    } else {
+        "backend"
+    };
+    let mut hasher = Sha256::new();
+    hasher.update(b"telex-application-error-v1\0");
+    hasher.update(detail.as_bytes());
+    let diagnostic = hex(&hasher.finalize());
+    ApplicationClientError::Unavailable(format!(
+        "{category} operation failed (diagnostic {})",
+        &diagnostic[..16]
+    ))
 }
 
 fn invalid(error: impl fmt::Display) -> ApplicationClientError {
@@ -1679,6 +1932,8 @@ fn hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "sqlite")]
+    use crate::backend::sqlite::SqliteBackend;
 
     fn send_request(operation: &str, body: &str) -> SendRequest {
         SendRequest {
@@ -1710,12 +1965,87 @@ mod tests {
     }
 
     #[test]
+    fn canonical_store_material_ignores_cosmetic_profile_differences() {
+        let sqlite_path = std::env::temp_dir().join(format!(
+            "telex-store-identity-{}-{}.db",
+            std::process::id(),
+            now_ms()
+        ));
+        std::fs::write(&sqlite_path, []).unwrap();
+        let direct = crate::profiles::implicit_sqlite(Some(&sqlite_path.to_string_lossy()));
+        let dotted_path = sqlite_path
+            .parent()
+            .unwrap()
+            .join(".")
+            .join(sqlite_path.file_name().unwrap());
+        let dotted = crate::profiles::implicit_sqlite(Some(&dotted_path.to_string_lossy()));
+        assert_eq!(
+            canonical_store_material(&direct, direct.path.as_deref()),
+            canonical_store_material(&dotted, dotted.path.as_deref())
+        );
+
+        let postgres_a = BackendProfile {
+            kind: "postgres".into(),
+            url: Some("postgres://user-a@Example.COM:5432/app?sslmode=require".into()),
+            schema: Some("telex".into()),
+            path: None,
+            auth: None,
+            password_env: None,
+            password_command: None,
+            entra_cred: None,
+            entra_scope: None,
+        };
+        let postgres_b = BackendProfile {
+            url: Some("postgres://user-b@example.com/app?sslmode=prefer".into()),
+            ..postgres_a.clone()
+        };
+        assert_eq!(
+            canonical_store_material(&postgres_a, None),
+            canonical_store_material(&postgres_b, None)
+        );
+    }
+
+    #[test]
+    fn postgres_principal_hint_is_unverified() {
+        let profile = BackendProfile {
+            kind: "postgres".into(),
+            url: Some("postgres://application-user@example.com/app".into()),
+            schema: None,
+            path: None,
+            auth: None,
+            password_env: None,
+            password_command: None,
+            entra_cred: None,
+            entra_scope: None,
+        };
+        let provenance = principal_provenance(&profile);
+        assert_eq!(provenance.principal.as_deref(), Some("application-user"));
+        assert_eq!(provenance.verification, PrincipalVerification::Unverified);
+    }
+
+    #[test]
     fn payload_fingerprint_is_retry_stable_and_input_sensitive() {
         let first = payload_fingerprint(&send_request("op-1", "one")).unwrap();
         let replay = payload_fingerprint(&send_request("op-1", "one")).unwrap();
         let changed = payload_fingerprint(&send_request("op-1", "two")).unwrap();
         assert_eq!(first, replay);
         assert_ne!(first, changed);
+    }
+
+    #[test]
+    fn payload_fingerprint_normalizes_cc_order_and_duplicates() {
+        let mut first = send_request("op-1", "one");
+        first.cc = vec!["observer:a".into(), "observer:b".into()];
+        let mut reordered = first.clone();
+        reordered.cc = vec![
+            "observer:b".into(),
+            "observer:a".into(),
+            "observer:a".into(),
+        ];
+        assert_eq!(
+            payload_fingerprint(&first).unwrap(),
+            payload_fingerprint(&reordered).unwrap()
+        );
     }
 
     #[test]
@@ -1745,5 +2075,109 @@ mod tests {
             declaration: serde_json::json!({}),
         }];
         assert!(validate_compound(&self_reference).is_err());
+
+        let cycle = vec![
+            CompoundStep {
+                step_id: "reply".into(),
+                position: 1,
+                kind: "reply".into(),
+                prerequisites: vec!["close".into()],
+                declaration: serde_json::json!({}),
+            },
+            CompoundStep {
+                step_id: "close".into(),
+                position: 2,
+                kind: "disposition".into(),
+                prerequisites: vec!["reply".into()],
+                declaration: serde_json::json!({}),
+            },
+        ];
+        assert!(validate_compound(&cycle).is_err());
+    }
+
+    #[test]
+    fn unavailable_errors_are_distinguishable_without_echoing_sources() {
+        let timeout = unavailable("timeout connecting to postgres://user:secret@example/db");
+        let storage = unavailable("database is full at C:\\secret\\telex.db");
+        assert_ne!(timeout.to_string(), storage.to_string());
+        assert!(!timeout.to_string().contains("secret"));
+        assert!(!storage.to_string().contains("C:\\secret"));
+    }
+
+    #[test]
+    fn unknown_wire_membership_reason_deserializes() {
+        let reason: NeedsAttachReason = serde_json::from_str("\"future_reason\"").unwrap();
+        assert_eq!(reason, NeedsAttachReason::Unknown);
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn pending_operation_reconciles_from_atomic_message_mapping() {
+        let path = std::env::temp_dir()
+            .join(format!(
+                "telex-application-reconcile-{}-{}.db",
+                std::process::id(),
+                now_ms()
+            ))
+            .to_string_lossy()
+            .into_owned();
+        let profile = crate::profiles::implicit_sqlite(Some(&path));
+        let store_key = crate::profiles::store_key(&profile, Some(&path));
+        let backend = Arc::new(SqliteBackend::open(&path).unwrap());
+        backend.init_schema().await.unwrap();
+        let logical_store_id =
+            LogicalStoreId::derive(&canonical_store_material(&profile, Some(&path)));
+        let client = ApplicationClient {
+            responsibility: ApplicationResponsibility("watcher".into()),
+            runtime_id: RuntimeId::fresh().unwrap(),
+            logical_store_id: logical_store_id.clone(),
+            store_key,
+            profile,
+            backend: backend.clone(),
+            memberships: Mutex::new(BTreeMap::new()),
+        };
+        backend
+            .begin_application_operation(&NewApplicationOperation {
+                logical_store_id: logical_store_id.0.clone(),
+                application_responsibility: "watcher".into(),
+                operation_id: "op-crash-window".into(),
+                operation_kind: "send".into(),
+                sender: "watcher:sender".into(),
+                recipients_json: r#"["target"]"#.into(),
+                payload_fingerprint: "fingerprint".into(),
+                retry_budget: 1,
+                created_at_ms: now_ms(),
+            })
+            .await
+            .unwrap();
+        backend
+            .insert_application_message(
+                &crate::model::NewMessage {
+                    from_addr: Some("watcher:sender".into()),
+                    to_addr: "target".into(),
+                    kind: "note".into(),
+                    attention: crate::model::Attention::Background,
+                    body: "payload".into(),
+                    sent_at_ms: now_ms(),
+                    ..Default::default()
+                },
+                &crate::model::ApplicationMessageOperation {
+                    logical_store_id: logical_store_id.0,
+                    application_responsibility: "watcher".into(),
+                    operation_id: "op-crash-window".into(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let reconciled = client
+            .reconcile_operation(&OperationId("op-crash-window".into()))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(reconciled.state, "accepted");
+        let result: SendResult =
+            serde_json::from_str(reconciled.result_json.as_deref().unwrap()).unwrap();
+        assert_eq!(result.recipient, "target");
     }
 }

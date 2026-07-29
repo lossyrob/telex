@@ -1064,6 +1064,14 @@ fn ensure_v3_invariants(c: &Connection) -> Result<()> {
              ON application_operations(
                 logical_store_id, application_responsibility, completed_at_ms, updated_at_ms
              );
+         CREATE TABLE IF NOT EXISTS application_operation_messages (
+             logical_store_id           TEXT NOT NULL,
+             application_responsibility TEXT NOT NULL,
+             operation_id               TEXT NOT NULL,
+             message_id                 INTEGER NOT NULL,
+             PRIMARY KEY(logical_store_id, application_responsibility, operation_id),
+             UNIQUE(message_id)
+         );
          CREATE TABLE IF NOT EXISTS application_compound_steps (
              logical_store_id           TEXT NOT NULL,
              application_responsibility TEXT NOT NULL,
@@ -1172,6 +1180,109 @@ fn map_compound_step(r: &rusqlite::Row) -> rusqlite::Result<CompoundStepRecord> 
         updated_at_ms: r.get(12)?,
         completed_at_ms: r.get(13)?,
     })
+}
+
+fn insert_message_inner(
+    c: &Connection,
+    m: &NewMessage,
+    operation: Option<&ApplicationMessageOperation>,
+) -> Result<MessageRow> {
+    let now = advance_clock_hwm(c)?;
+    c.execute(
+        "INSERT INTO messages(thread_id, parent_id, from_addr, to_addr, cc, kind, \
+         attention, requires_disposition, subject, body, metadata, sent_at_ms, created_at_ms) \
+         VALUES (NULL,?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
+        params![
+            m.parent_id,
+            m.from_addr,
+            m.to_addr,
+            m.cc,
+            m.kind,
+            m.attention.as_str(),
+            m.requires_disposition as i64,
+            m.subject,
+            m.body,
+            m.metadata,
+            m.sent_at_ms,
+            now
+        ],
+    )?;
+    let id = c.last_insert_rowid();
+    if let Some(operation) = operation {
+        c.execute(
+            "INSERT INTO application_operation_messages(
+                 logical_store_id, application_responsibility, operation_id, message_id
+             ) VALUES (?1,?2,?3,?4)
+             ON CONFLICT(logical_store_id, application_responsibility, operation_id)
+             DO UPDATE SET message_id=excluded.message_id",
+            params![
+                operation.logical_store_id,
+                operation.application_responsibility,
+                operation.operation_id,
+                id
+            ],
+        )?;
+    }
+    let thread_id: i64 = match m.parent_id {
+        Some(pid) => c
+            .query_row(
+                "SELECT COALESCE(thread_id, id) FROM messages WHERE id=?1",
+                params![pid],
+                |r| r.get(0),
+            )
+            .optional()?
+            .unwrap_or(id),
+        None => id,
+    };
+    c.execute(
+        "UPDATE messages SET thread_id=?2 WHERE id=?1",
+        params![id, thread_id],
+    )?;
+    for recipient in fanout_recipients(&m.to_addr, m.cc.as_deref()) {
+        let consumed_at_ms = (recipient != m.to_addr).then_some(now);
+        c.execute(
+            "INSERT OR IGNORE INTO deliveries
+             (message_id, recipient, delivered_at_ms, consumed_at_ms)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, recipient, now, consumed_at_ms],
+        )?;
+        if consumed_at_ms.is_some() {
+            let delivery_id: i64 = c.query_row(
+                "SELECT id FROM deliveries WHERE message_id=?1 AND recipient=?2",
+                params![id, recipient],
+                |row| row.get(0),
+            )?;
+            append_state_delta_inner(
+                c,
+                "acknowledgment",
+                &format!("delivery:{delivery_id}"),
+                &serde_json::json!({
+                    "delivery_id": delivery_id,
+                    "message_id": id,
+                    "recipient": recipient,
+                })
+                .to_string(),
+            )?;
+        }
+    }
+    append_state_delta_inner(
+        c,
+        "message",
+        &format!("message:{id}"),
+        &serde_json::json!({
+            "message_id": id,
+            "thread_id": thread_id,
+            "to_addr": m.to_addr,
+            "attention": m.attention.as_str(),
+            "kind": m.kind,
+        })
+        .to_string(),
+    )?;
+    Ok(c.query_row(
+        &format!("SELECT {MSG_COLS} FROM messages WHERE id=?1"),
+        params![id],
+        map_message,
+    )?)
 }
 
 fn raise_clock_hwm_to_existing_timestamps(c: &Connection) -> Result<()> {
@@ -2075,6 +2186,23 @@ impl Backend for SqliteBackend {
                             params![now, mid, rec],
                         )?;
                         if updated > 0 {
+                            let delivery_id: i64 = c.query_row(
+                                "SELECT id FROM deliveries
+                                 WHERE message_id=?1 AND recipient=?2",
+                                params![mid, rec],
+                                |row| row.get(0),
+                            )?;
+                            append_state_delta_inner(
+                                c,
+                                "acknowledgment",
+                                &format!("delivery:{delivery_id}"),
+                                &serde_json::json!({
+                                    "delivery_id": delivery_id,
+                                    "message_id": mid,
+                                    "recipient": rec,
+                                })
+                                .to_string(),
+                            )?;
                             persist_clock_hwm(c, now)?;
                             Ok(DeliveryOutcome::Marked)
                         } else {
@@ -2372,7 +2500,7 @@ impl Backend for SqliteBackend {
             materialize_pending_delivery_rows_for_recipient(c, &a)?;
             let terminal = terminal_dispositions_sql_list();
             let primary_sql = format!(
-                "SELECT {MSG_COLS_M} FROM deliveries d \
+                "SELECT {MSG_COLS_M}, d.id AS delivery_id FROM deliveries d \
                  JOIN messages m ON m.id=d.message_id \
                  WHERE d.recipient=?1 \
                   AND d.consumed_at_ms IS NULL \
@@ -2443,80 +2571,19 @@ impl Backend for SqliteBackend {
 
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow> {
         let m = m.clone();
+        self.run(move |c| with_immediate_transaction(c, |c| insert_message_inner(c, &m, None)))
+            .await
+    }
+
+    async fn insert_application_message(
+        &self,
+        message: &NewMessage,
+        operation: &ApplicationMessageOperation,
+    ) -> Result<MessageRow> {
+        let message = message.clone();
+        let operation = operation.clone();
         self.run(move |c| {
-            with_immediate_transaction(c, |c| {
-                // CC live-wake lower bounds compare against delivery timestamps. Advance the
-                // durable clock inside the insert transaction so a wait boundary cannot share a
-                // timestamp with a later message.
-                let now = advance_clock_hwm(c)?;
-                c.execute(
-                    "INSERT INTO messages(thread_id, parent_id, from_addr, to_addr, cc, kind, \
-                     attention, requires_disposition, subject, body, metadata, sent_at_ms, \
-                     created_at_ms) \
-                     VALUES (NULL,?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12)",
-                    params![
-                        m.parent_id,
-                        m.from_addr,
-                        m.to_addr,
-                        m.cc,
-                        m.kind,
-                        m.attention.as_str(),
-                        m.requires_disposition as i64,
-                        m.subject,
-                        m.body,
-                        m.metadata,
-                        m.sent_at_ms,
-                        now
-                    ],
-                )?;
-                let id = c.last_insert_rowid();
-
-                // Resolve thread: inherit the parent's thread, else root on self.
-                let thread_id: i64 = match m.parent_id {
-                    Some(pid) => c
-                        .query_row(
-                            "SELECT COALESCE(thread_id, id) FROM messages WHERE id=?1",
-                            params![pid],
-                            |r| r.get(0),
-                        )
-                        .optional()?
-                        .unwrap_or(id),
-                    None => id,
-                };
-                c.execute(
-                    "UPDATE messages SET thread_id=?2 WHERE id=?1",
-                    params![id, thread_id],
-                )?;
-
-                // Fan-out: create a pending delivery row for each addressed recipient so
-                // `fetch_undelivered` and `mark_consumed_if_current_owner` are per-recipient.
-                for recipient in fanout_recipients(&m.to_addr, m.cc.as_deref()) {
-                    let consumed_at_ms = if recipient == m.to_addr {
-                        None
-                    } else {
-                        Some(now)
-                    };
-                    c.execute(
-                        "INSERT OR IGNORE INTO deliveries \
-                         (message_id, recipient, delivered_at_ms, consumed_at_ms) \
-                         VALUES (?1, ?2, ?3, ?4)",
-                        params![id, recipient, now, consumed_at_ms],
-                    )?;
-                }
-                append_state_delta_inner(
-                    c,
-                    "message",
-                    &format!("message:{id}"),
-                    &format!("{{\"message_id\":{id}}}"),
-                )?;
-
-                let row = c.query_row(
-                    &format!("SELECT {MSG_COLS} FROM messages WHERE id=?1"),
-                    params![id],
-                    map_message,
-                )?;
-                Ok(row)
-            })
+            with_immediate_transaction(c, |c| insert_message_inner(c, &message, Some(&operation)))
         })
         .await
     }
@@ -2654,22 +2721,43 @@ impl Backend for SqliteBackend {
                 let id = c.last_insert_rowid();
                 if Disposition::is_terminal_str(&s) {
                     materialize_pending_delivery_rows_for_recipient(c, &r)?;
-                    c.execute(
+                    let consumed = c.execute(
                         "UPDATE deliveries SET consumed_at_ms=?1 \
                          WHERE message_id=?2 AND recipient=?3 AND consumed_at_ms IS NULL",
                         params![now, message_id, r],
                     )?;
+                    if consumed > 0 {
+                        let delivery_id: i64 = c.query_row(
+                            "SELECT id FROM deliveries
+                             WHERE message_id=?1 AND recipient=?2",
+                            params![message_id, r],
+                            |row| row.get(0),
+                        )?;
+                        append_state_delta_inner(
+                            c,
+                            "acknowledgment",
+                            &format!("delivery:{delivery_id}"),
+                            &serde_json::json!({
+                                "delivery_id": delivery_id,
+                                "message_id": message_id,
+                                "recipient": r,
+                            })
+                            .to_string(),
+                        )?;
+                    }
                     persist_clock_hwm(c, now)?;
                 }
                 append_state_delta_inner(
                     c,
                     "disposition",
                     &format!("message:{message_id}:recipient:{r}"),
-                    &format!(
-                        "{{\"message_id\":{message_id},\"recipient\":{},\"state\":{}}}",
-                        serde_json::to_string(&r)?,
-                        serde_json::to_string(&s)?
-                    ),
+                    &serde_json::json!({
+                        "message_id": message_id,
+                        "recipient": r,
+                        "state": s,
+                        "is_terminal": Disposition::is_terminal_str(&s),
+                    })
+                    .to_string(),
                 )?;
                 Ok(DispositionRow {
                     id,
@@ -2875,6 +2963,33 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn application_operation_message(
+        &self,
+        logical_store_id: &str,
+        application_responsibility: &str,
+        operation_id: &str,
+    ) -> Result<Option<MessageRow>> {
+        let store = logical_store_id.to_string();
+        let responsibility = application_responsibility.to_string();
+        let operation = operation_id.to_string();
+        self.run(move |c| {
+            Ok(c.query_row(
+                &format!(
+                    "SELECT {MSG_COLS_M}
+                         FROM application_operation_messages aom
+                         JOIN messages m ON m.id=aom.message_id
+                         WHERE aom.logical_store_id=?1
+                           AND aom.application_responsibility=?2
+                           AND aom.operation_id=?3"
+                ),
+                params![store, responsibility, operation],
+                map_message,
+            )
+            .optional()?)
+        })
+        .await
+    }
+
     async fn complete_application_operation(
         &self,
         logical_store_id: &str,
@@ -2898,7 +3013,10 @@ impl Backend for SqliteBackend {
                 let changed = c.execute(
                     "UPDATE application_operations
                      SET state=?4, result_json=?5, recovery_json=?6,
-                         updated_at_ms=?7, completed_at_ms=?7
+                         updated_at_ms=?7,
+                         completed_at_ms=CASE
+                             WHEN ?4 IN ('accepted','rejected','duplicate','completed')
+                             THEN ?7 ELSE NULL END
                      WHERE logical_store_id=?1 AND application_responsibility=?2
                        AND operation_id=?3",
                     params![
@@ -3278,6 +3396,7 @@ impl Backend for SqliteBackend {
                      WHERE rowid IN (
                          SELECT o.rowid FROM application_operations o
                          WHERE o.logical_store_id=?1 AND o.application_responsibility=?2
+                           AND o.state IN ('accepted','rejected','duplicate','completed')
                            AND o.completed_at_ms IS NOT NULL AND o.completed_at_ms<?3
                            AND NOT EXISTS (
                                SELECT 1 FROM application_compound_steps s
@@ -3296,6 +3415,17 @@ impl Backend for SqliteBackend {
                         max_delete
                     ],
                 )? as i64;
+                c.execute(
+                    "DELETE FROM application_operation_messages
+                     WHERE logical_store_id=?1 AND application_responsibility=?2
+                       AND NOT EXISTS (
+                           SELECT 1 FROM application_operations o
+                           WHERE o.logical_store_id=application_operation_messages.logical_store_id
+                             AND o.application_responsibility=application_operation_messages.application_responsibility
+                             AND o.operation_id=application_operation_messages.operation_id
+                       )",
+                    params![scope.logical_store_id, scope.application_responsibility],
+                )?;
                 let compound_steps_deleted = c.execute(
                     "DELETE FROM application_compound_steps
                      WHERE rowid IN (
@@ -3319,9 +3449,23 @@ impl Backend for SqliteBackend {
                         max_delete
                     ],
                 )? as i64;
+                let deltas_deleted = match policy.deltas_before_version {
+                    Some(version) => c.execute(
+                        "DELETE FROM application_state_deltas
+                         WHERE version IN (
+                             SELECT version FROM application_state_deltas
+                             WHERE version<?1
+                             ORDER BY version
+                             LIMIT ?2
+                         )",
+                        params![version, max_delete],
+                    )? as i64,
+                    None => 0,
+                };
                 Ok(CleanupReport {
                     operations_deleted,
                     compound_steps_deleted,
+                    deltas_deleted,
                 })
             })
         })

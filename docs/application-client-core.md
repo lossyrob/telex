@@ -40,9 +40,8 @@ ordered deltas. Migration is additive and idempotent. A client refuses a store
 whose schema is newer than the library supports.
 
 SQLite principal strings are `unverified`; local OS identity is not authenticated
-backend evidence. The current Postgres backend does not yet expose its
-authenticated principal through the backend trait, so provenance is
-`unavailable` rather than falsely `verified`.
+backend evidence. Postgres exposes the configured connection user as
+`unverified`; authenticated transport access alone is not identity proof.
 
 ## Operating guidance
 
@@ -51,15 +50,20 @@ authenticated principal through the backend trait, so provenance is
 - Ack only after the application has durably ingested enough state to resume.
 - Treat `Unknown { raw_reason }` as typed forward-compatible evidence. Do not
   reinterpret it as deliberate detach, collision, or safe automatic repair.
-- Use `cleanup` with explicit age and row-count bounds. It deletes only completed
-  application operation/step records in the selected application scope and
-  preserves in-flight work, messages, deliveries, dispositions, and other apps.
+- Use `cleanup` with explicit age, row-count, and delta-version bounds. It
+  deletes only terminal application operation/step records and explicitly
+  selected old deltas while preserving in-flight work, messages, deliveries,
+  dispositions, and other apps.
 - A capability mismatch or missing delivery-row identity is a fail-closed version
   skew signal. Upgrade the daemon/client pair; do not fabricate an ack identity.
 - Existing daemon `StationHealth` remains available for compatibility. New
   applications should use `ApplicationHealth`, which keeps sender readiness,
   receive readiness, backlog, ack-pending, recovering, degraded, and unattended
   evidence separate.
+- `reconcile_operation` checks the durable operation-to-message mapping written
+  in the same transaction as message acceptance. After a crash in the
+  accepted-send/local-result window, it promotes a matching pending operation to
+  `accepted` before the application authors a replacement.
 
 ## Required later conformance coverage
 

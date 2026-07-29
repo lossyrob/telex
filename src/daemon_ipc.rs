@@ -69,6 +69,7 @@ pub const ERROR_NEEDS_ATTACH: &str = "NeedsAttach";
 pub const ERROR_AMBIGUOUS: &str = "Ambiguous";
 pub const ERROR_UNSUPPORTED: &str = "Unsupported";
 pub const ERROR_NOT_OWNER: &str = "NotOwner";
+pub const ERROR_COLLISION: &str = "Collision";
 pub const REDACTED_SECRET: &str = "[redacted]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -281,6 +282,25 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         metadata: Option<String>,
     },
+    ApplicationSend {
+        store_key: String,
+        session_id: String,
+        from_addr: String,
+        to_addr: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cc: Option<String>,
+        kind: String,
+        attention: String,
+        requires_disposition: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<String>,
+        body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<String>,
+        logical_store_id: String,
+        application_responsibility: String,
+        operation_id: String,
+    },
     Reply {
         store_key: String,
         session_id: String,
@@ -311,6 +331,9 @@ pub enum Request {
         body: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         metadata: Option<String>,
+        logical_store_id: String,
+        application_responsibility: String,
+        operation_id: String,
     },
     Status {
         #[serde(default)]
@@ -355,6 +378,8 @@ pub enum Request {
 pub enum NeedsAttachReason {
     RestartLost,
     DeliberatelyDetached,
+    #[serde(other)]
+    Unknown,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

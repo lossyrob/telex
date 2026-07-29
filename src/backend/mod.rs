@@ -285,6 +285,13 @@ pub trait Backend: Send + Sync {
         Ok(false)
     }
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow>;
+    async fn insert_application_message(
+        &self,
+        _message: &NewMessage,
+        _operation: &ApplicationMessageOperation,
+    ) -> Result<MessageRow> {
+        bail!("insert_application_message: not supported by this backend")
+    }
     async fn get_message(&self, id: i64) -> Result<Option<MessageRow>>;
     async fn thread_messages(&self, thread_id: i64) -> Result<Vec<MessageRow>>;
     async fn inbox(&self, address: &str, include_all: bool, limit: i64) -> Result<Vec<InboxItem>>;
@@ -333,6 +340,15 @@ pub trait Backend: Send + Sync {
         _operation_id: &str,
     ) -> Result<Option<ApplicationOperationRecord>> {
         bail!("application_operation: not supported by this backend")
+    }
+
+    async fn application_operation_message(
+        &self,
+        _logical_store_id: &str,
+        _application_responsibility: &str,
+        _operation_id: &str,
+    ) -> Result<Option<MessageRow>> {
+        bail!("application_operation_message: not supported by this backend")
     }
 
     async fn complete_application_operation(

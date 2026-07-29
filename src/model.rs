@@ -311,6 +311,13 @@ pub struct NewMessage {
     pub sent_at_ms: i64,
 }
 
+#[derive(Clone, Debug)]
+pub struct ApplicationMessageOperation {
+    pub logical_store_id: String,
+    pub application_responsibility: String,
+    pub operation_id: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 pub struct DispositionRow {
     pub id: i64,
@@ -459,12 +466,14 @@ pub struct ApplicationRecordScope {
 pub struct RetentionPolicy {
     pub completed_before_ms: i64,
     pub max_delete: i64,
+    pub deltas_before_version: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CleanupReport {
     pub operations_deleted: i64,
     pub compound_steps_deleted: i64,
+    pub deltas_deleted: i64,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

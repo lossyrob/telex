@@ -178,6 +178,14 @@ CREATE INDEX IF NOT EXISTS application_operations_cleanup_idx
     ON application_operations(
         logical_store_id, application_responsibility, completed_at_ms, updated_at_ms
     );
+CREATE TABLE IF NOT EXISTS application_operation_messages (
+    logical_store_id           text NOT NULL,
+    application_responsibility text NOT NULL,
+    operation_id               text NOT NULL,
+    message_id                 bigint NOT NULL,
+    PRIMARY KEY(logical_store_id, application_responsibility, operation_id),
+    UNIQUE(message_id)
+);
 CREATE TABLE IF NOT EXISTS application_compound_steps (
     logical_store_id           text NOT NULL,
     application_responsibility text NOT NULL,
@@ -397,6 +405,119 @@ async fn pg_tx_append_state_delta(
         payload_json: payload_json.to_string(),
         at_ms,
     })
+}
+
+async fn pg_insert_message(
+    tx: &Transaction<'_>,
+    m: &NewMessage,
+    operation: Option<&ApplicationMessageOperation>,
+) -> Result<MessageRow> {
+    let now = pg_tx_advance_clock_hwm(tx).await?;
+    let parent_thread: Option<i64> = match m.parent_id {
+        Some(pid) => tx
+            .query_opt(
+                "SELECT COALESCE(thread_id, id) AS t FROM messages WHERE id=$1",
+                &[&pid],
+            )
+            .await?
+            .map(|r| r.get::<_, i64>("t")),
+        None => None,
+    };
+    let id: i64 = tx
+        .query_one(
+            "INSERT INTO messages(thread_id, parent_id, from_addr, to_addr, cc, kind, attention,
+                 requires_disposition, subject, body, metadata, sent_at_ms, created_at_ms)
+             VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id",
+            &[
+                &parent_thread,
+                &m.parent_id,
+                &m.from_addr,
+                &m.to_addr,
+                &m.cc,
+                &m.kind,
+                &m.attention.as_str(),
+                &m.requires_disposition,
+                &m.subject,
+                &m.body,
+                &m.metadata,
+                &m.sent_at_ms,
+                &now,
+            ],
+        )
+        .await?
+        .get("id");
+    if let Some(operation) = operation {
+        tx.execute(
+            "INSERT INTO application_operation_messages(
+                 logical_store_id, application_responsibility, operation_id, message_id
+             ) VALUES ($1,$2,$3,$4)
+             ON CONFLICT(logical_store_id, application_responsibility, operation_id)
+             DO UPDATE SET message_id=excluded.message_id",
+            &[
+                &operation.logical_store_id,
+                &operation.application_responsibility,
+                &operation.operation_id,
+                &id,
+            ],
+        )
+        .await?;
+    }
+    if parent_thread.is_none() {
+        tx.execute("UPDATE messages SET thread_id=$1 WHERE id=$1", &[&id])
+            .await?;
+    }
+    for recipient in fanout_recipients(&m.to_addr, m.cc.as_deref()) {
+        let consumed_at_ms = (recipient != m.to_addr).then_some(now);
+        tx.execute(
+            "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
+             VALUES ($1,$2,$3,$4)
+             ON CONFLICT(message_id, recipient) DO NOTHING",
+            &[&id, &recipient, &now, &consumed_at_ms],
+        )
+        .await?;
+        if consumed_at_ms.is_some() {
+            let delivery_id: i64 = tx
+                .query_one(
+                    "SELECT id FROM deliveries WHERE message_id=$1 AND recipient=$2",
+                    &[&id, &recipient],
+                )
+                .await?
+                .get("id");
+            pg_tx_append_state_delta(
+                tx,
+                "acknowledgment",
+                &format!("delivery:{delivery_id}"),
+                &serde_json::json!({
+                    "delivery_id": delivery_id,
+                    "message_id": id,
+                    "recipient": recipient,
+                })
+                .to_string(),
+            )
+            .await?;
+        }
+    }
+    pg_tx_append_state_delta(
+        tx,
+        "message",
+        &format!("message:{id}"),
+        &serde_json::json!({
+            "message_id": id,
+            "thread_id": parent_thread.unwrap_or(id),
+            "to_addr": m.to_addr,
+            "attention": m.attention.as_str(),
+            "kind": m.kind,
+        })
+        .to_string(),
+    )
+    .await?;
+    Ok(map_message(
+        &tx.query_one(
+            &format!("SELECT {MSG_COLS} FROM messages WHERE id=$1"),
+            &[&id],
+        )
+        .await?,
+    ))
 }
 
 async fn raise_clock_hwm_to_existing_timestamps(client: &tokio_postgres::Client) -> Result<()> {
@@ -1179,6 +1300,26 @@ impl Backend for PgBackend {
                         )
                         .await?;
                     if n > 0 {
+                        let delivery_id: i64 = tx
+                            .query_one(
+                                "SELECT id FROM deliveries
+                                 WHERE message_id=$1 AND recipient=$2",
+                                &[&message_id, &recipient],
+                            )
+                            .await?
+                            .get("id");
+                        pg_tx_append_state_delta(
+                            &tx,
+                            "acknowledgment",
+                            &format!("delivery:{delivery_id}"),
+                            &serde_json::json!({
+                                "delivery_id": delivery_id,
+                                "message_id": message_id,
+                                "recipient": recipient,
+                            })
+                            .to_string(),
+                        )
+                        .await?;
                         DeliveryOutcome::Marked
                     } else {
                         DeliveryOutcome::AlreadyConsumed
@@ -1450,7 +1591,7 @@ impl Backend for PgBackend {
         materialize_pending_delivery_rows_for_recipient(&client, address).await?;
         let terminal = terminal_dispositions_sql_list();
         let primary_sql = format!(
-            "SELECT {MSG_COLS_M} FROM deliveries d
+            "SELECT {MSG_COLS_M}, d.id AS delivery_id FROM deliveries d
              JOIN messages m ON m.id=d.message_id
              WHERE d.recipient=$1
                AND d.consumed_at_ms IS NULL
@@ -1508,63 +1649,19 @@ impl Backend for PgBackend {
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow> {
         let mut client = self.client().await?;
         let tx = client.transaction().await?;
-        let now = pg_tx_advance_clock_hwm(&tx).await?;
-        // Determine the parent's thread first (NULL for a root message).
-        let parent_thread: Option<i64> = match m.parent_id {
-            Some(pid) => tx
-                .query_opt(
-                    "SELECT COALESCE(thread_id, id) AS t FROM messages WHERE id=$1",
-                    &[&pid],
-                )
-                .await?
-                .map(|r| r.get::<_, i64>("t")),
-            None => None,
-        };
-        let id: i64 = tx
-            .query_one(
-                "INSERT INTO messages(thread_id, parent_id, from_addr, to_addr, cc, kind, attention, \
-                    requires_disposition, subject, body, metadata, sent_at_ms, created_at_ms) \
-                 VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) RETURNING id",
-                &[
-                    &parent_thread, &m.parent_id, &m.from_addr, &m.to_addr, &m.cc, &m.kind,
-                    &m.attention.as_str(), &m.requires_disposition, &m.subject, &m.body,
-                    &m.metadata, &m.sent_at_ms, &now,
-                ],
-            )
-            .await?
-            .get("id");
-        if parent_thread.is_none() {
-            tx.execute("UPDATE messages SET thread_id=$1 WHERE id=$1", &[&id])
-                .await?;
-        }
-        for recipient in fanout_recipients(&m.to_addr, m.cc.as_deref()) {
-            let consumed_at_ms = if recipient == m.to_addr {
-                None
-            } else {
-                Some(now)
-            };
-            tx.execute(
-                "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
-                 VALUES ($1,$2,$3,$4)
-                 ON CONFLICT(message_id, recipient) DO NOTHING",
-                &[&id, &recipient, &now, &consumed_at_ms],
-            )
-            .await?;
-        }
-        pg_tx_append_state_delta(
-            &tx,
-            "message",
-            &format!("message:{id}"),
-            &format!("{{\"message_id\":{id}}}"),
-        )
-        .await?;
-        let row = tx
-            .query_one(
-                &format!("SELECT {MSG_COLS} FROM messages WHERE id=$1"),
-                &[&id],
-            )
-            .await?;
-        let message = map_message(&row);
+        let message = pg_insert_message(&tx, m, None).await?;
+        tx.commit().await?;
+        Ok(message)
+    }
+
+    async fn insert_application_message(
+        &self,
+        message: &NewMessage,
+        operation: &ApplicationMessageOperation,
+    ) -> Result<MessageRow> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await?;
+        let message = pg_insert_message(&tx, message, Some(operation)).await?;
         tx.commit().await?;
         Ok(message)
     }
@@ -1677,22 +1774,47 @@ impl Backend for PgBackend {
             .get("id");
         if Disposition::is_terminal_str(state) {
             materialize_pending_delivery_rows_for_recipient_tx(&tx, recipient).await?;
-            tx.execute(
-                "UPDATE deliveries SET consumed_at_ms=$1
+            let consumed = tx
+                .execute(
+                    "UPDATE deliveries SET consumed_at_ms=$1
                  WHERE message_id=$2 AND recipient=$3 AND consumed_at_ms IS NULL",
-                &[&now, &message_id, &recipient],
-            )
-            .await?;
+                    &[&now, &message_id, &recipient],
+                )
+                .await?;
+            if consumed > 0 {
+                let delivery_id: i64 = tx
+                    .query_one(
+                        "SELECT id FROM deliveries
+                         WHERE message_id=$1 AND recipient=$2",
+                        &[&message_id, &recipient],
+                    )
+                    .await?
+                    .get("id");
+                pg_tx_append_state_delta(
+                    &tx,
+                    "acknowledgment",
+                    &format!("delivery:{delivery_id}"),
+                    &serde_json::json!({
+                        "delivery_id": delivery_id,
+                        "message_id": message_id,
+                        "recipient": recipient,
+                    })
+                    .to_string(),
+                )
+                .await?;
+            }
         }
         pg_tx_append_state_delta(
             &tx,
             "disposition",
             &format!("message:{message_id}:recipient:{recipient}"),
-            &format!(
-                "{{\"message_id\":{message_id},\"recipient\":{},\"state\":{}}}",
-                serde_json::to_string(recipient)?,
-                serde_json::to_string(state)?
-            ),
+            &serde_json::json!({
+                "message_id": message_id,
+                "recipient": recipient,
+                "state": state,
+                "is_terminal": Disposition::is_terminal_str(state),
+            })
+            .to_string(),
         )
         .await?;
         let row = DispositionRow {
@@ -1894,6 +2016,33 @@ impl Backend for PgBackend {
             .map(|r| map_application_operation(&r)))
     }
 
+    async fn application_operation_message(
+        &self,
+        logical_store_id: &str,
+        application_responsibility: &str,
+        operation_id: &str,
+    ) -> Result<Option<MessageRow>> {
+        let client = self.client().await?;
+        Ok(client
+            .query_opt(
+                &format!(
+                    "SELECT {MSG_COLS_M}
+                     FROM application_operation_messages aom
+                     JOIN messages m ON m.id=aom.message_id
+                     WHERE aom.logical_store_id=$1
+                       AND aom.application_responsibility=$2
+                       AND aom.operation_id=$3"
+                ),
+                &[
+                    &logical_store_id,
+                    &application_responsibility,
+                    &operation_id,
+                ],
+            )
+            .await?
+            .map(|row| map_message(&row)))
+    }
+
     async fn complete_application_operation(
         &self,
         logical_store_id: &str,
@@ -1910,7 +2059,10 @@ impl Backend for PgBackend {
             .query_opt(
                 "UPDATE application_operations
                  SET state=$4, result_json=$5, recovery_json=$6,
-                     updated_at_ms=$7, completed_at_ms=$7
+                     updated_at_ms=$7,
+                     completed_at_ms=CASE
+                         WHEN $4 IN ('accepted','rejected','duplicate','completed')
+                         THEN $7 ELSE NULL END
                  WHERE logical_store_id=$1 AND application_responsibility=$2
                    AND operation_id=$3
                  RETURNING logical_store_id, application_responsibility, operation_id,
@@ -2254,6 +2406,7 @@ impl Backend for PgBackend {
                 "WITH doomed AS (
                      SELECT o.ctid FROM application_operations o
                      WHERE o.logical_store_id=$1 AND o.application_responsibility=$2
+                       AND o.state IN ('accepted','rejected','duplicate','completed')
                        AND o.completed_at_ms IS NOT NULL AND o.completed_at_ms<$3
                        AND NOT EXISTS (
                            SELECT 1 FROM application_compound_steps s
@@ -2274,6 +2427,18 @@ impl Backend for PgBackend {
                 ],
             )
             .await? as i64;
+        tx.execute(
+            "DELETE FROM application_operation_messages aom
+             WHERE logical_store_id=$1 AND application_responsibility=$2
+               AND NOT EXISTS (
+                   SELECT 1 FROM application_operations o
+                   WHERE o.logical_store_id=aom.logical_store_id
+                     AND o.application_responsibility=aom.application_responsibility
+                     AND o.operation_id=aom.operation_id
+               )",
+            &[&scope.logical_store_id, &scope.application_responsibility],
+        )
+        .await?;
         let compound_steps_deleted = tx
             .execute(
                 "WITH doomed AS (
@@ -2299,10 +2464,27 @@ impl Backend for PgBackend {
                 ],
             )
             .await? as i64;
+        let deltas_deleted = match policy.deltas_before_version {
+            Some(version) => {
+                tx.execute(
+                    "WITH doomed AS (
+                         SELECT version FROM application_state_deltas
+                         WHERE version<$1
+                         ORDER BY version LIMIT $2
+                     )
+                     DELETE FROM application_state_deltas
+                     WHERE version IN (SELECT version FROM doomed)",
+                    &[&version, &policy.max_delete.max(0)],
+                )
+                .await? as i64
+            }
+            None => 0,
+        };
         tx.commit().await?;
         Ok(CleanupReport {
             operations_deleted,
             compound_steps_deleted,
+            deltas_deleted,
         })
     }
 

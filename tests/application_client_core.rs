@@ -4,8 +4,9 @@ use telex::backend::sqlite::SqliteBackend;
 use telex::backend::Backend;
 use telex::model::Attention;
 use telex::model::{
-    now_ms, ApplicationOperationBegin, ApplicationRecordScope, DeliveryOutcome, EpochClaimResult,
-    NewApplicationOperation, NewCompoundStepRecord, NewMessage, RetentionPolicy,
+    now_ms, ApplicationMessageOperation, ApplicationOperationBegin, ApplicationRecordScope,
+    DeliveryOutcome, EpochClaimResult, NewApplicationOperation, NewCompoundStepRecord, NewMessage,
+    RetentionPolicy,
 };
 
 fn db_path(name: &str) -> String {
@@ -43,6 +44,34 @@ async fn operation_identity_replays_and_rejects_changed_payload() {
             .unwrap(),
         ApplicationOperationBegin::Started(_)
     ));
+    let authored = backend
+        .insert_application_message(
+            &NewMessage {
+                from_addr: Some("watcher:sender".into()),
+                to_addr: "target".into(),
+                kind: "note".into(),
+                attention: Attention::Background,
+                body: "payload".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            },
+            &ApplicationMessageOperation {
+                logical_store_id: "store-v1-test".into(),
+                application_responsibility: "watcher".into(),
+                operation_id: "op-1".into(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        backend
+            .application_operation_message("store-v1-test", "watcher", "op-1")
+            .await
+            .unwrap()
+            .unwrap()
+            .id,
+        authored.id
+    );
     assert!(matches!(
         backend
             .begin_application_operation(&operation)
@@ -119,6 +148,41 @@ async fn exact_delivery_ack_is_bound_to_the_delivery_row() {
             .unwrap(),
         DeliveryOutcome::Marked
     );
+    assert!(backend
+        .state_deltas(0, 100)
+        .await
+        .unwrap()
+        .iter()
+        .any(|delta| delta.axis == "acknowledgment"));
+}
+
+#[tokio::test]
+async fn delta_cleanup_is_explicit_and_bounded() {
+    let path = db_path("delta-cleanup");
+    let backend = SqliteBackend::open(&path).unwrap();
+    backend.init_schema().await.unwrap();
+    for index in 0..10 {
+        backend
+            .append_state_delta("test", &format!("entity:{index}"), "{}")
+            .await
+            .unwrap();
+    }
+    let report = backend
+        .cleanup_application_records(
+            &ApplicationRecordScope {
+                logical_store_id: "store-v1-test".into(),
+                application_responsibility: "test".into(),
+            },
+            RetentionPolicy {
+                completed_before_ms: i64::MIN,
+                max_delete: 4,
+                deltas_before_version: Some(11),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(report.deltas_deleted, 4);
+    assert_eq!(backend.state_deltas(0, 100).await.unwrap().len(), 6);
 }
 
 #[tokio::test]
@@ -174,6 +238,7 @@ async fn compound_steps_and_cleanup_preserve_inflight_work() {
             RetentionPolicy {
                 completed_before_ms: i64::MAX,
                 max_delete: 100,
+                deltas_before_version: None,
             },
         )
         .await
