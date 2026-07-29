@@ -41,8 +41,12 @@ Streamliner launch-preparation run
 `1aec0d88-bdb2-41e8-b69f-acee8e6b47bc` created the dedicated
 `feature/operator-broker-128` worktree and launched both the v2 implementer and
 reviewer sessions through the broker. The implementer Telex station was
-attended; the reviewer session was live and graph-bound but had not yet
-registered its assigned Telex station at the last startup check.
+initially attended by the temporary preparation session rather than the launched
+worker; orchestration detached that stale registration after the preparation
+session ended. Both launched sessions remained live and graph-bound, but neither
+registered its assigned Telex control station during the bounded startup wait.
+The node is in progress with degraded control-channel reachability, and the
+launch-profile/broker interaction is escalated for campaign review.
 
 ## Boundaries
 

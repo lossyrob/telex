@@ -137,11 +137,14 @@ Client.
 Streamliner launch-preparation run
 `1aec0d88-bdb2-41e8-b69f-acee8e6b47bc` launched the paired implementation and
 review sessions in `telex-operator-broker-128` on
-`feature/operator-broker-128`. The implementer attends
-`telex://lossyrob/telex/T-A:operator-impl-128`; the reviewer is assigned
+`feature/operator-broker-128`. The assigned control addresses are
+`telex://lossyrob/telex/T-A:operator-impl-128` and
 `telex://lossyrob/telex/T-A:operator-review-128`. Both sessions are live and
-graph-bound; the reviewer Telex station was still completing startup at the
-last reconciliation check.
+graph-bound. During preparation, the temporary PAW-init session incorrectly
+attached the implementer address and then ended; orchestration detached that
+stale station. Neither launched worker registered its assigned Telex station
+within the subsequent bounded startup window, so the Telex control channel is
+currently degraded and campaign orchestration has been notified.
 
 `station-app` remains planned and held. The current graph still targets the
 pending `application-client-ready-gate`; no cross-workstream dependency geometry

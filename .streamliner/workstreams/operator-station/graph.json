@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "Operator-broker issue #128 is in progress through Streamliner launch run 1aec0d88-bdb2-41e8-b69f-acee8e6b47bc with paired implementer/reviewer sessions. Station-app remains held pending an explicit supported/conformant client export.",
+  "summary": "Operator-broker issue #128 is in progress through Streamliner launch run 1aec0d88-bdb2-41e8-b69f-acee8e6b47bc. Paired sessions are live and graph-bound, but their assigned Telex control stations did not attach during the bounded startup window; station-app remains held.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-29T15:27:00Z",
+  "updatedAt": "2026-07-29T15:36:30Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
