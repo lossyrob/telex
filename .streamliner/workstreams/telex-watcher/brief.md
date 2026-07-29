@@ -100,15 +100,34 @@ The `watcher-contract` completed through
 Watcher shared-client requirements were dual-approved and published to
 [issue #12](https://github.com/lossyrob/telex/issues/12#issuecomment-5042702401).
 
-No Watcher implementation node is launch-ready yet. `watcher-runtime` and
-`detector-template-library` are planned with resolvable dependencies on
-`telex/application-client/application-client-ready-gate`. Application Client
-workstream [#117](https://github.com/lossyrob/telex/issues/117) and
-contract-convergence node [#118](https://github.com/lossyrob/telex/issues/118)
-exist but are paused pending explicit builder scope approval. They are not active
-work until campaign relays that decision. After authorization, campaign/#12 must
-disposition the requirements and complete the shared gate before either Watcher
-node can become ready. There is no spike-private fallback.
+Application Client contract convergence completed through
+[#118](https://github.com/lossyrob/telex/issues/118) and clean replacement
+[PR #126](https://github.com/lossyrob/telex/pull/126), merged at
+`62c2b23cc3d54877226f46df44d6036b7dffa380`. Polluted
+[PR #123](https://github.com/lossyrob/telex/pull/123) is closed unmerged at
+`8b388a3c65a5bf804d6b8d5b43334047fa92ceb2` and remains preserved only as
+protocol-forensics evidence; its old approval and merge-floor records are not
+authority.
+
+[Issue #12](https://github.com/lossyrob/telex/issues/12) now publishes
+`application-client-ready` as a design-only semantic checkpoint. It accepts all
+15 Watcher requirements and unlocks detailed downstream planning, but it does
+not mean a supported client core, first binding, conformance suite, or consumer
+integration exists. Its supporting traceability link still points at the
+pre-repair `docs/design/application-client-crosswalk.md`; Application Client
+orchestration owns updating that link to
+`docs/notes/application-client/requirements-crosswalk.md`. Non-blocking wording
+alignment remains tracked in
+[#124](https://github.com/lossyrob/telex/issues/124).
+
+No Watcher implementation worker is active, and campaign/operator GO is required
+before any new launch. `detector-template-library` is the next node eligible for
+detailed promotion under the accepted contract. `watcher-runtime` is not yet
+launch-ready: production integration still needs the supported Application
+Client core, binding, and conformance work, while its current graph dependency
+names only the design-only `application-client-ready-gate`. That dependency and
+the parallel-versus-staged node shape require orchestrator/operator review before
+runtime launch. There is no spike-private fallback.
 
 ## Decisions
 
@@ -155,14 +174,26 @@ node can become ready. There is no spike-private fallback.
   wait for #12/campaign convergence. CLI subprocess parsing, raw daemon IPC,
   `TELEX_WATCHER_INTERNAL_SEND_ONCE_V1`, and sender occupancy are not accepted
   production client seams.
+- **`application-client-ready` is design-only:** it permits detailed node
+  promotion under the accepted semantics but does not satisfy
+  `watcher-runtime`'s dependency on an implemented, conformant supported client.
+- **Node launches use the Streamliner launch broker:** future implementer and
+  reviewer sessions use the graph-configured Watcher v2 prompt profiles through
+  `POST /api/launch-preparations/runs`; no hand-written node terminal prompts or
+  direct terminal helper launches are permitted.
+- **Workers execute product missions, not workstream gates:** gate, approval,
+  reconciliation, and evidence state remains orchestration-owned and off product
+  PR branches unless a node explicitly names an artifact as a product
+  deliverable.
 
 ## Open Questions
 
-- Which of the 15 Watcher shared-client requirements will #12 accept, defer, or
-  reject, and which dispositions block runtime versus template promotion?
-- When `application-client-ready` exists, should `watcher-runtime` and
-  `detector-template-library` be promoted in parallel or staged around a shared
-  conformance harness?
+- Should `detector-template-library` be promoted and launched first while
+  `watcher-runtime` waits for a supported Application Client implementation?
+- Which Application Client export should become `watcher-runtime`'s real
+  implementation dependency: the `supported-client` checkpoint,
+  `consumer-integration-gate`, or another explicitly accepted core/conformance
+  export?
 
 ## Imports and Exports
 

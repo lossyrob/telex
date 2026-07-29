@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "Production Watcher contract #110 is complete. Runtime/template nodes have resolvable pending dependencies on application-client/application-client-ready-gate; #117/#118 is paused pending explicit builder scope approval.",
+  "summary": "Application Client's design-only checkpoint landed through clean PR #126. No Watcher worker is active; detector-template-library is next eligible for detailed promotion, while watcher-runtime needs a reviewed dependency on the supported client implementation. New launches await campaign/operator GO.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-22T14:29:55Z",
+  "updatedAt": "2026-07-29T15:02:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
