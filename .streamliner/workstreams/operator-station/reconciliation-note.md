@@ -37,6 +37,13 @@ agent-session role and routing policy, not the non-agent shared client.
 to Application Client `client-conformance` is recorded for review but not
 applied.
 
+Streamliner launch-preparation run
+`1aec0d88-bdb2-41e8-b69f-acee8e6b47bc` created the dedicated
+`feature/operator-broker-128` worktree and launched both the v2 implementer and
+reviewer sessions through the broker. The implementer Telex station was
+attended; the reviewer session was live and graph-bound but had not yet
+registered its assigned Telex station at the last startup check.
+
 ## Boundaries
 
 - **Held:** The Station remained a separate optional application; filtering

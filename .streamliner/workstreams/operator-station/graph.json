@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "The production contract and clean Application Client contract convergence are merged. Operator-broker issue #128 is promoted for staged execution; station-app remains held pending an explicit supported/conformant client export.",
+  "summary": "Operator-broker issue #128 is in progress through Streamliner launch run 1aec0d88-bdb2-41e8-b69f-acee8e6b47bc with paired implementer/reviewer sessions. Station-app remains held pending an explicit supported/conformant client export.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-29T15:03:52Z",
+  "updatedAt": "2026-07-29T15:27:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -140,7 +140,7 @@
       "type": "task",
       "title": "Reusable operator-agent role and routing policy",
       "summary": "Package and validate the reusable assisted-mode operator-agent role: explicit ingress/human configuration, normal and quiet policy, resolution and clarification, production-v1 escalation/digest metadata, retry-stable human-response route-back, replacement recovery, stale-origin handling, source trust, and non-impersonation without becoming Telex core or a private Application Client.",
-      "status": "ready",
+      "status": "in-progress",
       "attention": "watch",
       "repoIds": [
         "telex"

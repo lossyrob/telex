@@ -134,6 +134,15 @@ accepted API-neutral semantic contract in clean PR #126 because it packages an
 agent-session role and routing policy rather than the non-agent Application
 Client.
 
+Streamliner launch-preparation run
+`1aec0d88-bdb2-41e8-b69f-acee8e6b47bc` launched the paired implementation and
+review sessions in `telex-operator-broker-128` on
+`feature/operator-broker-128`. The implementer attends
+`telex://lossyrob/telex/T-A:operator-impl-128`; the reviewer is assigned
+`telex://lossyrob/telex/T-A:operator-review-128`. Both sessions are live and
+graph-bound; the reviewer Telex station was still completing startup at the
+last reconciliation check.
+
 `station-app` remains planned and held. The current graph still targets the
 pending `application-client-ready-gate`; no cross-workstream dependency geometry
 was silently changed. The proposed replacement is an explicit dependency on
