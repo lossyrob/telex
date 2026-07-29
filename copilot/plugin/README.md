@@ -46,6 +46,6 @@ history, or foreign-station health is a blocked compatibility condition.
 The checked-in
 `skills/operator-station/compatibility-v0.1.2.json` fixture ties the role to the Telex
 and plugin release. Package version changes require explicit fixture and contract-test
-review. Compatibility is capability-gated: the generic v0.1.2 reply surface does not
-expose metadata-bearing authoring, so human-response route-back remains visibly blocked
-unless the loaded runtime workflow supplies that capability.
+review. Compatibility is capability-gated: routed outcomes require the
+`reply_metadata_p11` daemon capability. Missing capability support leaves
+human-response route-back visibly blocked rather than silently dropping metadata.

@@ -21,6 +21,7 @@
     "explicit-backend-and-sender",
     "full-thread-and-disposition-history",
     "metadata-bearing-send-and-reply",
+    "reply_metadata_p11",
     "exact-message-parent-thread-sender-recipient-receipt",
     "foreign-station-health-and-backlog"
   ],

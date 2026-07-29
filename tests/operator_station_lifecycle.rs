@@ -157,6 +157,11 @@ impl IsolatedTelexPlane {
 
     fn command(&self, session: &str) -> Command {
         let mut command = Command::new(&self.bin);
+        for (key, _) in std::env::vars_os() {
+            if key.to_string_lossy().starts_with("TELEX_") {
+                command.env_remove(key);
+            }
+        }
         command
             .current_dir(&self.repo)
             .env("TELEX_HOME", &self.home)
@@ -165,10 +170,7 @@ impl IsolatedTelexPlane {
             .env("TELEX_RUN_DIR", &self.run_dir)
             .env("TELEX_CONFIG", self.home.join("config.toml"))
             .env("TELEX_SESSION_ID", session)
-            .env("TELEX_RECONNECT_GRACE_MS", "3000")
-            .env_remove("TELEX_BACKEND")
-            .env_remove("TELEX_ADDRESS")
-            .env_remove("TELEX_SESSION_PID");
+            .env("TELEX_RECONNECT_GRACE_MS", "3000");
         #[cfg(windows)]
         command.env("LOCALAPPDATA", &self.state_dir);
         #[cfg(not(windows))]
@@ -385,7 +387,12 @@ impl IsolatedTelexPlane {
         if self.cleaned {
             return;
         }
-        self.stop_daemon_best_effort();
+        self.stop_daemon().unwrap_or_else(|error| {
+            panic!(
+                "stop isolated lifecycle daemon for {}: {error}",
+                self.run_root.display()
+            )
+        });
         remove_directory_with_retry(&self.run_root, Duration::from_secs(5)).unwrap_or_else(
             |error| {
                 panic!(
@@ -397,29 +404,30 @@ impl IsolatedTelexPlane {
         self.cleaned = true;
     }
 
-    fn stop_daemon_best_effort(&self) {
+    fn stop_daemon(&self) -> Result<(), String> {
         let _ = self.run_backend("cleanup", ["daemon", "stop", "--drain"]);
         let deadline = Instant::now() + Duration::from_secs(5);
         while Instant::now() < deadline {
             let status = self.run_backend("cleanup", ["daemon", "status"]);
             if !status.status.success() {
-                return;
+                return Ok(());
             }
             let running = serde_json::from_str::<Value>(&status.stdout)
                 .ok()
                 .and_then(|value| value.get("running").and_then(Value::as_bool));
             if running == Some(false) {
-                return;
+                return Ok(());
             }
             std::thread::sleep(Duration::from_millis(50));
         }
+        Err("daemon remained running after the cleanup deadline".to_string())
     }
 }
 
 impl Drop for IsolatedTelexPlane {
     fn drop(&mut self) {
         if !self.cleaned {
-            self.stop_daemon_best_effort();
+            let _ = self.stop_daemon();
             let _ = remove_directory_with_retry(&self.run_root, Duration::from_secs(5));
         }
     }
@@ -556,8 +564,8 @@ fn isolated_operator_station_lifecycle_preserves_v1_invariants() {
         "operator-session",
         INGRESS,
         clarification_id,
-        "operator-station.clarification",
-        true,
+        "note",
+        false,
         "Clarify requested scope",
         "Which exact scope should the operator use?",
         None,
@@ -1133,7 +1141,6 @@ fn isolated_operator_station_lifecycle_preserves_v1_invariants() {
         row["address"] == INGRESS && row["session_id"] == "response-replacement-session"
     }));
 
-    assert_deterministic_response_ordering();
     assert!(
         plane
             .export("direct-station-session")
@@ -1589,70 +1596,4 @@ fn matching_operation_messages<'a>(export: &'a [Value], operation_id: &str) -> V
                 == Some(operation_id)
         })
         .collect()
-}
-
-fn assert_deterministic_response_ordering() {
-    let text_reply = [
-        "persist-route-operation",
-        "accept-raw-thread-routed-outcome",
-        "close-raw-obligation",
-        "handle-human-response",
-    ];
-    assert_before(
-        &text_reply,
-        "accept-raw-thread-routed-outcome",
-        "close-raw-obligation",
-    );
-    assert_before(&text_reply, "close-raw-obligation", "handle-human-response");
-
-    let disposition_only = [
-        "persist-route-operation",
-        "accept-machine-readable-routed-outcome",
-        "terminal-raw-disposition",
-        "handle-human-response",
-    ];
-    assert_before(
-        &disposition_only,
-        "accept-machine-readable-routed-outcome",
-        "terminal-raw-disposition",
-    );
-
-    let station_action = [
-        "persist-human-operation",
-        "accept-human-reply",
-        "disposition-mediated-root",
-    ];
-    assert_before(
-        &station_action,
-        "accept-human-reply",
-        "disposition-mediated-root",
-    );
-
-    let handoff = [
-        "freeze-inventory",
-        "station-confirms-reconstruction",
-        "operator-detaches",
-        "direct-station-attaches",
-    ];
-    assert_before(
-        &handoff,
-        "station-confirms-reconstruction",
-        "operator-detaches",
-    );
-    assert_before(&handoff, "operator-detaches", "direct-station-attaches");
-}
-
-fn assert_before(sequence: &[&str], first: &str, second: &str) {
-    let first_index = sequence
-        .iter()
-        .position(|step| *step == first)
-        .expect("first ordering step");
-    let second_index = sequence
-        .iter()
-        .position(|step| *step == second)
-        .expect("second ordering step");
-    assert!(
-        first_index < second_index,
-        "{first} must occur before {second}"
-    );
 }

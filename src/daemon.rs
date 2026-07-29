@@ -5238,8 +5238,20 @@ async fn reply_message(
             )
         }
     };
-    if let Err(e) = backend.ensure_address(&to, None, None, None).await {
-        return proto::internal(format!("ensuring reply destination {to}: {e:#}"));
+    match backend.get_address(&to).await {
+        Ok(Some(addr)) if addr.status == STATUS_RETIRED => {
+            return proto::error_response(
+                proto::ERROR_INCOMPATIBLE,
+                format!("address {to} is retired"),
+            )
+        }
+        Ok(Some(_)) => {}
+        Ok(None) => {
+            if let Err(e) = backend.ensure_address(&to, None, None, None).await {
+                return proto::internal(format!("ensuring reply destination {to}: {e:#}"));
+            }
+        }
+        Err(e) => return proto::internal(format!("checking reply destination {to}: {e:#}")),
     }
     let subject = subject.or_else(|| parent.subject.as_ref().map(|s| format!("Re: {s}")));
     let new = NewMessage {
@@ -8082,6 +8094,47 @@ mod p3_tests {
             .expect("stored reply");
         assert_eq!(stored.parent_id, Some(parent_id));
         assert_eq!(stored.metadata.as_deref(), Some(metadata));
+    }
+
+    #[tokio::test]
+    async fn reply_rejects_a_retired_parent_sender() {
+        let state = test_state("reply-retired");
+        let store = store_key("reply-retired");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let parent_id = insert_test_message(&backend, "addr:a", None).await;
+        backend
+            .ensure_address("sender", None, None, None)
+            .await
+            .unwrap();
+        assert!(backend
+            .set_address_status("sender", STATUS_RETIRED)
+            .await
+            .unwrap());
+
+        let reply = request(
+            state,
+            Request::Reply {
+                store_key: store,
+                session_id: "s1".to_string(),
+                from_addr: Some("addr:a".to_string()),
+                message_id: parent_id,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                cc: None,
+                body: "must not queue".to_string(),
+                metadata: Some(r#"{"opaque":true}"#.to_string()),
+            },
+        )
+        .await;
+        assert!(matches!(
+            reply,
+            Response::Error { ref code, ref message, .. }
+                if code == proto::ERROR_INCOMPATIBLE && message.contains("retired")
+        ));
+        assert!(backend.inbox("sender", true, 100).await.unwrap().is_empty());
     }
 
     #[tokio::test]

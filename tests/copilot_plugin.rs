@@ -529,9 +529,18 @@ fn operator_station_skill_contract_is_complete_and_versioned() {
         "deterministic-envelope-ordering-recovery-not-model-quality"
     );
     assert_eq!(fixture["compatibility_mode"], "capability-gated");
+    assert!(fixture["required_runtime_capabilities"]
+        .as_array()
+        .is_some_and(|capabilities| capabilities
+            .iter()
+            .any(|capability| capability == "reply_metadata_p11")));
     assert!(fixture["known_runtime_blocks"]
         .as_array()
         .is_some_and(Vec::is_empty));
+    let plugin_readme = std::fs::read_to_string(root.join("copilot/plugin/README.md"))
+        .expect("read Copilot plugin README");
+    assert!(plugin_readme.contains("`reply_metadata_p11` daemon capability"));
+    assert!(!plugin_readme.contains("reply surface does not expose metadata-bearing authoring"));
 }
 
 #[test]

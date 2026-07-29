@@ -9,7 +9,7 @@ use std::fmt;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_MAJOR: u16 = 1;
-pub const PROTOCOL_MINOR: u16 = 4;
+pub const PROTOCOL_MINOR: u16 = 5;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
@@ -26,6 +26,7 @@ pub const CAP_STATUS_P5: &str = "status_p5";
 pub const CAP_STATION_LIFECYCLE_P8: &str = "station_lifecycle_p8";
 pub const CAP_WAIT_MIN_ATTENTION_P9: &str = "wait_min_attention_p9";
 pub const CAP_WAIT_WAKE_ON_CC_P10: &str = "wait_wake_on_cc_p10";
+pub const CAP_REPLY_METADATA_P11: &str = "reply_metadata_p11";
 /// Advertised (not required): the daemon honors `Register.on_deliver` and runs the generic
 /// on-deliver exec push primitive. A client provisioning push delivery checks this / the
 /// `push_registered` status to fail closed against an older daemon that would silently ignore
@@ -59,6 +60,7 @@ pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_STATION_LIFECYCLE_P8,
     CAP_WAIT_MIN_ATTENTION_P9,
     CAP_WAIT_WAKE_ON_CC_P10,
+    CAP_REPLY_METADATA_P11,
 ];
 
 pub const ERROR_INCOMPATIBLE: &str = "Incompatible";
@@ -1146,6 +1148,7 @@ mod tests {
             .expect("current protocol major in table");
         assert_eq!(row.protocol_minor, PROTOCOL_MINOR);
         assert_eq!(row.required_capabilities, REQUIRED_CAPABILITIES);
+        assert!(row.required_capabilities.contains(&CAP_REPLY_METADATA_P11));
         assert_eq!(row.unknown_required_capability_error, ERROR_INCOMPATIBLE);
     }
 

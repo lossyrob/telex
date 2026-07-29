@@ -51,6 +51,7 @@ The loaded workflow must provide:
 - explicit backend and sender selection;
 - full message and thread reads with ordered disposition history;
 - metadata-bearing sends and replies;
+- daemon capability `reply_metadata_p11`;
 - exact message, parent, thread, sender, and recipient receipt fields;
 - durable accepted, duplicate, rejected, and indeterminate reconciliation outcomes;
 - recipient-specific dispositions with notes;
@@ -258,7 +259,9 @@ routed outcome before any non-stale terminal disposition. `handled`, `rejected`,
 handle the human-response obligation until the required raw operation succeeds.
 
 For every send, check expected parent, thread, sender, and recipient. An indeterminate or
-mismatched receipt never advances either obligation.
+mismatched receipt never advances either obligation. Before any terminal disposition,
+re-read the stored raw-thread reply and verify the complete routed-outcome metadata
+envelope round-tripped unchanged; a receipt alone is not metadata-persistence evidence.
 
 ## Stale origin
 
