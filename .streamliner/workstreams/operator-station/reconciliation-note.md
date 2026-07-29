@@ -21,16 +21,15 @@ mediated loop into intended product design. The corrected Operator Station
 AC-01 through AC-15 export and merged-source addendum are published on issue
 #12.
 
-The campaign-owned `application-client-ready` checkpoint is now published.
 Contract-convergence issue #118 completed through clean product-only PR #126,
 merged at `62c2b23cc3d54877226f46df44d6036b7dffa380`. Polluted PR #123 was closed
 without merge and preserved for protocol forensics.
 
-The shared semantic dependency is satisfied, so `station-app` and
-`operator-broker` are promotion candidates rather than externally blocked
-sketches. They remain planned because the workstream has not yet decided how
-their implementation should sequence against the still-pending shared client
-core, binding, conformance, and consumer-integration work.
+The campaign-owned `application-client-ready` gate remains pending because
+issue #12 still carries the pre-repair crosswalk path and manifest identity.
+Campaign/operator authority must reconcile and accept the clean checkpoint
+before it is exported to Operator Station. `station-app` and `operator-broker`
+therefore remain externally blocked planned sketches, not promotion candidates.
 
 ## Boundaries
 
@@ -87,10 +86,10 @@ the domain-contract review, the exact #12 export review, and the
 workstream-owned artifact reconciliations. The paired reviewer remained the
 right owner for detailed lifecycle, provenance, recovery, and safety defects.
 
-The builder's next attention belongs at production-node promotion and the later
-usability gate. Campaign/operator attention is needed now to decide shared-client
-implementation sequencing and to authorize the next launch. No worker launch is
-requested by this reconciliation.
+Campaign/operator attention belongs first at the clean issue #12 checkpoint
+reconciliation and acceptance decision. After that gate, attention can move to
+production-node promotion, shared-client implementation sequencing, and the
+later usability gate. No worker launch is requested by this reconciliation.
 
 ## Inspired vs. recovery interventions
 
@@ -132,9 +131,9 @@ Other deferred items remain production-contract or hardening concerns owned by
 - Consolidate the spike's Application Client requirements with Telex Watcher
   evidence: target authority — issue #12
   - Disposition: landed as the corrected Operator Station domain export and
-    merge-SHA addendum on #12; the shared semantic checkpoint is published and
-    clean PR #126 is merged. Application Client orchestration still owns the
-    non-semantic supporting-crosswalk link correction.
+    merge-SHA addendum on #12; clean PR #126 is merged. The checkpoint remains
+    pending campaign/operator reconciliation and acceptance against the clean
+    supporting-traceability path and manifest.
 - Decide whether to promote, rename, or retire the experimental message/source
   convention: target authority — issue #114
   - Disposition: landed in `docs/design/operator-station.md`; the experimental

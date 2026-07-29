@@ -115,26 +115,24 @@ They include per-recipient delivery identity, exact-recipient acknowledgment,
 ordered resync, retry-safe metadata-bearing operations, and machine-readable
 raw-thread outcomes for terminal assisted responses.
 
-The campaign-owned `application-client-ready` checkpoint is now published on
-[#12](https://github.com/lossyrob/telex/issues/12). Contract-convergence issue
+Contract convergence is complete: issue
 [#118](https://github.com/lossyrob/telex/issues/118) closed when the clean,
 product-only [PR #126](https://github.com/lossyrob/telex/pull/126) merged at
 `62c2b23cc3d54877226f46df44d6036b7dffa380`. Polluted PR #123 remains closed
 without merge as protocol-forensics evidence and is not product authority.
 
-The semantic checkpoint resolves the external design dependency for
-`station-app` and `operator-broker`, but it does not provide the shared client
-core, first binding, conformance evidence, or consumer integration. No Operator
-Station node is active. Both production nodes remain planned sketches and are
-ready for orchestrator promotion/detailing, not worker launch. Before promotion,
-the operator and campaign must decide whether they execute in parallel with
-Application Client implementation or gain an explicit dependency on a later
-supported-client checkpoint. New launches remain held until campaign/operator
-GO.
+The campaign-owned `application-client-ready` gate is still pending. Issue
+[#12](https://github.com/lossyrob/telex/issues/12) publishes the prior approved
+checkpoint body, but it still identifies the pre-repair crosswalk path and
+manifest. Campaign/operator authority must reconcile and accept the checkpoint
+against clean PR #126 before it is exported to this workstream.
 
-Issue #12 still links its supporting crosswalk at the pre-repair design path.
-Application Client orchestration owns that non-semantic tracker correction; the
-normative contract and design-only checkpoint are already published.
+No Operator Station node is active or promotion-ready. `station-app` and
+`operator-broker` remain planned sketches blocked by the pending semantic gate.
+After that gate passes, the operator and campaign must still decide whether
+implementation executes in parallel with Application Client core/binding work
+or gains an explicit dependency on a later supported-client checkpoint. New
+launches remain held until campaign/operator GO.
 
 ## Decisions
 
@@ -185,10 +183,10 @@ normative contract and design-only checkpoint are already published.
   escalation, human-response, digest, and routed-outcome metadata for the
   Station/operator applications. Telex core still carries it opaquely.
 - **Shared client dependency remains external:** #12 owns AC-01 through AC-15
-  convergence and the `application-client-ready` checkpoint. The semantic gate
-  is complete, but this workstream must not implement a competing client or use
-  temporary CLI/raw-IPC seams while the supported core and binding are still
-  pending.
+  convergence and the `application-client-ready` checkpoint. Contract
+  convergence is complete, but the clean checkpoint reconciliation/acceptance
+  gate remains pending. This workstream must not implement a competing client
+  or use temporary CLI/raw-IPC seams.
 - **Clean shared-contract authority:** PR #126 and main at
   `62c2b23cc3d54877226f46df44d6036b7dffa380` are the product authority for the
   Application Client contract. Closed PR #123 is preserved only for protocol
@@ -200,6 +198,8 @@ normative contract and design-only checkpoint are already published.
 
 ## Open Questions
 
+- Will campaign/operator authority accept the issue #12 checkpoint update for
+  clean PR #126 and export `application-client-ready` to this workstream?
 - Should `station-app` and `operator-broker` execute in parallel with
   Application Client core/binding work under the accepted semantic contract, or
   should their implementation gain an explicit dependency on the later
@@ -212,8 +212,8 @@ normative contract and design-only checkpoint are already published.
 - The local-daemon workstream's local-exchange lifecycle, durable delivery,
   attention, reply, disposition, and Postgres behavior.
 - The accepted Operator Station design and ADR 0047/0048.
-- The accepted, design-only `application-client-ready` checkpoint owned through
-  issue #12.
+- The pending clean-PR reconciliation and acceptance of the design-only
+  `application-client-ready` checkpoint owned through issue #12.
 - The still-pending supported Application Client core, first binding,
   conformance, and consumer-integration exports from workstream #117.
 - Streamliner Desktop's Tauri tray/feed/notification patterns as reference code,
