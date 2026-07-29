@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "Operator-broker #128 has a clean never-commit/--yolo launch. Reviewer in-place repair is complete on pg-rde-telex with correction 1144 handled; implementer is attended_push but correction 1143 remains deferred behind its active validation turn.",
+  "summary": "Operator-broker #128 is in progress on a clean never-commit/--yolo launch. Both stations are attended_push; reviewer correction 1144 is handled, while implementer correction 1143 is normally queued behind its active validation turn.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-29T17:59:00Z",
+  "updatedAt": "2026-07-29T18:01:30Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -140,7 +140,7 @@
       "type": "task",
       "title": "Reusable operator-agent role and routing policy",
       "summary": "Package and validate the reusable assisted-mode operator-agent role: explicit ingress/human configuration, normal and quiet policy, resolution and clarification, production-v1 escalation/digest metadata, retry-stable human-response route-back, replacement recovery, stale-origin handling, source trust, and non-impersonation without becoming Telex core or a private Application Client.",
-      "status": "blocked",
+      "status": "in-progress",
       "attention": "watch",
       "repoIds": [
         "telex"

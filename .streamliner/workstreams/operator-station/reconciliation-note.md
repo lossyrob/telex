@@ -78,6 +78,12 @@ and handled correction `1144`. Implementer correction `1143` remains queued
 behind a long-running validation turn, which was preserved rather than
 interrupted.
 
+Campaign subsequently classified that state as normal Telex behavior:
+`working-with-queued-control-message`, not a readiness failure. The node returned
+to `in-progress`; orchestration will not stop, interrupt, or relaunch the
+implementer solely because deferred correction `1143` awaits the next natural
+turn boundary.
+
 ## Boundaries
 
 - **Held:** The Station remained a separate optional application; filtering

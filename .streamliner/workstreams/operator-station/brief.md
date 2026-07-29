@@ -159,8 +159,11 @@ SQLite backend instead of the campaign plane; orchestration repaired the same
 live session in place by detaching local and attaching
 `telex://lossyrob/telex/T-A:operator-review-128` on `pg-rde-telex`. Reviewer is
 now `attended_push`, pending zero, and correction `1144` is handled. The node
-remains blocked only until implementer correction `1143` is terminally
-dispositioned; the healthy implementation turn is not interrupted.
+is operationally `working-with-queued-control-message`: campaign accepted that
+implementer correction `1143` may remain pending behind the visible long-running
+validation turn. The healthy session continues uninterrupted and will consume
+and disposition the correction at its next natural checkpoint. No lifecycle
+action is taken solely for that queued message.
 
 `station-app` remains planned and held. The current graph still targets the
 pending `application-client-ready-gate`; no cross-workstream dependency geometry
