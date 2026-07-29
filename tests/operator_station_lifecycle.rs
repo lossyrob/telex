@@ -237,16 +237,16 @@ impl IsolatedTelexPlane {
                 panic!("isolated worktree daemon exited during startup with {status}: {stderr}");
             }
             let status = self.run_backend("bootstrap", ["daemon", "status"]);
-            let daemon_version =
+            let instance_id =
                 serde_json::from_str::<Value>(&status.stdout)
                     .ok()
                     .and_then(|value| {
                         value
-                            .get("daemon_version")
+                            .get("instance_id")
                             .and_then(Value::as_str)
                             .map(str::to_string)
                     });
-            if status.status.success() && daemon_version.is_some() {
+            if status.status.success() && instance_id.is_some() {
                 return;
             }
             std::thread::sleep(Duration::from_millis(50));
