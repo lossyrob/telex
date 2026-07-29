@@ -58,6 +58,17 @@ product implementation, their claims and stations were cleared, and the
 worktree was preserved unchanged. The node is now blocked on an authorized
 lifecycle repair.
 
+Campaign authorized a forensic branch rename and clean derived-worktree repair.
+The polluted branch remains local as `forensic/paw-init-operator-broker-128`.
+Preparation-only run `6aa58815-6ca1-441a-b8df-6b763b034481` proved the clean
+worktree starts at `origin/main`, uses `Artifact Lifecycle: never-commit`, tracks
+no `.paw` files, creates no workflow commit, and carries `--yolo`. Final paired
+launch run `24cbafa6-8708-4c12-8f96-4a495682418a` started both sessions. The
+implementer reached `attended_push` but has an unconsumed scope correction; the
+reviewer is live but waiting for input before Telex attachment. Readiness
+therefore remains blocked without rewriting the current WorkflowContext or
+stopping current work.
+
 ## Boundaries
 
 - **Held:** The Station remained a separate optional application; filtering
