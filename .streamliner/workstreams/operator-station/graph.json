@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (mediated human-attention loop)",
-  "summary": "Operator-broker PR #130 has automated PAW Review +1 at head 961e51e5a7d8da4a4867b2ae01efe75af47476b3 with green CI. Merge remains held on GitHub review-thread reconciliation and campaign/operator authorization.",
+  "summary": "Operator-broker PR #130 is merge-ready at head 961e51e5a7d8da4a4867b2ae01efe75af47476b3: green CI, mergeable, current-head automated +1, and zero unresolved review threads. Awaiting campaign/operator merge authorization.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-29T21:08:45Z",
+  "updatedAt": "2026-07-29T21:14:15Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
