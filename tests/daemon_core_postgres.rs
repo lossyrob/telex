@@ -56,6 +56,24 @@ async fn application_client_schema_v3_operation_smoke() {
             .unwrap(),
         ApplicationOperationBegin::Started(_)
     ));
+    assert!(matches!(
+        backend
+            .begin_application_operation(&operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Replay(existing)
+            if existing.payload_fingerprint == operation.payload_fingerprint
+    ));
+    let mut mismatched_operation = operation.clone();
+    mismatched_operation.payload_fingerprint = "different-fingerprint".into();
+    assert!(matches!(
+        backend
+            .begin_application_operation(&mismatched_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::FingerprintMismatch(existing)
+            if existing.payload_fingerprint == operation.payload_fingerprint
+    ));
     assert_eq!(
         backend
             .complete_application_operation(

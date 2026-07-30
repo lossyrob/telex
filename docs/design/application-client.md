@@ -315,15 +315,36 @@ The result model MUST distinguish:
 - indeterminate within the accepted-send/local-commit duplicate window;
 - previously completed or duplicate operation.
 
+A rejection proved to occur before durable acceptance MUST carry typed
+retryability: `transient`/retryable or `permanent`/non-retryable. Callers MUST
+NOT infer retry safety from free-form error text. Transport or peer failures
+whose acceptance boundary is not proved remain `indeterminate`.
+
+Duplicate or previously completed evidence is authoritative only when it proves
+the same stable operation identity and a comparable canonical payload identity
+for the attempted operation. Mismatched or non-comparable payload evidence MUST
+return a typed conflict and MUST NOT authorize replay success or adoption of the
+prior result.
+
 After restart, the client MUST support operation-result and receipt
 reconciliation before the application authors a replacement. It MUST preserve
 the original sender, recipient, payload identity, and retry budget during that
 reconciliation.
 
+Pending or indeterminate reconciliation MUST use the operation identity together
+with the opaque logical-store identity staged when the operation began. A store
+binding mismatch remains blocked or indeterminate and MUST NOT authorize retry,
+acceptance, or result adoption. Rebinding to another store requires an explicit
+new or recovery operation.
+
 ### AC-C15: Source identity is store-scoped
 
 Source identity is `(logical store identity, message ID)`. A same-number message
 from another store MUST NOT be opened or treated as the source.
+
+The same opaque logical-store identity also fences retry-stable operation
+reconciliation under AC-C14; source or operation evidence from another store
+cannot be silently rebound.
 
 The logical store identity MUST NOT expose a raw path, credential, token, or
 connection string.

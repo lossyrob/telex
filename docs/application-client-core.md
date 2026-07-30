@@ -42,6 +42,14 @@ versioned evidence and must not be interpreted as backend table layouts.
 - Application operations use caller-supplied `OperationId` values. Reuse with the
   same payload reconciles the prior result; reuse with different input is a typed
   `OperationMismatch`.
+- Pre-acceptance rejection exposes `RejectionRetryability::Transient` or
+  `Permanent`; retry policy never depends on parsing error prose.
+- `SendResult` and `OperationMismatch` carry canonical `PayloadIdentity`
+  evidence. Prior completion is adopted only for the same operation ID and a
+  comparable matching payload digest.
+- `RecoveryHandle` stages operation ID, responsibility, and opaque logical-store
+  identity. Reconciliation with a handle from another store fails with
+  `StoreBindingMismatch`; store rebinding requires an explicit new operation.
 - Snapshot/delta reads use a persisted monotonic store version. A gap returns
   `ResyncRequired`; timestamps are not ordering fences.
 - Compound steps are declared durably with prerequisite edges. A terminal

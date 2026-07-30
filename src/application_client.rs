@@ -66,6 +66,36 @@ pub enum MembershipLossReason {
     Unknown { raw_reason: Option<String> },
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum RejectionRetryability {
+    Transient,
+    Permanent,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PayloadIdentity {
+    pub algorithm: String,
+    pub digest: String,
+    pub comparable: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PayloadMismatchEvidence {
+    pub attempted: PayloadIdentity,
+    pub existing: PayloadIdentity,
+}
+
+impl PayloadIdentity {
+    fn sha256(digest: String) -> Self {
+        Self {
+            algorithm: "sha256".to_string(),
+            comparable: digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            digest,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CollisionEvidence {
     pub address: String,
@@ -91,6 +121,11 @@ pub enum ApplicationClientError {
     },
     OperationMismatch {
         operation_id: OperationId,
+        evidence: Box<PayloadMismatchEvidence>,
+    },
+    StoreBindingMismatch {
+        staged: LogicalStoreId,
+        current: LogicalStoreId,
     },
     ResyncRequired {
         expected_version: i64,
@@ -105,7 +140,11 @@ pub enum ApplicationClientError {
     Protocol {
         code: String,
     },
-    RetryableReadiness(String),
+    RejectedBeforeAcceptance {
+        code: String,
+        retryability: RejectionRetryability,
+        detail: String,
+    },
     TransportUncertain(String),
     Unavailable(String),
 }
@@ -124,24 +163,27 @@ impl fmt::Display for ApplicationClientError {
             Self::DeliveryMismatch { message_id, .. } => {
                 write!(f, "exact delivery mismatch for message {message_id}")
             }
-            Self::OperationMismatch { operation_id } => {
+            Self::OperationMismatch { operation_id, .. } => {
                 write!(
                     f,
                     "operation {} was reused with different input",
                     operation_id.0
                 )
             }
+            Self::StoreBindingMismatch { .. } => {
+                write!(f, "operation reconciliation store binding does not match")
+            }
             Self::ResyncRequired { .. } => write!(f, "state resynchronization required"),
             Self::Partial(detail) => write!(f, "partial application operation: {detail}"),
             Self::Indeterminate { detail, .. } => write!(f, "indeterminate operation: {detail}"),
             Self::InvalidRequest(detail) => write!(f, "invalid application request: {detail}"),
             Self::Protocol { code } => write!(f, "application protocol error: {code}"),
-            Self::RetryableReadiness(detail) => {
-                write!(
-                    f,
-                    "application readiness is temporarily unavailable: {detail}"
-                )
-            }
+            Self::RejectedBeforeAcceptance {
+                code, retryability, ..
+            } => write!(
+                f,
+                "operation rejected before acceptance: {code} ({retryability:?})"
+            ),
             Self::TransportUncertain(detail) => {
                 write!(f, "application transport outcome is uncertain: {detail}")
             }
@@ -297,6 +339,7 @@ pub struct SendResult {
     pub sender: String,
     pub recipient: String,
     pub axes: ReceiptAxes,
+    pub payload_identity: PayloadIdentity,
     pub replayed: bool,
 }
 
@@ -695,7 +738,10 @@ impl ApplicationClient {
                 }
                 Err(
                     error @ (ApplicationClientError::MembershipLost { .. }
-                    | ApplicationClientError::RetryableReadiness(_)),
+                    | ApplicationClientError::RejectedBeforeAcceptance {
+                        retryability: RejectionRetryability::Transient,
+                        ..
+                    }),
                 ) if attempt < retries => {
                     attempt += 1;
                     tokio::time::sleep(std::time::Duration::from_millis(50 * attempt as u64)).await;
@@ -813,18 +859,21 @@ impl ApplicationClient {
             };
         }
         if code == crate::daemon_ipc::ERROR_CAPABILITY_CONFLICT {
-            return ApplicationClientError::UnsupportedCapability(
-                "membership capability differs from the existing attachment; detach before changing it"
-                    .to_string(),
-            );
+            return preaccept_rejection(code, message, RejectionRetryability::Permanent);
         }
         if code == crate::daemon_ipc::ERROR_NOT_RUNNING && message.contains("draining") {
-            return ApplicationClientError::RetryableReadiness("daemon is draining".to_string());
+            return preaccept_rejection(code, message, RejectionRetryability::Transient);
         }
         if code == crate::daemon_ipc::ERROR_UNSUPPORTED {
-            return ApplicationClientError::UnsupportedCapability(
-                "daemon rejected an unsupported Application Client operation".to_string(),
-            );
+            return preaccept_rejection(code, message, RejectionRetryability::Permanent);
+        }
+        if matches!(
+            code,
+            crate::daemon_ipc::ERROR_INCOMPATIBLE
+                | crate::daemon_ipc::ERROR_UNAUTHORIZED
+                | crate::daemon_ipc::ERROR_AMBIGUOUS
+        ) {
+            return preaccept_rejection(code, message, RejectionRetryability::Permanent);
         }
         if code != crate::daemon_ipc::ERROR_NEEDS_ATTACH {
             return unavailable(format!("{code}: {message}"));
@@ -885,10 +934,14 @@ impl ApplicationClient {
             .await
             .map_err(unavailable)?
         {
-            ApplicationOperationBegin::FingerprintMismatch(_) => {
+            ApplicationOperationBegin::FingerprintMismatch(existing) => {
                 return Err(ApplicationClientError::OperationMismatch {
                     operation_id: request.operation_id,
-                })
+                    evidence: Box::new(PayloadMismatchEvidence {
+                        attempted: PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                        existing: PayloadIdentity::sha256(existing.payload_fingerprint),
+                    }),
+                });
             }
             ApplicationOperationBegin::Replay(existing)
                 if matches!(
@@ -917,7 +970,10 @@ impl ApplicationClient {
                 );
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "pending" => {
-                if let Some(reconciled) = self.reconcile_operation(&request.operation_id).await? {
+                if let Some(reconciled) = self
+                    .reconcile_operation_current(&request.operation_id)
+                    .await?
+                {
                     if reconciled.state == "accepted" {
                         let mut result: SendResult = serde_json::from_str(
                             reconciled.result_json.as_deref().ok_or_else(|| {
@@ -933,7 +989,10 @@ impl ApplicationClient {
                 }
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "indeterminate" => {
-                if let Some(reconciled) = self.reconcile_operation(&request.operation_id).await? {
+                if let Some(reconciled) = self
+                    .reconcile_operation_current(&request.operation_id)
+                    .await?
+                {
                     if reconciled.state == "accepted" {
                         let mut result: SendResult = serde_json::from_str(
                             reconciled.result_json.as_deref().ok_or_else(|| {
@@ -1017,6 +1076,9 @@ impl ApplicationClient {
                         recipient_consumption: EvidenceState::Unknown,
                         workflow_disposition: EvidenceState::Unknown,
                     },
+                    payload_identity: PayloadIdentity::sha256(
+                        operation.payload_fingerprint.clone(),
+                    ),
                     replayed: false,
                 };
                 let result_json = serde_json::to_string(&result).map_err(invalid)?;
@@ -1070,10 +1132,14 @@ impl ApplicationClient {
             .await
             .map_err(unavailable)?
         {
-            ApplicationOperationBegin::FingerprintMismatch(_) => {
+            ApplicationOperationBegin::FingerprintMismatch(existing) => {
                 return Err(ApplicationClientError::OperationMismatch {
                     operation_id: request.operation_id,
-                })
+                    evidence: Box::new(PayloadMismatchEvidence {
+                        attempted: PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                        existing: PayloadIdentity::sha256(existing.payload_fingerprint),
+                    }),
+                });
             }
             ApplicationOperationBegin::Replay(existing)
                 if matches!(
@@ -1102,7 +1168,10 @@ impl ApplicationClient {
                 );
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "pending" => {
-                if let Some(reconciled) = self.reconcile_operation(&request.operation_id).await? {
+                if let Some(reconciled) = self
+                    .reconcile_operation_current(&request.operation_id)
+                    .await?
+                {
                     if reconciled.state == "accepted" {
                         let mut result: SendResult = serde_json::from_str(
                             reconciled.result_json.as_deref().ok_or_else(|| {
@@ -1118,7 +1187,10 @@ impl ApplicationClient {
                 }
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "indeterminate" => {
-                if let Some(reconciled) = self.reconcile_operation(&request.operation_id).await? {
+                if let Some(reconciled) = self
+                    .reconcile_operation_current(&request.operation_id)
+                    .await?
+                {
                     if reconciled.state == "accepted" {
                         let mut result: SendResult = serde_json::from_str(
                             reconciled.result_json.as_deref().ok_or_else(|| {
@@ -1185,6 +1257,9 @@ impl ApplicationClient {
                         recipient_consumption: EvidenceState::Unknown,
                         workflow_disposition: EvidenceState::Unknown,
                     },
+                    payload_identity: PayloadIdentity::sha256(
+                        operation.payload_fingerprint.clone(),
+                    ),
                     replayed: false,
                 };
                 let result_json = serde_json::to_string(&result).map_err(invalid)?;
@@ -1638,6 +1713,22 @@ impl ApplicationClient {
 
     pub async fn reconcile_operation(
         &self,
+        reference: &RecoveryHandle,
+    ) -> Result<Option<ApplicationOperationRecord>, ApplicationClientError> {
+        if reference.logical_store_id != self.logical_store_id
+            || reference.responsibility != self.responsibility
+        {
+            return Err(ApplicationClientError::StoreBindingMismatch {
+                staged: reference.logical_store_id.clone(),
+                current: self.logical_store_id.clone(),
+            });
+        }
+        self.reconcile_operation_current(&reference.operation_id)
+            .await
+    }
+
+    async fn reconcile_operation_current(
+        &self,
         operation_id: &OperationId,
     ) -> Result<Option<ApplicationOperationRecord>, ApplicationClientError> {
         let record = self
@@ -1677,6 +1768,7 @@ impl ApplicationClient {
                         recipient_consumption: EvidenceState::Unknown,
                         workflow_disposition: EvidenceState::Unknown,
                     },
+                    payload_identity: PayloadIdentity::sha256(record.payload_fingerprint.clone()),
                     replayed: true,
                 };
                 return self
@@ -1699,14 +1791,11 @@ impl ApplicationClient {
 
     pub async fn refresh_receipt_axes(
         &self,
-        operation_id: &OperationId,
+        reference: &RecoveryHandle,
     ) -> Result<ReceiptAxes, ApplicationClientError> {
-        let record = self
-            .reconcile_operation(operation_id)
-            .await?
-            .ok_or_else(|| {
-                ApplicationClientError::InvalidRequest("operation does not exist".to_string())
-            })?;
+        let record = self.reconcile_operation(reference).await?.ok_or_else(|| {
+            ApplicationClientError::InvalidRequest("operation does not exist".to_string())
+        })?;
         match record.state.as_str() {
             "accepted" | "completed" | "duplicate" => {}
             "rejected" | "needs-attach" => {
@@ -1726,7 +1815,7 @@ impl ApplicationClient {
                     .map(serde_json::from_str)
                     .transpose()
                     .map_err(invalid)?
-                    .unwrap_or_else(|| self.recovery_handle(operation_id.clone()));
+                    .unwrap_or_else(|| reference.clone());
                 let detail = record
                     .result_json
                     .as_deref()
@@ -1745,7 +1834,7 @@ impl ApplicationClient {
             serde_json::from_str(record.result_json.as_deref().ok_or_else(|| {
                 ApplicationClientError::Indeterminate {
                     detail: format!("operation is {}", record.state),
-                    recovery: self.recovery_handle(operation_id.clone()),
+                    recovery: reference.clone(),
                 }
             })?)
             .map_err(invalid)?;
@@ -1779,9 +1868,17 @@ impl ApplicationClient {
 
     pub async fn abandon_unmapped_operation(
         &self,
-        operation_id: &OperationId,
+        reference: &RecoveryHandle,
         reason: &str,
     ) -> Result<ApplicationOperationRecord, ApplicationClientError> {
+        if reference.logical_store_id != self.logical_store_id
+            || reference.responsibility != self.responsibility
+        {
+            return Err(ApplicationClientError::StoreBindingMismatch {
+                staged: reference.logical_store_id.clone(),
+                current: self.logical_store_id.clone(),
+            });
+        }
         let error = ApplicationClientError::InvalidRequest(format!(
             "operation was explicitly abandoned before acceptance: {reason}"
         ));
@@ -1789,7 +1886,7 @@ impl ApplicationClient {
             .abandon_unmapped_application_operation(
                 &self.logical_store_id.0,
                 &self.responsibility.0,
-                &operation_id.0,
+                &reference.operation_id.0,
                 &serde_json::to_string(&error).map_err(invalid)?,
             )
             .await
@@ -2531,6 +2628,18 @@ fn invalid(error: impl fmt::Display) -> ApplicationClientError {
     ApplicationClientError::InvalidRequest(error.to_string())
 }
 
+fn preaccept_rejection(
+    code: &str,
+    detail: &str,
+    retryability: RejectionRetryability,
+) -> ApplicationClientError {
+    ApplicationClientError::RejectedBeforeAcceptance {
+        code: code.to_string(),
+        retryability,
+        detail: detail.to_string(),
+    }
+}
+
 fn unexpected_response(code: &'static str) -> ApplicationClientError {
     ApplicationClientError::Protocol {
         code: code.to_string(),
@@ -2640,6 +2749,12 @@ mod tests {
     }
 
     #[test]
+    fn payload_identity_marks_noncanonical_evidence_noncomparable() {
+        assert!(PayloadIdentity::sha256("a".repeat(64)).comparable);
+        assert!(!PayloadIdentity::sha256("legacy-opaque".into()).comparable);
+    }
+
+    #[test]
     fn unknown_membership_reason_preserves_raw_evidence() {
         let reason = MembershipLossReason::Unknown {
             raw_reason: Some("future-loss".to_string()),
@@ -2688,6 +2803,34 @@ mod tests {
         assert!(matches!(
             classify_peer_failure("FuturePeerError", None),
             PeerFailureDisposition::Indeterminate
+        ));
+    }
+
+    #[test]
+    fn preacceptance_rejection_exposes_typed_retryability() {
+        let transient = preaccept_rejection(
+            crate::daemon_ipc::ERROR_NOT_RUNNING,
+            "daemon draining",
+            RejectionRetryability::Transient,
+        );
+        let permanent = preaccept_rejection(
+            crate::daemon_ipc::ERROR_INCOMPATIBLE,
+            "recipient retired",
+            RejectionRetryability::Permanent,
+        );
+        assert!(matches!(
+            transient,
+            ApplicationClientError::RejectedBeforeAcceptance {
+                retryability: RejectionRetryability::Transient,
+                ..
+            }
+        ));
+        assert!(matches!(
+            permanent,
+            ApplicationClientError::RejectedBeforeAcceptance {
+                retryability: RejectionRetryability::Permanent,
+                ..
+            }
         ));
     }
 
@@ -2771,6 +2914,15 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
         };
+        let mismatched_reference = RecoveryHandle {
+            logical_store_id: LogicalStoreId::persisted("store-v1-other".into()),
+            responsibility: ApplicationResponsibility("watcher".into()),
+            operation_id: OperationId("op-crash-window".into()),
+        };
+        assert!(matches!(
+            client.reconcile_operation(&mismatched_reference).await,
+            Err(ApplicationClientError::StoreBindingMismatch { .. })
+        ));
         backend
             .begin_application_operation(&NewApplicationOperation {
                 logical_store_id: logical_store_id.0.clone(),
@@ -2807,7 +2959,7 @@ mod tests {
             .unwrap();
 
         let reconciled = client
-            .reconcile_operation(&OperationId("op-crash-window".into()))
+            .reconcile_operation(&client.recovery_handle(OperationId("op-crash-window".into())))
             .await
             .unwrap()
             .unwrap();
@@ -2922,7 +3074,7 @@ mod tests {
             )
             .await
             .unwrap();
-        match client.refresh_receipt_axes(&operation_id).await {
+        match client.refresh_receipt_axes(&recovery).await {
             Err(ApplicationClientError::Indeterminate {
                 recovery: actual, ..
             }) => assert_eq!(actual.operation_id, operation_id),

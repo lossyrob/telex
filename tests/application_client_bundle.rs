@@ -13,7 +13,7 @@ fn application_client_bundle_matches_file_bytes() {
         .collect::<String>();
     assert_eq!(
         manifest_hash,
-        "5079239067d8c4944a3396897616113b00fadbcd6e6495b21a3f636255cdd623"
+        "f799a085c2ddcaf82b95c7f9f8dcc3169f5d6b2209654bd1e10a71d9a8de38c0"
     );
     let actual_paths = manifest["files"]
         .as_array()

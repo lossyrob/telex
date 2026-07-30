@@ -78,14 +78,16 @@ async fn operation_identity_replays_and_rejects_changed_payload() {
             .begin_application_operation(&operation)
             .await
             .unwrap(),
-        ApplicationOperationBegin::Replay(_)
+        ApplicationOperationBegin::Replay(existing)
+            if existing.payload_fingerprint == operation.payload_fingerprint
     ));
 
     let mut changed = operation.clone();
     changed.payload_fingerprint = "fingerprint-b".into();
     assert!(matches!(
         backend.begin_application_operation(&changed).await.unwrap(),
-        ApplicationOperationBegin::FingerprintMismatch(_)
+        ApplicationOperationBegin::FingerprintMismatch(existing)
+            if existing.payload_fingerprint == operation.payload_fingerprint
     ));
 }
 
