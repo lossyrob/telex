@@ -26,6 +26,14 @@ direct-station-contract-reset
 
 `station-app` also waits on Application Client `client-conformance`.
 
+The first #134 preparation-only run
+`cda96dff-f2b8-49cc-b258-350b901e29ff` validated the clean base, `never-commit`,
+local/untracked PAW state, no workflow commit, `--yolo`, and ADR 0051
+non-collision. It stopped before terminal launch because WorkflowContext resolved
+stale `gpt-5.5` and `general-reviewer:claude-opus-4.7` instead of the live
+catalog's `gpt-5.6-sol` and `claude-opus-5`. This is a launch-system blocker, not
+a node-design issue; no worker session was launched.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so

@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (direct human-attended Telex endpoint)",
-  "summary": "Issue #134 is ready to reset the product contract around direct Station attendance and ADR 0051. Mediation remains external/non-normative; station-app stays planned behind the direction gate and Application Client client-conformance.",
+  "summary": "Issue #134 is blocked at preparation validation: never-commit, --yolo, clean base, and ADR 0051 checks pass, but WorkflowContext resolved stale gpt-5.5/claude-opus-4.7 instead of current gpt-5.6-sol/claude-opus-5. No terminals launched.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-30T20:14:00Z",
+  "updatedAt": "2026-07-30T20:36:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -113,7 +113,7 @@
       "type": "research",
       "title": "Direct Station product contract reset",
       "summary": "Rewrite the normative Operator Station design around direct human-attended address operation, add ADR 0051, narrow ADRs 0047/0048, preserve mediation only as external non-normative evidence, and produce an implementation-ready station-app handoff.",
-      "status": "ready",
+      "status": "blocked",
       "attention": "focus",
       "repoIds": [
         "telex"

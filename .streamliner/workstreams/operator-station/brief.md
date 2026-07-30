@@ -113,8 +113,17 @@ Active transition:
 - ADR allocation message `1304` reserves ADR 0051,
   `direct-station-product-boundary`.
 - [#134](https://github.com/lossyrob/telex/issues/134)
-  `direct-station-contract-reset` is ready and is the only launch-ready Operator
-  Station node.
+  `direct-station-contract-reset` was prepared through Streamliner run
+  `cda96dff-f2b8-49cc-b258-350b901e29ff`.
+- Preparation passed the clean-base, `never-commit`, untracked `.paw`, no
+  workflow-commit, `--yolo`, worktree, tracker, title/color, and ADR 0051
+  collision checks.
+- Terminal launch is blocked because generated WorkflowContext resolved
+  `gpt-5.5` and `general-reviewer:claude-opus-4.7`. The current runtime catalog
+  exposes newer compatible `gpt-5.6-sol` and `claude-opus-5`, both supporting
+  long context and xhigh reasoning.
+- No implementer or reviewer terminal was launched. Campaign must repair dynamic
+  latest-family resolution, then preparation must be rerun and revalidated.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.
@@ -153,8 +162,9 @@ Active transition:
 
 ## Open Questions
 
-- None for the product direction. Issue #134 owns the precise direct Station
-  contract and ADR supersession wording.
+- Model-resolution blocker: Streamliner/PAW initialization must resolve the
+  current latest compatible GPT and Claude Opus models before issue #134 can
+  launch.
 
 ## Imports and Exports
 
