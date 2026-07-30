@@ -10,8 +10,8 @@ use telex::backend::Backend;
 use telex::daemon::test_support::{registered_epoch, send_request, TestDaemon};
 use telex::daemon_ipc::{self as proto, Request, Response, WatchPidSpec};
 use telex::model::{
-    now_ms, ApplicationOperationBegin, Attention, DeliveryOutcome, NewApplicationOperation,
-    NewMessage,
+    now_ms, ApplicationMessageOperation, ApplicationOperationBegin, Attention, DeliveryOutcome,
+    NewApplicationOperation, NewMessage,
 };
 use telex::profiles::{self, BackendProfile, ConfigFile};
 
@@ -71,6 +71,66 @@ async fn application_client_schema_v3_operation_smoke() {
             .state,
         "accepted"
     );
+    let parent = backend
+        .insert_message(&NewMessage {
+            from_addr: Some("postgres:target".into()),
+            to_addr: "postgres:sender".into(),
+            kind: "request".into(),
+            attention: Attention::Background,
+            body: "parent".into(),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let reply_operation = NewApplicationOperation {
+        logical_store_id: operation.logical_store_id.clone(),
+        application_responsibility: "postgres-smoke".into(),
+        operation_id: "reply-operation".into(),
+        operation_kind: "reply".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: format!("[{},[]]", parent.id),
+        payload_fingerprint: "reply-fingerprint".into(),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&reply_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    let metadata = r#"{"urn:test:opaque":{"value":"postgres"}}"#;
+    let reply = backend
+        .insert_application_message(
+            &NewMessage {
+                parent_id: Some(parent.id),
+                from_addr: Some("postgres:sender".into()),
+                to_addr: "postgres:target".into(),
+                kind: "reply".into(),
+                attention: Attention::Background,
+                body: "reply".into(),
+                metadata: Some(metadata.into()),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            },
+            &ApplicationMessageOperation {
+                logical_store_id: reply_operation.logical_store_id.clone(),
+                application_responsibility: reply_operation.application_responsibility.clone(),
+                operation_id: reply_operation.operation_id.clone(),
+                payload_fingerprint: reply_operation.payload_fingerprint.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.metadata.as_deref(), Some(metadata));
+    assert!(backend
+        .thread_messages(parent.thread_id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|message| message.id == reply.id && message.metadata.as_deref() == Some(metadata)));
     drop(backend);
     admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
         .await

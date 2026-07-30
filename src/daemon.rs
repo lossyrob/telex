@@ -22,6 +22,8 @@ use crate::model::{
     ApplicationMessageOperation, Attention, DeliveryOutcome, EpochClaimResult, MessageRow,
     NewMessage, STATUS_RETIRED,
 };
+#[cfg(test)]
+use crate::model::{ApplicationOperationBegin, NewApplicationOperation};
 #[cfg(feature = "postgres")]
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -7905,6 +7907,135 @@ mod p3_tests {
                 .capability,
             StationCapability::Bidirectional
         );
+    }
+
+    #[tokio::test]
+    async fn application_reply_preserves_opaque_metadata_through_thread_and_receive() {
+        let state = test_state("application-reply-metadata");
+        let store = store_key("application-reply-metadata");
+        for (session, address) in [
+            ("sender-runtime", "addr:sender"),
+            ("target-runtime", "addr:target"),
+        ] {
+            assert!(matches!(
+                request(
+                    state.clone(),
+                    Request::ApplicationRegister {
+                        store_key: store.clone(),
+                        address: address.to_string(),
+                        session_id: session.to_string(),
+                        occupant: session.to_string(),
+                        capability: StationCapability::Bidirectional,
+                        description: None,
+                        scope: None,
+                        tags: None,
+                        watch_pids: Vec::new(),
+                        recovery: false,
+                    }
+                )
+                .await,
+                Response::Registered { .. }
+            ));
+        }
+        let backend = state.backend_for(&store).await.unwrap();
+        let parent = backend
+            .insert_message(&NewMessage {
+                from_addr: Some("addr:target".into()),
+                to_addr: "addr:sender".into(),
+                kind: "request".into(),
+                attention: Attention::Background,
+                body: "parent".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let logical_store_id = backend.logical_store_id().await.unwrap();
+        let operation = NewApplicationOperation {
+            logical_store_id: logical_store_id.clone(),
+            application_responsibility: "metadata-test".into(),
+            operation_id: "reply-operation".into(),
+            operation_kind: "reply".into(),
+            sender: "addr:sender".into(),
+            recipients_json: format!("[{},[]]", parent.id),
+            payload_fingerprint: "opaque-fingerprint".into(),
+            retry_budget: 0,
+            created_at_ms: now_ms(),
+        };
+        assert!(matches!(
+            backend
+                .begin_application_operation(&operation)
+                .await
+                .unwrap(),
+            ApplicationOperationBegin::Started(_)
+        ));
+        let metadata = r#"{"urn:test:opaque":{"nested":[1,true,"value"]}}"#;
+        let sent = request(
+            state.clone(),
+            Request::ApplicationReply {
+                store_key: store.clone(),
+                session_id: "sender-runtime".into(),
+                from_addr: "addr:sender".into(),
+                message_id: parent.id,
+                kind: "reply".into(),
+                attention: "background".into(),
+                requires_disposition: false,
+                subject: None,
+                cc: None,
+                body: "reply".into(),
+                metadata: Some(metadata.into()),
+                logical_store_id,
+                application_responsibility: "metadata-test".into(),
+                operation_id: "reply-operation".into(),
+                payload_fingerprint: "opaque-fingerprint".into(),
+            },
+        )
+        .await;
+        let reply_id = match sent {
+            Response::Sent { receipt } => receipt.id,
+            other => panic!("expected sent reply, got {other:?}"),
+        };
+        assert_eq!(
+            backend
+                .get_message(reply_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .metadata
+                .as_deref(),
+            Some(metadata)
+        );
+        assert!(
+            backend
+                .thread_messages(parent.thread_id)
+                .await
+                .unwrap()
+                .iter()
+                .any(|message| message.id == reply_id
+                    && message.metadata.as_deref() == Some(metadata))
+        );
+        assert!(matches!(
+            request(
+                state,
+                Request::Wait {
+                    store_key: store,
+                    session_id: "target-runtime".into(),
+                    address: "addr:target".into(),
+                    attention: None,
+                    min_attention: None,
+                    wake_on_cc: false,
+                    timeout_ms: Some(100),
+                    waiter_pid: Some(std::process::id()),
+                    waiter_start_time: None,
+                }
+            )
+            .await,
+            Response::Message {
+                id,
+                metadata: Some(actual),
+                ..
+            } if id == reply_id && actual == metadata
+        ));
     }
 
     #[tokio::test]

@@ -30,6 +30,10 @@ versioned evidence and must not be interpreted as backend table layouts.
 - Receive results carry message ID, recipient, delivery-row ID, role, store ID,
   and an `AckHandle` bound to that exact delivery. Ack remains an explicit action
   after durable application ingest.
+- `ReplyRequest.metadata` is opaque application data. Telex fingerprints and
+  transports the bytes unchanged through reply creation, persistence, thread
+  reads, and receive projection; interpretation and extension-field semantics
+  remain application or binding responsibilities.
 - Durable acceptance, occupancy, push, exact-recipient consumption, and workflow
   disposition remain separate `ReceiptAxes`. The axes returned by send/reply are
   an acceptance-time snapshot. `refresh_receipt_axes` refreshes exact delivery
