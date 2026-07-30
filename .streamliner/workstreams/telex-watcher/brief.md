@@ -144,13 +144,15 @@ optional hardening. Watcher owns generic lifecycle, bounds, diagnostics, opaque
 state, durable Telex delivery, receipt-gated commit, and runtime-generated event
 sequence identity.
 
-`minimal-watcher-authoring-contract` is the first ready node. It must revise
-`docs/design/watcher.md`, add v2 registration/request/result schemas, and add a
-new ADR that narrowly supersedes ADR 0046's authoring/provenance details while
-reaffirming the core architecture. Runtime and example nodes remain planned
-until the new contract and its builder gate are accepted. Runtime additionally
-depends on Application Client `client-conformance`. There is no private-client
-or mandatory-template fallback.
+`minimal-watcher-authoring-contract` is active through
+[#133](https://github.com/lossyrob/telex/issues/133), with Streamliner-launched
+implementer and reviewer sessions attached at `watcher-impl-133` and
+`watcher-review-133`. It must revise `docs/design/watcher.md`, add v2
+registration/request/result schemas, and add a new ADR that narrowly supersedes
+ADR 0046's authoring/provenance details while reaffirming the core architecture.
+Runtime and example nodes remain planned until the new contract and its builder
+gate are accepted. Runtime additionally depends on Application Client
+`client-conformance`. There is no private-client or mandatory-template fallback.
 
 ## Decisions
 

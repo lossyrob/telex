@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "Operator-approved redesign reset Watcher around minimal agent-authored scripts. Issue #127 / PR #131 are closed unmerged as superseded evidence; minimal-watcher-authoring-contract issue #133 is the first ready node.",
+  "summary": "Operator-approved redesign reset Watcher around minimal agent-authored scripts. Issue #127 / PR #131 are closed unmerged as superseded evidence; minimal-watcher-authoring-contract issue #133 is active with paired implementer/reviewer sessions.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-30T17:30:00Z",
+  "updatedAt": "2026-07-30T17:40:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -113,7 +113,7 @@
       "type": "research",
       "title": "Minimal Watcher authoring and registration contract",
       "summary": "Reset the normative Watcher design around command-plus-policy registration, detector request/result v2, runtime-generated event sequence identity, optional hardening, and a narrowly superseding ADR while retaining provider-neutral trusted-local receipt-gated execution.",
-      "status": "ready",
+      "status": "in-progress",
       "attention": "focus",
       "repoIds": [
         "telex"
