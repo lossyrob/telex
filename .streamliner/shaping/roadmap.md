@@ -27,26 +27,22 @@ long-lived task occupying the session?
 **Theater.** The Telex application layer: non-agent stations, deterministic event
 producers, human recipients, and the shared programmatic client they consume.
 
-**State.** Both builder viability gates and both production domain-contract
-nodes are complete and reconciled. The shared
-[Application Client workstream #117](https://github.com/lossyrob/telex/issues/117)
-is formed, and contract-convergence node
-[#118](https://github.com/lossyrob/telex/issues/118) is in progress to reconcile the
-merged requirements through issue #12 and publish `application-client-ready`.
-The live campaign mediation path spans campaign control → `attention:rob` →
-`operator:rob`. Production product nodes remain blocked on that checkpoint.
-Campaign orchestration transfer to a devbox is prepared in
-[`addressable-attention-devbox-handoff.md`](addressable-attention-devbox-handoff.md);
-authority remains with the laptop until the explicit PostgreSQL-backed transfer
-handshake and builder confirmation complete.
+**State.** Both builder viability gates and both initial production
+domain-contract nodes completed. Application Client contract convergence is
+merged, the design-only `application-client-ready` checkpoint is published, and
+client-core implementation is active. Operator Station production work is
+advancing. Telex Watcher is undergoing an operator-approved contract reset:
+issue #127 / PR #131 were closed without merge because the mandatory template
+framework conflicted with the desired minimal agent-authoring experience.
+`minimal-watcher-authoring-contract` is the next ready Watcher node.
 
 ## Covering workstreams
 
 | Workstream | Tracker | Outcome | Current first move |
 |---|---|---|---|
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Human-attended Telex endpoint plus an optional operator-agent filter and reply loop. | Contract #114 / PR #116 is merged and reconciled; `station-app` and `operator-broker` wait on `application-client-ready`. |
-| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral deterministic detectors emit Telex messages without session-owned background tasks. | Contract #110 / PR #115 is merged and reconciled; `watcher-runtime` and `detector-template-library` wait on `application-client-ready`. |
-| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Launch contract-convergence [#118](https://github.com/lossyrob/telex/issues/118), disposition both merged domain exports through #12, and publish `application-client-ready`. |
+| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Reset authoring/registration design around a minimal v2 contract; preserve #127/#131 as superseded evidence. |
+| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Contract convergence is merged; client core is active and Watcher runtime waits on `client-conformance`. |
 
 ## Shared seam
 
@@ -121,12 +117,13 @@ accepted contracts and spike/gate evidence into #12, records explicit
 dispositions, and accepts one semantic contract. Product nodes wait on the
 resulting `application-client-ready` checkpoint.
 
-### Stage 4 — Parallel production applications
+### Stage 4 — Production applications under accepted contracts
 
-After the shared checkpoint:
+After the shared semantic checkpoint:
 
 - Operator Station builds the desktop app and reusable operator-agent role.
-- Telex Watcher builds the production runtime and detector-template library.
+- Telex Watcher first resets the authoring contract to the minimal
+  command-plus-policy model, then builds runtime/CLI and small optional examples.
 
 Each retains its own usability and operational-hardening gates.
 
@@ -152,7 +149,7 @@ collapse into noise, and no session-bound polling task is required.
 | Declared-intent slice | Covered by |
 |---|---|
 | External long-duration observation outside sessions | Telex Watcher |
-| Agent-authored custom detector policy | Telex Watcher detector contract and templates |
+| Agent-authored custom detector policy | Telex Watcher minimal detector contract and optional examples |
 | Durable event delivery and agent wakeup | Existing Telex local exchange and bridges |
 | Filtering, aggregation, and human escalation | Operator Station operator-agent role |
 | Human inbox, notifications, replies, and disposition | Operator Station |
@@ -194,15 +191,10 @@ collapse into noise, and no session-bound polling task is required.
 
 ## Current next actions
 
-1. Launch Application Client contract-convergence node
-   [#118](https://github.com/lossyrob/telex/issues/118) under workstream
-   [#117](https://github.com/lossyrob/telex/issues/117).
-2. Disposition every merged Watcher and Operator shared-client requirement,
-   land the API-neutral design contract, and publish
-   `application-client-ready` through issue #12.
-3. Reconcile that checkpoint into both product workstreams, then promote/detail
-   `station-app`, `operator-broker`, `watcher-runtime`, and
-   `detector-template-library` for coordinated execution.
-4. Detail the Application Client core, first binding, and conformance nodes from
-   the accepted contract; do not allow a product-private fallback while shared
-   implementation is in progress.
+1. Accept the minimal Watcher authoring/registration v2 contract and its
+   superseding ADR before resuming runtime or example implementation.
+2. Continue Application Client core/binding/conformance work and export
+   `client-conformance` before Watcher runtime integration.
+3. After the Watcher contract gate, run the minimal example pack in parallel
+   with runtime core where dependencies permit; keep hardening recipes optional.
+4. Preserve the campaign integration exercise and no-private-client boundary.
