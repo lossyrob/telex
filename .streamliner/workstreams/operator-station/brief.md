@@ -129,6 +129,14 @@ Active transition:
 - Both stations are `attended_push`; both sessions are live/working and
   graph-bound. Scope/ADR control messages are durably queued for their current
   turns.
+- The implementer opened
+  [PR #136](https://github.com/lossyrob/telex/pull/136) at
+  `59043ce5bf6b3fdd2bb7084777d15141929fbf41`.
+- The diff contains only `docs/design/DECISIONS.md`,
+  `docs/design/index.md`, and `docs/design/operator-station.md`. All six CI
+  checks pass and GitHub reports the PR mergeable.
+- Paired review is active. The builder-owned direction gate remains separate
+  and cannot be passed by the worker or reviewer.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.

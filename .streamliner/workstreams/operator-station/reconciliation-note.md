@@ -42,6 +42,12 @@ Paired run `419ba98f-6c1e-4829-8255-7e4de25a2a70` then launched implementer
 `e32f377b-49f6-4d23-a09c-96b107f32075`; both stations reached
 `attended_push`. Issue #134 is now in progress.
 
+The implementer opened design-only PR #136 at
+`59043ce5bf6b3fdd2bb7084777d15141929fbf41`. The diff is limited to the decision
+log, design index, and Operator Station contract; all six CI checks pass and the
+PR is mergeable. Review ownership remains with the paired reviewer, while the
+later direction gate remains builder-owned.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so
