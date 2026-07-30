@@ -118,7 +118,9 @@
         "body": {
           "type": "string"
         },
-        "metadata": true
+        "metadata": {
+          "type": "object"
+        }
       }
     }
   }

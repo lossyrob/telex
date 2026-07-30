@@ -20,14 +20,18 @@
       "const": 2
     },
     "id": {
-      "$ref": "#/$defs/nonControlString"
+      "$ref": "#/$defs/watchId"
     },
     "command": {
       "type": "array",
       "minItems": 1,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/executable"
+        }
+      ],
       "items": {
-        "type": "string",
-        "minLength": 1
+        "$ref": "#/$defs/argument"
       }
     },
     "intervalSeconds": {
@@ -61,6 +65,7 @@
       "default": true
     },
     "workingDirectory": {
+      "$comment": "When supplied, the runtime requires a canonical absolute local path. Cross-platform absolute-path validation is runtime-enforced.",
       "$ref": "#/$defs/nonControlString"
     },
     "environmentAllowlist": {
@@ -80,6 +85,21 @@
     }
   },
   "$defs": {
+    "watchId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "executable": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000]+$"
+    },
+    "argument": {
+      "type": "string",
+      "pattern": "^[^\\u0000]*$"
+    },
     "nonControlString": {
       "type": "string",
       "minLength": 1,

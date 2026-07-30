@@ -24,11 +24,12 @@
       ],
       "properties": {
         "id": {
-          "$ref": "#/$defs/nonControlString"
+          "$ref": "#/$defs/watchId"
         },
         "now": {
           "type": "string",
-          "format": "date-time"
+          "format": "date-time",
+          "pattern": "Z$"
         }
       }
     },
@@ -47,13 +48,15 @@
         },
         "activatedAt": {
           "type": "string",
-          "format": "date-time"
+          "format": "date-time",
+          "pattern": "Z$"
         },
         "lastSuccessAt": {
           "oneOf": [
             {
               "type": "string",
-              "format": "date-time"
+              "format": "date-time",
+              "pattern": "Z$"
             },
             {
               "type": "null"
@@ -66,6 +69,12 @@
     "state": true
   },
   "$defs": {
+    "watchId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
     "nonControlString": {
       "type": "string",
       "minLength": 1,

@@ -1970,6 +1970,8 @@ must conform to the canonical schemas, receipt/state transaction, restart and co
 rules, and deferred-work ownership in `watcher.md`. Production runtime promotion remains
 blocked on `application-client-ready`; arbitrary actions, hosted ingestion, remote code
 registration, multi-host failover, and provider policy remain outside this decision.
+See [ADR 0050](#0050--watcher-v2-uses-minimal-command-registration-and-runtime-owned-event-identity)
+for the narrowly superseding v2 authoring, identity, and compatibility direction.
 
 ## 0047 — Operator Station mediation remains application logic outside Telex core
 
@@ -2074,6 +2076,9 @@ integration, or production readiness.
 
 - **Date:** 2026-07-30
 - **Status:** Accepted (issue #133)
+- **Supersedes:** 0046 in part (authoring ceremony, script provenance/pinning,
+  kind authorization, registration-owned downtime policy, template obligations,
+  and detector-authored event identity)
 
 **Context.** ADR 0046 established the correct production architecture for Telex
 Watcher: a separately supervised, provider-neutral application runs trusted
@@ -2092,7 +2097,9 @@ attention, disposition, working directory, environment names, parameters, and
 initial state have explicit defaults or optional generic semantics. Detector
 request/result v2 carries generic timing facts, opaque state, structured outcomes,
 and bounded event content, but no script provenance, route, action, or event
-identity.
+identity. Backend profile, sender, and target remain immutable for one watch ID;
+changing the fixed route requires a new watch ID and an explicit state-migration
+decision.
 
 Watcher allocates a permanent per-watch sequence and runtime-generated event ID
 before the first send, stages the complete operation durably, and reuses that
@@ -2112,7 +2119,8 @@ versioned optional tooling.
 
 **Supersession.** This decision supersedes ADR 0046 only for mandatory script
 provenance/pinning, allowed-kind policy, registration-owned downtime declarations,
-template-framework/conformance obligations, and `(watchId, detectorEventId)`
+template-framework/conformance obligations, and detector ownership of the
+`(watchId, eventId)`
 identity. ADR 0046 remains binding for the provider-neutral application boundary,
 trusted same-user local execution, local-only registration, fixed routing,
 structured results, generic bounds and diagnostics, no workflow actions, durable
@@ -2129,4 +2137,7 @@ Experimental v1 registrations require explicit migration to a new v2 watch ID
 and a reviewed opaque-state decision; an adapter is optional downstream work.
 The Application Client requirements crosswalk may need a later owner update for
 the strengthened operation-result reconciliation requirement, but this decision
-does not create a product-private client seam.
+does not create a product-private client seam. The issue #118
+`application-client.bundle.json` remains that convergence checkpoint's historical
+snapshot; this Watcher decision does not regenerate its approval/provenance
+manifest.

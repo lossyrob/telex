@@ -143,8 +143,8 @@ bounds, backend selection, and fixed routing:
 | Field | Required | Contract / default |
 |---|---:|---|
 | `schemaVersion` | yes | `2`. |
-| `id` | yes | Stable watch ID. A removed ID is tombstoned and never reusable. |
-| `command` | yes | Non-empty local argv. No shell interpolation is implied. |
+| `id` | yes | Stable lowercase ASCII watch ID matching `[a-z0-9][a-z0-9._-]{0,127}`. A removed ID is tombstoned and never reusable. |
+| `command` | yes | Local argv with a non-empty executable and zero or more arguments. No shell interpolation is implied. |
 | `intervalSeconds` | yes | Requested cadence, subject to product minimum/maximum bounds and jitter. |
 | `timeoutSeconds` | yes | Detector execution timeout, subject to product bounds. |
 | `backendProfile` | yes | Explicit configured Telex backend/profile name. Credentials are not copied into registration. |
@@ -157,23 +157,51 @@ bounds, backend selection, and fixed routing:
 | `parameters` | no | Opaque detector parameters. Defaults to `{}`. |
 | `initialState` | no | Initial opaque committed state. Defaults to `null`. |
 
+Minimal registration example:
+
+```json
+{
+  "schemaVersion": 2,
+  "id": "github-pr-133",
+  "command": [
+    "pwsh",
+    "-File",
+    "C:\\watchers\\github-pr.ps1"
+  ],
+  "intervalSeconds": 300,
+  "timeoutSeconds": 30,
+  "backendProfile": "pg-rde-telex",
+  "sender": "service:watcher/github",
+  "target": "project:telex/node:133"
+}
+```
+
 Registration validates schema version, watch ID, argv, timing bounds, addresses,
 backend/profile name, working directory, environment variable names, and opaque
 JSON size/canonicalizability before persistence.
 
-Every successful update increments `registrationRevision`. Updates may change
-command, execution policy, backend, or route, but cannot replace an already
-staged pending operation. That operation retains the captured registration
-revision, route, attention, disposition, and payload until it is committed,
-proven not accepted, or retained unresolved by removal.
+Every successful update increments `registrationRevision`. `id`,
+`backendProfile`, `sender`, and `target` are immutable for the lifetime of a
+watch ID. Changing backend or route requires a new watch ID and the explicit
+state-migration decision described below. Updates may change command, working
+directory, cadence, timeout, attention, disposition, environment names,
+parameters, or committed state only when no pending operation exists. A pending
+operation rejects registration update and retains its captured revision, route,
+policy, and payload until it is resolved or retained by removal.
 
 ### Command and working-directory semantics
 
-Watcher executes the argv directly and never inserts a shell. The persisted
-working directory is inspectable through management status.
+Watcher executes the argv directly and never inserts a shell. A supplied working
+directory must be canonical and absolute; when omitted, registration captures
+the command's current absolute directory. The persisted value is inspectable
+through management status.
 
 An absolute `argv[0]` names the executable directly. A non-absolute value is
-resolved on each attempt through the documented controlled launch environment.
+resolved on each attempt through the controlled launch baseline: platform
+executable-search path, system root, user home, temporary directory, and locale
+values captured from the supervised runtime environment, plus explicitly
+allowlisted per-watch variable names. Allowlisted values override baseline
+values with the same name. No other ambient environment is inherited.
 Users who require stable command resolution choose an absolute path or a
 trusted wrapper. Watcher records the attempted argv and working directory for
 diagnostics but does not claim script-byte provenance.
@@ -210,7 +238,7 @@ Lifecycle remains intentionally small:
 | Lifecycle | Meaning | Legal transitions |
 |---|---|---|
 | `active` | Watch is enabled. It schedules only when eligibility is `eligible`. | `paused`, `terminal`, `removed` |
-| `paused` | Detector attempts are disabled. May be operator-selected or health-blocked. | `active` through explicit resume or successful late reconciliation, `removed` |
+| `paused` | Detector attempts are disabled. May be operator-selected or health-blocked. | `active` through explicit resume or a late retryable result plus finite retry grant, `terminal` through late acceptance of a staged terminal event, `removed` |
 | `terminal` | Detector completed the watch. No further detector scheduling. | `removed` |
 | `removed` | Administratively removed but identity, tombstone, and unresolved evidence are retained. | none |
 
@@ -239,6 +267,9 @@ Legal combinations include:
 `blockedReason` is non-null only for `paused`/`blocked`. V2 reasons are:
 
 - `receipt-outcome-unresolved`;
+- `send-retry-exhausted`;
+- `send-permanently-rejected`;
+- `operation-identity-conflict`;
 - `unsupported-registration-version`; and
 - `orphan-containment-unproven`.
 
@@ -276,9 +307,25 @@ committed opaque state give detector code enough generic facts to implement its
 own provider cursor, replay, recurrence, and gap policy. A detector may persist
 additional timing facts in opaque state. Watcher does not interpret them.
 
+`activatedAt` is set when a v2 registration first becomes active and is replaced
+on each explicit operator resume after a paused state. Active registration
+updates and successful late reconciliation do not replace it. `lastSuccessAt`
+is `null` until the first successful evaluation commits. It advances to
+`attempt.now` when an `idle` result commits, an event is durably accepted and
+commits, or an eventless/accepted terminal result commits. Detector degradation,
+process failure, pending/unknown send outcomes, and rejected sends do not
+advance it. Explicit resume does not clear it.
+
+All request timestamps are RFC 3339 UTC values ending in `Z`, with whole-second
+or millisecond precision. They are wall-clock evidence, not a monotonic clock;
+detectors that compare gaps must tolerate equal or backward-adjusted values and
+persist any stricter monotonic policy in opaque state.
+
 The detector exits zero and writes exactly one JSON result to stdout. The
 normative shape is
 [watcher-detector-result-v2.schema.json](schemas/watcher-detector-result-v2.schema.json).
+Stdout is reserved for that one JSON document. Human-readable diagnostics and
+tool chatter use bounded stderr.
 
 ```json
 {
@@ -304,8 +351,8 @@ The detector does not author event identity. `event` has no `id`,
 attention, disposition, cadence, timeout, or an action.
 
 The outer request/result objects are strict. Unknown fields are rejected.
-Detector `parameters`, `state`, `nextState`, and `event.metadata` remain
-arbitrary JSON.
+Detector `parameters`, `state`, and `nextState` remain arbitrary JSON.
+`event.metadata`, when present, is an arbitrary JSON object.
 
 All opaque values must be valid I-JSON and RFC 8785 canonicalizable. The parser
 rejects duplicate object member names, invalid Unicode, non-finite numbers, and
@@ -322,9 +369,9 @@ major versions require an explicit compatibility or migration decision.
 
 | Outcome | Event | State behavior | Lifecycle behavior |
 |---|---|---|---|
-| `idle` | forbidden | Valid `nextState` commits immediately | remains active |
+| `idle` | forbidden | Explicit `nextState` commits immediately; omission preserves prior state | remains active |
 | `event` | required | `nextState`, or unchanged prior state when omitted, commits only after durable Telex acceptance | remains active |
-| `terminal` | optional | Event-producing state is receipt-gated; eventless state commits directly when supplied | becomes terminal after commit |
+| `terminal` | optional | Event-producing state is receipt-gated; eventless explicit state commits directly; omission preserves prior state | becomes terminal after commit |
 | `degraded` | forbidden | Must not contain or advance `nextState` | remains active with failure/backoff |
 
 An `idle` state advance asserts that the detector successfully evaluated the
@@ -335,8 +382,10 @@ A bare `terminal` result with neither `event` nor `nextState` is valid. It leave
 prior state unchanged, records the attempt, and transitions the watch to
 terminal.
 
-For `event` and event-producing `terminal`, omitted `nextState` means unchanged
-committed prior state. Omission never creates an undefined state.
+For every outcome that permits state, omitted `nextState` means unchanged
+committed prior state. Explicit JSON `null` is a real state value and commits
+`null`; it is not equivalent to omission. Omission never creates an undefined
+state.
 
 Process exit status is separate from detector outcome. Nonzero exit is an
 execution failure, not `degraded`.
@@ -414,6 +463,11 @@ Before the first send, Watcher atomically persists:
 - canonical hashes of prior state, proposed state, and normalized envelope; and
 - pending status and reconciliation budget.
 
+Persistent hashes use `sha256:<lowercase-hex>` over RFC 8785 canonical JSON
+UTF-8 bytes. Each evidence record identifies the hash algorithm and pre-image
+kind. A future algorithm or pre-image change requires a new evidence version;
+historical hashes are never rewritten.
+
 The complete values, not only their hashes, must survive restart. This lets
 Watcher commit the exact proposed transition after a reconciled acceptance or
 retry the exact same operation after a proven rejection without rerunning the
@@ -424,21 +478,29 @@ detector.
 | Evidence | Required transition |
 |---|---|
 | No event or staging failed | No sequence/send/state change. A later attempt may execute normally. |
-| Definite pre-acceptance rejection or failure | Keep the staged identity and retry the exact same operation under bounded policy. |
+| Authoritative `not-recorded` | The client proves no operation/result/receipt exists for the exact operation ID and no durable acceptance occurred. Keep the staged identity and retry the exact same operation under bounded policy. |
+| Definite transient rejection before acceptance | Keep the staged identity and retry the exact same operation under bounded policy. |
+| Definite permanent rejection before acceptance | Pause/block with `send-permanently-rejected`; no automatic retry. |
+| Repeated transient rejection exhausts retry budget | Pause/block with `send-retry-exhausted`. |
 | Durable acceptance proven | Atomically commit proposed state, committed sequence, receipt/evidence, and attempt result. |
+| `previously-completed` or `duplicate` with matching operation/payload identity and durable receipt | Treat as proven acceptance and commit. |
+| `previously-completed` or `duplicate` with mismatched identity or payload | Pause/block with `operation-identity-conflict`; do not send or commit. |
+| `partial` result | Commit only if its durable-acceptance axis is proven. If rejection is proven, follow the rejection rows. Otherwise treat as indeterminate. |
 | Accepted send but local commit failed | Keep the pending operation; reconcile the original operation and commit when acceptance is proven again. |
 | Indeterminate result | Set eligibility to `reconciliation-pending`; do not run the detector or author a replacement send. |
-| Bounded reconciliation budget exhausted | Pause/block with `receipt-outcome-unresolved`. |
-| Late acceptance after blocking | Commit; return an event watch to active/ready or finish a terminal watch. |
-| Late rejection after blocking | Return the same staged operation to retryable active/degraded under an explicit finite retry budget. |
-| Proven permanent pre-acceptance rejection | Close the allocation as `not-accepted`, retain its sequence tombstone, and permit later detector execution at the next sequence after operator correction. |
+| Reconciliation budget exhausted without accepted/rejected/not-recorded proof | Pause/block with `receipt-outcome-unresolved`. |
+| Late acceptance after blocking | Commit; return an event watch to active/ready or transition a staged terminal event from paused to terminal. |
+| Late rejection or authoritative `not-recorded` after blocking | Return the same staged operation to retryable active/degraded only after an explicit finite retry grant. |
 | Removal while unresolved | Stop execution; retain pending operation and unresolved tombstone for later evidence closure without resurrecting the watch. |
 
 Automatic or operator-requested retry is legal only through a retry-safe
 Application Client primitive using the exact persisted operation ID, event ID,
 sequence, sender, target, payload, and retry budget. If the supported client
 cannot guarantee identity-checkable same-operation retry, recovery is query-only
-reconciliation and the watch remains blocked.
+reconciliation and the watch remains blocked. `Not found` is not sufficient
+unless the client defines it as authoritative `not-recorded` for the selected
+logical store and exact operation identity; unavailable history remains
+indeterminate.
 
 The contract forbids:
 
@@ -464,8 +526,12 @@ Watcher computes `recurrenceHash` over:
 - backend/profile, sender, target, attention, and disposition; and
 - detector kind, subject, body, and metadata.
 
-The hash excludes event sequence, event ID, operation ID, attempt/runtime IDs,
-receipts, and timestamps. Health and retained evidence expose:
+The pre-image is an object with exactly those fields, encoded as RFC 8785
+canonical JSON, and the value is `sha256:<lowercase-hex>`. The hash excludes
+event sequence, event ID, operation ID, attempt/runtime IDs, receipts, and
+timestamps. It is an exact rendered-content diagnostic, not a stable provider
+condition key; detector-added timestamps or run IDs intentionally make the hash
+different. Health and retained evidence expose:
 
 - `lastRecurrenceHash`;
 - `consecutiveIdenticalRecurrences`;
@@ -531,6 +597,12 @@ Provider/credential-wide rate budgets are detector/project policy. The runtime's
 generic concurrency, cadence, jitter, timeout, and failure backoff remain the
 common floor.
 
+`timeoutSeconds` may exceed `intervalSeconds`. Single-flight execution prevents
+overlap: due ticks while an attempt is running coalesce into at most one due
+attempt after the current attempt and applicable backoff complete. Health
+exposes latest attempt duration and `suppressedDueCount` so effective cadence
+loss is visible.
+
 Catch-up and downtime correctness belong to detector policy. The request exposes
 activation time, last successful evaluation time, current time, parameters, and
 committed opaque state. A detector that requires durable replay or a maximum gap
@@ -569,9 +641,12 @@ The default Telex coordination daemon is never used for destructive proof.
 | `degraded` | no state/send | active/eligible/degraded + backoff | later successful attempt |
 | nonzero exit, malformed/oversize/noncanonical result, timeout | no event allocation/state/send | active/eligible/degraded + backoff | later successful attempt or operator correction |
 | missing working directory/executable | no event allocation/state/send | active/eligible/degraded + backoff | registration or local path correction |
-| send failure proven before acceptance | retain exact pending operation | active/reconciliation-pending/degraded | same-operation retry |
+| authoritative `not-recorded` or transient rejection before acceptance | retain exact pending operation | active/reconciliation-pending/degraded | same-operation retry |
+| repeated transient rejection exhausts budget | retain staged identity | paused/inactive/blocked (`send-retry-exhausted`) | finite retry grant or remove |
+| permanent rejection before acceptance | retain staged identity and rejection evidence | paused/inactive/blocked (`send-permanently-rejected`) | remove or create a new corrected watch ID |
 | indeterminate receipt or accepted-send/local-commit failure | no new detector execution | active/reconciliation-pending/degraded | result/receipt reconciliation |
 | reconciliation budget exhausted | no new detector execution | paused/inactive/blocked | reconcile now, finite same-operation retry budget, or remove |
+| duplicate/previously-completed identity conflict | no send/state commit | paused/inactive/blocked (`operation-identity-conflict`) | investigate client/store identity, then remove |
 | unsupported v1 registration | no execution | paused/inactive/blocked | explicit v2 re-registration/migration |
 | unproven orphan containment | no execution | paused/inactive/blocked | operator proof/cleanup + resume |
 | sender partial/unready | no affected watch execution/send | runtime degraded | reconcile/compensate |
@@ -660,6 +735,14 @@ runtime, store, registration, and detector protocol version. V2 does not
 guarantee which script bytes ran. Projects that need script provenance record it
 in their wrapper, detector metadata, or separate audit system.
 
+`eventSequence` is strictly increasing within a watch ID but is not guaranteed
+dense. A recipient must not interpret a gap as lost Telex delivery without
+consulting Watcher evidence. When two Telex messages carry the same Watcher event
+identity, the recipient may deduplicate its domain action, but each Telex message
+still has its own transport acknowledgment and required workflow disposition.
+The recipient should retire every duplicate delivery explicitly while recording
+that the Watcher event was already handled.
+
 Prior/next state hashes, normalized-envelope hash, recurrence hash, registration
 policy snapshot, and typed receipt remain in the local evidence ledger. Detector
 state is never exposed in the message.
@@ -708,6 +791,7 @@ V2 per-watch status includes:
 - pending operation identity, state, reconciliation attempts/deadline, and last
   evidence time when present;
 - last attempt, success, event, and next-attempt times;
+- latest attempt duration and suppressed due-tick count;
 - consecutive failures and diagnostic category;
 - recurrence hash/count/timestamps/last sequence;
 - sender readiness; and
@@ -741,6 +825,27 @@ before promotion. This node freezes only the three issue-named v2 schemas;
 metadata and health projection schemas belong to runtime implementation once
 its concrete model exists.
 
+## Management operations
+
+The contract requires management semantics but does not freeze CLI spelling.
+Every mutation is local-only, audited, and returns the resulting registration
+revision, lifecycle, eligibility, health, and typed refusal reason.
+
+| Operation | Required effect and refusal rules |
+|---|---|
+| Register | Validate and persist one v2 registration. Reject an existing or tombstoned watch ID. |
+| Show/list | Include active, paused, terminal, removed, v1-unsupported, and unresolved-tombstone records through explicit filters. |
+| Pause | Move an active eligible watch to paused/inactive. Refuse while a pending operation exists; use reconciliation or removal instead. |
+| Resume | Move paused/inactive to active/eligible, replace `activatedAt`, and retain `lastSuccessAt`. Refuse while unresolved pending evidence exists or the blocked reason has not been corrected. |
+| Update | Apply mutable registration fields and optionally replace committed opaque state, incrementing revision and auditing old/new state hashes. Refuse immutable ID/backend/route changes, removed watches, and any watch with a pending operation. |
+| Reconcile now | Query the exact pending operation for active, blocked, or removed watches. It may close evidence on a removed tombstone but never resurrect it. |
+| Grant retry budget | Add a finite same-operation retry budget after authoritative `not-recorded`, transient rejection, or unresolved blocking. Refuse replacement identity or payload. |
+| Remove | Stop future detector execution and retain identity, pending operation, tombstone, and evidence. Removal never asserts accepted or rejected. |
+
+Late reconciliation updates a removed tombstone with accepted, rejected, or
+authoritative-not-recorded closure evidence. It never changes lifecycle away
+from `removed`.
+
 ## Retention and provenance
 
 For each permanent watch ID, retain:
@@ -753,9 +858,14 @@ For each permanent watch ID, retain:
 - enough recurrence evidence to support the health projection.
 
 Historical event identity and receipt bindings are never rewritten in place.
-Future compaction may remove bulky attempt and diagnostic payloads only through
-a versioned contract that preserves non-reuse, sequence high-water, unresolved
-operations, receipt binding, and recipient dedupe evidence.
+`watcher-runtime-core` permanently retains the identity/receipt spine listed
+above and keeps unresolved removed records discoverable until closure evidence
+arrives. `runtime-hardening` owns capacity defaults and a versioned compaction
+contract. That contract may remove completed-attempt stdout/stderr, detailed
+diagnostic payloads, and historical recurrence samples after preserving
+aggregate counters, but must preserve non-reuse, sequence high-water, unresolved
+operations, operation/payload hashes, receipt binding, and recipient dedupe
+evidence.
 
 The runtime health surface exposes retained rows/bytes and positive warning
 thresholds. Backup, capacity defaults, and safe compaction remain operational
@@ -774,6 +884,10 @@ A v2 runtime does not silently execute persisted v1 registrations or accept v1
 detector results. Mixed registries remain usable: unsupported v1 registrations
 are visibly paused/blocked with `unsupported-registration-version`, while valid
 v2 watches continue.
+
+The in-repository spike-era `telex-watcher` crate and example detectors remain
+historical v1 implementation evidence until the runtime and example nodes replace
+or reclassify them. Their presence does not claim v2 conformance.
 
 Baseline migration is explicit:
 
@@ -808,9 +922,10 @@ The client must support:
 10. restart-stable application operation identity;
 11. accepted, rejected, partial, indeterminate, previously-completed, and
     duplicate operation outcomes;
-12. operation-result and receipt lookup after restart;
+12. operation-result and receipt lookup after restart, including authoritative
+    `not-recorded` scoped to the exact logical store and operation identity;
 13. identity-checkable retry of the exact same operation, preserving sender,
-    target, payload, event identity, operation identity, and retry budget; and
+    target, exact payload bytes/identity, operation identity, and retry budget;
 14. health, reconciliation, compensation, and cleanup primitives without CLI
     parsing or raw daemon IPC.
 
@@ -834,18 +949,24 @@ The canonical v2 schema set produced by this contract is:
 Contract validation must:
 
 - validate all three against JSON Schema draft 2020-12;
-- accept the normative examples in this document;
+- accept the normative registration, request, and result examples in this
+  document;
 - reject detector-authored event identity, route, attention, disposition,
   cadence, timeout, and action fields;
 - reject invalid outcome/event/state combinations;
+- prove that omitted `nextState` preserves prior state while explicit `null`
+  commits JSON null;
+- enforce watch-ID grammar, metadata object shape, UTC `Z` timestamps, command
+  NUL rules, and runtime absolute-working-directory validation;
 - verify v1 schemas remain unchanged and are linked only as v1 compatibility
   artifacts; and
 - verify design links and ADR anchors resolve.
 
-Runtime implementation must add conformance between its concrete v2 registration,
-request, result, normalized metadata, and health models and the corresponding
-normative contract. Provider-specific fixtures and conformance suites remain
-project-owned, not prerequisites for Watcher registration.
+`watcher-runtime-core` owns executable repository checks for the items above and
+must add conformance between its concrete v2 registration, request, result,
+normalized metadata, and health models and the corresponding normative contract.
+Provider-specific fixtures and conformance suites remain project-owned, not
+prerequisites for Watcher registration.
 
 ## Downstream implementation checklist
 
@@ -859,7 +980,8 @@ project-owned, not prerequisites for Watcher registration.
 - How are complete staged payloads and hashes committed before send and recovered
   after restart?
 - Which Application Client primitives prove accepted/rejected/indeterminate/
-  previously-completed outcomes and same-operation retry?
+  previously-completed/duplicate/authoritative-not-recorded outcomes and
+  same-operation retry?
 - How are late acceptance, late rejection, permanent rejection, removal, and
   unresolved tombstones represented?
 - How are backend/profile selection and opaque logical-store identity threaded
@@ -868,6 +990,11 @@ project-owned, not prerequisites for Watcher registration.
   alongside the three canonical schemas?
 - Which platform mechanisms prove detector-tree death after abrupt runtime exit?
 - How does service supervision consume health and detect staleness?
+- How are register, show/list, pause, resume, update/state replacement,
+  reconcile-now, finite retry grant, remove, and removed-evidence closure
+  implemented with the required refusal rules?
+- How are `activatedAt`, `lastSuccessAt`, UTC timestamp emission, and wall-clock
+  adjustment behavior tested?
 - How are unsupported v1 rows isolated without blocking valid v2 watches?
 - How are retention warnings configured while preserving the identity/receipt
   spine?
