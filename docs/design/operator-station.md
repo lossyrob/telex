@@ -174,6 +174,11 @@ Postgres backends. Backend availability and principal-provenance differences
 remain visible evidence; they do not change message, acknowledgment,
 disposition, reply, or recovery meaning.
 
+Station identity, collision handling, and backend access inherit the daemon's
+same-user, shared-store trust model. They do not create a stronger
+cross-principal authorization boundary. Stronger principal isolation remains
+outside this contract and belongs to operational hardening.
+
 The Station MUST NOT derive a second address, operator address, or intermediary
 topology from a configured address. Address names are deployment choices, not
 Operator Station protocol vocabulary.
@@ -224,14 +229,21 @@ Retained addresses keep their local projections and recipient state. Removed or
 replaced address projections remain available until the Station performs an
 explicit evidence-preserving cleanup under unambiguous application ownership.
 
-Before detaching or removing an address, the Station MUST surface its unresolved
-primary obligations and in-flight operations. Their local projections and
-address attribution remain until they become terminal, are explicitly
-reassigned, or are deliberately abandoned with a recorded reason. Retention
-policy MUST NOT prune unresolved obligations or in-flight operations.
+Detaching an address either removes it from the configured set or records an
+explicit durable detached state. The Station MUST surface unresolved primary
+obligations and in-flight operations before either transition. It MUST NOT
+detach or remove the address until each item:
 
-A deliberate detach is durable intent. Automatic recovery MUST NOT resurrect a
-deliberately removed address.
+- becomes terminal;
+- is explicitly reassigned to another configured address or application
+  responsibility with durable evidence; or
+- is deliberately abandoned with a recorded reason and final local state.
+
+Retained evidence keeps the original address attribution. Retention policy MUST
+NOT prune unresolved obligations or in-flight operations. Restart preserves the
+durable configured/removed/detached state and the recorded outcome for every
+item. Automatic recovery MUST NOT resurrect a deliberately removed or detached
+address.
 
 ## Receive, durable ingest, and acknowledgment
 
@@ -349,7 +361,8 @@ result remains visible and is reconciled before retry.
 The reply result MUST distinguish:
 
 - accepted while the target is unoccupied and durably queued;
-- rejected or retired target;
+- retryable rejection before acceptance;
+- retired or otherwise permanently unresolvable target;
 - source identity mismatch;
 - already-terminal source obligation;
 - indeterminate acceptance.
@@ -390,7 +403,11 @@ Failure remains explicit:
 
 | Failure | Required state |
 |---|---|
-| Reply rejected before acceptance | Obligation remains open; retry with the same operation identity when safe |
+| Retryable rejection before acceptance | Obligation remains open; preserve the operation identity and retry only from AC-C14 reconciliation evidence after the rejection condition changes |
+| Retired or permanently unresolvable target | Obligation remains open; do not retry automatically or record `handled`; require target repair, an explicit new directed message, or a separate human disposition |
+| Source identity mismatch | Do not record `handled`; show both identities and preserve the obligation. If a send may have occurred, reconcile its AC-C14 operation evidence before retry; otherwise fail closed before reply or disposition |
+| Source already terminal before send | Do not run `Reply & Handle`; offer an explicitly confirmed ordinary follow-up reply without changing the existing terminal state |
+| Source becomes or is discovered terminal after reply acceptance | Show `reply sent / source already terminal`; preserve the existing terminal evidence and do not overwrite it with `handled` |
 | Reply accepted, disposition fails | Show `reply sent / handle pending`; retry only the disposition |
 | Indeterminate reply | Show partial/unknown; reconcile operation and receipt before replacement |
 | Restart after reply acceptance | Recover operation state and complete pending disposition without resending |
@@ -414,6 +431,7 @@ behavior.
 | Primary | `background` or `fyi`, disposition required | Actionable feed and badge; no toast |
 | Primary | no disposition required | Feed/history; toast configurable only by explicit local policy |
 | CC | any | Feed/history visibility; no toast and no obligation by default |
+| Other non-primary role | any | Feed/history visibility; no workflow obligation; no toast by default unless explicit local policy enables it |
 
 Local policy resolves collisions in this order:
 
@@ -448,6 +466,15 @@ message ID. The Station presents separately:
 An address is routing identity. A principal is separate evidence. A principal
 is labeled verified only when the Application Client supplies authenticated
 evidence; otherwise it is unverified or unavailable.
+
+Source resolution remains Station-visible:
+
+| State | Meaning | Presentation |
+|---|---|---|
+| `authoritative` | The selected logical store resolves the message and identity fields agree | Show the current Telex record |
+| `captured-only` | The current store is unavailable, but the durable local projection remains | Show the captured projection as non-authoritative evidence |
+| `mismatch` | A same-number record resolves but store, sender, recipient, or thread identity differs | Show both identities with a warning and fail closed for reply/disposition |
+| `unavailable` | Neither an authoritative record nor a sufficient captured projection exists | Show unavailable and do not guess or substitute a source |
 
 The Station MUST NOT:
 
@@ -496,6 +523,11 @@ The Application Client/daemon supplies membership, push/wait, backlog, gap, and
 latest-error evidence. Station configuration owns threshold values; operational
 hardening validates and tunes them.
 
+`stalled actionable backlog` is a configured predicate over unresolved primary
+count and oldest actionable age. The health surface MUST report the predicate's
+threshold and current evidence. Threshold selection and validation remain
+downstream, but the resulting state is computable and testable.
+
 ## Restart, recovery, and operation reconciliation
 
 On restart, the Station:
@@ -530,7 +562,10 @@ Every human-visible surface MUST:
 Telex message and thread actions are internal Station navigation. `https` links
 may open only after explicit user action and MUST display the destination.
 `http`, `file`, custom schemes, and local process actions are disabled by
-default. Link labels MUST NOT hide a different destination.
+default. A local allowlist MAY enable a bounded action only after explicit
+confirmation; the allowlist MUST identify the scheme/action and target
+constraint, and MUST NOT treat message content as executable instructions.
+Link labels MUST NOT hide a different destination.
 
 Messages and metadata are never executed as commands or agent instructions.
 Operator Station may send Telex messages and dispositions; it does not directly
@@ -666,6 +701,7 @@ auto-start, signing, diagnostics, and cleanup.
 | Item | Owner |
 |---|---|
 | Complete live CC acquisition, if required beyond bounded history | Application Client design/conformance decision |
+| Re-baseline stale Station product-boundary, readiness, integration, and route-back references in `application-client.md` | [Issue #12](https://github.com/lossyrob/telex/issues/12) / Application Client workstream |
 | Receive-health threshold values and latency tuning | `station-app` and operational hardening |
 | Optimistic display of an accepted reply | `station-app`; must preserve durable receipt and partial state |
 | Notification pressure limits and coalescing policy | Usability validation and operational hardening |
@@ -681,6 +717,8 @@ Revisit this contract if:
 - production evidence shows exact-recipient reply/disposition cannot remain
   clear across multiple attended addresses;
 - backend principal evidence cannot be presented without overstating trust;
+- the daemon's same-user/shared-store trust model is insufficient for required
+  cross-principal isolation;
 - notification pressure requires a different default matrix;
 - safe-link or rendering requirements need a shared security contract;
 - an external mediation convention demonstrates a broadly useful capability,
