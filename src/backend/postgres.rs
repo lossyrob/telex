@@ -1397,7 +1397,7 @@ impl Backend for PgBackend {
             )
             .await?;
         let outcome = match consumed {
-            None => DeliveryOutcome::NoDelivery,
+            None => DeliveryOutcome::AckNoOp,
             Some(row) => {
                 let consumed_at_ms: Option<i64> = row.get("consumed_at_ms");
                 if consumed_at_ms.is_some() {

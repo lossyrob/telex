@@ -1688,7 +1688,7 @@ mod sqlite_epoch_tests {
             "second mark should return AlreadyConsumed"
         );
 
-        // NoDelivery: message with no delivery row at all.
+        // AckNoOp: legacy generic ack with no delivery row at all.
         let msg2 = b
             .insert_message(&NewMessage {
                 to_addr: "epoch:other".to_string(),
@@ -1703,8 +1703,8 @@ mod sqlite_epoch_tests {
             b.mark_consumed_if_current_owner(addr, owner, epoch, msg2.id)
                 .await
                 .unwrap(),
-            DeliveryOutcome::NoDelivery,
-            "no delivery row should return NoDelivery"
+            DeliveryOutcome::AckNoOp,
+            "legacy no delivery row should return AckNoOp"
         );
 
         // NotOwner still takes precedence even if delivery row exists.

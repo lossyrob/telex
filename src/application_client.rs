@@ -1707,6 +1707,40 @@ impl ApplicationClient {
             .ok_or_else(|| {
                 ApplicationClientError::InvalidRequest("operation does not exist".to_string())
             })?;
+        match record.state.as_str() {
+            "accepted" | "completed" | "duplicate" => {}
+            "rejected" | "needs-attach" => {
+                return Err(
+                    serde_json::from_str(record.result_json.as_deref().ok_or_else(|| {
+                        ApplicationClientError::Protocol {
+                            code: "terminal-operation-without-result".to_string(),
+                        }
+                    })?)
+                    .map_err(invalid)?,
+                );
+            }
+            "pending" | "indeterminate" => {
+                let recovery = record
+                    .recovery_json
+                    .as_deref()
+                    .map(serde_json::from_str)
+                    .transpose()
+                    .map_err(invalid)?
+                    .unwrap_or_else(|| self.recovery_handle(operation_id.clone()));
+                let detail = record
+                    .result_json
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<ApplicationClientError>(json).ok())
+                    .map(|error| error.to_string())
+                    .unwrap_or_else(|| format!("operation is {}", record.state));
+                return Err(ApplicationClientError::Indeterminate { detail, recovery });
+            }
+            _ => {
+                return Err(ApplicationClientError::Protocol {
+                    code: "unknown-operation-state".to_string(),
+                });
+            }
+        }
         let result: SendResult =
             serde_json::from_str(record.result_json.as_deref().ok_or_else(|| {
                 ApplicationClientError::Indeterminate {
@@ -2815,6 +2849,7 @@ mod tests {
                 .await
                 .unwrap();
         }
+
         backend
             .cleanup_state_deltas(StoreDeltaRetentionPolicy {
                 before_version: i64::MAX,
@@ -2830,6 +2865,69 @@ mod tests {
             client.delta_page(100, 10).await,
             Err(ApplicationClientError::ResyncRequired { .. })
         ));
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn receipt_refresh_preserves_indeterminate_recovery_evidence() {
+        let path = std::env::temp_dir()
+            .join(format!(
+                "telex-application-receipt-indeterminate-{}-{}.db",
+                std::process::id(),
+                now_ms()
+            ))
+            .to_string_lossy()
+            .into_owned();
+        let profile = crate::profiles::implicit_sqlite(Some(&path));
+        let store_key = crate::profiles::store_key(&profile, Some(&path));
+        let backend = Arc::new(SqliteBackend::open(&path).unwrap());
+        backend.init_schema().await.unwrap();
+        let logical_store_id = LogicalStoreId::persisted(backend.logical_store_id().await.unwrap());
+        let client = ApplicationClient {
+            responsibility: ApplicationResponsibility("watcher".into()),
+            runtime_id: RuntimeId::fresh().unwrap(),
+            logical_store_id: logical_store_id.clone(),
+            store_key,
+            profile,
+            backend: backend.clone(),
+            memberships: Mutex::new(BTreeMap::new()),
+            outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
+        };
+        let operation_id = OperationId("indeterminate-peer-error".into());
+        backend
+            .begin_application_operation(&NewApplicationOperation {
+                logical_store_id: logical_store_id.0.clone(),
+                application_responsibility: "watcher".into(),
+                operation_id: operation_id.0.clone(),
+                operation_kind: "send".into(),
+                sender: "watcher:sender".into(),
+                recipients_json: r#"["target"]"#.into(),
+                payload_fingerprint: "fingerprint".into(),
+                retry_budget: 1,
+                created_at_ms: now_ms(),
+            })
+            .await
+            .unwrap();
+        let peer_error = ApplicationClientError::Unavailable("peer internal".into());
+        let recovery = client.recovery_handle(operation_id.clone());
+        backend
+            .complete_application_operation(
+                &logical_store_id.0,
+                "watcher",
+                &operation_id.0,
+                "indeterminate",
+                Some(&serde_json::to_string(&peer_error).unwrap()),
+                Some(&serde_json::to_string(&recovery).unwrap()),
+            )
+            .await
+            .unwrap();
+        match client.refresh_receipt_axes(&operation_id).await {
+            Err(ApplicationClientError::Indeterminate {
+                recovery: actual, ..
+            }) => assert_eq!(actual.operation_id, operation_id),
+            other => panic!("expected indeterminate receipt refresh, got {other:?}"),
+        }
     }
 
     #[cfg(feature = "sqlite")]

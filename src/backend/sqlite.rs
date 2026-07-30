@@ -2282,7 +2282,7 @@ impl Backend for SqliteBackend {
                     .optional()?;
 
                 match consumed {
-                    None => Ok(DeliveryOutcome::NoDelivery),
+                    None => Ok(DeliveryOutcome::AckNoOp),
                     Some(Some(_)) => {
                         // Row exists and already consumed — idempotent success.
                         Ok(DeliveryOutcome::AlreadyConsumed)
