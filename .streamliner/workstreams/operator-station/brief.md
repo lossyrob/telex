@@ -173,6 +173,28 @@ protocol capability fence, and isolated lifecycle validation are now owned by
 the paired reviewer. Both implementer and reviewer stations remain
 `attended_push`.
 
+The first paired review pass is
+[review 4812665371](https://github.com/lossyrob/telex/pull/130#pullrequestreview-4812665371):
+two must-fix and two non-blocking findings. The blockers require the packaged
+disposition-only routed outcome to carry its `outcomeType` and require the
+documented operation-ID byte derivation to match the lifecycle fixture exactly.
+These are issue-scoped contract-conformance repairs, not a change to the shared
+Application Client seam or Operator Station boundary.
+
+The implementer resolved all findings and the reviewer posted the verified
+automated +1 marker in
+[review 4812915308](https://github.com/lossyrob/telex/pull/130#pullrequestreview-4812915308)
+at `961e51e5a7d8da4a4867b2ae01efe75af47476b3`. CI remains green and the PR is
+mergeable. GitHub still reports four review threads unresolved (three outdated,
+one current), so orchestration requested thread reconciliation before a
+merge-ready handoff. Merge remains campaign/operator-owned.
+
+The implementer resolved all four GitHub review threads. Revalidation confirms
+the head is still `961e51e5a7d8da4a4867b2ae01efe75af47476b3`, every CI check is
+green, GitHub reports `MERGEABLE`, the current-head automated +1 remains valid,
+and unresolved review-thread count is zero. PR #130 is merge-ready, but no merge
+occurs without campaign/operator authorization.
+
 `station-app` remains planned and held. The current graph still targets the
 pending `application-client-ready-gate`; no cross-workstream dependency geometry
 was silently changed. The proposed replacement is an explicit dependency on
