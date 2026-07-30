@@ -32,22 +32,29 @@ pub struct WaitFetchOptions {
 pub struct WaitCandidate {
     pub message: MessageRow,
     pub delivery_id: Option<i64>,
+    pub snapshot_version: i64,
     pub notification_only: bool,
 }
 
 impl WaitCandidate {
-    pub fn primary(message: MessageRow, delivery_id: Option<i64>) -> Self {
+    pub fn primary(message: MessageRow, delivery_id: Option<i64>, snapshot_version: i64) -> Self {
         Self {
             message,
             delivery_id,
+            snapshot_version,
             notification_only: false,
         }
     }
 
-    pub fn cc_notification(message: MessageRow, delivery_id: Option<i64>) -> Self {
+    pub fn cc_notification(
+        message: MessageRow,
+        delivery_id: Option<i64>,
+        snapshot_version: i64,
+    ) -> Self {
         Self {
             message,
             delivery_id,
+            snapshot_version,
             notification_only: true,
         }
     }
@@ -62,6 +69,7 @@ pub trait Backend: Send + Sync {
     }
 
     async fn init_schema(&self) -> Result<()>;
+    async fn logical_store_id(&self) -> Result<String>;
 
     // ---- addresses / directory ----
     async fn ensure_address(
@@ -273,7 +281,7 @@ pub trait Backend: Send + Sync {
             .fetch_undelivered(address)
             .await?
             .into_iter()
-            .map(|message| WaitCandidate::primary(message, None))
+            .map(|message| WaitCandidate::primary(message, None, 0))
             .collect();
         if options.wake_on_cc {
             bail!("wake-on-cc wait candidates are not supported by this backend")
@@ -311,6 +319,21 @@ pub trait Backend: Send + Sync {
         note: Option<&str>,
         by: Option<&str>,
     ) -> Result<DispositionRow>;
+    #[allow(clippy::too_many_arguments)]
+    async fn application_disposition_with_ack(
+        &self,
+        _recipient: &str,
+        _owner_instance_id: &str,
+        _lease_epoch: i64,
+        _message_id: i64,
+        _delivery_id: i64,
+        _state: &str,
+        _note: Option<&str>,
+        _by: Option<&str>,
+        _compound_step: Option<&CompoundDispositionStep>,
+    ) -> Result<(Option<DispositionRow>, DeliveryOutcome)> {
+        bail!("application_disposition_with_ack: not supported by this backend")
+    }
     async fn dispositions_for(&self, message_id: i64) -> Result<Vec<DispositionRow>>;
     /// Delivery records for a message (one per recipient that received it). Read side of
     /// `mark_delivered`; the source of truth for "was this delivered, when, to which holder."
@@ -414,6 +437,14 @@ pub trait Backend: Send + Sync {
         bail!("state_deltas: not supported by this backend")
     }
 
+    async fn state_delta_page(
+        &self,
+        _after_version: i64,
+        _limit: i64,
+    ) -> Result<StateDeltaPageRecord> {
+        bail!("state_delta_page: not supported by this backend")
+    }
+
     async fn history_page(&self, _query: &HistoryQuery) -> Result<Vec<HistoryRecord>> {
         bail!("history_page: not supported by this backend")
     }
@@ -431,6 +462,13 @@ pub trait Backend: Send + Sync {
         _scope: &ApplicationRecordScope,
     ) -> Result<ApplicationStorageStats> {
         bail!("application_storage_stats: not supported by this backend")
+    }
+
+    async fn cleanup_state_deltas(
+        &self,
+        _policy: StoreDeltaRetentionPolicy,
+    ) -> Result<StoreDeltaCleanupReport> {
+        bail!("cleanup_state_deltas: not supported by this backend")
     }
 
     /// Per-primary-recipient count of undelivered backlog, as `(to_addr, count)` pairs. A message

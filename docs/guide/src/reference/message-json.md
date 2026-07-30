@@ -26,8 +26,11 @@ Output of `telex wait --json` for one delivered message:
   "requires_disposition_for_current_recipient": true,
   "subject": "Hello",
   "body": "world",
+  "metadata": null,
   "sent_at_ms": 1783355088938,
   "buffered_at_ms": 1783355089013,
+  "delivery_id": 321,
+  "snapshot_version": 44,
   "lease_epoch": 1
 }
 ```
@@ -51,7 +54,10 @@ Output of `telex wait --json` for one delivered message:
 | `requires_disposition_for_current_recipient` | The same, scoped to this recipient. |
 | `subject` | Subject, if any. |
 | `body` | Message body. |
+| `metadata` | Opaque message metadata, if any. |
 | `sent_at_ms`, `buffered_at_ms` | Unix millisecond timestamps. |
+| `delivery_id` | Exact per-recipient delivery-row identity for this delivered JSON record. Legacy CLI ack still addresses message plus recipient; supported applications use the typed Application Client ack handle rather than parsing this field from CLI output. |
+| `snapshot_version` | Store state fence captured with delivery selection. |
 | `lease_epoch` | The recipient station's lease epoch at delivery. |
 
 Fields whose names end in `_ms` such as `backend_ms`, `send_to_exit_ms`, and

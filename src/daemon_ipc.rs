@@ -9,7 +9,7 @@ use std::fmt;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_MAJOR: u16 = 1;
-pub const PROTOCOL_MINOR: u16 = 4;
+pub const PROTOCOL_MINOR: u16 = 5;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
@@ -46,6 +46,7 @@ pub const ON_DELIVER_DEFERRED_EXIT: i32 = 4;
 /// check it to detect version skew (an older daemon maps exit 4 to a transient retry and ignores
 /// `DrainDeferred`, which is bounded and self-resolves on daemon restart).
 pub const CAP_ON_DELIVER_DEFERRED: &str = "on_deliver_deferred_v1";
+pub const CAP_APPLICATION_CLIENT_V1: &str = "application_client_v1";
 
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
@@ -70,6 +71,7 @@ pub const ERROR_AMBIGUOUS: &str = "Ambiguous";
 pub const ERROR_UNSUPPORTED: &str = "Unsupported";
 pub const ERROR_NOT_OWNER: &str = "NotOwner";
 pub const ERROR_COLLISION: &str = "Collision";
+pub const ERROR_CAPABILITY_CONFLICT: &str = "CapabilityConflict";
 pub const REDACTED_SECRET: &str = "[redacted]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -300,6 +302,7 @@ pub enum Request {
         logical_store_id: String,
         application_responsibility: String,
         operation_id: String,
+        payload_fingerprint: String,
     },
     Reply {
         store_key: String,
@@ -334,6 +337,7 @@ pub enum Request {
         logical_store_id: String,
         application_responsibility: String,
         operation_id: String,
+        payload_fingerprint: String,
     },
     Status {
         #[serde(default)]
@@ -416,6 +420,8 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         delivery_id: Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_version: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         lease_epoch: Option<i64>,
     },
     Sent {
@@ -430,6 +436,8 @@ pub enum Response {
         protocol_version: ProtocolVersion,
         daemon_version: String,
         instance_id: String,
+        #[serde(default)]
+        capabilities: Vec<String>,
     },
     Ack {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -827,6 +835,7 @@ pub fn daemon_capabilities() -> Vec<String> {
     // Advertised-but-optional (issue #65): lets a client detect a daemon that understands the
     // deferred outcome + `DrainDeferred`, so version skew against an older daemon is diagnosable.
     caps.push(CAP_ON_DELIVER_DEFERRED.to_string());
+    caps.push(CAP_APPLICATION_CLIENT_V1.to_string());
     caps
 }
 

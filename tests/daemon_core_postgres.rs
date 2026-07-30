@@ -9,10 +9,73 @@ use telex::backend::postgres::{make_tls, sanitize_ident, PgBackend};
 use telex::backend::Backend;
 use telex::daemon::test_support::{registered_epoch, send_request, TestDaemon};
 use telex::daemon_ipc::{self as proto, Request, Response, WatchPidSpec};
-use telex::model::{now_ms, Attention, DeliveryOutcome, NewMessage};
+use telex::model::{
+    now_ms, ApplicationOperationBegin, Attention, DeliveryOutcome, NewApplicationOperation,
+    NewMessage,
+};
 use telex::profiles::{self, BackendProfile, ConfigFile};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[tokio::test]
+async fn application_client_schema_v3_operation_smoke() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) = pg_url_or_skip("application_client_schema_v3_operation_smoke") else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let schema = sanitize_ident(&format!(
+        "telex_app_client_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .unwrap();
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+    let backend = PgBackend::connect_with(cfg.clone(), Some(&schema))
+        .await
+        .unwrap();
+    backend.init_schema().await.unwrap();
+    let store_id = backend.logical_store_id().await.unwrap();
+    let operation = NewApplicationOperation {
+        logical_store_id: store_id,
+        application_responsibility: "postgres-smoke".into(),
+        operation_id: "operation-1".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: "fingerprint".into(),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    assert_eq!(
+        backend
+            .complete_application_operation(
+                &operation.logical_store_id,
+                &operation.application_responsibility,
+                &operation.operation_id,
+                "accepted",
+                Some("{}"),
+                None,
+            )
+            .await
+            .unwrap()
+            .state,
+        "accepted"
+    );
+    drop(backend);
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+}
 
 fn pg_url_or_skip(test_name: &str) -> Option<String> {
     let require = std::env::var("TELEX_PG_REQUIRE")

@@ -1072,6 +1072,10 @@ fn ensure_v3_invariants(c: &Connection) -> Result<()> {
              PRIMARY KEY(logical_store_id, application_responsibility, operation_id),
              UNIQUE(message_id)
          );
+         CREATE TABLE IF NOT EXISTS application_store_identity (
+             singleton INTEGER PRIMARY KEY CHECK(singleton = 1),
+             logical_store_id TEXT NOT NULL UNIQUE
+         );
          CREATE TABLE IF NOT EXISTS application_compound_steps (
              logical_store_id           TEXT NOT NULL,
              application_responsibility TEXT NOT NULL,
@@ -1110,6 +1114,12 @@ fn ensure_v3_invariants(c: &Connection) -> Result<()> {
          );
          CREATE INDEX IF NOT EXISTS application_state_deltas_axis_idx
              ON application_state_deltas(axis, version);",
+    )?;
+    let store_id = new_logical_store_id()?;
+    c.execute(
+        "INSERT INTO application_store_identity(singleton, logical_store_id)
+         VALUES (1, ?1) ON CONFLICT(singleton) DO NOTHING",
+        params![store_id],
     )?;
     Ok(())
 }
@@ -1182,11 +1192,101 @@ fn map_compound_step(r: &rusqlite::Row) -> rusqlite::Result<CompoundStepRecord> 
     })
 }
 
+fn validate_compound_prerequisites_sqlite(
+    c: &Connection,
+    step: &CompoundDispositionStep,
+) -> Result<()> {
+    let prerequisites_json: String = c
+        .query_row(
+            "SELECT prerequisites_json FROM application_compound_steps
+             WHERE logical_store_id=?1 AND application_responsibility=?2
+               AND operation_id=?3 AND step_id=?4",
+            params![
+                step.logical_store_id,
+                step.application_responsibility,
+                step.operation_id,
+                step.step_id
+            ],
+            |row| row.get(0),
+        )
+        .optional()?
+        .ok_or_else(|| anyhow!("compound step does not exist"))?;
+    let prerequisites: Vec<String> = serde_json::from_str(&prerequisites_json)?;
+    for prerequisite in prerequisites {
+        let prerequisite_state: Option<String> = c
+            .query_row(
+                "SELECT state FROM application_compound_steps
+                 WHERE logical_store_id=?1 AND application_responsibility=?2
+                   AND operation_id=?3 AND step_id=?4",
+                params![
+                    step.logical_store_id,
+                    step.application_responsibility,
+                    step.operation_id,
+                    prerequisite
+                ],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if !matches!(
+            prerequisite_state.as_deref(),
+            Some("accepted" | "completed" | "no-op")
+        ) {
+            bail!("compound prerequisite is not durably complete");
+        }
+    }
+    Ok(())
+}
+
 fn insert_message_inner(
     c: &Connection,
     m: &NewMessage,
     operation: Option<&ApplicationMessageOperation>,
 ) -> Result<MessageRow> {
+    if let Some(operation) = operation {
+        let operation_row: Option<(String, String, String)> = c
+            .query_row(
+                "SELECT sender, payload_fingerprint, state FROM application_operations
+                 WHERE logical_store_id=?1 AND application_responsibility=?2
+                   AND operation_id=?3",
+                params![
+                    operation.logical_store_id,
+                    operation.application_responsibility,
+                    operation.operation_id
+                ],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .optional()?;
+        let Some((sender, fingerprint, state)) = operation_row else {
+            bail!("application operation does not exist");
+        };
+        if sender != m.from_addr.as_deref().unwrap_or_default()
+            || fingerprint != operation.payload_fingerprint
+            || !matches!(state.as_str(), "pending" | "needs-attach" | "indeterminate")
+        {
+            bail!("application operation evidence does not match message authorship");
+        }
+        if let Some(existing) = c
+            .query_row(
+                &format!(
+                    "SELECT {MSG_COLS_M}
+                     FROM application_operation_messages aom
+                     JOIN messages m ON m.id=aom.message_id
+                     WHERE aom.logical_store_id=?1
+                       AND aom.application_responsibility=?2
+                       AND aom.operation_id=?3"
+                ),
+                params![
+                    operation.logical_store_id,
+                    operation.application_responsibility,
+                    operation.operation_id
+                ],
+                map_message,
+            )
+            .optional()?
+        {
+            return Ok(existing);
+        }
+    }
     let now = advance_clock_hwm(c)?;
     c.execute(
         "INSERT INTO messages(thread_id, parent_id, from_addr, to_addr, cc, kind, \
@@ -1212,9 +1312,7 @@ fn insert_message_inner(
         c.execute(
             "INSERT INTO application_operation_messages(
                  logical_store_id, application_responsibility, operation_id, message_id
-             ) VALUES (?1,?2,?3,?4)
-             ON CONFLICT(logical_store_id, application_responsibility, operation_id)
-             DO UPDATE SET message_id=excluded.message_id",
+             ) VALUES (?1,?2,?3,?4)",
             params![
                 operation.logical_store_id,
                 operation.application_responsibility,
@@ -1719,6 +1817,17 @@ impl Backend for SqliteBackend {
 
     async fn init_schema(&self) -> Result<()> {
         self.run(init_schema_inner).await
+    }
+
+    async fn logical_store_id(&self) -> Result<String> {
+        self.run(|c| {
+            Ok(c.query_row(
+                "SELECT logical_store_id FROM application_store_identity WHERE singleton=1",
+                [],
+                |row| row.get(0),
+            )?)
+        })
+        .await
     }
 
     async fn ensure_address(
@@ -2471,7 +2580,10 @@ impl Backend for SqliteBackend {
             // Recipient-first: pending delivery rows are the source of delivery work. Legacy
             // no-row messages are materialized above before any emission.
             let sql = format!(
-                "SELECT {MSG_COLS_M}, d.id AS delivery_id FROM deliveries d \
+                "SELECT {MSG_COLS_M}, d.id AS delivery_id,
+                        (SELECT version FROM application_state_version WHERE singleton=1)
+                        AS snapshot_version
+                 FROM deliveries d \
                  JOIN messages m ON m.id=d.message_id \
                  WHERE d.recipient=?1 \
                   AND d.consumed_at_ms IS NULL \
@@ -2500,7 +2612,10 @@ impl Backend for SqliteBackend {
             materialize_pending_delivery_rows_for_recipient(c, &a)?;
             let terminal = terminal_dispositions_sql_list();
             let primary_sql = format!(
-                "SELECT {MSG_COLS_M}, d.id AS delivery_id FROM deliveries d \
+                "SELECT {MSG_COLS_M}, d.id AS delivery_id,
+                        (SELECT version FROM application_state_version WHERE singleton=1)
+                        AS snapshot_version
+                 FROM deliveries d \
                  JOIN messages m ON m.id=d.message_id \
                  WHERE d.recipient=?1 \
                   AND d.consumed_at_ms IS NULL \
@@ -2512,13 +2627,20 @@ impl Backend for SqliteBackend {
             let mut candidates = c
                 .prepare(&primary_sql)?
                 .query_map(params![a.as_str()], |row| {
-                    Ok(WaitCandidate::primary(map_message(row)?, row.get(14)?))
+                    Ok(WaitCandidate::primary(
+                        map_message(row)?,
+                        row.get(14)?,
+                        row.get(15)?,
+                    ))
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
 
             if options.wake_on_cc {
                 let cc_sql = format!(
-                    "SELECT {MSG_COLS_M}, d.id AS delivery_id FROM deliveries d \
+                    "SELECT {MSG_COLS_M}, d.id AS delivery_id,
+                            (SELECT version FROM application_state_version WHERE singleton=1)
+                            AS snapshot_version
+                     FROM deliveries d \
                      JOIN messages m ON m.id=d.message_id \
                      WHERE d.recipient=?1 \
                       AND d.consumed_at_ms IS NOT NULL \
@@ -2531,20 +2653,29 @@ impl Backend for SqliteBackend {
                 let cc_messages = c
                     .prepare(&cc_sql)?
                     .query_map(params![a.as_str(), options.cc_after_ms], |row| {
-                        Ok((map_message(row)?, row.get::<_, i64>(14)?))
+                        Ok((
+                            map_message(row)?,
+                            row.get::<_, i64>(14)?,
+                            row.get::<_, i64>(15)?,
+                        ))
                     })?
                     .collect::<rusqlite::Result<Vec<_>>>()?;
-                candidates.extend(
-                    cc_messages
-                        .into_iter()
-                        .filter_map(|(message, delivery_id)| {
-                            // The SQL predicate is recipient-row based; keep the parsed delivery-role
-                            // check as the authority so comma-string false positives and acked primaries
-                            // cannot become CC wake candidates.
-                            (delivery_role(&a, &message.to_addr, message.cc.as_deref()) == "cc")
-                                .then(|| WaitCandidate::cc_notification(message, Some(delivery_id)))
-                        }),
-                );
+                candidates.extend(cc_messages.into_iter().filter_map(
+                    |(message, delivery_id, snapshot_version)| {
+                        // The SQL predicate is recipient-row based; keep the parsed delivery-role
+                        // check as the authority so comma-string false positives and acked primaries
+                        // cannot become CC wake candidates.
+                        (delivery_role(&a, &message.to_addr, message.cc.as_deref()) == "cc").then(
+                            || {
+                                WaitCandidate::cc_notification(
+                                    message,
+                                    Some(delivery_id),
+                                    snapshot_version,
+                                )
+                            },
+                        )
+                    },
+                ));
             }
 
             candidates.sort_by_key(|candidate| candidate.message.id);
@@ -2768,6 +2899,154 @@ impl Backend for SqliteBackend {
                     by_principal: b,
                     at_ms: now,
                 })
+            })
+        })
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn application_disposition_with_ack(
+        &self,
+        recipient: &str,
+        owner_instance_id: &str,
+        lease_epoch: i64,
+        message_id: i64,
+        delivery_id: i64,
+        state: &str,
+        note: Option<&str>,
+        by: Option<&str>,
+        compound_step: Option<&CompoundDispositionStep>,
+    ) -> Result<(Option<DispositionRow>, DeliveryOutcome)> {
+        let recipient = recipient.to_string();
+        let owner = owner_instance_id.to_string();
+        let state = state.to_string();
+        let note = note.map(str::to_string);
+        let by = by.map(str::to_string);
+        let compound_step = compound_step.cloned();
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let lease: Option<(i64, Option<String>)> = c
+                    .query_row(
+                        "SELECT lease_epoch, owner_instance_id FROM leases WHERE address=?1",
+                        params![recipient],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                if !matches!(
+                    lease,
+                    Some((epoch, ref current_owner))
+                        if epoch == lease_epoch && current_owner.as_deref() == Some(owner.as_str())
+                ) {
+                    return Ok((None, DeliveryOutcome::NotOwner));
+                }
+                materialize_pending_delivery_rows_for_recipient(c, &recipient)?;
+                let delivery: Option<(i64, Option<i64>)> = c
+                    .query_row(
+                        "SELECT id, consumed_at_ms FROM deliveries
+                         WHERE message_id=?1 AND recipient=?2",
+                        params![message_id, recipient],
+                        |row| Ok((row.get(0)?, row.get(1)?)),
+                    )
+                    .optional()?;
+                let Some((actual_delivery_id, consumed_at_ms)) = delivery else {
+                    return Ok((None, DeliveryOutcome::AckNoOp));
+                };
+                if actual_delivery_id != delivery_id {
+                    return Ok((None, DeliveryOutcome::DeliveryMismatch));
+                }
+                if let Some(compound) = &compound_step {
+                    validate_compound_prerequisites_sqlite(c, compound)?;
+                }
+                let now = advance_clock_hwm(c)?;
+                c.execute(
+                    "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms)
+                     VALUES (?1,?2,?3,?4,?5,?6)",
+                    params![message_id, recipient, state, note, by, now],
+                )?;
+                let id = c.last_insert_rowid();
+                let mut outcome = if consumed_at_ms.is_some() {
+                    DeliveryOutcome::AlreadyConsumed
+                } else {
+                    DeliveryOutcome::AckNoOp
+                };
+                if Disposition::is_terminal_str(&state) && consumed_at_ms.is_none() {
+                    c.execute(
+                        "UPDATE deliveries SET consumed_at_ms=?1
+                         WHERE id=?2 AND message_id=?3 AND recipient=?4",
+                        params![now, delivery_id, message_id, recipient],
+                    )?;
+                    append_state_delta_inner(
+                        c,
+                        "acknowledgment",
+                        &format!("delivery:{delivery_id}"),
+                        &serde_json::json!({
+                            "delivery_id": delivery_id,
+                            "message_id": message_id,
+                            "recipient": recipient,
+                        })
+                        .to_string(),
+                    )?;
+                    if let Some(compound) = &compound_step {
+                        let changed = c.execute(
+                            "UPDATE application_compound_steps
+                             SET state='accepted', outcome_json=?5, recovery_json=?6,
+                                 updated_at_ms=?7, completed_at_ms=?7
+                             WHERE logical_store_id=?1 AND application_responsibility=?2
+                               AND operation_id=?3 AND step_id=?4",
+                            params![
+                                compound.logical_store_id,
+                                compound.application_responsibility,
+                                compound.operation_id,
+                                compound.step_id,
+                                compound.outcome_json,
+                                compound.recovery_json,
+                                now
+                            ],
+                        )?;
+                        if changed == 0 {
+                            bail!("compound step does not exist");
+                        }
+                        append_state_delta_inner(
+                            c,
+                            "compound",
+                            &format!(
+                                "operation:{}:step:{}",
+                                compound.operation_id, compound.step_id
+                            ),
+                            &serde_json::json!({
+                                "operation_id": compound.operation_id,
+                                "step_id": compound.step_id,
+                                "state": "accepted",
+                            })
+                            .to_string(),
+                        )?;
+                    }
+                    outcome = DeliveryOutcome::Marked;
+                }
+                append_state_delta_inner(
+                    c,
+                    "disposition",
+                    &format!("message:{message_id}:recipient:{recipient}"),
+                    &serde_json::json!({
+                        "message_id": message_id,
+                        "recipient": recipient,
+                        "state": state,
+                        "is_terminal": Disposition::is_terminal_str(&state),
+                    })
+                    .to_string(),
+                )?;
+                Ok((
+                    Some(DispositionRow {
+                        id,
+                        message_id,
+                        recipient,
+                        state,
+                        note,
+                        by_principal: by,
+                        at_ms: now,
+                    }),
+                    outcome,
+                ))
             })
         })
         .await
@@ -3206,11 +3485,42 @@ impl Backend for SqliteBackend {
         );
         self.run(move |c| {
             with_immediate_transaction(c, |c| {
+                let prerequisites_json: String = c
+                    .query_row(
+                        "SELECT prerequisites_json FROM application_compound_steps
+                         WHERE logical_store_id=?1 AND application_responsibility=?2
+                           AND operation_id=?3 AND step_id=?4",
+                        params![store, responsibility, operation, step],
+                        |row| row.get(0),
+                    )
+                    .optional()?
+                    .ok_or_else(|| anyhow!("compound step does not exist"))?;
+                let prerequisites: Vec<String> = serde_json::from_str(&prerequisites_json)?;
+                for prerequisite in prerequisites {
+                    let prerequisite_state: Option<String> = c
+                        .query_row(
+                            "SELECT state FROM application_compound_steps
+                             WHERE logical_store_id=?1 AND application_responsibility=?2
+                               AND operation_id=?3 AND step_id=?4",
+                            params![store, responsibility, operation, prerequisite],
+                            |row| row.get(0),
+                        )
+                        .optional()?;
+                    if !matches!(
+                        prerequisite_state.as_deref(),
+                        Some("accepted" | "completed" | "no-op")
+                    ) {
+                        bail!("compound prerequisite is not durably complete");
+                    }
+                }
                 let now = next_clock_hwm(c)?;
                 let changed = c.execute(
                     "UPDATE application_compound_steps
                      SET state=?5, outcome_json=?6, recovery_json=?7,
-                         updated_at_ms=?8, completed_at_ms=?8
+                         updated_at_ms=?8,
+                         completed_at_ms=CASE
+                             WHEN ?5 IN ('accepted','rejected','completed','no-op')
+                             THEN ?8 ELSE NULL END
                      WHERE logical_store_id=?1 AND application_responsibility=?2
                        AND operation_id=?3 AND step_id=?4",
                     params![
@@ -3306,6 +3616,51 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn state_delta_page(
+        &self,
+        after_version: i64,
+        limit: i64,
+    ) -> Result<StateDeltaPageRecord> {
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let current_version: i64 = c.query_row(
+                    "SELECT version FROM application_state_version WHERE singleton=1",
+                    [],
+                    |row| row.get(0),
+                )?;
+                let retained_floor: i64 = c
+                    .query_row(
+                        "SELECT MIN(version) FROM application_state_deltas",
+                        [],
+                        |row| row.get::<_, Option<i64>>(0),
+                    )?
+                    .unwrap_or(current_version.saturating_add(1));
+                let mut stmt = c.prepare(
+                    "SELECT version, axis, entity_id, payload_json, at_ms
+                     FROM application_state_deltas
+                     WHERE version>?1 ORDER BY version LIMIT ?2",
+                )?;
+                let deltas = stmt
+                    .query_map(params![after_version, limit.max(1)], |row| {
+                        Ok(StateDeltaRecord {
+                            version: row.get(0)?,
+                            axis: row.get(1)?,
+                            entity_id: row.get(2)?,
+                            payload_json: row.get(3)?,
+                            at_ms: row.get(4)?,
+                        })
+                    })?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                Ok(StateDeltaPageRecord {
+                    current_version,
+                    retained_floor,
+                    deltas,
+                })
+            })
+        })
+        .await
+    }
+
     async fn history_page(&self, query: &HistoryQuery) -> Result<Vec<HistoryRecord>> {
         let query = query.clone();
         self.run(move |c| {
@@ -3391,41 +3746,55 @@ impl Backend for SqliteBackend {
         self.run(move |c| {
             with_immediate_transaction(c, |c| {
                 let max_delete = policy.max_delete.max(0);
-                let operations_deleted = c.execute(
-                    "DELETE FROM application_operations
-                     WHERE rowid IN (
-                         SELECT o.rowid FROM application_operations o
-                         WHERE o.logical_store_id=?1 AND o.application_responsibility=?2
-                           AND o.state IN ('accepted','rejected','duplicate','completed')
-                           AND o.completed_at_ms IS NOT NULL AND o.completed_at_ms<?3
-                           AND NOT EXISTS (
-                               SELECT 1 FROM application_compound_steps s
-                               WHERE s.logical_store_id=o.logical_store_id
-                                 AND s.application_responsibility=o.application_responsibility
-                                 AND s.operation_id=o.operation_id
-                                 AND s.completed_at_ms IS NULL
-                           )
-                         ORDER BY completed_at_ms
-                         LIMIT ?4
-                     )",
-                    params![
-                        scope.logical_store_id,
-                        scope.application_responsibility,
-                        policy.completed_before_ms,
-                        max_delete
-                    ],
-                )? as i64;
-                c.execute(
-                    "DELETE FROM application_operation_messages
-                     WHERE logical_store_id=?1 AND application_responsibility=?2
+                let mut operation_stmt = c.prepare(
+                    "SELECT o.operation_id FROM application_operations o
+                     WHERE o.logical_store_id=?1 AND o.application_responsibility=?2
+                       AND o.state IN ('accepted','rejected','duplicate','completed')
+                       AND o.completed_at_ms IS NOT NULL AND o.completed_at_ms<?3
                        AND NOT EXISTS (
-                           SELECT 1 FROM application_operations o
-                           WHERE o.logical_store_id=application_operation_messages.logical_store_id
-                             AND o.application_responsibility=application_operation_messages.application_responsibility
-                             AND o.operation_id=application_operation_messages.operation_id
-                       )",
-                    params![scope.logical_store_id, scope.application_responsibility],
+                           SELECT 1 FROM application_compound_steps s
+                           WHERE s.logical_store_id=o.logical_store_id
+                             AND s.application_responsibility=o.application_responsibility
+                             AND s.operation_id=o.operation_id
+                             AND s.completed_at_ms IS NULL
+                       )
+                     ORDER BY o.completed_at_ms LIMIT ?4",
                 )?;
+                let deleted_operation_ids = operation_stmt
+                    .query_map(
+                        params![
+                            scope.logical_store_id,
+                            scope.application_responsibility,
+                            policy.completed_before_ms,
+                            max_delete
+                        ],
+                        |row| row.get::<_, String>(0),
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?;
+                drop(operation_stmt);
+                for operation_id in &deleted_operation_ids {
+                    c.execute(
+                        "DELETE FROM application_operation_messages
+                         WHERE logical_store_id=?1 AND application_responsibility=?2
+                           AND operation_id=?3",
+                        params![
+                            scope.logical_store_id,
+                            scope.application_responsibility,
+                            operation_id
+                        ],
+                    )?;
+                    c.execute(
+                        "DELETE FROM application_operations
+                         WHERE logical_store_id=?1 AND application_responsibility=?2
+                           AND operation_id=?3",
+                        params![
+                            scope.logical_store_id,
+                            scope.application_responsibility,
+                            operation_id
+                        ],
+                    )?;
+                }
+                let operations_deleted = deleted_operation_ids.len() as i64;
                 let compound_steps_deleted = c.execute(
                     "DELETE FROM application_compound_steps
                      WHERE rowid IN (
@@ -3449,23 +3818,9 @@ impl Backend for SqliteBackend {
                         max_delete
                     ],
                 )? as i64;
-                let deltas_deleted = match policy.deltas_before_version {
-                    Some(version) => c.execute(
-                        "DELETE FROM application_state_deltas
-                         WHERE version IN (
-                             SELECT version FROM application_state_deltas
-                             WHERE version<?1
-                             ORDER BY version
-                             LIMIT ?2
-                         )",
-                        params![version, max_delete],
-                    )? as i64,
-                    None => 0,
-                };
                 Ok(CleanupReport {
                     operations_deleted,
                     compound_steps_deleted,
-                    deltas_deleted,
                 })
             })
         })
@@ -3490,18 +3845,31 @@ impl Backend for SqliteBackend {
                 params![scope.logical_store_id, scope.application_responsibility],
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )?;
-            let (delta_rows, oldest_delta_at_ms) = c.query_row(
-                "SELECT COUNT(*), MIN(at_ms) FROM application_state_deltas",
-                [],
-                |r| Ok((r.get(0)?, r.get(1)?)),
-            )?;
             Ok(ApplicationStorageStats {
                 operation_rows,
                 compound_step_rows,
-                delta_rows,
                 oldest_operation_at_ms,
                 oldest_compound_step_at_ms,
-                oldest_delta_at_ms,
+            })
+        })
+        .await
+    }
+
+    async fn cleanup_state_deltas(
+        &self,
+        policy: StoreDeltaRetentionPolicy,
+    ) -> Result<StoreDeltaCleanupReport> {
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let deltas_deleted = c.execute(
+                    "DELETE FROM application_state_deltas
+                     WHERE version IN (
+                         SELECT version FROM application_state_deltas
+                         WHERE version<?1 ORDER BY version LIMIT ?2
+                     )",
+                    params![policy.before_version, policy.max_delete.max(0)],
+                )? as i64;
+                Ok(StoreDeltaCleanupReport { deltas_deleted })
             })
         })
         .await

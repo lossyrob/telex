@@ -186,6 +186,10 @@ CREATE TABLE IF NOT EXISTS application_operation_messages (
     PRIMARY KEY(logical_store_id, application_responsibility, operation_id),
     UNIQUE(message_id)
 );
+CREATE TABLE IF NOT EXISTS application_store_identity (
+    singleton integer PRIMARY KEY CHECK(singleton = 1),
+    logical_store_id text NOT NULL UNIQUE
+);
 CREATE TABLE IF NOT EXISTS application_compound_steps (
     logical_store_id           text NOT NULL,
     application_responsibility text NOT NULL,
@@ -317,6 +321,51 @@ fn map_compound_step(r: &Row) -> CompoundStepRecord {
     }
 }
 
+async fn validate_compound_prerequisites_postgres(
+    tx: &Transaction<'_>,
+    step: &CompoundDispositionStep,
+) -> Result<()> {
+    let prerequisites_json: String = tx
+        .query_opt(
+            "SELECT prerequisites_json FROM application_compound_steps
+             WHERE logical_store_id=$1 AND application_responsibility=$2
+               AND operation_id=$3 AND step_id=$4 FOR UPDATE",
+            &[
+                &step.logical_store_id,
+                &step.application_responsibility,
+                &step.operation_id,
+                &step.step_id,
+            ],
+        )
+        .await?
+        .ok_or_else(|| anyhow!("compound step does not exist"))?
+        .get("prerequisites_json");
+    let prerequisites: Vec<String> = serde_json::from_str(&prerequisites_json)?;
+    for prerequisite in prerequisites {
+        let prerequisite_state = tx
+            .query_opt(
+                "SELECT state FROM application_compound_steps
+                 WHERE logical_store_id=$1 AND application_responsibility=$2
+                   AND operation_id=$3 AND step_id=$4 FOR UPDATE",
+                &[
+                    &step.logical_store_id,
+                    &step.application_responsibility,
+                    &step.operation_id,
+                    &prerequisite,
+                ],
+            )
+            .await?
+            .map(|row| row.get::<_, String>("state"));
+        if !matches!(
+            prerequisite_state.as_deref(),
+            Some("accepted" | "completed" | "no-op")
+        ) {
+            bail!("compound prerequisite is not durably complete");
+        }
+    }
+    Ok(())
+}
+
 fn fanout_recipients(to_addr: &str, cc: Option<&str>) -> Vec<String> {
     let mut recipients = vec![to_addr.to_string()];
     for recipient in cc_recipients(cc) {
@@ -412,6 +461,52 @@ async fn pg_insert_message(
     m: &NewMessage,
     operation: Option<&ApplicationMessageOperation>,
 ) -> Result<MessageRow> {
+    if let Some(operation) = operation {
+        let operation_row = tx
+            .query_opt(
+                "SELECT sender, payload_fingerprint, state FROM application_operations
+                 WHERE logical_store_id=$1 AND application_responsibility=$2
+                   AND operation_id=$3 FOR UPDATE",
+                &[
+                    &operation.logical_store_id,
+                    &operation.application_responsibility,
+                    &operation.operation_id,
+                ],
+            )
+            .await?;
+        let Some(operation_row) = operation_row else {
+            bail!("application operation does not exist");
+        };
+        let sender: String = operation_row.get("sender");
+        let fingerprint: String = operation_row.get("payload_fingerprint");
+        let state: String = operation_row.get("state");
+        if sender != m.from_addr.as_deref().unwrap_or_default()
+            || fingerprint != operation.payload_fingerprint
+            || !matches!(state.as_str(), "pending" | "needs-attach" | "indeterminate")
+        {
+            bail!("application operation evidence does not match message authorship");
+        }
+        if let Some(existing) = tx
+            .query_opt(
+                &format!(
+                    "SELECT {MSG_COLS_M}
+                     FROM application_operation_messages aom
+                     JOIN messages m ON m.id=aom.message_id
+                     WHERE aom.logical_store_id=$1
+                       AND aom.application_responsibility=$2
+                       AND aom.operation_id=$3"
+                ),
+                &[
+                    &operation.logical_store_id,
+                    &operation.application_responsibility,
+                    &operation.operation_id,
+                ],
+            )
+            .await?
+        {
+            return Ok(map_message(&existing));
+        }
+    }
     let now = pg_tx_advance_clock_hwm(tx).await?;
     let parent_thread: Option<i64> = match m.parent_id {
         Some(pid) => tx
@@ -450,9 +545,7 @@ async fn pg_insert_message(
         tx.execute(
             "INSERT INTO application_operation_messages(
                  logical_store_id, application_responsibility, operation_id, message_id
-             ) VALUES ($1,$2,$3,$4)
-             ON CONFLICT(logical_store_id, application_responsibility, operation_id)
-             DO UPDATE SET message_id=excluded.message_id",
+             ) VALUES ($1,$2,$3,$4)",
             &[
                 &operation.logical_store_id,
                 &operation.application_responsibility,
@@ -776,6 +869,14 @@ impl Backend for PgBackend {
             );
         }
         client.batch_execute(SCHEMA).await?;
+        let store_id = new_logical_store_id()?;
+        client
+            .execute(
+                "INSERT INTO application_store_identity(singleton, logical_store_id)
+                 VALUES (1, $1) ON CONFLICT(singleton) DO NOTHING",
+                &[&store_id],
+            )
+            .await?;
         client
             .batch_execute(
                 "ALTER TABLE leases ADD COLUMN IF NOT EXISTS lease_epoch bigint;
@@ -818,6 +919,17 @@ impl Backend for PgBackend {
         raise_clock_hwm_to_existing_timestamps(&client).await?;
         publish_schema_version(&client).await?;
         Ok(())
+    }
+
+    async fn logical_store_id(&self) -> Result<String> {
+        let client = self.client().await?;
+        Ok(client
+            .query_one(
+                "SELECT logical_store_id FROM application_store_identity WHERE singleton=1",
+                &[],
+            )
+            .await?
+            .get("logical_store_id"))
     }
 
     async fn ensure_address(
@@ -1568,7 +1680,10 @@ impl Backend for PgBackend {
         let client = self.client().await?;
         materialize_pending_delivery_rows_for_recipient(&client, address).await?;
         let sql = format!(
-            "SELECT {MSG_COLS_M}, d.id AS delivery_id FROM deliveries d
+            "SELECT {MSG_COLS_M}, d.id AS delivery_id,
+                    (SELECT version FROM application_state_version WHERE singleton=1)
+                    AS snapshot_version
+             FROM deliveries d
              JOIN messages m ON m.id=d.message_id
              WHERE d.recipient=$1
                AND d.consumed_at_ms IS NULL
@@ -1604,12 +1719,21 @@ impl Backend for PgBackend {
             .query(&primary_sql, &[&address])
             .await?
             .into_iter()
-            .map(|row| WaitCandidate::primary(map_message(&row), Some(row.get("delivery_id"))))
+            .map(|row| {
+                WaitCandidate::primary(
+                    map_message(&row),
+                    Some(row.get("delivery_id")),
+                    row.get("snapshot_version"),
+                )
+            })
             .collect();
 
         if options.wake_on_cc {
             let cc_sql = format!(
-                "SELECT {MSG_COLS_M}, d.id AS delivery_id FROM deliveries d
+                "SELECT {MSG_COLS_M}, d.id AS delivery_id,
+                        (SELECT version FROM application_state_version WHERE singleton=1)
+                        AS snapshot_version
+                 FROM deliveries d
                  JOIN messages m ON m.id=d.message_id
                  WHERE d.recipient=$1
                    AND d.consumed_at_ms IS NOT NULL
@@ -1625,8 +1749,10 @@ impl Backend for PgBackend {
             candidates.extend(cc_messages.into_iter().filter_map(|row| {
                 let message = map_message(&row);
                 let delivery_id = row.get("delivery_id");
-                (delivery_role(address, &message.to_addr, message.cc.as_deref()) == "cc")
-                    .then(|| WaitCandidate::cc_notification(message, Some(delivery_id)))
+                let snapshot_version = row.get("snapshot_version");
+                (delivery_role(address, &message.to_addr, message.cc.as_deref()) == "cc").then(
+                    || WaitCandidate::cc_notification(message, Some(delivery_id), snapshot_version),
+                )
             }));
         }
 
@@ -1828,6 +1954,158 @@ impl Backend for PgBackend {
         };
         tx.commit().await?;
         Ok(row)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn application_disposition_with_ack(
+        &self,
+        recipient: &str,
+        owner_instance_id: &str,
+        lease_epoch: i64,
+        message_id: i64,
+        delivery_id: i64,
+        state: &str,
+        note: Option<&str>,
+        by: Option<&str>,
+        compound_step: Option<&CompoundDispositionStep>,
+    ) -> Result<(Option<DispositionRow>, DeliveryOutcome)> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await?;
+        let lease = tx
+            .query_opt(
+                "SELECT lease_epoch, owner_instance_id FROM leases
+                 WHERE address=$1 FOR UPDATE",
+                &[&recipient],
+            )
+            .await?;
+        let is_owner = lease.is_some_and(|row| {
+            row.get::<_, Option<i64>>("lease_epoch") == Some(lease_epoch)
+                && row.get::<_, Option<String>>("owner_instance_id").as_deref()
+                    == Some(owner_instance_id)
+        });
+        if !is_owner {
+            tx.rollback().await?;
+            return Ok((None, DeliveryOutcome::NotOwner));
+        }
+        materialize_pending_delivery_rows_for_recipient_tx(&tx, recipient).await?;
+        let delivery = tx
+            .query_opt(
+                "SELECT id, consumed_at_ms FROM deliveries
+                 WHERE message_id=$1 AND recipient=$2 FOR UPDATE",
+                &[&message_id, &recipient],
+            )
+            .await?;
+        let Some(delivery) = delivery else {
+            tx.rollback().await?;
+            return Ok((None, DeliveryOutcome::AckNoOp));
+        };
+        if delivery.get::<_, i64>("id") != delivery_id {
+            tx.rollback().await?;
+            return Ok((None, DeliveryOutcome::DeliveryMismatch));
+        }
+        if let Some(compound) = compound_step {
+            validate_compound_prerequisites_postgres(&tx, compound).await?;
+        }
+        let consumed_at_ms: Option<i64> = delivery.get("consumed_at_ms");
+        let now = pg_tx_advance_clock_hwm(&tx).await?;
+        let id: i64 = tx
+            .query_one(
+                "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms)
+                 VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
+                &[&message_id, &recipient, &state, &note, &by, &now],
+            )
+            .await?
+            .get("id");
+        let mut outcome = if consumed_at_ms.is_some() {
+            DeliveryOutcome::AlreadyConsumed
+        } else {
+            DeliveryOutcome::AckNoOp
+        };
+        if Disposition::is_terminal_str(state) && consumed_at_ms.is_none() {
+            tx.execute(
+                "UPDATE deliveries SET consumed_at_ms=$1
+                 WHERE id=$2 AND message_id=$3 AND recipient=$4",
+                &[&now, &delivery_id, &message_id, &recipient],
+            )
+            .await?;
+            pg_tx_append_state_delta(
+                &tx,
+                "acknowledgment",
+                &format!("delivery:{delivery_id}"),
+                &serde_json::json!({
+                    "delivery_id": delivery_id,
+                    "message_id": message_id,
+                    "recipient": recipient,
+                })
+                .to_string(),
+            )
+            .await?;
+            if let Some(compound) = compound_step {
+                let changed = tx
+                    .execute(
+                        "UPDATE application_compound_steps
+                         SET state='accepted', outcome_json=$5, recovery_json=$6,
+                             updated_at_ms=$7, completed_at_ms=$7
+                         WHERE logical_store_id=$1 AND application_responsibility=$2
+                           AND operation_id=$3 AND step_id=$4",
+                        &[
+                            &compound.logical_store_id,
+                            &compound.application_responsibility,
+                            &compound.operation_id,
+                            &compound.step_id,
+                            &compound.outcome_json,
+                            &compound.recovery_json,
+                            &now,
+                        ],
+                    )
+                    .await?;
+                if changed == 0 {
+                    bail!("compound step does not exist");
+                }
+                pg_tx_append_state_delta(
+                    &tx,
+                    "compound",
+                    &format!(
+                        "operation:{}:step:{}",
+                        compound.operation_id, compound.step_id
+                    ),
+                    &serde_json::json!({
+                        "operation_id": compound.operation_id,
+                        "step_id": compound.step_id,
+                        "state": "accepted",
+                    })
+                    .to_string(),
+                )
+                .await?;
+            }
+            outcome = DeliveryOutcome::Marked;
+        }
+        pg_tx_append_state_delta(
+            &tx,
+            "disposition",
+            &format!("message:{message_id}:recipient:{recipient}"),
+            &serde_json::json!({
+                "message_id": message_id,
+                "recipient": recipient,
+                "state": state,
+                "is_terminal": Disposition::is_terminal_str(state),
+            })
+            .to_string(),
+        )
+        .await?;
+        tx.commit().await?;
+        Ok((
+            Some(DispositionRow {
+                id,
+                message_id,
+                recipient: recipient.to_string(),
+                state: state.to_string(),
+                note: note.map(str::to_string),
+                by_principal: by.map(str::to_string),
+                at_ms: now,
+            }),
+            outcome,
+        ))
     }
 
     async fn dispositions_for(&self, message_id: i64) -> Result<Vec<DispositionRow>> {
@@ -2235,12 +2513,53 @@ impl Backend for PgBackend {
     ) -> Result<CompoundStepRecord> {
         let mut client = self.client().await?;
         let tx = client.transaction().await?;
+        let prerequisites_json: String = tx
+            .query_opt(
+                "SELECT prerequisites_json FROM application_compound_steps
+                 WHERE logical_store_id=$1 AND application_responsibility=$2
+                   AND operation_id=$3 AND step_id=$4 FOR UPDATE",
+                &[
+                    &logical_store_id,
+                    &application_responsibility,
+                    &operation_id,
+                    &step_id,
+                ],
+            )
+            .await?
+            .ok_or_else(|| anyhow!("compound step does not exist"))?
+            .get("prerequisites_json");
+        let prerequisites: Vec<String> = serde_json::from_str(&prerequisites_json)?;
+        for prerequisite in prerequisites {
+            let prerequisite_state = tx
+                .query_opt(
+                    "SELECT state FROM application_compound_steps
+                     WHERE logical_store_id=$1 AND application_responsibility=$2
+                       AND operation_id=$3 AND step_id=$4 FOR UPDATE",
+                    &[
+                        &logical_store_id,
+                        &application_responsibility,
+                        &operation_id,
+                        &prerequisite,
+                    ],
+                )
+                .await?
+                .map(|row| row.get::<_, String>("state"));
+            if !matches!(
+                prerequisite_state.as_deref(),
+                Some("accepted" | "completed" | "no-op")
+            ) {
+                bail!("compound prerequisite is not durably complete");
+            }
+        }
         let now = pg_tx_advance_clock_hwm(&tx).await?;
         let row = tx
             .query_opt(
                 "UPDATE application_compound_steps
                  SET state=$5, outcome_json=$6, recovery_json=$7,
-                     updated_at_ms=$8, completed_at_ms=$8
+                     updated_at_ms=$8,
+                     completed_at_ms=CASE
+                         WHEN $5 IN ('accepted','rejected','completed','no-op')
+                         THEN $8 ELSE NULL END
                  WHERE logical_store_id=$1 AND application_responsibility=$2
                    AND operation_id=$3 AND step_id=$4
                  RETURNING logical_store_id, application_responsibility, operation_id,
@@ -2323,6 +2642,57 @@ impl Backend for PgBackend {
             .collect())
     }
 
+    async fn state_delta_page(
+        &self,
+        after_version: i64,
+        limit: i64,
+    ) -> Result<StateDeltaPageRecord> {
+        let mut client = self.client().await?;
+        let tx = client
+            .build_transaction()
+            .isolation_level(tokio_postgres::IsolationLevel::RepeatableRead)
+            .start()
+            .await?;
+        let current_version: i64 = tx
+            .query_one(
+                "SELECT version FROM application_state_version WHERE singleton=1",
+                &[],
+            )
+            .await?
+            .get("version");
+        let retained_floor: Option<i64> = tx
+            .query_one(
+                "SELECT MIN(version) AS floor FROM application_state_deltas",
+                &[],
+            )
+            .await?
+            .get("floor");
+        let rows = tx
+            .query(
+                "SELECT version, axis, entity_id, payload_json, at_ms
+                 FROM application_state_deltas
+                 WHERE version>$1 ORDER BY version LIMIT $2",
+                &[&after_version, &limit.max(1)],
+            )
+            .await?;
+        let deltas = rows
+            .iter()
+            .map(|row| StateDeltaRecord {
+                version: row.get("version"),
+                axis: row.get("axis"),
+                entity_id: row.get("entity_id"),
+                payload_json: row.get("payload_json"),
+                at_ms: row.get("at_ms"),
+            })
+            .collect();
+        tx.commit().await?;
+        Ok(StateDeltaPageRecord {
+            current_version,
+            retained_floor: retained_floor.unwrap_or(current_version.saturating_add(1)),
+            deltas,
+        })
+    }
+
     async fn history_page(&self, query: &HistoryQuery) -> Result<Vec<HistoryRecord>> {
         if query.unresolved_only && query.recipient.is_none() {
             bail!("unresolved history requires an exact recipient");
@@ -2401,24 +2771,21 @@ impl Backend for PgBackend {
     ) -> Result<CleanupReport> {
         let mut client = self.client().await?;
         let tx = client.transaction().await?;
-        let operations_deleted = tx
-            .execute(
-                "WITH doomed AS (
-                     SELECT o.ctid FROM application_operations o
-                     WHERE o.logical_store_id=$1 AND o.application_responsibility=$2
-                       AND o.state IN ('accepted','rejected','duplicate','completed')
-                       AND o.completed_at_ms IS NOT NULL AND o.completed_at_ms<$3
-                       AND NOT EXISTS (
-                           SELECT 1 FROM application_compound_steps s
-                           WHERE s.logical_store_id=o.logical_store_id
-                             AND s.application_responsibility=o.application_responsibility
-                             AND s.operation_id=o.operation_id
-                             AND s.completed_at_ms IS NULL
-                       )
-                     ORDER BY completed_at_ms LIMIT $4
-                 )
-                 DELETE FROM application_operations
-                 WHERE ctid IN (SELECT ctid FROM doomed)",
+        let deleted_operation_ids: Vec<String> = tx
+            .query(
+                "SELECT o.operation_id FROM application_operations o
+                 WHERE o.logical_store_id=$1 AND o.application_responsibility=$2
+                   AND o.state IN ('accepted','rejected','duplicate','completed')
+                   AND o.completed_at_ms IS NOT NULL AND o.completed_at_ms<$3
+                   AND NOT EXISTS (
+                       SELECT 1 FROM application_compound_steps s
+                       WHERE s.logical_store_id=o.logical_store_id
+                         AND s.application_responsibility=o.application_responsibility
+                         AND s.operation_id=o.operation_id
+                         AND s.completed_at_ms IS NULL
+                   )
+                 ORDER BY o.completed_at_ms LIMIT $4
+                 FOR UPDATE",
                 &[
                     &scope.logical_store_id,
                     &scope.application_responsibility,
@@ -2426,19 +2793,35 @@ impl Backend for PgBackend {
                     &policy.max_delete.max(0),
                 ],
             )
-            .await? as i64;
-        tx.execute(
-            "DELETE FROM application_operation_messages aom
-             WHERE logical_store_id=$1 AND application_responsibility=$2
-               AND NOT EXISTS (
-                   SELECT 1 FROM application_operations o
-                   WHERE o.logical_store_id=aom.logical_store_id
-                     AND o.application_responsibility=aom.application_responsibility
-                     AND o.operation_id=aom.operation_id
-               )",
-            &[&scope.logical_store_id, &scope.application_responsibility],
-        )
-        .await?;
+            .await?
+            .iter()
+            .map(|row| row.get("operation_id"))
+            .collect();
+        for operation_id in &deleted_operation_ids {
+            tx.execute(
+                "DELETE FROM application_operation_messages
+                 WHERE logical_store_id=$1 AND application_responsibility=$2
+                   AND operation_id=$3",
+                &[
+                    &scope.logical_store_id,
+                    &scope.application_responsibility,
+                    operation_id,
+                ],
+            )
+            .await?;
+            tx.execute(
+                "DELETE FROM application_operations
+                 WHERE logical_store_id=$1 AND application_responsibility=$2
+                   AND operation_id=$3",
+                &[
+                    &scope.logical_store_id,
+                    &scope.application_responsibility,
+                    operation_id,
+                ],
+            )
+            .await?;
+        }
+        let operations_deleted = deleted_operation_ids.len() as i64;
         let compound_steps_deleted = tx
             .execute(
                 "WITH doomed AS (
@@ -2464,27 +2847,10 @@ impl Backend for PgBackend {
                 ],
             )
             .await? as i64;
-        let deltas_deleted = match policy.deltas_before_version {
-            Some(version) => {
-                tx.execute(
-                    "WITH doomed AS (
-                         SELECT version FROM application_state_deltas
-                         WHERE version<$1
-                         ORDER BY version LIMIT $2
-                     )
-                     DELETE FROM application_state_deltas
-                     WHERE version IN (SELECT version FROM doomed)",
-                    &[&version, &policy.max_delete.max(0)],
-                )
-                .await? as i64
-            }
-            None => 0,
-        };
         tx.commit().await?;
         Ok(CleanupReport {
             operations_deleted,
             compound_steps_deleted,
-            deltas_deleted,
         })
     }
 
@@ -2509,20 +2875,32 @@ impl Backend for PgBackend {
                 &[&scope.logical_store_id, &scope.application_responsibility],
             )
             .await?;
-        let deltas = client
-            .query_one(
-                "SELECT COUNT(*)::bigint AS count, MIN(at_ms) AS oldest
-                 FROM application_state_deltas",
-                &[],
-            )
-            .await?;
         Ok(ApplicationStorageStats {
             operation_rows: operations.get("count"),
             compound_step_rows: compounds.get("count"),
-            delta_rows: deltas.get("count"),
             oldest_operation_at_ms: operations.get("oldest"),
             oldest_compound_step_at_ms: compounds.get("oldest"),
-            oldest_delta_at_ms: deltas.get("oldest"),
+        })
+    }
+
+    async fn cleanup_state_deltas(
+        &self,
+        policy: StoreDeltaRetentionPolicy,
+    ) -> Result<StoreDeltaCleanupReport> {
+        let client = self.client().await?;
+        let deleted = client
+            .execute(
+                "WITH doomed AS (
+                     SELECT version FROM application_state_deltas
+                     WHERE version<$1 ORDER BY version LIMIT $2
+                 )
+                 DELETE FROM application_state_deltas
+                 WHERE version IN (SELECT version FROM doomed)",
+                &[&policy.before_version, &policy.max_delete.max(0)],
+            )
+            .await? as i64;
+        Ok(StoreDeltaCleanupReport {
+            deltas_deleted: deleted,
         })
     }
 

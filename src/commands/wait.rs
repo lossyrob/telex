@@ -450,6 +450,7 @@ impl WaitOutcome {
                 sent_at_ms,
                 buffered_at_ms,
                 delivery_id,
+                snapshot_version,
                 lease_epoch,
             } => {
                 let waiter_exit_ms = now_ms();
@@ -473,6 +474,7 @@ impl WaitOutcome {
                     "sent_at_ms": sent_at_ms,
                     "buffered_at_ms": buffered_at_ms,
                     "delivery_id": delivery_id,
+                    "snapshot_version": snapshot_version,
                     "lease_epoch": lease_epoch,
                     "waiter_exit_ms": waiter_exit_ms,
                     "backend_ms": buffered_at_ms - sent_at_ms,
@@ -797,6 +799,7 @@ mod tests {
             sent_at_ms: now_ms(),
             buffered_at_ms: now_ms(),
             delivery_id: Some(1),
+            snapshot_version: Some(1),
             lease_epoch: Some(2),
         }
     }

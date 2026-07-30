@@ -3590,6 +3590,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             protocol_version: current_protocol_version(),
             daemon_version: proto::DAEMON_VERSION.to_string(),
             instance_id: state.instance_id.clone(),
+            capabilities: proto::daemon_capabilities(),
         },
         Request::Status { detail, proof, .. } => {
             if detail {
@@ -3819,6 +3820,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             logical_store_id,
             application_responsibility,
             operation_id,
+            payload_fingerprint,
         } => {
             send_message(
                 state.clone(),
@@ -3833,7 +3835,12 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 subject,
                 body,
                 metadata,
-                Some((logical_store_id, application_responsibility, operation_id)),
+                Some((
+                    logical_store_id,
+                    application_responsibility,
+                    operation_id,
+                    payload_fingerprint,
+                )),
             )
             .await
         }
@@ -3881,6 +3888,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             logical_store_id,
             application_responsibility,
             operation_id,
+            payload_fingerprint,
         } => {
             reply_message(
                 state.clone(),
@@ -3895,7 +3903,12 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 cc,
                 body,
                 metadata,
-                Some((logical_store_id, application_responsibility, operation_id)),
+                Some((
+                    logical_store_id,
+                    application_responsibility,
+                    operation_id,
+                    payload_fingerprint,
+                )),
             )
             .await
         }
@@ -3968,7 +3981,7 @@ async fn register_member(
                 if let Some(capability) = capability {
                     if capability != existing.capability {
                         return proto::error_response(
-                            proto::ERROR_COLLISION,
+                            proto::ERROR_CAPABILITY_CONFLICT,
                             format!(
                                 "address {address} is already attached with {:?} capability; detach before changing capability",
                                 existing.capability
@@ -4913,6 +4926,7 @@ async fn wait_for_message_with_idle_ttl(
             )
         }) {
             let delivery_id = candidate.delivery_id;
+            let snapshot_version = candidate.snapshot_version;
             let row = candidate.message;
             let current = match state.get_member(&store_key, &session_id, &address) {
                 Some(member) => member,
@@ -4965,6 +4979,7 @@ async fn wait_for_message_with_idle_ttl(
                 sent_at_ms: row.sent_at_ms,
                 buffered_at_ms: now_ms(),
                 delivery_id,
+                snapshot_version: Some(snapshot_version),
                 lease_epoch: Some(current.lease_epoch),
             };
             return match proto::json_line_frame_len(&response) {
@@ -5202,6 +5217,9 @@ async fn ack_message_inner(
             }
         }
     };
+    if member.capability == StationCapability::SendOnly {
+        return proto::unsupported("acknowledgment requires bidirectional membership");
+    }
     let outcome = match delivery_id {
         Some(delivery_id) => {
             backend
@@ -5281,7 +5299,7 @@ async fn send_message(
     subject: Option<String>,
     body: String,
     metadata: Option<String>,
-    application_operation: Option<(String, String, String)>,
+    application_operation: Option<(String, String, String, String)>,
 ) -> Response {
     let attention = match Attention::parse(&attention) {
         Ok(attention) => attention,
@@ -5337,7 +5355,7 @@ async fn send_message(
         sent_at_ms: now_ms(),
     };
     let row = match application_operation {
-        Some((logical_store_id, application_responsibility, operation_id)) => {
+        Some((logical_store_id, application_responsibility, operation_id, payload_fingerprint)) => {
             backend
                 .insert_application_message(
                     &new,
@@ -5345,6 +5363,7 @@ async fn send_message(
                         logical_store_id,
                         application_responsibility,
                         operation_id,
+                        payload_fingerprint,
                     },
                 )
                 .await
@@ -5400,7 +5419,7 @@ async fn reply_message(
     cc: Option<String>,
     body: String,
     metadata: Option<String>,
-    application_operation: Option<(String, String, String)>,
+    application_operation: Option<(String, String, String, String)>,
 ) -> Response {
     let attention = match Attention::parse(&attention) {
         Ok(attention) => attention,
@@ -5464,7 +5483,7 @@ async fn reply_message(
         sent_at_ms: now_ms(),
     };
     let row = match application_operation {
-        Some((logical_store_id, application_responsibility, operation_id)) => {
+        Some((logical_store_id, application_responsibility, operation_id, payload_fingerprint)) => {
             backend
                 .insert_application_message(
                     &new,
@@ -5472,6 +5491,7 @@ async fn reply_message(
                         logical_store_id,
                         application_responsibility,
                         operation_id,
+                        payload_fingerprint,
                     },
                 )
                 .await
@@ -7798,14 +7818,39 @@ mod p3_tests {
         )
         .await;
         assert!(matches!(
-            sent,
+            &sent,
             Response::Sent {
                 receipt: SentReceipt {
                     occupied: Some(false),
-                    ref receipt,
+                    receipt,
                     ..
                 }
             } if receipt == "queued-unoccupied"
+        ));
+        let message_id = match sent {
+            Response::Sent { receipt } => receipt.id,
+            _ => unreachable!(),
+        };
+        let backend = state.backend_for(&store).await.unwrap();
+        let delivery_id = backend
+            .delivery_for_recipient(message_id, address)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        assert!(matches!(
+            request(
+                state.clone(),
+                Request::ApplicationAck {
+                    store_key: store.clone(),
+                    session_id: "application-runtime".to_string(),
+                    address: address.to_string(),
+                    message_id,
+                    delivery_id,
+                }
+            )
+            .await,
+            Response::Error { ref code, .. } if code == proto::ERROR_UNSUPPORTED
         ));
 
         let wait = request(
@@ -7851,7 +7896,7 @@ mod p3_tests {
         ));
         assert!(matches!(
             request(state.clone(), register(StationCapability::SendOnly)).await,
-            Response::Error { ref code, .. } if code == proto::ERROR_COLLISION
+            Response::Error { ref code, .. } if code == proto::ERROR_CAPABILITY_CONFLICT
         ));
         assert_eq!(
             state
@@ -7860,6 +7905,98 @@ mod p3_tests {
                 .capability,
             StationCapability::Bidirectional
         );
+    }
+
+    #[tokio::test]
+    async fn bidirectional_application_membership_is_occupied_and_exact_acknowledgeable() {
+        let state = test_state("application-bidirectional");
+        let store = store_key("application-bidirectional");
+        let address = "addr:application";
+        assert!(matches!(
+            request(
+                state.clone(),
+                Request::ApplicationRegister {
+                    store_key: store.clone(),
+                    address: address.to_string(),
+                    session_id: "application-runtime".to_string(),
+                    occupant: "application".to_string(),
+                    capability: StationCapability::Bidirectional,
+                    description: None,
+                    scope: None,
+                    tags: None,
+                    watch_pids: Vec::new(),
+                    recovery: false,
+                }
+            )
+            .await,
+            Response::Registered { .. }
+        ));
+        let sent = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "application-runtime".to_string(),
+                from_addr: Some(address.to_string()),
+                to_addr: address.to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: "deliver".to_string(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            sent,
+            Response::Sent {
+                receipt: SentReceipt {
+                    occupied: Some(true),
+                    ..
+                }
+            }
+        ));
+        let delivered = request(
+            state.clone(),
+            Request::Wait {
+                store_key: store.clone(),
+                session_id: "application-runtime".to_string(),
+                address: address.to_string(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: false,
+                timeout_ms: Some(100),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: None,
+            },
+        )
+        .await;
+        let (message_id, delivery_id) = match delivered {
+            Response::Message {
+                id,
+                delivery_id: Some(delivery_id),
+                ..
+            } => (id, delivery_id),
+            other => panic!("expected exact delivery, got {other:?}"),
+        };
+        assert!(matches!(
+            request(
+                state,
+                Request::ApplicationAck {
+                    store_key: store,
+                    session_id: "application-runtime".to_string(),
+                    address: address.to_string(),
+                    message_id,
+                    delivery_id,
+                }
+            )
+            .await,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
     }
 
     #[tokio::test]

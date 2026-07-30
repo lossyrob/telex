@@ -9,12 +9,20 @@ connection strings, or product-private helpers.
 This node ships the core, not a public language binding. Later bindings wrap
 these types and preserve their identities, outcomes, and error distinctions.
 
+The public module defines its own `ApplicationCapability` and error taxonomy;
+daemon IPC enums are not part of the supported API. Message, delivery,
+disposition, operation, compound-step, and delta records returned by the module
+are intentional stable domain records. Their JSON payload fields are opaque
+versioned evidence and must not be interpreted as backend table layouts.
+
 ## Core model
 
 - `ApplicationResponsibility` is stable configuration. `RuntimeId` is generated
   from OS randomness for each `ApplicationClient` instance and is never reused.
-- `LogicalStoreId` is an opaque, versioned SHA-256 identity. Public results never
-  expose the internal SQLite path, Postgres target, credential, or store key.
+- `LogicalStoreId` is an opaque identity generated once and persisted in schema
+  v3. First open, restart, symlink/path spelling, and profile presentation changes
+  therefore resolve to the same store identity. Public results never expose the
+  internal SQLite path, Postgres target, credential, or store key.
 - Every membership declares `send-only` or `bidirectional`. Send-only membership
   can author messages but is excluded from inbound occupancy, receive, and ack.
 - Strict recovery reports typed membership loss. Bounded recovery retries only
@@ -23,7 +31,10 @@ these types and preserve their identities, outcomes, and error distinctions.
   and an `AckHandle` bound to that exact delivery. Ack remains an explicit action
   after durable application ingest.
 - Durable acceptance, occupancy, push, exact-recipient consumption, and workflow
-  disposition remain separate `ReceiptAxes`.
+  disposition remain separate `ReceiptAxes`. The axes returned by send/reply are
+  an acceptance-time snapshot. `refresh_receipt_axes` refreshes exact delivery
+  consumption and workflow disposition; push-attempt evidence is currently
+  reported as unavailable rather than implied current.
 - Application operations use caller-supplied `OperationId` values. Reuse with the
   same payload reconciles the prior result; reuse with different input is a typed
   `OperationMismatch`.
@@ -50,10 +61,11 @@ backend evidence. Postgres exposes the configured connection user as
 - Ack only after the application has durably ingested enough state to resume.
 - Treat `Unknown { raw_reason }` as typed forward-compatible evidence. Do not
   reinterpret it as deliberate detach, collision, or safe automatic repair.
-- Use `cleanup` with explicit age, row-count, and delta-version bounds. It
-  deletes only terminal application operation/step records and explicitly
-  selected old deltas while preserving in-flight work, messages, deliveries,
-  dispositions, and other apps.
+- Use application `cleanup` with explicit age and row-count bounds. It deletes
+  only terminal records owned by that responsibility and preserves in-flight
+  work, messages, deliveries, dispositions, other apps, and the store-global
+  delta journal. Store administrators use `ApplicationStoreMaintenance` with an
+  explicit version floor to prune global deltas.
 - A capability mismatch or missing delivery-row identity is a fail-closed version
   skew signal. Upgrade the daemon/client pair; do not fabricate an ack identity.
 - Existing daemon `StationHealth` remains available for compatibility. New

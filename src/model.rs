@@ -14,6 +14,17 @@ pub fn now_ms() -> i64 {
         .as_millis() as i64
 }
 
+pub fn new_logical_store_id() -> Result<String> {
+    let mut bytes = [0u8; 32];
+    getrandom::getrandom(&mut bytes).map_err(|error| anyhow::anyhow!(error.to_string()))?;
+    let mut value = String::from("store-v1-");
+    for byte in bytes {
+        use std::fmt::Write as _;
+        write!(&mut value, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    Ok(value)
+}
+
 /// How urgently a recipient should be woken. Note: "interrupt" means "deliver at the
 /// next turn boundary," not "preempt the running model" — agent-wake latency dominates.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -316,6 +327,7 @@ pub struct ApplicationMessageOperation {
     pub logical_store_id: String,
     pub application_responsibility: String,
     pub operation_id: String,
+    pub payload_fingerprint: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -405,6 +417,16 @@ pub struct NewCompoundStepRecord {
     pub created_at_ms: i64,
 }
 
+#[derive(Clone, Debug)]
+pub struct CompoundDispositionStep {
+    pub logical_store_id: String,
+    pub application_responsibility: String,
+    pub operation_id: String,
+    pub step_id: String,
+    pub outcome_json: Option<String>,
+    pub recovery_json: Option<String>,
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct CompoundStepRecord {
     pub logical_store_id: String,
@@ -466,13 +488,22 @@ pub struct ApplicationRecordScope {
 pub struct RetentionPolicy {
     pub completed_before_ms: i64,
     pub max_delete: i64,
-    pub deltas_before_version: Option<i64>,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct CleanupReport {
     pub operations_deleted: i64,
     pub compound_steps_deleted: i64,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct StoreDeltaRetentionPolicy {
+    pub before_version: i64,
+    pub max_delete: i64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct StoreDeltaCleanupReport {
     pub deltas_deleted: i64,
 }
 
@@ -480,10 +511,15 @@ pub struct CleanupReport {
 pub struct ApplicationStorageStats {
     pub operation_rows: i64,
     pub compound_step_rows: i64,
-    pub delta_rows: i64,
     pub oldest_operation_at_ms: Option<i64>,
     pub oldest_compound_step_at_ms: Option<i64>,
-    pub oldest_delta_at_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct StateDeltaPageRecord {
+    pub current_version: i64,
+    pub retained_floor: i64,
+    pub deltas: Vec<StateDeltaRecord>,
 }
 
 /// A message plus its current disposition status, for inbox listing.
