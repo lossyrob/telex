@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (direct human-attended Telex endpoint)",
-  "summary": "Direct Station reset PR #136 is in paired review at head 59043ce5bf6b3fdd2bb7084777d15141929fbf41. Diff is design-only, all six CI checks pass, mergeability is clean, and station-app remains gated.",
+  "summary": "Direct Station reset PR #136 is responding to review at head 59043ce5bf6b3fdd2bb7084777d15141929fbf41. CI is green; three node-scoped contract blockers and five clarifications are assigned for repair.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-30T22:49:30Z",
+  "updatedAt": "2026-07-30T23:50:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",

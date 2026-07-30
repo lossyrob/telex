@@ -48,6 +48,14 @@ log, design index, and Operator Station contract; all six CI checks pass and the
 PR is mergeable. Review ownership remains with the paired reviewer, while the
 later direction gate remains builder-owned.
 
+Review 4824128333 found three blocking contract-completeness gaps: terminal or
+reassignment behavior for removed-address obligations, exhaustive Reply & Handle
+post-conditions, and a catch-all notification decision for non-primary delivery
+roles. Five non-blocking clarifications cover trust-model wording, computable
+backlog health, safe actions, Application Client carry-forward, and visible
+source-resolution states. All are issue-scoped repairs rather than boundary or
+shared-contract decisions.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so
