@@ -1,0 +1,75 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-detector-request-v2.schema.json",
+  "title": "Telex Watcher detector request v2",
+  "$comment": "Opaque JSON values must be valid I-JSON and RFC 8785 canonicalizable. Duplicate object member names and values outside that subset are rejected before execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "attempt",
+    "watch",
+    "state"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "now"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "now": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "watch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "activatedAt",
+        "lastSuccessAt",
+        "parameters"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "activatedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastSuccessAt": {
+          "oneOf": [
+            {
+              "type": "string",
+              "format": "date-time"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parameters": true
+      }
+    },
+    "state": true
+  },
+  "$defs": {
+    "nonControlString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    }
+  }
+}

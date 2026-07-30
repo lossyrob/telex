@@ -1943,7 +1943,7 @@ artifacts; automated retention/garbage collection is outside this decision.
 ## 0046 — Watcher runs provider-neutral trusted local detectors with receipt-gated state
 
 - **Date:** 2026-07-22
-- **Status:** Accepted (issue #110)
+- **Status:** Accepted (issue #110; authoring, provenance, kind-policy, downtime, template-framework, and detector-authored event-identity details superseded by 0050; provider-neutral trusted-local receipt-gated execution retained)
 
 **Context.** Long-duration external observation should not occupy an agent session or
 reproduce the Loop skill's session-owned worker and attached waiter lifecycle. The generic
@@ -2069,3 +2069,64 @@ prove both capabilities without weakening either domain. The
 `application-client-ready` checkpoint is design-only: it unlocks that downstream work
 but does not claim an implementation, binding, conformance result, consumer
 integration, or production readiness.
+
+## 0050 — Watcher v2 uses minimal command registration and runtime-owned event identity
+
+- **Date:** 2026-07-30
+- **Status:** Accepted (issue #133)
+
+**Context.** ADR 0046 established the correct production architecture for Telex
+Watcher: a separately supervised, provider-neutral application runs trusted
+same-user local detectors, owns fixed routing and generic execution policy, and
+commits event-producing state only after durable Telex acceptance. Subsequent
+operator dogfood rejected the mandatory authoring ceremony layered onto that
+boundary. Script pinning/digests, manifests, event-kind allowlists, provider
+preflight, downtime declarations, template conformance, and detector-authored
+event IDs made a simple agent-authored watch require a framework before it could
+run.
+
+**Decision.** Watcher v2 uses the minimal command-plus-policy contract in
+[watcher.md](watcher.md). Ordinary registration requires only a stable watch ID,
+argv command, cadence, timeout, backend profile, sender, and fixed target;
+attention, disposition, working directory, environment names, parameters, and
+initial state have explicit defaults or optional generic semantics. Detector
+request/result v2 carries generic timing facts, opaque state, structured outcomes,
+and bounded event content, but no script provenance, route, action, or event
+identity.
+
+Watcher allocates a permanent per-watch sequence and runtime-generated event ID
+before the first send, stages the complete operation durably, and reuses that
+identity through exact same-operation retry and receipt reconciliation. Unknown
+acceptance makes the watch visibly ineligible and eventually blocked; Watcher
+never guesses accepted or rejected. Durable acceptance atomically commits state,
+sequence, receipt evidence, and attempt result. Removed watch IDs are never
+reused, and identical later detector events are new recurrences with new
+sequences. Watcher exposes recurrence evidence but does not infer provider intent
+by suppressing content.
+
+Manifests, script digests/pinning, event-kind allowlists, provider preflight,
+cursor/downtime declarations, provider fixtures/conformance, provider budgets,
+and template frameworks are absent from v2 registration/runtime semantics.
+Projects may add them in detector code, wrappers, examples, tests, or separately
+versioned optional tooling.
+
+**Supersession.** This decision supersedes ADR 0046 only for mandatory script
+provenance/pinning, allowed-kind policy, registration-owned downtime declarations,
+template-framework/conformance obligations, and `(watchId, detectorEventId)`
+identity. ADR 0046 remains binding for the provider-neutral application boundary,
+trusted same-user local execution, local-only registration, fixed routing,
+structured results, generic bounds and diagnostics, no workflow actions, durable
+acceptance before event-state commit, visible at-least-once duplicates, and the
+shared Application Client/no-private-fallback boundary.
+
+**Consequences.** A cold-start authoring path is small enough for an agent to
+write or copy a detector, optionally run it, register command/cadence/timeout/
+route, and leave. Watcher no longer claims which script bytes ran or whether a
+provider-specific replay policy is safe; projects that need those assurances own
+them explicitly. The runtime must persist complete pending operations, sequence
+high-water marks, tombstones, receipt bindings, and recurrence diagnostics.
+Experimental v1 registrations require explicit migration to a new v2 watch ID
+and a reviewed opaque-state decision; an adapter is optional downstream work.
+The Application Client requirements crosswalk may need a later owner update for
+the strengthened operation-result reconciliation requirement, but this decision
+does not create a product-private client seam.
