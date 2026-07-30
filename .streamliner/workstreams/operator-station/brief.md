@@ -146,6 +146,17 @@ Active transition:
 - These are node-scoped design-completeness repairs. They do not reopen the
   direct product boundary, ADR 0051 allocation, or shared Application Client
   ownership.
+- Campaign assigned the stale direct/assisted/quiet, route-back,
+  mode-transition, Operator integration/readiness, and requirements-crosswalk
+  re-baseline to Application Client
+  [#129](https://github.com/lossyrob/telex/issues/129) /
+  [PR #132](https://github.com/lossyrob/telex/pull/132), with issue
+  [#12](https://github.com/lossyrob/telex/issues/12) remaining the public
+  contract/checkpoint owner.
+- PR #136 must add a durable carry-forward reference but must not edit shared
+  Application Client files. It preserves generic AC-C15 source-resolution states
+  unless that owner returns an explicitly accepted narrowing. The cross-workstream
+  review thread stays open until #129 provides exact evidence.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.

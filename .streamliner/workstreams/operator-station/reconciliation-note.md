@@ -56,6 +56,14 @@ backlog health, safe actions, Application Client carry-forward, and visible
 source-resolution states. All are issue-scoped repairs rather than boundary or
 shared-contract decisions.
 
+Campaign disposition assigned the stale direct/assisted/quiet, route-back,
+mode-transition, Operator integration/readiness, and crosswalk re-baseline to
+Application Client #129 / PR #132, with issue #12 retaining public contract
+authority. PR #136 records a carry-forward but does not edit shared-client files.
+Generic AC-C15 source-resolution states remain visible unless Application Client
+returns an explicit accepted narrowing; the cross-workstream review thread
+remains open until exact evidence is returned.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so
