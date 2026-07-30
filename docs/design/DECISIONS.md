@@ -2002,7 +2002,7 @@ and current UI remain evidence rather than production core contracts.
 ## 0048 — Direct and assisted routing use exclusive ingress attendance
 
 - **Date:** 2026-07-22
-- **Status:** Superseded by 0051
+- **Status:** Accepted (issue #114; Station topology superseded by 0051)
 
 **Context.** Direct operation needs the Station to receive raw obligations, while
 assisted operation needs an operator agent to filter the same worker-facing ingress.
@@ -2082,8 +2082,8 @@ notifications, ordinary reply, provenance, restart continuity, and delivery/ack 
 but the issue #114 contract promoted its operator-agent intermediary into first-party
 product architecture. Product-direction review concluded that agents can send directly
 to configured human-attended addresses while Telex remains a semantically dumb fabric.
-Campaign allocation reserved ADR 0051 for this reset; the number is intentional even
-though 0050 is not yet present in this branch.
+Campaign allocation reserved ADR 0051 for this reset; the numbering gap is
+intentional.
 
 **Decision.** Operator Station is a separately installable application that directly
 attends one or more explicitly configured Telex addresses through the supported

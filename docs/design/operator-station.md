@@ -121,8 +121,8 @@ This contract does not define or require:
   is not a workflow obligation for the CC recipient.
 
 **Human obligation**
-: A primary delivery to a configured Station address with
-  `requiresDisposition` set.
+: A primary delivery whose disposition requirement is set for that exact
+  configured recipient delivery.
 
 **Local projection**
 : Restart-safe Station-owned state used to render and recover messages,
@@ -133,8 +133,10 @@ This contract does not define or require:
 
 1. Operator Station directly attends configured addresses. No intermediary is
    required for send, receive, reply, or disposition.
-2. One address has at most one attending owner under existing Telex semantics.
-   Operator Station adds no shared-attendance exception.
+2. One address has at most one attending owner under the
+   [lease-collision contract](DESIGN.md#lease-collision-and-takeover).
+   Operator Station consumes the client's typed collision result and adds no
+   shared-attendance exception.
 3. Message acceptance, target occupancy, push, delivery, acknowledgment, local
    read state, notification submission, and workflow disposition remain
    separate facts.
@@ -165,7 +167,12 @@ The Station MUST be configured with:
 - a backend/profile or logical store selection;
 - one or more exact addresses to attend;
 - a stable application responsibility and a fresh runtime identity;
-- local notification, history, and cleanup policy.
+- local notification, bounded history/retention, and cleanup policy.
+
+Station semantics remain identical across supported SQLite and credentialed
+Postgres backends. Backend availability and principal-provenance differences
+remain visible evidence; they do not change message, acknowledgment,
+disposition, reply, or recovery meaning.
 
 The Station MUST NOT derive a second address, operator address, or intermediary
 topology from a configured address. Address names are deployment choices, not
@@ -217,6 +224,12 @@ Retained addresses keep their local projections and recipient state. Removed or
 replaced address projections remain available until the Station performs an
 explicit evidence-preserving cleanup under unambiguous application ownership.
 
+Before detaching or removing an address, the Station MUST surface its unresolved
+primary obligations and in-flight operations. Their local projections and
+address attribution remain until they become terminal, are explicitly
+reassigned, or are deliberately abandoned with a recorded reason. Retention
+policy MUST NOT prune unresolved obligations or in-flight operations.
+
 A deliberate detach is durable intent. Automatic recovery MUST NOT resurrect a
 deliberately removed address.
 
@@ -243,10 +256,21 @@ In-memory insertion, rendering, local read state, or toast submission is not
 durable ingest. Acknowledging one recipient MUST NOT consume another
 recipient's delivery.
 
-CC deliveries remain visibility-only under core Telex semantics. The Station
-MUST NOT offer a workflow disposition for its CC recipient, present it as a
-primary obligation, or infer authority from the primary recipient's
-`requiresDisposition` flag.
+CC deliveries remain visibility-only under core Telex semantics. Current
+Station support is bounded history/backfill visibility through generic history
+queries; it is not a guarantee of complete live CC acquisition. The Station
+MUST show the configured history bound and whether live CC observation is
+supported, disabled, or incomplete for the selected client/backend.
+
+The Station MUST NOT offer a workflow disposition for its CC recipient, present
+it as a primary obligation, or infer authority from the primary recipient's
+disposition requirement.
+
+Any non-primary role, including `watcher` or an unknown future role, MUST remain
+visibly classified and MUST NOT be inferred to be a human obligation or offered
+a workflow disposition. The Station durably ingests it before using any
+available acknowledgment capability, or fails visibly when the role is
+unsupported.
 
 At-least-once redelivery is normal. The Station dedupes by logical store and
 exact recipient delivery identity. Redelivery MUST NOT create a second feed
@@ -261,7 +285,8 @@ On startup and recovery, the Station requests:
 1. every unresolved primary obligation for its configured addresses;
 2. bounded recent message and delivery history;
 3. bounded thread history on demand;
-4. a snapshot fence or monotonic per-axis versions for subsequent deltas.
+4. bounded CC history when supported, with explicit completeness evidence;
+5. a snapshot fence or monotonic per-axis versions for subsequent deltas.
 
 Recovery MUST NOT require full-store materialization. Snapshot, backfill, and
 delta application MUST NOT regress newer message, delivery, acknowledgment,
@@ -269,6 +294,8 @@ disposition, health, or recovery state.
 
 Each feed row shows at least:
 
+- logical store, message, and exact delivery identity in a copyable diagnostic
+  surface;
 - recipient address and delivery role;
 - source address;
 - subject, kind, attention, and sent time;
@@ -305,6 +332,12 @@ thread. It is authored from the selected delivery's exact configured recipient
 address and targets the ordinary reply recipient determined by Telex reply
 semantics.
 
+Reply attention defaults to `next-checkpoint`. The human MAY explicitly select
+`interrupt` for a genuinely urgent response. A reply expected to unblock an
+agent MUST require disposition from its target recipient; an informational
+reply MAY deliberately omit that obligation, but the UI MUST make the choice
+explicit rather than silently defaulting it away.
+
 Reply uses the Application Client's metadata-bearing reply operation so opaque
 metadata can be preserved or supplied generically. Operator Station defines no
 reply schema and does not depend on implementation from closed PR #130.
@@ -312,6 +345,19 @@ reply schema and does not depend on implementation from closed PR #130.
 The Station verifies that the durable reply receipt identifies the expected
 logical store, parent/thread, sender, and recipient. A mismatch or indeterminate
 result remains visible and is reconciled before retry.
+
+The reply result MUST distinguish:
+
+- accepted while the target is unoccupied and durably queued;
+- rejected or retired target;
+- source identity mismatch;
+- already-terminal source obligation;
+- indeterminate acceptance.
+
+The UI never presents durable acceptance or queueing as human or agent
+consumption. If reply delivery is rejected or indeterminate, the selected
+human obligation remains explicitly open unless the human separately chooses a
+disposition.
 
 ### Exact-recipient disposition
 
@@ -325,6 +371,10 @@ actions are:
 
 The Station MAY offer **Reply** and **Reply & Handle** as convenience actions.
 Plain Reply leaves the selected obligation unchanged.
+
+The direct Station intentionally does not expose the core `escalate`
+disposition. A future direct-mode meaning requires a separate product decision;
+the retired mediation lifecycle is not restored implicitly.
 
 ### Reply & Handle ordering
 
@@ -382,7 +432,8 @@ its own feed identity, thread, recipient state, and notification evidence.
 For each toast-eligible delivery, the Station records the resolved decision,
 policy reason, submission attempt and time, observable OS result, and aggregate
 identity when used. Toast submission is not proof of human delivery, reading,
-or approval.
+or approval. Coalesced and suppressed notification counts remain observable so
+later usability and pressure validation can measure the direct topology.
 
 ## Provenance and non-impersonation
 
@@ -417,7 +468,7 @@ availability into one unqualified `online` state.
 |---|---|
 | Application lifecycle | configured, attaching, ready, partially ready, recovering, deliberately detached, stopped |
 | Per-address membership | owner/runtime, lease epoch, capability, collision or loss reason, latest error |
-| Receive path | healthy, recovering, degraded, attended but deaf, stopped, unknown |
+| Receive path | healthy, recovering, degraded, attended but deaf, stopped, unknown; client/daemon evidence and latest transition |
 | Delivery/ack | pending unconsumed count, ack-pending count, oldest age, stalled evidence |
 | Actionable backlog | unresolved primary count and oldest age per address |
 | Resynchronization | current fence/version, gap or mismatch, resync progress and result |
@@ -426,6 +477,24 @@ availability into one unqualified `online` state.
 
 Occupancy alone is never healthy receive status. Human availability is unknown
 unless a separate explicit local signal exists.
+
+Receive-state precedence is:
+
+1. `stopped` when membership is deliberately detached or receive capability is
+   absent;
+2. `attended but deaf` when membership remains but no healthy receive path is
+   armed past the configured deaf threshold;
+3. `recovering` while typed reconnect, reattach, or resynchronization work is in
+   progress;
+4. `degraded` for recent receive failures, gaps, or stalled actionable backlog
+   before the deaf threshold;
+5. `healthy` only when membership and receive evidence are current and no
+   stalled actionable backlog exists;
+6. `unknown` when required evidence is unavailable.
+
+The Application Client/daemon supplies membership, push/wait, backlog, gap, and
+latest-error evidence. Station configuration owns threshold values; operational
+hardening validates and tunes them.
 
 ## Restart, recovery, and operation reconciliation
 
@@ -516,6 +585,12 @@ contract are historical and have no current Station producer or consumer.
 Generic Application Client compound primitives remain available to other
 applications without becoming Operator Station requirements.
 
+The negative assisted/quiet/mediation vocabulary in the Application Client
+product-boundary list is historical provenance. Its downstream Operator
+integration bullet that names route-back ordering must be re-baselined by the
+shared client owner; ADR 0051 and this document govern current Station
+requirements. This node does not edit or weaken generic AC-C20 semantics.
+
 If implementation discovers that the accepted Application Client contract
 cannot express a required direct Station semantic, Station implementation is
 blocked on that shared owner. A private client, CLI parsing, raw IPC, spike
@@ -585,6 +660,16 @@ Later work validates credentialed Postgres, remote principals, duplicate and
 delayed delivery, offline/unoccupied periods, collision and recovery,
 notification pressure and OS suppression, security, packaging, install/upgrade,
 auto-start, signing, diagnostics, and cleanup.
+
+### Direct-topology carry-forward
+
+| Item | Owner |
+|---|---|
+| Complete live CC acquisition, if required beyond bounded history | Application Client design/conformance decision |
+| Receive-health threshold values and latency tuning | `station-app` and operational hardening |
+| Optimistic display of an accepted reply | `station-app`; must preserve durable receipt and partial state |
+| Notification pressure limits and coalescing policy | Usability validation and operational hardening |
+| Restart artifact and in-flight operation evidence | `station-app` validation |
 
 ## Revisit conditions
 
