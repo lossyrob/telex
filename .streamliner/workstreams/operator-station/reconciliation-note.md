@@ -34,6 +34,14 @@ stale `gpt-5.5` and `general-reviewer:claude-opus-4.7` instead of the live
 catalog's `gpt-5.6-sol` and `claude-opus-5`. This is a launch-system blocker, not
 a node-design issue; no worker session was launched.
 
+Streamliner repaired model resolution and proved preparation run
+`c7d3f616-466d-4bb2-a3b4-16f1d975f025`: clean base, `never-commit`, untracked
+PAW state, `--yolo`, `gpt-5.6-sol`, and `general-reviewer:claude-opus-5`.
+Paired run `419ba98f-6c1e-4829-8255-7e4de25a2a70` then launched implementer
+`9b7f8a6c-79f1-4967-afad-37b8dfbad5df` and reviewer
+`e32f377b-49f6-4d23-a09c-96b107f32075`; both stations reached
+`attended_push`. Issue #134 is now in progress.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so

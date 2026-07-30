@@ -113,17 +113,22 @@ Active transition:
 - ADR allocation message `1304` reserves ADR 0051,
   `direct-station-product-boundary`.
 - [#134](https://github.com/lossyrob/telex/issues/134)
-  `direct-station-contract-reset` was prepared through Streamliner run
-  `cda96dff-f2b8-49cc-b258-350b901e29ff`.
-- Preparation passed the clean-base, `never-commit`, untracked `.paw`, no
-  workflow-commit, `--yolo`, worktree, tracker, title/color, and ADR 0051
-  collision checks.
-- Terminal launch is blocked because generated WorkflowContext resolved
-  `gpt-5.5` and `general-reviewer:claude-opus-4.7`. The current runtime catalog
-  exposes newer compatible `gpt-5.6-sol` and `claude-opus-5`, both supporting
-  long context and xhigh reasoning.
-- No implementer or reviewer terminal was launched. Campaign must repair dynamic
-  latest-family resolution, then preparation must be rerun and revalidated.
+  `direct-station-contract-reset` is in progress.
+- Initial preparation run `cda96dff-f2b8-49cc-b258-350b901e29ff` caught stale
+  model resolution before terminal launch. Streamliner repaired paw-init to
+  resolve the live model catalog and reject mismatched WorkflowContext fields.
+- Proven preparation run `c7d3f616-466d-4bb2-a3b4-16f1d975f025` validated
+  current base `53afb88`, `never-commit`, local/untracked `.paw`, no workflow
+  commit, `["--yolo"]`, `gpt-5.6-sol`, and
+  `general-reviewer:claude-opus-5`.
+- Paired launch run `419ba98f-6c1e-4829-8255-7e4de25a2a70` started:
+  - implementer `9b7f8a6c-79f1-4967-afad-37b8dfbad5df` /
+    `telex://lossyrob/telex/T-A:operator-impl-134`;
+  - reviewer `e32f377b-49f6-4d23-a09c-96b107f32075` /
+    `telex://lossyrob/telex/T-A:operator-review-134`.
+- Both stations are `attended_push`; both sessions are live/working and
+  graph-bound. Scope/ADR control messages are durably queued for their current
+  turns.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.
@@ -162,9 +167,8 @@ Active transition:
 
 ## Open Questions
 
-- Model-resolution blocker: Streamliner/PAW initialization must resolve the
-  current latest compatible GPT and Claude Opus models before issue #134 can
-  launch.
+- None for workstream execution. The builder-owned direction gate remains the
+  authority for accepting or rejecting the #134 design output.
 
 ## Imports and Exports
 
