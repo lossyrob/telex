@@ -2,6 +2,38 @@
 
 ## What changed
 
+On 2026-07-30, operator product-direction feedback rejected a prescribed
+operator-agent role as shipped Telex or Operator Station behavior. The Station
+product is now a direct human-attended endpoint: agents address configured
+Station addresses through ordinary Telex, and mediation remains an optional
+external user convention.
+
+Issue #128 and PR #130 were closed without merge after reaching green CI,
+resolved review feedback, and reviewer +1. The implementation is preserved as
+scope-analysis evidence; closure is not an implementation-defect finding.
+Campaign authorized a dedicated design reset and allocated ADR 0051,
+`direct-station-product-boundary`. Issue #134 is the replacement design-only
+node. The active graph now runs:
+
+```text
+direct-station-contract-reset
+  -> direct-station-direction-gate
+  -> station-app
+  -> direct-station-usability-gate
+  -> operational-hardening
+  -> closure-gate
+```
+
+`station-app` also waits on Application Client `client-conformance`.
+
+The first #134 preparation-only run
+`cda96dff-f2b8-49cc-b258-350b901e29ff` validated the clean base, `never-commit`,
+local/untracked PAW state, no workflow commit, `--yolo`, and ADR 0051
+non-collision. It stopped before terminal launch because WorkflowContext resolved
+stale `gpt-5.5` and `general-reviewer:claude-opus-4.7` instead of the live
+catalog's `gpt-5.6-sol` and `claude-opus-5`. This is a launch-system blocker, not
+a node-design issue; no worker session was launched.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so
@@ -111,6 +143,18 @@ merge-ready; merge authority remains outside the worker and reviewer sessions.
 
 ## Boundaries
 
+- **Reset held:** Telex remains an opaque, durable protocol; Station remains a
+  separate optional desktop application; direct address attendance, ordinary
+  reply/disposition, health, notification, provenance, and recovery remain the
+  product.
+- **Superseded:** shipped operator-agent policy, required assisted topology,
+  quiet-mode mediation, custom routed-outcome lifecycle, and a first-party
+  operator skill are no longer Operator Station product scope.
+- **Externalized:** users may create mediation conventions outside the product,
+  but their policy and metadata remain opaque and non-normative.
+- **Dependency clarified:** generic metadata-bearing reply belongs to Application
+  Client client-core/conformance; Station does not inherit code from closed
+  PR #130.
 - **Held:** The Station remained a separate optional application; filtering
   stayed in the operator agent; Telex core did not gain human UI or semantic
   routing; Windows/SQLite remained the spike boundary; raw and mediated threads
@@ -124,6 +168,15 @@ merge-ready; merge authority remains outside the worker and reviewer sessions.
 
 ## Contracts and exports
 
+The next authoritative export is issue #134: a rewritten direct Station design
+and ADR 0051. ADRs 0047/0048 remain historical and are narrowed/superseded only
+through the new append-only decision.
+
+PR #130, its branch, tests, and review record are preserved as evidence of a
+well-executed but superseded product boundary. No operator-agent package or
+generic reply-metadata code is promoted from it. Application Client owns any
+future metadata-bearing reply implementation.
+
 The durable exports are the experimental Station and assignment under
 `spike/operator-station/`, plus the evidence and Application Client requirements
 in `docs/notes/operator-loop-spike-report.md`.
@@ -135,6 +188,22 @@ experimental namespace, current UI behavior, `attention.*` kinds, and
 Issue #12 remains the shared-client convergence authority.
 
 ## Context fitness
+
+The largest context failure was upstream of implementation: issue #128 and the
+accepted mediated contract were internally precise, but the product-level
+question "should Telex ship an operator-agent role at all?" had not received an
+explicit human floor before implementation. The worker and reviewer correctly
+executed the given mission; the workstream geometry was wrong.
+
+Future product/policy nodes must separate:
+
+- normative shipped behavior;
+- optional user-developed conventions;
+- experimental evidence;
+- generic shared-client/core capabilities.
+
+That distinction belongs in the node outcome and inherited decisions before a
+large implementation or multi-model review begins.
 
 The original node boundary and engagement points were useful. Dual plan review
 caught two misleading assumptions before implementation: attach plus inbox
@@ -159,6 +228,12 @@ off-branch unless the product explicitly requires it.
 
 ## Attention allocation
 
+Operator attention was applied too late on #128: after implementation, CI, and
+review had already earned technical confidence. The higher-leverage moment was
+the pre-promotion product-boundary decision. Issue #134 is therefore a
+focus-level design reset with explicit plan, contract, and final-diff review
+before the builder direction gate.
+
 Operator attention was highest-leverage at plan review, the first live demo,
 the domain-contract review, the exact #12 export review, and the
 workstream-owned artifact reconciliations. The paired reviewer remained the
@@ -171,6 +246,15 @@ Station/broker acceptance.
 
 ## Inspired vs. recovery interventions
 
+- **Inspired:** The direct Station simplification removes a required
+  intermediary while preserving the valuable human inbox/notification/reply
+  experience proven by dogfood.
+- **Recovery:** Closing #128/#130 after technical completion reflects a missed
+  product-boundary floor. Future shaping must confirm whether agent policy is
+  shipped product or optional convention before implementation.
+- **Recovery:** Generic reply metadata was bundled with Station policy because
+  the node needed it. The reset restores ownership to Application Client rather
+  than extracting it implicitly from a closed product PR.
 - **Inspired:** Treating delivery/ack health and operator-agent occupancy as
   first-class Station state came from using the real loop and improved the
   product evidence.
@@ -205,6 +289,12 @@ Station/broker acceptance.
 
 ## Closeout observation dispositions
 
+- Prescribed operator-agent package: superseded; #128/#130 closed without merge.
+- Direct Station contract: promoted to issue #134 and ADR 0051.
+- Generic metadata-bearing reply: deferred to Application Client
+  client-core/conformance; no extraction from PR #130 now.
+- Preserved #128 branches/worktrees/review evidence: retained pending explicit
+  cleanup authorization.
 - Reply/disposition clarity: completed in
   [#114](https://github.com/lossyrob/telex/issues/114) at the contract level.
   `station-app` owns implementation and usability evidence.
@@ -214,6 +304,18 @@ Other deferred items remain production-contract or hardening concerns owned by
 
 ## Promotion candidates
 
+- Direct human-attended Station is the shipped product; mediation is external:
+  target authority — design doc and decision record
+  - Disposition: promoted to issue #134 and allocated ADR 0051.
+- Require an explicit product-boundary floor before launching agent-policy or
+  topology packages: target authority — workstream-design lesson (`streamliner`)
+  - Disposition: landed in this reconciliation note and issue #134 inherited
+    decisions; candidate for broader Streamliner shaping guidance.
+- Keep generic protocol/client capabilities with their shared owner rather than
+  the first product that needs them: target authority — workstream-design lesson
+  (`project`)
+  - Disposition: landed as the Application Client ownership decision for
+    metadata-bearing reply.
 - Consolidate the spike's Application Client requirements with Telex Watcher
   evidence: target authority — issue #12
   - Disposition: landed as the corrected Operator Station domain export and
