@@ -43,9 +43,9 @@ The client owns:
   selected backend supplies it.
 
 The client does not own Watcher detector execution, scheduling, state
-transactions, or provider policy. It does not own Operator Station routing
-policy, mediation judgment, notification policy, human UI, or campaign
-vocabulary.
+transactions, or provider policy. It does not own application-specific
+presentation, human workflow selection, mediation judgment, notification
+policy, routing vocabulary, UI, or campaign vocabulary.
 
 ## Terms
 
@@ -242,7 +242,7 @@ shapes MUST preserve identical delivery and acknowledgment semantics.
 An application MUST acknowledge a delivery only after it has stored enough
 state to replay or resume the application action after restart. The client MUST
 make acknowledgment an explicit action; it MUST NOT infer acknowledgment from
-occupancy, rendering, notification submission, or transport output.
+occupancy, rendering, any application-side side effect, or transport output.
 
 The receive-health surface MUST keep at least these conditions distinguishable:
 
@@ -420,8 +420,9 @@ NOT regress workflow state.
 ### AC-C20: Compound operations preserve ordering and recovery evidence
 
 The client MUST provide general primitives for compound application workflows
-that may include reply, disposition, notification submission, and route-back.
-The client does not decide which steps a product requires.
+that may include metadata-bearing message authorship, reply, and exact-recipient
+workflow effects such as disposition. The client does not decide which steps a
+product requires.
 
 For a caller-declared sequence, the client MUST:
 
@@ -432,11 +433,10 @@ For a caller-declared sequence, the client MUST:
 - support a machine-readable outcome record before a caller performs a
   non-stale terminal closure that depends on that record.
 
-When a caller declares that reply or notification must precede terminal
+When a caller declares that one authored operation must precede terminal
 disposition, the disposition MUST NOT become terminal until the prerequisite
-operation is durably accepted. "No notice needed" is not a generic client
-success state; product policy must express and evidence any permitted
-disposition-only path.
+operation is durably accepted. Whether a workflow requires a reply, another
+message, or disposition alone remains caller policy.
 
 ## Product boundary and prohibited fallback seams
 
@@ -444,8 +444,8 @@ The following remain outside the shared client:
 
 - Watcher detector request/result schemas, scheduling, state transitions,
   allowed event kinds, provider templates, script policy, and runtime health;
-- Operator Station direct/assisted/quiet policy, human-obligation selection,
-  notification matrix, route policy, mediation vocabulary, and UI;
+- application-specific human-obligation selection, notification presentation,
+  mediation/routing vocabulary, and UI;
 - campaign-local kinds, addresses, and attention-routing policy.
 
 The following MUST NOT become a supported production fallback:
@@ -502,9 +502,11 @@ The accepted contract decomposes into these ordered work areas:
    - replace spike-private send/membership seams with the supported client;
    - preserve receipt-gated state and send-only readiness invariants.
 5. **Operator Station integration**
-   - replace subprocess/private seams with the supported client;
-   - preserve exact-delivery ack, unresolved/history recovery, source
-     resolution, and compound route-back ordering.
+   - consume the ordinary bidirectional client primitives without a
+     Station-private seam;
+   - preserve exact-delivery ack, opaque metadata-bearing reply, per-recipient
+     disposition, unresolved/history recovery, all AC-C15 source-resolution
+     states, and generic compound ordering when the caller declares a sequence.
 6. **Operational hardening**
    - validate principal provenance, observability, bounded storage, performance,
      packaging, upgrade, and failure recovery in supported environments.
