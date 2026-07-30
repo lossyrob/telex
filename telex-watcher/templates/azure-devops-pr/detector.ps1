@@ -4,7 +4,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $helperPath = Join-Path $PSScriptRoot '..\shared\DetectorCommon.psm1'
-$expectedHelperSha256 = 'cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1'
+$expectedHelperSha256 = '03072d00f5b343d6a19c5fe40c7365c6286fea5035546763a8c753b0399cf189'
 if ((Get-FileHash $helperPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHelperSha256) {
     [Console]::Error.WriteLine('detectorDiagnostic={"schemaVersion":1,"code":"shared-helper-digest-mismatch","message":"Pinned shared helper digest mismatch."}')
     [Console]::Out.WriteLine('{"schemaVersion":1,"outcome":"degraded"}')
@@ -206,11 +206,11 @@ try {
             return
         }
         if ([bool](Get-OptionalValue -Object $preflight -Name 'terminal' -Default $false)) {
-            Write-EventlessTerminal -Evidence $evidence
+            Write-EventlessTerminal -Request $request -Evidence $evidence
             return
         }
         if ($terminal) {
-            Write-EventlessTerminal -Evidence $evidence
+            Write-EventlessTerminal -Request $request -Evidence $evidence
             return
         }
     }
@@ -225,7 +225,7 @@ try {
     }
     if ($kind) {
         $event = [ordered]@{
-            id = New-EventId -Provider 'azure-devops-pr' -Scope ([string]$pr.pullRequestId) -Cursor $cursor
+            id = New-EventId -Provider 'azure-devops-pr' -Scope ([string]$pr.pullRequestId) -Cursor $cursor -Request $request
             kind = $kind
             subject = "Azure DevOps PR #$($pr.pullRequestId): $($pr.title)"
             body = $reason

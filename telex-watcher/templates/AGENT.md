@@ -11,7 +11,9 @@ Use the authoritative [template library README](README.md).
    [registration samples](README.md#registration-samples), allowed kinds,
    credential allowlist, interval, and downtime.
 5. Preserve [event and cursor stability](README.md#event-and-cursor-stability),
-   replay suppression, duplicate IDs, non-advancing degradation, and
+   committed-state-derived occurrence IDs, A -> B -> A uniqueness, retry
+   stability, changed-idle occurrence advancement, replay suppression,
+   non-advancing degradation, and
    [initial emission semantics](README.md#initial-emission-semantics).
 6. For PRs, perform the final [terminal preflight](README.md#terminal-behavior-and-pr-preflight)
    immediately before registration and seed `initialState.preflight`.
@@ -19,7 +21,9 @@ Use the authoritative [template library README](README.md).
    [downtime and restart](README.md#downtime-and-restart), and
    [pinned and follow-path operation](README.md#pinned-and-follow-path-operation).
 8. Maintain sanitized [fixtures](README.md#fixture-maintenance) and run
-   [validation](README.md#validation).
+   [validation](README.md#validation). Keep event metadata deterministically
+   below protocol caps; hash complete normalized activity instead of emitting
+   unbounded provider arrays or bodies.
 9. For upgrades, use the
    [customized-template reconciliation recipe](RECONCILING-CUSTOMIZATIONS.md).
 10. Operate the detector as observation only; Watcher scheduling, Application

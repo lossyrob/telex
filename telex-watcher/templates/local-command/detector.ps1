@@ -6,7 +6,7 @@ $ErrorActionPreference = 'Stop'
 $sharedPath = Join-Path (Split-Path -Parent $PSScriptRoot) 'shared'
 $helperPath = Join-Path $sharedPath 'DetectorCommon.psm1'
 $boundedCommandPath = Join-Path $sharedPath 'BoundedCommand.psm1'
-$expectedHelperSha256 = 'cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1'
+$expectedHelperSha256 = '03072d00f5b343d6a19c5fe40c7365c6286fea5035546763a8c753b0399cf189'
 $expectedBoundedCommandSha256 = '2ee2894ba3ca0e7cb4e3a5ccf6e05dc9a7a31b305aa5c0334b3fe5bf39e5b0a9'
 if (
     (Get-FileHash $helperPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHelperSha256 -or
@@ -65,7 +65,7 @@ try {
     $event = $null
     if ($conditionMet) {
         $event = [ordered]@{
-            id = New-EventId -Provider 'local-command' -Scope $sourceId -Cursor $cursor
+            id = New-EventId -Provider 'local-command' -Scope $sourceId -Cursor $cursor -Request $request
             kind = 'local.command.condition-met'
             subject = "Local command condition '$sourceId' matched"
             body = $result.Stdout.Trim()

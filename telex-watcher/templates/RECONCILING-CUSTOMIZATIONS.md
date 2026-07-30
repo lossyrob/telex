@@ -15,18 +15,24 @@ version.
    reject any provider mutation or configurable reaction.
 5. Reconcile normalized evidence deliberately. If its composition changes,
    increment the copied evidence-normalization/template version and decide
-   whether old cursor state can be migrated. Otherwise establish a reviewed new
+   whether old cursor state can be migrated. Preserve the helper-managed
+   `occurrence` field as well as `cursor`: absent occurrence migrates as zero,
+   every committed changed observation advances it, and retries before commit
+   must derive the same candidate value. Otherwise establish a reviewed new
    baseline. The current helper recursively sorts object keys before hashing,
-   so source-code insertion order is irrelevant; do not replace it with plain
-   compact JSON hashing.
+   so source-code insertion order is irrelevant; set-like arrays still require
+   explicit ordinal total comparators. Do not replace canonical hashing with
+   plain compact JSON hashing.
 6. Reconcile allowed kinds, credentials, calls per attempt, interval, terminal
    semantics, and `maxSafeDowntimeSeconds`. Kind changes require an operator
    checkpoint before resume. Enabling `emitInitialSnapshot` or
    `emitInitialCreatedEvent` requires authorizing the matching synthetic kind;
    disabling it should remove that kind from the registration policy.
 7. Refresh sanitized fixtures. Run the copied detector twice per fixture to
-   prove stable cursor/event IDs and replay suppression, plus terminal preflight
-   race cases for PR templates.
+   prove stable cursor/event IDs and replay suppression. Also prove A -> B -> A
+   assigns distinct IDs to the two A occurrences, retries before commit retain
+   an ID, and provider-array permutations retain a cursor. Include terminal
+   preflight race cases for PR templates.
 8. Recompute the helper digest embedded in the detector, the detector digest in
    the copied manifest, and the pinned registration digest.
 9. Update `derivedFrom` to the new upstream template/version/digests and record

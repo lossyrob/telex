@@ -4,13 +4,38 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $helperPath = Join-Path $PSScriptRoot '..\shared\DetectorCommon.psm1'
-$expectedHelperSha256 = 'cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1'
+$expectedHelperSha256 = '03072d00f5b343d6a19c5fe40c7365c6286fea5035546763a8c753b0399cf189'
 if ((Get-FileHash $helperPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHelperSha256) {
     [Console]::Error.WriteLine('detectorDiagnostic={"schemaVersion":1,"code":"shared-helper-digest-mismatch","message":"Pinned shared helper digest mismatch."}')
     [Console]::Out.WriteLine('{"schemaVersion":1,"outcome":"degraded"}')
     exit 0
 }
 Import-Module $helperPath -Force
+
+function ConvertTo-BoundedUtf8Text {
+    param(
+        [string]$Value,
+        [int]$MaximumBytes
+    )
+
+    if ([Text.Encoding]::UTF8.GetByteCount($Value) -le $MaximumBytes) {
+        return [ordered]@{ value = $Value; truncated = $false }
+    }
+
+    $builder = [Text.StringBuilder]::new()
+    $bytes = 0
+    $enumerator = [Globalization.StringInfo]::GetTextElementEnumerator($Value)
+    while ($enumerator.MoveNext()) {
+        $piece = [string]$enumerator.Current
+        $pieceBytes = [Text.Encoding]::UTF8.GetByteCount($piece)
+        if ($bytes + $pieceBytes -gt $MaximumBytes) {
+            break
+        }
+        [void]$builder.Append($piece)
+        $bytes += $pieceBytes
+    }
+    return [ordered]@{ value = $builder.ToString(); truncated = $true }
+}
 
 function Get-GitHubPrData {
     param([hashtable]$Request)
@@ -85,30 +110,61 @@ try {
             [void]$ignored.Add([string]$login)
         }
     }
-    $externalReviews = @($pr.reviews | Where-Object {
+    $normalizedIgnoredLogins = [string[]]@($ignored | ForEach-Object { $_.ToLowerInvariant() })
+    [Array]::Sort($normalizedIgnoredLogins, [StringComparer]::Ordinal)
+
+    $externalReviews = [object[]]@($pr.reviews | Where-Object {
         -not $ignored.Contains([string]$_.author.login) -and [string]$_.state -in @('APPROVED', 'CHANGES_REQUESTED', 'COMMENTED', 'DISMISSED')
     } | ForEach-Object {
         [ordered]@{ id = [string]$_.id; author = [string]$_.author.login; state = [string]$_.state }
-    } | Sort-Object id)
-    $externalComments = @($pr.comments | Where-Object {
+    })
+    [Array]::Sort[object]($externalReviews, [System.Comparison[object]]{
+        param($left, $right)
+        foreach ($field in 'id', 'author', 'state') {
+            $comparison = [StringComparer]::Ordinal.Compare([string]$left[$field], [string]$right[$field])
+            if ($comparison -ne 0) {
+                return $comparison
+            }
+        }
+        return 0
+    })
+
+    $externalComments = [object[]]@($pr.comments | Where-Object {
         -not $ignored.Contains([string]$_.author.login) -and -not [string]::IsNullOrWhiteSpace([string]$_.body)
     } | ForEach-Object {
-        [ordered]@{ id = [string]$_.id; author = [string]$_.author.login; body = [string]$_.body }
-    } | Sort-Object id)
+        [ordered]@{
+            id = [string]$_.id
+            author = [string]$_.author.login
+            bodySha256 = Get-Sha256 -Text ([string]$_.body)
+        }
+    })
+    [Array]::Sort[object]($externalComments, [System.Comparison[object]]{
+        param($left, $right)
+        foreach ($field in 'id', 'author', 'bodySha256') {
+            $comparison = [StringComparer]::Ordinal.Compare([string]$left[$field], [string]$right[$field])
+            if ($comparison -ne 0) {
+                return $comparison
+            }
+        }
+        return 0
+    })
 
-    $normalizedComments = @($externalComments | ForEach-Object {
-        [ordered]@{ id = $_.id; author = $_.author }
+    $activityDigest = Get-OpaqueCursor ([ordered]@{
+        externalReviews = $externalReviews
+        externalComments = $externalComments
     })
     $evidence = [ordered]@{
-        evidenceNormalizationVersion = 2
+        evidenceNormalizationVersion = 3
         provider = 'github'
         repository = [string](Get-DetectorParameter -Request $request -Name 'repository' -Default '')
         number = [int]$pr.number
         headSha = [string](Get-OptionalValue -Object $pr -Name 'headRefOid' -Default '')
         state = [string](Get-OptionalValue -Object $pr -Name 'state' -Default 'OPEN')
-        ignoredLogins = @($ignored | Sort-Object)
-        externalReviews = $externalReviews
-        externalComments = $normalizedComments
+        ignoredLoginCount = $normalizedIgnoredLogins.Count
+        ignoredLoginsDigest = Get-OpaqueCursor $normalizedIgnoredLogins
+        externalReviewCount = $externalReviews.Count
+        externalCommentCount = $externalComments.Count
+        activityDigest = $activityDigest
     }
     $cursor = Get-OpaqueCursor $evidence
     $terminal = [string](Get-OptionalValue -Object $pr -Name 'state' -Default 'OPEN') -in @('MERGED', 'CLOSED')
@@ -120,27 +176,61 @@ try {
             return
         }
         if ([bool](Get-OptionalValue -Object $preflight -Name 'terminal' -Default $false)) {
-            Write-EventlessTerminal -Evidence $evidence
+            Write-EventlessTerminal -Request $request -Evidence $evidence
             return
         }
     }
     if ($terminal) {
-        Write-EventlessTerminal -Evidence $evidence
+        Write-EventlessTerminal -Request $request -Evidence $evidence
         return
     }
     $event = $null
     if ($externalReviews.Count -gt 0 -or $externalComments.Count -gt 0) {
+        $projectionLimit = 16
+        $boundedUrl = ConvertTo-BoundedUtf8Text -Value ([string]$pr.url) -MaximumBytes 2048
+        $reviewProjection = @($externalReviews | Select-Object -First $projectionLimit | ForEach-Object {
+            $id = ConvertTo-BoundedUtf8Text -Value ([string]$_.id) -MaximumBytes 64
+            $author = ConvertTo-BoundedUtf8Text -Value ([string]$_.author) -MaximumBytes 64
+            $state = ConvertTo-BoundedUtf8Text -Value ([string]$_.state) -MaximumBytes 32
+            [ordered]@{
+                id = $id.value
+                idTruncated = $id.truncated
+                author = $author.value
+                authorTruncated = $author.truncated
+                state = $state.value
+                stateTruncated = $state.truncated
+            }
+        })
+        $commentProjection = @($externalComments | Select-Object -First $projectionLimit | ForEach-Object {
+            $id = ConvertTo-BoundedUtf8Text -Value ([string]$_.id) -MaximumBytes 64
+            $author = ConvertTo-BoundedUtf8Text -Value ([string]$_.author) -MaximumBytes 64
+            [ordered]@{
+                id = $id.value
+                idTruncated = $id.truncated
+                author = $author.value
+                authorTruncated = $author.truncated
+            }
+        })
         $event = [ordered]@{
-            id = New-EventId -Provider 'github-pr-activity' -Scope ([string]$pr.number) -Cursor $cursor
+            id = New-EventId -Provider 'github-pr-activity' -Scope ([string]$pr.number) -Cursor $cursor -Request $request
             kind = 'github.pull-request.external-activity'
             subject = "GitHub PR #$($pr.number): external reviewer activity"
-            body = "$($externalReviews.Count) external review(s), $($externalComments.Count) external comment(s)`n$($pr.url)"
+            body = "$($externalReviews.Count) external review(s), $($externalComments.Count) external comment(s)`n$($boundedUrl.value)"
             metadata = [ordered]@{
                 provider = 'github'
-                pullRequest = [ordered]@{ number = [int]$pr.number; url = [string]$pr.url }
-                ignoredLogins = @($ignored | Sort-Object)
-                externalReviews = $externalReviews
-                externalComments = $externalComments
+                pullRequest = [ordered]@{
+                    number = [int]$pr.number
+                    url = $boundedUrl.value
+                    urlTruncated = $boundedUrl.truncated
+                }
+                ignoredLoginCount = $normalizedIgnoredLogins.Count
+                externalReviewCount = $externalReviews.Count
+                externalCommentCount = $externalComments.Count
+                projectionLimit = $projectionLimit
+                externalReviews = $reviewProjection
+                externalReviewsTruncated = $externalReviews.Count -gt $projectionLimit
+                externalComments = $commentProjection
+                externalCommentsTruncated = $externalComments.Count -gt $projectionLimit
             }
         }
     }

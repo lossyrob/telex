@@ -32,6 +32,9 @@ working through this authoritative guide.
   registrations, event metadata, or diagnostics.
 - Event-producing state is committed by Watcher only after durable Telex
   acceptance. Templates do not implement delivery or receipt logic.
+- Committed template state contains an opaque evidence `cursor` and
+  non-negative `occurrence`. The occurrence is derived only from prior
+  committed state, never from attempt IDs or wall-clock time.
 - Detector stderr is local health evidence only. Watcher redacts allowlisted
   secret values before retaining diagnostics; stderr is never a Telex event
   body or cursor input.
@@ -132,14 +135,24 @@ not expand or start the experimental runtime.
 
 The shared helper recursively sorts object keys using ordinal comparison,
 serializes compact JSON, and stores its lowercase SHA-256 in
-`nextState.cursor`. Detectors sort set-like arrays before hashing; ordered
-provider arrays retain their order. Human-facing reason text is not evidence.
-Event IDs combine provider scope with the first 24 hex characters of that
-cursor.
+`nextState.cursor`. Detectors use explicit ordinal total comparators for
+set-like provider arrays before hashing; genuinely ordered provider arrays
+retain their order. Human-facing reason text is not evidence.
 
-- An unchanged cursor returns `idle`, suppressing replay.
+`nextState.occurrence` starts from zero when absent and advances once for every
+changed observation that Watcher commits. Event IDs combine provider scope,
+the candidate occurrence, and the first 24 hex characters of the cursor. The
+candidate is derived from prior committed state, so retries before commit
+produce the same ID. After A -> B -> A commits, the second A has a higher
+occurrence and therefore a different ID even though its cursor matches the
+first A.
+
+- An unchanged cursor returns `idle`, preserves occurrence, and suppresses
+  replay.
 - A changed observation with no event still returns `idle.nextState`; that
-  means the observation was intentionally classified.
+  means the observation was intentionally classified. If Watcher commits that
+  idle result, it also commits the incremented occurrence. Changed idle
+  observations therefore consume an occurrence without emitting an event.
 - `degraded` never contains `event` or `nextState`, so failed evaluation cannot
   advance the cursor.
 - At-least-once delivery may repeat an accepted event. Recipients deduplicate
@@ -221,6 +234,11 @@ manifest owns provider-specific budget assumptions.
 
 - GitHub uses one `gh pr view` call. Use the GitHub CLI credential store or
   allowlist `GH_TOKEN`.
+- The customized GitHub external-activity template hashes complete normalized
+  review/comment activity, including comment-body digests, into compact cursor
+  evidence. Event metadata contains counts, a bounded PR URL, and at most 16
+  body-free review/comment entries with explicit field/list truncation flags,
+  keeping serialized detector metadata below the 64 KiB protocol cap.
 - Azure DevOps uses two REST 7.1 GETs. Select bearer
   `AZURE_DEVOPS_ACCESS_TOKEN` or PAT `AZURE_DEVOPS_EXT_PAT`, never both.
 - HTTP/JSON uses one HTTPS GET, rejects redirects, limits content to 1 MiB, and
@@ -277,7 +295,8 @@ free. To refresh a fixture:
    the manifest;
 4. preserve only fields used by normalization or event metadata;
 5. add/update terminal, neutral, missing/null, and no-external-activity cases
-   when policy changes; and
+   when policy changes; generate large-cardinality cases in tests rather than
+   checking in unbounded comment bodies; and
 6. run the full template conformance test before committing.
 
 ## Validation

@@ -1,5 +1,30 @@
 # Detector template library changelog
 
+## 2026-07-29 recurring event identity and bounded GitHub activity
+
+- `github-pr` template version 1.2.0, detector protocol 1, evidence
+  normalization 3.
+- `github-pr-external-activity` template version 1.2.0, detector protocol 1,
+  evidence normalization 3.
+- `azure-devops-pr` template version 1.2.0, detector protocol 1, evidence
+  normalization 3.
+- `http-json` template version 1.2.0, detector protocol 1, evidence
+  normalization 2.
+- `local-file-json` template version 1.2.0, detector protocol 1, evidence
+  normalization 2.
+- `local-command` template version 1.2.0, detector protocol 1, evidence
+  normalization 2.
+- Added committed-state-derived occurrence discriminators to all event IDs.
+  Retries before commit retain IDs, committed A -> B -> A cycles receive a new
+  ID for the second A, unchanged replay remains idle, and changed idle
+  observations explicitly consume an occurrence.
+- Replaced ineffective ordered-dictionary sorting in both GitHub templates
+  with ordinal total comparators and deterministic tie-breakers.
+- Replaced unbounded external-activity metadata with counts, a bounded PR URL,
+  capped body-free projections, and explicit truncation flags. Complete
+  normalized review/comment activity is represented by compact hashes in
+  cursor evidence.
+
 ## 2026-07-29 cross-platform conformance
 
 - `azure-devops-pr` template version 1.1.1, detector protocol 1, evidence

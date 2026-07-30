@@ -1,9 +1,9 @@
 {
   "manifestSchemaVersion": 1,
   "templateId": "github-pr-external-activity",
-  "templateVersion": "1.1.0",
+  "templateVersion": "1.2.0",
   "detectorProtocolVersion": 1,
-  "evidenceNormalizationVersion": 2,
+  "evidenceNormalizationVersion": 3,
   "runtimeRequirement": {
     "command": "pwsh",
     "minimumVersion": "7.4",
@@ -11,11 +11,11 @@
   },
   "librarySource": {
     "path": "github-pr-external-activity/detector.ps1",
-    "sha256": "d1aa012c466c62ed9b91dc9cd3600905578456176bbec56448ed571fad51e005",
+    "sha256": "e09936ecb78e68e441dd747c229d0f7a58e850e6651f3d9089d46fc0f1d0cadd",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
-        "sha256": "cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1"
+        "sha256": "03072d00f5b343d6a19c5fe40c7365c6286fea5035546763a8c753b0399cf189"
       }
     ]
   },
@@ -28,12 +28,16 @@
   ],
   "cursor": {
     "stateField": "cursor",
+    "occurrenceStateField": "occurrence",
     "strategy": "sha256-recursive-key-sorted-json-v1",
-    "replay": "The cursor covers PR identity, head SHA, state, ignored identities, and sorted external review/comment identities. Comment text edits do not create a new event."
+    "replay": "The cursor covers PR identity, head SHA, state, compact hashes of normalized ignored identities, and complete ordinally sorted external review/comment activity. Comment body edits change the activity digest. An unchanged cursor returns idle without advancing occurrence.",
+    "occurrence": "Every committed changed observation increments state.occurrence. Event IDs include that value, so retries before commit retain an ID while a later recurrence receives a new ID."
   },
   "semantics": {
     "terminal": "Merged or closed PRs return eventless terminal, including preflight-declared terminal and a close between preflight and the first attempt.",
-    "duplicates": "Event IDs are deterministic from PR number and normalized activity cursor. Recipients must deduplicate repeated event IDs.",
+    "duplicates": "Event IDs are deterministic from PR number, committed-state-derived occurrence, and normalized activity cursor. At-least-once retries before state commit repeat the same ID; recipients must deduplicate it.",
+    "changedIdle": "A changed observation classified idle commits its new cursor and increments occurrence without emitting an event. That consumed occurrence prevents a later recurring event from reusing an older ID.",
+    "classification": "Event metadata contains counts, a bounded PR URL, and at most 16 body-free review/comment projections with field- and list-truncation indicators. Complete normalized activity is represented only by compact cursor digests.",
     "initialEmission": {
       "actionable": "Existing substantive external activity emits on the first attempt because it is a naturally actionable condition.",
       "synthetic": "This template has no synthetic snapshot or created event."

@@ -616,43 +616,43 @@ fn fixture_detectors_emit_declared_kinds_with_stable_ids_and_suppress_replay() {
         (
             "github-pr",
             (
-                "017b2629b85ccd4dcb4eca4898fa84cc2996b3e6dbbed61c4be59f65d5e30171",
-                "github-pr:42:017b2629b85ccd4dcb4eca48",
+                "4546fc60e7393e66ed2453fe07455f7b3f24d479fdc482a1f9a53229c2ef006f",
+                "github-pr:42:1:4546fc60e7393e66ed2453fe",
             ),
         ),
         (
             "github-pr-external-activity",
             (
-                "48028f1174c6ccebaed866ec7176f89177c17ce1a6be9e8c8076a8766cee375a",
-                "github-pr-activity:43:48028f1174c6ccebaed866ec",
+                "b58c0edddc013945d0e552157fa78cb7503216d122775410c4f1abac26e0c690",
+                "github-pr-activity:43:1:b58c0edddc013945d0e55215",
             ),
         ),
         (
             "azure-devops-pr",
             (
                 "985685e50683ac11de09e32091149396ab6c176fbe7aca950020082072d9606a",
-                "azure-devops-pr:73:985685e50683ac11de09e320",
+                "azure-devops-pr:73:1:985685e50683ac11de09e320",
             ),
         ),
         (
             "http-json",
             (
                 "5c46396891a798218ffd568b8aa3e7f942f9362ce7a004d11a7c18157a03d04e",
-                "http-json:example:5c46396891a798218ffd568b",
+                "http-json:example:1:5c46396891a798218ffd568b",
             ),
         ),
         (
             "local-file-json",
             (
                 "5fa0d25475fe8e8c2a7ae9dcc8dac6f7d31586e54d15ed0e9101b681cf99ee48",
-                "local-file-json:example:5fa0d25475fe8e8c2a7ae9dc",
+                "local-file-json:example:1:5fa0d25475fe8e8c2a7ae9dc",
             ),
         ),
         (
             "local-command",
             (
                 "632c0d44266fc389e6947848fa3eddecc6519c34093045eba8727cb78db80357",
-                "local-command:example:632c0d44266fc389e6947848",
+                "local-command:example:1:632c0d44266fc389e6947848",
             ),
         ),
     ]);
@@ -674,6 +674,10 @@ fn fixture_detectors_emit_declared_kinds_with_stable_ids_and_suppress_replay() {
                 .as_str()
                 .expect("event ID")
                 .to_owned();
+            assert_eq!(
+                first.result["nextState"]["occurrence"], 1,
+                "{template_id} first changed observation must be occurrence 1"
+            );
             emitted_kinds.insert(
                 first.result["event"]["kind"]
                     .as_str()
@@ -730,6 +734,16 @@ fn capture_path(name: &str) -> PathBuf {
     if path.exists() {
         fs::remove_file(&path).expect("remove stale transport capture");
     }
+    path
+}
+
+fn write_generated_fixture(name: &str, value: &Value) -> PathBuf {
+    let path = capture_path(name);
+    fs::write(
+        &path,
+        serde_json::to_vec(value).expect("serialize generated fixture"),
+    )
+    .unwrap_or_else(|error| panic!("write generated fixture {}: {error}", path.display()));
     path
 }
 
@@ -793,6 +807,278 @@ fn canonical_cursor_is_independent_of_object_insertion_order() {
         utc.result["event"]["metadata"]["creationDate"],
         pacific.result["event"]["metadata"]["creationDate"]
     );
+}
+
+#[test]
+fn recurring_observations_use_distinct_occurrences_with_retry_stable_ids() {
+    let actionable = primary_parameters("github-pr");
+    let first = run_detector("github-pr", actionable.clone(), json!({}));
+    let first_retry = run_detector("github-pr", actionable.clone(), json!({}));
+    assert_eq!(first.result["outcome"], "event");
+    assert_eq!(
+        first_retry.result["event"]["id"],
+        first.result["event"]["id"]
+    );
+    assert_eq!(first.result["nextState"]["occurrence"], 1);
+
+    let idle_parameters = json!({
+        "fixturePath": fixture("github-pr", "github-pr-neutral.json"),
+        "repository": "example/repo",
+        "emitInitialSnapshot": false
+    });
+    let changed_idle = run_detector(
+        "github-pr",
+        idle_parameters.clone(),
+        first.result["nextState"].clone(),
+    );
+    let changed_idle_retry = run_detector(
+        "github-pr",
+        idle_parameters,
+        first.result["nextState"].clone(),
+    );
+    assert_eq!(changed_idle.result["outcome"], "idle");
+    assert_eq!(changed_idle.result["nextState"]["occurrence"], 2);
+    assert_eq!(
+        changed_idle_retry.result["nextState"], changed_idle.result["nextState"],
+        "retrying an uncommitted changed idle observation must retain its occurrence"
+    );
+
+    let second = run_detector(
+        "github-pr",
+        actionable.clone(),
+        changed_idle.result["nextState"].clone(),
+    );
+    let second_retry = run_detector(
+        "github-pr",
+        actionable,
+        changed_idle.result["nextState"].clone(),
+    );
+    assert_eq!(second.result["outcome"], "event");
+    assert_eq!(second.result["nextState"]["occurrence"], 3);
+    assert_ne!(
+        second.result["event"]["id"], first.result["event"]["id"],
+        "A -> B -> A must assign a new ID to the second A occurrence"
+    );
+    assert_eq!(
+        second_retry.result["event"]["id"], second.result["event"]["id"],
+        "retrying the uncommitted second A occurrence must retain its ID"
+    );
+
+    let replay = run_detector(
+        "github-pr",
+        primary_parameters("github-pr"),
+        second.result["nextState"].clone(),
+    );
+    assert_eq!(replay.result["outcome"], "idle");
+    assert_eq!(replay.result["nextState"]["occurrence"], 3);
+}
+
+#[test]
+fn github_provider_array_permutations_have_stable_cursors_and_event_ids() {
+    let mut github_first = read_json(
+        &templates_root()
+            .join("github-pr")
+            .join("fixtures")
+            .join("github-pr-ready.json"),
+    );
+    github_first["statusCheckRollup"] = json!([
+        {"name": "same", "status": "IN_PROGRESS", "conclusion": ""},
+        {"name": "alpha", "status": "COMPLETED", "conclusion": "SUCCESS"},
+        {"name": "same", "status": "COMPLETED", "conclusion": "SUCCESS"}
+    ]);
+    let mut github_second = github_first.clone();
+    github_second["statusCheckRollup"]
+        .as_array_mut()
+        .expect("GitHub checks")
+        .reverse();
+    let github_first_path = write_generated_fixture("github-check-order-a.json", &github_first);
+    let github_second_path = write_generated_fixture("github-check-order-b.json", &github_second);
+    let github_parameters = |path: &Path| {
+        json!({
+            "fixturePath": path_text(path),
+            "repository": "example/repo",
+            "pullRequestNumber": 42
+        })
+    };
+    let github_a = run_detector(
+        "github-pr",
+        github_parameters(&github_first_path),
+        json!({}),
+    );
+    let github_b = run_detector(
+        "github-pr",
+        github_parameters(&github_second_path),
+        json!({}),
+    );
+    assert_eq!(
+        github_a.result["nextState"]["cursor"],
+        github_b.result["nextState"]["cursor"]
+    );
+    assert_eq!(
+        github_a.result["event"]["id"],
+        github_b.result["event"]["id"]
+    );
+    fs::remove_file(github_first_path).expect("remove generated GitHub fixture");
+    fs::remove_file(github_second_path).expect("remove generated GitHub fixture");
+
+    let mut activity_first = read_json(
+        &templates_root()
+            .join("github-pr-external-activity")
+            .join("fixtures")
+            .join("activity.json"),
+    );
+    activity_first["reviews"] = json!([
+        {"id": "same", "state": "COMMENTED", "author": {"login": "reviewer-b"}},
+        {"id": "alpha", "state": "APPROVED", "author": {"login": "reviewer-a"}},
+        {"id": "same", "state": "APPROVED", "author": {"login": "reviewer-a"}}
+    ]);
+    activity_first["comments"] = json!([
+        {"id": "same", "body": "second", "author": {"login": "commenter-b"}},
+        {"id": "alpha", "body": "first", "author": {"login": "commenter-a"}},
+        {"id": "same", "body": "first", "author": {"login": "commenter-a"}}
+    ]);
+    let mut activity_second = activity_first.clone();
+    activity_second["reviews"]
+        .as_array_mut()
+        .expect("GitHub reviews")
+        .reverse();
+    activity_second["comments"]
+        .as_array_mut()
+        .expect("GitHub comments")
+        .rotate_left(1);
+    let activity_first_path =
+        write_generated_fixture("github-activity-order-a.json", &activity_first);
+    let activity_second_path =
+        write_generated_fixture("github-activity-order-b.json", &activity_second);
+    let activity_parameters = |path: &Path| {
+        json!({
+            "fixturePath": path_text(path),
+            "repository": "example/repo",
+            "pullRequestNumber": 43,
+            "selfLogin": "self-login",
+            "ignoredLogins": []
+        })
+    };
+    let activity_a = run_detector(
+        "github-pr-external-activity",
+        activity_parameters(&activity_first_path),
+        json!({}),
+    );
+    let activity_b = run_detector(
+        "github-pr-external-activity",
+        activity_parameters(&activity_second_path),
+        json!({}),
+    );
+    assert_eq!(
+        activity_a.result["nextState"]["cursor"],
+        activity_b.result["nextState"]["cursor"]
+    );
+    assert_eq!(
+        activity_a.result["event"]["id"],
+        activity_b.result["event"]["id"]
+    );
+
+    let mut edited_activity = activity_first;
+    edited_activity["comments"][0]["body"] = "edited body".into();
+    let edited_path = write_generated_fixture("github-activity-edited.json", &edited_activity);
+    let edited = run_detector(
+        "github-pr-external-activity",
+        activity_parameters(&edited_path),
+        json!({}),
+    );
+    assert_ne!(
+        activity_a.result["nextState"]["cursor"], edited.result["nextState"]["cursor"],
+        "comment-body edits must affect the complete normalized activity digest"
+    );
+    fs::remove_file(activity_first_path).expect("remove generated activity fixture");
+    fs::remove_file(activity_second_path).expect("remove generated activity fixture");
+    fs::remove_file(edited_path).expect("remove generated activity fixture");
+}
+
+#[test]
+fn external_activity_metadata_is_bounded_for_large_provider_payloads() {
+    let mut payload = read_json(
+        &templates_root()
+            .join("github-pr-external-activity")
+            .join("fixtures")
+            .join("activity.json"),
+    );
+    payload["url"] = format!("https://github.example.invalid/{}", "u".repeat(10_000)).into();
+    payload["reviews"] = Value::Array(
+        (0..128)
+            .map(|index| {
+                json!({
+                    "id": format!("{index:04}-{}", "r".repeat(200)),
+                    "state": if index % 2 == 0 { "COMMENTED" } else { "APPROVED" },
+                    "author": {"login": format!("reviewer-{index}-{}", "a".repeat(200))}
+                })
+            })
+            .collect(),
+    );
+    payload["comments"] = Value::Array(
+        (0..1024)
+            .map(|index| {
+                json!({
+                    "id": format!("{index:04}-{}", "c".repeat(200)),
+                    "body": format!("large comment {index} {}", "b".repeat(2048)),
+                    "author": {"login": format!("commenter-{index}-{}", "a".repeat(200))}
+                })
+            })
+            .collect(),
+    );
+    let payload_path = write_generated_fixture("github-activity-large.json", &payload);
+    let parameters = json!({
+        "fixturePath": path_text(&payload_path),
+        "repository": "example/repo",
+        "pullRequestNumber": 43,
+        "selfLogin": "self-login",
+        "ignoredLogins": []
+    });
+    let first = run_detector("github-pr-external-activity", parameters.clone(), json!({}));
+    let retry = run_detector("github-pr-external-activity", parameters.clone(), json!({}));
+    assert_eq!(first.result["outcome"], "event");
+    assert_eq!(first.result["event"]["id"], retry.result["event"]["id"]);
+    assert_eq!(
+        first.result["nextState"]["cursor"],
+        retry.result["nextState"]["cursor"]
+    );
+    let metadata = &first.result["event"]["metadata"];
+    assert!(serde_json::to_vec(metadata).expect("metadata JSON").len() < 64 * 1024);
+    assert_eq!(metadata["externalReviewCount"], 128);
+    assert_eq!(metadata["externalCommentCount"], 1024);
+    assert_eq!(
+        metadata["externalReviews"]
+            .as_array()
+            .expect("review projection")
+            .len(),
+        16
+    );
+    assert_eq!(
+        metadata["externalComments"]
+            .as_array()
+            .expect("comment projection")
+            .len(),
+        16
+    );
+    assert_eq!(metadata["externalReviewsTruncated"], true);
+    assert_eq!(metadata["externalCommentsTruncated"], true);
+    assert_eq!(metadata["pullRequest"]["urlTruncated"], true);
+    assert!(
+        !metadata.to_string().contains("large comment"),
+        "metadata projection must not contain comment bodies"
+    );
+
+    let replay = run_detector(
+        "github-pr-external-activity",
+        parameters,
+        first.result["nextState"].clone(),
+    );
+    assert_eq!(replay.result["outcome"], "idle");
+    assert_eq!(
+        replay.result["nextState"]["occurrence"],
+        first.result["nextState"]["occurrence"]
+    );
+    fs::remove_file(payload_path).expect("remove generated large activity fixture");
 }
 
 #[test]

@@ -4,7 +4,7 @@ param()
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 $helperPath = Join-Path $PSScriptRoot '..\shared\DetectorCommon.psm1'
-$expectedHelperSha256 = 'cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1'
+$expectedHelperSha256 = '03072d00f5b343d6a19c5fe40c7365c6286fea5035546763a8c753b0399cf189'
 if ((Get-FileHash $helperPath -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHelperSha256) {
     [Console]::Error.WriteLine('detectorDiagnostic={"schemaVersion":1,"code":"shared-helper-digest-mismatch","message":"Pinned shared helper digest mismatch."}')
     [Console]::Out.WriteLine('{"schemaVersion":1,"outcome":"degraded"}')
@@ -85,13 +85,23 @@ try {
         'statusCheckRollup', 'author', 'comments', 'reviews', 'headRefOid'
     )
 
-    $checks = @($pr.statusCheckRollup | ForEach-Object {
+    $checks = [object[]]@($pr.statusCheckRollup | ForEach-Object {
         [ordered]@{
             name = [string]$_.name
             status = [string]$_.status
             conclusion = [string]$_.conclusion
         }
-    } | Sort-Object name)
+    })
+    [Array]::Sort[object]($checks, [System.Comparison[object]]{
+        param($left, $right)
+        foreach ($field in 'name', 'status', 'conclusion') {
+            $comparison = [StringComparer]::Ordinal.Compare([string]$left[$field], [string]$right[$field])
+            if ($comparison -ne 0) {
+                return $comparison
+            }
+        }
+        return 0
+    })
     $failingChecks = @($checks | Where-Object { $_.conclusion -in @('FAILURE', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'CANCELLED') })
     $mergeState = [string]$pr.mergeStateStatus
     $reviewDecision = [string]$pr.reviewDecision
@@ -123,7 +133,7 @@ try {
     }
 
     $evidence = [ordered]@{
-        evidenceNormalizationVersion = 2
+        evidenceNormalizationVersion = 3
         provider = 'github'
         repository = [string](Get-DetectorParameter -Request $request -Name 'repository' -Default '')
         number = [int]$pr.number
@@ -143,11 +153,11 @@ try {
             return
         }
         if ([bool](Get-OptionalValue -Object $preflight -Name 'terminal' -Default $false)) {
-            Write-EventlessTerminal -Evidence $evidence
+            Write-EventlessTerminal -Request $request -Evidence $evidence
             return
         }
         if ($terminal) {
-            Write-EventlessTerminal -Evidence $evidence
+            Write-EventlessTerminal -Request $request -Evidence $evidence
             return
         }
     }
@@ -158,7 +168,7 @@ try {
     }
     if ($kind) {
         $event = [ordered]@{
-            id = New-EventId -Provider 'github-pr' -Scope ([string]$pr.number) -Cursor $cursor
+            id = New-EventId -Provider 'github-pr' -Scope ([string]$pr.number) -Cursor $cursor -Request $request
             kind = $kind
             subject = "GitHub PR #$($pr.number): $($pr.title)"
             body = "$reason`n$($pr.url)"

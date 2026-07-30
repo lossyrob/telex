@@ -1,7 +1,7 @@
 {
   "manifestSchemaVersion": 1,
   "templateId": "http-json",
-  "templateVersion": "1.1.0",
+  "templateVersion": "1.2.0",
   "detectorProtocolVersion": 1,
   "evidenceNormalizationVersion": 2,
   "runtimeRequirement": {
@@ -11,11 +11,11 @@
   },
   "librarySource": {
     "path": "http-json/detector.ps1",
-    "sha256": "dc0a4f20b296befa005685159bf183e4cbae0576fd5da7a8718beaaf1095b4d9",
+    "sha256": "4a44fed41de485086963f53f6ded3cc32ca0106aa6cd0cfa93a4280c08953378",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
-        "sha256": "cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1"
+        "sha256": "03072d00f5b343d6a19c5fe40c7365c6286fea5035546763a8c753b0399cf189"
       }
     ]
   },
@@ -28,12 +28,15 @@
   ],
   "cursor": {
     "stateField": "cursor",
+    "occurrenceStateField": "occurrence",
     "strategy": "sha256-recursive-key-sorted-json-v1",
-    "replay": "The cursor covers source ID, field path, expected scalar, field presence, observed scalar, and match state. An unchanged response returns idle."
+    "replay": "The cursor covers source ID, field path, expected scalar, field presence, observed scalar, and match state. An unchanged response returns idle without advancing occurrence.",
+    "occurrence": "Every committed changed observation increments state.occurrence. Event IDs include that value, so retries before commit retain an ID while a later recurrence receives a new ID."
   },
   "semantics": {
     "terminal": "This continuing condition template never returns terminal; remove or pause the watch when the condition no longer matters.",
-    "duplicates": "Event IDs are deterministic from source ID and normalized cursor. Recipients must deduplicate repeated event IDs.",
+    "duplicates": "Event IDs are deterministic from source ID, committed-state-derived occurrence, and normalized cursor. At-least-once retries before state commit repeat the same ID; recipients must deduplicate it.",
+    "changedIdle": "A changed observation classified idle commits its new cursor and increments occurrence without emitting an event. That consumed occurrence prevents a later recurring event from reusing an older ID.",
     "initialEmission": {
       "actionable": "An already-matched scalar condition emits on the first attempt.",
       "synthetic": "This template has no synthetic snapshot event; emitInitialSnapshot is not a supported parameter."

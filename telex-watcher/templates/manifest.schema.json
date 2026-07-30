@@ -127,17 +127,25 @@
       "additionalProperties": false,
       "required": [
         "stateField",
+        "occurrenceStateField",
         "strategy",
-        "replay"
+        "replay",
+        "occurrence"
       ],
       "properties": {
         "stateField": {
           "const": "cursor"
         },
+        "occurrenceStateField": {
+          "const": "occurrence"
+        },
         "strategy": {
           "const": "sha256-recursive-key-sorted-json-v1"
         },
         "replay": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "occurrence": {
           "$ref": "#/$defs/nonEmptyString"
         }
       }
@@ -148,6 +156,7 @@
       "required": [
         "terminal",
         "duplicates",
+        "changedIdle",
         "initialEmission",
         "diagnostics"
       ],
@@ -156,6 +165,9 @@
           "$ref": "#/$defs/nonEmptyString"
         },
         "duplicates": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "changedIdle": {
           "$ref": "#/$defs/nonEmptyString"
         },
         "initialEmission": {

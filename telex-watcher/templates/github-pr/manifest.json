@@ -1,9 +1,9 @@
 {
   "manifestSchemaVersion": 1,
   "templateId": "github-pr",
-  "templateVersion": "1.1.0",
+  "templateVersion": "1.2.0",
   "detectorProtocolVersion": 1,
-  "evidenceNormalizationVersion": 2,
+  "evidenceNormalizationVersion": 3,
   "runtimeRequirement": {
     "command": "pwsh",
     "minimumVersion": "7.4",
@@ -11,11 +11,11 @@
   },
   "librarySource": {
     "path": "github-pr/detector.ps1",
-    "sha256": "e9358b39bc6498faaae806c54d5d5245b768f1ccdfbd442c8f6f10e45b818c89",
+    "sha256": "429a105110afeaf253d16e78d7b24c7bb30780708154561d34850964fae2c3a0",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
-        "sha256": "cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1"
+        "sha256": "03072d00f5b343d6a19c5fe40c7365c6286fea5035546763a8c753b0399cf189"
       }
     ]
   },
@@ -31,12 +31,15 @@
   ],
   "cursor": {
     "stateField": "cursor",
+    "occurrenceStateField": "occurrence",
     "strategy": "sha256-recursive-key-sorted-json-v1",
-    "replay": "The cursor covers PR identity, head SHA, state, draft flag, merge state, review decision, and sorted checks. An unchanged cursor returns idle."
+    "replay": "The cursor covers PR identity, head SHA, state, draft flag, merge state, review decision, and ordinally sorted checks. An unchanged cursor returns idle without advancing occurrence.",
+    "occurrence": "Every committed changed observation increments state.occurrence. Event IDs include that value, so retries before commit retain an ID while a later recurrence receives a new ID."
   },
   "semantics": {
     "terminal": "Merged or closed PRs return terminal. If preflight declares terminal, or terminalization occurs after safe preflight but before the first attempt, the result is eventless terminal.",
-    "duplicates": "Event IDs are deterministic from PR number and normalized cursor. At-least-once delivery can repeat the same event ID; recipients must deduplicate it.",
+    "duplicates": "Event IDs are deterministic from PR number, committed-state-derived occurrence, and normalized cursor. At-least-once retries before state commit repeat the same ID; recipients must deduplicate it.",
+    "changedIdle": "A changed observation classified idle commits its new cursor and increments occurrence without emitting an event. That consumed occurrence prevents a later recurring event from reusing an older ID.",
     "initialEmission": {
       "actionable": "A naturally actionable attention, ready-to-merge, or completion condition emits on the first attempt even when emitInitialSnapshot is false.",
       "synthetic": "The synthetic github.pull-request.snapshot baseline emits only when emitInitialSnapshot is true. The pinned registration keeps it false and does not authorize the snapshot kind."

@@ -1,7 +1,7 @@
 {
   "manifestSchemaVersion": 1,
   "templateId": "azure-devops-pr",
-  "templateVersion": "1.1.1",
+  "templateVersion": "1.2.0",
   "detectorProtocolVersion": 1,
   "evidenceNormalizationVersion": 3,
   "runtimeRequirement": {
@@ -11,11 +11,11 @@
   },
   "librarySource": {
     "path": "azure-devops-pr/detector.ps1",
-    "sha256": "dc52be71232cc89f586cb366e1904ec15b26929c90cfc8bfdbafe892e7e9f2e1",
+    "sha256": "1a68aa743a017796671ebe8ca69d5c31debac509fdc4a076cc72bb9f5fd6bb95",
     "supportFiles": [
       {
         "path": "shared/DetectorCommon.psm1",
-        "sha256": "cca5ae57123142df3b7bd053cb6a1d88e0436ca38dd769533d5d4591987201b1"
+        "sha256": "03072d00f5b343d6a19c5fe40c7365c6286fea5035546763a8c753b0399cf189"
       }
     ]
   },
@@ -32,12 +32,15 @@
   ],
   "cursor": {
     "stateField": "cursor",
+    "occurrenceStateField": "occurrence",
     "strategy": "sha256-recursive-key-sorted-json-v1",
-    "replay": "The cursor covers PR identity, creation time, status, source commit, merge status, sorted reviewers, and sorted thread state. An unchanged cursor returns idle."
+    "replay": "The cursor covers PR identity, creation time, status, source commit, merge status, sorted reviewers, and sorted thread state. An unchanged cursor returns idle without advancing occurrence.",
+    "occurrence": "Every committed changed observation increments state.occurrence. Event IDs include that value, so retries before commit retain an ID while a later recurrence receives a new ID."
   },
   "semantics": {
     "terminal": "Completed or abandoned PRs return terminal. Preflight-declared terminal and a terminal transition after safe preflight but before the first attempt return eventless terminal.",
-    "duplicates": "Event IDs are deterministic from PR ID and normalized cursor. Recipients must deduplicate repeated event IDs.",
+    "duplicates": "Event IDs are deterministic from PR ID, committed-state-derived occurrence, and normalized cursor. At-least-once retries before state commit repeat the same ID; recipients must deduplicate it.",
+    "changedIdle": "A changed observation classified idle commits its new cursor and increments occurrence without emitting an event. That consumed occurrence prevents a later recurring event from reusing an older ID.",
     "initialEmission": {
       "actionable": "A naturally actionable attention, ready-to-merge, or completion condition emits on the first attempt even when emitInitialSnapshot and emitInitialCreatedEvent are false.",
       "synthetic": "Created and snapshot baseline events emit only when their corresponding parameters are true. The pinned registration keeps both false and authorizes neither kind."

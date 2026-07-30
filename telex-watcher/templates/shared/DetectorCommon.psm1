@@ -134,6 +134,45 @@ function Get-StateCursor {
     return $null
 }
 
+function Get-StateOccurrence {
+    param([hashtable]$Request)
+
+    if ($Request.state -isnot [System.Collections.IDictionary] -or -not $Request.state.Contains('occurrence')) {
+        return [int64]0
+    }
+
+    $text = [Convert]::ToString($Request.state.occurrence, [Globalization.CultureInfo]::InvariantCulture)
+    [int64]$occurrence = 0
+    if (
+        -not [int64]::TryParse(
+            $text,
+            [Globalization.NumberStyles]::None,
+            [Globalization.CultureInfo]::InvariantCulture,
+            [ref]$occurrence
+        ) -or
+        $occurrence -lt 0
+    ) {
+        throw 'state-invalid: state.occurrence must be a non-negative integer.'
+    }
+    return $occurrence
+}
+
+function Get-NextOccurrence {
+    param(
+        [hashtable]$Request,
+        [string]$Cursor
+    )
+
+    $previousOccurrence = Get-StateOccurrence -Request $Request
+    if ((Get-StateCursor -Request $Request) -eq $Cursor) {
+        return $previousOccurrence
+    }
+    if ($previousOccurrence -eq [int64]::MaxValue) {
+        throw 'state-invalid: state.occurrence cannot advance beyond Int64.MaxValue.'
+    }
+    return $previousOccurrence + 1
+}
+
 function Get-PreflightEvidence {
     param([hashtable]$Request)
 
@@ -238,10 +277,12 @@ function New-EventId {
     param(
         [string]$Provider,
         [string]$Scope,
-        [string]$Cursor
+        [string]$Cursor,
+        [hashtable]$Request
     )
 
-    return "$Provider`:$Scope`:$($Cursor.Substring(0, 24))"
+    $occurrence = Get-NextOccurrence -Request $Request -Cursor $Cursor
+    return "$Provider`:$Scope`:$occurrence`:$($Cursor.Substring(0, 24))"
 }
 
 function Write-DetectorResult {
@@ -293,7 +334,10 @@ function Write-SnapshotResult {
     )
 
     $cursor = Get-OpaqueCursor $Evidence
-    $nextState = [ordered]@{ cursor = $cursor }
+    $nextState = [ordered]@{
+        cursor = $cursor
+        occurrence = Get-NextOccurrence -Request $Request -Cursor $cursor
+    }
     $previousCursor = Get-StateCursor $Request
 
     if ($previousCursor -eq $cursor) {
@@ -313,11 +357,16 @@ function Write-SnapshotResult {
 }
 
 function Write-EventlessTerminal {
-    param([System.Collections.IDictionary]$Evidence)
+    param(
+        [hashtable]$Request,
+        [System.Collections.IDictionary]$Evidence
+    )
 
+    $cursor = Get-OpaqueCursor $Evidence
     Write-DetectorResult -Outcome terminal -NextState ([ordered]@{
-        cursor = Get-OpaqueCursor $Evidence
+        cursor = $cursor
+        occurrence = Get-NextOccurrence -Request $Request -Cursor $cursor
     })
 }
 
-Export-ModuleMember -Function Read-DetectorRequest, Get-DetectorParameter, Get-OptionalValue, Resolve-DetectorPath, ConvertTo-CompactJson, ConvertTo-CanonicalJson, Get-Sha256, Get-OpaqueCursor, Get-StateCursor, Get-PreflightEvidence, Test-Rfc3339Timestamp, ConvertTo-Rfc3339Utc, Assert-DetectorTestMode, Write-TestTransportRecord, New-EventId, Write-DetectorResult, Write-Degraded, Write-SnapshotResult, Write-EventlessTerminal
+Export-ModuleMember -Function Read-DetectorRequest, Get-DetectorParameter, Get-OptionalValue, Resolve-DetectorPath, ConvertTo-CompactJson, ConvertTo-CanonicalJson, Get-Sha256, Get-OpaqueCursor, Get-StateCursor, Get-StateOccurrence, Get-NextOccurrence, Get-PreflightEvidence, Test-Rfc3339Timestamp, ConvertTo-Rfc3339Utc, Assert-DetectorTestMode, Write-TestTransportRecord, New-EventId, Write-DetectorResult, Write-Degraded, Write-SnapshotResult, Write-EventlessTerminal
