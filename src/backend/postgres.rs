@@ -2339,8 +2339,8 @@ impl Backend for PgBackend {
                  SET state=$4, result_json=$5, recovery_json=$6,
                      updated_at_ms=$7,
                      completed_at_ms=CASE
-                         WHEN $4 IN ('accepted','rejected','duplicate','completed')
-                         THEN $7 ELSE NULL END
+                         WHEN $4::text IN ('accepted','rejected','duplicate','completed')
+                         THEN $7::bigint ELSE NULL::bigint END
                  WHERE logical_store_id=$1 AND application_responsibility=$2
                    AND operation_id=$3
                  RETURNING logical_store_id, application_responsibility, operation_id,
@@ -2558,8 +2558,8 @@ impl Backend for PgBackend {
                  SET state=$5, outcome_json=$6, recovery_json=$7,
                      updated_at_ms=$8,
                      completed_at_ms=CASE
-                         WHEN $5 IN ('accepted','rejected','completed','no-op')
-                         THEN $8 ELSE NULL END
+                         WHEN $5::text IN ('accepted','rejected','completed','no-op')
+                         THEN $8::bigint ELSE NULL::bigint END
                  WHERE logical_store_id=$1 AND application_responsibility=$2
                    AND operation_id=$3 AND step_id=$4
                  RETURNING logical_store_id, application_responsibility, operation_id,
