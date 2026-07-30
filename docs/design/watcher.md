@@ -270,11 +270,16 @@ Legal combinations include:
 - `send-retry-exhausted`;
 - `send-permanently-rejected`;
 - `operation-identity-conflict`;
+- `logical-store-mismatch`;
 - `unsupported-registration-version`; and
 - `orphan-containment-unproven`.
 
 Address occupancy never controls lifecycle. A target or sender becoming
 unoccupied does not silently cancel or expire a watch.
+
+Eligibility is watch-local. Even an active/eligible watch may wait on
+runtime-wide concurrency, backoff, containment, or sender readiness. Those
+external execution gates do not rewrite watch eligibility.
 
 ## Detector protocol v2
 
@@ -457,7 +462,8 @@ Before the first send, Watcher atomically persists:
 
 - watch ID, event sequence, event ID, and operation ID;
 - attempt ID and captured registration revision;
-- fixed backend, sender, target, attention, and disposition;
+- fixed backend/profile, opaque logical-store identity, sender, target,
+  attention, and disposition;
 - committed prior state and proposed next state;
 - the complete normalized Telex envelope;
 - canonical hashes of prior state, proposed state, and normalized envelope; and
@@ -478,13 +484,14 @@ detector.
 | Evidence | Required transition |
 |---|---|
 | No event or staging failed | No sequence/send/state change. A later attempt may execute normally. |
-| Authoritative `not-recorded` | The client proves no operation/result/receipt exists for the exact operation ID and no durable acceptance occurred. Keep the staged identity and retry the exact same operation under bounded policy. |
-| Definite transient rejection before acceptance | Keep the staged identity and retry the exact same operation under bounded policy. |
-| Definite permanent rejection before acceptance | Pause/block with `send-permanently-rejected`; no automatic retry. An audited `close not accepted` operation may tombstone the allocation after external correction. |
+| Authoritative `not-recorded` | The client proves no operation/result/receipt exists for the staged logical store and exact operation ID, and no durable acceptance occurred. Keep the staged identity and retry the exact same operation under bounded policy. |
+| Definite transient rejection before acceptance | Rejection evidence explicitly classifies the condition as retryable. Keep the staged identity and retry the exact same operation under bounded policy. |
+| Definite permanent rejection before acceptance | Rejection evidence explicitly classifies the condition as non-retryable. Pause/block with `send-permanently-rejected`; no automatic retry. An audited `close not accepted` operation may tombstone the allocation after external correction. |
 | Repeated transient rejection exhausts retry budget | Pause/block with `send-retry-exhausted`. |
 | Durable acceptance proven | Atomically commit proposed state, committed sequence, receipt/evidence, and attempt result. |
-| `previously-completed` or `duplicate` with matching operation/payload identity and durable receipt | Treat as proven acceptance and commit. |
+| `previously-completed` or `duplicate` with matching logical store, operation identity, canonical payload identity, and durable receipt | Treat as proven acceptance and commit. |
 | `previously-completed` or `duplicate` with mismatched identity or payload | Pause/block with `operation-identity-conflict`; do not send or commit. |
+| Result or receipt refers to another logical store | Pause/block with `logical-store-mismatch`; never authorize retry or commit from that evidence. |
 | `partial` result | Commit only if its durable-acceptance axis is proven. If rejection is proven, follow the rejection rows. Otherwise treat as indeterminate. |
 | Accepted send but local commit failed | Keep the pending operation; reconcile the original operation and commit when acceptance is proven again. |
 | Indeterminate result | Set eligibility to `reconciliation-pending`; do not run the detector or author a replacement send. |
@@ -495,7 +502,8 @@ detector.
 
 Automatic or operator-requested retry is legal only through a retry-safe
 Application Client primitive using the exact persisted operation ID, event ID,
-sequence, sender, target, payload, and retry budget. If the supported client
+sequence, staged logical-store identity, sender, target, payload, and retry
+budget. If the supported client
 cannot guarantee identity-checkable same-operation retry, recovery is query-only
 reconciliation and the watch remains blocked. `Not found` is not sufficient
 unless the client defines it as authoritative `not-recorded` for the selected
@@ -521,17 +529,35 @@ After successful commit, every later detector `event` is a new occurrence and
 receives a new sequence and event ID. Detector state decides whether a persistent
 condition should return `event` again or become `idle`.
 
-Watcher computes `recurrenceHash` over:
+Watcher computes `recurrenceHash` from this versioned literal pre-image shape;
+omitted detector metadata normalizes to `{}`:
 
-- backend/profile, sender, target, attention, and disposition; and
-- detector kind, subject, body, and metadata.
+```json
+{
+  "schemaVersion": 1,
+  "route": {
+    "backendProfile": "pg-rde-telex",
+    "sender": "service:watcher/github",
+    "target": "project:telex/node:133",
+    "attention": "next-checkpoint",
+    "requiresDisposition": true
+  },
+  "event": {
+    "kind": "github.pull-request.review",
+    "subject": "External review received on PR #133",
+    "body": "A reviewer requested changes.",
+    "metadata": {}
+  }
+}
+```
 
-The pre-image is an object with exactly those fields, encoded as RFC 8785
-canonical JSON, and the value is `sha256:<lowercase-hex>`. The hash excludes
-event sequence, event ID, operation ID, attempt/runtime IDs, receipts, and
-timestamps. It is an exact rendered-content diagnostic, not a stable provider
-condition key; detector-added timestamps or run IDs intentionally make the hash
-different. Health and retained evidence expose:
+The pre-image is encoded as RFC 8785 canonical JSON and the value is
+`sha256:<lowercase-hex>`. A shape change requires a new pre-image
+`schemaVersion`; historical hashes are not recomputed. The shape excludes event
+sequence, event ID, operation ID, attempt/runtime IDs, receipts, and timestamps.
+It is an exact rendered-content diagnostic, not a stable provider condition key;
+detector-added timestamps or run IDs intentionally make the hash different.
+Health and retained evidence expose:
 
 - `lastRecurrenceHash`;
 - `consecutiveIdenticalRecurrences`;
@@ -562,8 +588,12 @@ an executable.
 
 Detector processes start from a documented minimal platform launch baseline plus
 values for explicitly allowlisted inherited variable names. Registration stores
-variable names, never values. Values are read at each attempt. Credentials never
-appear in detector request JSON.
+variable names, never values. Values are read at each attempt. Inherited
+allowlist values are not serialized into detector request JSON. Opaque
+`parameters` and committed `state` are serialized into the request and retained
+by Watcher; detector authors must treat them as sensitive-capable data and avoid
+placing credentials there unless their local storage policy explicitly permits
+it.
 
 One runtime process may serve many watches. Environment allowlists select names
 from that runtime's environment; they do not create separate secret-value
@@ -647,6 +677,7 @@ The default Telex coordination daemon is never used for destructive proof.
 | indeterminate receipt or accepted-send/local-commit failure | no new detector execution | active/reconciliation-pending/degraded | result/receipt reconciliation |
 | reconciliation budget exhausted | no new detector execution | paused/inactive/blocked | reconcile now, finite same-operation retry budget, or remove |
 | duplicate/previously-completed identity conflict | no send/state commit | paused/inactive/blocked (`operation-identity-conflict`) | investigate client/store identity, then remove |
+| receipt/result logical-store mismatch | no retry/send/state commit | paused/inactive/blocked (`logical-store-mismatch`) | correct backend selection or evidence source; reconcile only against the staged store, otherwise remove |
 | unsupported v1 registration | no execution | paused/inactive/blocked | explicit v2 re-registration/migration |
 | unproven orphan containment | no execution | paused/inactive/blocked | operator proof/cleanup + resume |
 | sender partial/unready | no affected watch execution/send | runtime degraded | reconcile/compensate |
@@ -730,6 +761,11 @@ The top-level keys `schemaVersion`, `watcher`, and `detector` are reserved and
 constructed by Watcher. Arbitrary detector metadata is nested under `detector`,
 so it cannot collide with Watcher provenance.
 
+The reserved shape is not self-authenticating. Recipients trust
+`metadata.watcher` provenance only when the Telex message is bound to the
+authenticated registered sender and expected logical-store evidence. Telex core
+otherwise carries the metadata as opaque content.
+
 Recipients can inspect watch identity, event ordering, retry identity, attempt,
 runtime, store, registration, and detector protocol version. V2 does not
 guarantee which script bytes ran. Projects that need script provenance record it
@@ -737,11 +773,14 @@ in their wrapper, detector metadata, or separate audit system.
 
 `eventSequence` is strictly increasing within a watch ID but is not guaranteed
 dense. A recipient must not interpret a gap as lost Telex delivery without
-consulting Watcher evidence. When two Telex messages carry the same Watcher event
-identity, the recipient may deduplicate its domain action, but each Telex message
-still has its own transport acknowledgment and required workflow disposition.
-The recipient should retire every duplicate delivery explicitly while recording
-that the Watcher event was already handled.
+operator-assisted investigation of Watcher evidence; Watcher does not expose a
+recipient-facing evidence API in v2. `attemptId` and `runtimeId` identify the
+detector attempt and runtime that staged the frozen envelope, not a later runtime
+that reconciles or retries it. When two Telex messages carry the same Watcher
+event identity, the recipient may deduplicate its domain action, but each Telex
+message still has its own transport acknowledgment and required workflow
+disposition. The recipient should retire every duplicate delivery explicitly
+while recording that the Watcher event was already handled.
 
 Prior/next state hashes, normalized-envelope hash, recurrence hash, registration
 policy snapshot, and typed receipt remain in the local evidence ledger. Detector
@@ -837,9 +876,9 @@ revision, lifecycle, eligibility, health, and typed refusal reason.
 | Show/list | Include active, paused, terminal, removed, v1-unsupported, and unresolved-tombstone records through explicit filters. |
 | Pause | Move an active eligible watch to paused/inactive. Refuse while a pending operation exists; use reconciliation or removal instead. |
 | Resume | Move paused/inactive to active/eligible, replace `activatedAt`, and retain `lastSuccessAt`. Refuse while unresolved pending evidence exists or the blocked reason has not been corrected. |
-| Update | Apply mutable registration fields and optionally replace committed opaque state, incrementing revision and auditing old/new state hashes. Refuse immutable ID/backend/route changes, removed watches, and any watch with a pending operation. |
+| Update | In one registry transaction, verify no pending operation exists, apply mutable fields, optionally replace committed opaque state, and increment revision so update and event staging cannot race. Omitted state replacement preserves committed state; explicit JSON `null` replaces it with null. Refuse immutable ID/backend/route changes, removed watches, unsupported v1 rows (re-register under v2), and any watch with a pending operation. Audit old/new state hashes when state changes. |
 | Reconcile now | Query the exact pending operation for active, blocked, or removed watches. It may close evidence on a removed tombstone but never resurrect it. |
-| Grant retry budget | Add a finite same-operation retry budget after authoritative `not-recorded`, transient rejection, or unresolved blocking. Refuse replacement identity or payload. |
+| Grant retry budget | For `receipt-outcome-unresolved` or `send-retry-exhausted`, atomically add a finite same-operation retry budget and transition to active/`reconciliation-pending`/degraded with `blockedReason = null` and `diagnosticCategory = receipt-reconciliation-pending`; no separate resume is required. Refuse grants for permanent rejection, identity/store conflict, unsupported v1, containment failure, replacement identity, or replacement payload. |
 | Close not accepted | Only for a definitively permanently rejected pre-acceptance operation. Record the rejection as terminal evidence for that allocation, retain its sequence tombstone, clear the pending operation without advancing detector state, and permit explicit resume at the next sequence after external correction. Refuse for indeterminate outcomes. |
 | Remove | Stop future detector execution and retain identity, pending operation, tombstone, and evidence. Removal never asserts accepted or rejected. |
 
@@ -922,12 +961,16 @@ The client must support:
 9. stable opaque logical-store identity on status and receipts;
 10. restart-stable application operation identity;
 11. accepted, rejected, partial, indeterminate, previously-completed, and
-    duplicate operation outcomes;
+    duplicate operation outcomes, with pre-acceptance rejection classified as
+    transient/retryable or permanent/non-retryable;
 12. operation-result and receipt lookup after restart, including authoritative
     `not-recorded` scoped to the exact logical store and operation identity;
 13. identity-checkable retry of the exact same operation, preserving sender,
-    target, exact payload bytes/identity, operation identity, and retry budget;
-14. health, reconciliation, compensation, and cleanup primitives without CLI
+    target, staged logical-store binding, exact payload bytes/identity,
+    operation identity, and retry budget;
+14. comparable canonical payload identity on duplicate/previously-completed
+    evidence so Watcher can reject mismatched results; and
+15. health, reconciliation, compensation, and cleanup primitives without CLI
     parsing or raw daemon IPC.
 
 If the supported client cannot provide same-operation retry at that strength,
@@ -958,8 +1001,11 @@ Contract validation must:
 - reject invalid outcome/event/state combinations;
 - prove that omitted `nextState` preserves prior state while explicit `null`
   commits JSON null;
-- enforce watch-ID grammar, metadata object shape, UTC `Z` timestamps, command
-  NUL rules, and runtime absolute-working-directory validation;
+- enforce watch-ID grammar, metadata object shape, command NUL rules, and
+  runtime absolute-working-directory validation;
+- assert JSON Schema `date-time` format (or perform an equivalent
+  calendar-validity check) in addition to the UTC `Z`/precision lexical pattern,
+  rejecting invalid calendar dates and excess fractional precision;
 - verify v1 schemas remain unchanged and are linked only as v1 compatibility
   artifacts; and
 - verify design links and ADR anchors resolve.
