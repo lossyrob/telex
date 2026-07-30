@@ -268,7 +268,7 @@ async fn courier_loop(runtime: &Arc<Runtime>) {
             .set_courier(|courier| courier.last_exit_code = Some(code))
             .await;
 
-        let (decision, next_hung) = decide_exit(code, consecutive_daemon_hung);
+        let (decision, next_hung) = decide_exit(code, &stderr, consecutive_daemon_hung);
         consecutive_daemon_hung = next_hung;
         match decision {
             ExitDecision::Delivery => {
@@ -352,7 +352,9 @@ async fn courier_loop(runtime: &Arc<Runtime>) {
                 }
             }
             ExitDecision::Backoff => {
-                let detail = if stderr.trim().is_empty() {
+                let detail = if is_transient_store_disconnect(&stderr) {
+                    "PostgreSQL connection interrupted; retrying after recovery backoff".to_string()
+                } else if stderr.trim().is_empty() {
                     format!("telex wait exited {code}; retrying after recovery backoff")
                 } else {
                     format!(
@@ -718,9 +720,10 @@ fn failure_decision(attempt: u8, maximum: u8) -> FailureDecision {
     }
 }
 
-fn decide_exit(code: i32, consecutive_daemon_hung: u8) -> (ExitDecision, u8) {
+fn decide_exit(code: i32, stderr: &str, consecutive_daemon_hung: u8) -> (ExitDecision, u8) {
     match code {
         0 => (ExitDecision::Delivery, 0),
+        1 if is_transient_store_disconnect(stderr) => (ExitDecision::Backoff, 0),
         1 => (ExitDecision::Pause, 0),
         2 => (ExitDecision::Rearm, 0),
         3 | 5 => (ExitDecision::Reattach, 0),
@@ -728,6 +731,18 @@ fn decide_exit(code: i32, consecutive_daemon_hung: u8) -> (ExitDecision, u8) {
         4 => (ExitDecision::Backoff, 1),
         _ => (ExitDecision::Pause, 0),
     }
+}
+
+fn is_transient_store_disconnect(stderr: &str) -> bool {
+    let normalized = stderr.to_ascii_lowercase();
+    [
+        "terminating connection due to administrator command",
+        "server closed the connection unexpectedly",
+        "connection reset by peer",
+        "connection was forcibly closed",
+    ]
+    .iter()
+    .any(|needle| normalized.contains(needle))
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -836,13 +851,24 @@ mod tests {
 
     #[test]
     fn courier_exit_decisions_match_recovery_contract() {
-        assert_eq!(decide_exit(0, 0), (ExitDecision::Delivery, 0));
-        assert_eq!(decide_exit(1, 0), (ExitDecision::Pause, 0));
-        assert_eq!(decide_exit(2, 0), (ExitDecision::Rearm, 0));
-        assert_eq!(decide_exit(3, 0), (ExitDecision::Reattach, 0));
-        assert_eq!(decide_exit(5, 0), (ExitDecision::Reattach, 0));
-        assert_eq!(decide_exit(4, 0), (ExitDecision::Backoff, 1));
-        assert_eq!(decide_exit(4, 1), (ExitDecision::Pause, 2));
+        assert_eq!(decide_exit(0, "", 0), (ExitDecision::Delivery, 0));
+        assert_eq!(
+            decide_exit(1, "invalid configuration", 0),
+            (ExitDecision::Pause, 0)
+        );
+        assert_eq!(
+            decide_exit(
+                1,
+                "db error: FATAL: terminating connection due to administrator command",
+                0,
+            ),
+            (ExitDecision::Backoff, 0)
+        );
+        assert_eq!(decide_exit(2, "", 0), (ExitDecision::Rearm, 0));
+        assert_eq!(decide_exit(3, "", 0), (ExitDecision::Reattach, 0));
+        assert_eq!(decide_exit(5, "", 0), (ExitDecision::Reattach, 0));
+        assert_eq!(decide_exit(4, "", 0), (ExitDecision::Backoff, 1));
+        assert_eq!(decide_exit(4, "", 1), (ExitDecision::Pause, 2));
     }
 
     #[test]
