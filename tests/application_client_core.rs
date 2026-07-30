@@ -259,6 +259,18 @@ async fn compound_steps_and_cleanup_preserve_inflight_work() {
         },
     ];
     backend.declare_compound_steps(&steps).await.unwrap();
+    assert!(backend
+        .complete_compound_step(
+            "store-v1-test",
+            "station",
+            "compound-1",
+            "reply",
+            "done",
+            Some("{}"),
+            None,
+        )
+        .await
+        .is_err());
     backend
         .complete_compound_step(
             "store-v1-test",
@@ -365,7 +377,7 @@ async fn compound_terminal_disposition_is_fenced_and_atomic() {
         outcome_json: Some("{}".into()),
         recovery_json: None,
     };
-    assert!(backend
+    let (row, outcome) = backend
         .application_disposition_with_ack(
             "recipient",
             &owner,
@@ -378,7 +390,9 @@ async fn compound_terminal_disposition_is_fenced_and_atomic() {
             Some(&effect),
         )
         .await
-        .is_err());
+        .unwrap();
+    assert!(row.is_none());
+    assert_eq!(outcome, DeliveryOutcome::PrerequisiteIncomplete);
     assert!(backend
         .dispositions_for(message.id)
         .await
@@ -396,6 +410,19 @@ async fn compound_terminal_disposition_is_fenced_and_atomic() {
         )
         .await
         .unwrap();
+    assert_eq!(
+        backend
+            .mark_delivery_consumed_if_current_owner(
+                "recipient",
+                &owner,
+                epoch,
+                message.id,
+                delivery.id,
+            )
+            .await
+            .unwrap(),
+        DeliveryOutcome::Marked
+    );
     let (disposition, outcome) = backend
         .application_disposition_with_ack(
             "recipient",
@@ -411,7 +438,7 @@ async fn compound_terminal_disposition_is_fenced_and_atomic() {
         .await
         .unwrap();
     assert!(disposition.is_some());
-    assert_eq!(outcome, DeliveryOutcome::Marked);
+    assert_eq!(outcome, DeliveryOutcome::AlreadyConsumed);
     assert_eq!(
         backend
             .compound_steps("store-v1-test", "station", "compound-disposition")
@@ -420,4 +447,27 @@ async fn compound_terminal_disposition_is_fenced_and_atomic() {
             .state,
         "accepted"
     );
+    backend.reset_epoch_lease("recipient").await.unwrap();
+    let successor = backend
+        .claim_epoch_lease("recipient", "owner-2", 15)
+        .await
+        .unwrap();
+    assert!(matches!(successor, EpochClaimResult::Claimed(_)));
+    let (stale_row, stale_outcome) = backend
+        .application_disposition_with_ack(
+            "recipient",
+            &owner,
+            epoch,
+            message.id,
+            delivery.id,
+            "closed",
+            None,
+            Some("station:sender"),
+            None,
+        )
+        .await
+        .unwrap();
+    assert!(stale_row.is_none());
+    assert_eq!(stale_outcome, DeliveryOutcome::NotOwner);
+    assert_eq!(backend.dispositions_for(message.id).await.unwrap().len(), 1);
 }

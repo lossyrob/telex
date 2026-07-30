@@ -170,6 +170,8 @@ pub struct HelloAck {
     pub auth_policy_version: u16,
     pub accepted: bool,
     pub required_capabilities: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -887,6 +889,7 @@ pub fn evaluate_hello(hello: &Hello) -> HelloAck {
         auth_policy_version: AUTH_POLICY_VERSION,
         accepted: reason.is_none(),
         required_capabilities: required,
+        capabilities,
         reason,
         capability_scopes: Vec::new(),
     }

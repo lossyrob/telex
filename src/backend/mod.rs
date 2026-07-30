@@ -386,6 +386,16 @@ pub trait Backend: Send + Sync {
         bail!("complete_application_operation: not supported by this backend")
     }
 
+    async fn abandon_unmapped_application_operation(
+        &self,
+        _logical_store_id: &str,
+        _application_responsibility: &str,
+        _operation_id: &str,
+        _result_json: &str,
+    ) -> Result<Option<ApplicationOperationRecord>> {
+        bail!("abandon_unmapped_application_operation: not supported by this backend")
+    }
+
     async fn declare_compound_steps(
         &self,
         _steps: &[NewCompoundStepRecord],

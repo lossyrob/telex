@@ -11,8 +11,9 @@ use crate::daemon_ipc::{
 use crate::model::{
     now_ms, ApplicationOperationBegin, ApplicationOperationRecord, ApplicationRecordScope,
     ApplicationStorageStats, CleanupReport, CompoundDispositionStep, CompoundStepRecord,
-    DeliveryOutcome, HistoryOrder, HistoryQuery, NewApplicationOperation, NewCompoundStepRecord,
-    RetentionPolicy, StateDeltaRecord, StoreDeltaCleanupReport, StoreDeltaRetentionPolicy,
+    CompoundStepState, DeliveryOutcome, HistoryOrder, HistoryQuery, NewApplicationOperation,
+    NewCompoundStepRecord, RetentionPolicy, StateDeltaRecord, StoreDeltaCleanupReport,
+    StoreDeltaRetentionPolicy,
 };
 use crate::profiles::BackendProfile;
 use serde::{Deserialize, Serialize};
@@ -104,6 +105,7 @@ pub enum ApplicationClientError {
     Protocol {
         code: String,
     },
+    TransportUncertain(String),
     Unavailable(String),
 }
 
@@ -133,6 +135,9 @@ impl fmt::Display for ApplicationClientError {
             Self::Indeterminate { detail, .. } => write!(f, "indeterminate operation: {detail}"),
             Self::InvalidRequest(detail) => write!(f, "invalid application request: {detail}"),
             Self::Protocol { code } => write!(f, "application protocol error: {code}"),
+            Self::TransportUncertain(detail) => {
+                write!(f, "application transport outcome is uncertain: {detail}")
+            }
             Self::Unavailable(detail) => write!(f, "application client unavailable: {detail}"),
         }
     }
@@ -231,8 +236,10 @@ pub enum EvidenceState {
     Unknown,
     Unavailable,
     NotAttempted,
+    Pending,
     Accepted,
     Rejected,
+    Disposition(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -360,6 +367,7 @@ pub struct ApplicationHealth {
     pub receive_ready: bool,
     pub attended_but_deaf: bool,
     pub recovering: bool,
+    pub last_recovery_failure: Option<String>,
     pub degraded: bool,
     pub stopped_or_unattended: bool,
     pub principal: PrincipalProvenance,
@@ -430,6 +438,7 @@ pub struct CompoundDispositionRequest {
 struct LocalMembership {
     handle: MembershipHandle,
     recovering: bool,
+    last_recovery_failure: Option<String>,
 }
 
 pub struct ApplicationClient {
@@ -641,6 +650,7 @@ impl ApplicationClient {
         let mut attempt = 0;
         if let Some(existing) = self.memberships.lock().unwrap().get_mut(&spec.address) {
             existing.recovering = true;
+            existing.last_recovery_failure = None;
         }
         loop {
             match self.attach_one(spec, true).await {
@@ -650,7 +660,14 @@ impl ApplicationClient {
                     tokio::time::sleep(std::time::Duration::from_millis(50 * attempt as u64)).await;
                     let _ = error;
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    if let Some(existing) = self.memberships.lock().unwrap().get_mut(&spec.address)
+                    {
+                        existing.recovering = false;
+                        existing.last_recovery_failure = Some(error.to_string());
+                    }
+                    return Err(error);
+                }
             }
         }
     }
@@ -695,6 +712,7 @@ impl ApplicationClient {
                     LocalMembership {
                         handle: handle.clone(),
                         recovering: false,
+                        last_recovery_failure: None,
                     },
                 );
                 Ok(handle)
@@ -894,7 +912,7 @@ impl ApplicationClient {
         };
         let response = match self.request(daemon_request, false).await {
             Ok(response) => response,
-            Err(error) => {
+            Err(error @ ApplicationClientError::TransportUncertain(_)) => {
                 let recovery = self.recovery_handle(request.operation_id.clone());
                 let _ = self
                     .backend
@@ -911,6 +929,20 @@ impl ApplicationClient {
                     detail: error.to_string(),
                     recovery,
                 });
+            }
+            Err(error) => {
+                self.backend
+                    .complete_application_operation(
+                        &self.logical_store_id.0,
+                        &self.responsibility.0,
+                        &request.operation_id.0,
+                        "rejected",
+                        Some(&serde_json::to_string(&error).map_err(invalid)?),
+                        None,
+                    )
+                    .await
+                    .map_err(unavailable)?;
+                return Err(error);
             }
         };
         match response {
@@ -1134,7 +1166,7 @@ impl ApplicationClient {
                 Err(error)
             }
             Ok(_) => Err(unexpected_response("reply")),
-            Err(error) => {
+            Err(error @ ApplicationClientError::TransportUncertain(_)) => {
                 let recovery = self.recovery_handle(request.operation_id.clone());
                 let _ = self
                     .backend
@@ -1151,6 +1183,20 @@ impl ApplicationClient {
                     detail: error.to_string(),
                     recovery,
                 })
+            }
+            Err(error) => {
+                self.backend
+                    .complete_application_operation(
+                        &self.logical_store_id.0,
+                        &self.responsibility.0,
+                        &request.operation_id.0,
+                        "rejected",
+                        Some(&serde_json::to_string(&error).map_err(invalid)?),
+                        None,
+                    )
+                    .await
+                    .map_err(unavailable)?;
+                Err(error)
             }
         }
     }
@@ -1423,9 +1469,9 @@ impl ApplicationClient {
                 delivery_id: delivery.delivery_id,
             });
         }
-        let terminal = crate::model::Disposition::parse(state)
-            .map_err(invalid)?
-            .is_terminal();
+        let disposition = crate::model::Disposition::parse(state).map_err(invalid)?;
+        let terminal = disposition.is_terminal();
+        let state = disposition.as_str();
         let (row, outcome) = self
             .backend
             .application_disposition_with_ack(
@@ -1459,6 +1505,9 @@ impl ApplicationClient {
                     delivery_id: delivery.delivery_id,
                 })
             }
+            DeliveryOutcome::PrerequisiteIncomplete => Err(ApplicationClientError::Partial(
+                "compound prerequisite is not durably complete".to_string(),
+            )),
             DeliveryOutcome::Marked | DeliveryOutcome::AlreadyConsumed => {
                 let row = row.ok_or_else(|| ApplicationClientError::Protocol {
                     code: "missing-disposition-result".to_string(),
@@ -1642,20 +1691,17 @@ impl ApplicationClient {
             durable_acceptance: EvidenceState::Accepted,
             occupied_at_acceptance: result.axes.occupied_at_acceptance,
             push_acceptance: EvidenceState::Unavailable,
-            recipient_consumption: if delivery.and_then(|row| row.consumed_at_ms).is_some() {
-                EvidenceState::Accepted
-            } else {
-                EvidenceState::NotAttempted
+            recipient_consumption: match delivery {
+                None => EvidenceState::NotAttempted,
+                Some(row) if row.consumed_at_ms.is_some() => EvidenceState::Accepted,
+                Some(_) => EvidenceState::Pending,
             },
-            workflow_disposition: if dispositions
+            workflow_disposition: dispositions
                 .iter()
                 .rev()
-                .any(|row| row.recipient == result.recipient)
-            {
-                EvidenceState::Accepted
-            } else {
-                EvidenceState::NotAttempted
-            },
+                .find(|row| row.recipient == result.recipient)
+                .map(|row| EvidenceState::Disposition(row.state.clone()))
+                .unwrap_or(EvidenceState::NotAttempted),
         })
     }
 
@@ -1664,35 +1710,23 @@ impl ApplicationClient {
         operation_id: &OperationId,
         reason: &str,
     ) -> Result<ApplicationOperationRecord, ApplicationClientError> {
-        if self
-            .backend
-            .application_operation_message(
-                &self.logical_store_id.0,
-                &self.responsibility.0,
-                &operation_id.0,
-            )
-            .await
-            .map_err(unavailable)?
-            .is_some()
-        {
-            return Err(ApplicationClientError::InvalidRequest(
-                "cannot abandon an operation with durable message acceptance evidence".to_string(),
-            ));
-        }
         let error = ApplicationClientError::InvalidRequest(format!(
             "operation was explicitly abandoned before acceptance: {reason}"
         ));
         self.backend
-            .complete_application_operation(
+            .abandon_unmapped_application_operation(
                 &self.logical_store_id.0,
                 &self.responsibility.0,
                 &operation_id.0,
-                "rejected",
-                Some(&serde_json::to_string(&error).map_err(invalid)?),
-                None,
+                &serde_json::to_string(&error).map_err(invalid)?,
             )
             .await
-            .map_err(unavailable)
+            .map_err(unavailable)?
+            .ok_or_else(|| {
+                ApplicationClientError::InvalidRequest(
+                    "operation has acceptance evidence or is no longer abandonable".to_string(),
+                )
+            })
     }
 
     pub async fn delta_page(
@@ -1770,7 +1804,7 @@ impl ApplicationClient {
         &self,
         operation_id: &OperationId,
         step_id: &str,
-        state: &str,
+        state: CompoundStepState,
         outcome: Option<&serde_json::Value>,
         recovery: Option<&serde_json::Value>,
     ) -> Result<CompoundStepRecord, ApplicationClientError> {
@@ -1800,10 +1834,9 @@ impl ApplicationClient {
                         "compound prerequisite is not declared".into(),
                     )
                 })?;
-            if !matches!(
-                prerequisite.state.as_str(),
-                "accepted" | "completed" | "no-op"
-            ) {
+            if !CompoundStepState::parse(&prerequisite.state)
+                .is_some_and(CompoundStepState::satisfies_prerequisite)
+            {
                 return Err(ApplicationClientError::Partial(format!(
                     "prerequisite {} is {}",
                     prerequisite.step_id, prerequisite.state
@@ -1816,7 +1849,7 @@ impl ApplicationClient {
                 &self.responsibility.0,
                 &operation_id.0,
                 step_id,
-                state,
+                state.as_str(),
                 outcome
                     .map(serde_json::to_string)
                     .transpose()
@@ -1929,38 +1962,27 @@ impl ApplicationClient {
         request: Request,
         spawn: bool,
     ) -> Result<Response, ApplicationClientError> {
-        if Self::is_application_request(&request) {
-            let ping = if spawn {
-                crate::daemon::request_connect_or_spawn(&self.store_key, &Request::Ping).await
-            } else {
-                let mut client = crate::daemon::connect_existing(&self.store_key)
-                    .await
-                    .map_err(unavailable)?;
-                client.request(&Request::Ping).await
-            }
-            .map_err(unavailable)?;
-            match ping {
-                Response::Pong { capabilities, .. }
-                    if capabilities.iter().any(|capability| {
-                        capability == crate::daemon_ipc::CAP_APPLICATION_CLIENT_V1
-                    }) => {}
-                Response::Pong { .. } => {
-                    return Err(ApplicationClientError::UnsupportedCapability(
-                        "daemon does not advertise application_client_v1".to_string(),
-                    ))
-                }
-                _ => return Err(unexpected_response("capability-probe")),
-            }
-        }
-        let response = if spawn {
-            crate::daemon::request_connect_or_spawn(&self.store_key, &request).await
-        } else {
-            let mut client = crate::daemon::connect_existing(&self.store_key)
+        let mut client = if spawn {
+            crate::daemon::connect_or_spawn(&self.store_key)
                 .await
-                .map_err(unavailable)?;
-            client.request(&request).await
+                .map_err(unavailable)?
+        } else {
+            crate::daemon::connect_existing(&self.store_key)
+                .await
+                .map_err(unavailable)?
         };
-        response.map_err(unavailable)
+        if Self::is_application_request(&request)
+            && !client
+                .ack
+                .capabilities
+                .iter()
+                .any(|capability| capability == crate::daemon_ipc::CAP_APPLICATION_CLIENT_V1)
+        {
+            return Err(ApplicationClientError::UnsupportedCapability(
+                "daemon does not advertise application_client_v1".to_string(),
+            ));
+        }
+        client.request(&request).await.map_err(transport_uncertain)
     }
 
     fn is_application_request(request: &Request) -> bool {
@@ -2050,6 +2072,7 @@ fn health_projection(
         receive_ready,
         attended_but_deaf: member.map(|member| member.deaf_warn).unwrap_or(false),
         recovering: local.recovering,
+        last_recovery_failure: local.last_recovery_failure.clone(),
         degraded: actionable > 0
             || local.recovering
             || member.map(|member| member.deaf_warn).unwrap_or(false)
@@ -2293,6 +2316,18 @@ fn unavailable(error: impl fmt::Display) -> ApplicationClientError {
     let diagnostic = hex(&hasher.finalize());
     ApplicationClientError::Unavailable(format!(
         "{category} operation failed (diagnostic {})",
+        &diagnostic[..16]
+    ))
+}
+
+fn transport_uncertain(error: impl fmt::Display) -> ApplicationClientError {
+    let detail = error.to_string();
+    let mut hasher = Sha256::new();
+    hasher.update(b"telex-application-transport-v1\0");
+    hasher.update(detail.as_bytes());
+    let diagnostic = hex(&hasher.finalize());
+    ApplicationClientError::TransportUncertain(format!(
+        "request may have crossed the daemon boundary (diagnostic {})",
         &diagnostic[..16]
     ))
 }
@@ -2691,6 +2726,7 @@ mod tests {
                         owner_instance_id: "owner".into(),
                     },
                     recovering: false,
+                    last_recovery_failure: None,
                 },
             )])),
             outstanding_acks: Mutex::new(BTreeSet::new()),
@@ -2707,5 +2743,17 @@ mod tests {
             .history(Some("station:inbox".into()), false, None, None, None, 0)
             .await
             .is_err());
+        let local = client
+            .memberships
+            .lock()
+            .unwrap()
+            .get("station:inbox")
+            .unwrap()
+            .clone();
+        let health = health_projection(&client, &local, None);
+        assert_eq!(health.outstanding_ack_count, 0);
+        assert!(health.liveness.is_empty());
+        assert!(!health.recovering);
+        assert!(health.last_recovery_failure.is_none());
     }
 }

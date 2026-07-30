@@ -1195,7 +1195,7 @@ fn map_compound_step(r: &rusqlite::Row) -> rusqlite::Result<CompoundStepRecord> 
 fn validate_compound_prerequisites_sqlite(
     c: &Connection,
     step: &CompoundDispositionStep,
-) -> Result<()> {
+) -> Result<bool> {
     let prerequisites_json: String = c
         .query_row(
             "SELECT prerequisites_json FROM application_compound_steps
@@ -1227,14 +1227,15 @@ fn validate_compound_prerequisites_sqlite(
                 |row| row.get(0),
             )
             .optional()?;
-        if !matches!(
-            prerequisite_state.as_deref(),
-            Some("accepted" | "completed" | "no-op")
-        ) {
-            bail!("compound prerequisite is not durably complete");
+        if !prerequisite_state
+            .as_deref()
+            .and_then(CompoundStepState::parse)
+            .is_some_and(CompoundStepState::satisfies_prerequisite)
+        {
+            return Ok(false);
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 fn insert_message_inner(
@@ -2955,7 +2956,9 @@ impl Backend for SqliteBackend {
                     return Ok((None, DeliveryOutcome::DeliveryMismatch));
                 }
                 if let Some(compound) = &compound_step {
-                    validate_compound_prerequisites_sqlite(c, compound)?;
+                    if !validate_compound_prerequisites_sqlite(c, compound)? {
+                        return Ok((None, DeliveryOutcome::PrerequisiteIncomplete));
+                    }
                 }
                 let now = advance_clock_hwm(c)?;
                 c.execute(
@@ -2986,6 +2989,9 @@ impl Backend for SqliteBackend {
                         })
                         .to_string(),
                     )?;
+                    outcome = DeliveryOutcome::Marked;
+                }
+                if Disposition::is_terminal_str(&state) {
                     if let Some(compound) = &compound_step {
                         let changed = c.execute(
                             "UPDATE application_compound_steps
@@ -3021,7 +3027,6 @@ impl Backend for SqliteBackend {
                             .to_string(),
                         )?;
                     }
-                    outcome = DeliveryOutcome::Marked;
                 }
                 append_state_delta_inner(
                     c,
@@ -3338,6 +3343,46 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn abandon_unmapped_application_operation(
+        &self,
+        logical_store_id: &str,
+        application_responsibility: &str,
+        operation_id: &str,
+        result_json: &str,
+    ) -> Result<Option<ApplicationOperationRecord>> {
+        let store = logical_store_id.to_string();
+        let responsibility = application_responsibility.to_string();
+        let operation = operation_id.to_string();
+        let result = result_json.to_string();
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let now = next_clock_hwm(c)?;
+                Ok(c.query_row(
+                    "UPDATE application_operations
+                         SET state='rejected', result_json=?4, recovery_json=NULL,
+                             updated_at_ms=?5, completed_at_ms=?5
+                         WHERE logical_store_id=?1 AND application_responsibility=?2
+                           AND operation_id=?3
+                           AND state IN ('pending','indeterminate')
+                           AND NOT EXISTS (
+                               SELECT 1 FROM application_operation_messages mapping
+                               WHERE mapping.logical_store_id=?1
+                                 AND mapping.application_responsibility=?2
+                                 AND mapping.operation_id=?3
+                           )
+                         RETURNING logical_store_id, application_responsibility, operation_id,
+                                   operation_kind, sender, recipients_json, payload_fingerprint,
+                                   retry_budget, state, result_json, recovery_json, created_at_ms,
+                                   updated_at_ms, completed_at_ms",
+                    params![store, responsibility, operation, result, now],
+                    map_application_operation,
+                )
+                .optional()?)
+            })
+        })
+        .await
+    }
+
     async fn declare_compound_steps(
         &self,
         steps: &[NewCompoundStepRecord],
@@ -3474,12 +3519,14 @@ impl Backend for SqliteBackend {
         outcome_json: Option<&str>,
         recovery_json: Option<&str>,
     ) -> Result<CompoundStepRecord> {
+        let state = CompoundStepState::parse(state)
+            .ok_or_else(|| anyhow!("invalid compound step state"))?;
         let (store, responsibility, operation, step, state, outcome, recovery) = (
             logical_store_id.to_string(),
             application_responsibility.to_string(),
             operation_id.to_string(),
             step_id.to_string(),
-            state.to_string(),
+            state.as_str().to_string(),
             outcome_json.map(str::to_string),
             recovery_json.map(str::to_string),
         );
@@ -3506,10 +3553,11 @@ impl Backend for SqliteBackend {
                             |row| row.get(0),
                         )
                         .optional()?;
-                    if !matches!(
-                        prerequisite_state.as_deref(),
-                        Some("accepted" | "completed" | "no-op")
-                    ) {
+                    if !prerequisite_state
+                        .as_deref()
+                        .and_then(CompoundStepState::parse)
+                        .is_some_and(CompoundStepState::satisfies_prerequisite)
+                    {
                         bail!("compound prerequisite is not durably complete");
                     }
                 }
@@ -3519,7 +3567,7 @@ impl Backend for SqliteBackend {
                      SET state=?5, outcome_json=?6, recovery_json=?7,
                          updated_at_ms=?8,
                          completed_at_ms=CASE
-                             WHEN ?5 IN ('accepted','rejected','completed','no-op')
+                             WHEN ?5 IN ('accepted','rejected')
                              THEN ?8 ELSE NULL END
                      WHERE logical_store_id=?1 AND application_responsibility=?2
                        AND operation_id=?3 AND step_id=?4",

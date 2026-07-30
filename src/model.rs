@@ -251,6 +251,7 @@ pub enum DeliveryOutcome {
     /// A delivery exists for `(message_id, recipient)`, but its durable row identity
     /// does not match the caller's exact-delivery handle.
     DeliveryMismatch,
+    PrerequisiteIncomplete,
     /// Caller is not the current epoch owner. Precedence-winning and fatal for the caller:
     /// the daemon must self-demote on this outcome, even if the message is already consumed.
     NotOwner,
@@ -425,6 +426,44 @@ pub struct CompoundDispositionStep {
     pub step_id: String,
     pub outcome_json: Option<String>,
     pub recovery_json: Option<String>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum CompoundStepState {
+    Accepted,
+    Rejected,
+    Partial,
+    Indeterminate,
+}
+
+impl CompoundStepState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Rejected => "rejected",
+            Self::Partial => "partial",
+            Self::Indeterminate => "indeterminate",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        match value {
+            "accepted" => Some(Self::Accepted),
+            "rejected" => Some(Self::Rejected),
+            "partial" => Some(Self::Partial),
+            "indeterminate" => Some(Self::Indeterminate),
+            _ => None,
+        }
+    }
+
+    pub fn is_terminal(self) -> bool {
+        matches!(self, Self::Accepted | Self::Rejected)
+    }
+
+    pub fn satisfies_prerequisite(self) -> bool {
+        self == Self::Accepted
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

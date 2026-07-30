@@ -324,7 +324,7 @@ fn map_compound_step(r: &Row) -> CompoundStepRecord {
 async fn validate_compound_prerequisites_postgres(
     tx: &Transaction<'_>,
     step: &CompoundDispositionStep,
-) -> Result<()> {
+) -> Result<bool> {
     let prerequisites_json: String = tx
         .query_opt(
             "SELECT prerequisites_json FROM application_compound_steps
@@ -356,14 +356,15 @@ async fn validate_compound_prerequisites_postgres(
             )
             .await?
             .map(|row| row.get::<_, String>("state"));
-        if !matches!(
-            prerequisite_state.as_deref(),
-            Some("accepted" | "completed" | "no-op")
-        ) {
-            bail!("compound prerequisite is not durably complete");
+        if !prerequisite_state
+            .as_deref()
+            .and_then(CompoundStepState::parse)
+            .is_some_and(CompoundStepState::satisfies_prerequisite)
+        {
+            return Ok(false);
         }
     }
-    Ok(())
+    Ok(true)
 }
 
 fn fanout_recipients(to_addr: &str, cc: Option<&str>) -> Vec<String> {
@@ -2007,7 +2008,10 @@ impl Backend for PgBackend {
             return Ok((None, DeliveryOutcome::DeliveryMismatch));
         }
         if let Some(compound) = compound_step {
-            validate_compound_prerequisites_postgres(&tx, compound).await?;
+            if !validate_compound_prerequisites_postgres(&tx, compound).await? {
+                tx.rollback().await?;
+                return Ok((None, DeliveryOutcome::PrerequisiteIncomplete));
+            }
         }
         let consumed_at_ms: Option<i64> = delivery.get("consumed_at_ms");
         let now = pg_tx_advance_clock_hwm(&tx).await?;
@@ -2043,6 +2047,9 @@ impl Backend for PgBackend {
                 .to_string(),
             )
             .await?;
+            outcome = DeliveryOutcome::Marked;
+        }
+        if Disposition::is_terminal_str(state) {
             if let Some(compound) = compound_step {
                 let changed = tx
                     .execute(
@@ -2081,7 +2088,6 @@ impl Backend for PgBackend {
                 )
                 .await?;
             }
-            outcome = DeliveryOutcome::Marked;
         }
         pg_tx_append_state_delta(
             &tx,
@@ -2378,6 +2384,48 @@ impl Backend for PgBackend {
         Ok(row)
     }
 
+    async fn abandon_unmapped_application_operation(
+        &self,
+        logical_store_id: &str,
+        application_responsibility: &str,
+        operation_id: &str,
+        result_json: &str,
+    ) -> Result<Option<ApplicationOperationRecord>> {
+        let mut client = self.client().await?;
+        let tx = client.transaction().await?;
+        let now = pg_tx_advance_clock_hwm(&tx).await?;
+        let row = tx
+            .query_opt(
+                "UPDATE application_operations operation
+                 SET state='rejected', result_json=$4, recovery_json=NULL,
+                     updated_at_ms=$5, completed_at_ms=$5
+                 WHERE logical_store_id=$1 AND application_responsibility=$2
+                   AND operation_id=$3
+                   AND state IN ('pending','indeterminate')
+                   AND NOT EXISTS (
+                       SELECT 1 FROM application_operation_messages mapping
+                       WHERE mapping.logical_store_id=operation.logical_store_id
+                         AND mapping.application_responsibility=operation.application_responsibility
+                         AND mapping.operation_id=operation.operation_id
+                   )
+                 RETURNING logical_store_id, application_responsibility, operation_id,
+                           operation_kind, sender, recipients_json, payload_fingerprint,
+                           retry_budget, state, result_json, recovery_json, created_at_ms,
+                           updated_at_ms, completed_at_ms",
+                &[
+                    &logical_store_id,
+                    &application_responsibility,
+                    &operation_id,
+                    &result_json,
+                    &now,
+                ],
+            )
+            .await?
+            .map(|row| map_application_operation(&row));
+        tx.commit().await?;
+        Ok(row)
+    }
+
     async fn declare_compound_steps(
         &self,
         steps: &[NewCompoundStepRecord],
@@ -2514,6 +2562,8 @@ impl Backend for PgBackend {
         outcome_json: Option<&str>,
         recovery_json: Option<&str>,
     ) -> Result<CompoundStepRecord> {
+        let state = CompoundStepState::parse(state)
+            .ok_or_else(|| anyhow!("invalid compound step state"))?;
         let mut client = self.client().await?;
         let tx = client.transaction().await?;
         let prerequisites_json: String = tx
@@ -2547,10 +2597,11 @@ impl Backend for PgBackend {
                 )
                 .await?
                 .map(|row| row.get::<_, String>("state"));
-            if !matches!(
-                prerequisite_state.as_deref(),
-                Some("accepted" | "completed" | "no-op")
-            ) {
+            if !prerequisite_state
+                .as_deref()
+                .and_then(CompoundStepState::parse)
+                .is_some_and(CompoundStepState::satisfies_prerequisite)
+            {
                 bail!("compound prerequisite is not durably complete");
             }
         }
@@ -2561,7 +2612,7 @@ impl Backend for PgBackend {
                  SET state=$5, outcome_json=$6, recovery_json=$7,
                      updated_at_ms=$8,
                      completed_at_ms=CASE
-                         WHEN $5::text IN ('accepted','rejected','completed','no-op')
+                         WHEN $5::text IN ('accepted','rejected')
                          THEN $8::bigint ELSE NULL::bigint END
                  WHERE logical_store_id=$1 AND application_responsibility=$2
                    AND operation_id=$3 AND step_id=$4
@@ -2574,7 +2625,7 @@ impl Backend for PgBackend {
                     &application_responsibility,
                     &operation_id,
                     &step_id,
-                    &state,
+                    &state.as_str(),
                     &outcome_json,
                     &recovery_json,
                     &now,
@@ -2590,7 +2641,7 @@ impl Backend for PgBackend {
                 "{{\"operation_id\":{},\"step_id\":{},\"state\":{}}}",
                 serde_json::to_string(operation_id)?,
                 serde_json::to_string(step_id)?,
-                serde_json::to_string(state)?
+                serde_json::to_string(state.as_str())?
             ),
         )
         .await?;
