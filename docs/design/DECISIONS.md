@@ -2135,9 +2135,10 @@ them explicitly. The runtime must persist complete pending operations, sequence
 high-water marks, tombstones, receipt bindings, and recurrence diagnostics.
 Experimental v1 registrations require explicit migration to a new v2 watch ID
 and a reviewed opaque-state decision; an adapter is optional downstream work.
-The Application Client requirements crosswalk may need a later owner update for
-the strengthened operation-result reconciliation requirement, but this decision
-does not create a product-private client seam. The issue #118
+The Application Client owner must later reconcile normative
+`application-client.md` AC-C14 with Watcher's authoritative `not-recorded`
+requirement and then update the non-normative requirements crosswalk, but this
+decision does not create a product-private client seam. The issue #118
 `application-client.bundle.json` remains that convergence checkpoint's historical
 snapshot; this Watcher decision does not regenerate its approval/provenance
 manifest.

@@ -480,7 +480,7 @@ detector.
 | No event or staging failed | No sequence/send/state change. A later attempt may execute normally. |
 | Authoritative `not-recorded` | The client proves no operation/result/receipt exists for the exact operation ID and no durable acceptance occurred. Keep the staged identity and retry the exact same operation under bounded policy. |
 | Definite transient rejection before acceptance | Keep the staged identity and retry the exact same operation under bounded policy. |
-| Definite permanent rejection before acceptance | Pause/block with `send-permanently-rejected`; no automatic retry. |
+| Definite permanent rejection before acceptance | Pause/block with `send-permanently-rejected`; no automatic retry. An audited `close not accepted` operation may tombstone the allocation after external correction. |
 | Repeated transient rejection exhausts retry budget | Pause/block with `send-retry-exhausted`. |
 | Durable acceptance proven | Atomically commit proposed state, committed sequence, receipt/evidence, and attempt result. |
 | `previously-completed` or `duplicate` with matching operation/payload identity and durable receipt | Treat as proven acceptance and commit. |
@@ -643,7 +643,7 @@ The default Telex coordination daemon is never used for destructive proof.
 | missing working directory/executable | no event allocation/state/send | active/eligible/degraded + backoff | registration or local path correction |
 | authoritative `not-recorded` or transient rejection before acceptance | retain exact pending operation | active/reconciliation-pending/degraded | same-operation retry |
 | repeated transient rejection exhausts budget | retain staged identity | paused/inactive/blocked (`send-retry-exhausted`) | finite retry grant or remove |
-| permanent rejection before acceptance | retain staged identity and rejection evidence | paused/inactive/blocked (`send-permanently-rejected`) | remove or create a new corrected watch ID |
+| permanent rejection before acceptance | retain staged identity and rejection evidence | paused/inactive/blocked (`send-permanently-rejected`) | after external correction, close not accepted and resume at the next sequence; otherwise remove or create a new corrected watch ID |
 | indeterminate receipt or accepted-send/local-commit failure | no new detector execution | active/reconciliation-pending/degraded | result/receipt reconciliation |
 | reconciliation budget exhausted | no new detector execution | paused/inactive/blocked | reconcile now, finite same-operation retry budget, or remove |
 | duplicate/previously-completed identity conflict | no send/state commit | paused/inactive/blocked (`operation-identity-conflict`) | investigate client/store identity, then remove |
@@ -840,6 +840,7 @@ revision, lifecycle, eligibility, health, and typed refusal reason.
 | Update | Apply mutable registration fields and optionally replace committed opaque state, incrementing revision and auditing old/new state hashes. Refuse immutable ID/backend/route changes, removed watches, and any watch with a pending operation. |
 | Reconcile now | Query the exact pending operation for active, blocked, or removed watches. It may close evidence on a removed tombstone but never resurrect it. |
 | Grant retry budget | Add a finite same-operation retry budget after authoritative `not-recorded`, transient rejection, or unresolved blocking. Refuse replacement identity or payload. |
+| Close not accepted | Only for a definitively permanently rejected pre-acceptance operation. Record the rejection as terminal evidence for that allocation, retain its sequence tombstone, clear the pending operation without advancing detector state, and permit explicit resume at the next sequence after external correction. Refuse for indeterminate outcomes. |
 | Remove | Stop future detector execution and retain identity, pending operation, tombstone, and evidence. Removal never asserts accepted or rejected. |
 
 Late reconciliation updates a removed tombstone with accepted, rejected, or
@@ -934,9 +935,10 @@ Watcher uses query-only reconciliation and remains blocked. It never falls back
 to CLI subprocess parsing, raw daemon IPC, spike-private helpers, or a
 Watcher-private client.
 
-The non-normative Application Client requirements crosswalk may need a later
-owner update for the strengthened reconciliation requirement. ADR 0050 records
-that follow-up; this node does not edit the crosswalk.
+The Application Client owner must later reconcile normative
+`application-client.md` AC-C14 with the authoritative `not-recorded` result
+required here, then update the non-normative requirements crosswalk. ADR 0050
+records that follow-up; this node does not change shared client semantics.
 
 ## Schema and documentation conformance
 
@@ -991,8 +993,8 @@ prerequisites for Watcher registration.
 - Which platform mechanisms prove detector-tree death after abrupt runtime exit?
 - How does service supervision consume health and detect staleness?
 - How are register, show/list, pause, resume, update/state replacement,
-  reconcile-now, finite retry grant, remove, and removed-evidence closure
-  implemented with the required refusal rules?
+  reconcile-now, finite retry grant, close-not-accepted, remove, and
+  removed-evidence closure implemented with the required refusal rules?
 - How are `activatedAt`, `lastSuccessAt`, UTC timestamp emission, and wall-clock
   adjustment behavior tested?
 - How are unsupported v1 rows isolated without blocking valid v2 watches?
