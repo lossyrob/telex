@@ -1397,7 +1397,7 @@ impl Backend for PgBackend {
             )
             .await?;
         let outcome = match consumed {
-            None => DeliveryOutcome::AckNoOp,
+            None => DeliveryOutcome::NoDelivery,
             Some(row) => {
                 let consumed_at_ms: Option<i64> = row.get("consumed_at_ms");
                 if consumed_at_ms.is_some() {
@@ -1483,7 +1483,7 @@ impl Backend for PgBackend {
             )
             .await?;
         let outcome = match row {
-            None => DeliveryOutcome::AckNoOp,
+            None => DeliveryOutcome::NoDelivery,
             Some(row) => {
                 let actual_id: i64 = row.get("id");
                 let consumed_at_ms: Option<i64> = row.get("consumed_at_ms");
@@ -2001,7 +2001,7 @@ impl Backend for PgBackend {
             .await?;
         let Some(delivery) = delivery else {
             tx.rollback().await?;
-            return Ok((None, DeliveryOutcome::DeliveryMismatch));
+            return Ok((None, DeliveryOutcome::NoDelivery));
         };
         if delivery.get::<_, i64>("id") != delivery_id {
             tx.rollback().await?;

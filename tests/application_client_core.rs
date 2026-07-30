@@ -117,6 +117,13 @@ async fn exact_delivery_ack_is_bound_to_the_delivery_row() {
         })
         .await
         .unwrap();
+    assert_eq!(
+        backend
+            .mark_delivery_consumed_if_current_owner("recipient", &owner, epoch, 999_999, 1)
+            .await
+            .unwrap(),
+        DeliveryOutcome::NoDelivery
+    );
     let delivery = backend
         .delivery_for_recipient(message.id, "recipient")
         .await

@@ -460,6 +460,12 @@ enum RequestFailure {
     WriteBoundaryUnknown(ApplicationClientError),
 }
 
+enum PeerFailureDisposition {
+    Rejected,
+    NeedsAttach,
+    Indeterminate,
+}
+
 pub struct ApplicationClient {
     responsibility: ApplicationResponsibility,
     runtime_id: RuntimeId,
@@ -759,6 +765,7 @@ impl ApplicationClient {
                         last_recovery_failure: None,
                     },
                 );
+                self.recovery_attempts.lock().unwrap().remove(&spec.address);
                 Ok(handle)
             }
             Response::Error {
@@ -843,6 +850,7 @@ impl ApplicationClient {
         {
             Response::Ack { .. } => {
                 self.memberships.lock().unwrap().remove(address);
+                self.recovery_attempts.lock().unwrap().remove(address);
                 Ok(())
             }
             Response::Error {
@@ -1033,20 +1041,9 @@ impl ApplicationClient {
                 let error = self
                     .registration_error(&request.sender, &code, &message, needs_attach_reason)
                     .await;
-                let error_json = serde_json::to_string(&error).map_err(invalid)?;
-                let state = operation_state_for_error(&error);
-                self.backend
-                    .complete_application_operation(
-                        &self.logical_store_id.0,
-                        &self.responsibility.0,
-                        &request.operation_id.0,
-                        state,
-                        Some(&error_json),
-                        None,
-                    )
-                    .await
-                    .map_err(unavailable)?;
-                Err(error)
+                Err(self
+                    .finish_peer_failure(&request.operation_id, &code, needs_attach_reason, error)
+                    .await?)
             }
             _ => Err(unexpected_response("send")),
         }
@@ -1212,20 +1209,9 @@ impl ApplicationClient {
                 let error = self
                     .registration_error(&request.sender, &code, &message, needs_attach_reason)
                     .await;
-                let error_json = serde_json::to_string(&error).map_err(invalid)?;
-                let state = operation_state_for_error(&error);
-                self.backend
-                    .complete_application_operation(
-                        &self.logical_store_id.0,
-                        &self.responsibility.0,
-                        &request.operation_id.0,
-                        state,
-                        Some(&error_json),
-                        None,
-                    )
-                    .await
-                    .map_err(unavailable)?;
-                Err(error)
+                Err(self
+                    .finish_peer_failure(&request.operation_id, &code, needs_attach_reason, error)
+                    .await?)
             }
             Ok(_) => Err(unexpected_response("reply")),
             Err(RequestFailure::WriteBoundaryUnknown(error)) => {
@@ -1416,7 +1402,7 @@ impl ApplicationClient {
                 Ok(AckResult::AlreadyConsumed)
             }
             Response::Ack {
-                delivery_outcome: Some(DeliveryOutcome::AckNoOp),
+                delivery_outcome: Some(DeliveryOutcome::AckNoOp | DeliveryOutcome::NoDelivery),
                 ..
             } => {
                 self.clear_outstanding_ack(handle);
@@ -1547,7 +1533,10 @@ impl ApplicationClient {
                     code: "missing-disposition-result".to_string(),
                 })
             }
-            DeliveryOutcome::AckNoOp | DeliveryOutcome::DeliveryMismatch => {
+            DeliveryOutcome::AckNoOp => Err(ApplicationClientError::Protocol {
+                code: "terminal-disposition-returned-ack-no-op".to_string(),
+            }),
+            DeliveryOutcome::NoDelivery | DeliveryOutcome::DeliveryMismatch => {
                 Err(ApplicationClientError::DeliveryMismatch {
                     message_id: delivery.message_id,
                     recipient: delivery.recipient.clone(),
@@ -1778,6 +1767,64 @@ impl ApplicationClient {
             })
     }
 
+    async fn finish_peer_failure(
+        &self,
+        operation_id: &OperationId,
+        code: &str,
+        needs_attach_reason: Option<NeedsAttachReason>,
+        error: ApplicationClientError,
+    ) -> Result<ApplicationClientError, ApplicationClientError> {
+        let error_json = serde_json::to_string(&error).map_err(invalid)?;
+        match classify_peer_failure(code, needs_attach_reason) {
+            PeerFailureDisposition::Rejected => {
+                self.backend
+                    .complete_application_operation(
+                        &self.logical_store_id.0,
+                        &self.responsibility.0,
+                        &operation_id.0,
+                        "rejected",
+                        Some(&error_json),
+                        None,
+                    )
+                    .await
+                    .map_err(unavailable)?;
+                Ok(error)
+            }
+            PeerFailureDisposition::NeedsAttach => {
+                self.backend
+                    .complete_application_operation(
+                        &self.logical_store_id.0,
+                        &self.responsibility.0,
+                        &operation_id.0,
+                        "needs-attach",
+                        Some(&error_json),
+                        None,
+                    )
+                    .await
+                    .map_err(unavailable)?;
+                Ok(error)
+            }
+            PeerFailureDisposition::Indeterminate => {
+                let recovery = self.recovery_handle(operation_id.clone());
+                self.backend
+                    .complete_application_operation(
+                        &self.logical_store_id.0,
+                        &self.responsibility.0,
+                        &operation_id.0,
+                        "indeterminate",
+                        Some(&error_json),
+                        Some(&serde_json::to_string(&recovery).map_err(invalid)?),
+                    )
+                    .await
+                    .map_err(unavailable)?;
+                Ok(ApplicationClientError::Indeterminate {
+                    detail: error.to_string(),
+                    recovery,
+                })
+            }
+        }
+    }
+
     pub async fn delta_page(
         &self,
         after_version: i64,
@@ -1941,17 +1988,21 @@ impl ApplicationClient {
                 },
                 false,
             )
-            .await?
+            .await
         {
-            Response::StatusReport { status } => status,
-            _ => return Err(unexpected_response("health-status")),
+            Ok(Response::StatusReport { status }) => Some(status),
+            Ok(_) => return Err(unexpected_response("health-status")),
+            Err(_) => None,
         };
         let memberships = self.memberships.lock().unwrap().clone();
         let mut health: Vec<_> = memberships
             .values()
             .map(|local| {
-                let member = status.members.iter().find(|member| {
-                    member.session_id == self.runtime_id.0 && member.address == local.handle.address
+                let member = status.as_ref().and_then(|status| {
+                    status.members.iter().find(|member| {
+                        member.session_id == self.runtime_id.0
+                            && member.address == local.handle.address
+                    })
                 });
                 health_projection(self, local, member)
             })
@@ -2236,18 +2287,32 @@ fn principal_provenance(profile: &BackendProfile) -> PrincipalProvenance {
     }
 }
 
-fn operation_state_for_error(error: &ApplicationClientError) -> &'static str {
-    match error {
-        ApplicationClientError::MembershipLost {
-            reason:
-                MembershipLossReason::DaemonRestart
-                | MembershipLossReason::PredicateDeath
-                | MembershipLossReason::NeedsAttach
-                | MembershipLossReason::OwnerDemoted,
-            ..
-        } => "needs-attach",
-        _ => "rejected",
+fn classify_peer_failure(
+    code: &str,
+    needs_attach_reason: Option<NeedsAttachReason>,
+) -> PeerFailureDisposition {
+    if needs_attach_reason == Some(NeedsAttachReason::DeliberatelyDetached) {
+        return PeerFailureDisposition::Rejected;
     }
+    if code == crate::daemon_ipc::ERROR_NEEDS_ATTACH
+        || code == crate::daemon_ipc::ERROR_NOT_OWNER
+        || needs_attach_reason == Some(NeedsAttachReason::RestartLost)
+    {
+        return PeerFailureDisposition::NeedsAttach;
+    }
+    if matches!(
+        code,
+        crate::daemon_ipc::ERROR_INCOMPATIBLE
+            | crate::daemon_ipc::ERROR_UNAUTHORIZED
+            | crate::daemon_ipc::ERROR_NOT_RUNNING
+            | crate::daemon_ipc::ERROR_AMBIGUOUS
+            | crate::daemon_ipc::ERROR_UNSUPPORTED
+            | crate::daemon_ipc::ERROR_COLLISION
+            | crate::daemon_ipc::ERROR_CAPABILITY_CONFLICT
+    ) {
+        return PeerFailureDisposition::Rejected;
+    }
+    PeerFailureDisposition::Indeterminate
 }
 
 fn project_membership_loss(
@@ -2567,6 +2632,29 @@ mod tests {
             ),
             MembershipLossReason::DeliberateDetach
         );
+    }
+
+    #[test]
+    fn peer_failure_allowlist_preserves_acceptance_uncertainty() {
+        assert!(matches!(
+            classify_peer_failure(crate::daemon_ipc::ERROR_INCOMPATIBLE, None),
+            PeerFailureDisposition::Rejected
+        ));
+        assert!(matches!(
+            classify_peer_failure(
+                crate::daemon_ipc::ERROR_NEEDS_ATTACH,
+                Some(NeedsAttachReason::RestartLost)
+            ),
+            PeerFailureDisposition::NeedsAttach
+        ));
+        assert!(matches!(
+            classify_peer_failure(crate::daemon_ipc::ERROR_INTERNAL, None),
+            PeerFailureDisposition::Indeterminate
+        ));
+        assert!(matches!(
+            classify_peer_failure("FuturePeerError", None),
+            PeerFailureDisposition::Indeterminate
+        ));
     }
 
     #[test]

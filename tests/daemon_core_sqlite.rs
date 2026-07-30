@@ -328,12 +328,12 @@ async fn section17_05_explicit_ack_fanout_dedup() {
         daemon
             .ack(&store, "s1", "addr:b", message_id + 99_999)
             .await,
-        DeliveryOutcome::AckNoOp,
+        DeliveryOutcome::NoDelivery,
     );
     assert_eq!(
         backend.delivery_retention_count().await.expect("retention"),
         before_noop,
-        "AckNoOp inserts no consumed row"
+        "NoDelivery inserts no consumed row"
     );
     assert!(matches!(
         daemon.wait(&store, "s1", "addr:b", 1_000).await,

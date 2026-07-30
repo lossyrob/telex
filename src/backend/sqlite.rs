@@ -2282,7 +2282,7 @@ impl Backend for SqliteBackend {
                     .optional()?;
 
                 match consumed {
-                    None => Ok(DeliveryOutcome::AckNoOp),
+                    None => Ok(DeliveryOutcome::NoDelivery),
                     Some(Some(_)) => {
                         // Row exists and already consumed — idempotent success.
                         Ok(DeliveryOutcome::AlreadyConsumed)
@@ -2361,7 +2361,7 @@ impl Backend for SqliteBackend {
                     )
                     .optional()?;
                 match row {
-                    None => Ok(DeliveryOutcome::AckNoOp),
+                    None => Ok(DeliveryOutcome::NoDelivery),
                     Some((actual_id, _)) if actual_id != delivery_id => {
                         Ok(DeliveryOutcome::DeliveryMismatch)
                     }
@@ -2950,7 +2950,7 @@ impl Backend for SqliteBackend {
                     )
                     .optional()?;
                 let Some((actual_delivery_id, consumed_at_ms)) = delivery else {
-                    return Ok((None, DeliveryOutcome::DeliveryMismatch));
+                    return Ok((None, DeliveryOutcome::NoDelivery));
                 };
                 if actual_delivery_id != delivery_id {
                     return Ok((None, DeliveryOutcome::DeliveryMismatch));

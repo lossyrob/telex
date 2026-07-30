@@ -245,9 +245,11 @@ pub enum DeliveryOutcome {
     Marked,
     /// The message was already consumed (idempotent success; current owner confirmed first).
     AlreadyConsumed,
-    /// No delivery row exists for `(message_id, recipient)`; inserts nothing.
-    /// Returned only after confirming current ownership.
+    /// A non-terminal Application Client disposition was recorded without
+    /// consuming the existing delivery.
     AckNoOp,
+    /// No delivery row exists for `(message_id, recipient)`.
+    NoDelivery,
     /// A delivery exists for `(message_id, recipient)`, but its durable row identity
     /// does not match the caller's exact-delivery handle.
     DeliveryMismatch,
