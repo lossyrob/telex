@@ -1706,7 +1706,10 @@ impl Backend for PgBackend {
         materialize_pending_delivery_rows_for_recipient(&client, address).await?;
         let terminal = terminal_dispositions_sql_list();
         let primary_sql = format!(
-            "SELECT {MSG_COLS_M}, d.id AS delivery_id FROM deliveries d
+            "SELECT {MSG_COLS_M}, d.id AS delivery_id,
+                    (SELECT version FROM application_state_version WHERE singleton=1)
+                    AS snapshot_version
+             FROM deliveries d
              JOIN messages m ON m.id=d.message_id
              WHERE d.recipient=$1
                AND d.consumed_at_ms IS NULL
