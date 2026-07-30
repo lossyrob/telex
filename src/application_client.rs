@@ -105,6 +105,7 @@ pub enum ApplicationClientError {
     Protocol {
         code: String,
     },
+    RetryableReadiness(String),
     TransportUncertain(String),
     Unavailable(String),
 }
@@ -135,6 +136,12 @@ impl fmt::Display for ApplicationClientError {
             Self::Indeterminate { detail, .. } => write!(f, "indeterminate operation: {detail}"),
             Self::InvalidRequest(detail) => write!(f, "invalid application request: {detail}"),
             Self::Protocol { code } => write!(f, "application protocol error: {code}"),
+            Self::RetryableReadiness(detail) => {
+                write!(
+                    f,
+                    "application readiness is temporarily unavailable: {detail}"
+                )
+            }
             Self::TransportUncertain(detail) => {
                 write!(f, "application transport outcome is uncertain: {detail}")
             }
@@ -441,6 +448,18 @@ struct LocalMembership {
     last_recovery_failure: Option<String>,
 }
 
+#[derive(Clone, Debug)]
+struct RecoveryAttempt {
+    capability: ApplicationCapability,
+    recovering: bool,
+    last_failure: Option<String>,
+}
+
+enum RequestFailure {
+    BeforePeerDecision(ApplicationClientError),
+    WriteBoundaryUnknown(ApplicationClientError),
+}
+
 pub struct ApplicationClient {
     responsibility: ApplicationResponsibility,
     runtime_id: RuntimeId,
@@ -450,6 +469,7 @@ pub struct ApplicationClient {
     backend: Arc<dyn Backend>,
     memberships: Mutex<BTreeMap<String, LocalMembership>>,
     outstanding_acks: Mutex<BTreeSet<(i64, String, i64)>>,
+    recovery_attempts: Mutex<BTreeMap<String, RecoveryAttempt>>,
 }
 
 pub struct ApplicationStoreMaintenance {
@@ -510,6 +530,7 @@ impl ApplicationClient {
             backend,
             memberships: Mutex::new(BTreeMap::new()),
             outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -648,14 +669,28 @@ impl ApplicationClient {
             RecoveryPolicy::BoundedRepair { retries } => retries,
         };
         let mut attempt = 0;
+        self.recovery_attempts.lock().unwrap().insert(
+            spec.address.clone(),
+            RecoveryAttempt {
+                capability: spec.capability,
+                recovering: true,
+                last_failure: None,
+            },
+        );
         if let Some(existing) = self.memberships.lock().unwrap().get_mut(&spec.address) {
             existing.recovering = true;
             existing.last_recovery_failure = None;
         }
         loop {
             match self.attach_one(spec, true).await {
-                Ok(handle) => return Ok(handle),
-                Err(error @ ApplicationClientError::MembershipLost { .. }) if attempt < retries => {
+                Ok(handle) => {
+                    self.recovery_attempts.lock().unwrap().remove(&spec.address);
+                    return Ok(handle);
+                }
+                Err(
+                    error @ (ApplicationClientError::MembershipLost { .. }
+                    | ApplicationClientError::RetryableReadiness(_)),
+                ) if attempt < retries => {
                     attempt += 1;
                     tokio::time::sleep(std::time::Duration::from_millis(50 * attempt as u64)).await;
                     let _ = error;
@@ -665,6 +700,15 @@ impl ApplicationClient {
                     {
                         existing.recovering = false;
                         existing.last_recovery_failure = Some(error.to_string());
+                    }
+                    if let Some(recovery) = self
+                        .recovery_attempts
+                        .lock()
+                        .unwrap()
+                        .get_mut(&spec.address)
+                    {
+                        recovery.recovering = false;
+                        recovery.last_failure = Some(error.to_string());
                     }
                     return Err(error);
                 }
@@ -767,6 +811,9 @@ impl ApplicationClient {
                     .to_string(),
             );
         }
+        if code == crate::daemon_ipc::ERROR_NOT_RUNNING && message.contains("draining") {
+            return ApplicationClientError::RetryableReadiness("daemon is draining".to_string());
+        }
         if code == crate::daemon_ipc::ERROR_UNSUPPORTED {
             return ApplicationClientError::UnsupportedCapability(
                 "daemon rejected an unsupported Application Client operation".to_string(),
@@ -861,9 +908,23 @@ impl ApplicationClient {
                     .map_err(invalid)?,
                 );
             }
-            ApplicationOperationBegin::Replay(existing)
-                if matches!(existing.state.as_str(), "pending" | "indeterminate") =>
-            {
+            ApplicationOperationBegin::Replay(existing) if existing.state == "pending" => {
+                if let Some(reconciled) = self.reconcile_operation(&request.operation_id).await? {
+                    if reconciled.state == "accepted" {
+                        let mut result: SendResult = serde_json::from_str(
+                            reconciled.result_json.as_deref().ok_or_else(|| {
+                                ApplicationClientError::Unavailable(
+                                    "reconciled operation has no durable result".to_string(),
+                                )
+                            })?,
+                        )
+                        .map_err(invalid)?;
+                        result.replayed = true;
+                        return Ok(result);
+                    }
+                }
+            }
+            ApplicationOperationBegin::Replay(existing) if existing.state == "indeterminate" => {
                 if let Some(reconciled) = self.reconcile_operation(&request.operation_id).await? {
                     if reconciled.state == "accepted" {
                         let mut result: SendResult = serde_json::from_str(
@@ -910,9 +971,9 @@ impl ApplicationClient {
             operation_id: request.operation_id.0.clone(),
             payload_fingerprint: operation.payload_fingerprint.clone(),
         };
-        let response = match self.request(daemon_request, false).await {
+        let response = match self.request_staged(daemon_request, false).await {
             Ok(response) => response,
-            Err(error @ ApplicationClientError::TransportUncertain(_)) => {
+            Err(RequestFailure::WriteBoundaryUnknown(error)) => {
                 let recovery = self.recovery_handle(request.operation_id.clone());
                 let _ = self
                     .backend
@@ -930,20 +991,7 @@ impl ApplicationClient {
                     recovery,
                 });
             }
-            Err(error) => {
-                self.backend
-                    .complete_application_operation(
-                        &self.logical_store_id.0,
-                        &self.responsibility.0,
-                        &request.operation_id.0,
-                        "rejected",
-                        Some(&serde_json::to_string(&error).map_err(invalid)?),
-                        None,
-                    )
-                    .await
-                    .map_err(unavailable)?;
-                return Err(error);
-            }
+            Err(RequestFailure::BeforePeerDecision(error)) => return Err(error),
         };
         match response {
             Response::Sent { receipt } => {
@@ -1056,9 +1104,23 @@ impl ApplicationClient {
                     .map_err(invalid)?,
                 );
             }
-            ApplicationOperationBegin::Replay(existing)
-                if matches!(existing.state.as_str(), "pending" | "indeterminate") =>
-            {
+            ApplicationOperationBegin::Replay(existing) if existing.state == "pending" => {
+                if let Some(reconciled) = self.reconcile_operation(&request.operation_id).await? {
+                    if reconciled.state == "accepted" {
+                        let mut result: SendResult = serde_json::from_str(
+                            reconciled.result_json.as_deref().ok_or_else(|| {
+                                ApplicationClientError::Unavailable(
+                                    "reconciled reply operation has no durable result".to_string(),
+                                )
+                            })?,
+                        )
+                        .map_err(invalid)?;
+                        result.replayed = true;
+                        return Ok(result);
+                    }
+                }
+            }
+            ApplicationOperationBegin::Replay(existing) if existing.state == "indeterminate" => {
                 if let Some(reconciled) = self.reconcile_operation(&request.operation_id).await? {
                     if reconciled.state == "accepted" {
                         let mut result: SendResult = serde_json::from_str(
@@ -1089,7 +1151,7 @@ impl ApplicationClient {
         }
 
         let response = self
-            .request(
+            .request_staged(
                 Request::ApplicationReply {
                     store_key: self.store_key.clone(),
                     session_id: self.runtime_id.0.clone(),
@@ -1166,7 +1228,7 @@ impl ApplicationClient {
                 Err(error)
             }
             Ok(_) => Err(unexpected_response("reply")),
-            Err(error @ ApplicationClientError::TransportUncertain(_)) => {
+            Err(RequestFailure::WriteBoundaryUnknown(error)) => {
                 let recovery = self.recovery_handle(request.operation_id.clone());
                 let _ = self
                     .backend
@@ -1184,20 +1246,7 @@ impl ApplicationClient {
                     recovery,
                 })
             }
-            Err(error) => {
-                self.backend
-                    .complete_application_operation(
-                        &self.logical_store_id.0,
-                        &self.responsibility.0,
-                        &request.operation_id.0,
-                        "rejected",
-                        Some(&serde_json::to_string(&error).map_err(invalid)?),
-                        None,
-                    )
-                    .await
-                    .map_err(unavailable)?;
-                Err(error)
-            }
+            Err(RequestFailure::BeforePeerDecision(error)) => Err(error),
         }
     }
 
@@ -1898,7 +1947,7 @@ impl ApplicationClient {
             _ => return Err(unexpected_response("health-status")),
         };
         let memberships = self.memberships.lock().unwrap().clone();
-        Ok(memberships
+        let mut health: Vec<_> = memberships
             .values()
             .map(|local| {
                 let member = status.members.iter().find(|member| {
@@ -1906,7 +1955,38 @@ impl ApplicationClient {
                 });
                 health_projection(self, local, member)
             })
-            .collect())
+            .collect();
+        let recovery_attempts = self.recovery_attempts.lock().unwrap().clone();
+        for (address, recovery) in recovery_attempts {
+            if memberships.contains_key(&address) {
+                continue;
+            }
+            health.push(ApplicationHealth {
+                logical_store_id: self.logical_store_id.clone(),
+                responsibility: self.responsibility.clone(),
+                runtime_id: self.runtime_id.clone(),
+                address,
+                capability: recovery.capability,
+                registered: false,
+                lease_epoch: None,
+                owner_instance_id: None,
+                pending_unconsumed: 0,
+                inbound_actionable: 0,
+                acknowledgment_pending: false,
+                outstanding_ack_count: 0,
+                liveness: Vec::new(),
+                sender_ready: false,
+                receive_ready: false,
+                attended_but_deaf: false,
+                recovering: recovery.recovering,
+                last_recovery_failure: recovery.last_failure,
+                degraded: true,
+                stopped_or_unattended: true,
+                principal: principal_provenance(&self.profile),
+                evidence: vec!["runtime-local recovery attempt; no durable membership".to_string()],
+            });
+        }
+        Ok(health)
     }
 
     fn require_sender(&self, sender: &str) -> Result<MembershipHandle, ApplicationClientError> {
@@ -1962,14 +2042,28 @@ impl ApplicationClient {
         request: Request,
         spawn: bool,
     ) -> Result<Response, ApplicationClientError> {
+        match self.request_staged(request, spawn).await {
+            Ok(response) => Ok(response),
+            Err(RequestFailure::BeforePeerDecision(error)) => Err(error),
+            Err(RequestFailure::WriteBoundaryUnknown(error)) => Err(
+                ApplicationClientError::TransportUncertain(error.to_string()),
+            ),
+        }
+    }
+
+    async fn request_staged(
+        &self,
+        request: Request,
+        spawn: bool,
+    ) -> Result<Response, RequestFailure> {
         let mut client = if spawn {
             crate::daemon::connect_or_spawn(&self.store_key)
                 .await
-                .map_err(unavailable)?
+                .map_err(|error| RequestFailure::BeforePeerDecision(unavailable(error)))?
         } else {
             crate::daemon::connect_existing(&self.store_key)
                 .await
-                .map_err(unavailable)?
+                .map_err(|error| RequestFailure::BeforePeerDecision(unavailable(error)))?
         };
         if Self::is_application_request(&request)
             && !client
@@ -1978,11 +2072,16 @@ impl ApplicationClient {
                 .iter()
                 .any(|capability| capability == crate::daemon_ipc::CAP_APPLICATION_CLIENT_V1)
         {
-            return Err(ApplicationClientError::UnsupportedCapability(
-                "daemon does not advertise application_client_v1".to_string(),
+            return Err(RequestFailure::BeforePeerDecision(
+                ApplicationClientError::UnsupportedCapability(
+                    "daemon does not advertise application_client_v1".to_string(),
+                ),
             ));
         }
-        client.request(&request).await.map_err(transport_uncertain)
+        client
+            .request(&request)
+            .await
+            .map_err(|error| RequestFailure::WriteBoundaryUnknown(transport_uncertain(error)))
     }
 
     fn is_application_request(request: &Request) -> bool {
@@ -2075,6 +2174,7 @@ fn health_projection(
         last_recovery_failure: local.last_recovery_failure.clone(),
         degraded: actionable > 0
             || local.recovering
+            || local.last_recovery_failure.is_some()
             || member.map(|member| member.deaf_warn).unwrap_or(false)
             || (local.handle.capability == ApplicationCapability::Bidirectional && !receive_ready),
         stopped_or_unattended: member
@@ -2146,10 +2246,6 @@ fn operation_state_for_error(error: &ApplicationClientError) -> &'static str {
                 | MembershipLossReason::OwnerDemoted,
             ..
         } => "needs-attach",
-        ApplicationClientError::Unavailable(_)
-        | ApplicationClientError::Protocol { .. }
-        | ApplicationClientError::Indeterminate { .. }
-        | ApplicationClientError::Partial(_) => "indeterminate",
         _ => "rejected",
     }
 }
@@ -2551,6 +2647,7 @@ mod tests {
             backend: backend.clone(),
             memberships: Mutex::new(BTreeMap::new()),
             outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
         };
         backend
             .begin_application_operation(&NewApplicationOperation {
@@ -2622,6 +2719,7 @@ mod tests {
             backend: backend.clone(),
             memberships: Mutex::new(BTreeMap::new()),
             outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
         };
         for index in 0..3 {
             backend
@@ -2730,6 +2828,7 @@ mod tests {
                 },
             )])),
             outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
         };
         assert!(client
             .history(None, false, None, None, None, 10)

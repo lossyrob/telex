@@ -2950,7 +2950,7 @@ impl Backend for SqliteBackend {
                     )
                     .optional()?;
                 let Some((actual_delivery_id, consumed_at_ms)) = delivery else {
-                    return Ok((None, DeliveryOutcome::AckNoOp));
+                    return Ok((None, DeliveryOutcome::DeliveryMismatch));
                 };
                 if actual_delivery_id != delivery_id {
                     return Ok((None, DeliveryOutcome::DeliveryMismatch));

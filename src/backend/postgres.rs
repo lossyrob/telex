@@ -2001,7 +2001,7 @@ impl Backend for PgBackend {
             .await?;
         let Some(delivery) = delivery else {
             tx.rollback().await?;
-            return Ok((None, DeliveryOutcome::AckNoOp));
+            return Ok((None, DeliveryOutcome::DeliveryMismatch));
         };
         if delivery.get::<_, i64>("id") != delivery_id {
             tx.rollback().await?;
