@@ -202,7 +202,7 @@ async fn application_client_schema_v3_operation_smoke() {
                 path: None,
                 url: Some(url.clone()),
                 auth: Some("password".into()),
-                password_env: Some("TELEX_PG_PASSWORD".into()),
+                password_env: None,
                 password_command: None,
                 schema: Some(schema.clone()),
                 entra_cred: None,
