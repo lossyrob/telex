@@ -157,6 +157,15 @@ Active transition:
   Application Client files. It preserves generic AC-C15 source-resolution states
   unless that owner returns an explicitly accepted narrowing. The cross-workstream
   review thread stays open until #129 provides exact evidence.
+- The implementer pushed fixes at
+  `3e36028b6e3d84bcef647f38e43cfe1b2de035c8`; all six checks pass and the PR is
+  mergeable. Seven Operator-local review threads are resolved.
+- Discussion
+  [3687008544](https://github.com/lossyrob/telex/pull/136#discussion_r3687008544)
+  was reopened by workstream orchestration because its reply cited issue #12 but
+  did not yet provide the exact #129/PR #132 wording and bundle evidence required
+  by campaign. It is the only unresolved thread and remains an intentional
+  cross-workstream merge gate during re-review.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.

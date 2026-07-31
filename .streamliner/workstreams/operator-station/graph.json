@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (direct human-attended Telex endpoint)",
-  "summary": "Direct Station reset PR #136 is responding to review. Operator-local contract gaps are assigned for repair; Application Client #129/PR #132 owns the stale direct/assisted/route-back/integration re-baseline and evidence handoff.",
+  "summary": "Direct Station reset PR #136 is in re-review at head 3e36028b6e3d84bcef647f38e43cfe1b2de035c8. Seven Operator-local threads are resolved; one Application Client evidence thread remains intentionally open pending #129/PR #132 proof.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-30T23:53:00Z",
+  "updatedAt": "2026-07-31T00:03:15Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",

@@ -64,6 +64,13 @@ Generic AC-C15 source-resolution states remain visible unless Application Client
 returns an explicit accepted narrowing; the cross-workstream review thread
 remains open until exact evidence is returned.
 
+The implementer resolved all Operator-local findings at
+`3e36028b6e3d84bcef647f38e43cfe1b2de035c8`. Orchestration reopened only
+discussion 3687008544 because its initial response named issue #12 without the
+required exact #129/PR #132 wording and bundle evidence. Seven threads remain
+resolved; one intentional cross-workstream gate remains open during paired
+re-review.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so
