@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (direct human-attended Telex endpoint)",
-  "summary": "Direct Station reset PR #136 is in re-review at head 3e36028b6e3d84bcef647f38e43cfe1b2de035c8. Seven Operator-local threads are resolved; one Application Client evidence thread remains intentionally open pending #129/PR #132 proof.",
+  "summary": "Direct Station reset PR #136 awaits paired re-review at head 3e36028b6e3d84bcef647f38e43cfe1b2de035c8. All eight threads are resolved, including independently verified #129/PR #132 bundle evidence; CI is green.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-31T00:03:15Z",
+  "updatedAt": "2026-07-31T00:22:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",

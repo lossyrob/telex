@@ -166,6 +166,16 @@ Active transition:
   did not yet provide the exact #129/PR #132 wording and bundle evidence required
   by campaign. It is the only unresolved thread and remains an intentional
   cross-workstream merge gate during re-review.
+- Application Client returned exact evidence at PR #132 head
+  `9f08628f10df132fb7b858380f3607760b7b2e48`. Operator review independently
+  verified the direct-Station wording, generic compound/reply/identity
+  preservation, all four AC-C15 states, green CI, mergeability, and bundle
+  manifest blob `b9861495527afe297e78f0546b0c54db8cd19b21` /
+  2423 bytes / SHA-256
+  `9e648d2005f9b368b0de72c6097bdd7432365e7afab43004399c2c6bd0b68e8d`.
+- The exact evidence was added to discussion 3687008544 and the thread was
+  resolved. All eight PR #136 threads are now resolved; paired re-review is the
+  remaining review step.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.

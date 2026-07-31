@@ -71,6 +71,15 @@ required exact #129/PR #132 wording and bundle evidence. Seven threads remain
 resolved; one intentional cross-workstream gate remains open during paired
 re-review.
 
+Application Client returned the required evidence at PR #132 head
+`9f08628f10df132fb7b858380f3607760b7b2e48`. Operator-side verification
+reproduced manifest blob `b9861495527afe297e78f0546b0c54db8cd19b21`, 2423
+bytes, and SHA-256
+`9e648d2005f9b368b0de72c6097bdd7432365e7afab43004399c2c6bd0b68e8d`,
+and confirmed generic reply/compound/identity semantics plus all AC-C15 states.
+The evidence was posted to discussion 3687008544 and the final thread resolved.
+All eight threads are now closed; paired re-review remains.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so
