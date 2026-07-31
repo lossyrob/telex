@@ -2980,28 +2980,7 @@ mod tests {
         let backend = Arc::new(SqliteBackend::open(&path).unwrap());
         backend.init_schema().await.unwrap();
         let logical_store_id = LogicalStoreId::persisted(backend.logical_store_id().await.unwrap());
-        let client = ApplicationClient {
-            responsibility: ApplicationResponsibility("watcher".into()),
-            runtime_id: RuntimeId::fresh().unwrap(),
-            logical_store_id: logical_store_id.clone(),
-            store_key,
-            profile,
-            backend: backend.clone(),
-            memberships: Mutex::new(BTreeMap::new()),
-            outstanding_acks: Mutex::new(BTreeSet::new()),
-            recovery_attempts: Mutex::new(BTreeMap::new()),
-        };
         let payload_fingerprint = "a".repeat(64);
-        let mismatched_reference = RecoveryHandle {
-            logical_store_id: LogicalStoreId::persisted("store-v1-other".into()),
-            responsibility: ApplicationResponsibility("watcher".into()),
-            operation_id: OperationId("op-crash-window".into()),
-            payload_identity: PayloadIdentity::sha256(payload_fingerprint.clone()),
-        };
-        assert!(matches!(
-            client.reconcile_operation(&mismatched_reference).await,
-            Err(ApplicationClientError::StoreBindingMismatch { .. })
-        ));
         backend
             .begin_application_operation(&NewApplicationOperation {
                 logical_store_id: logical_store_id.0.clone(),
@@ -3036,17 +3015,97 @@ mod tests {
             )
             .await
             .unwrap();
+        let current_client = ApplicationClient {
+            responsibility: ApplicationResponsibility("watcher".into()),
+            runtime_id: RuntimeId::fresh().unwrap(),
+            logical_store_id: logical_store_id.clone(),
+            store_key: store_key.clone(),
+            profile: profile.clone(),
+            backend: backend.clone(),
+            memberships: Mutex::new(BTreeMap::new()),
+            outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
+        };
+        let current_noncomparable = RecoveryHandle {
+            logical_store_id: logical_store_id.clone(),
+            responsibility: ApplicationResponsibility("watcher".into()),
+            operation_id: OperationId("op-crash-window".into()),
+            payload_identity: PayloadIdentity {
+                algorithm: "sha256".into(),
+                digest: payload_fingerprint.clone(),
+                comparable: false,
+            },
+        };
+        assert!(matches!(
+            current_client
+                .reconcile_operation(&current_noncomparable)
+                .await,
+            Err(ApplicationClientError::OperationMismatch { .. })
+        ));
+        assert_eq!(
+            backend
+                .application_operation(&logical_store_id.0, "watcher", "op-crash-window")
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "pending"
+        );
+        drop(current_client);
+        drop(backend);
+
+        let profile = crate::profiles::implicit_sqlite(Some(&path));
+        let store_key = crate::profiles::store_key(&profile, Some(&path));
+        let backend = Arc::new(SqliteBackend::open(&path).unwrap());
+        backend.init_schema().await.unwrap();
+        let reopened_store_id =
+            LogicalStoreId::persisted(backend.logical_store_id().await.unwrap());
+        assert_eq!(reopened_store_id, logical_store_id);
+        let client = ApplicationClient {
+            responsibility: ApplicationResponsibility("watcher".into()),
+            runtime_id: RuntimeId::fresh().unwrap(),
+            logical_store_id: reopened_store_id,
+            store_key,
+            profile,
+            backend: backend.clone(),
+            memberships: Mutex::new(BTreeMap::new()),
+            outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
+        };
+        let mismatched_reference = RecoveryHandle {
+            logical_store_id: LogicalStoreId::persisted("store-v1-other".into()),
+            responsibility: ApplicationResponsibility("watcher".into()),
+            operation_id: OperationId("op-crash-window".into()),
+            payload_identity: PayloadIdentity::sha256(payload_fingerprint.clone()),
+        };
+        assert!(matches!(
+            client.reconcile_operation(&mismatched_reference).await,
+            Err(ApplicationClientError::StoreBindingMismatch { .. })
+        ));
 
         let noncomparable_reference = RecoveryHandle {
             logical_store_id: logical_store_id.clone(),
             responsibility: ApplicationResponsibility("watcher".into()),
             operation_id: OperationId("op-crash-window".into()),
-            payload_identity: PayloadIdentity::sha256("legacy-opaque".into()),
+            payload_identity: PayloadIdentity {
+                algorithm: "sha256".into(),
+                digest: payload_fingerprint.clone(),
+                comparable: false,
+            },
         };
         assert!(matches!(
             client.reconcile_operation(&noncomparable_reference).await,
             Err(ApplicationClientError::OperationMismatch { .. })
         ));
+        assert_eq!(
+            backend
+                .application_operation(&logical_store_id.0, "watcher", "op-crash-window")
+                .await
+                .unwrap()
+                .unwrap()
+                .state,
+            "pending"
+        );
         let reconciled = client
             .reconcile_operation(&client.recovery_handle(
                 OperationId("op-crash-window".into()),

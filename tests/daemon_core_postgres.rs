@@ -5,6 +5,10 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use telex::application_client::{
+    ApplicationClient, ApplicationClientConfig, ApplicationClientError, ApplicationResponsibility,
+    LogicalStoreId, OperationId, PayloadIdentity, RecoveryHandle,
+};
 use telex::backend::postgres::{make_tls, sanitize_ident, PgBackend};
 use telex::backend::Backend;
 use telex::daemon::test_support::{registered_epoch, send_request, TestDaemon};
@@ -149,6 +153,121 @@ async fn application_client_schema_v3_operation_smoke() {
         .unwrap()
         .iter()
         .any(|message| message.id == reply.id && message.metadata.as_deref() == Some(metadata)));
+
+    let comparable_digest = "c".repeat(64);
+    let pending_operation = NewApplicationOperation {
+        logical_store_id: operation.logical_store_id.clone(),
+        application_responsibility: "postgres-public-client".into(),
+        operation_id: "public-reconcile".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: comparable_digest.clone(),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&pending_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    backend
+        .insert_application_message(
+            &NewMessage {
+                from_addr: Some("postgres:sender".into()),
+                to_addr: "postgres:target".into(),
+                kind: "note".into(),
+                attention: Attention::Background,
+                body: "public reconcile".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            },
+            &ApplicationMessageOperation {
+                logical_store_id: pending_operation.logical_store_id.clone(),
+                application_responsibility: pending_operation.application_responsibility.clone(),
+                operation_id: pending_operation.operation_id.clone(),
+                payload_fingerprint: comparable_digest.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let config = ConfigFile {
+        default: Some("pg-public-client".into()),
+        backends: BTreeMap::from([(
+            "pg-public-client".into(),
+            BackendProfile {
+                kind: "postgres".into(),
+                path: None,
+                url: Some(url.clone()),
+                auth: Some("password".into()),
+                password_env: Some("TELEX_PG_PASSWORD".into()),
+                password_command: None,
+                schema: Some(schema.clone()),
+                entra_cred: None,
+                entra_scope: None,
+            },
+        )]),
+    };
+    let config_path = write_temp_config("application-client-public", &config);
+    let previous_config = std::env::var_os("TELEX_CONFIG");
+    std::env::set_var("TELEX_CONFIG", &config_path);
+    let client = ApplicationClient::connect(ApplicationClientConfig {
+        responsibility: ApplicationResponsibility("postgres-public-client".into()),
+        backend: Some("pg-public-client".into()),
+        db_override: None,
+    })
+    .await
+    .unwrap();
+    let noncomparable = RecoveryHandle {
+        logical_store_id: LogicalStoreId(pending_operation.logical_store_id.clone()),
+        responsibility: ApplicationResponsibility(
+            pending_operation.application_responsibility.clone(),
+        ),
+        operation_id: OperationId(pending_operation.operation_id.clone()),
+        payload_identity: PayloadIdentity {
+            algorithm: "sha256".into(),
+            digest: comparable_digest.clone(),
+            comparable: false,
+        },
+    };
+    assert!(matches!(
+        client.reconcile_operation(&noncomparable).await,
+        Err(ApplicationClientError::OperationMismatch { .. })
+    ));
+    assert_eq!(
+        backend
+            .application_operation(
+                &pending_operation.logical_store_id,
+                &pending_operation.application_responsibility,
+                &pending_operation.operation_id,
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        "pending"
+    );
+    let comparable = RecoveryHandle {
+        payload_identity: PayloadIdentity {
+            algorithm: "sha256".into(),
+            digest: comparable_digest,
+            comparable: true,
+        },
+        ..noncomparable
+    };
+    assert_eq!(
+        client
+            .reconcile_operation(&comparable)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        "accepted"
+    );
+    restore_env("TELEX_CONFIG", previous_config);
+    drop(client);
     drop(backend);
     admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
         .await
