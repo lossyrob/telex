@@ -64,6 +64,48 @@ Generic AC-C15 source-resolution states remain visible unless Application Client
 returns an explicit accepted narrowing; the cross-workstream review thread
 remains open until exact evidence is returned.
 
+The implementer resolved all Operator-local findings at
+`3e36028b6e3d84bcef647f38e43cfe1b2de035c8`. Orchestration reopened only
+discussion 3687008544 because its initial response named issue #12 without the
+required exact #129/PR #132 wording and bundle evidence. Seven threads remain
+resolved; one intentional cross-workstream gate remains open during paired
+re-review.
+
+Application Client returned the required evidence at PR #132 head
+`9f08628f10df132fb7b858380f3607760b7b2e48`. Operator-side verification
+reproduced manifest blob `b9861495527afe297e78f0546b0c54db8cd19b21`, 2423
+bytes, and SHA-256
+`9e648d2005f9b368b0de72c6097bdd7432365e7afab43004399c2c6bd0b68e8d`,
+and confirmed generic reply/compound/identity semantics plus all AC-C15 states.
+The evidence was posted to discussion 3687008544 and the final thread resolved.
+All eight threads are now closed; paired re-review remains.
+
+Campaign clarified that PR #132 remains candidate authority until it merges.
+The direct reset node now carries an explicit external dependency on Application
+Client `client-core` / PR #132 for final merge ordering. Issue #12 publication
+reconciliation remains campaign-owned after that merge.
+
+Second re-review 4824505655 found three blockers: restart resurrection of
+durably detached addresses, typed retryability evidence for Reply & Handle, and
+total pre-authoring behavior for all AC-C15 source states. Campaign confirmed
+PR #132 already provides
+`ApplicationClientError::RejectedBeforeAcceptance` and
+`RejectionRetryability::{Transient, Permanent}`; unknown evidence remains
+fail-closed/indeterminate. No new shared-client change is required. The worker
+owns the local detach, source-state, reassignment, and safe-action wording
+repairs.
+
+The implementer resolved the second review at
+`7c6603ecd081255d8af370668cf3ddddc8075b50`. All 13 accumulated review threads
+are resolved, all six CI checks pass, and the PR is mergeable. Final paired
+re-review is pending.
+
+Final review 4824865088 posted the verified automated +1 at the same head with
+zero Must/Should findings. PR #136 is technically ready but merge-order held:
+Application Client PR #132 remains open as the candidate authority, and issue
+#12 publication reconciliation follows its merge. Campaign owns sequencing;
+the builder direction gate remains a separate post-design decision.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so
