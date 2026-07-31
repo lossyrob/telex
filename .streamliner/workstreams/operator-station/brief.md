@@ -194,6 +194,11 @@ Active transition:
   rejection is fail-closed/indeterminate and cannot auto-retry. The remaining
   detach, AC-C15 authoring, reassignment, and safe-action wording is
   Operator-local repair.
+- The implementer resolved the second review at
+  `7c6603ecd081255d8af370668cf3ddddc8075b50`. All five new threads and all
+  earlier threads are resolved; all six checks pass and GitHub reports the PR
+  mergeable. A fresh disposition-required final re-review request is with the
+  paired reviewer.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.

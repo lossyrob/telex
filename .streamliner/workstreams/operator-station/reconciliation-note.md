@@ -95,6 +95,11 @@ fail-closed/indeterminate. No new shared-client change is required. The worker
 owns the local detach, source-state, reassignment, and safe-action wording
 repairs.
 
+The implementer resolved the second review at
+`7c6603ecd081255d8af370668cf3ddddc8075b50`. All 13 accumulated review threads
+are resolved, all six CI checks pass, and the PR is mergeable. Final paired
+re-review is pending.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so
