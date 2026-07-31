@@ -134,7 +134,7 @@ pub enum ApplicationClientError {
     Partial(String),
     Indeterminate {
         detail: String,
-        recovery: RecoveryHandle,
+        recovery: Box<RecoveryHandle>,
     },
     InvalidRequest(String),
     Protocol {
@@ -278,6 +278,7 @@ pub struct RecoveryHandle {
     pub logical_store_id: LogicalStoreId,
     pub responsibility: ApplicationResponsibility,
     pub operation_id: OperationId,
+    pub payload_identity: PayloadIdentity,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -971,7 +972,10 @@ impl ApplicationClient {
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "pending" => {
                 if let Some(reconciled) = self
-                    .reconcile_operation_current(&request.operation_id)
+                    .reconcile_operation_current(
+                        &request.operation_id,
+                        &PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                    )
                     .await?
                 {
                     if reconciled.state == "accepted" {
@@ -990,7 +994,10 @@ impl ApplicationClient {
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "indeterminate" => {
                 if let Some(reconciled) = self
-                    .reconcile_operation_current(&request.operation_id)
+                    .reconcile_operation_current(
+                        &request.operation_id,
+                        &PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                    )
                     .await?
                 {
                     if reconciled.state == "accepted" {
@@ -1008,14 +1015,20 @@ impl ApplicationClient {
                 }
                 return Err(ApplicationClientError::Indeterminate {
                     detail: format!("operation remains {}", existing.state),
-                    recovery: self.recovery_handle(request.operation_id),
+                    recovery: Box::new(self.recovery_handle(
+                        request.operation_id,
+                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                    )),
                 });
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "needs-attach" => {}
             ApplicationOperationBegin::Replay(existing) => {
                 return Err(ApplicationClientError::Indeterminate {
                     detail: format!("operation remains {}", existing.state),
-                    recovery: self.recovery_handle(request.operation_id),
+                    recovery: Box::new(self.recovery_handle(
+                        request.operation_id,
+                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                    )),
                 })
             }
             ApplicationOperationBegin::Started(_) => {}
@@ -1041,7 +1054,10 @@ impl ApplicationClient {
         let response = match self.request_staged(daemon_request, false).await {
             Ok(response) => response,
             Err(RequestFailure::WriteBoundaryUnknown(error)) => {
-                let recovery = self.recovery_handle(request.operation_id.clone());
+                let recovery = self.recovery_handle(
+                    request.operation_id.clone(),
+                    PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                );
                 let _ = self
                     .backend
                     .complete_application_operation(
@@ -1055,7 +1071,7 @@ impl ApplicationClient {
                     .await;
                 return Err(ApplicationClientError::Indeterminate {
                     detail: error.to_string(),
-                    recovery,
+                    recovery: Box::new(recovery),
                 });
             }
             Err(RequestFailure::BeforePeerDecision(error)) => return Err(error),
@@ -1104,7 +1120,13 @@ impl ApplicationClient {
                     .registration_error(&request.sender, &code, &message, needs_attach_reason)
                     .await;
                 Err(self
-                    .finish_peer_failure(&request.operation_id, &code, needs_attach_reason, error)
+                    .finish_peer_failure(
+                        &request.operation_id,
+                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                        &code,
+                        needs_attach_reason,
+                        error,
+                    )
                     .await?)
             }
             _ => Err(unexpected_response("send")),
@@ -1169,7 +1191,10 @@ impl ApplicationClient {
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "pending" => {
                 if let Some(reconciled) = self
-                    .reconcile_operation_current(&request.operation_id)
+                    .reconcile_operation_current(
+                        &request.operation_id,
+                        &PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                    )
                     .await?
                 {
                     if reconciled.state == "accepted" {
@@ -1188,7 +1213,10 @@ impl ApplicationClient {
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "indeterminate" => {
                 if let Some(reconciled) = self
-                    .reconcile_operation_current(&request.operation_id)
+                    .reconcile_operation_current(
+                        &request.operation_id,
+                        &PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                    )
                     .await?
                 {
                     if reconciled.state == "accepted" {
@@ -1206,14 +1234,20 @@ impl ApplicationClient {
                 }
                 return Err(ApplicationClientError::Indeterminate {
                     detail: format!("reply operation remains {}", existing.state),
-                    recovery: self.recovery_handle(request.operation_id),
+                    recovery: Box::new(self.recovery_handle(
+                        request.operation_id,
+                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                    )),
                 });
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "needs-attach" => {}
             ApplicationOperationBegin::Replay(existing) => {
                 return Err(ApplicationClientError::Indeterminate {
                     detail: format!("reply operation remains {}", existing.state),
-                    recovery: self.recovery_handle(request.operation_id),
+                    recovery: Box::new(self.recovery_handle(
+                        request.operation_id,
+                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                    )),
                 })
             }
             ApplicationOperationBegin::Started(_) => {}
@@ -1285,12 +1319,21 @@ impl ApplicationClient {
                     .registration_error(&request.sender, &code, &message, needs_attach_reason)
                     .await;
                 Err(self
-                    .finish_peer_failure(&request.operation_id, &code, needs_attach_reason, error)
+                    .finish_peer_failure(
+                        &request.operation_id,
+                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                        &code,
+                        needs_attach_reason,
+                        error,
+                    )
                     .await?)
             }
             Ok(_) => Err(unexpected_response("reply")),
             Err(RequestFailure::WriteBoundaryUnknown(error)) => {
-                let recovery = self.recovery_handle(request.operation_id.clone());
+                let recovery = self.recovery_handle(
+                    request.operation_id.clone(),
+                    PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                );
                 let _ = self
                     .backend
                     .complete_application_operation(
@@ -1304,7 +1347,7 @@ impl ApplicationClient {
                     .await;
                 Err(ApplicationClientError::Indeterminate {
                     detail: error.to_string(),
-                    recovery,
+                    recovery: Box::new(recovery),
                 })
             }
             Err(RequestFailure::BeforePeerDecision(error)) => Err(error),
@@ -1723,13 +1766,14 @@ impl ApplicationClient {
                 current: self.logical_store_id.clone(),
             });
         }
-        self.reconcile_operation_current(&reference.operation_id)
+        self.reconcile_operation_current(&reference.operation_id, &reference.payload_identity)
             .await
     }
 
     async fn reconcile_operation_current(
         &self,
         operation_id: &OperationId,
+        staged_payload: &PayloadIdentity,
     ) -> Result<Option<ApplicationOperationRecord>, ApplicationClientError> {
         let record = self
             .backend
@@ -1743,6 +1787,20 @@ impl ApplicationClient {
         let Some(record) = record else {
             return Ok(None);
         };
+        let stored_payload = PayloadIdentity::sha256(record.payload_fingerprint.clone());
+        if !staged_payload.comparable
+            || !stored_payload.comparable
+            || staged_payload.algorithm != stored_payload.algorithm
+            || staged_payload.digest != stored_payload.digest
+        {
+            return Err(ApplicationClientError::OperationMismatch {
+                operation_id: operation_id.clone(),
+                evidence: Box::new(PayloadMismatchEvidence {
+                    attempted: staged_payload.clone(),
+                    existing: stored_payload,
+                }),
+            });
+        }
         if matches!(record.state.as_str(), "pending" | "indeterminate") {
             if let Some(message) = self
                 .backend
@@ -1822,7 +1880,10 @@ impl ApplicationClient {
                     .and_then(|json| serde_json::from_str::<ApplicationClientError>(json).ok())
                     .map(|error| error.to_string())
                     .unwrap_or_else(|| format!("operation is {}", record.state));
-                return Err(ApplicationClientError::Indeterminate { detail, recovery });
+                return Err(ApplicationClientError::Indeterminate {
+                    detail,
+                    recovery: Box::new(recovery),
+                });
             }
             _ => {
                 return Err(ApplicationClientError::Protocol {
@@ -1834,7 +1895,7 @@ impl ApplicationClient {
             serde_json::from_str(record.result_json.as_deref().ok_or_else(|| {
                 ApplicationClientError::Indeterminate {
                     detail: format!("operation is {}", record.state),
-                    recovery: reference.clone(),
+                    recovery: Box::new(reference.clone()),
                 }
             })?)
             .map_err(invalid)?;
@@ -1901,6 +1962,7 @@ impl ApplicationClient {
     async fn finish_peer_failure(
         &self,
         operation_id: &OperationId,
+        payload_identity: PayloadIdentity,
         code: &str,
         needs_attach_reason: Option<NeedsAttachReason>,
         error: ApplicationClientError,
@@ -1936,7 +1998,7 @@ impl ApplicationClient {
                 Ok(error)
             }
             PeerFailureDisposition::Indeterminate => {
-                let recovery = self.recovery_handle(operation_id.clone());
+                let recovery = self.recovery_handle(operation_id.clone(), payload_identity);
                 self.backend
                     .complete_application_operation(
                         &self.logical_store_id.0,
@@ -1950,7 +2012,7 @@ impl ApplicationClient {
                     .map_err(unavailable)?;
                 Ok(ApplicationClientError::Indeterminate {
                     detail: error.to_string(),
-                    recovery,
+                    recovery: Box::new(recovery),
                 })
             }
         }
@@ -2196,11 +2258,16 @@ impl ApplicationClient {
             })
     }
 
-    fn recovery_handle(&self, operation_id: OperationId) -> RecoveryHandle {
+    fn recovery_handle(
+        &self,
+        operation_id: OperationId,
+        payload_identity: PayloadIdentity,
+    ) -> RecoveryHandle {
         RecoveryHandle {
             logical_store_id: self.logical_store_id.clone(),
             responsibility: self.responsibility.clone(),
             operation_id,
+            payload_identity,
         }
     }
 
@@ -2636,8 +2703,17 @@ fn preaccept_rejection(
     ApplicationClientError::RejectedBeforeAcceptance {
         code: code.to_string(),
         retryability,
-        detail: detail.to_string(),
+        detail: redacted_diagnostic("pre-acceptance-refusal", detail),
     }
+}
+
+fn redacted_diagnostic(category: &str, detail: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(b"telex-application-public-diagnostic-v1\0");
+    hasher.update(category.as_bytes());
+    hasher.update(detail.as_bytes());
+    let digest = hex(&hasher.finalize());
+    format!("{category} (diagnostic {})", &digest[..16])
 }
 
 fn unexpected_response(code: &'static str) -> ApplicationClientError {
@@ -2818,13 +2894,14 @@ mod tests {
             "recipient retired",
             RejectionRetryability::Permanent,
         );
-        assert!(matches!(
-            transient,
+        match transient {
             ApplicationClientError::RejectedBeforeAcceptance {
                 retryability: RejectionRetryability::Transient,
+                detail,
                 ..
-            }
-        ));
+            } => assert!(!detail.contains("daemon draining")),
+            other => panic!("expected transient rejection, got {other:?}"),
+        }
         assert!(matches!(
             permanent,
             ApplicationClientError::RejectedBeforeAcceptance {
@@ -2914,10 +2991,12 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
         };
+        let payload_fingerprint = "a".repeat(64);
         let mismatched_reference = RecoveryHandle {
             logical_store_id: LogicalStoreId::persisted("store-v1-other".into()),
             responsibility: ApplicationResponsibility("watcher".into()),
             operation_id: OperationId("op-crash-window".into()),
+            payload_identity: PayloadIdentity::sha256(payload_fingerprint.clone()),
         };
         assert!(matches!(
             client.reconcile_operation(&mismatched_reference).await,
@@ -2931,7 +3010,7 @@ mod tests {
                 operation_kind: "send".into(),
                 sender: "watcher:sender".into(),
                 recipients_json: r#"["target"]"#.into(),
-                payload_fingerprint: "fingerprint".into(),
+                payload_fingerprint: payload_fingerprint.clone(),
                 retry_budget: 1,
                 created_at_ms: now_ms(),
             })
@@ -2949,17 +3028,30 @@ mod tests {
                     ..Default::default()
                 },
                 &crate::model::ApplicationMessageOperation {
-                    logical_store_id: logical_store_id.0,
+                    logical_store_id: logical_store_id.0.clone(),
                     application_responsibility: "watcher".into(),
                     operation_id: "op-crash-window".into(),
-                    payload_fingerprint: "fingerprint".into(),
+                    payload_fingerprint: payload_fingerprint.clone(),
                 },
             )
             .await
             .unwrap();
 
+        let noncomparable_reference = RecoveryHandle {
+            logical_store_id: logical_store_id.clone(),
+            responsibility: ApplicationResponsibility("watcher".into()),
+            operation_id: OperationId("op-crash-window".into()),
+            payload_identity: PayloadIdentity::sha256("legacy-opaque".into()),
+        };
+        assert!(matches!(
+            client.reconcile_operation(&noncomparable_reference).await,
+            Err(ApplicationClientError::OperationMismatch { .. })
+        ));
         let reconciled = client
-            .reconcile_operation(&client.recovery_handle(OperationId("op-crash-window".into())))
+            .reconcile_operation(&client.recovery_handle(
+                OperationId("op-crash-window".into()),
+                PayloadIdentity::sha256(payload_fingerprint),
+            ))
             .await
             .unwrap()
             .unwrap();
@@ -3047,6 +3139,7 @@ mod tests {
             recovery_attempts: Mutex::new(BTreeMap::new()),
         };
         let operation_id = OperationId("indeterminate-peer-error".into());
+        let payload_fingerprint = "b".repeat(64);
         backend
             .begin_application_operation(&NewApplicationOperation {
                 logical_store_id: logical_store_id.0.clone(),
@@ -3055,14 +3148,17 @@ mod tests {
                 operation_kind: "send".into(),
                 sender: "watcher:sender".into(),
                 recipients_json: r#"["target"]"#.into(),
-                payload_fingerprint: "fingerprint".into(),
+                payload_fingerprint: payload_fingerprint.clone(),
                 retry_budget: 1,
                 created_at_ms: now_ms(),
             })
             .await
             .unwrap();
         let peer_error = ApplicationClientError::Unavailable("peer internal".into());
-        let recovery = client.recovery_handle(operation_id.clone());
+        let recovery = client.recovery_handle(
+            operation_id.clone(),
+            PayloadIdentity::sha256(payload_fingerprint),
+        );
         backend
             .complete_application_operation(
                 &logical_store_id.0,
