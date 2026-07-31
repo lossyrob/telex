@@ -1974,7 +1974,7 @@ registration, multi-host failover, and provider policy remain outside this decis
 ## 0047 — Operator Station mediation remains application logic outside Telex core
 
 - **Date:** 2026-07-22
-- **Status:** Accepted (issue #114)
+- **Status:** Accepted (issue #114; narrowed by 0051)
 
 **Context.** The Operator Station spike and builder dogfood proved value in a
 human-attended feed, selective operator-agent filtering, recommendations, Windows
@@ -2002,7 +2002,7 @@ and current UI remain evidence rather than production core contracts.
 ## 0048 — Direct and assisted routing use exclusive ingress attendance
 
 - **Date:** 2026-07-22
-- **Status:** Accepted (issue #114)
+- **Status:** Accepted (issue #114; Station topology superseded by 0051)
 
 **Context.** Direct operation needs the Station to receive raw obligations, while
 assisted operation needs an operator agent to filter the same worker-facing ingress.
@@ -2069,3 +2069,53 @@ prove both capabilities without weakening either domain. The
 `application-client-ready` checkpoint is design-only: it unlocks that downstream work
 but does not claim an implementation, binding, conformance result, consumer
 integration, or production readiness.
+
+## 0051 — Operator Station ships a direct human-attended endpoint; mediation remains external
+
+- **Date:** 2026-07-30
+- **Status:** Accepted (issue #134)
+- **Narrows:** 0047
+- **Supersedes:** 0048's Operator Station topology and transition contract
+
+**Context.** The human-attended Station spike proved the value of a durable feed,
+notifications, ordinary reply, provenance, restart continuity, and delivery/ack health,
+but the issue #114 contract promoted its operator-agent intermediary into first-party
+product architecture. Product-direction review concluded that agents can send directly
+to configured human-attended addresses while Telex remains a semantically dumb fabric.
+Campaign allocation reserved ADR 0051 for this reset; the numbering gap is
+intentional.
+
+**Decision.** Operator Station is a separately installable application that directly
+attends one or more explicitly configured Telex addresses through the supported
+Application Client. It receives ordinary messages, ingests durably before exact-recipient
+acknowledgment, presents feeds and threads, sends ordinary messages and replies in the
+source thread, records exact-recipient dispositions, applies local notification policy,
+and preserves provenance, health, recovery, safety, and evidence-preserving cleanup.
+Telex and Station ship no operator-agent skill, semantic filter/router, required
+intermediary address pair, routed-outcome lifecycle, or Operator-specific core semantic.
+
+ADR 0047 remains authoritative only for the boundary that human-attention policy stays
+in applications rather than Telex core and for mandatory source provenance and
+non-impersonation. Its first-party operator-agent authority and
+`urn:telex:operator-station:v1` extension implications are superseded. ADR 0048's
+direct/assisted/quiet product topology and transition inventory are superseded; ordinary
+exclusive attendance, typed collision, bounded liveness proof, explicit detach, and
+fail-closed reclaim remain general daemon/Application Client rules and direct Station
+behavior. The retired Operator URN and `operator-station.*` kinds remain reserved
+historical identifiers and are unavailable for reuse.
+
+Optional mediation remains possible only as an external user-developed convention over
+ordinary Telex messages. It chooses its own namespace and cannot override core fields,
+Station behavior, or source identity. Generic metadata-bearing reply and compound
+operation semantics remain owned by Application Client client-core/conformance; this
+decision adds no private client or implementation extracted from closed PR #130.
+
+**Consequences.** The normative Station contract is
+[operator-station.md](operator-station.md), and `station-app` waits for both the
+builder-owned direct Station direction gate and Application Client
+`client-conformance`. The desktop receives raw direct traffic, so notification tuning
+and attention policy remain explicit local application responsibilities rather than a
+hidden mediation dependency. Historical mediation evidence remains useful, but no
+current Station requirement, downstream `operator-broker`, or Telex core behavior
+depends on it. Any future first-party mediation product requires its own design decision
+and cannot silently re-enter the Station contract.
