@@ -238,7 +238,7 @@ Lifecycle remains intentionally small:
 | Lifecycle | Meaning | Legal transitions |
 |---|---|---|
 | `active` | Watch is enabled. It schedules only when eligibility is `eligible`. | `paused`, `terminal`, `removed` |
-| `paused` | Detector attempts are disabled. May be operator-selected or health-blocked. | `active` through explicit resume or a late retryable result plus finite retry grant, `terminal` through late acceptance of a staged terminal event, `removed` |
+| `paused` | Detector attempts are disabled. May be operator-selected or health-blocked. | `active` through explicit resume or an applicable finite reconciliation/send-retry grant, `terminal` through late acceptance of a staged terminal event, `removed` |
 | `terminal` | Detector completed the watch. No further detector scheduling. | `removed` |
 | `removed` | Administratively removed but identity, tombstone, and unresolved evidence are retained. | none |
 
@@ -278,8 +278,11 @@ Address occupancy never controls lifecycle. A target or sender becoming
 unoccupied does not silently cancel or expire a watch.
 
 Eligibility is watch-local. Even an active/eligible watch may wait on
-runtime-wide concurrency, backoff, containment, or sender readiness. Those
-external execution gates do not rewrite watch eligibility.
+runtime-wide concurrency, backoff, sender readiness, or containment setup for a
+new attempt. Those external execution gates do not rewrite watch eligibility.
+Uncertainty about containment from a prior runtime is different: it keeps the
+watch ineligible and, when proof cannot be made, transitions it to
+paused/inactive/blocked with `orphan-containment-unproven`.
 
 ## Detector protocol v2
 
@@ -314,8 +317,10 @@ additional timing facts in opaque state. Watcher does not interpret them.
 
 `activatedAt` is set when a v2 registration first becomes active and is replaced
 on each explicit operator resume after a paused state. Active registration
-updates and successful late reconciliation do not replace it. `lastSuccessAt`
-is `null` until the first successful evaluation commits. It advances to
+updates, successful late reconciliation, and administrative reconciliation or
+send-retry grants do not replace it. Such grants also preserve `lastSuccessAt`;
+only explicit `Resume` replaces `activatedAt`. `lastSuccessAt` is `null` until
+the first successful evaluation commits. It advances to
 `attempt.now` when an `idle` result commits, an event is durably accepted and
 commits, or an eventless/accepted terminal result commits. Detector degradation,
 process failure, pending/unknown send outcomes, and rejected sends do not
@@ -467,7 +472,7 @@ Before the first send, Watcher atomically persists:
 - committed prior state and proposed next state;
 - the complete normalized Telex envelope;
 - canonical hashes of prior state, proposed state, and normalized envelope; and
-- pending status and reconciliation budget.
+- pending status plus separate reconciliation and send-retry budgets.
 
 Persistent hashes use `sha256:<lowercase-hex>` over RFC 8785 canonical JSON
 UTF-8 bytes. Each evidence record identifies the hash algorithm and pre-image
@@ -497,7 +502,8 @@ detector.
 | Indeterminate result | Set eligibility to `reconciliation-pending`; do not run the detector or author a replacement send. |
 | Reconciliation budget exhausted without accepted/rejected/not-recorded proof | Pause/block with `receipt-outcome-unresolved`. |
 | Late acceptance after blocking | Commit; return an event watch to active/ready or transition a staged terminal event from paused to terminal. |
-| Late rejection or authoritative `not-recorded` after blocking | Return the same staged operation to retryable active/degraded only after an explicit finite retry grant. |
+| Late transient rejection or authoritative `not-recorded` after unresolved blocking | Record the proof first, remain paused/inactive/blocked, and change `blockedReason` to `send-retry-exhausted`. A later finite send-retry grant may reactivate exact same-operation send recovery. |
+| Late permanent rejection after unresolved blocking | Record the proof, remain paused/inactive/blocked, and change `blockedReason` to `send-permanently-rejected`. No retry grant is available. |
 | Removal while unresolved | Stop execution; retain pending operation and unresolved tombstone for later evidence closure without resurrecting the watch. |
 
 Automatic or operator-requested retry is legal only through a retry-safe
@@ -672,10 +678,10 @@ The default Telex coordination daemon is never used for destructive proof.
 | nonzero exit, malformed/oversize/noncanonical result, timeout | no event allocation/state/send | active/eligible/degraded + backoff | later successful attempt or operator correction |
 | missing working directory/executable | no event allocation/state/send | active/eligible/degraded + backoff | registration or local path correction |
 | authoritative `not-recorded` or transient rejection before acceptance | retain exact pending operation | active/reconciliation-pending/degraded | same-operation retry |
-| repeated transient rejection exhausts budget | retain staged identity | paused/inactive/blocked (`send-retry-exhausted`) | finite retry grant or remove |
+| repeated transient rejection exhausts budget | retain staged identity | paused/inactive/blocked (`send-retry-exhausted`) | finite send-retry grant or remove |
 | permanent rejection before acceptance | retain staged identity and rejection evidence | paused/inactive/blocked (`send-permanently-rejected`) | after external correction, close not accepted and resume at the next sequence; otherwise remove or create a new corrected watch ID |
 | indeterminate receipt or accepted-send/local-commit failure | no new detector execution | active/reconciliation-pending/degraded | result/receipt reconciliation |
-| reconciliation budget exhausted | no new detector execution | paused/inactive/blocked | reconcile now, finite same-operation retry budget, or remove |
+| reconciliation budget exhausted | no new detector execution | paused/inactive/blocked | reconcile now, finite reconciliation budget, or remove |
 | duplicate/previously-completed identity conflict | no send/state commit | paused/inactive/blocked (`operation-identity-conflict`) | investigate client/store identity, then remove |
 | receipt/result logical-store mismatch | no retry/send/state commit | paused/inactive/blocked (`logical-store-mismatch`) | correct backend selection or evidence source; reconcile only against the staged store, otherwise remove |
 | unsupported v1 registration | no execution | paused/inactive/blocked | explicit v2 re-registration/migration |
@@ -877,8 +883,9 @@ revision, lifecycle, eligibility, health, and typed refusal reason.
 | Pause | Move an active eligible watch to paused/inactive. Refuse while a pending operation exists; use reconciliation or removal instead. |
 | Resume | Move paused/inactive to active/eligible, replace `activatedAt`, and retain `lastSuccessAt`. Refuse while unresolved pending evidence exists or the blocked reason has not been corrected. |
 | Update | In one registry transaction, verify no pending operation exists, apply mutable fields, optionally replace committed opaque state, and increment revision so update and event staging cannot race. Omitted state replacement preserves committed state; explicit JSON `null` replaces it with null. Refuse immutable ID/backend/route changes, removed watches, unsupported v1 rows (re-register under v2), and any watch with a pending operation. Audit old/new state hashes when state changes. |
-| Reconcile now | Query the exact pending operation for active, blocked, or removed watches. It may close evidence on a removed tombstone but never resurrect it. |
-| Grant retry budget | For `receipt-outcome-unresolved` or `send-retry-exhausted`, atomically add a finite same-operation retry budget and transition to active/`reconciliation-pending`/degraded with `blockedReason = null` and `diagnosticCategory = receipt-reconciliation-pending`; no separate resume is required. Refuse grants for permanent rejection, identity/store conflict, unsupported v1, containment failure, replacement identity, or replacement payload. |
+| Reconcile now | Query the exact pending operation for active, blocked, or removed watches. It may close evidence on a removed tombstone but never resurrect it. If a blocked unresolved outcome becomes authoritative `not-recorded` or transient rejection, record that proof and change the paused watch's blocked reason to `send-retry-exhausted` before any send budget can be granted. If it becomes permanent rejection, change the reason to `send-permanently-rejected`. |
+| Grant reconciliation budget | Only for `receipt-outcome-unresolved`: atomically add a finite receipt-query attempt/deadline budget and transition to active/`reconciliation-pending`/degraded with `blockedReason = null` and `diagnosticCategory = receipt-reconciliation-pending`. This grant authorizes reconciliation only and MUST NOT authorize a send. No separate resume is required; `activatedAt` and `lastSuccessAt` are preserved. |
+| Grant send-retry budget | Only after authoritative `not-recorded` or transient rejection is already recorded as `send-retry-exhausted`: atomically add a finite exact same-operation send-retry budget and transition to active/`reconciliation-pending`/degraded with `blockedReason = null`. No separate resume is required; `activatedAt` and `lastSuccessAt` are preserved. Refuse replacement identity or payload. |
 | Close not accepted | Only for a definitively permanently rejected pre-acceptance operation. Record the rejection as terminal evidence for that allocation, retain its sequence tombstone, clear the pending operation without advancing detector state, and permit explicit resume at the next sequence after external correction. Refuse for indeterminate outcomes. |
 | Remove | Stop future detector execution and retain identity, pending operation, tombstone, and evidence. Removal never asserts accepted or rejected. |
 
@@ -1039,8 +1046,9 @@ prerequisites for Watcher registration.
 - Which platform mechanisms prove detector-tree death after abrupt runtime exit?
 - How does service supervision consume health and detect staleness?
 - How are register, show/list, pause, resume, update/state replacement,
-  reconcile-now, finite retry grant, close-not-accepted, remove, and
-  removed-evidence closure implemented with the required refusal rules?
+  reconcile-now, finite reconciliation grant, finite send-retry grant,
+  close-not-accepted, remove, and removed-evidence closure implemented with the
+  required refusal rules and authority split?
 - How are `activatedAt`, `lastSuccessAt`, UTC timestamp emission, and wall-clock
   adjustment behavior tested?
 - How are unsupported v1 rows isolated without blocking valid v2 watches?
