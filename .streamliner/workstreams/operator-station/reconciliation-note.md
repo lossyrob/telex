@@ -80,6 +80,11 @@ and confirmed generic reply/compound/identity semantics plus all AC-C15 states.
 The evidence was posted to discussion 3687008544 and the final thread resolved.
 All eight threads are now closed; paired re-review remains.
 
+Campaign clarified that PR #132 remains candidate authority until it merges.
+The direct reset node now carries an explicit external dependency on Application
+Client `client-core` / PR #132 for final merge ordering. Issue #12 publication
+reconciliation remains campaign-owned after that merge.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so

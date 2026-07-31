@@ -176,6 +176,10 @@ Active transition:
 - The exact evidence was added to discussion 3687008544 and the thread was
   resolved. All eight PR #136 threads are now resolved; paired re-review is the
   remaining review step.
+- PR #132 is still candidate shared authority until merge. PR #136 final merge
+  readiness therefore depends on PR #132 merging at the verified evidence or on
+  an explicitly coordinated merge order. Issue #12 publication reconciliation
+  remains campaign-owned after #132 merge.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.
