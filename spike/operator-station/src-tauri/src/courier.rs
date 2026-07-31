@@ -740,6 +740,7 @@ fn is_transient_store_disconnect(stderr: &str) -> bool {
         "server closed the connection unexpectedly",
         "connection reset by peer",
         "connection was forcibly closed",
+        "connection closed",
     ]
     .iter()
     .any(|needle| normalized.contains(needle))
@@ -860,6 +861,14 @@ mod tests {
             decide_exit(
                 1,
                 "db error: FATAL: terminating connection due to administrator command",
+                0,
+            ),
+            (ExitDecision::Backoff, 0)
+        );
+        assert_eq!(
+            decide_exit(
+                1,
+                "telex: Internal: fetching wait candidates for operator:rob: connection closed",
                 0,
             ),
             (ExitDecision::Backoff, 0)
