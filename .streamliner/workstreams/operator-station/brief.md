@@ -180,6 +180,20 @@ Active transition:
   readiness therefore depends on PR #132 merging at the verified evidence or on
   an explicitly coordinated merge order. Issue #12 publication reconciliation
   remains campaign-owned after #132 merge.
+- Second re-review
+  [4824505655](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824505655)
+  found three remaining blockers and two follow-ups:
+  - restart must exclude durably detached addresses;
+  - Reply & Handle must name shared typed retryability evidence and fail closed
+    on unclassified rejection;
+  - every AC-C15 non-authoritative state needs a pre-authoring refusal or
+    reconciliation-pending rule.
+- Campaign confirmed no new Application Client gap. PR #132 provides
+  `ApplicationClientError::RejectedBeforeAcceptance` and
+  `RejectionRetryability::{Transient, Permanent}`; unknown/unclassified
+  rejection is fail-closed/indeterminate and cannot auto-retry. The remaining
+  detach, AC-C15 authoring, reassignment, and safe-action wording is
+  Operator-local repair.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.

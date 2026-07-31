@@ -85,6 +85,16 @@ The direct reset node now carries an explicit external dependency on Application
 Client `client-core` / PR #132 for final merge ordering. Issue #12 publication
 reconciliation remains campaign-owned after that merge.
 
+Second re-review 4824505655 found three blockers: restart resurrection of
+durably detached addresses, typed retryability evidence for Reply & Handle, and
+total pre-authoring behavior for all AC-C15 source states. Campaign confirmed
+PR #132 already provides
+`ApplicationClientError::RejectedBeforeAcceptance` and
+`RejectionRetryability::{Transient, Permanent}`; unknown evidence remains
+fail-closed/indeterminate. No new shared-client change is required. The worker
+owns the local detach, source-state, reassignment, and safe-action wording
+repairs.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so
