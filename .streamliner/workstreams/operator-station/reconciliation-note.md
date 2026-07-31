@@ -100,6 +100,12 @@ The implementer resolved the second review at
 are resolved, all six CI checks pass, and the PR is mergeable. Final paired
 re-review is pending.
 
+Final review 4824865088 posted the verified automated +1 at the same head with
+zero Must/Should findings. PR #136 is technically ready but merge-order held:
+Application Client PR #132 remains open as the candidate authority, and issue
+#12 publication reconciliation follows its merge. Campaign owns sequencing;
+the builder direction gate remains a separate post-design decision.
+
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
 read-only inbox polling to an application-owned wait/read/ingest/ack courier so

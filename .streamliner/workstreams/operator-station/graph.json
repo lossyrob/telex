@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (direct human-attended Telex endpoint)",
-  "summary": "Direct Station reset PR #136 awaits final paired re-review at head 7c6603ecd081255d8af370668cf3ddddc8075b50. All 13 review threads are resolved, all six CI checks pass, and mergeability is clean.",
+  "summary": "Direct Station reset PR #136 is review-approved at head 7c6603ecd081255d8af370668cf3ddddc8075b50 with green CI, clean mergeability, and zero unresolved threads. Merge is held on Application Client PR #132 ordering.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-31T01:21:00Z",
+  "updatedAt": "2026-07-31T02:12:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",

@@ -199,6 +199,14 @@ Active transition:
   earlier threads are resolved; all six checks pass and GitHub reports the PR
   mergeable. A fresh disposition-required final re-review request is with the
   paired reviewer.
+- Final review
+  [4824865088](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824865088)
+  contains the verified automated +1 at that exact head with zero Must/Should
+  findings. All 13 threads are resolved.
+- PR #136 merge remains held because Application Client PR #132 is still open.
+  Campaign must authorize exact merge ordering; issue #12 publication
+  reconciliation follows PR #132 merge. The builder direction gate remains
+  separate from PR review and merge.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.
