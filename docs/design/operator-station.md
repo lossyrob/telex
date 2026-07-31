@@ -235,9 +235,16 @@ obligations and in-flight operations before either transition. It MUST NOT
 detach or remove the address until each item:
 
 - becomes terminal;
-- is explicitly reassigned to another configured address or application
-  responsibility with durable evidence; or
+- is explicitly reassigned to another application responsibility that can act
+  under the original configured address, with durable evidence; or
 - is deliberately abandoned with a recorded reason and final local state.
+
+Reassignment transfers Station-local recovery responsibility only. It preserves
+the original exact-recipient, sender, and operation identities and does not move
+an in-flight operation to another sender address. The receiving application
+must be able to act under the original address through ordinary Application
+Client ownership and collision rules. Otherwise the Station records an explicit
+final local abandonment state without claiming a Telex-terminal outcome.
 
 Retained evidence keeps the original address attribution. Retention policy MUST
 NOT prune unresolved obligations or in-flight operations. Restart preserves the
@@ -358,14 +365,21 @@ The Station verifies that the durable reply receipt identifies the expected
 logical store, parent/thread, sender, and recipient. A mismatch or indeterminate
 result remains visible and is reconciled before retry.
 
-The reply result MUST distinguish:
+The authoring state and reply result model MUST distinguish:
 
 - accepted while the target is unoccupied and durably queued;
-- retryable rejection before acceptance;
-- retired or otherwise permanently unresolvable target;
-- source identity mismatch;
+- rejection before acceptance, plus retryability or permanent-unresolvability
+  only when named typed Application Client evidence supplies that subtype;
+- pre-send non-authoritative source state;
+- post-send receipt identity mismatch;
 - already-terminal source obligation;
 - indeterminate acceptance.
+
+The supported Application Client currently guarantees rejection before
+acceptance, not retryable/permanent rejection subtyping. An unclassified
+rejection fails closed: preserve the operation identity and obligation, do not
+retry automatically, and surface the missing shared semantic tracked by
+[Issue #12](https://github.com/lossyrob/telex/issues/12).
 
 The UI never presents durable acceptance or queueing as human or agent
 consumption. If reply delivery is rejected or indeterminate, the selected
@@ -395,17 +409,21 @@ the retired mediation lifecycle is not restored implicitly.
 
 1. mint or reuse a retry-stable operation identity;
 2. persist it in restart-safe local state;
-3. send the ordinary reply from the exact attended recipient address;
-4. verify durable acceptance and expected receipt identity;
-5. only then record `handled` for the selected recipient delivery.
+3. require authoritative source resolution and verify that the selected
+   obligation is not terminal;
+4. send the ordinary reply from the exact attended recipient address;
+5. verify durable acceptance and expected receipt identity;
+6. only then record `handled` for the selected recipient delivery.
 
 Failure remains explicit:
 
 | Failure | Required state |
 |---|---|
-| Retryable rejection before acceptance | Obligation remains open; preserve the operation identity and retry only from AC-C14 reconciliation evidence after the rejection condition changes |
-| Retired or permanently unresolvable target | Obligation remains open; do not retry automatically or record `handled`; require target repair, an explicit new directed message, or a separate human disposition |
-| Source identity mismatch | Do not record `handled`; show both identities and preserve the obligation. If a send may have occurred, reconcile its AC-C14 operation evidence before retry; otherwise fail closed before reply or disposition |
+| Unclassified rejection before acceptance | Obligation remains open; preserve the operation identity, do not retry automatically or record `handled`, and expose the missing typed classification |
+| Typed retryable rejection before acceptance | Obligation remains open; preserve the operation identity and retry only from AC-C14 reconciliation evidence after the rejection condition changes |
+| Typed permanently unresolvable target | Obligation remains open; do not retry automatically or record `handled`; require target repair, an explicit new directed message, or a separate human disposition |
+| Pre-send source is `captured-only`, `mismatch`, or `unavailable` | Do not send or disposition; preserve the operation and obligation in reconciliation-pending state until authoritative resolution is restored |
+| Post-send receipt identity mismatch | Do not record `handled`; show expected and actual receipt identities, preserve the obligation, and reconcile the AC-C14 operation evidence before retry |
 | Source already terminal before send | Do not run `Reply & Handle`; offer an explicitly confirmed ordinary follow-up reply without changing the existing terminal state |
 | Source becomes or is discovered terminal after reply acceptance | Show `reply sent / source already terminal`; preserve the existing terminal evidence and do not overwrite it with `handled` |
 | Reply accepted, disposition fails | Show `reply sent / handle pending`; retry only the disposition |
@@ -471,10 +489,16 @@ Source resolution remains Station-visible:
 
 | State | Meaning | Presentation |
 |---|---|---|
-| `authoritative` | The selected logical store resolves the message and identity fields agree | Show the current Telex record |
-| `captured-only` | The current store is unavailable, but the durable local projection remains | Show the captured projection as non-authoritative evidence |
-| `mismatch` | A same-number record resolves but store, sender, recipient, or thread identity differs | Show both identities with a warning and fail closed for reply/disposition |
-| `unavailable` | Neither an authoritative record nor a sufficient captured projection exists | Show unavailable and do not guess or substitute a source |
+| `authoritative` | The selected logical store resolves the message and identity fields agree | Show the current Telex record; authoring may proceed only after the terminal-state check |
+| `captured-only` | The selected store cannot reproduce the source, but a sufficient durable local projection remains | Show the projection as non-authoritative evidence; reply/disposition authoring is reconciliation-pending and MUST NOT proceed |
+| `mismatch` | A same-number record resolves but store, sender, recipient, or thread identity differs | Show both identities with a warning; reply/disposition authoring is refused pending explicit source repair |
+| `unavailable` | Neither an authoritative record nor a sufficient captured projection exists | Show unavailable, do not guess or substitute a source, and refuse reply/disposition authoring |
+
+Every reply or disposition rechecks source resolution and selected-obligation
+terminal state immediately before authoring. A later durable receipt that does
+not match the expected store, parent/thread, sender, or recipient is a distinct
+post-send receipt mismatch and enters AC-C14 reconciliation; it is not treated
+as pre-send source authorization.
 
 The Station MUST NOT:
 
@@ -533,7 +557,8 @@ downstream, but the resulting state is computable and testable.
 On restart, the Station:
 
 1. restores its durable local projection and in-flight operation identities;
-2. explicitly reattaches configured addresses;
+2. explicitly reattaches configured addresses that are not in a durable
+   detached state;
 3. reconciles partial membership and collision state;
 4. requests unresolved primary obligations and bounded recent history;
 5. resumes from a durable cursor/fence or performs explicit resynchronization;
@@ -563,8 +588,10 @@ Telex message and thread actions are internal Station navigation. `https` links
 may open only after explicit user action and MUST display the destination.
 `http`, `file`, custom schemes, and local process actions are disabled by
 default. A local allowlist MAY enable a bounded action only after explicit
-confirmation; the allowlist MUST identify the scheme/action and target
-constraint, and MUST NOT treat message content as executable instructions.
+per-invocation confirmation that displays the fully resolved target. The
+allowlist MUST identify the scheme/action and target constraint. Message-derived
+values MAY fill only an explicitly constrained parameter and MUST NOT select a
+new action or be treated as executable instructions.
 Link labels MUST NOT hide a different destination.
 
 Messages and metadata are never executed as commands or agent instructions.
@@ -702,6 +729,7 @@ auto-start, signing, diagnostics, and cleanup.
 |---|---|
 | Complete live CC acquisition, if required beyond bounded history | Application Client design/conformance decision |
 | Re-baseline stale Station product-boundary, readiness, integration, and route-back references in `application-client.md` | [Issue #12](https://github.com/lossyrob/telex/issues/12) / Application Client workstream |
+| Define named typed evidence for retryable versus permanently unresolvable rejection if Station needs that distinction | [Issue #12](https://github.com/lossyrob/telex/issues/12) / Application Client workstream |
 | Receive-health threshold values and latency tuning | `station-app` and operational hardening |
 | Optimistic display of an accepted reply | `station-app`; must preserve durable receipt and partial state |
 | Notification pressure limits and coalescing policy | Usability validation and operational hardening |
