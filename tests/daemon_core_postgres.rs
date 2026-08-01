@@ -15,7 +15,7 @@ use telex::daemon::test_support::{registered_epoch, send_request, TestDaemon};
 use telex::daemon_ipc::{self as proto, Request, Response, WatchPidSpec};
 use telex::model::{
     now_ms, ApplicationMessageOperation, ApplicationOperationBegin, Attention, DeliveryOutcome,
-    NewApplicationOperation, NewMessage,
+    Disposition, NewApplicationOperation, NewMessage,
 };
 use telex::profiles::{self, BackendProfile, ConfigFile};
 
@@ -266,6 +266,76 @@ async fn application_client_schema_v3_operation_smoke() {
             .state,
         "accepted"
     );
+
+    let daemon = TestDaemon::new("pg-oversized-delivery-progress");
+    let store_key = profiles::store_key(config.backends.get("pg-public-client").unwrap(), None);
+    assert!(matches!(
+        daemon
+            .register(&store_key, "pg-receiver-session", "pg-frame-recipient")
+            .await,
+        Response::Registered { .. }
+    ));
+    let oversized_id = backend
+        .insert_message(&NewMessage {
+            from_addr: Some("pg-frame-sender".into()),
+            to_addr: "pg-frame-recipient".into(),
+            kind: "note".into(),
+            attention: Attention::Background,
+            body: "x".repeat(proto::MAX_JSONL_FRAME_BYTES + 1),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .id;
+    let following_id = backend
+        .insert_message(&NewMessage {
+            from_addr: Some("pg-frame-sender".into()),
+            to_addr: "pg-frame-recipient".into(),
+            kind: "note".into(),
+            attention: Attention::Background,
+            body: "following".into(),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .id;
+    assert!(matches!(
+        daemon
+            .wait(
+                &store_key,
+                "pg-receiver-session",
+                "pg-frame-recipient",
+                1_000,
+            )
+            .await,
+        Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
+    ));
+    assert!(backend
+        .dispositions_for(oversized_id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|disposition| {
+            disposition.recipient == "pg-frame-recipient"
+                && disposition.state == Disposition::Rejected.as_str()
+                && disposition.by_principal.as_deref() == Some("daemon")
+                && disposition.note.as_deref().is_some_and(|note| {
+                    note.contains("serialized_bytes=") && note.contains("max_bytes=")
+                })
+        }));
+    assert!(matches!(
+        daemon
+            .wait(
+                &store_key,
+                "pg-receiver-session",
+                "pg-frame-recipient",
+                1_000,
+            )
+            .await,
+        Response::Message { id, .. } if id == following_id
+    ));
     restore_env("TELEX_CONFIG", previous_config);
     drop(client);
     drop(backend);

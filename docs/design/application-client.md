@@ -237,6 +237,18 @@ result and MUST NOT fabricate a consumed row.
 Receive MAY be projected as a stream, callback, or poll by a binding, but those
 shapes MUST preserve identical delivery and acknowledgment semantics.
 
+Message acceptance MUST verify that the actual recipient-specific serialized
+receive frame fits the supported transport limit before persisting the message
+or any delivery row. The check MUST include JSON escaping and generated delivery
+fields. If an older store already contains a row that cannot be represented
+without changing its body, subject, or metadata, the daemon MUST preserve those
+stored values, atomically record a terminal `rejected` disposition for the exact
+recipient delivery with a bounded diagnostic note, consume that delivery, and
+return a typed compatibility error. This legacy quarantine is an explicit
+progress exception: the unrepresentable delivery is not handed to the
+application, but it cannot permanently block later receivable deliveries, and
+the durable disposition remains auditable after restart.
+
 ### AC-C10: Acknowledgment follows durable application ingest
 
 An application MUST acknowledge a delivery only after it has stored enough
