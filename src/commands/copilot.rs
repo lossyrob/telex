@@ -2153,6 +2153,11 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
     let bridge_live = bridge_is_live(&session);
     let enforce_delivery_exclusivity =
         (status.protocol_version.major, status.protocol_version.minor) >= (1, 4);
+    // The three issue-named conditions are derived here, from the daemon's own intent projection:
+    // `live_intent_missing_member` is a live intent with no member, `intent_protocol_incompatible`
+    // is an intent this daemon cannot reconcile, and `member_missing_live_producer` is the existing
+    // stale-bridge-heartbeat signal below. Only the first two need a new input.
+    let unrestored_push_intents = unrestored_push_intents(&status, &store_key, &session);
     let decision = evaluate_guard(
         &session,
         &active_members,
@@ -2160,6 +2165,7 @@ async fn turn_guard(ctx: &Ctx, args: CopilotTurnGuardArgs) -> Result<i32> {
         state,
         bridge_live,
         enforce_delivery_exclusivity,
+        &unrestored_push_intents,
     );
     if let Some(next_state) = &decision.next_state {
         if let Err(e) = write_guard_state(&state_path, next_state) {
@@ -2495,6 +2501,46 @@ fn active_session_members(
         .collect()
 }
 
+/// The three issue-named intent conditions, as intent rows the turn guard should warn about.
+///
+/// * `live_intent_missing_member` — a live push intent with no member: push is *desired* but not
+///   currently armed, which is the condition a daemon replacement leaves behind.
+/// * `intent_protocol_incompatible` — the daemon cannot reconcile this intent at all (schema or
+///   descriptor incompatibility, or a producer that predates the probe verb).
+/// * degraded states (`Unverifiable`, `Insecure`, `Quarantined`, `OwnershipConflict`) — surfaced
+///   for the same reason: the operator, not the agent, has to act.
+///
+/// `member_missing_live_producer` is the pre-existing stale-bridge-heartbeat signal and is left
+/// where it already lives, inside `evaluate_guard`'s `push_dead` branch.
+fn unrestored_push_intents(
+    status: &DaemonStatus,
+    store_key: &str,
+    session: &str,
+) -> Vec<crate::daemon_ipc::IntentStatus> {
+    use crate::daemon_ipc::IntentRecoveryState;
+    status
+        .intents
+        .iter()
+        .filter(|intent| intent.store_key == store_key && intent.session_id == session)
+        .filter(|intent| {
+            !intent.has_member
+                && matches!(
+                    intent.state,
+                    IntentRecoveryState::Live
+                        | IntentRecoveryState::DeferredLease
+                        | IntentRecoveryState::DeferredPullWaiter
+                        | IntentRecoveryState::Incompatible
+                        | IntentRecoveryState::LegacyProducer
+                        | IntentRecoveryState::Unverifiable
+                        | IntentRecoveryState::Insecure
+                        | IntentRecoveryState::Quarantined
+                        | IntentRecoveryState::OwnershipConflict
+                )
+        })
+        .cloned()
+        .collect()
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct GuardSettings {
     enabled: bool,
@@ -2570,7 +2616,31 @@ fn evaluate_guard(
     prior_state: Option<GuardState>,
     bridge_live: bool,
     enforce_delivery_exclusivity: bool,
+    unrestored_push_intents: &[crate::daemon_ipc::IntentStatus],
 ) -> GuardEvaluation {
+    // A live push intent with no member means a daemon replacement has not (yet) restored this
+    // session's push delivery. Surface it — today this case falls through as a silent
+    // `no_attended_stations` allow, which is exactly how an unrecovered station stays invisible.
+    //
+    // It **warns and allows**, never blocks. Blocking every agent turn on a recovery-state
+    // condition would convert one orphaned intent into a wedged session, and it buys no delivery
+    // correctness: the guard cannot deliver a message, only refuse to let work continue.
+    if !unrestored_push_intents.is_empty() {
+        let stations = unrestored_push_intents
+            .iter()
+            .map(|intent| format!("{} ({:?})", intent.address, intent.state))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return GuardEvaluation {
+            decision: HookDecision::Allow,
+            reason_code: "push_intent_unrestored",
+            summary: format!(
+                "Push delivery is not restored for: {stations}. Messages stay durable; run `telex --address <station> copilot resume` (and `extensions_reload`) to restore push, or `telex inbox` to read them now."
+            ),
+            nudges: 0,
+            next_state: None,
+        };
+    }
     if members.is_empty() {
         return GuardEvaluation {
             decision: HookDecision::Allow,
@@ -3866,7 +3936,15 @@ mod tests {
             enabled: true,
             max_nudges: 3,
         };
-        let eval = evaluate_guard("s1", &[member("addr:a", 0, 2)], settings, None, true, true);
+        let eval = evaluate_guard(
+            "s1",
+            &[member("addr:a", 0, 2)],
+            settings,
+            None,
+            true,
+            true,
+            &[],
+        );
         assert_eq!(eval.reason_code, "coverage_gap");
         assert_eq!(eval.nudges, 1);
         match eval.decision {
@@ -3888,7 +3966,7 @@ mod tests {
         let mut push = member("addr:push", 0, 0);
         push.push_registered = true;
         let pull = member("addr:pull", 0, 2);
-        let eval = evaluate_guard("s1", &[push, pull], settings, None, true, true);
+        let eval = evaluate_guard("s1", &[push, pull], settings, None, true, true, &[]);
         assert_eq!(
             eval.reason_code, "coverage_gap",
             "an uncovered pull address must still be nudged even when another address is push-covered"
@@ -3914,7 +3992,7 @@ mod tests {
         let mut conflict = member("addr:conflict", 1, 0);
         conflict.push_registered = true;
         conflict.delivery_mode = DeliveryMode::Conflict;
-        let eval = evaluate_guard("s1", &[conflict], settings, None, true, true);
+        let eval = evaluate_guard("s1", &[conflict], settings, None, true, true, &[]);
         assert_eq!(eval.reason_code, "coverage_gap");
         match eval.decision {
             HookDecision::Block { reason } => {
@@ -3933,7 +4011,7 @@ mod tests {
         };
         let mut conflict = member("addr:legacy-conflict", 1, 0);
         conflict.push_registered = true;
-        let eval = evaluate_guard("s1", &[conflict], settings, None, true, false);
+        let eval = evaluate_guard("s1", &[conflict], settings, None, true, false, &[]);
         assert_eq!(eval.reason_code, "covered");
         assert!(matches!(eval.decision, HookDecision::Allow));
     }
@@ -3949,7 +4027,7 @@ mod tests {
         // bridge coverage is handled by `guard_nudges_push_member_when_bridge_not_live`.
         let mut push = member("addr:push", 0, 1);
         push.push_registered = true;
-        let eval = evaluate_guard("s1", &[push], settings, None, true, true);
+        let eval = evaluate_guard("s1", &[push], settings, None, true, true, &[]);
         assert_eq!(eval.reason_code, "covered");
         assert!(matches!(eval.decision, HookDecision::Allow));
     }
@@ -3962,7 +4040,7 @@ mod tests {
         };
         let mut push = member("addr:push", 0, 0);
         push.push_registered = true;
-        let eval = evaluate_guard("s1", &[push], settings, None, true, true);
+        let eval = evaluate_guard("s1", &[push], settings, None, true, true, &[]);
         assert_eq!(eval.reason_code, "covered");
         assert!(matches!(eval.decision, HookDecision::Allow));
     }
@@ -3985,6 +4063,7 @@ mod tests {
                 prior_state,
                 false,
                 true,
+                &[],
             );
             assert_eq!(eval.reason_code, "coverage_gap");
             assert_eq!(eval.nudges, expected_nudge);
@@ -4019,6 +4098,7 @@ mod tests {
             prior_state,
             false,
             true,
+            &[],
         );
         assert_eq!(exhausted.reason_code, "cap_exhausted");
         assert!(matches!(exhausted.decision, HookDecision::Allow));
@@ -4042,7 +4122,15 @@ mod tests {
                 &[],
             )),
         });
-        let eval = evaluate_guard("s1", &[member("addr:a", 0, 0)], settings, prior, true, true);
+        let eval = evaluate_guard(
+            "s1",
+            &[member("addr:a", 0, 0)],
+            settings,
+            prior,
+            true,
+            true,
+            &[],
+        );
         assert_eq!(eval.reason_code, "cap_exhausted");
         assert!(matches!(eval.decision, HookDecision::Allow));
         assert_eq!(eval.next_state.unwrap().nudges, 2);
@@ -4062,7 +4150,7 @@ mod tests {
             updated_at_ms: 1,
             issue_key: Some(coverage_issue_key(&[&unarmed], &[], &[], &[], &[])),
         });
-        let eval = evaluate_guard("s1", &[armed, unarmed], settings, prior, true, true);
+        let eval = evaluate_guard("s1", &[armed, unarmed], settings, prior, true, true, &[]);
         assert_eq!(eval.reason_code, "coverage_gap");
         assert_eq!(eval.next_state.unwrap().nudges, 3);
     }
@@ -4081,7 +4169,7 @@ mod tests {
             updated_at_ms: 1,
             issue_key: Some(coverage_issue_key(&[&previous], &[], &[], &[], &[])),
         });
-        let eval = evaluate_guard("s1", &[current], settings, prior, true, true);
+        let eval = evaluate_guard("s1", &[current], settings, prior, true, true, &[]);
         assert_eq!(eval.reason_code, "coverage_gap");
         assert_eq!(eval.next_state.unwrap().nudges, 1);
     }
@@ -4094,7 +4182,7 @@ mod tests {
         };
         let mut delivered = member("addr:delivered", 1, 1);
         delivered.last_waiter_outcome = Some(WaiterOutcome::Message);
-        let eval = evaluate_guard("s1", &[delivered], settings, None, true, true);
+        let eval = evaluate_guard("s1", &[delivered], settings, None, true, true, &[]);
         assert_eq!(eval.reason_code, "coverage_gap");
         match eval.decision {
             HookDecision::Block { reason } => {
@@ -4112,7 +4200,15 @@ mod tests {
             max_nudges: 3,
         };
         let pending_with_waiter = member("addr:pending", 1, 1);
-        let eval = evaluate_guard("s1", &[pending_with_waiter], settings, None, true, true);
+        let eval = evaluate_guard(
+            "s1",
+            &[pending_with_waiter],
+            settings,
+            None,
+            true,
+            true,
+            &[],
+        );
         assert_eq!(eval.reason_code, "covered");
         assert!(matches!(eval.decision, HookDecision::Allow));
     }
@@ -4137,7 +4233,7 @@ mod tests {
             enabled: true,
             max_nudges: 3,
         };
-        let eval = evaluate_guard("s1", &[], settings, None, true, true);
+        let eval = evaluate_guard("s1", &[], settings, None, true, true, &[]);
         assert_eq!(eval.reason_code, "no_attended_stations");
         assert!(matches!(eval.decision, HookDecision::Allow));
         assert!(eval.next_state.is_none());

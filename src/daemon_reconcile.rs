@@ -915,24 +915,35 @@ async fn register_member_reconciled(
         return IntentOutcome::failed("ensure_address_failed");
     }
 
-    let claimed = match backend
+    let (claimed_lease_epoch, claimed_owner_instance_id) = match backend
         .claim_epoch_lease(&intent.address, &state.instance_id, liveness_window_secs())
         .await
     {
-        Ok(EpochClaimResult::Claimed(claimed)) => claimed,
-        Ok(EpochClaimResult::AlreadyOwned { lease_row, .. }) => {
-            // The distinction that makes the crash bound derivable: an incumbent whose lease is
-            // merely not stale yet is a *waiting* outcome on a fixed cadence, while a genuinely
-            // fresh competing owner is a failure. Neither is ever force-stolen.
-            let durable_now = backend
-                .durable_clock_now_ms()
-                .await
-                .unwrap_or_else(|_| now_ms());
-            let stale_cutoff_ms = durable_now - liveness_window_secs() * 1000;
-            if lease_row.heartbeat_at_ms > stale_cutoff_ms {
-                return IntentOutcome::DeferredLease;
+        Ok(EpochClaimResult::Claimed(claimed)) => (claimed.lease_epoch, claimed.owner_instance_id),
+        Ok(EpochClaimResult::AlreadyOwned {
+            lease_epoch,
+            owner_instance_id,
+            lease_row,
+        }) => {
+            if owner_instance_id == state.instance_id {
+                // We already own this address and simply have no in-memory member for it — the
+                // shape a lost or forgotten member leaves behind. Adopt the lease we already hold
+                // rather than deferring forever against ourselves, which would wedge the binding.
+                (lease_epoch, owner_instance_id)
+            } else {
+                // The distinction that makes the crash bound derivable: an incumbent whose lease is
+                // merely not stale yet is a *waiting* outcome on a fixed cadence, while a genuinely
+                // fresh competing owner is a failure. Neither is ever force-stolen.
+                let durable_now = backend
+                    .durable_clock_now_ms()
+                    .await
+                    .unwrap_or_else(|_| now_ms());
+                let stale_cutoff_ms = durable_now - liveness_window_secs() * 1000;
+                if lease_row.heartbeat_at_ms > stale_cutoff_ms {
+                    return IntentOutcome::DeferredLease;
+                }
+                return IntentOutcome::failed("epoch_claim_lost");
             }
-            return IntentOutcome::failed("epoch_claim_lost");
         }
         Err(_) => return IntentOutcome::failed("epoch_claim_failed"),
     };
@@ -947,8 +958,8 @@ async fn register_member_reconciled(
             let _ = backend
                 .release_epoch_lease(
                     &intent.address,
-                    &claimed.owner_instance_id,
-                    claimed.lease_epoch,
+                    &claimed_owner_instance_id,
+                    claimed_lease_epoch,
                 )
                 .await;
             return IntentOutcome::terminal(IntentRecoveryState::Revoked, "tombstoned");
@@ -958,8 +969,8 @@ async fn register_member_reconciled(
             let _ = backend
                 .release_epoch_lease(
                     &intent.address,
-                    &claimed.owner_instance_id,
-                    claimed.lease_epoch,
+                    &claimed_owner_instance_id,
+                    claimed_lease_epoch,
                 )
                 .await;
             return IntentOutcome::failed("tombstone_recheck_failed");
@@ -981,8 +992,8 @@ async fn register_member_reconciled(
         description: intent.description.clone(),
         scope: intent.scope.clone(),
         tags: intent.tags.clone(),
-        lease_epoch: claimed.lease_epoch,
-        owner_instance_id: claimed.owner_instance_id.clone(),
+        lease_epoch: claimed_lease_epoch,
+        owner_instance_id: claimed_owner_instance_id.clone(),
         idle: false,
         idle_rearmable: false,
         unattended_since_ms: Some(now_ms()),

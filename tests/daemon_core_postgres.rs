@@ -1064,3 +1064,136 @@ async fn postgres_listener_degradation_surfaces_recent_error() {
     let _ = std::fs::remove_dir_all(config_path.parent().unwrap());
     restore_env("TELEX_CONFIG", prior_config);
 }
+
+// ---------------------------------------------------------------------------------------------
+// T17: station-intent reconciliation against Postgres, asserting the single-writer property.
+// ---------------------------------------------------------------------------------------------
+
+/// A reconciled restore on a shared Postgres store must go through the same epoch lease as an
+/// ordinary register: exactly one instance may own the address, and a second daemon must not be
+/// able to reconcile the same intent into a competing owner.
+///
+/// This is the cross-host guarantee stated concretely: intents are host-local files, so a second
+/// host cannot even see this intent — but a second *daemon on this host* can, and the epoch lease
+/// is what stops it.
+#[tokio::test]
+async fn postgres_station_intent_restore_is_single_writer() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_station_intent_restore_is_single_writer") else {
+        return;
+    };
+
+    let prior_config = std::env::var_os("TELEX_CONFIG");
+    let schema = sanitize_ident(&format!(
+        "telex_daemon_pg_intent_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .expect("derived schema");
+    let cfg = pg_config(&url);
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("pre-test schema cleanup");
+
+    let profile = BackendProfile {
+        kind: "postgres".to_string(),
+        path: None,
+        url: Some(url.clone()),
+        auth: Some("password".to_string()),
+        password_env: std::env::var("TELEX_PG_PASSWORD")
+            .ok()
+            .filter(|pw| !pw.is_empty())
+            .map(|_| "TELEX_PG_PASSWORD".to_string()),
+        password_command: None,
+        schema: Some(schema.clone()),
+        entra_cred: None,
+        entra_scope: None,
+    };
+    let store_key = profiles::store_key(&profile, None);
+    let mut backends = BTreeMap::new();
+    backends.insert("pg-intent-test".to_string(), profile);
+    let config_path = write_temp_config(
+        "intent",
+        &ConfigFile {
+            default: Some("pg-intent-test".to_string()),
+            backends,
+        },
+    );
+    std::env::set_var("TELEX_CONFIG", &config_path);
+
+    telex::intent_test_support::register_test_handler_kind();
+    let session = "pg-intent-session";
+    let address = "addr:pg-intent";
+
+    let first = TestDaemon::new("pg-intent-one");
+    let _ = first.open_backend(&store_key).await;
+    let producer_dir = first.root().join("producer");
+    let root_id = format!("pg_intent_root_{}", std::process::id());
+    let root = telex::intent_test_support::register_test_producer_root(&root_id, &producer_dir);
+    let secret = "g".repeat(64);
+    let producer = telex::intent_test_support::FakeProducer::start(
+        &root,
+        session,
+        &secret,
+        telex::intent_test_support::ProducerBehavior::Healthy,
+    )
+    .await;
+    let credential = root.join(format!("{session}.json"));
+    telex::intent_test_support::write_credential_file(&credential, &secret);
+
+    let intent = telex::intent_test_support::live_intent(
+        &store_key,
+        session,
+        address,
+        first.singleton_hash(),
+        &producer,
+        &root_id,
+        &credential,
+    );
+    first
+        .intent_store()
+        .write_atomic(&intent)
+        .expect("seed the intent for the first daemon");
+
+    let report = first.reconcile_once().await;
+    assert_eq!(report.restored, 1, "the first daemon restores push");
+
+    // A second daemon with its own scope sees the same store and the same intent content, but must
+    // not become a competing owner while the first daemon's lease is fresh.
+    let second = TestDaemon::new("pg-intent-two");
+    let _ = second.open_backend(&store_key).await;
+    let mut rival = intent.clone();
+    rival.singleton_hash = second.singleton_hash().to_string();
+    second
+        .intent_store()
+        .write_atomic(&rival)
+        .expect("seed the intent for the second daemon");
+    let rival_report = second.reconcile_once().await;
+    assert_eq!(
+        rival_report.restored, 0,
+        "a second daemon must not steal a fresh owner's address"
+    );
+    assert_eq!(
+        rival_report.deferred_lease + rival_report.failed,
+        1,
+        "the rival attempt must be deferred or failed, never silently succeed: {rival_report:?}"
+    );
+
+    let backend = first.open_backend(&store_key).await;
+    let lease = backend
+        .get_lease(address)
+        .await
+        .expect("lease query")
+        .expect("a lease row");
+    assert_eq!(
+        lease.owner_instance_id.as_deref(),
+        Some(first.instance_id()),
+        "exactly one instance may own the address"
+    );
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("post-test schema cleanup");
+    let _ = std::fs::remove_dir_all(config_path.parent().unwrap());
+    restore_env("TELEX_CONFIG", prior_config);
+}

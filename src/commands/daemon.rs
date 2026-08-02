@@ -156,9 +156,45 @@ async fn stop_drain(ctx: &Ctx) -> Result<i32> {
         })
         .await?;
     match response {
-        Response::Ack { .. } => {
-            emit(ctx.fmt, &serde_json::json!({"draining": true}), || {
+        Response::Ack { drain_intents, .. } => {
+            // The pre-drain station-intent signal (issue #106). Computed by the daemon from
+            // in-memory state before it released any lease, so it describes what a successor will
+            // find rather than what is true after the fact. An older daemon omits it entirely,
+            // which is rendered as "unavailable" rather than silently as zero.
+            let report = drain_intents.clone();
+            let payload = serde_json::json!({
+                "draining": true,
+                "station_intents": report,
+            });
+            emit(ctx.fmt, &payload, || {
                 println!("daemon drain requested");
+                match &report {
+                    Some(report) => {
+                        println!(
+                            "station intents  recoverable {} degraded {} incompatible {} unknown {}",
+                            report.recoverable,
+                            report.degraded,
+                            report.incompatible,
+                            report.unknown
+                        );
+                        if report.over_cap {
+                            println!(
+                                "station intents  WARNING: {} entries exceed the per-scope write cap; run `telex copilot gc`",
+                                report.observed_count
+                            );
+                        }
+                        if report.degraded > 0 || report.incompatible > 0 {
+                            println!(
+                                "station intents  {} intent(s) will NOT be restored automatically; run `telex --address <station> copilot resume` after the successor starts",
+                                report.degraded + report.incompatible
+                            );
+                        }
+                        println!("station intents  index_as_of_ms {}", report.index_as_of_ms);
+                    }
+                    None => println!(
+                        "station intents  unavailable (the running daemon predates station-intent reporting)"
+                    ),
+                }
             });
             Ok(0)
         }

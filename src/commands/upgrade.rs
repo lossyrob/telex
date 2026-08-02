@@ -259,12 +259,21 @@ async fn perform_upgrade(
     } else {
         Some(install::switch_to(layout, &plan.tag)?)
     };
+    // Post-switch successor (ADR 0050 decision 14c): spawn the daemon this switch just installed
+    // and wait, bounded, for a reconcile pass, so an idle attached session regains push without
+    // the user running anything. Skipped when nothing was drained or nothing is recoverable.
+    let reconcile = if switched.is_some() {
+        verify_successor_reconcile(ctx, &drain).await
+    } else {
+        json!({"attempted": false, "reason": "no switch performed"})
+    };
     let out = json!({
         "upgrade": true,
         "installed": installed,
         "drain": drain,
         "switch": switched,
         "release": plan.release,
+        "station_intent_reconcile": reconcile,
     });
     emit(ctx.fmt, &out, || {
         println!("installed {}", plan.tag);
@@ -277,6 +286,7 @@ async fn perform_upgrade(
         } else {
             println!("current unchanged (--no-switch)");
         }
+        print_station_intent_summary(&drain, &reconcile);
     });
     Ok(0)
 }
@@ -370,14 +380,29 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
         drain_daemon(ctx, args.drain_timeout_ms).await?
     };
     let switched = install::switch_to(&layout, &target)?;
+    // Rollback gets the same pre-flight report as upgrade, plus an explicit warning: a target
+    // binary that predates station-intent reconciliation cannot restore these intents, and the
+    // documented consequence is a return to manual `telex copilot resume`. Intents are never
+    // deleted by a rollback — an older daemon simply ignores a directory it does not know, and the
+    // singleton-hash namespacing plus the schema range keep it inert with respect to them.
+    let reconcile = verify_successor_reconcile(ctx, &drain).await;
     let out = json!({
         "rollback": true,
         "drain": drain,
         "switch": switched,
+        "station_intent_reconcile": reconcile,
     });
     emit(ctx.fmt, &out, || {
         println!("current {}", switched.switched_to);
         println!("binary {}", switched.current_binary);
+        print_station_intent_summary(&drain, &reconcile);
+        if recoverable_intent_count(&drain).unwrap_or(0) > 0 {
+            println!(
+                "station intents  WARNING: if {} predates station-intent reconciliation it cannot restore these bindings; \
+                 run `telex --address <station> copilot resume` per station after rolling back",
+                switched.switched_to
+            );
+        }
     });
     Ok(0)
 }
@@ -591,7 +616,14 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         Err(_) => bail!("daemon drain timed out after {timeout_ms}ms"),
     };
     match response {
-        Response::Ack { .. } => Ok(json!({"drained": true, "status": "draining"})),
+        Response::Ack { drain_intents, .. } => Ok(json!({
+            "drained": true,
+            "status": "draining",
+            // The pre-drain station-intent signal (issue #106), carried through so `upgrade` and
+            // `rollback` can report — and, for upgrade, verify — what a successor must restore.
+            // `null` means the drained daemon predates station-intent reporting.
+            "station_intents": drain_intents,
+        })),
         Response::Error { code, message, .. } if code == ERROR_NOT_RUNNING => {
             Ok(json!({"drained": false, "status": "not_running", "message": message}))
         }
@@ -600,6 +632,127 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         }
         Response::Error { code, message, .. } => bail!("daemon drain failed: {code}: {message}"),
         other => bail!("unexpected daemon drain response: {other:?}"),
+    }
+}
+
+/// How long a post-switch successor is given to report a completed reconciliation pass.
+///
+/// Derived from the published graceful bound plus the successor's own spawn/readiness time, so it
+/// is generous enough not to be flaky and still bounded — `upgrade`/`rollback` must never hang.
+const SUCCESSOR_RECONCILE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Number of recoverable intents at drain time, or `None` when the daemon did not report any.
+fn recoverable_intent_count(drain: &serde_json::Value) -> Option<u64> {
+    drain.get("station_intents")?.get("recoverable")?.as_u64()
+}
+
+/// Spawn the successor daemon the switch just installed and wait, bounded, for one reconcile pass.
+///
+/// This is a deliberate, bounded extension of "only `attach` auto-spawns" (ADR 0028), recorded in
+/// ADR 0050: it is what makes the issue's motivating scenario — `telex upgrade` with an idle
+/// Copilot session — recover without the user typing anything. It waits for a *reconcile report*
+/// on the trigger/report seam rather than polling a clock, and it never fails the upgrade: a
+/// successor that cannot be reached is reported, not fatal, because the binary is already switched
+/// and the next client operation will spawn one anyway.
+async fn verify_successor_reconcile(ctx: &Ctx, drain: &serde_json::Value) -> serde_json::Value {
+    let Some(recoverable) = recoverable_intent_count(drain) else {
+        return json!({"attempted": false, "reason": "no station-intent report from the drained daemon"});
+    };
+    if recoverable == 0 {
+        return json!({"attempted": false, "reason": "no recoverable station intents"});
+    }
+    let store_key = match ctx.store_key() {
+        Ok(store_key) => store_key,
+        Err(e) => {
+            return json!({"attempted": false, "reason": format!("store key unavailable: {e}")})
+        }
+    };
+    let result = tokio::time::timeout(SUCCESSOR_RECONCILE_TIMEOUT, async {
+        let (mut client, cap) = {
+            let client = crate::daemon::connect_or_spawn(&store_key).await?;
+            let paths = crate::daemon::DaemonPaths::current()?;
+            let cap = crate::daemon::read_cap_file(&paths.cap_path)?;
+            (client, cap)
+        };
+        client
+            .request(&Request::ReconcileIntents {
+                proof: Some(cap.admin_cap),
+                scope: None,
+            })
+            .await
+    })
+    .await;
+    match result {
+        Ok(Ok(Response::Reconciled { report })) => json!({
+            "attempted": true,
+            "recoverable_at_drain": recoverable,
+            "restored": report.restored,
+            "refreshed_no_op": report.refreshed_no_op,
+            "deferred_lease": report.deferred_lease,
+            "failed": report.failed,
+            "pass_seq": report.pass_seq,
+        }),
+        Ok(Ok(Response::Error { code, message, .. })) => {
+            json!({"attempted": true, "error": format!("{code}: {message}")})
+        }
+        Ok(Ok(other)) => json!({"attempted": true, "error": format!("unexpected {other:?}")}),
+        Ok(Err(e)) => json!({"attempted": true, "error": e.to_string()}),
+        Err(_) => json!({
+            "attempted": true,
+            "error": format!("successor did not report a reconcile pass within {}s", SUCCESSOR_RECONCILE_TIMEOUT.as_secs()),
+        }),
+    }
+}
+
+/// Render the station-intent part of an upgrade/rollback result in text mode.
+fn print_station_intent_summary(drain: &serde_json::Value, reconcile: &serde_json::Value) {
+    match drain.get("station_intents") {
+        Some(serde_json::Value::Object(report)) => {
+            let get = |key: &str| {
+                report
+                    .get(key)
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0)
+            };
+            println!(
+                "station intents  recoverable {} degraded {} incompatible {} unknown {}",
+                get("recoverable"),
+                get("degraded"),
+                get("incompatible"),
+                get("unknown")
+            );
+            if get("degraded") + get("incompatible") > 0 {
+                println!(
+                    "station intents  {} intent(s) need `telex --address <station> copilot resume` after this switch",
+                    get("degraded") + get("incompatible")
+                );
+            }
+        }
+        _ => println!("station intents  unavailable (no report from the drained daemon)"),
+    }
+    if reconcile
+        .get("attempted")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        match reconcile.get("error").and_then(serde_json::Value::as_str) {
+            Some(error) => println!("station intents  successor reconcile incomplete: {error}"),
+            None => println!(
+                "station intents  successor restored {} / deferred {} / failed {}",
+                reconcile
+                    .get("restored")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                reconcile
+                    .get("deferred_lease")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                reconcile
+                    .get("failed")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0)
+            ),
+        }
     }
 }
 

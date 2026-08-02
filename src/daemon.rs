@@ -3553,8 +3553,19 @@ async fn needs_attach_for_missing_member(
     )
 }
 
+/// Bounded wait for in-flight `on_deliver` handlers before a graceful drain releases leases.
+///
+/// Epoch advancement fences the *daemon*, not helper processes a dying one already spawned. On the
+/// graceful path we can close that overlap completely by simply waiting for the helpers to finish,
+/// so a successor never races a predecessor's handler. It is bounded because a wedged helper must
+/// not be able to hold a drain open indefinitely; the `--daemon-instance` fence covers whatever
+/// escapes the bound (and the crash path, which has no drain at all).
+const DRAIN_INFLIGHT_WAIT: Duration = Duration::from_secs(5);
+const DRAIN_INFLIGHT_POLL: Duration = Duration::from_millis(50);
+
 async fn drain_members(state: Arc<DaemonState>) -> std::result::Result<(), Response> {
     state.begin_draining();
+    wait_for_inflight_handlers(&state, DRAIN_INFLIGHT_WAIT).await;
     let members = state.members_snapshot();
     for member in &members {
         let backend = match state.backend_for(&member.store_key).await {
@@ -3596,6 +3607,31 @@ async fn drain_members(state: Arc<DaemonState>) -> std::result::Result<(), Respo
     }
     state.clear_members();
     Ok(())
+}
+
+/// Wait, bounded, for every in-flight push helper to finish. `begin_draining` has already stopped
+/// new pushes from being spawned, so this converges; the bound only guards against a helper that
+/// never exits.
+async fn wait_for_inflight_handlers(state: &Arc<DaemonState>, budget: Duration) {
+    let deadline = Instant::now() + budget;
+    loop {
+        let inflight = state.on_deliver.inflight.lock().unwrap().len();
+        if inflight == 0 {
+            return;
+        }
+        if Instant::now() >= deadline {
+            state.push_recent_error(
+                "DrainInflight",
+                format!(
+                    "graceful drain proceeded with {inflight} in-flight push handler(s) after {}ms; \
+                     the --daemon-instance fence stops them from injecting into a successor's session",
+                    budget.as_millis()
+                ),
+            );
+            return;
+        }
+        tokio::time::sleep(DRAIN_INFLIGHT_POLL).await;
+    }
 }
 
 async fn handle_client(
@@ -10120,6 +10156,19 @@ pub mod test_support {
         }
     }
 
+    /// A `Send`-able handle onto a running `TestDaemon`, for tests that need a second concurrent
+    /// request (e.g. holding a live pull waiter open while a reconcile pass runs).
+    #[derive(Clone)]
+    pub struct TestDaemonHandle {
+        state: Arc<DaemonState>,
+    }
+
+    impl TestDaemonHandle {
+        pub async fn request(&self, request: Request) -> Response {
+            handle_request(self.state.clone(), request).await.0
+        }
+    }
+
     impl TestDaemon {
         pub fn new(label: &str) -> Self {
             Self::with_protocol(label, proto::PROTOCOL_MAJOR)
@@ -10380,6 +10429,30 @@ pub mod test_support {
                 proof: Some(self.state.admin_cap.clone()),
             })
             .await
+        }
+
+        /// Drop a member from the in-memory table **without** tombstoning it, modelling exactly
+        /// what a daemon replacement leaves behind: the durable intent survives, the member does
+        /// not, and no explicit detach was ever performed.
+        pub fn forget_member(&self, store_key: &str, session_id: &str, address: &str) {
+            self.state.remove_member(store_key, session_id, address);
+        }
+
+        /// The opened backend for a store, so a test can assert on durable state (tombstones,
+        /// leases) that the daemon's own response does not expose.
+        pub async fn open_backend(&self, store_key: &str) -> Arc<dyn Backend> {
+            self.state
+                .backend_for(store_key)
+                .await
+                .expect("open test backend")
+        }
+
+        /// A cheap handle a spawned task can use to issue requests against this daemon, so a test
+        /// can hold a live `Wait` open while driving another operation.
+        pub fn handle(&self) -> TestDaemonHandle {
+            TestDaemonHandle {
+                state: self.state.clone(),
+            }
         }
 
         pub async fn status(&self) -> DaemonStatus {

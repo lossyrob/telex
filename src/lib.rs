@@ -16,6 +16,10 @@ pub use crate::daemon::reconcile as daemon_reconcile;
 pub mod handler_kinds;
 pub mod identity;
 pub mod install;
+/// Test harness for the station-intent path: a controllable fake producer endpoint and intent
+/// fixtures. Compiled with the crate (like `daemon::test_support`) so integration tests can use it.
+#[doc(hidden)]
+pub mod intent_test_support;
 // Legacy resident-holder IPC/registry surface retained for compatibility with
 // pre-daemon commands and tests. New membership and delivery flows should use
 // `daemon`/`daemon_ipc`.
