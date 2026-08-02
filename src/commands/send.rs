@@ -52,6 +52,15 @@ pub async fn run(ctx: &Ctx, args: SendArgs) -> Result<i32> {
                 if needs_attach_reason == Some(NeedsAttachReason::DeliberatelyDetached) {
                     return Err(anyhow!("{code}: {message}"));
                 }
+                // A pending station intent means an attach is still finalizing; re-registering
+                // would race it, so this is terminal with an actionable message.
+                if needs_attach_reason == Some(NeedsAttachReason::PushIntentPending) {
+                    return Err(anyhow!(
+                        "{code}: {message}. A push attach for this station is still finalizing; \
+                         run `extensions_reload` in the Copilot session, or re-run \
+                         `telex --address <station> copilot resume`"
+                    ));
+                }
                 if retried_after_attach {
                     return Err(anyhow!("{code}: {message}"));
                 }

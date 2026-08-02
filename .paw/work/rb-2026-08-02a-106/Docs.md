@@ -203,6 +203,16 @@ claim, no steal, and the post-claim tombstone re-check still runs.
   `member_missing_live_producer`, and `intent_protocol_incompatible`.
 - `telex daemon stop --drain`, `telex upgrade`, and `telex rollback` print a pre-drain intent report
   computed from the cached index only — no directory scan, no probe — so it cannot slow a drain.
+- `telex copilot gc` reads station intents **first**: a session named by a non-revoked intent is
+  kept even when its bridge heartbeat is stale, because deleting the bridge under a live intent is
+  the one action GC could take that recovery cannot undo. `.bindings.json` is a secondary hint, and
+  drift between the two (`binding_intent_drift`) is *reported*, never silently repaired. An
+  unreadable intent scope is reported as `station_intents_readable: false` rather than treated as
+  "no intents" — an unreadable scope must not become a licence to delete a live session's bridge.
+- A `pending` intent (a push attach that has not finalized) makes an unattended `wait`/`send` return
+  `NeedsAttach` with reason `PushIntentPending` instead of silently re-registering. `wait` and
+  `send` render it as "run `extensions_reload`, or re-run `copilot resume`" and stop, because a
+  generic retry there would race the in-flight attach.
 
 ## Verification
 

@@ -472,6 +472,25 @@ impl DaemonState {
         intent.is_reconcilable().then_some(intent)
     }
 
+    /// Whether a `pending` (not yet finalized) push intent exists for this binding.
+    ///
+    /// Read from the durable manifest rather than the index: a pending intent is never reconciled,
+    /// so no pass ever indexes it, and this is the one question the index cannot answer.
+    pub(crate) fn pending_push_intent(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+    ) -> bool {
+        let Some(store) = self.intent_store() else {
+            return false;
+        };
+        let id = IntentId::derive(store_key, session_id, address);
+        store
+            .load(&id)
+            .is_ok_and(|intent| intent.state == IntentRecoveryState::Pending)
+    }
+
     /// The pre/post-drain intent signal.
     ///
     /// Computed from the cached index only — no directory scan, no probe, no network I/O — so it

@@ -3543,6 +3543,19 @@ async fn needs_attach_for_missing_member(
             NeedsAttachReason::DeliberatelyDetached,
         );
     }
+    // A `pending` station intent means a push attach for this binding is mid-flight, or crashed
+    // before it finalized. The daemon never acts on a pending intent, so a generic
+    // re-register-and-retry would race the attach and could create a pull-only member over a push
+    // provisioning in progress. Report the specific reason instead, so the client stops and points
+    // the user at the finalizing step rather than silently retrying.
+    if state.pending_push_intent(store_key, session_id, address) {
+        return proto::needs_attach_with_reason(
+            format!(
+                "session {session_id} has a push attach for {address} in {store_key} that has not finalized yet"
+            ),
+            NeedsAttachReason::PushIntentPending,
+        );
+    }
     state.push_recent_error(
         "NeedsAttach",
         format!("NeedsAttach operation={operation} store={store_key} session={session_id} address={address}"),

@@ -947,3 +947,52 @@ async fn station_intent_trigger_seam_drives_a_pass_without_a_wall_clock_sleep() 
         "every completed pass must be published on the report seam"
     );
 }
+
+#[tokio::test]
+async fn station_intent_pending_intent_is_reported_as_needing_attach_not_silently_retried() {
+    // A `pending` intent means a push attach is mid-flight (or crashed before finalizing). The
+    // daemon never acts on a pending intent, so a generic re-register-and-retry would race the
+    // attach; the typed reason is what lets the client stop and point at the finalizing step.
+    let scenario = Scenario::new("intent-pending", ProducerBehavior::Healthy).await;
+    let mut pending = scenario.intent.clone();
+    pending.state = IntentRecoveryState::Pending;
+    pending.generation = 2;
+    scenario.reseed(&pending);
+
+    // A pending intent is never reconciled.
+    let report = scenario.daemon.reconcile_once().await;
+    assert_eq!(report.restored, 0);
+    assert_eq!(report.inert, 1);
+    assert!(!scenario.member_push_registered().await);
+
+    // And a wait against the unattended station names the specific reason.
+    let response = scenario
+        .daemon
+        .request(Request::Wait {
+            store_key: scenario.store_key.clone(),
+            session_id: scenario.intent.session_id.clone(),
+            address: scenario.intent.address.clone(),
+            attention: None,
+            min_attention: None,
+            wake_on_cc: false,
+            timeout_ms: Some(50),
+            waiter_pid: Some(std::process::id()),
+            waiter_start_time: None,
+        })
+        .await;
+    match response {
+        Response::Error {
+            code,
+            needs_attach_reason,
+            ..
+        } => {
+            assert_eq!(code, telex::daemon_ipc::ERROR_NEEDS_ATTACH);
+            assert_eq!(
+                needs_attach_reason,
+                Some(NeedsAttachReason::PushIntentPending),
+                "a pending push attach must be named, not reported as generic restart loss"
+            );
+        }
+        other => panic!("expected a typed needs-attach, got {other:?}"),
+    }
+}

@@ -2283,9 +2283,17 @@ fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
         Some(session) => vec![session],
         None => discover_bridge_sessions()?,
     };
+    // Truth ordering (ADR 0050 decision 17): the station intent is authoritative for keep
+    // decisions; `.bindings.json` is a secondary hint that survives only as the extension teardown
+    // ref-count. Drift between the two is *reported*, never silently repaired — a GC that quietly
+    // reconciled them could delete the bridge a live intent still depends on.
+    let intent_sessions = live_intent_sessions();
     let mut entries = Vec::new();
     for session in sessions {
         let live = bridge_is_live(&session);
+        let has_live_intent = intent_sessions
+            .as_ref()
+            .is_some_and(|sessions| sessions.contains(&session));
         let bindings = match read_bridge_bindings(&session) {
             Ok(bindings) => bindings,
             Err(e) if !args.force => {
@@ -2294,13 +2302,21 @@ fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
                     "action": "keep",
                     "reason": format!("bindings unreadable ({e}); treating as still shared"),
                     "live": live,
+                    "live_station_intent": has_live_intent,
                     "bindings": serde_json::Value::Null,
                 }));
                 continue;
             }
             Err(_) => Vec::new(),
         };
-        let keep_reason = if live {
+        let drift = has_live_intent && bindings.is_empty();
+        let keep_reason = if has_live_intent && !args.force {
+            Some(
+                "a live station intent still names this session; \
+                 detach it (`telex --address <station> copilot detach`) before removing the bridge"
+                    .to_string(),
+            )
+        } else if live {
             Some("bridge heartbeat is live".to_string())
         } else if !bindings.is_empty() && !args.force {
             Some(format!(
@@ -2323,6 +2339,8 @@ fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
             "action": action,
             "reason": reason,
             "live": live,
+            "live_station_intent": has_live_intent,
+            "binding_intent_drift": drift,
             "bindings": bindings,
         }));
     }
@@ -2330,6 +2348,7 @@ fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
         "copilot_bridge_gc": true,
         "dry_run": args.dry_run,
         "force": args.force,
+        "station_intents_readable": intent_sessions.is_some(),
         "entries": entries,
     });
     crate::output::emit(ctx.fmt, &out, || {
@@ -2345,10 +2364,33 @@ fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
                     .unwrap_or("unknown");
                 let reason = entry.get("reason").and_then(|v| v.as_str()).unwrap_or("");
                 println!("{action} {session} ({reason})");
+                if entry.get("binding_intent_drift").and_then(|v| v.as_bool()) == Some(true) {
+                    println!(
+                        "  drift {session}: a live station intent exists but no bridge binding is recorded"
+                    );
+                }
             }
         }
     });
     Ok(0)
+}
+
+/// Sessions named by a non-revoked station intent in this daemon scope.
+///
+/// `None` means the scope could not be read at all, which is reported rather than treated as "no
+/// intents" — an unreadable scope must not become a licence to delete a live session's bridge.
+fn live_intent_sessions() -> Option<std::collections::BTreeSet<String>> {
+    let store = intent_store().ok()?;
+    let ids = store.list_ids().ok()?;
+    let mut sessions = std::collections::BTreeSet::new();
+    for id in ids {
+        if let Ok(intent) = store.load(&id) {
+            if intent.state != crate::daemon_ipc::IntentRecoveryState::Revoked {
+                sessions.insert(intent.session_id);
+            }
+        }
+    }
+    Some(sessions)
 }
 
 fn discover_bridge_sessions() -> Result<Vec<String>> {
