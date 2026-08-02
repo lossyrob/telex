@@ -191,6 +191,52 @@ claim, no steal, and the post-claim tombstone re-check still runs.
   dependency graph behind the optional `self-update` feature. Intent identity must be identical in
   every feature combination, including `--no-default-features --features sqlite`.
 
+## Corrections made during implementation review
+
+Six defects an adversarial review of the diff surfaced, all fixed. Recorded because each is a
+subtle failure mode that a passing test suite did not catch, and the reasoning is worth keeping.
+
+1. **The scan cursor advanced past intents the pass never attempted.** `IntentStore::scan` persisted
+   the cursor at the last entry it *loaded*, but a pass attempts only what fits inside
+   `RECONCILE_PASS_DEADLINE`. A truncated pass therefore skipped everything between — permanently.
+   Worse, for a scope smaller than the budget the cursor always landed on the maximum, `start` reset
+   to 0 every pass, and the round-robin property the queue-delay bound rests on did not exist at
+   all: four permanently-`DeferredLease` intents would occupy every wave forever while the tail
+   never ran. **Fix:** `scan` reads the cursor and exposes `loaded_positions`; the reconciler calls
+   `advance_cursor` with the last intent it actually *attempted* (or, if it attempted none, the last
+   it considered, so a pass of entirely inert entries still makes progress). Regression test:
+   `station_intent_cursor_advances_only_past_attempted_intents`.
+2. **Admission-guard acquisition sat outside the per-intent timeout.** `register_member` holds the
+   same per-`MemberKey` guard across backend work, so one slow station could block a wave task
+   indefinitely; `reconcile_once` joins every handle, and `heartbeat_loop` awaits the pass inline,
+   so a single blocked station could stop *every* member's epoch heartbeat and let leases go stale.
+   **Fix:** guard acquisition and the reconcile call are now inside one
+   `tokio::time::timeout(RECONCILE_PER_INTENT_TIMEOUT, …)`.
+3. **The anti-downgrade guard was inert until the first pass.** It gated on the in-memory index,
+   which only a completed reconcile pass populates — and `serve()` accepts connections before that
+   pass runs, which is exactly the daemon-replacement window the guard exists to protect. **Fix:**
+   the guard consults the durable manifest (`load_live_intent`) and treats an index hit with an
+   unreadable manifest as fail-closed. Regression test:
+   `station_intent_anti_downgrade_guard_works_before_the_first_reconcile_pass`.
+4. **Intent `generation` was reset to 1 on every pending write.** With finalize bumping to 2, the
+   generation cycled `1 → 2 → 1 → 2` and was not monotonic, so a reconcile pass holding generation 2
+   could pass its compare-and-set against a *newer* manifest that had cycled back to 2 and clobber a
+   fresh producer descriptor with a stale one — after which every probe failed
+   `producer_identity_mismatch` and the station was parked for an hour. **Fix:**
+   `write_pending_intent` builds on any existing generation. Regression test:
+   `station_intent_generation_never_resets_so_a_stale_pass_cannot_clobber_a_resume`.
+5. **A re-attach demoted a working `live` intent to `pending`.** If the subsequent finalize failed
+   (bridge mid-reload, probe rate limit) the attach still succeeded, leaving push working *now* with
+   a `pending` record GC deletes five minutes later — precisely the "works now, no recovery later"
+   state this feature exists to remove. **Fix:** `write_pending_intent` leaves an existing `live`
+   intent alone and lets finalize update it in place, and the attach rollback removes only an intent
+   that invocation actually created.
+6. **A transient backend error was classified terminal.** Any `backend_for` failure — a Postgres
+   connect blip, a failover — mapped to `Terminal(Unverifiable)`, which parks an intent for the
+   one-hour quarantine retry with no self-healing path, inconsistent with every other backend error
+   in the same function. **Fix:** only a genuinely absent store (`store_missing`) is terminal; a
+   connection error takes the ordinary 5 s → 5 min failure ladder.
+
 ## Operating notes
 
 - Intent scopes are namespaced by user identity, **canonicalized config root**, and protocol major.

@@ -653,11 +653,27 @@ async fn probe_local_bridge(session: &str, secret: &str) -> Result<()> {
     Ok(())
 }
 
+/// Outcome of the pre-`Register` intent write, so rollback only removes what this invocation
+/// actually created.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PendingIntentWrite {
+    /// This invocation created (or replaced a non-live) intent record.
+    Created,
+    /// A `live` intent already existed and was left alone; finalize will update it in place.
+    KeptExistingLive,
+}
+
 /// Write the `pending` intent for a binding, before `Register`.
 ///
 /// Deliberately written *first*: if the process dies between here and a successful register, the
 /// record left behind is `Pending`, which the daemon never acts on and GC removes. The reverse
 /// order would leave a window where push is armed with no durable record of the desired state.
+///
+/// A binding that **already has a `live` intent** (the `copilot resume` case) is left alone.
+/// Demoting it to `Pending` would mean that a resume whose finalize step fails — a bridge mid-reload,
+/// a probe rate limit — silently destroys a working recovery record and GC deletes it five minutes
+/// later, leaving push that works now and no recovery after the next daemon replacement. That is
+/// precisely the state this feature exists to remove.
 fn write_pending_intent(
     ctx: &Ctx,
     session: &str,
@@ -665,7 +681,7 @@ fn write_pending_intent(
     occupant: &str,
     args: &CopilotAttachArgs,
     wake_on_cc: bool,
-) -> Result<()> {
+) -> Result<PendingIntentWrite> {
     // The Windows DACL on the bridge root has to actually exist before a credential path under it
     // is recorded: Node's `mkdir(..., { mode: 0o700 })` and `chmod` are no-ops on Windows, so the
     // directory the bridge created would otherwise inherit whatever the profile grants.
@@ -676,12 +692,22 @@ fn write_pending_intent(
     let store_key = ctx.store_key()?;
     let paths = crate::daemon::DaemonPaths::current()
         .map_err(|e| anyhow!("resolving daemon paths for the station intent: {e}"))?;
+    let store = intent_store()?;
+    let id = crate::station_intent::IntentId::derive(&store_key, session, address);
+    let existing = store.load(&id).ok();
+    if existing
+        .as_ref()
+        .is_some_and(|intent| intent.state == crate::daemon_ipc::IntentRecoveryState::Live)
+    {
+        return Ok(PendingIntentWrite::KeptExistingLive);
+    }
+
     // A live bridge (the `resume` case) already gives real identity; a first attach does not, and
     // that is what `Pending` is for.
     let identity = capture_producer_identity(session)
         .map(|(identity, _)| identity)
         .unwrap_or_else(|_| placeholder_producer_identity());
-    let intent = build_pending_intent(
+    let mut intent = build_pending_intent(
         &store_key,
         session,
         address,
@@ -693,9 +719,17 @@ fn write_pending_intent(
         &paths.singleton_hash,
         &identity,
     )?;
-    intent_store()?
+    // Generation must be monotonic, never reset: a reconcile pass that read generation N and then
+    // wrote back under a compare-and-set would otherwise be able to clobber a *newer* manifest that
+    // happened to cycle back to N, restoring a stale producer descriptor over a fresh one.
+    if let Some(existing) = existing.as_ref() {
+        intent.generation = existing.generation.saturating_add(1);
+        intent.created_at_ms = existing.created_at_ms;
+    }
+    store
         .write_atomic(&intent)
-        .map_err(|e| anyhow!("writing the pending station intent: {e}"))
+        .map_err(|e| anyhow!("writing the pending station intent: {e}"))?;
+    Ok(PendingIntentWrite::Created)
 }
 
 /// Finalize a `pending` intent to `live` after the daemon armed push and the local probe succeeded.
@@ -1576,6 +1610,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     // (issue #106 / ADR 0050). A failure here fails the attach: silently proceeding would leave the
     // user with push that works now and no recovery after a daemon replacement, which is precisely
     // the state this feature exists to remove.
+    let mut intent_write = None;
     if bridge_provisioned {
         match ctx.cfg.require_address(&ctx.address) {
             Ok(address) => {
@@ -1583,7 +1618,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
                     .occupant
                     .clone()
                     .unwrap_or_else(crate::config::hostname);
-                if let Err(e) = write_pending_intent(
+                match write_pending_intent(
                     ctx,
                     &session,
                     &address,
@@ -1591,11 +1626,14 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
                     &args,
                     args.copilot_bridge && args.wake_on_cc,
                 ) {
-                    eprintln!("telex copilot attach: {e}");
-                    if let Ok(true) = remove_bridge_binding(&session, &address) {
-                        remove_bridge_extension(&session);
+                    Ok(written) => intent_write = Some(written),
+                    Err(e) => {
+                        eprintln!("telex copilot attach: {e}");
+                        if let Ok(true) = remove_bridge_binding(&session, &address) {
+                            remove_bridge_extension(&session);
+                        }
+                        return Ok(1);
                     }
-                    return Ok(1);
                 }
             }
             Err(e) => {
@@ -1673,9 +1711,11 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     // so a failed bind never leaves an orphaned bridge that reloads on a later resume.
     if bridge_provisioned && !matches!(result, Ok(0)) {
         if let Ok(address) = ctx.cfg.require_address(&ctx.address) {
-            // The intent goes first: a half-armed bridge with a leftover intent would be the one
-            // shape that could later claim a station the user never successfully attached.
-            remove_intent_best_effort(ctx, &session, &address);
+            // Only remove an intent *this invocation created*. A failed re-attach must not delete
+            // the still-good recovery record of an already-live binding.
+            if intent_write == Some(PendingIntentWrite::Created) {
+                remove_intent_best_effort(ctx, &session, &address);
+            }
             if let Ok(true) = remove_bridge_binding(&session, &address) {
                 remove_bridge_extension(&session);
             }

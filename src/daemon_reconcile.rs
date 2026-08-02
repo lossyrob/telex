@@ -843,17 +843,17 @@ async fn register_member_reconciled(
     argv: Vec<String>,
 ) -> IntentOutcome {
     let backend = match backend_open_existing_only(state, &intent.store_key).await {
-        Ok(backend) => backend,
-        Err(code) => {
-            return IntentOutcome::terminal(
-                IntentRecoveryState::Unverifiable,
-                if code == "store_missing" {
-                    "store_missing".to_string()
-                } else {
-                    format!("backend_unavailable: {code}")
-                },
-            )
+        // A store that genuinely does not exist is terminal: reconciliation is open-existing-only
+        // and must never bring one into being.
+        Err(code) if code == "store_missing" => {
+            return IntentOutcome::terminal(IntentRecoveryState::Unverifiable, "store_missing")
         }
+        // Anything else is a *transient* backend condition — a Postgres connect error, a DNS blip,
+        // a failover. Classifying it terminal would park every push station for the quarantine
+        // retry (an hour) after the database came back, with no self-healing path, so it takes the
+        // ordinary failure ladder like every other backend error in this function.
+        Err(code) => return IntentOutcome::failed(format!("backend_unavailable: {code}")),
+        Ok(backend) => backend,
     };
 
     // Tombstone check #1: unconditional, before the claim.
@@ -1244,9 +1244,17 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
     }
 
     let now = now_ms();
-    let mut due: Vec<StationIntentV1> = Vec::new();
+    let mut due: Vec<(String, StationIntentV1)> = Vec::new();
     let mut seen_keys: BTreeSet<IntentKey> = BTreeSet::new();
-    for intent in page.loaded {
+    // The position of the last entry this pass *considered* but did not attempt. Used only when the
+    // pass attempts nothing at all, so the cursor still advances and the next pass moves on.
+    let mut last_considered_position: Option<String> = None;
+    for (intent, position) in page
+        .loaded
+        .into_iter()
+        .zip(page.loaded_positions.into_iter())
+    {
+        last_considered_position = Some(position.clone());
         if let Some(filter) = scope.as_deref() {
             if intent.store_key != filter {
                 continue;
@@ -1283,7 +1291,7 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
             report.skipped += 1;
             continue;
         }
-        due.push(intent);
+        due.push((position, intent));
     }
 
     // Wave scheduling: waves of at most `RECONCILE_MAX_CONCURRENCY`, each intent bounded by
@@ -1291,6 +1299,7 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
     // The first wave always runs, which is what guarantees a minimum of `RECONCILE_MAX_CONCURRENCY`
     // intents of progress per pass even when every intent times out.
     let mut cursor = 0usize;
+    let mut last_attempted_position: Option<String> = None;
     while cursor < due.len() {
         if cursor > 0 {
             let remaining = RECONCILE_PASS_DEADLINE.checked_sub(started.elapsed());
@@ -1303,7 +1312,7 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
                 }
             }
         }
-        let wave: Vec<StationIntentV1> = due[cursor..]
+        let wave: Vec<(String, StationIntentV1)> = due[cursor..]
             .iter()
             .take(RECONCILE_MAX_CONCURRENCY)
             .cloned()
@@ -1311,36 +1320,41 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
         cursor += wave.len();
 
         let mut handles = Vec::with_capacity(wave.len());
-        for intent in wave {
+        for (position, intent) in wave {
             let state = state.clone();
             handles.push(tokio::spawn(async move {
                 // The acquiring half of the two-level API: take the per-station admission guard,
                 // then call the guard-free inner routine.
-                let admission = state
-                    .delivery_admission(
-                        &intent.store_key,
-                        &intent.session_id,
-                        &intent.address,
-                        DeliveryAdmissionKind::Register,
-                    )
-                    .await;
-                let _guard = admission.lock().await;
-                let outcome = match tokio::time::timeout(
-                    RECONCILE_PER_INTENT_TIMEOUT,
-                    reconcile_intent_locked(state.clone(), &intent),
-                )
+                //
+                // Guard *acquisition* is inside the timeout, not just the reconcile: `register_member`
+                // holds this same guard across backend work, so an unbounded wait here would let one
+                // slow station stall the wave — and, because the heartbeat loop awaits the pass
+                // inline, stall every member's epoch heartbeat with it.
+                let outcome = match tokio::time::timeout(RECONCILE_PER_INTENT_TIMEOUT, async {
+                    let admission = state
+                        .delivery_admission(
+                            &intent.store_key,
+                            &intent.session_id,
+                            &intent.address,
+                            DeliveryAdmissionKind::Register,
+                        )
+                        .await;
+                    let _guard = admission.lock().await;
+                    reconcile_intent_locked(state.clone(), &intent).await
+                })
                 .await
                 {
                     Ok(outcome) => outcome,
                     Err(_) => IntentOutcome::failed("per_intent_timeout"),
                 };
-                (intent, outcome)
+                (position, intent, outcome)
             }));
         }
         for handle in handles {
             match handle.await {
-                Ok((intent, outcome)) => {
+                Ok((position, intent, outcome)) => {
                     report.scanned += 1;
+                    last_attempted_position = Some(position);
                     apply_outcome(&state, &store, &intent, outcome, &mut report, pass_seq);
                 }
                 Err(_) => {
@@ -1348,6 +1362,19 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
                     report.failed += 1;
                 }
             }
+        }
+    }
+
+    // Advance the round-robin cursor to the last intent actually attempted, so a pass cut short by
+    // the deadline resumes where it stopped rather than skipping everything it loaded. When nothing
+    // was attempted (all inert or backed off) the cursor still moves past what was considered, so
+    // the next pass makes progress instead of re-examining the same head forever.
+    if let Some(position) = last_attempted_position.or(last_considered_position) {
+        if let Err(e) = store.advance_cursor(&position) {
+            state.push_recent_error(
+                "StationIntent",
+                format!("persisting the reconcile scan cursor: {e}"),
+            );
         }
     }
 

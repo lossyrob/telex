@@ -526,14 +526,19 @@ pub struct IntentSortKey {
 pub struct ScanPage {
     /// Manifests actually loaded this pass, in deterministic order.
     pub loaded: Vec<StationIntentV1>,
+    /// Sort position of each entry in `loaded`, parallel by index.
+    ///
+    /// Exposed so the caller can advance the round-robin cursor to the last intent it actually
+    /// *attempted*. `scan` cannot do that itself: it does not know how far a budget- or
+    /// deadline-truncated pass got, and advancing past unattempted entries is precisely how a
+    /// round-robin cursor starves the tail of a scope.
+    pub loaded_positions: Vec<String>,
     /// Entries the pass observed but did not load because the budget was exhausted.
     pub skipped: Vec<IntentId>,
     /// Entries whose read failed a security or schema check, with the state they map to.
     pub rejected: Vec<(IntentId, IntentRecoveryState, String)>,
     pub observed_count: usize,
     pub over_cap: bool,
-    /// Sort position to resume from on the next pass.
-    pub next_cursor: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -766,6 +771,11 @@ impl IntentStore {
     /// The cursor stores a *sort position*, not an index, so entries added or removed between
     /// passes cannot starve another entry: the next pass resumes at the first position strictly
     /// greater than the last one processed, and wraps at the end.
+    ///
+    /// This function **reads** the cursor and never advances it. Only the caller knows how far a
+    /// budget- or deadline-truncated pass actually got, and advancing past entries the pass never
+    /// attempted is exactly how a round-robin cursor silently starves the tail of a scope. See
+    /// [`IntentStore::advance_cursor`].
     pub fn scan(&self, budget: usize) -> Result<ScanPage> {
         let ids = self.list_ids()?;
         let observed_count = ids.len();
@@ -788,15 +798,17 @@ impl IntentStore {
         if total == 0 {
             return Ok(ScanPage {
                 loaded: Vec::new(),
+                loaded_positions: Vec::new(),
                 skipped,
                 rejected,
                 observed_count,
                 over_cap,
-                next_cursor: cursor.position,
             });
         }
 
         let sort_positions: Vec<String> = entries.iter().map(|(k, _)| sort_position(k)).collect();
+        // Resume at the first position strictly greater than the last processed one; wrap to the
+        // start when the cursor sits at or past the maximum.
         let start = match cursor.position.as_deref() {
             Some(position) => sort_positions
                 .iter()
@@ -807,28 +819,34 @@ impl IntentStore {
 
         let take = budget.min(total);
         let mut loaded = Vec::with_capacity(take);
-        let mut next_cursor = cursor.position.clone();
+        let mut loaded_positions = Vec::with_capacity(take);
         for offset in 0..total {
             let index = (start + offset) % total;
             if loaded.len() >= take {
                 skipped.push(entries[index].1.id());
                 continue;
             }
-            next_cursor = Some(sort_positions[index].clone());
+            loaded_positions.push(sort_positions[index].clone());
             loaded.push(entries[index].1.clone());
-        }
-        if let Some(position) = &next_cursor {
-            self.write_cursor(position)?;
         }
 
         Ok(ScanPage {
             loaded,
+            loaded_positions,
             skipped,
             rejected,
             observed_count,
             over_cap,
-            next_cursor,
         })
+    }
+
+    /// Persist the round-robin cursor at the sort position of the last entry a pass processed.
+    ///
+    /// Called by the reconciler with the position of the last intent it actually attempted (or, if
+    /// it attempted none, the last it considered), so a truncated pass resumes where it stopped
+    /// instead of skipping everything it loaded but never reached.
+    pub fn advance_cursor(&self, position: &str) -> Result<()> {
+        self.write_cursor(position)
     }
 
     fn read_cursor(&self) -> Result<ScanCursor> {
@@ -1275,6 +1293,12 @@ mod tests {
             let page = store.scan(budget).expect("scan");
             assert!(page.over_cap, "an over-cap scope must report over_cap");
             assert_eq!(page.observed_count, total);
+            // The store never advances the cursor itself: only the caller knows how far a pass
+            // actually got. A sweep that attempted everything it loaded advances to its last
+            // position.
+            if let Some(last) = page.loaded_positions.last() {
+                store.advance_cursor(last).expect("advance cursor");
+            }
             for intent in page.loaded {
                 seen.insert(intent.id());
             }

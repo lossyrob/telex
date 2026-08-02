@@ -486,6 +486,15 @@ async fn station_intent_live_pull_waiter_still_wins_and_is_deferred_not_failed()
     // T6 negative control: pull-waiter precedence is preserved, and the intent waits rather than
     // being permanently failed.
     let scenario = Scenario::new("intent-pullwaiter", ProducerBehavior::Healthy).await;
+    // Withhold the intent while the pull station is established. Otherwise the (correct)
+    // anti-downgrade guard reconciles it to push during `Register`, and there would never be a pull
+    // waiter to test precedence against.
+    let intent_path = scenario
+        .daemon
+        .intent_store()
+        .path_for(&scenario.intent.id());
+    std::fs::remove_file(&intent_path).expect("withhold the intent during setup");
+
     let register = scenario
         .daemon
         .request(register_request(
@@ -522,6 +531,9 @@ async fn station_intent_live_pull_waiter_still_wins_and_is_deferred_not_failed()
     });
     // Let the waiter arm.
     tokio::time::sleep(Duration::from_millis(150)).await;
+    // Now the intent exists again — the shape a daemon replacement leaves behind while a pull
+    // fallback is already running.
+    scenario.reseed(&scenario.intent);
 
     let report = scenario.daemon.reconcile_once().await;
     assert_eq!(
@@ -995,4 +1007,146 @@ async fn station_intent_pending_intent_is_reported_as_needing_attach_not_silentl
         }
         other => panic!("expected a typed needs-attach, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn station_intent_cursor_advances_only_past_attempted_intents() {
+    // Regression guard for a silent starvation bug: if the scan cursor advances to the last entry
+    // it *loaded* rather than the last the pass *attempted*, then a pass truncated by the deadline
+    // skips everything in between, permanently, and the tail of a scope never recovers.
+    let run_dir = std::env::temp_dir().join(format!(
+        "telex-cursor-fairness-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or_default()
+    ));
+    std::fs::create_dir_all(&run_dir).expect("run dir");
+    let store = telex::station_intent::IntentStore::open(&run_dir, "cursorhash").expect("store");
+
+    // Seed a small scope — smaller than any plausible pass budget, which is the case the naive
+    // implementation got wrong (the cursor pinned to the maximum and `start` reset to 0 forever).
+    let producer_dir = run_dir.join("producer");
+    let root_id = format!("cursor_root_{}", std::process::id());
+    let root = register_test_producer_root(&root_id, &producer_dir);
+    let secret = "c".repeat(64);
+    let producer =
+        FakeProducer::start(&root, "cursor-session", &secret, ProducerBehavior::Healthy).await;
+    let credential = root.join("cursor-session.json");
+    write_credential_file(&credential, &secret);
+    for i in 0..6 {
+        let mut intent = live_intent(
+            "sqlite:/cursor",
+            "cursor-session",
+            &format!("addr:{i:02}"),
+            "cursorhash",
+            &producer,
+            &root_id,
+            &credential,
+        );
+        intent.generation = 1;
+        store.write_atomic(&intent).expect("seed");
+    }
+
+    // A pass that attempts only two entries must resume at the third, not at the seventh.
+    let page = store.scan(6).expect("scan");
+    assert_eq!(page.loaded.len(), 6);
+    assert_eq!(page.loaded_positions.len(), 6);
+    let first_two: Vec<String> = page.loaded[..2].iter().map(|i| i.address.clone()).collect();
+    store
+        .advance_cursor(&page.loaded_positions[1])
+        .expect("advance to the last attempted entry");
+
+    let next = store.scan(6).expect("second scan");
+    assert_eq!(
+        next.loaded[0].address, page.loaded[2].address,
+        "the next pass must resume at the first entry the previous pass did not attempt"
+    );
+    assert!(
+        !first_two.contains(&next.loaded[0].address),
+        "the next pass must not restart at an already-attempted entry"
+    );
+
+    // Sweeping the whole scope wraps back to the beginning, so coverage is cyclic, not one-shot.
+    store
+        .advance_cursor(&page.loaded_positions[5])
+        .expect("advance past the maximum sort position");
+    let wrapped = store.scan(6).expect("third scan");
+    assert_eq!(
+        wrapped.loaded[0].address, page.loaded[0].address,
+        "the cursor must wrap after a complete sweep"
+    );
+
+    let _ = std::fs::remove_dir_all(&run_dir);
+}
+
+#[tokio::test]
+async fn station_intent_generation_never_resets_so_a_stale_pass_cannot_clobber_a_resume() {
+    // A generation that cycles 1 -> 2 -> 1 -> 2 defeats the write-CAS: a pass that read generation 2
+    // could write back over a *newer* manifest that had cycled to 2 again, restoring a stale
+    // producer descriptor and permanently breaking recovery for that station.
+    let scenario = Scenario::new("intent-generation", ProducerBehavior::Healthy).await;
+    let store = scenario.daemon.intent_store();
+    let id = scenario.intent.id();
+    let first = store.load(&id).expect("seeded intent").generation;
+
+    // Model a resume: the pending write must build on the existing generation, not reset it.
+    let mut resumed = scenario.intent.clone();
+    resumed.state = IntentRecoveryState::Pending;
+    resumed.generation = first.saturating_add(1);
+    store.write_atomic(&resumed).expect("pending rewrite");
+    let mut finalized = resumed.clone();
+    finalized.state = IntentRecoveryState::Live;
+    finalized.generation = resumed.generation.saturating_add(1);
+    store.write_atomic(&finalized).expect("finalize");
+
+    let observed = store.load(&id).expect("reload").generation;
+    assert!(
+        observed > first,
+        "generation must be monotonic across a resume cycle ({observed} must exceed {first})"
+    );
+
+    // And a CAS from the pre-resume generation must lose.
+    let mut stale = scenario.intent.clone();
+    stale.occupant = "stale-pass".to_string();
+    stale.generation = first;
+    assert!(
+        !store.write_cas(first, &stale).expect("cas"),
+        "a pass holding a pre-resume generation must not be able to write back"
+    );
+    assert_eq!(
+        store.load(&id).expect("reload").occupant,
+        scenario.intent.occupant,
+        "the fresh manifest must survive a stale pass"
+    );
+}
+
+#[tokio::test]
+async fn station_intent_anti_downgrade_guard_works_before_the_first_reconcile_pass() {
+    // The index is populated by a reconcile pass, and `serve()` accepts connections before that
+    // pass runs — which is exactly the daemon-replacement window the guard exists to protect. The
+    // guard must therefore consult the durable manifest, not only the cache.
+    let scenario = Scenario::new("intent-cold-guard", ProducerBehavior::Healthy).await;
+    assert!(
+        scenario.daemon.intent_index().entries.is_empty(),
+        "precondition: no pass has run, so the cached index is empty"
+    );
+
+    let response = scenario
+        .daemon
+        .request(register_request(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+        ))
+        .await;
+    assert!(
+        matches!(response, Response::Registered { .. }),
+        "a recoverable intent should reconcile inline: {response:?}"
+    );
+    assert!(
+        scenario.member_push_registered().await,
+        "a pull-only Register before the first pass must still not downgrade a live push intent"
+    );
 }

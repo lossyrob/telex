@@ -4101,8 +4101,14 @@ async fn register_member(
             session_id: session_id.clone(),
             address: address.clone(),
         };
-        if state.live_push_intent(&intent_key).is_some() {
-            match state.load_live_intent(&intent_key) {
+        // Consult the **durable manifest**, not only the cached index. The index is populated by the
+        // first reconcile pass, and `serve()` accepts connections before that pass runs — which is
+        // exactly the daemon-replacement window this guard exists to protect. An index hit with an
+        // unreadable manifest still fails closed.
+        let manifest = state.load_live_intent(&intent_key);
+        let indexed_live = state.live_push_intent(&intent_key).is_some();
+        if manifest.is_some() || indexed_live {
+            match manifest {
                 Some(intent) => {
                     let outcome = reconcile::reconcile_intent_locked(state.clone(), &intent).await;
                     match outcome {
