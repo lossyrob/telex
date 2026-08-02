@@ -1926,3 +1926,100 @@ corresponding decision should be revisited.
   ([§15.2](#152-single-source-skill)) hits a
   harness constraint (manifest cannot point outside the plugin dir **and** `exec` is rejected), a
   code-touching deviation is forced.
+
+## 18. Station intents and daemon-owned reconciliation (issue #106, ADR 0050)
+
+A **station intent** is a host-local, owner-private, versioned record of the *desired* push
+registration for one `(store_key, session_id, address)` binding. It is not membership and not
+attendance: in-memory `MemberRecord` (sec. 5) plus the backend epoch lease (sec. 11) remain the only
+authority for who attends an address and who may deliver to it. An intent only says "if a compatible
+daemon is running **and** this producer proves it is alive, restore this exact push handler."
+
+### 18.1 Storage and scope
+
+`<run_dir>/intents/<singleton_hash>/<sha256(store_key | 0x1f | session_id | 0x1f | address)[..32]>.intent.json`
+
+- `run_dir` is the directory ADR 0025 designates as authority-bearing — the only one with a real
+  fail-closed owner-private check on both platforms.
+- `singleton_hash` hashes user identity, canonicalized config root, and protocol major, so scopes
+  are isolated per config root and namespaced per protocol major.
+- Filenames are hashed, so address and store strings never reach a filesystem path.
+- Bounds: 512 intents per scope (a write-time rule), 16 KiB per manifest (enforced on the open
+  handle). A scope may legitimately hold *more* than the cap; that is reported as `over_cap` and is
+  never a reason to delete anything. Only GC deletes.
+
+### 18.2 States
+
+Persisted: `pending`, `live`, `revoked`. Everything else is a runtime projection held in an
+in-memory index, so a transient probe failure never rewrites durable state.
+
+Precedence, highest first: `revoked` > `tombstoned` > `insecure` > `incompatible` >
+`ownership_conflict` > `quarantined` > `unverifiable` > `legacy_producer` > `deferred_pull_waiter` >
+`deferred_lease` > `pending` > `restored` > `live`.
+
+`pending` is written **before** `Register` and is never reconciled, so a crash mid-attach cannot
+leave a claimable record.
+
+### 18.3 What restoration requires
+
+In order, and all fail-closed:
+
+1. Host and boot identity match this machine and this boot.
+2. The handler kind is registered (composition-time registry — the daemon core learns an opaque id,
+   never a Copilot symbol).
+3. The producer advertises probe protocol ≥ 2; below that it is `legacy_producer` — never restored,
+   never wedged.
+4. No live armed pull waiter (`deferred_pull_waiter` otherwise; pull-waiter precedence is preserved).
+5. The store selector resolves, and the store is opened **open-existing-only**.
+6. The credential resolves: a registered producer root, canonical containment, per-file
+   owner-private checks, and an mtime inside `max_age_ms` — checked *before* the secret is read.
+7. `verify_server_peer` succeeds **before anything is sent**: same user, matching executable,
+   matching pid + start time.
+8. The probe answers with the echoed nonce, the expected session, and protocol ≥ 2.
+
+### 18.4 Scheduling and bounds
+
+| Constant | Value | Why |
+|---|---|---|
+| `RECONCILE_INTERVAL` | `HEARTBEAT_INTERVAL` (5 s) | one loop, not two |
+| `RECONCILE_PASS_DEADLINE` | 4 s | a pass can never overrun the tick that started it |
+| `RECONCILE_PER_INTENT_TIMEOUT` | 3 s | probe + validation + claim |
+| `RECONCILE_PASS_BUDGET` | 64 | upper bound per pass, round-robin cursor across passes |
+| `RECONCILE_MAX_CONCURRENCY` | 4 | herd cap **and** guaranteed minimum progress per pass |
+| `RECONCILE_DEFERRED_LEASE_RETRY` | 5 s fixed | a not-yet-stale incumbent is *waiting*, not failing |
+| `RECONCILE_BACKOFF_INITIAL`/`_MAX` | 5 s / 5 min ±20 % | genuine failures only |
+| `RECONCILE_QUARANTINE_AFTER` | 10 consecutive failures → hourly | one wedged intent cannot eat the budget |
+
+Outcome classes drive retry policy and nothing else: `Restored` / `RefreshedNoOp` (success),
+`DeferredLease` (fixed cadence, no backoff, no quarantine counter), `DeferredPullWaiter` (its own
+backoff), `Failed` (the only backoff-eligible class), and terminal/inert classes.
+
+### 18.5 Two-level API
+
+- `reconcile_once(state, scope)` — **acquiring**. Owns the per-scope single-flight guard, the pass
+  scheduling, and takes the per-`MemberKey` `delivery_admission` guard for each intent.
+- `reconcile_intent_locked(state, intent)` — **guard-free inner**. Assumes the caller already holds
+  that guard.
+
+`register_member`'s anti-downgrade check may only call the locked variant: it already holds the
+admission guard, which is documented as outermost and non-reentrant, so calling the acquiring entry
+point there would self-deadlock the hottest register path.
+
+### 18.6 Tombstone guarantee
+
+`register_member_reconciled` checks the durable detach tombstone **unconditionally** before the
+epoch claim and again after it, releasing the lease on a post-claim hit. It contains no call to
+`clear_detach_tombstone` at all — clearing is an explicit-attach-only operation — and a unit test
+asserts that structurally against the source. Detach ordering is durable tombstone first, local
+intent revocation second, so a crash between them leaves tombstone-wins.
+
+### 18.7 Triggers
+
+(a) daemon startup scan (asynchronous; `serve()` accepts connections immediately);
+(b) the heartbeat tick; (c) `upgrade`/`rollback` spawning the successor they installed (a bounded
+ADR 0028 exception); (d) `Request::ReconcileIntents { proof, scope }`, admin-proofed exactly like
+`Drain` because reconciliation arms delivery and spawns processes.
+
+All four pulse one trigger, and every completed pass publishes a `ReconcileReport` with a monotonic
+`pass_seq`. Callers await a report rather than polling a clock. Pulses schedule work; they never
+bypass `next_attempt_ms`.

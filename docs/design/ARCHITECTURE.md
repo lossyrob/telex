@@ -340,3 +340,51 @@ fallback.
 *Governing spec:* [daemon.md sec.13.2 on-deliver push](daemon.md#132-on-deliver-push-opt-in-harness-neutral) ,
 [copilot-bridge-push.md](copilot-bridge-push.md) ,
 [DECISIONS.md ADR 0039](DECISIONS.md#0039--push-delivery-via-a-generic-on-deliver-exec--copilot-session-bridge)
+
+## 10. Station intents: recovering push across a daemon replacement
+
+Push delivery (sec. 9) is armed by an in-memory `MemberRecord`. That record does not survive a
+daemon replacement, so an upgrade, a graceful drain, or a crash silently converts a push-attended
+session into an unattended one. A **station intent** (ADR 0050) closes that gap without violating
+the never-rebuild-membership-from-history invariant.
+
+```
+attach --copilot-bridge
+   |
+   |  1. write `pending` intent          <run_dir>/intents/<singleton_hash>/<hash>.intent.json
+   |  2. Register (arms push)
+   |  3. probe the producer, capture identity
+   |  4. finalize intent -> `live`  (+ cc_watermark_ms captured from the member)
+   v
+daemon replaced (upgrade / drain / crash)
+   |
+   |  successor startup scan, or the 5 s heartbeat tick
+   v
+reconcile pass (single-flight, drain-suppressed, budget + deadline bounded)
+   |
+   |  host/boot match -> handler kind registered -> producer protocol >= 2
+   |  -> no live pull waiter -> store selector resolves (open-existing-only)
+   |  -> credential resolves under a registered root, inside max_age_ms
+   |  -> verify_server_peer  (BEFORE anything is sent)
+   |  -> probe: nonce echoed, session matches
+   |  -> tombstone check, epoch claim, tombstone re-check
+   v
+member restored with re-derived argv and the PRESERVED cc watermark
+```
+
+Three properties are worth stating explicitly, because each one is a place a naive design goes
+wrong:
+
+1. **Restoration proves liveness; it does not replay a record.** The producer must answer an
+   authenticated probe from a process that already passed OS-level identity verification. A record
+   alone never restores anything, which is what keeps this distinct from resurrection.
+2. **The CC watermark is preserved, not recomputed.** Recomputing it as "now" at restore time would
+   make every CC message committed during the restart gap permanently invisible.
+3. **Argv is re-derived, never persisted.** The successor rebuilds the handler command from its own
+   executable and store resolution, so an upgrade or rollback cannot restore a handler pointing at
+   a binary that no longer exists, and a tampered manifest cannot inject argv.
+
+Intents are host-local files, so the cross-host topology of sec. 7 is unaffected by construction: a
+second host cannot see, let alone restore, another host's bridge. Within a host, the epoch fence of
+sec. 6 remains the single-writer authority — a reconciled restore claims the lease exactly as an
+ordinary register does, and never force-steals an incumbent.

@@ -622,7 +622,7 @@ level may proceed in parallel.
 | 7 | `documentation` | `drain-upgrade`, `tests` |
 | 8 | `verification` | all |
 
-- [ ] **Promote owner-private filesystem and process-identity primitives to a shared module**
+- [x] **Promote owner-private filesystem and process-identity primitives to a shared module**
   (`platform-fs`)
   - Depends on: none.
   - Move `ensure_owner_private_dir`, `write_owner_only_file` and the Windows
@@ -656,7 +656,7 @@ level may proceed in parallel.
   - Success (manual): confirm on Windows that a hand-relaxed DACL on (a) the scope directory and
     (b) a credential file outside the scope both make the read path fail closed.
 
-- [ ] **Define the station-intent model and secure store** (`intent-model`)
+- [x] **Define the station-intent model and secure store** (`intent-model`)
   - Depends on: `platform-fs`.
   - New `src/station_intent.rs`: `StationIntentV1` (schema version, generation, timestamps, state,
     store key, session id, address, occupant/description/scope/tags, `delivery_mode`, `wake_on_cc`,
@@ -680,7 +680,7 @@ level may proceed in parallel.
     clamped; precedence function is exhaustively tested.
   - Success (manual): inspect a real intent file and confirm no secret material is present.
 
-- [ ] **Add the generic handler-kind registry and the shared argv builder** (`handler-registry`)
+- [x] **Add the generic handler-kind registry and the shared argv builder** (`handler-registry`)
   - Depends on: `platform-fs`.
   - New `src/handler_kinds.rs` with `HandlerKindRegistry`, `HandlerKindId`, the registry of
     **producer roots** decision 3 requires (`root_id -> absolute root path`, registered at
@@ -708,7 +708,7 @@ level may proceed in parallel.
     resolution for the same store and returns the typed error for an unknown/ambiguous store key.
   - Success (manual): none required.
 
-- [ ] **Add the bridge probe protocol as a testable module** (`bridge-protocol`)
+- [x] **Add the bridge probe protocol as a testable module** (`bridge-protocol`)
   - Depends on: none.
   - Extract a pure, SDK-free, exporting `copilot/bridge/probe-protocol.mjs` (request/response
     framing, nonce echo, constant-time secret comparison via `crypto.timingSafeEqual`, protocol
@@ -727,7 +727,7 @@ level may proceed in parallel.
   - Success (manual): `node --check copilot/bridge/extension.mjs` still passes; a live Copilot
     session answers a probe after `extensions_reload`.
 
-- [ ] **Wire Copilot lifecycle to intents** (`copilot-intent`)
+- [x] **Wire Copilot lifecycle to intents** (`copilot-intent`)
   - Depends on: `intent-model`, `handler-registry`, `bridge-protocol`.
   - Attach/resume: ensure the Copilot bridge producer root exists with correct owner-only
     permissions via `platform_fs::ensure_owner_private_dir` (so the Windows DACL exists at all -
@@ -756,7 +756,7 @@ level may proceed in parallel.
   - Success (manual): attach a real Copilot session and confirm exactly one `live` intent file with
     correct store/address/session/CC fields.
 
-- [ ] **Implement daemon-owned reconciliation** (`daemon-reconcile`)
+- [x] **Implement daemon-owned reconciliation** (`daemon-reconcile`)
   - Depends on: `intent-model`, `handler-registry`.
   - New `src/daemon_reconcile.rs` implementing decision 6 end to end: the two-level API
     (`reconcile_once` acquires the single-flight guard and the per-`MemberKey` `delivery_admission`;
@@ -797,7 +797,7 @@ level may proceed in parallel.
   - Success (manual): kill a daemon with a live bridge, spawn a successor, and observe recovery
     within the published crash bound.
 
-- [ ] **Enforce anti-downgrade in the daemon** (`anti-downgrade`)
+- [x] **Enforce anti-downgrade in the daemon** (`anti-downgrade`)
   - Depends on: `daemon-reconcile`, `copilot-intent`.
   - Implement decision 10 inside `register_member` - calling `reconcile_intent_locked`, never
     `reconcile_once` (SF2-5) - plus decision 13's pull-waiter scoping, plus the `NeedsAttachReason`
@@ -811,7 +811,7 @@ level may proceed in parallel.
     controls.
   - Success (manual): none required.
 
-- [ ] **Add diagnostics, status projection and evidence** (`diagnostics`)
+- [x] **Add diagnostics, status projection and evidence** (`diagnostics`)
   - Depends on: `daemon-reconcile`, `anti-downgrade`.
   - Bump `PROTOCOL_MINOR` to 5; add intent rows (state + evidence per decision 18) to daemon and
     station status, including intent-only rows with no member; add the three issue-named conditions
@@ -824,7 +824,7 @@ level may proceed in parallel.
   - Success (manual): `telex station status --session <id>` shows a degraded intent-only row after a
     daemon kill.
 
-- [ ] **Drain, upgrade and rollback signaling** (`drain-upgrade`)
+- [x] **Drain, upgrade and rollback signaling** (`drain-upgrade`)
   - Depends on: `diagnostics`.
   - Compute the drain report from in-memory members plus the cached `IntentIndex` of decision 6
     only - no directory scan, no probe, no network I/O, evaluated before the lease-release loop in
@@ -842,7 +842,7 @@ level may proceed in parallel.
   - Success (manual): run `telex upgrade` on a host with one idle attached session and confirm push
     is restored without manual resume.
 
-- [ ] **Build the missing test harness** (`test-harness`)
+- [x] **Build the missing test harness** (`test-harness`)
   - Depends on: `bridge-protocol`, `intent-model`.
   - Add a Rust **fake producer endpoint** (named pipe on Windows, UDS on Unix) that speaks the probe
     protocol, with knobs for wrong secret, wrong nonce, wrong session, legacy protocol, hang, and
@@ -867,7 +867,7 @@ level may proceed in parallel.
     executable identity than the intent records.
   - Success (manual): none required.
 
-- [ ] **Cover lifecycle, storage, bridge and delivery semantics with tests** (`tests`)
+- [x] **Cover lifecycle, storage, bridge and delivery semantics with tests** (`tests`)
   - Depends on: `test-harness`, `anti-downgrade`, `diagnostics`, `drain-upgrade`.
   - Implement the full matrix in the Traceability section below, including the **negative controls**
     the review found missing: a test that fails if the reconciler never runs, and a test that fails
@@ -882,7 +882,7 @@ level may proceed in parallel.
     conformance --test daemon_core_postgres`; `node --test copilot/bridge` - all green.
   - Success (manual): none required.
 
-- [ ] **Document the revised lifecycle and operator contract** (`documentation`)
+- [x] **Document the revised lifecycle and operator contract** (`documentation`)
   - Depends on: `drain-upgrade`, `tests`.
   - `.paw/work/rb-2026-08-02a-106/Docs.md` as the as-built technical reference.
   - ADR 0050 per decision 21, and the ADR 0023 status amendment.
@@ -910,7 +910,7 @@ level may proceed in parallel.
   - Success (manual): a reviewer can follow the operating guide to reproduce both published bounds
     within their stated qualifications.
 
-- [ ] **Run full verification and prepare reviewable commits** (`verification`)
+- [x] **Run full verification and prepare reviewable commits** (`verification`)
   - Depends on: everything.
   - `cargo fmt --check`; `cargo clippy --workspace -- -D warnings`; `cargo test --workspace`;
     feature-matrix builds (`--no-default-features --features sqlite`, `--features postgres`,
@@ -1069,3 +1069,46 @@ question remains open.
 ## Open Questions
 
 None.
+
+## Implementation Deviations (as built)
+
+Four direction-preserving deviations, each recorded with the reason. Full detail in `Docs.md`.
+
+1. **Producer roots are validated, not rewritten (Windows).** The plan specified
+   `ensure_owner_private_dir` for the Copilot bridge root. On Windows that applies a *protected*
+   DACL, which re-propagates inheritance and leaves pre-existing children with an empty DACL —
+   unreadable even to the process that wrote them, which would break the bridge itself
+   (reproduced: `read` on a pre-existing `.bindings.json` failed with `Access is denied` immediately
+   after hardening). Replaced by `ensure_owner_private_producer_root`: create-strict for a directory
+   telex creates, validate-never-rewrite for one that already exists, with an ACE allowlist of
+   current user / `SYSTEM` / local `Administrators` / logon-session SID / AppContainer SID. Posture
+   unchanged (a broadly-ACLed root still fails closed); per-file credential checks still apply
+   independently. Regression test:
+   `platform_fs::tests::producer_root_hardening_never_strips_an_existing_producer_file`.
+2. **Intent finalization also happens at the turn boundary.** On a *first* attach the bridge
+   extension is written but not yet loaded, so there is no producer to probe or describe and attach
+   alone cannot finalize the very first binding. `ProducerDescriptorV1::validate` therefore requires
+   concrete producer identity only when the state is not `Pending` (safe: a `Pending` intent is never
+   reconciled), and the `agentStop` drain hook — already the explicit reconcile trigger of decision
+   14(d) — finalizes pending intents once the bridge answers. Recovery is armed within one turn of
+   `extensions_reload`, with no new command and no new lifecycle.
+3. **`--daemon-instance` requires connecting before provisioning.** `provision_bridge` builds argv
+   before `attach::run` connects, so on a cold start there was no cap file yet. `daemon_instance_id`
+   now calls `connect_or_spawn` first. No new lifecycle — attach connects on the very next step
+   regardless — it just moves the connect one step earlier so attach-registered and
+   reconcile-registered argv stay byte-identical.
+4. **Self-owned lease adoption.** `AlreadyOwned` where the owner *is this daemon instance* is
+   neither `DeferredLease` nor `Failed`: both would wedge a binding whose member was lost from
+   memory while the lease is still held. The reconciler adopts the lease it already holds. No new
+   claim, no steal, and the post-claim tombstone re-check still runs.
+
+Minor, non-behavioral:
+
+- The plan's `--drain-timeout-ms` flag does not exist in this codebase; the bounded in-flight
+  handler wait uses a named constant (`DRAIN_INFLIGHT_WAIT`, 5 s) rather than inventing a flag.
+- CI runs `node --test "copilot/bridge/*.test.mjs"` instead of the directory form, which does not
+  resolve on Windows runners. Same requirement satisfied: every `*.test.mjs` under `copilot/bridge`
+  runs on both platforms.
+- SHA-256 is implemented in `platform_fs` rather than taken from `sha2`, which is only in the
+  dependency graph behind the optional `self-update` feature. Intent identity must be byte-identical
+  in every feature combination, including `--no-default-features --features sqlite`.

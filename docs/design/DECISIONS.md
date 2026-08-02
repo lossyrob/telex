@@ -1078,7 +1078,10 @@ owner-only-enforcement primitive removes the need for the opt-out.
 ## 0023 — Minimal session/presence/delivery model: supersede the incarnation-currency machinery
 
 - **Date:** 2026-06-23
-- **Status:** Accepted (design)
+- **Status:** Accepted (design); **amended by 0050** — a durable *station intent* records desired
+  push registration and lets a successor daemon restore it after verifying the producer is alive.
+  The invariant this ADR set stands: membership is still never rebuilt from durable history, and an
+  intent is desired state, not attendance.
 - **Revises:** 0017 (liveness), 0019 (daemon-native session ownership), 0015 (the delivery-commit
   model — waiter-ACK → agent-ACK), and 0020 (the `sessions`-table migration instruction) —
   supersedes their session-incarnation/currency / `occupied_stale` / force-takeover / waiter-ACK /
@@ -2069,3 +2072,96 @@ prove both capabilities without weakening either domain. The
 `application-client-ready` checkpoint is design-only: it unlocks that downstream work
 but does not claim an implementation, binding, conformance result, consumer
 integration, or production readiness.
+
+## 0050 — Durable station intent and daemon-owned reconciliation
+
+- **Date:** 2026-08-02
+- **Status:** Accepted (issue #106)
+- **Revises:** 0023 (amended — intent is desired state, not membership; the
+  never-rebuild-membership-from-history invariant is preserved), 0025 (extended — `run_dir` now
+  also carries intent manifests), 0028 (bounded exception — `upgrade`/`rollback` may spawn the
+  successor they just installed), 0039 push-delivery (clarified — generic descriptor kinds keep
+  the daemon harness-agnostic)
+
+**Context.** Push delivery (ADR 0039) arms a station by registering an `on_deliver` handler in the
+daemon's in-memory `MemberRecord`. That record does not survive daemon replacement. A `telex
+upgrade`, a `daemon stop --drain`, or a crash therefore silently converts a push-attended Copilot
+session into an unattended one: messages stay durable, but nothing arrives as a turn until a human
+notices and runs `telex copilot resume`. An idle session is exactly the case where nobody notices.
+
+The tempting fix — rebuild membership from durable history — is precisely what ADR 0023 forbids,
+and for good reason: a station that returns because a *record* exists, rather than because a
+*producer is alive*, is resurrection, and it reintroduces the double-delivery and stale-owner
+problems the epoch lease exists to prevent.
+
+**Decision.** Introduce a host-local, owner-private, versioned **station intent**: the exact desired
+push registration for one `(store_key, session_id, address)` binding. Intents are *desired state*,
+never attendance. In-memory `MemberRecord` plus the backend epoch lease remain the only authority
+for who is attending an address and who may deliver to it.
+
+The daemon owns reconciliation as its own operation, not as a `Register` side effect:
+
+1. **Storage.** `<run_dir>/intents/<singleton_hash>/<hashed-id>.intent.json`. `run_dir` is the
+   directory ADR 0025 designates as authority-bearing and the only one with a real fail-closed
+   owner-private check on both platforms. `<singleton_hash>` hashes user identity, canonicalized
+   config root, and protocol major, so scopes are isolated per config root and namespaced per
+   protocol major. Filenames are `sha256(store_key | 0x1f | session_id | 0x1f | address)`, so
+   address and store strings never reach a filesystem path.
+2. **Restoration requires a live, verified producer.** The daemon connects to a generic producer
+   descriptor, calls `verify_server_peer` (same user, matching executable, matching pid +
+   start time) *before sending anything*, then sends an authenticated `probe` whose nonce must be
+   echoed. `host_id` and `boot_id` are bound too, so a synced home directory or a rebooted machine
+   cannot make a stale `(pid, start_time)` pair verify. Any platform that cannot resolve one of
+   these fails closed.
+3. **The daemon stays harness-agnostic.** It knows a *registered handler kind* and a *registered
+   producer root id* — never a Copilot path, filename, or symbol. Argv is rebuilt by one shared
+   builder from the daemon's own executable and store resolution; it is never persisted, so a
+   tampered manifest cannot inject argv and an upgrade cannot restore a handler pointing at a
+   binary that no longer exists.
+4. **No secret is ever stored.** The intent carries a *constrained pointer* to an owner-private
+   credential file under a registered root, resolved fresh at reconcile time. The bridge's
+   per-process rotating secret is therefore a non-issue rather than a permanent fail-closed.
+5. **An explicitly detached station never returns.** The reconcile path checks the durable detach
+   tombstone unconditionally before and after the epoch claim, and contains no call to
+   `clear_detach_tombstone` at all — clearing is an explicit-attach-only operation.
+6. **Bounded and non-overrunning.** Reconciliation rides the existing heartbeat tick, is
+   single-flight per scope, drain-suppressed, budgeted by both a per-pass count and a wall-clock
+   deadline shorter than the tick, and per-intent timed out. A lease that is merely *not stale yet*
+   is a **waiting** outcome on a fixed cadence, never a failure — which is what makes the published
+   crash-recovery bound derivable rather than asserted.
+7. **Anti-downgrade.** When a `Register` would create a *new* member for a key that has a live push
+   intent, the daemon reconciles inline; on failure it returns typed `Incompatible` /
+   `PushIntentUnrecoverable` rather than creating a pull-only member. A live armed pull waiter
+   still wins (the guarantee is scoped to the no-live-waiter case).
+
+**Bounded ADR 0028 exception.** `upgrade` and `rollback` spawn the successor they just installed and
+wait, bounded, for one reconcile report. Without this, the issue's motivating scenario — `telex
+upgrade` with an idle Copilot session — still needs a human. The exception is narrow: only these two
+commands, only immediately after a switch they performed, and only when the drained daemon reported
+recoverable intents.
+
+**Consequences.**
+
+- New release axes: `STATION_INTENT_SCHEMA_VERSION` (1), `COPILOT_BRIDGE_PROTOCOL` (1 → 2),
+  `PROTOCOL_MINOR` (4 → 5). `MIN_COMPATIBLE_PLUGIN_VERSION` is asserted **unchanged** against a
+  frozen fixture, because the plugin hook surface is untouched.
+- Fail-closed is scoped to *advertised-but-unverifiable* producers. A pre-probe bridge is
+  `legacy_producer`: never auto-restored, never wedged, and the documented manual
+  `telex copilot resume` path keeps working exactly as before.
+- The turn guard **warns and allows** on an unrestored push intent. Blocking would convert one
+  orphaned intent into a wedged session and buys no delivery correctness.
+- Legacy `.bindings.json` remains authoritative only for the extension teardown ref-count and is
+  scheduled for removal in the release after this one. No intent is ever synthesized from it.
+- Rolling back to a binary that predates this work returns those stations to manual `copilot
+  resume`; the rollback output says so. Intents are never deleted by a rollback, and the
+  singleton-hash namespacing plus schema range keep a pre-feature binary inert with respect to them.
+
+**Deviation from the plan, recorded.** The plan specified `ensure_owner_private_dir` for the producer
+root. On Windows that rewrites the directory to a *protected* DACL, which re-propagates inheritance
+and leaves pre-existing children with an empty DACL — unreadable even to the process that wrote
+them, which would break the bridge itself. The producer root is therefore **created** strictly (with
+the owner-only descriptor, when telex creates it) and **validated, never rewritten**, when it
+already exists: owner must be the current user and every ACE must name the current user, `SYSTEM`,
+local `Administrators`, the logon-session SID, or an AppContainer SID. The posture is unchanged — a
+broadly-ACLed root still fails closed — and per-file credential checks still apply independently, so
+containment in this directory is never the only thing being trusted.

@@ -57,3 +57,51 @@ identity.
 - `telex station status --session <id>`: attended addresses, waiter counts, and
   station health for a session.
 - `telex daemon status`: daemon internals.
+
+## Copilot: push was working, then stopped after an upgrade or daemon restart
+
+This should recover on its own. A push-attended station records a durable **station intent**, and a
+successor daemon restores it within about 10 seconds of being up (or `liveness_window_secs()` + 10 s
+after a hard crash, because the crashed daemon's lease has to go stale first). See
+[Push recovery after a daemon replacement](operating.md#push-recovery-after-a-daemon-replacement).
+
+If it has not recovered, check the station:
+
+```bash
+telex --address <addr> status
+```
+
+Look at the `station_intent` line:
+
+| State | Meaning | What to do |
+|---|---|---|
+| `deferred_lease` | Waiting for a crashed predecessor's lease to go stale. **Not an error.** | Wait; `next_attempt_ms` says when it retries. |
+| `deferred_pull_waiter` | A live `telex wait` owns the address; pull wins. | Stop the waiter (`telex station stop`) if you want push back. |
+| `legacy_producer` | The bridge predates the liveness probe, so it cannot be proved alive. | `telex --address <addr> copilot resume`, then `extensions_reload`. |
+| `unverifiable` | The producer or its credential could not be resolved (bridge gone, registry stale). | `telex --address <addr> copilot resume`, then `extensions_reload`. |
+| `insecure` | A permissions check failed on the bridge directory or credential file. | Fix the permissions (owner-only), then resume. |
+| `incompatible` | This daemon cannot reconcile the recorded intent (version skew). | `telex --address <addr> copilot resume`. |
+| `quarantined` | Ten consecutive genuine failures; now retrying hourly. | Fix the underlying cause, then resume to reset it. |
+| `revoked` | The station was explicitly detached or its session ended. | Intentional. Explicit attach is the only way back. |
+
+Messages are durable the whole time — read them with `telex inbox --address <addr>` — and the turn
+guard warns rather than blocking, so an unrestored intent never wedges a session.
+
+## Copilot: `telex attach` refuses with `PushIntentUnrecoverable`
+
+The address has a live push intent that could not be restored, and telex refused to create a
+**pull-only** member over it rather than silently downgrading your delivery mode.
+
+Either restore push:
+
+```bash
+telex --address <addr> copilot resume   # then run extensions_reload in the session
+```
+
+or give up push for this station explicitly:
+
+```bash
+telex --address <addr> copilot detach
+```
+
+after which a plain `telex attach` works normally.

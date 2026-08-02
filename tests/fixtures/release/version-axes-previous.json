@@ -1,0 +1,19 @@
+{
+  "_comment": "Frozen version-axis contract as of the release BEFORE station-intent reconciliation (issue #106). tests/release_contract.rs compares the current constants against this file, so an axis that must not move is asserted against a recorded previous value rather than against a second copy of the current constant (which would assert nothing).",
+  "recorded_for_release": "0.1.2",
+  "axes": {
+    "station_intent_schema_version": null,
+    "copilot_bridge_protocol": 1,
+    "protocol_minor": 4,
+    "min_compatible_plugin_version": "0.1.0"
+  },
+  "unchanged_axes": [
+    "min_compatible_plugin_version"
+  ],
+  "notes": {
+    "station_intent_schema_version": "Did not exist before this release; introduced at 1.",
+    "copilot_bridge_protocol": "Bumped 1 -> 2 by the `probe` verb.",
+    "protocol_minor": "Bumped 4 -> 5 by ReconcileIntents plus the intent status projection.",
+    "min_compatible_plugin_version": "Asserted UNCHANGED. The plugin hook surface (copilot/plugin/hooks.json, copilot/plugin/plugin.json) is untouched by this work; the new probe verb is a bridge-extension change gated by copilot_bridge_protocol. A future change to the plugin/bridge contract must revisit this axis explicitly."
+  }
+}

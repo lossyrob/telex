@@ -126,6 +126,101 @@ telex export --thread <id>
 telex export --since <id>
 ```
 
+## Push recovery after a daemon replacement
+
+A push-attended station (a Copilot bridge bound with `telex copilot attach --copilot-bridge`)
+records a durable **station intent**: the exact desired push registration for that
+`(store, session, address)` binding. When a daemon is replaced — `telex upgrade`,
+`telex daemon stop --drain`, or a crash — the successor restores the registration *by itself*, with
+no manual `telex copilot resume`.
+
+Restoration is not "replay a record". The successor restores a binding only after it has proved the
+producer is alive: same user, matching executable, matching pid and process start time, matching
+machine and boot, and an authenticated liveness probe whose nonce the producer must echo. A producer
+that cannot be proved alive is never restored — messages stay durable and readable with
+`telex inbox`, and the condition is reported rather than silent.
+
+### Published recovery bounds
+
+Both bounds are measured from "a compatible successor daemon is running **and** the producer is
+live and verifiable", and both are derived from the reconciler's constants rather than asserted.
+
+| Situation | Bound |
+|---|---|
+| Graceful drain or upgrade | **≤ 10 s** (one 5 s reconcile tick + a 1 s probe + a 2 s validation/claim allowance) |
+| Hard crash | **`liveness_window_secs()` + 10 s** (the crashed daemon never released its lease, so the successor waits for it to go stale) |
+
+Both bounds are **qualified**. They apply to an intent that is:
+
+- in a scope holding no more than **64** live intents (one pass budget), so it is attempted in the
+  first pass after the trigger; and
+- not currently in failure backoff, pull-waiter backoff, or quarantine.
+
+They explicitly exclude: no successor daemon exists at all (start one with `telex attach`), a
+backend outage, a competing fresh owner, and a producer too old to answer the liveness probe.
+
+### Larger scopes
+
+A scope holding more than one pass budget gets a computable *queue delay* rather than a recovery
+bound. An intent waits at most
+
+```
+ceil(live_intents / 4) * 5 s
+```
+
+before it is attempted, where 4 is the guaranteed per-pass progress in the pathological case where
+every intent consumes its full timeout (a healthy pass drains up to 64). Its own recovery then
+completes within the applicable bound above. At the 512-intent per-scope cap that is ≤ 640 s in the
+pathological case and ≈ 40 s in the healthy case.
+
+### Waiting is not failing
+
+`telex --address <station> status` reports a station-intent row with a state. The one that most
+often surprises people is `deferred_lease`: after a crash, the predecessor's epoch lease is not
+stale yet, so the successor is **waiting for it to expire**, not failing. It retries at a fixed 5 s
+cadence, never backs off exponentially, and never counts toward quarantine. `next_attempt_ms` says
+when it will try again.
+
+Three conditions are named explicitly in status:
+
+- `live_intent_missing_member` — push is desired here but not currently armed.
+- `member_missing_live_producer` — push is registered but the producer has gone quiet.
+- `intent_protocol_incompatible` — this daemon cannot reconcile the recorded intent (schema skew, or
+  a producer that predates the liveness probe).
+
+### What recovery does *not* do
+
+- **It never silently downgrades push to pull.** If a plain `telex attach` would create a pull-only
+  member over a live push intent, the daemon either reconciles it to push or refuses with
+  `Incompatible` / `PushIntentUnrecoverable`. It never creates the pull-only member.
+  This guarantee is scoped to the case with **no live armed pull waiter**: an armed waiter still
+  wins, and the intent waits rather than forcing the conflict.
+- **It never returns an explicitly detached station.** `telex copilot detach` and
+  `telex station stop` write a durable tombstone, and the reconciler honors it unconditionally.
+  Explicit attach is the only way back.
+- **It never crosses hosts.** Intents are local files bound to this machine and this boot, so a
+  shared Postgres store — or a synced home directory — cannot let one host restore another's bridge.
+
+### Before you drain
+
+`telex daemon stop --drain`, `telex upgrade`, and `telex rollback` print a pre-drain intent report:
+
+```
+station intents  recoverable 2 degraded 0 incompatible 0 unknown 0
+```
+
+`recoverable` is what a successor is expected to restore automatically. `degraded` and
+`incompatible` need action: run `telex --address <station> copilot resume` after the switch.
+Rolling back to a binary that predates this feature returns those stations to manual resume, and the
+rollback output warns about it.
+
+### Destructive testing
+
+Station intents are namespaced by a hash of your user identity, your **canonicalized config root**,
+and the protocol major. To experiment destructively without touching your real bindings, point
+`TELEX_CONFIG` (and `TELEX_HOME`) at a scratch directory: the scratch daemon gets its own intent
+scope, and nothing you do there can restore or revoke a station in your normal scope.
+
 ## Recovering from a lost daemon
 
 A `wait` that finds no daemon exits with a distinct code (see

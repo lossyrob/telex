@@ -818,3 +818,118 @@ fn plugin_versions_track_the_crate_version() {
          Cargo.toml [package].version ({crate_version})"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Version axes (issue #106 / ADR 0050)
+// ---------------------------------------------------------------------------------------------
+
+/// The four release axes this feature touches, checked against a **frozen previous-release
+/// fixture** rather than against a second copy of the current constants.
+///
+/// Comparing a constant to itself asserts nothing. Comparing it to a recorded previous value is
+/// what makes "this axis is deliberately unchanged" a real, failing check: if someone bumps
+/// `MIN_COMPATIBLE_PLUGIN_VERSION`, this test fails and forces the runbook to be updated with it.
+#[test]
+fn station_intent_version_axes_match_the_frozen_previous_release_contract() {
+    let fixture: Value =
+        serde_json::from_str(&read("tests/fixtures/release/version-axes-previous.json"))
+            .expect("parse the frozen version-axis fixture");
+    let previous = &fixture["axes"];
+
+    // Axes this work deliberately moves.
+    assert_eq!(
+        previous["copilot_bridge_protocol"].as_u64(),
+        Some(1),
+        "the fixture must record the pre-change bridge protocol"
+    );
+    assert_eq!(
+        telex::commands::copilot::COPILOT_BRIDGE_PROTOCOL as u64,
+        2,
+        "the probe verb bumps the bridge protocol to 2"
+    );
+    assert_eq!(
+        previous["protocol_minor"].as_u64(),
+        Some(4),
+        "the fixture must record the pre-change daemon protocol minor"
+    );
+    assert_eq!(
+        telex::daemon_ipc::PROTOCOL_MINOR as u64,
+        5,
+        "ReconcileIntents plus the intent status projection bumps the daemon protocol minor to 5"
+    );
+    assert_eq!(
+        telex::daemon_reconcile::RECONCILE_MIN_DAEMON_MINOR,
+        telex::daemon_ipc::PROTOCOL_MINOR,
+        "the client capability gate must name the minor that actually introduced reconciliation"
+    );
+
+    // The axis introduced by this work.
+    assert!(
+        previous["station_intent_schema_version"].is_null(),
+        "the station-intent schema did not exist in the previous release"
+    );
+    assert_eq!(
+        telex::station_intent::STATION_INTENT_SCHEMA_VERSION,
+        1,
+        "the station-intent schema starts at 1"
+    );
+    assert_eq!(
+        telex::station_intent::STATION_INTENT_SCHEMA_MIN_SUPPORTED,
+        1
+    );
+    assert_eq!(
+        telex::station_intent::STATION_INTENT_SCHEMA_MAX_SUPPORTED,
+        1
+    );
+
+    // The axis asserted UNCHANGED.
+    assert_eq!(
+        previous["min_compatible_plugin_version"].as_str(),
+        Some(telex::commands::copilot::MIN_COMPATIBLE_PLUGIN_VERSION),
+        "MIN_COMPATIBLE_PLUGIN_VERSION is an asserted-unchanged axis for this release; \
+         if the plugin/bridge contract really changed, update the fixture AND the release runbook"
+    );
+
+    // And the runbook must actually document all four axes.
+    let runbook = read("docs/developing/releasing.md");
+    for axis in [
+        "STATION_INTENT_SCHEMA_VERSION",
+        "COPILOT_BRIDGE_PROTOCOL",
+        "PROTOCOL_MINOR",
+        "MIN_COMPATIBLE_PLUGIN_VERSION",
+    ] {
+        assert!(
+            runbook.contains(axis),
+            "docs/developing/releasing.md must document the {axis} release axis"
+        );
+    }
+}
+
+/// A frozen V1 manifest must still load, and a rewrite must preserve a field this build does not
+/// know about.
+#[test]
+fn station_intent_frozen_v1_fixture_loads_and_preserves_unknown_fields() {
+    let raw = read("tests/fixtures/station_intent/v1/live.intent.json");
+    let intent: telex::station_intent::StationIntentV1 =
+        serde_json::from_str(&raw).expect("a frozen V1 manifest must still deserialize");
+    intent
+        .validate()
+        .expect("a frozen V1 manifest must still validate");
+    assert_eq!(intent.schema_version, 1);
+    assert_eq!(intent.delivery_mode, "push");
+    assert_eq!(intent.cc_watermark_ms, Some(1_785_000_000_123));
+    assert_eq!(
+        intent.extra.get("a_field_from_a_future_build"),
+        Some(&serde_json::json!({"must": "survive a rewrite"})),
+        "a V1 daemon must not drop a future build's field"
+    );
+
+    let rewritten = serde_json::to_string(&intent).expect("re-encode");
+    let round_tripped: telex::station_intent::StationIntentV1 =
+        serde_json::from_str(&rewritten).expect("re-decode");
+    assert_eq!(round_tripped, intent);
+    assert!(
+        rewritten.contains("a_field_from_a_future_build"),
+        "the unknown field must survive the rewrite, not just the in-memory copy"
+    );
+}
