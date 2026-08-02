@@ -56,6 +56,15 @@ const DEFAULT_DEAF_WARN_MS: i64 = 2 * 60 * 1000;
 
 pub type Result<T> = std::result::Result<T, DaemonError>;
 
+/// Daemon-owned station-intent reconciliation (issue #106 / ADR 0050).
+///
+/// Physically `src/daemon_reconcile.rs`. It is mounted as a child of `daemon` rather than as a
+/// sibling crate module because it manipulates member records, admission guards, and epoch leases —
+/// state that must stay private to the daemon. The crate root re-exports it as
+/// `crate::daemon_reconcile`.
+#[path = "daemon_reconcile.rs"]
+pub mod reconcile;
+
 #[cfg(windows)]
 const WINDOWS_ELEVATION_MISMATCH_HINT: &str = "On Windows, this usually means the telex daemon and this process are running at different elevations (Administrator vs non-Administrator), so they cannot authenticate over the daemon named pipe. Stop the existing daemon from a matching-elevation terminal, or restart/attach from the same elevation as this session (for an elevated session, start telex from an Administrator terminal).";
 
@@ -150,6 +159,26 @@ impl std::error::Error for DaemonError {
 impl From<serde_json::Error> for DaemonError {
     fn from(value: serde_json::Error) -> Self {
         DaemonError::Json(value)
+    }
+}
+
+/// Shared owner-private filesystem errors map onto the two `DaemonError` variants they were
+/// raised as before the primitives moved into `crate::platform_fs`, so daemon-facing error text
+/// is unchanged.
+impl From<crate::platform_fs::FsError> for DaemonError {
+    fn from(value: crate::platform_fs::FsError) -> Self {
+        match value {
+            crate::platform_fs::FsError::Io { action, source } => {
+                DaemonError::Io { action, source }
+            }
+            crate::platform_fs::FsError::Unsupported {
+                capability,
+                message,
+            } => DaemonError::Unsupported {
+                capability,
+                message,
+            },
+        }
     }
 }
 
@@ -332,6 +361,9 @@ pub struct DaemonState {
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
     draining: AtomicBool,
     on_deliver: OnDeliverState,
+    /// Station-intent reconciliation state: the cached index, the per-scope single-flight guard,
+    /// and the trigger/report seam (issue #106 / ADR 0050).
+    intents: reconcile::IntentRuntime,
 }
 
 #[derive(Clone)]
@@ -541,6 +573,11 @@ impl DaemonState {
             retention: Vec::new(),
             idle_stations: IdleStationStatus::default(),
             deaf_stations: DeafStationStatus::default(),
+            // Intent rows are part of the authenticated projection only; the uncapped minimal
+            // projection must not leak session ids or addresses.
+            intents: Vec::new(),
+            intent_index_as_of_ms: None,
+            intent_over_cap: false,
         }
     }
 
@@ -738,6 +775,10 @@ impl DaemonState {
             .collect();
         let idle_count = members.iter().filter(|m| m.idle).count();
         let deaf_count = members.iter().filter(|m| m.deaf_warn).count();
+        // Intent rows come from the cached index only, so building status never touches the intent
+        // directory and never probes a producer.
+        let intent_index = self.intent_index_snapshot();
+        let intents = self.intent_statuses(None);
         DaemonStatus {
             protocol_version: current_protocol_version(),
             daemon_version: proto::DAEMON_VERSION.to_string(),
@@ -760,6 +801,9 @@ impl DaemonState {
                 warn: deaf_count > 0,
                 warn_threshold_ms: deaf_warn_threshold_ms,
             },
+            intents,
+            intent_index_as_of_ms: Some(intent_index.as_of_ms),
+            intent_over_cap: intent_index.over_cap,
         }
     }
 
@@ -2040,6 +2084,9 @@ pub async fn serve() -> Result<()> {
     let state = Arc::new(new_state(paths)?);
     let (drain_tx, mut drain_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let heartbeat_task = tokio::spawn(heartbeat_loop(state.clone()));
+    // Startup scan (trigger (a) of ADR 0050). Spawned, never awaited: the daemon accepts
+    // connections immediately, so a large or corrupt intent scope cannot delay readiness.
+    reconcile::spawn_startup_scan(state.clone());
 
     loop {
         tokio::select! {
@@ -2094,6 +2141,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         ended_sessions: Mutex::new(BTreeMap::new()),
         draining: AtomicBool::new(false),
         on_deliver: OnDeliverState::default(),
+        intents: reconcile::IntentRuntime::default(),
     })
 }
 
@@ -3252,8 +3300,24 @@ fn spawn_on_deliver_backlog(state: Arc<DaemonState>, member: MemberRecord) {
 
 async fn heartbeat_loop(state: Arc<DaemonState>) {
     loop {
-        tokio::time::sleep(HEARTBEAT_INTERVAL).await;
-        heartbeat_members_once(state.clone()).await;
+        // One loop, two responsibilities. Reconciliation rides the existing heartbeat tick rather
+        // than adding a second timer, and it also wakes on an explicit trigger pulse (startup,
+        // upgrade/rollback, `ReconcileIntents`, tests) so callers can drive a pass without waiting
+        // out the interval. A pulse only *schedules* work: per-intent backoff, quarantine, and
+        // deferred cadences are still honored inside the pass.
+        let tick = tokio::time::sleep(HEARTBEAT_INTERVAL);
+        tokio::pin!(tick);
+        let mut heartbeat_due = false;
+        tokio::select! {
+            _ = &mut tick => heartbeat_due = true,
+            _ = state.intents.trigger.notified() => {}
+        }
+        if heartbeat_due {
+            heartbeat_members_once(state.clone()).await;
+        }
+        // The pass is bounded by `RECONCILE_PASS_DEADLINE < HEARTBEAT_INTERVAL`, so it cannot
+        // overrun the tick that started it.
+        reconcile::reconcile_once(state.clone(), None).await;
     }
 }
 
@@ -3635,6 +3699,10 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             if let Err(response) = state.check_admin_cap(proof.as_deref()) {
                 return (response, ClientAction::Continue);
             }
+            // Computed from in-memory members plus the cached intent index, *before* the
+            // lease-release loop, so it describes what a successor will find and cannot push the
+            // graceful drain past `--drain-timeout-ms`.
+            let drain_intents = Some(state.drain_intent_report());
             if let Err(response) = drain_members(state.clone()).await {
                 return (response, ClientAction::Continue);
             }
@@ -3645,9 +3713,20 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                     address: None,
                     message_id: None,
                     lease_epoch: None,
+                    drain_intents,
                 },
                 ClientAction::Drain,
             );
+        }
+        Request::ReconcileIntents { proof, scope } => {
+            // Admin-proofed exactly like `Drain`: reconciliation arms delivery and spawns handler
+            // processes, so it must not be reachable from an unproofed request path.
+            if let Err(response) = state.check_admin_cap(proof.as_deref()) {
+                return (response, ClientAction::Continue);
+            }
+            Response::Reconciled {
+                report: reconcile::reconcile_once(state.clone(), scope).await,
+            }
         }
         Request::Register {
             store_key,
@@ -3955,6 +4034,82 @@ async fn register_member(
         );
     }
 
+    // Anti-downgrade (issue #106 / ADR 0050 decision 10).
+    //
+    // We are about to create a **new** member for this key. If a live push intent exists for it,
+    // creating a pull-only member here would silently downgrade a station the user provisioned for
+    // push — the exact failure the issue calls out. The guard lives here, in `register_member`,
+    // rather than in a Copilot-specific path, so it also covers older clients and plain
+    // `telex attach`.
+    //
+    // It calls `reconcile_intent_locked`, the **guard-free inner** entry point: this function
+    // already holds the per-`MemberKey` admission guard for this key, and that guard is documented
+    // as outermost and non-reentrant, so calling the acquiring `reconcile_once` here would
+    // self-deadlock the hottest register path.
+    if on_deliver.is_none() && !replace_on_deliver {
+        let intent_key = reconcile::IntentKey {
+            store_key: store_key.clone(),
+            session_id: session_id.clone(),
+            address: address.clone(),
+        };
+        if state.live_push_intent(&intent_key).is_some() {
+            match state.load_live_intent(&intent_key) {
+                Some(intent) => {
+                    let outcome = reconcile::reconcile_intent_locked(state.clone(), &intent).await;
+                    match outcome {
+                        // Push was restored (or was already live): treat the incoming registration
+                        // as a refresh of the now-push member rather than creating a pull-only one.
+                        reconcile::IntentOutcome::Restored
+                        | reconcile::IntentOutcome::RefreshedNoOp => {
+                            if let Some(restored) =
+                                state.get_member(&store_key, &session_id, &address)
+                            {
+                                return Response::Registered {
+                                    lease_epoch: restored.lease_epoch,
+                                    owner_instance_id: restored.owner_instance_id,
+                                };
+                            }
+                        }
+                        // A live armed pull waiter wins (decision 13): the anti-downgrade guarantee
+                        // is explicitly scoped to the no-live-waiter case, so fall through and let
+                        // the normal pull registration proceed.
+                        reconcile::IntentOutcome::DeferredPullWaiter => {}
+                        // Anything else means we could not prove the push path is recoverable, so
+                        // we fail closed with a typed reason instead of creating a pull-only member
+                        // over a live push intent.
+                        other => {
+                            let code = other.failure_code().unwrap_or("unrecoverable").to_string();
+                            state.push_recent_error(
+                                "PushIntentUnrecoverable",
+                                format!(
+                                    "refused pull-only registration over a live push intent store={store_key} session={session_id} address={address}: {code}"
+                                ),
+                            );
+                            return proto::incompatible_with_reason(
+                                format!(
+                                    "address {address} has a live push intent for session {session_id} that could not be restored ({code}); \
+                                     re-provision push with `telex --address {address} copilot resume`, or detach it with `telex --address {address} copilot detach` before attaching pull-only"
+                                ),
+                                NeedsAttachReason::PushIntentUnrecoverable,
+                            );
+                        }
+                    }
+                }
+                None => {
+                    // The index says live but the manifest is gone or unreadable. Fail closed
+                    // rather than guess.
+                    return proto::incompatible_with_reason(
+                        format!(
+                            "address {address} has a live push intent for session {session_id} whose manifest could not be read; \
+                             re-provision push with `telex --address {address} copilot resume`, or detach it before attaching pull-only"
+                        ),
+                        NeedsAttachReason::PushIntentUnrecoverable,
+                    );
+                }
+            }
+        }
+    }
+
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
         Err(response) => return response,
@@ -4210,6 +4365,7 @@ async fn drain_deferred(
         address: None,
         message_id: None,
         lease_epoch: None,
+        drain_intents: None,
     }
 }
 
@@ -4232,12 +4388,17 @@ async fn end_session_members(
             format!("{kind} no-op store={store_key} session={session_id}: no active members"),
         );
     }
+    // An ended session must never be re-attended by a stale intent. This is daemon-owned and
+    // harness-neutral: it covers `sessionEnd`, watch-pid death, and idle-TTL reaping alike,
+    // because intents are generic records the daemon owns rather than Copilot state.
+    state.revoke_intents_for_session(&store_key, &session_id);
     Response::Ack {
         message: Some(presence_ended_detail(kind)),
         delivery_outcome: None,
         address: None,
         message_id: None,
         lease_epoch: None,
+        drain_intents: None,
     }
 }
 
@@ -4319,6 +4480,7 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
         address: Some(address),
         message_id: None,
         lease_epoch: affected.first().map(|m| m.lease_epoch).or(durable_epoch),
+        drain_intents: None,
     }
 }
 
@@ -4449,6 +4611,12 @@ async fn detach_member(
                 // backend contract). A second, non-atomic write can race a concurrent explicit
                 // re-attach's tombstone clear and recreate a stale tombstone for a freshly-live
                 // station, which `telex copilot push` would then refuse permanently.
+                //
+                // Intent revocation happens *after* the durable tombstone, deliberately: a crash
+                // between the two leaves tombstone-wins, which the reconciler already honors, so
+                // the station still cannot auto-return. The reverse order could leave a live
+                // intent with no tombstone.
+                state.revoke_intent_for_binding(&store_key, &session_id, &address);
             }
             Ok(false) => {
                 self_demote_member(
@@ -4481,6 +4649,7 @@ async fn detach_member(
             address: Some(address),
             message_id: None,
             lease_epoch: Some(member.lease_epoch),
+            drain_intents: None,
         }
     } else {
         let backend = match state.backend_for(&store_key).await {
@@ -4501,12 +4670,15 @@ async fn detach_member(
                 "Detach recorded terminal tombstone store={store_key} session={session_id} address={address}: no active in-memory member"
             ),
         );
+        // Same ordering as the attached branch: durable tombstone first, local intent second.
+        state.revoke_intent_for_binding(&store_key, &session_id, &address);
         Response::Ack {
             message: Some("not-attached".to_string()),
             delivery_outcome: None,
             address: Some(address),
             message_id: None,
             lease_epoch: None,
+            drain_intents: None,
         }
     }
 }
@@ -5047,6 +5219,7 @@ async fn ack_message(
                 address: Some(address),
                 message_id: Some(message_id),
                 lease_epoch: Some(member.lease_epoch),
+                drain_intents: None,
             }
         }
         Err(e) => proto::unsupported(format!("acking message {message_id}: {e:#}")),
@@ -5416,6 +5589,7 @@ mod p3_tests {
             ended_sessions: Mutex::new(BTreeMap::new()),
             draining: AtomicBool::new(false),
             on_deliver: OnDeliverState::default(),
+            intents: reconcile::IntentRuntime::default(),
         })
     }
 
@@ -9973,8 +10147,99 @@ pub mod test_support {
                 ended_sessions: Mutex::new(BTreeMap::new()),
                 draining: AtomicBool::new(false),
                 on_deliver: OnDeliverState::default(),
+                intents: reconcile::IntentRuntime::default(),
             });
             Self { state, root }
+        }
+
+        /// A `TestDaemon` that has exercised the **real** startup path: the run dir is created and
+        /// owner-private-checked, the intent scope is opened, and the startup scan (GC + first
+        /// reconcile pass) has completed.
+        ///
+        /// The plain constructor deliberately skips this so existing tests stay fast and hermetic;
+        /// startup reconciliation needs the real path, so it gets its own constructor rather than a
+        /// flag that silently changes what every other test exercises.
+        pub async fn with_startup_scan(label: &str) -> Self {
+            let daemon = Self::new(label);
+            std::fs::create_dir_all(daemon.state.paths.run_dir.clone())
+                .expect("create test run dir");
+            let mut reports = daemon.state.reconcile_reports();
+            let before = reports.borrow_and_update().pass_seq;
+            reconcile::spawn_startup_scan(daemon.state.clone());
+            let _ = reconcile::await_next_report(reports, before, Duration::from_secs(30)).await;
+            daemon
+        }
+
+        /// Open (creating if needed) this daemon's station-intent scope, so a test can seed intents
+        /// exactly where the daemon will look for them.
+        pub fn intent_store(&self) -> crate::station_intent::IntentStore {
+            std::fs::create_dir_all(&self.state.paths.run_dir).expect("create test run dir");
+            crate::station_intent::IntentStore::open(
+                &self.state.paths.run_dir,
+                &self.state.paths.singleton_hash,
+            )
+            .expect("open test intent scope")
+        }
+
+        pub fn singleton_hash(&self) -> &str {
+            &self.state.paths.singleton_hash
+        }
+
+        /// Drive exactly one reconciliation pass and return its report. Deterministic: no wall-clock
+        /// sleep, no polling.
+        pub async fn reconcile_once(&self) -> crate::daemon_ipc::ReconcileReport {
+            reconcile::reconcile_once(self.state.clone(), None).await
+        }
+
+        /// Pulse the reconcile trigger and await the report of the pass it drives.
+        pub async fn pulse_reconcile_and_wait(
+            &self,
+            timeout: Duration,
+        ) -> Option<crate::daemon_ipc::ReconcileReport> {
+            let mut reports = self.state.reconcile_reports();
+            let before = reports.borrow_and_update().pass_seq;
+            self.state.pulse_reconcile();
+            reconcile::await_next_report(reports, before, timeout).await
+        }
+
+        pub fn reconcile_reports(
+            &self,
+        ) -> tokio::sync::watch::Receiver<crate::daemon_ipc::ReconcileReport> {
+            self.state.reconcile_reports()
+        }
+
+        pub fn intent_index(&self) -> reconcile::IntentIndexSnapshot {
+            self.state.intent_index_snapshot()
+        }
+
+        pub fn drain_intent_report(&self) -> crate::daemon_ipc::DrainIntentReport {
+            self.state.drain_intent_report()
+        }
+
+        /// The intent-row projection the authenticated status surface exposes.
+        pub fn intent_statuses(&self) -> Vec<crate::daemon_ipc::IntentStatus> {
+            self.state.intent_statuses(None)
+        }
+
+        /// Reconcile one intent while *holding* its admission guard, exactly as the inline
+        /// anti-downgrade path inside `register_member` does. A deadlock here is a real deadlock in
+        /// the hottest register path, so this is exercised directly.
+        pub async fn reconcile_intent_under_admission_guard(
+            &self,
+            intent: &crate::station_intent::StationIntentV1,
+        ) -> String {
+            let admission = self
+                .state
+                .delivery_admission(
+                    &intent.store_key,
+                    &intent.session_id,
+                    &intent.address,
+                    DeliveryAdmissionKind::Register,
+                )
+                .await;
+            let _guard = admission.lock().await;
+            let outcome = reconcile::reconcile_intent_locked(self.state.clone(), intent).await;
+            format!("{outcome:?}")
         }
 
         pub fn root(&self) -> &Path {
@@ -10525,62 +10790,20 @@ mod platform {
         Ok(format!("uid:{}", unsafe { libc::geteuid() }))
     }
 
+    // Owner-private filesystem and process-identity primitives live in `crate::platform_fs` so the
+    // daemon and the station-intent store share one hardened implementation (ADR 0050). These
+    // wrappers only adapt the shared error type; the daemon's cap-file, socket, and
+    // peer-verification behavior is byte-for-byte unchanged.
     pub fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
-        if !path.exists() {
-            let mut builder = std::fs::DirBuilder::new();
-            builder.recursive(true).mode(0o700);
-            builder
-                .create(path)
-                .map_err(|e| io_err("creating owner-private daemon directory", e))?;
-        }
-        let link_meta = std::fs::symlink_metadata(path)
-            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
-        if link_meta.file_type().is_symlink() {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is a symlink", path.display()),
-            });
-        }
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| io_err("setting owner-private daemon directory permissions", e))?;
-        let meta = std::fs::metadata(path)
-            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
-        let uid = unsafe { libc::geteuid() };
-        if meta.uid() != uid {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!(
-                    "{} is owned by uid {}, expected uid {}",
-                    path.display(),
-                    meta.uid(),
-                    uid
-                ),
-            });
-        }
-        if meta.mode() & 0o077 != 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is group/world accessible", path.display()),
-            });
-        }
-        std::fs::canonicalize(path).map_err(|e| io_err("canonicalizing daemon directory", e))
+        crate::platform_fs::ensure_owner_private_dir(path).map_err(Into::into)
     }
 
     pub fn write_owner_only_file(path: &Path, bytes: &[u8]) -> Result<()> {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|e| io_err("creating owner-only daemon capability file", e))?;
-        use std::io::Write;
-        file.write_all(bytes)
-            .map_err(|e| io_err("writing daemon capability file", e))?;
-        file.write_all(b"\n")
-            .map_err(|e| io_err("writing daemon capability file", e))?;
-        file.sync_all()
-            .map_err(|e| io_err("syncing daemon capability file", e))?;
-        Ok(())
+        crate::platform_fs::write_owner_only_file(path, bytes).map_err(Into::into)
+    }
+
+    pub fn process_exe_path(pid: u32) -> Result<PathBuf> {
+        crate::platform_fs::process_exe_path(pid).map_err(Into::into)
     }
 
     pub fn verify_client_peer(conn: &ServerConn) -> Result<()> {
@@ -10687,42 +10910,17 @@ mod platform {
 
     #[cfg(target_os = "linux")]
     fn server_executable(pid: u32) -> Result<PathBuf> {
-        std::fs::canonicalize(format!("/proc/{pid}/exe")).map_err(|e| DaemonError::Unsupported {
+        process_exe_path(pid).map_err(|e| DaemonError::Unsupported {
             capability: "client-side server executable verification",
-            message: format!("cannot verify /proc/{pid}/exe: {e}"),
+            message: e.to_string(),
         })
     }
 
     #[cfg(target_os = "macos")]
     fn server_executable(pid: u32) -> Result<PathBuf> {
-        use std::ffi::OsString;
-        use std::os::unix::ffi::OsStringExt;
-
-        let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
-        let bytes = unsafe {
-            libc::proc_pidpath(
-                pid as libc::c_int,
-                buffer.as_mut_ptr() as *mut libc::c_void,
-                buffer.len() as u32,
-            )
-        };
-        if bytes <= 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "client-side server executable verification",
-                message: format!(
-                    "cannot resolve executable path for pid {pid}: {}",
-                    std::io::Error::last_os_error()
-                ),
-            });
-        }
-        buffer.truncate(bytes as usize);
-        if buffer.last() == Some(&0) {
-            buffer.pop();
-        }
-        let path = PathBuf::from(OsString::from_vec(buffer));
-        std::fs::canonicalize(&path).map_err(|e| DaemonError::Unsupported {
+        process_exe_path(pid).map_err(|e| DaemonError::Unsupported {
             capability: "client-side server executable verification",
-            message: format!("cannot canonicalize {} for pid {pid}: {e}", path.display()),
+            message: e.to_string(),
         })
     }
 
@@ -10784,30 +10982,23 @@ mod platform {
 #[cfg(windows)]
 mod platform {
     use super::*;
-    use std::ffi::{c_void, OsStr, OsString};
-    use std::io::Write;
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    use std::ffi::{c_void, OsStr};
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::AsRawHandle;
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer};
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, LocalFree, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS,
-        ERROR_PIPE_BUSY, FILETIME, HANDLE, INVALID_HANDLE_VALUE, PSID,
+        CloseHandle, LocalFree, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY,
+        FILETIME, HANDLE, INVALID_HANDLE_VALUE,
     };
     use windows_sys::Win32::Security::Authorization::{
         ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-        ConvertStringSidToSidW, GetNamedSecurityInfoW, SetNamedSecurityInfoW, SDDL_REVISION_1,
-        SE_FILE_OBJECT,
+        SDDL_REVISION_1,
     };
     use windows_sys::Win32::Security::{
-        AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
-        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation, TokenUser,
-        ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE, ACL, ACL_SIZE_INFORMATION,
-        DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-        SECURITY_ATTRIBUTES, SE_DACL_PRESENT, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+        GetTokenInformation, TokenUser, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateDirectoryW, CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
         FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
     };
     use windows_sys::Win32::System::Pipes::{
@@ -10816,7 +11007,7 @@ mod platform {
     };
     use windows_sys::Win32::System::Threading::{
         GetCurrentProcess, GetProcessTimes, OpenProcess, OpenProcessToken,
-        QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
     pub type ClientConn = NamedPipeClient;
@@ -10893,52 +11084,20 @@ mod platform {
         sid_string_from_token(token.0)
     }
 
+    // Owner-private filesystem and process-identity primitives live in `crate::platform_fs` so the
+    // daemon and the station-intent store share one hardened implementation (ADR 0050). These
+    // wrappers only adapt the shared error type; the daemon's cap-file, pipe, and
+    // peer-verification behavior is byte-for-byte unchanged.
     pub fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
-        if !path.exists() {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| io_err("creating daemon directory parent", e))?;
-            }
-            create_owner_only_dir(path)?;
-        }
-        validate_owner_private_dir_shape(path)?;
-        set_owner_only_dir_security(path)?;
-        let canonical = std::fs::canonicalize(path)
-            .map_err(|e| io_err("canonicalizing daemon directory", e))?;
-        validate_owner_private_dir_shape(&canonical)?;
-        set_owner_only_dir_security(&canonical)?;
-        validate_owner_private_dir_security(&canonical)?;
-        Ok(canonical)
+        crate::platform_fs::ensure_owner_private_dir(path).map_err(Into::into)
     }
 
     pub fn write_owner_only_file(path: &Path, bytes: &[u8]) -> Result<()> {
-        let sa = owner_only_security_attributes()?;
-        let wide = wide_null(path.as_os_str());
-        let handle = unsafe {
-            CreateFileW(
-                wide.as_ptr(),
-                FILE_GENERIC_WRITE,
-                0,
-                &sa.attrs,
-                CREATE_NEW,
-                FILE_ATTRIBUTE_NORMAL,
-                0,
-            )
-        };
-        if handle == INVALID_HANDLE_VALUE {
-            return Err(io_err(
-                "creating owner-only daemon capability file",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let mut file = unsafe { std::fs::File::from_raw_handle(handle as _) };
-        file.write_all(bytes)
-            .map_err(|e| io_err("writing daemon capability file", e))?;
-        file.write_all(b"\n")
-            .map_err(|e| io_err("writing daemon capability file", e))?;
-        file.sync_all()
-            .map_err(|e| io_err("syncing daemon capability file", e))?;
-        Ok(())
+        crate::platform_fs::write_owner_only_file(path, bytes).map_err(Into::into)
+    }
+
+    pub fn process_exe_path(pid: u32) -> Result<PathBuf> {
+        crate::platform_fs::process_exe_path(pid).map_err(Into::into)
     }
 
     pub fn verify_client_peer(conn: &NamedPipeServer) -> Result<()> {
@@ -11010,241 +11169,6 @@ mod platform {
         }
         unsafe { NamedPipeServer::from_raw_handle(handle as _) }
             .map_err(|e| io_err("wrapping daemon named pipe handle", e))
-    }
-
-    fn create_owner_only_dir(path: &Path) -> Result<()> {
-        let sa = owner_only_security_attributes()?;
-        let wide = wide_null(path.as_os_str());
-        let ok = unsafe { CreateDirectoryW(wide.as_ptr(), &sa.attrs) };
-        if ok == 0 {
-            let err = unsafe { GetLastError() };
-            if err == ERROR_ALREADY_EXISTS {
-                return Ok(());
-            }
-            return Err(io_err(
-                "creating owner-private daemon directory",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn set_owner_only_dir_security(path: &Path) -> Result<()> {
-        let sa = owner_only_security_attributes()?;
-        let mut dacl_present = 0;
-        let mut dacl_defaulted = 0;
-        let mut dacl = std::ptr::null_mut();
-        let ok = unsafe {
-            GetSecurityDescriptorDacl(
-                sa.descriptor,
-                &mut dacl_present,
-                &mut dacl,
-                &mut dacl_defaulted,
-            )
-        };
-        if ok == 0 || dacl_present == 0 || dacl.is_null() {
-            return Err(io_err(
-                "reading owner-private daemon directory DACL",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let mut owner_defaulted = 0;
-        let mut owner = std::ptr::null_mut();
-        let ok =
-            unsafe { GetSecurityDescriptorOwner(sa.descriptor, &mut owner, &mut owner_defaulted) };
-        if ok == 0 || owner.is_null() {
-            return Err(io_err(
-                "reading owner-private daemon directory owner",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let wide = wide_null(path.as_os_str());
-        let rc = unsafe {
-            SetNamedSecurityInfoW(
-                wide.as_ptr(),
-                SE_FILE_OBJECT,
-                OWNER_SECURITY_INFORMATION
-                    | DACL_SECURITY_INFORMATION
-                    | PROTECTED_DACL_SECURITY_INFORMATION,
-                owner,
-                std::ptr::null_mut(),
-                dacl,
-                std::ptr::null_mut(),
-            )
-        };
-        if rc != 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!(
-                    "setting DACL for {} failed: {}",
-                    path.display(),
-                    std::io::Error::from_raw_os_error(rc as i32)
-                ),
-            });
-        }
-        Ok(())
-    }
-
-    fn validate_owner_private_dir_shape(path: &Path) -> Result<()> {
-        use std::os::windows::fs::MetadataExt;
-        use std::path::{Component, Prefix};
-
-        if path.components().any(|component| {
-            matches!(
-                component,
-                Component::Prefix(prefix)
-                    if matches!(prefix.kind(), Prefix::UNC(_, _) | Prefix::VerbatimUNC(_, _))
-            )
-        }) {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is not a local path", path.display()),
-            });
-        }
-        let meta = std::fs::symlink_metadata(path)
-            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
-        if !meta.is_dir() {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is not a directory", path.display()),
-            });
-        }
-        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is a reparse point", path.display()),
-            });
-        }
-        Ok(())
-    }
-
-    fn validate_owner_private_dir_security(path: &Path) -> Result<()> {
-        const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
-        const ACCESS_DENIED_ACE_TYPE: u8 = 1;
-
-        let mut sd: *mut c_void = std::ptr::null_mut();
-        let mut owner: PSID = std::ptr::null_mut();
-        let mut dacl: *mut ACL = std::ptr::null_mut();
-        let wide = wide_null(path.as_os_str());
-        let rc = unsafe {
-            GetNamedSecurityInfoW(
-                wide.as_ptr(),
-                SE_FILE_OBJECT,
-                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-                &mut owner,
-                std::ptr::null_mut(),
-                &mut dacl,
-                std::ptr::null_mut(),
-                &mut sd,
-            )
-        };
-        if rc != 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!(
-                    "cannot read security descriptor for {}: {}",
-                    path.display(),
-                    std::io::Error::from_raw_os_error(rc as i32)
-                ),
-            });
-        }
-        let _sd_guard = LocalAllocGuard(sd);
-
-        let current_sid = sid_from_string(&current_user_identity()?)?;
-        let system_sid = sid_from_string("S-1-5-18")?;
-        let admins_sid = sid_from_string("S-1-5-32-544")?;
-
-        if owner.is_null() || unsafe { EqualSid(owner, current_sid.0) } == 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is not owned by the current SID", path.display()),
-            });
-        }
-
-        let mut control = 0u16;
-        let mut revision = 0u32;
-        let ok = unsafe { GetSecurityDescriptorControl(sd, &mut control, &mut revision) };
-        if ok == 0 || control & SE_DACL_PRESENT == 0 || control & SE_DACL_PROTECTED == 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} does not have a protected explicit DACL", path.display()),
-            });
-        }
-        if dacl.is_null() {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is missing a DACL", path.display()),
-            });
-        }
-
-        let mut info = ACL_SIZE_INFORMATION {
-            AceCount: 0,
-            AclBytesInUse: 0,
-            AclBytesFree: 0,
-        };
-        let ok = unsafe {
-            GetAclInformation(
-                dacl,
-                &mut info as *mut _ as *mut c_void,
-                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
-                AclSizeInformation,
-            )
-        };
-        if ok == 0 || info.AceCount == 0 {
-            return Err(io_err(
-                "reading daemon directory ACL",
-                std::io::Error::last_os_error(),
-            ));
-        }
-
-        for idx in 0..info.AceCount {
-            let mut ace_ptr: *mut c_void = std::ptr::null_mut();
-            let ok = unsafe { GetAce(dacl, idx, &mut ace_ptr) };
-            if ok == 0 || ace_ptr.is_null() {
-                return Err(io_err(
-                    "reading daemon directory ACE",
-                    std::io::Error::last_os_error(),
-                ));
-            }
-
-            let header = unsafe { &*(ace_ptr as *const windows_sys::Win32::Security::ACE_HEADER) };
-            match header.AceType {
-                ACCESS_ALLOWED_ACE_TYPE => {
-                    let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
-                    let sid = (&ace.SidStart as *const u32).cast::<c_void>() as PSID;
-                    let allowed = unsafe {
-                        EqualSid(sid, current_sid.0) != 0
-                            || EqualSid(sid, system_sid.0) != 0
-                            || EqualSid(sid, admins_sid.0) != 0
-                    };
-                    if !allowed {
-                        return Err(DaemonError::Unsupported {
-                            capability: "owner-private daemon directory",
-                            message: format!("{} grants access to a non-owner SID", path.display()),
-                        });
-                    }
-                }
-                ACCESS_DENIED_ACE_TYPE => {
-                    let _ace = unsafe { &*(ace_ptr as *const ACCESS_DENIED_ACE) };
-                    return Err(DaemonError::Unsupported {
-                        capability: "owner-private daemon directory",
-                        message: format!("{} contains a deny ACE", path.display()),
-                    });
-                }
-                _ => {
-                    return Err(DaemonError::Unsupported {
-                        capability: "owner-private daemon directory",
-                        message: format!(
-                            "{} contains unsupported ACE type {}",
-                            path.display(),
-                            header.AceType
-                        ),
-                    });
-                }
-            }
-        }
-
-        Ok(())
     }
 
     #[cfg(test)]
@@ -11380,7 +11304,13 @@ mod platform {
         let sid = sid_string_from_token(token.0)?;
         let start_time_100ns = process_start_time(process.0)?;
         let exe = if expected_exe.is_some() {
-            Some(process_exe(process.0)?)
+            // One implementation of executable resolution, shared with the intent producer-identity
+            // path (`platform_fs::process_exe_path`), so the two can never disagree about what
+            // "this pid's executable" means.
+            Some(process_exe_path(pid).map_err(|e| DaemonError::Unsupported {
+                capability: "peer process executable verification",
+                message: e.to_string(),
+            })?)
         } else {
             None
         };
@@ -11405,25 +11335,6 @@ mod platform {
             ));
         }
         Ok(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
-    }
-
-    fn process_exe(process: HANDLE) -> Result<PathBuf> {
-        let mut buf = vec![0u16; 32768];
-        let mut len = buf.len() as u32;
-        let ok = unsafe { QueryFullProcessImageNameW(process, 0, buf.as_mut_ptr(), &mut len) };
-        if ok == 0 {
-            return Err(io_err(
-                "reading peer process executable",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let raw = PathBuf::from(OsString::from_wide(&buf[..len as usize]));
-        std::fs::canonicalize(&raw).map_err(|e| {
-            io_err(
-                "canonicalizing peer process executable",
-                std::io::Error::new(e.kind(), format!("{}: {e}", raw.display())),
-            )
-        })
     }
 
     fn current_process_token() -> Result<Handle> {
@@ -11455,43 +11366,6 @@ mod platform {
         DaemonError::Unauthorized(format!(
             "{context}: {source}. {WINDOWS_ELEVATION_MISMATCH_HINT}"
         ))
-    }
-
-    struct LocalAllocGuard(*mut c_void);
-
-    impl Drop for LocalAllocGuard {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe {
-                    LocalFree(self.0);
-                }
-            }
-        }
-    }
-
-    struct OwnedSid(PSID);
-
-    impl Drop for OwnedSid {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe {
-                    LocalFree(self.0);
-                }
-            }
-        }
-    }
-
-    fn sid_from_string(sid: &str) -> Result<OwnedSid> {
-        let wide = wide_null(OsStr::new(sid));
-        let mut raw: PSID = std::ptr::null_mut();
-        let ok = unsafe { ConvertStringSidToSidW(wide.as_ptr(), &mut raw) };
-        if ok == 0 || raw.is_null() {
-            return Err(io_err(
-                "converting SID string",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        Ok(OwnedSid(raw))
     }
 
     fn sid_string_from_token(token: HANDLE) -> Result<String> {

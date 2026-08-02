@@ -34,6 +34,16 @@ import { join } from "node:path";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { randomBytes } from "node:crypto";
 import { createBusyTracker, DEFERRED_UNTIL_IDLE } from "./busy-state.mjs";
+import {
+  COPILOT_BRIDGE_PROTOCOL,
+  PROBE_ERRORS,
+  buildProbeError,
+  buildProbeResponse,
+  classifyRequest,
+  createProbeRateLimiter,
+  secretMatches,
+  validateProbeRequest,
+} from "./probe-protocol.mjs";
 
 const isPosix = platform() !== "win32";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024; // 8 MiB: fits a max daemon message plus JSON-escaped prompt wrapping, so large messages push as turns instead of dead-lettering
@@ -85,6 +95,14 @@ session.on((event) => busyTracker.onEvent(event));
 // over the OS ACL, needed because the default Windows named-pipe DACL grants Everyone READ.
 const secret = randomBytes(32).toString("hex");
 const registryPath = join(registryDir, `${sessionId}.json`);
+
+// Bridge generation: a monotonic marker for "this bridge process". The daemon carries it through a
+// probe response so a reload is distinguishable from a still-running instance. It is diagnostic
+// only — never an authorization input; process identity is proved at the OS level before a probe
+// is ever sent.
+const bridgeGeneration = Date.now();
+const startTimeMs = Math.round(Date.now() - process.uptime() * 1000);
+const probeRateLimiter = createProbeRateLimiter();
 
 // Derive the same-user endpoint from the session id (stable across reloads).
 const endpoint =
@@ -149,8 +167,34 @@ async function handleConnection(socket) {
       socket.end();
       return;
     }
-    if (typeof input.secret !== "string" || input.secret !== secret) {
+    if (typeof input.secret !== "string" || !secretMatches(input.secret, secret)) {
       writeResponse(socket, { ok: false, error: "unauthorized" });
+      socket.end();
+      return;
+    }
+    // Liveness probe (protocol 2): answer "yes, this is session X's bridge" and nothing more. No
+    // paths, no busy diagnostics, no secret. Handled before the push path so a probe never touches
+    // the busy tracker or the send queue.
+    if (classifyRequest(input).kind === "probe") {
+      if (!probeRateLimiter.allow()) {
+        writeResponse(socket, buildProbeError(PROBE_ERRORS.RATE_LIMITED));
+        socket.end();
+        return;
+      }
+      const validated = validateProbeRequest(input, secret);
+      if (!validated.ok) {
+        writeResponse(socket, buildProbeError(validated.error));
+        socket.end();
+        return;
+      }
+      writeResponse(
+        socket,
+        buildProbeResponse({
+          nonce: validated.nonce,
+          sessionId,
+          bridgeGeneration,
+        }),
+      );
       socket.end();
       return;
     }
@@ -257,6 +301,14 @@ async function writeRegistry() {
         pid: process.pid,
         secret,
         maxRequestBytes: MAX_REQUEST_BYTES,
+        // Wire protocol this bridge speaks. `telex copilot attach/resume` records the range in the
+        // station intent so the daemon can tell a probe-capable producer (>= 2) from a *legacy*
+        // one — legacy is never auto-restored, but it never wedges anything either.
+        protocol: COPILOT_BRIDGE_PROTOCOL,
+        bridgeGeneration,
+        // Diagnostic. The authoritative process start time in a station intent is captured by
+        // telex through the platform primitive, never trusted from this file.
+        startTimeMs,
         createdAt,
         heartbeatAt: new Date().toISOString(),
         // Diagnostic only (issue #65): the bridge's connect-time answer is the ONLY authoritative

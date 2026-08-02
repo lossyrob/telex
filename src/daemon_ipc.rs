@@ -9,7 +9,7 @@ use std::fmt;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_MAJOR: u16 = 1;
-pub const PROTOCOL_MINOR: u16 = 4;
+pub const PROTOCOL_MINOR: u16 = 5;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
@@ -46,6 +46,13 @@ pub const ON_DELIVER_DEFERRED_EXIT: i32 = 4;
 /// check it to detect version skew (an older daemon maps exit 4 to a transient retry and ignores
 /// `DrainDeferred`, which is bounded and self-resolves on daemon restart).
 pub const CAP_ON_DELIVER_DEFERRED: &str = "on_deliver_deferred_v1";
+
+/// Advertised (not required): the daemon owns durable station intents and reconciles them
+/// (`Request::ReconcileIntents`, intent rows in status, `IntentRecoveryState`). Advertised rather
+/// than required so a pre-P11 client still handshakes; a client that needs the behavior checks the
+/// daemon minor against `RECONCILE_MIN_DAEMON_MINOR` and refuses to write an intent an older
+/// daemon would never act on.
+pub const CAP_STATION_INTENT: &str = "station_intent_v1";
 
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
@@ -299,6 +306,15 @@ pub enum Request {
         #[serde(default)]
         proof: Option<String>,
     },
+    /// Explicit station-intent reconciliation (issue #106 / ADR 0050). Admin-proofed exactly like
+    /// `Drain`: reconciliation arms delivery and spawns push handler processes, so it must not be
+    /// reachable from an unproofed request path. `scope` optionally narrows the pass to one store.
+    ReconcileIntents {
+        #[serde(default)]
+        proof: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
     Ping,
 }
 
@@ -307,6 +323,204 @@ pub enum Request {
 pub enum NeedsAttachReason {
     RestartLost,
     DeliberatelyDetached,
+    /// A `pending` station intent exists for this binding: an attach is mid-flight (or crashed
+    /// before finalizing). Explicit attach/resume is the way forward; the daemon will not act on a
+    /// pending intent.
+    PushIntentPending,
+    /// A `live` push intent exists for this binding but could not be reconciled, so the daemon
+    /// refused to create a *pull-only* member over it. This is the anti-downgrade signal.
+    PushIntentUnrecoverable,
+    /// Forward-compat catch-all so an older client deserializing a newer daemon's error does not
+    /// fail on a reason it does not know.
+    #[serde(other)]
+    Unknown,
+}
+
+/// Recovery state of a station intent, as projected by the daemon.
+///
+/// Only `Pending`, `Live`, and `Revoked` are ever *persisted*; the rest are runtime projections
+/// held in the daemon's in-memory intent index, so a transient probe failure never rewrites
+/// durable state. `Unknown` is the forward-compat catch-all, matching `StationHealth`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentRecoveryState {
+    /// Written before `Register`, not yet finalized. Never reconciled.
+    Pending,
+    /// Finalized and eligible for reconciliation.
+    #[default]
+    Live,
+    /// Reconciled into a live member during this daemon's lifetime.
+    Restored,
+    /// The predecessor's epoch lease is simply not stale yet. A **waiting** state, not an error:
+    /// it retries at a fixed cadence, never enters the exponential ladder, and never counts toward
+    /// quarantine. This is what makes the published crash-recovery bound derivable.
+    DeferredLease,
+    /// A live armed pull waiter owns the address. Pull-waiter precedence is preserved, so the
+    /// intent waits rather than forcing the conflict.
+    DeferredPullWaiter,
+    /// The producer predates the probe verb, so its liveness is unprovable. Legacy, *not* failed:
+    /// the documented manual resume path keeps working and no turn is ever blocked.
+    LegacyProducer,
+    /// The manifest or descriptor is structurally incompatible with this build.
+    Incompatible,
+    /// The producer, credential, or store selector could not be resolved, so the intent cannot be
+    /// verified. Never "verified anyway".
+    Unverifiable,
+    /// A security check failed (ownership, permissions, containment, reparse point).
+    Insecure,
+    /// Too many consecutive genuine failures; retried on a slow cadence so one wedged intent can
+    /// never consume the pass budget.
+    Quarantined,
+    /// Explicitly revoked locally (detach, session end, fallback downgrade).
+    Tombstoned,
+    /// A durable detach tombstone exists for this binding. Highest precedence of all: an
+    /// explicitly detached station never auto-returns.
+    Revoked,
+    /// Another owner holds the address and is not stale.
+    OwnershipConflict,
+    /// Forward-compat catch-all. Never produced intentionally.
+    #[serde(other)]
+    Unknown,
+}
+
+impl IntentRecoveryState {
+    /// Precedence when several states apply at once, highest first. Encoded as a total order so
+    /// the projection is deterministic rather than dependent on evaluation order.
+    pub fn precedence(self) -> u8 {
+        match self {
+            IntentRecoveryState::Revoked => 13,
+            IntentRecoveryState::Tombstoned => 12,
+            IntentRecoveryState::Insecure => 11,
+            IntentRecoveryState::Incompatible => 10,
+            IntentRecoveryState::OwnershipConflict => 9,
+            IntentRecoveryState::Quarantined => 8,
+            IntentRecoveryState::Unverifiable => 7,
+            IntentRecoveryState::LegacyProducer => 6,
+            IntentRecoveryState::DeferredPullWaiter => 5,
+            IntentRecoveryState::DeferredLease => 4,
+            IntentRecoveryState::Pending => 3,
+            IntentRecoveryState::Restored => 2,
+            IntentRecoveryState::Live => 1,
+            IntentRecoveryState::Unknown => 0,
+        }
+    }
+
+    /// The higher-precedence of two states.
+    pub fn max(self, other: Self) -> Self {
+        if other.precedence() > self.precedence() {
+            other
+        } else {
+            self
+        }
+    }
+
+    /// Whether this is a *waiting* state rather than an error, so status and the drain report can
+    /// project "waiting for the predecessor's lease to go stale" instead of "failing".
+    pub fn is_waiting(self) -> bool {
+        matches!(
+            self,
+            IntentRecoveryState::DeferredLease
+                | IntentRecoveryState::DeferredPullWaiter
+                | IntentRecoveryState::Pending
+        )
+    }
+
+    /// Whether the daemon considers this intent recoverable without operator action.
+    pub fn is_recoverable(self) -> bool {
+        matches!(
+            self,
+            IntentRecoveryState::Live
+                | IntentRecoveryState::Restored
+                | IntentRecoveryState::DeferredLease
+                | IntentRecoveryState::DeferredPullWaiter
+        )
+    }
+}
+
+/// One intent row in the daemon status projection.
+///
+/// Carries evidence, not just a state name, matching the `*_since_ms` / `*_for_ms` / `*_count`
+/// idiom already used by `MemberStatus`. Never carries a secret, a raw argv, or a credential path.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntentStatus {
+    pub store_key: String,
+    pub session_id: String,
+    pub address: String,
+    pub state: IntentRecoveryState,
+    pub generation: u64,
+    #[serde(default)]
+    pub delivery_mode: DeliveryMode,
+    #[serde(default)]
+    pub wake_on_cc: bool,
+    /// Whether a `MemberRecord` currently exists for this binding. When it does, `StationHealth`
+    /// and `PushDeliveryHealth` stay authoritative and this row is supplementary; when it does
+    /// not, this row is the only projection of the binding.
+    #[serde(default)]
+    pub has_member: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cc_watermark_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_attempt_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success_ms: Option<i64>,
+    #[serde(default)]
+    pub attempts: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub producer_verified_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_attempt_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_latency_ms: Option<i64>,
+    /// When the cached index this row was projected from was last refreshed, so a reader can tell
+    /// "no live intent" from "the index has not been refreshed since the last pass".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_as_of_ms: Option<i64>,
+}
+
+/// Outcome counts for one reconciliation pass. Published on the trigger/report seam so callers
+/// (upgrade, rollback, tests) can await a pass rather than poll a clock.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReconcileReport {
+    /// Monotonically increasing pass sequence number.
+    pub pass_seq: u64,
+    pub scanned: usize,
+    pub restored: usize,
+    pub refreshed_no_op: usize,
+    pub deferred_lease: usize,
+    pub deferred_pull_waiter: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    /// Intents in terminal/inert states (revoked, tombstoned, insecure, incompatible, legacy,
+    /// unverifiable, quarantined). Surfaced, never retried on the fast cadence.
+    pub inert: usize,
+    /// Whether the scope holds more than the per-scope write cap. Reported, never acted on.
+    pub over_cap: bool,
+    pub observed_count: usize,
+    pub duration_ms: u64,
+    /// True when the pass stopped on `RECONCILE_PASS_DEADLINE` rather than sweeping the scope.
+    pub deadline_reached: bool,
+    pub index_as_of_ms: i64,
+}
+
+/// Pre/post-drain intent signal, computed from in-memory state only (members + the cached intent
+/// index). No directory scan, no probe, no network I/O — so producing it can never push a graceful
+/// drain past `--drain-timeout-ms`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DrainIntentReport {
+    /// Intents a compatible successor is expected to restore automatically.
+    pub recoverable: usize,
+    /// Intents that need operator action (unverifiable, insecure, quarantined).
+    pub degraded: usize,
+    /// Intents this build cannot reconcile (schema or descriptor incompatibility, legacy producer).
+    pub incompatible: usize,
+    /// Intents whose state is not yet known to the index.
+    pub unknown: usize,
+    pub over_cap: bool,
+    pub observed_count: usize,
+    /// Index freshness, so an operator sees staleness rather than assuming the report is live.
+    pub index_as_of_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -349,6 +563,10 @@ pub enum Response {
     StatusReport {
         status: DaemonStatus,
     },
+    /// One completed reconciliation pass.
+    Reconciled {
+        report: ReconcileReport,
+    },
     Pong {
         protocol_version: ProtocolVersion,
         daemon_version: String,
@@ -365,6 +583,10 @@ pub enum Response {
         message_id: Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lease_epoch: Option<i64>,
+        /// Pre-drain station-intent signal, present on the `Drain` ack. Additive and optional, so
+        /// an older client deserializing a newer daemon's ack simply ignores it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        drain_intents: Option<DrainIntentReport>,
     },
     StationStopped {
         store_key: String,
@@ -435,6 +657,16 @@ pub struct DaemonStatus {
     pub idle_stations: IdleStationStatus,
     #[serde(default)]
     pub deaf_stations: DeafStationStatus,
+    /// Station-intent rows, including intent-only rows with no member. Part of the authenticated
+    /// (`detail: true`) projection only — never the uncapped `status_minimal` projection.
+    #[serde(default)]
+    pub intents: Vec<IntentStatus>,
+    /// When the cached intent index was last refreshed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent_index_as_of_ms: Option<i64>,
+    /// Whether the intent scope holds more than the per-scope write cap.
+    #[serde(default)]
+    pub intent_over_cap: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -748,6 +980,10 @@ pub fn daemon_capabilities() -> Vec<String> {
     // Advertised-but-optional (issue #65): lets a client detect a daemon that understands the
     // deferred outcome + `DrainDeferred`, so version skew against an older daemon is diagnosable.
     caps.push(CAP_ON_DELIVER_DEFERRED.to_string());
+    // Advertised-but-optional (issue #106): durable station intents plus daemon-owned
+    // reconciliation. A client that would write an intent checks this (and the daemon minor)
+    // rather than assuming a connected daemon will ever act on one.
+    caps.push(CAP_STATION_INTENT.to_string());
     caps
 }
 
@@ -834,6 +1070,16 @@ pub fn needs_attach_with_reason(message: impl Into<String>, reason: NeedsAttachR
 
 pub fn ambiguous(message: impl Into<String>) -> Response {
     error_response(ERROR_AMBIGUOUS, message.into())
+}
+
+/// `ERROR_INCOMPATIBLE` carrying a typed reason, so a client can render an actionable recovery
+/// path instead of parsing free text. Used by the anti-downgrade guard.
+pub fn incompatible_with_reason(message: impl Into<String>, reason: NeedsAttachReason) -> Response {
+    Response::Error {
+        code: ERROR_INCOMPATIBLE.to_string(),
+        message: message.into(),
+        needs_attach_reason: Some(reason),
+    }
 }
 
 pub fn unsupported(message: impl Into<String>) -> Response {

@@ -1,0 +1,1849 @@
+//! Shared owner-private filesystem and process-identity primitives.
+//!
+//! These were previously private inside `daemon::platform`. They are promoted here verbatim so a
+//! second authority-bearing consumer — the durable station-intent store (ADR 0050) — inherits the
+//! *same* fail-closed owner-private checks the daemon cap file and endpoint already rely on,
+//! rather than growing a parallel, weaker implementation. `daemon::platform` re-exports every
+//! promoted function, so daemon behavior is byte-for-byte unchanged.
+//!
+//! Three rules hold everywhere in this module:
+//!
+//! 1. **Fail closed.** Anything that cannot be positively verified is an error, never a silent
+//!    "assume fine". There are no broad catches and no permissive fallbacks.
+//! 2. **Check the open handle, not the path.** Every read-side check is made against the handle the
+//!    read will use, so no path can be swapped between the check and the read.
+//! 3. **Both platforms, same posture.** Windows gets a real DACL/owner/reparse-point check
+//!    (`validate_owner_private_file_security`), not just "the file lives in a directory we trust".
+
+use std::path::{Component, Path, PathBuf};
+
+pub type Result<T> = std::result::Result<T, FsError>;
+
+/// Error surface of the shared primitives. Mirrors the two `DaemonError` variants these functions
+/// used to produce so `daemon::platform`'s re-exports keep their exact error text.
+#[derive(Debug)]
+pub enum FsError {
+    Io {
+        action: &'static str,
+        source: std::io::Error,
+    },
+    Unsupported {
+        capability: &'static str,
+        message: String,
+    },
+}
+
+impl std::fmt::Display for FsError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FsError::Io { action, source } => write!(f, "{action}: {source}"),
+            FsError::Unsupported {
+                capability,
+                message,
+            } => write!(f, "{capability} is unsupported on this platform: {message}"),
+        }
+    }
+}
+
+impl std::error::Error for FsError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            FsError::Io { source, .. } => Some(source),
+            FsError::Unsupported { .. } => None,
+        }
+    }
+}
+
+pub(crate) fn io_err(action: &'static str, source: std::io::Error) -> FsError {
+    FsError::Io { action, source }
+}
+
+fn unsupported(capability: &'static str, message: impl Into<String>) -> FsError {
+    FsError::Unsupported {
+        capability: capability_static(capability),
+        message: message.into(),
+    }
+}
+
+/// `capability` is already `'static`; this exists only so callers read symmetrically.
+const fn capability_static(capability: &'static str) -> &'static str {
+    capability
+}
+
+/// Metadata captured from the same open handle the content was read through, so an age or size
+/// decision can never be made against a different file than the one that was read.
+#[derive(Debug, Clone, Copy)]
+pub struct OwnerOnlyFileMeta {
+    pub len: u64,
+    /// Modification time in unix epoch milliseconds, or `None` when the platform cannot report one.
+    pub modified_ms: Option<i64>,
+}
+
+/// Read an owner-private file fail-closed, per-file, on both platforms.
+///
+/// Rejects (never "warns and continues"): a non-regular file, a symlink or reparse point, a file
+/// larger than `max_bytes`, a foreign owner, and — on Unix — any group/world permission bit. On
+/// Windows the file's own owner SID and DACL are validated (see
+/// `validate_owner_private_file_security`), so a credential file living *outside* the intent scope
+/// is still checkable rather than trusted because of where it happens to sit.
+pub fn read_owner_only_file(path: &Path, max_bytes: u64) -> Result<Vec<u8>> {
+    read_owner_only_file_with_meta(path, max_bytes).map(|(bytes, _)| bytes)
+}
+
+/// `read_owner_only_file` plus the handle's own metadata (size, mtime) for age-bounded reads.
+pub fn read_owner_only_file_with_meta(
+    path: &Path,
+    max_bytes: u64,
+) -> Result<(Vec<u8>, OwnerOnlyFileMeta)> {
+    imp::read_owner_only_file_with_meta(path, max_bytes)
+}
+
+/// Run every owner-private security and shape check and return the handle's metadata **without
+/// reading the contents**.
+///
+/// This exists so an age-bounded credential read can decide "too old" before the secret is ever
+/// brought into memory: a stale credential must produce no read, no connection, and no probe.
+pub fn stat_owner_only_file(path: &Path, max_bytes: u64) -> Result<OwnerOnlyFileMeta> {
+    imp::open_owner_only_file(path, max_bytes).map(|(_, meta)| meta)
+}
+
+/// Write `bytes` to a fresh owner-only file and atomically move it into place.
+///
+/// `CREATE_NEW` semantics on a randomized sibling temp name plus `rename` means a reader never sees
+/// a partial manifest and an attacker cannot pre-create the target to capture the write.
+pub fn write_owner_only_file_atomic(path: &Path, bytes: &[u8]) -> Result<()> {
+    let tmp = sibling_tmp_path(path);
+    write_owner_only_file_exact(&tmp, bytes)?;
+    match std::fs::rename(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            std::fs::remove_file(path).map_err(|e| io_err("replacing owner-only file", e))?;
+            std::fs::rename(&tmp, path).map_err(|e| io_err("installing owner-only file", e))
+        }
+        Err(e) => {
+            let _ = std::fs::remove_file(&tmp);
+            Err(io_err("installing owner-only file", e))
+        }
+    }
+}
+
+fn sibling_tmp_path(path: &Path) -> PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(1);
+    let file_name = path
+        .file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("owner-only");
+    path.with_file_name(format!(
+        "{file_name}.{}.{}.tmp",
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ))
+}
+
+/// Resolve `path` and prove it is strictly contained under `root`.
+///
+/// Containment is decided on canonicalized paths (never a string prefix), `..` is rejected in the
+/// input, and every component between `root` and `path` is checked for a symlink/reparse point, so
+/// a link planted inside the root cannot redirect a read out of it.
+pub fn contained_under(root: &Path, path: &Path) -> Result<PathBuf> {
+    if path.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(unsupported(
+            "owner-private path containment",
+            format!("{} contains a parent-directory component", path.display()),
+        ));
+    }
+    let canonical_root = std::fs::canonicalize(root)
+        .map_err(|e| io_err("canonicalizing owner-private containment root", e))?;
+    let canonical_path = std::fs::canonicalize(path)
+        .map_err(|e| io_err("canonicalizing owner-private contained path", e))?;
+    if !canonical_path.starts_with(&canonical_root) || canonical_path == canonical_root {
+        return Err(unsupported(
+            "owner-private path containment",
+            format!(
+                "{} does not resolve strictly under {}",
+                path.display(),
+                root.display()
+            ),
+        ));
+    }
+    // Walk root -> path and reject any link on the chain. Canonicalization alone would silently
+    // accept a link that happens to land back inside the root.
+    let relative = canonical_path
+        .strip_prefix(&canonical_root)
+        .map_err(|_| unsupported("owner-private path containment", "prefix strip failed"))?
+        .to_path_buf();
+    let mut walked = canonical_root.clone();
+    for component in relative.components() {
+        walked.push(component);
+        let meta = std::fs::symlink_metadata(&walked)
+            .map_err(|e| io_err("checking owner-private containment chain", e))?;
+        if meta.file_type().is_symlink() {
+            return Err(unsupported(
+                "owner-private path containment",
+                format!("{} traverses a symlink", walked.display()),
+            ));
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::fs::MetadataExt;
+            if meta.file_attributes() & imp::FILE_ATTRIBUTE_REPARSE_POINT_BIT != 0 {
+                return Err(unsupported(
+                    "owner-private path containment",
+                    format!("{} traverses a reparse point", walked.display()),
+                ));
+            }
+        }
+    }
+    Ok(canonical_path)
+}
+
+/// Create (or repair) an owner-private directory and return its canonical path.
+pub fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
+    imp::ensure_owner_private_dir(path)
+}
+
+/// Ensure a **producer root** — a directory telex shares with an external same-user producer — is
+/// owner-private, and return its canonical path.
+///
+/// This is deliberately *not* `ensure_owner_private_dir`. That function rewrites the directory's
+/// DACL to the daemon's protected, non-inheritable owner-only descriptor, which is correct for a
+/// directory telex owns outright but destructive for one it shares: on Windows, protecting a
+/// directory's DACL re-propagates inheritance to its children, and any file whose access came
+/// purely from inherited ACEs — every file the producer wrote before telex touched the directory —
+/// is left with an empty DACL and becomes unreadable *to everyone, including its own author*.
+/// Hardening the bridge root that way would break the very producer this feature exists to keep
+/// alive.
+///
+/// So the rule here is create-strict, validate-existing:
+/// * A directory that does not exist yet is created with the owner-only descriptor, so it is
+///   owner-private from birth and has no children to strip.
+/// * A directory that already exists is **validated, never rewritten**: owner must be the current
+///   user, a DACL must be present, and every allowed ACE must name the current user, `SYSTEM`, or
+///   local `Administrators`. `Everyone`, `Authenticated Users`, `Users`, or any foreign SID fails
+///   closed.
+///
+/// The posture is therefore unchanged — a non-owner-private root is still refused — while the
+/// producer's own files keep working. Per-file checks (`read_owner_only_file`) still apply to the
+/// credential itself, so containment in this directory is never the only thing being trusted.
+pub fn ensure_owner_private_producer_root(path: &Path) -> Result<PathBuf> {
+    imp::ensure_owner_private_producer_root(path)
+}
+
+/// Create a brand-new owner-only file containing `bytes` followed by a newline.
+///
+/// Preserved verbatim from `daemon::platform` — the daemon cap file's on-disk shape depends on the
+/// trailing newline, so the exact-bytes writer is a separate function.
+pub fn write_owner_only_file(path: &Path, bytes: &[u8]) -> Result<()> {
+    imp::write_owner_only_file(path, bytes, true)
+}
+
+/// Create a brand-new owner-only file containing exactly `bytes`.
+pub fn write_owner_only_file_exact(path: &Path, bytes: &[u8]) -> Result<()> {
+    imp::write_owner_only_file(path, bytes, false)
+}
+
+/// Absolute, canonical executable path of a live process. Fails closed when it cannot be resolved.
+pub fn process_exe_path(pid: u32) -> Result<PathBuf> {
+    imp::process_exe_path(pid)
+}
+
+/// Stable machine identity, hashed before it is returned so no raw machine identifier is ever
+/// persisted into an intent manifest, status projection, or event log.
+pub fn host_id() -> Result<String> {
+    imp::raw_host_id().map(|raw| hashed_identity("host", &raw))
+}
+
+/// Boot-session identity, hashed like `host_id`. Distinguishes a reused `(pid, start_time)` pair
+/// across a reboot — the Linux boot-relative start-time reproducibility hole.
+pub fn boot_id() -> Result<String> {
+    imp::raw_boot_id().map(|raw| hashed_identity("boot", &raw))
+}
+
+fn hashed_identity(domain: &str, raw: &str) -> String {
+    let mut material = Vec::with_capacity(domain.len() + raw.len() + 1);
+    material.extend_from_slice(domain.as_bytes());
+    material.push(0x1f);
+    material.extend_from_slice(raw.as_bytes());
+    sha256_hex(&material)[..32].to_string()
+}
+
+// ---------------------------------------------------------------------------------------------
+// SHA-256
+// ---------------------------------------------------------------------------------------------
+
+/// SHA-256 as lowercase hex.
+///
+/// Implemented here rather than pulled from `sha2` because `sha2` is only in the dependency graph
+/// behind the optional `self-update` feature, and intent identity must be identical in every
+/// feature combination (including `--no-default-features --features sqlite`). Adding a mandatory
+/// crypto dependency for one hash would be a larger change than 60 lines of a fully specified
+/// algorithm, and the identity must never differ between builds.
+pub fn sha256_hex(bytes: &[u8]) -> String {
+    let digest = sha256(bytes);
+    let mut out = String::with_capacity(64);
+    for byte in digest {
+        out.push_str(&format!("{byte:02x}"));
+    }
+    out
+}
+
+const SHA256_K: [u32; 64] = [
+    0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4, 0xab1c5ed5,
+    0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe, 0x9bdc06a7, 0xc19bf174,
+    0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f, 0x4a7484aa, 0x5cb0a9dc, 0x76f988da,
+    0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7, 0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967,
+    0x27b70a85, 0x2e1b2138, 0x4d2c6dfc, 0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85,
+    0xa2bfe8a1, 0xa81a664b, 0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070,
+    0x19a4c116, 0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+    0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
+];
+
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    let bit_len = (bytes.len() as u64).wrapping_mul(8);
+    let mut padded = bytes.to_vec();
+    padded.push(0x80);
+    while padded.len() % 64 != 56 {
+        padded.push(0);
+    }
+    padded.extend_from_slice(&bit_len.to_be_bytes());
+
+    for chunk in padded.chunks_exact(64) {
+        let mut w = [0u32; 64];
+        for (i, word) in chunk.chunks_exact(4).enumerate() {
+            w[i] = u32::from_be_bytes([word[0], word[1], word[2], word[3]]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+        let (mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut hh) =
+            (h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7]);
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let temp1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(SHA256_K[i])
+                .wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let temp2 = s0.wrapping_add(maj);
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(temp1);
+            d = c;
+            c = b;
+            b = a;
+            a = temp1.wrapping_add(temp2);
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(hh);
+    }
+
+    let mut out = [0u8; 32];
+    for (i, word) in h.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    out
+}
+
+fn system_time_to_ms(time: std::time::SystemTime) -> Option<i64> {
+    time.duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .and_then(|d| i64::try_from(d.as_millis()).ok())
+}
+
+// ---------------------------------------------------------------------------------------------
+// Unix
+// ---------------------------------------------------------------------------------------------
+
+#[cfg(unix)]
+mod imp {
+    use super::{io_err, system_time_to_ms, FsError, OwnerOnlyFileMeta, Result};
+    use std::io::Read;
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+    use std::path::{Path, PathBuf};
+
+    pub(super) fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
+        if !path.exists() {
+            let mut builder = std::fs::DirBuilder::new();
+            builder.recursive(true).mode(0o700);
+            builder
+                .create(path)
+                .map_err(|e| io_err("creating owner-private daemon directory", e))?;
+        }
+        let link_meta = std::fs::symlink_metadata(path)
+            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
+        if link_meta.file_type().is_symlink() {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is a symlink", path.display()),
+            });
+        }
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
+            .map_err(|e| io_err("setting owner-private daemon directory permissions", e))?;
+        let meta = std::fs::metadata(path)
+            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
+        let uid = unsafe { libc::geteuid() };
+        if meta.uid() != uid {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!(
+                    "{} is owned by uid {}, expected uid {}",
+                    path.display(),
+                    meta.uid(),
+                    uid
+                ),
+            });
+        }
+        if meta.mode() & 0o077 != 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is group/world accessible", path.display()),
+            });
+        }
+        std::fs::canonicalize(path).map_err(|e| io_err("canonicalizing daemon directory", e))
+    }
+
+    /// On Unix the owner-private rule is `chmod 0700` plus a uid check, and POSIX permissions are
+    /// not inherited by children, so hardening a shared directory cannot strip access from files
+    /// already inside it. The producer-root rule is therefore identical to the plain one here; the
+    /// two only diverge on Windows.
+    pub(super) fn ensure_owner_private_producer_root(path: &Path) -> Result<PathBuf> {
+        ensure_owner_private_dir(path)
+    }
+
+    pub(super) fn write_owner_only_file(
+        path: &Path,
+        bytes: &[u8],
+        trailing_newline: bool,
+    ) -> Result<()> {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(path)
+            .map_err(|e| io_err("creating owner-only daemon capability file", e))?;
+        use std::io::Write;
+        file.write_all(bytes)
+            .map_err(|e| io_err("writing daemon capability file", e))?;
+        if trailing_newline {
+            file.write_all(b"\n")
+                .map_err(|e| io_err("writing daemon capability file", e))?;
+        }
+        file.sync_all()
+            .map_err(|e| io_err("syncing daemon capability file", e))?;
+        Ok(())
+    }
+
+    pub(super) fn open_owner_only_file(
+        path: &Path,
+        max_bytes: u64,
+    ) -> Result<(std::fs::File, OwnerOnlyFileMeta)> {
+        // O_NOFOLLOW: a symlink at the final component fails the open outright, so the checks below
+        // and the read that follows are guaranteed to be about the same inode.
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_CLOEXEC)
+            .open(path)
+            .map_err(|e| io_err("opening owner-only file", e))?;
+        let meta = file
+            .metadata()
+            .map_err(|e| io_err("inspecting owner-only file", e))?;
+        if !meta.file_type().is_file() {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!("{} is not a regular file", path.display()),
+            });
+        }
+        let uid = unsafe { libc::geteuid() };
+        if meta.uid() != uid {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!(
+                    "{} is owned by uid {}, expected uid {}",
+                    path.display(),
+                    meta.uid(),
+                    uid
+                ),
+            });
+        }
+        if meta.mode() & 0o077 != 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!("{} is group/world accessible", path.display()),
+            });
+        }
+        if meta.len() > max_bytes {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!(
+                    "{} is {} bytes, over the {max_bytes} byte cap",
+                    path.display(),
+                    meta.len()
+                ),
+            });
+        }
+        let modified_ms = meta.modified().ok().and_then(system_time_to_ms);
+        Ok((
+            file,
+            OwnerOnlyFileMeta {
+                len: meta.len(),
+                modified_ms,
+            },
+        ))
+    }
+
+    pub(super) fn read_owner_only_file_with_meta(
+        path: &Path,
+        max_bytes: u64,
+    ) -> Result<(Vec<u8>, OwnerOnlyFileMeta)> {
+        let (file, meta) = open_owner_only_file(path, max_bytes)?;
+        let mut buf = Vec::with_capacity(meta.len as usize);
+        file.take(max_bytes + 1)
+            .read_to_end(&mut buf)
+            .map_err(|e| io_err("reading owner-only file", e))?;
+        if buf.len() as u64 > max_bytes {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!("{} grew past the {max_bytes} byte cap", path.display()),
+            });
+        }
+        Ok((buf, meta))
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn process_exe_path(pid: u32) -> Result<PathBuf> {
+        std::fs::canonicalize(format!("/proc/{pid}/exe")).map_err(|e| FsError::Unsupported {
+            capability: "process executable resolution",
+            message: format!("cannot verify /proc/{pid}/exe: {e}"),
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn process_exe_path(pid: u32) -> Result<PathBuf> {
+        use std::ffi::OsString;
+        use std::os::unix::ffi::OsStringExt;
+
+        let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+        let bytes = unsafe {
+            libc::proc_pidpath(
+                pid as libc::c_int,
+                buffer.as_mut_ptr() as *mut libc::c_void,
+                buffer.len() as u32,
+            )
+        };
+        if bytes <= 0 {
+            return Err(FsError::Unsupported {
+                capability: "process executable resolution",
+                message: format!(
+                    "cannot resolve executable path for pid {pid}: {}",
+                    std::io::Error::last_os_error()
+                ),
+            });
+        }
+        buffer.truncate(bytes as usize);
+        if buffer.last() == Some(&0) {
+            buffer.pop();
+        }
+        let path = PathBuf::from(OsString::from_vec(buffer));
+        std::fs::canonicalize(&path).map_err(|e| FsError::Unsupported {
+            capability: "process executable resolution",
+            message: format!("cannot canonicalize {} for pid {pid}: {e}", path.display()),
+        })
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    pub(super) fn process_exe_path(_pid: u32) -> Result<PathBuf> {
+        Err(FsError::Unsupported {
+            capability: "process executable resolution",
+            message: "process executable resolution is only wired for Linux and macOS".into(),
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn raw_host_id() -> Result<String> {
+        for candidate in ["/etc/machine-id", "/var/lib/dbus/machine-id"] {
+            if let Ok(raw) = std::fs::read_to_string(candidate) {
+                let trimmed = raw.trim();
+                if !trimmed.is_empty() {
+                    return Ok(trimmed.to_string());
+                }
+            }
+        }
+        Err(FsError::Unsupported {
+            capability: "stable host identity",
+            message: "neither /etc/machine-id nor /var/lib/dbus/machine-id is readable".into(),
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn raw_host_id() -> Result<String> {
+        sysctl_string("kern.uuid").ok_or(FsError::Unsupported {
+            capability: "stable host identity",
+            message: "sysctl kern.uuid is unavailable".into(),
+        })
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    pub(super) fn raw_host_id() -> Result<String> {
+        Err(FsError::Unsupported {
+            capability: "stable host identity",
+            message: "host identity is only wired for Linux and macOS".into(),
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn raw_boot_id() -> Result<String> {
+        let raw = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(|e| {
+            FsError::Unsupported {
+                capability: "boot session identity",
+                message: format!("cannot read /proc/sys/kernel/random/boot_id: {e}"),
+            }
+        })?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(FsError::Unsupported {
+                capability: "boot session identity",
+                message: "/proc/sys/kernel/random/boot_id is empty".into(),
+            });
+        }
+        Ok(trimmed.to_string())
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn raw_boot_id() -> Result<String> {
+        let mut boottime: libc::timeval = unsafe { std::mem::zeroed() };
+        let mut size = std::mem::size_of::<libc::timeval>();
+        let name = std::ffi::CString::new("kern.boottime").expect("static sysctl name");
+        let rc = unsafe {
+            libc::sysctlbyname(
+                name.as_ptr(),
+                &mut boottime as *mut _ as *mut libc::c_void,
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if rc != 0 || boottime.tv_sec == 0 {
+            return Err(FsError::Unsupported {
+                capability: "boot session identity",
+                message: "sysctl kern.boottime is unavailable".into(),
+            });
+        }
+        Ok(format!("{}.{}", boottime.tv_sec, boottime.tv_usec))
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    pub(super) fn raw_boot_id() -> Result<String> {
+        Err(FsError::Unsupported {
+            capability: "boot session identity",
+            message: "boot identity is only wired for Linux and macOS".into(),
+        })
+    }
+
+    #[cfg(target_os = "macos")]
+    fn sysctl_string(name: &str) -> Option<String> {
+        let cname = std::ffi::CString::new(name).ok()?;
+        let mut buf = vec![0u8; 256];
+        let mut size = buf.len();
+        let rc = unsafe {
+            libc::sysctlbyname(
+                cname.as_ptr(),
+                buf.as_mut_ptr() as *mut libc::c_void,
+                &mut size,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+        if rc != 0 || size == 0 {
+            return None;
+        }
+        buf.truncate(size);
+        while buf.last() == Some(&0) {
+            buf.pop();
+        }
+        String::from_utf8(buf).ok().filter(|s| !s.is_empty())
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Windows
+// ---------------------------------------------------------------------------------------------
+
+#[cfg(windows)]
+mod imp {
+    use super::{io_err, system_time_to_ms, FsError, OwnerOnlyFileMeta, Result};
+    use std::ffi::{c_void, OsStr, OsString};
+    use std::io::Read;
+    use std::os::windows::ffi::{OsStrExt, OsStringExt};
+    use std::os::windows::fs::MetadataExt;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    use std::path::{Component, Path, PathBuf, Prefix};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, GetLastError, LocalFree, ERROR_ALREADY_EXISTS, HANDLE, INVALID_HANDLE_VALUE,
+        PSID,
+    };
+    use windows_sys::Win32::Security::Authorization::{
+        ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
+        ConvertStringSidToSidW, GetNamedSecurityInfoW, GetSecurityInfo, SetNamedSecurityInfoW,
+        SDDL_REVISION_1, SE_FILE_OBJECT,
+    };
+    use windows_sys::Win32::Security::{
+        AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
+        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation, TokenUser,
+        ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
+        OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES,
+        SE_DACL_PRESENT, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateDirectoryW, CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
+        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
+        FILE_GENERIC_WRITE, FILE_SHARE_READ, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::Registry::{RegGetValueW, HKEY_LOCAL_MACHINE, RRF_RT_REG_SZ};
+    use windows_sys::Win32::System::SystemInformation::GetTickCount64;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
+        PROCESS_QUERY_LIMITED_INFORMATION,
+    };
+
+    pub(super) const FILE_ATTRIBUTE_REPARSE_POINT_BIT: u32 = FILE_ATTRIBUTE_REPARSE_POINT;
+
+    const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
+    const ACCESS_DENIED_ACE_TYPE: u8 = 1;
+
+    /// Whether an ACE trustee is one telex considers safe on an owner-private object.
+    ///
+    /// The set matches the repository's existing notion of a strict owner-private descriptor:
+    /// the current user, `SYSTEM`, local `Administrators`, the per-logon-session SID
+    /// (`S-1-5-5-X-Y`, which Windows puts in a token's default DACL and which is scoped to this
+    /// logon), and AppContainer SIDs (`S-1-15-2-*` / `S-1-15-3-*`). Everything else — notably
+    /// `Everyone` (`S-1-1-0`), `Authenticated Users` (`S-1-5-11`), and `Users` (`S-1-5-32-545`) —
+    /// is refused, so a broadened DACL fails closed rather than being quietly accepted.
+    fn ace_trustee_is_allowlisted(
+        sid: PSID,
+        current: PSID,
+        system: PSID,
+        admins: PSID,
+    ) -> (bool, bool) {
+        let is_current = unsafe { EqualSid(sid, current) } != 0;
+        if is_current {
+            return (true, true);
+        }
+        let privileged = unsafe { EqualSid(sid, system) != 0 || EqualSid(sid, admins) != 0 };
+        if privileged {
+            return (true, false);
+        }
+        match sid_to_string(sid) {
+            Some(text) => {
+                let scoped = text.starts_with("S-1-5-5-")
+                    || text.starts_with("S-1-15-2-")
+                    || text.starts_with("S-1-15-3-");
+                (scoped, false)
+            }
+            None => (false, false),
+        }
+    }
+
+    fn sid_to_string(sid: PSID) -> Option<String> {
+        let mut raw: *mut u16 = std::ptr::null_mut();
+        let ok = unsafe { ConvertSidToStringSidW(sid, &mut raw) };
+        if ok == 0 || raw.is_null() {
+            return None;
+        }
+        let text = unsafe { wide_ptr_to_string(raw) };
+        unsafe {
+            LocalFree(raw as *mut c_void);
+        }
+        Some(text)
+    }
+
+    pub(super) fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
+        if !path.exists() {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| io_err("creating daemon directory parent", e))?;
+            }
+            create_owner_only_dir(path)?;
+        }
+        validate_owner_private_dir_shape(path)?;
+        set_owner_only_dir_security(path)?;
+        let canonical = std::fs::canonicalize(path)
+            .map_err(|e| io_err("canonicalizing daemon directory", e))?;
+        validate_owner_private_dir_shape(&canonical)?;
+        set_owner_only_dir_security(&canonical)?;
+        validate_owner_private_dir_security(&canonical, true)?;
+        Ok(canonical)
+    }
+
+    /// Create-strict, validate-existing. See the doc comment on
+    /// `platform_fs::ensure_owner_private_producer_root` for why an existing shared directory is
+    /// validated rather than rewritten.
+    pub(super) fn ensure_owner_private_producer_root(path: &Path) -> Result<PathBuf> {
+        let created = if path.exists() {
+            false
+        } else {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent)
+                    .map_err(|e| io_err("creating producer root parent", e))?;
+            }
+            create_owner_only_dir(path)?;
+            true
+        };
+        validate_owner_private_dir_shape(path)?;
+        let canonical =
+            std::fs::canonicalize(path).map_err(|e| io_err("canonicalizing producer root", e))?;
+        validate_owner_private_dir_shape(&canonical)?;
+        // A directory telex just created carries the protected owner-only descriptor and must
+        // still look like one; an existing directory only has to be *safe*, not telex-shaped.
+        validate_owner_private_dir_security(&canonical, created)?;
+        Ok(canonical)
+    }
+
+    pub(super) fn write_owner_only_file(
+        path: &Path,
+        bytes: &[u8],
+        trailing_newline: bool,
+    ) -> Result<()> {
+        use std::io::Write;
+        let sa = owner_only_security_attributes()?;
+        let wide = wide_null(path.as_os_str());
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                FILE_GENERIC_WRITE,
+                0,
+                &sa.attrs,
+                CREATE_NEW,
+                FILE_ATTRIBUTE_NORMAL,
+                0,
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(io_err(
+                "creating owner-only daemon capability file",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let mut file = unsafe { std::fs::File::from_raw_handle(handle as _) };
+        file.write_all(bytes)
+            .map_err(|e| io_err("writing daemon capability file", e))?;
+        if trailing_newline {
+            file.write_all(b"\n")
+                .map_err(|e| io_err("writing daemon capability file", e))?;
+        }
+        file.sync_all()
+            .map_err(|e| io_err("syncing daemon capability file", e))?;
+        Ok(())
+    }
+
+    pub(super) fn open_owner_only_file(
+        path: &Path,
+        max_bytes: u64,
+    ) -> Result<(std::fs::File, OwnerOnlyFileMeta)> {
+        let wide = wide_null(path.as_os_str());
+        // FILE_FLAG_OPEN_REPARSE_POINT: open the link itself rather than its target, so a reparse
+        // point is *detected* below instead of silently followed.
+        let handle = unsafe {
+            CreateFileW(
+                wide.as_ptr(),
+                FILE_GENERIC_READ,
+                FILE_SHARE_READ,
+                std::ptr::null_mut(),
+                OPEN_EXISTING,
+                FILE_ATTRIBUTE_NORMAL | FILE_FLAG_OPEN_REPARSE_POINT,
+                0,
+            )
+        };
+        if handle == INVALID_HANDLE_VALUE {
+            return Err(io_err(
+                "opening owner-only file",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let file = unsafe { std::fs::File::from_raw_handle(handle as _) };
+        let meta = file
+            .metadata()
+            .map_err(|e| io_err("inspecting owner-only file", e))?;
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!("{} is a reparse point", path.display()),
+            });
+        }
+        if !meta.is_file() {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!("{} is not a regular file", path.display()),
+            });
+        }
+        if meta.len() > max_bytes {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!(
+                    "{} is {} bytes, over the {max_bytes} byte cap",
+                    path.display(),
+                    meta.len()
+                ),
+            });
+        }
+        validate_owner_private_file_security(file.as_raw_handle() as HANDLE, path)?;
+        let modified_ms = meta.modified().ok().and_then(system_time_to_ms);
+        Ok((
+            file,
+            OwnerOnlyFileMeta {
+                len: meta.len(),
+                modified_ms,
+            },
+        ))
+    }
+
+    pub(super) fn read_owner_only_file_with_meta(
+        path: &Path,
+        max_bytes: u64,
+    ) -> Result<(Vec<u8>, OwnerOnlyFileMeta)> {
+        let (file, meta) = open_owner_only_file(path, max_bytes)?;
+        let mut buf = Vec::with_capacity(meta.len as usize);
+        file.take(max_bytes + 1)
+            .read_to_end(&mut buf)
+            .map_err(|e| io_err("reading owner-only file", e))?;
+        if buf.len() as u64 > max_bytes {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!("{} grew past the {max_bytes} byte cap", path.display()),
+            });
+        }
+        Ok((buf, meta))
+    }
+
+    /// Per-file Windows owner/DACL validator, modelled on `validate_owner_private_dir_security`.
+    ///
+    /// Unlike the directory validator this does **not** require a protected (non-inheritable) DACL:
+    /// a credential file written by an unrelated same-user producer legitimately carries the
+    /// process token's normal current-user/SYSTEM/Administrators inherited DACL. What it does
+    /// require is that every ACE names a principal in that allowlist, so `Everyone`,
+    /// `Authenticated Users`, `Users`, or any foreign SID makes the read fail closed.
+    pub(super) fn validate_owner_private_file_security(handle: HANDLE, path: &Path) -> Result<()> {
+        let mut sd: *mut c_void = std::ptr::null_mut();
+        let mut owner: PSID = std::ptr::null_mut();
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let rc = unsafe {
+            GetSecurityInfo(
+                handle,
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut sd,
+            )
+        };
+        if rc != 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!(
+                    "cannot read security descriptor for {}: {}",
+                    path.display(),
+                    std::io::Error::from_raw_os_error(rc as i32)
+                ),
+            });
+        }
+        let _sd_guard = LocalAllocGuard(sd);
+
+        let current_sid = sid_from_string(&current_user_sid()?)?;
+        let system_sid = sid_from_string("S-1-5-18")?;
+        let admins_sid = sid_from_string("S-1-5-32-544")?;
+
+        if owner.is_null() || unsafe { EqualSid(owner, current_sid.0) } == 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!("{} is not owned by the current SID", path.display()),
+            });
+        }
+
+        let mut control = 0u16;
+        let mut revision = 0u32;
+        let ok = unsafe { GetSecurityDescriptorControl(sd, &mut control, &mut revision) };
+        if ok == 0 || control & SE_DACL_PRESENT == 0 || dacl.is_null() {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!("{} has no DACL", path.display()),
+            });
+        }
+
+        let mut info = ACL_SIZE_INFORMATION {
+            AceCount: 0,
+            AclBytesInUse: 0,
+            AclBytesFree: 0,
+        };
+        let ok = unsafe {
+            GetAclInformation(
+                dacl,
+                &mut info as *mut _ as *mut c_void,
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+        };
+        if ok == 0 || info.AceCount == 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!("{} has an empty or unreadable DACL", path.display()),
+            });
+        }
+
+        let mut grants_current_user = false;
+        for idx in 0..info.AceCount {
+            let mut ace_ptr: *mut c_void = std::ptr::null_mut();
+            let ok = unsafe { GetAce(dacl, idx, &mut ace_ptr) };
+            if ok == 0 || ace_ptr.is_null() {
+                return Err(io_err(
+                    "reading owner-only file ACE",
+                    std::io::Error::last_os_error(),
+                ));
+            }
+            let header = unsafe { &*(ace_ptr as *const windows_sys::Win32::Security::ACE_HEADER) };
+            match header.AceType {
+                ACCESS_ALLOWED_ACE_TYPE => {
+                    let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
+                    let sid = (&ace.SidStart as *const u32).cast::<c_void>() as PSID;
+                    let (allowed, is_current) =
+                        ace_trustee_is_allowlisted(sid, current_sid.0, system_sid.0, admins_sid.0);
+                    if !allowed {
+                        return Err(FsError::Unsupported {
+                            capability: "owner-only file read",
+                            message: format!(
+                                "{} grants access to a principal outside the owner allowlist",
+                                path.display()
+                            ),
+                        });
+                    }
+                    grants_current_user |= is_current;
+                }
+                ACCESS_DENIED_ACE_TYPE => {
+                    return Err(FsError::Unsupported {
+                        capability: "owner-only file read",
+                        message: format!("{} contains a deny ACE", path.display()),
+                    });
+                }
+                other => {
+                    return Err(FsError::Unsupported {
+                        capability: "owner-only file read",
+                        message: format!(
+                            "{} contains unsupported ACE type {other}",
+                            path.display()
+                        ),
+                    });
+                }
+            }
+        }
+        if !grants_current_user {
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: format!("{} does not grant the current user access", path.display()),
+            });
+        }
+        Ok(())
+    }
+
+    fn create_owner_only_dir(path: &Path) -> Result<()> {
+        let sa = owner_only_security_attributes()?;
+        let wide = wide_null(path.as_os_str());
+        let ok = unsafe { CreateDirectoryW(wide.as_ptr(), &sa.attrs) };
+        if ok == 0 {
+            let err = unsafe { GetLastError() };
+            if err == ERROR_ALREADY_EXISTS {
+                return Ok(());
+            }
+            return Err(io_err(
+                "creating owner-private daemon directory",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        Ok(())
+    }
+
+    fn set_owner_only_dir_security(path: &Path) -> Result<()> {
+        let sa = owner_only_security_attributes()?;
+        let mut dacl_present = 0;
+        let mut dacl_defaulted = 0;
+        let mut dacl = std::ptr::null_mut();
+        let ok = unsafe {
+            GetSecurityDescriptorDacl(
+                sa.descriptor,
+                &mut dacl_present,
+                &mut dacl,
+                &mut dacl_defaulted,
+            )
+        };
+        if ok == 0 || dacl_present == 0 || dacl.is_null() {
+            return Err(io_err(
+                "reading owner-private daemon directory DACL",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let mut owner_defaulted = 0;
+        let mut owner = std::ptr::null_mut();
+        let ok =
+            unsafe { GetSecurityDescriptorOwner(sa.descriptor, &mut owner, &mut owner_defaulted) };
+        if ok == 0 || owner.is_null() {
+            return Err(io_err(
+                "reading owner-private daemon directory owner",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let wide = wide_null(path.as_os_str());
+        let rc = unsafe {
+            SetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION
+                    | DACL_SECURITY_INFORMATION
+                    | PROTECTED_DACL_SECURITY_INFORMATION,
+                owner,
+                std::ptr::null_mut(),
+                dacl,
+                std::ptr::null_mut(),
+            )
+        };
+        if rc != 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!(
+                    "setting DACL for {} failed: {}",
+                    path.display(),
+                    std::io::Error::from_raw_os_error(rc as i32)
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    fn validate_owner_private_dir_shape(path: &Path) -> Result<()> {
+        if path.components().any(|component| {
+            matches!(
+                component,
+                Component::Prefix(prefix)
+                    if matches!(prefix.kind(), Prefix::UNC(_, _) | Prefix::VerbatimUNC(_, _))
+            )
+        }) {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is not a local path", path.display()),
+            });
+        }
+        let meta = std::fs::symlink_metadata(path)
+            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
+        if !meta.is_dir() {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is not a directory", path.display()),
+            });
+        }
+        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is a reparse point", path.display()),
+            });
+        }
+        Ok(())
+    }
+
+    /// Validate a directory's owner and DACL.
+    ///
+    /// `require_protected` distinguishes the two callers: a directory telex owns outright must
+    /// carry an explicit, non-inheriting (`SE_DACL_PROTECTED`) owner-only DACL, while a producer
+    /// root telex merely shares only has to be *safe* — owner is the current user and every
+    /// allowed ACE names the current user, `SYSTEM`, or local `Administrators`. Both reject
+    /// `Everyone`, `Authenticated Users`, `Users`, any foreign SID, and any deny ACE.
+    fn validate_owner_private_dir_security(path: &Path, require_protected: bool) -> Result<()> {
+        let mut sd: *mut c_void = std::ptr::null_mut();
+        let mut owner: PSID = std::ptr::null_mut();
+        let mut dacl: *mut ACL = std::ptr::null_mut();
+        let wide = wide_null(path.as_os_str());
+        let rc = unsafe {
+            GetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
+                &mut owner,
+                std::ptr::null_mut(),
+                &mut dacl,
+                std::ptr::null_mut(),
+                &mut sd,
+            )
+        };
+        if rc != 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!(
+                    "cannot read security descriptor for {}: {}",
+                    path.display(),
+                    std::io::Error::from_raw_os_error(rc as i32)
+                ),
+            });
+        }
+        let _sd_guard = LocalAllocGuard(sd);
+
+        let current_sid = sid_from_string(&current_user_sid()?)?;
+        let system_sid = sid_from_string("S-1-5-18")?;
+        let admins_sid = sid_from_string("S-1-5-32-544")?;
+
+        if owner.is_null() || unsafe { EqualSid(owner, current_sid.0) } == 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is not owned by the current SID", path.display()),
+            });
+        }
+
+        let mut control = 0u16;
+        let mut revision = 0u32;
+        let ok = unsafe { GetSecurityDescriptorControl(sd, &mut control, &mut revision) };
+        if ok == 0
+            || control & SE_DACL_PRESENT == 0
+            || (require_protected && control & windows_sys::Win32::Security::SE_DACL_PROTECTED == 0)
+        {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} does not have a protected explicit DACL", path.display()),
+            });
+        }
+        if dacl.is_null() {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!("{} is missing a DACL", path.display()),
+            });
+        }
+
+        let mut info = ACL_SIZE_INFORMATION {
+            AceCount: 0,
+            AclBytesInUse: 0,
+            AclBytesFree: 0,
+        };
+        let ok = unsafe {
+            GetAclInformation(
+                dacl,
+                &mut info as *mut _ as *mut c_void,
+                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
+                AclSizeInformation,
+            )
+        };
+        if ok == 0 || info.AceCount == 0 {
+            return Err(io_err(
+                "reading daemon directory ACL",
+                std::io::Error::last_os_error(),
+            ));
+        }
+
+        for idx in 0..info.AceCount {
+            let mut ace_ptr: *mut c_void = std::ptr::null_mut();
+            let ok = unsafe { GetAce(dacl, idx, &mut ace_ptr) };
+            if ok == 0 || ace_ptr.is_null() {
+                return Err(io_err(
+                    "reading daemon directory ACE",
+                    std::io::Error::last_os_error(),
+                ));
+            }
+
+            let header = unsafe { &*(ace_ptr as *const windows_sys::Win32::Security::ACE_HEADER) };
+            match header.AceType {
+                ACCESS_ALLOWED_ACE_TYPE => {
+                    let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
+                    let sid = (&ace.SidStart as *const u32).cast::<c_void>() as PSID;
+                    let (allowed, _) =
+                        ace_trustee_is_allowlisted(sid, current_sid.0, system_sid.0, admins_sid.0);
+                    if !allowed {
+                        return Err(FsError::Unsupported {
+                            capability: "owner-private daemon directory",
+                            message: format!("{} grants access to a non-owner SID", path.display()),
+                        });
+                    }
+                }
+                ACCESS_DENIED_ACE_TYPE => {
+                    return Err(FsError::Unsupported {
+                        capability: "owner-private daemon directory",
+                        message: format!("{} contains a deny ACE", path.display()),
+                    });
+                }
+                other => {
+                    return Err(FsError::Unsupported {
+                        capability: "owner-private daemon directory",
+                        message: format!(
+                            "{} contains unsupported ACE type {other}",
+                            path.display()
+                        ),
+                    });
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn process_exe_path(pid: u32) -> Result<PathBuf> {
+        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
+        if process == 0 {
+            return Err(FsError::Unsupported {
+                capability: "process executable resolution",
+                message: format!(
+                    "cannot open process {pid}: {}",
+                    std::io::Error::last_os_error()
+                ),
+            });
+        }
+        let process = Handle(process);
+        let mut buf = vec![0u16; 32768];
+        let mut len = buf.len() as u32;
+        let ok = unsafe { QueryFullProcessImageNameW(process.0, 0, buf.as_mut_ptr(), &mut len) };
+        if ok == 0 {
+            return Err(FsError::Unsupported {
+                capability: "process executable resolution",
+                message: format!(
+                    "cannot resolve executable for pid {pid}: {}",
+                    std::io::Error::last_os_error()
+                ),
+            });
+        }
+        let raw = PathBuf::from(OsString::from_wide(&buf[..len as usize]));
+        std::fs::canonicalize(&raw).map_err(|e| FsError::Unsupported {
+            capability: "process executable resolution",
+            message: format!("cannot canonicalize {} for pid {pid}: {e}", raw.display()),
+        })
+    }
+
+    pub(super) fn raw_host_id() -> Result<String> {
+        let subkey = wide_null(OsStr::new(r"SOFTWARE\Microsoft\Cryptography"));
+        let value = wide_null(OsStr::new("MachineGuid"));
+        let mut buf = vec![0u16; 128];
+        let mut size = (buf.len() * 2) as u32;
+        let rc = unsafe {
+            RegGetValueW(
+                HKEY_LOCAL_MACHINE,
+                subkey.as_ptr(),
+                value.as_ptr(),
+                RRF_RT_REG_SZ,
+                std::ptr::null_mut(),
+                buf.as_mut_ptr() as *mut c_void,
+                &mut size,
+            )
+        };
+        if rc != 0 {
+            return Err(FsError::Unsupported {
+                capability: "stable host identity",
+                message: format!(
+                    "cannot read HKLM\\SOFTWARE\\Microsoft\\Cryptography\\MachineGuid: {}",
+                    std::io::Error::from_raw_os_error(rc as i32)
+                ),
+            });
+        }
+        let chars = (size as usize / 2).min(buf.len());
+        let mut text = String::from_utf16_lossy(&buf[..chars]);
+        text.retain(|c| c != '\0');
+        let text = text.trim().to_string();
+        if text.is_empty() {
+            return Err(FsError::Unsupported {
+                capability: "stable host identity",
+                message: "MachineGuid is empty".into(),
+            });
+        }
+        Ok(text)
+    }
+
+    pub(super) fn raw_boot_id() -> Result<String> {
+        // Boot wall-clock instant, quantized to the second so repeated calls within one boot agree
+        // (GetTickCount64 advances between calls, `now` advances with it).
+        let uptime_ms = unsafe { GetTickCount64() };
+        let now_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .map_err(|_| FsError::Unsupported {
+                capability: "boot session identity",
+                message: "system clock is before the unix epoch".into(),
+            })?;
+        if uptime_ms == 0 || now_ms < uptime_ms {
+            return Err(FsError::Unsupported {
+                capability: "boot session identity",
+                message: "system uptime is unavailable".into(),
+            });
+        }
+        Ok(format!("{}", (now_ms - uptime_ms) / 1000))
+    }
+
+    fn current_user_sid() -> Result<String> {
+        let token = current_process_token()?;
+        sid_string_from_token(token.0)
+    }
+
+    fn current_process_token() -> Result<Handle> {
+        let mut token = 0isize;
+        let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
+        if ok == 0 {
+            return Err(io_err(
+                "opening process token",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        Ok(Handle(token))
+    }
+
+    fn sid_string_from_token(token: HANDLE) -> Result<String> {
+        let mut needed = 0u32;
+        unsafe {
+            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+        }
+        if needed == 0 {
+            return Err(io_err(
+                "sizing token user information",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let mut buf = vec![0u8; needed as usize];
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                TokenUser,
+                buf.as_mut_ptr() as *mut c_void,
+                needed,
+                &mut needed,
+            )
+        };
+        if ok == 0 {
+            return Err(io_err(
+                "reading token user information",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+        let mut sid_ptr: *mut u16 = std::ptr::null_mut();
+        let ok = unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_ptr) };
+        if ok == 0 {
+            return Err(io_err(
+                "converting SID to string",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let sid = unsafe { wide_ptr_to_string(sid_ptr) };
+        unsafe {
+            LocalFree(sid_ptr as *mut c_void);
+        }
+        Ok(sid)
+    }
+
+    struct OwnedSid(PSID);
+
+    impl Drop for OwnedSid {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    LocalFree(self.0);
+                }
+            }
+        }
+    }
+
+    fn sid_from_string(sid: &str) -> Result<OwnedSid> {
+        let wide = wide_null(OsStr::new(sid));
+        let mut raw: PSID = std::ptr::null_mut();
+        let ok = unsafe { ConvertStringSidToSidW(wide.as_ptr(), &mut raw) };
+        if ok == 0 || raw.is_null() {
+            return Err(io_err(
+                "converting SID string",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        Ok(OwnedSid(raw))
+    }
+
+    struct LocalAllocGuard(*mut c_void);
+
+    impl Drop for LocalAllocGuard {
+        fn drop(&mut self) {
+            if !self.0.is_null() {
+                unsafe {
+                    LocalFree(self.0);
+                }
+            }
+        }
+    }
+
+    struct OwnerOnlySecurityAttributes {
+        attrs: SECURITY_ATTRIBUTES,
+        descriptor: *mut c_void,
+    }
+
+    impl Drop for OwnerOnlySecurityAttributes {
+        fn drop(&mut self) {
+            if !self.descriptor.is_null() {
+                unsafe {
+                    LocalFree(self.descriptor);
+                }
+            }
+        }
+    }
+
+    fn owner_only_security_attributes() -> Result<OwnerOnlySecurityAttributes> {
+        let sid = current_user_sid()?;
+        let sddl = format!("O:{sid}G:{sid}D:P(A;;GA;;;{sid})");
+        let wide = wide_null(OsStr::new(&sddl));
+        let mut descriptor: *mut c_void = std::ptr::null_mut();
+        let ok = unsafe {
+            ConvertStringSecurityDescriptorToSecurityDescriptorW(
+                wide.as_ptr(),
+                SDDL_REVISION_1,
+                &mut descriptor,
+                std::ptr::null_mut(),
+            )
+        };
+        if ok == 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-only Windows security descriptor",
+                message: std::io::Error::last_os_error().to_string(),
+            });
+        }
+        Ok(OwnerOnlySecurityAttributes {
+            attrs: SECURITY_ATTRIBUTES {
+                nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
+                lpSecurityDescriptor: descriptor,
+                bInheritHandle: 0,
+            },
+            descriptor,
+        })
+    }
+
+    struct Handle(HANDLE);
+
+    impl Drop for Handle {
+        fn drop(&mut self) {
+            if self.0 != 0 && self.0 != INVALID_HANDLE_VALUE {
+                unsafe {
+                    CloseHandle(self.0);
+                }
+            }
+        }
+    }
+
+    fn wide_null(s: &OsStr) -> Vec<u16> {
+        s.encode_wide().chain(std::iter::once(0)).collect()
+    }
+
+    unsafe fn wide_ptr_to_string(ptr: *const u16) -> String {
+        let mut len = 0usize;
+        while *ptr.add(len) != 0 {
+            len += 1;
+        }
+        String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
+    }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Other platforms
+// ---------------------------------------------------------------------------------------------
+
+#[cfg(not(any(unix, windows)))]
+mod imp {
+    use super::{FsError, OwnerOnlyFileMeta, Result};
+    use std::path::{Path, PathBuf};
+
+    pub(super) fn ensure_owner_private_dir(_path: &Path) -> Result<PathBuf> {
+        Err(FsError::Unsupported {
+            capability: "owner-private daemon directory",
+            message: "no owner-only permission implementation for this platform".into(),
+        })
+    }
+
+    pub(super) fn ensure_owner_private_producer_root(_path: &Path) -> Result<PathBuf> {
+        Err(FsError::Unsupported {
+            capability: "owner-private producer root",
+            message: "no owner-only permission implementation for this platform".into(),
+        })
+    }
+
+    pub(super) fn write_owner_only_file(
+        _path: &Path,
+        _bytes: &[u8],
+        _trailing_newline: bool,
+    ) -> Result<()> {
+        Err(FsError::Unsupported {
+            capability: "owner-only daemon capability file",
+            message: "no owner-only permission implementation for this platform".into(),
+        })
+    }
+
+    pub(super) fn open_owner_only_file(
+        _path: &Path,
+        _max_bytes: u64,
+    ) -> Result<(std::fs::File, OwnerOnlyFileMeta)> {
+        Err(FsError::Unsupported {
+            capability: "owner-only file read",
+            message: "no owner-only permission implementation for this platform".into(),
+        })
+    }
+
+    pub(super) fn read_owner_only_file_with_meta(
+        _path: &Path,
+        _max_bytes: u64,
+    ) -> Result<(Vec<u8>, OwnerOnlyFileMeta)> {
+        Err(FsError::Unsupported {
+            capability: "owner-only file read",
+            message: "no owner-only permission implementation for this platform".into(),
+        })
+    }
+
+    pub(super) fn process_exe_path(_pid: u32) -> Result<PathBuf> {
+        Err(FsError::Unsupported {
+            capability: "process executable resolution",
+            message: "no process identity implementation for this platform".into(),
+        })
+    }
+
+    pub(super) fn raw_host_id() -> Result<String> {
+        Err(FsError::Unsupported {
+            capability: "stable host identity",
+            message: "no host identity implementation for this platform".into(),
+        })
+    }
+
+    pub(super) fn raw_boot_id() -> Result<String> {
+        Err(FsError::Unsupported {
+            capability: "boot session identity",
+            message: "no boot identity implementation for this platform".into(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(label: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "telex-platform-fs-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        dir
+    }
+
+    #[test]
+    fn sha256_matches_known_vectors() {
+        assert_eq!(
+            sha256_hex(b""),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
+        assert_eq!(
+            sha256_hex(b"abc"),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
+        );
+        assert_eq!(
+            sha256_hex(b"The quick brown fox jumps over the lazy dog"),
+            "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592"
+        );
+    }
+
+    #[test]
+    fn owner_only_round_trip_and_size_cap() {
+        let dir = temp_dir("roundtrip");
+        let scope = ensure_owner_private_dir(&dir).expect("scope");
+        let path = scope.join("payload.json");
+        write_owner_only_file_atomic(&path, b"{\"a\":1}").expect("write");
+        let (bytes, meta) = read_owner_only_file_with_meta(&path, 4096).expect("read");
+        assert_eq!(bytes, b"{\"a\":1}");
+        assert_eq!(meta.len, 7);
+        assert!(meta.modified_ms.is_some());
+
+        // Over-cap reads fail closed rather than truncating.
+        assert!(read_owner_only_file(&path, 3).is_err());
+
+        // Atomic rewrite replaces in place and leaves no temp files behind.
+        write_owner_only_file_atomic(&path, b"{\"a\":2}").expect("rewrite");
+        assert_eq!(
+            read_owner_only_file(&path, 4096).expect("reread"),
+            b"{\"a\":2}"
+        );
+        let leftovers = std::fs::read_dir(&scope)
+            .expect("scan")
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".tmp"))
+            .count();
+        assert_eq!(leftovers, 0, "atomic write left a temp file behind");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn read_rejects_a_directory() {
+        let dir = temp_dir("dir-reject");
+        let scope = ensure_owner_private_dir(&dir).expect("scope");
+        let nested = scope.join("nested");
+        std::fs::create_dir(&nested).expect("nested");
+        assert!(read_owner_only_file(&nested, 4096).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn containment_accepts_inside_and_rejects_escape() {
+        let dir = temp_dir("containment");
+        let root = ensure_owner_private_dir(&dir).expect("root");
+        let inside = root.join("inside.json");
+        write_owner_only_file_atomic(&inside, b"{}").expect("write inside");
+        assert!(contained_under(&root, &inside).is_ok());
+
+        let outside_dir = temp_dir("containment-outside");
+        let outside = outside_dir.join("outside.json");
+        std::fs::write(&outside, b"{}").expect("write outside");
+        assert!(contained_under(&root, &outside).is_err());
+
+        // A `..` component is refused before any filesystem access.
+        assert!(contained_under(&root, &root.join("..").join("escape.json")).is_err());
+
+        // The root itself is not "strictly under" the root.
+        assert!(contained_under(&root, &root).is_err());
+
+        let _ = std::fs::remove_dir_all(&dir);
+        let _ = std::fs::remove_dir_all(&outside_dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn unix_read_rejects_group_readable_and_symlinks() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = temp_dir("unix-perms");
+        let scope = ensure_owner_private_dir(&dir).expect("scope");
+        let path = scope.join("secret.json");
+        write_owner_only_file_atomic(&path, b"{}").expect("write");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o640)).expect("relax");
+        assert!(
+            read_owner_only_file(&path, 4096).is_err(),
+            "a group-readable credential file must fail closed"
+        );
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("restore");
+        assert!(read_owner_only_file(&path, 4096).is_ok());
+
+        let link = scope.join("link.json");
+        std::os::unix::fs::symlink(&path, &link).expect("symlink");
+        assert!(
+            read_owner_only_file(&link, 4096).is_err(),
+            "a symlinked credential path must fail closed"
+        );
+        assert!(contained_under(&scope, &link).is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_read_accepts_a_normal_same_user_file_outside_any_scope() {
+        // The producer writes its credential file with the process token's ordinary DACL, outside
+        // the intent scope. That safe shape must be accepted; anything broader must not.
+        let dir = temp_dir("win-outside");
+        let path = dir.join("registry.json");
+        std::fs::write(&path, b"{\"secret\":\"x\"}").expect("write");
+        let read = read_owner_only_file(&path, 4096);
+        assert!(read.is_ok(), "unexpected rejection: {read:?}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_read_rejects_a_world_accessible_file() {
+        let dir = temp_dir("win-broad");
+        let path = dir.join("broad.json");
+        std::fs::write(&path, b"{}").expect("write");
+        // Grant Everyone read via icacls; if the grant does not take, skip rather than assert a
+        // false negative (some CI images disallow the change).
+        let granted = std::process::Command::new("icacls")
+            .arg(&path)
+            .arg("/grant")
+            .arg("*S-1-1-0:(R)")
+            .output()
+            .map(|o| o.status.success())
+            .unwrap_or(false);
+        if granted {
+            assert!(
+                read_owner_only_file(&path, 4096).is_err(),
+                "a world-readable credential file must fail closed"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn producer_root_hardening_never_strips_an_existing_producer_file() {
+        // Regression guard for the hazard that made `ensure_owner_private_dir` unusable on a
+        // shared directory: on Windows, protecting a directory's DACL re-propagates inheritance and
+        // leaves pre-existing children with an empty DACL — unreadable even to their own author.
+        // The producer-root rule must validate an existing directory, never rewrite it.
+        let dir = temp_dir("producer-root");
+        let existing = dir.join("registry.json");
+        std::fs::write(&existing, b"{\"secret\":\"x\"}").expect("seed producer file");
+        let root = ensure_owner_private_producer_root(&dir).expect("harden producer root");
+        assert!(root.is_absolute());
+        assert_eq!(
+            std::fs::read_to_string(&existing).expect("the producer's own file stays readable"),
+            "{\"secret\":\"x\"}"
+        );
+        // Files the producer writes afterwards are still readable and still pass the per-file
+        // owner-private check, which is what the credential read actually relies on.
+        let later = dir.join("later.json");
+        std::fs::write(&later, b"{}").expect("write later producer file");
+        assert!(read_owner_only_file(&later, 4096).is_ok());
+        // Idempotent.
+        assert!(ensure_owner_private_producer_root(&dir).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_freshly_created_producer_root_is_owner_private_from_birth() {
+        let base = temp_dir("producer-root-fresh");
+        let root = base.join("nested").join("telex-bridge");
+        assert!(!root.exists());
+        let secured = ensure_owner_private_producer_root(&root).expect("create producer root");
+        assert!(secured.exists());
+        // A file written into a freshly created root is readable and owner-private.
+        let file = secured.join("registry.json");
+        std::fs::write(&file, b"{}").expect("write into fresh root");
+        assert!(read_owner_only_file(&file, 4096).is_ok());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn process_identity_primitives_resolve_or_fail_closed() {
+        let exe = process_exe_path(std::process::id()).expect("own exe path");
+        assert!(exe.is_absolute());
+        let expected = std::fs::canonicalize(std::env::current_exe().expect("current exe"))
+            .expect("canonical current exe");
+        assert_eq!(exe, expected);
+
+        // A pid that cannot exist must fail closed, never return a value.
+        assert!(process_exe_path(0).is_err());
+
+        let host = host_id().expect("host id");
+        let boot = boot_id().expect("boot id");
+        assert_eq!(host.len(), 32);
+        assert_eq!(boot.len(), 32);
+        assert_ne!(host, boot);
+        // Stable within a boot.
+        assert_eq!(host, host_id().expect("host id again"));
+        assert_eq!(boot, boot_id().expect("boot id again"));
+    }
+}

@@ -24,8 +24,12 @@ jobs:
       - name: Check embedded bridge JS syntax
         run: node --check copilot/bridge/extension.mjs
 
-      - name: Test embedded bridge busy/idle contract
-        run: node --test copilot/bridge/busy-state.test.mjs
+      - name: Test embedded bridge contracts
+        # Glob rather than a single hardcoded path, so every `copilot/bridge/*.test.mjs` actually
+        # runs (the busy/idle contract and the probe protocol). The glob form is used instead of
+        # passing the directory because Node's directory discovery does not resolve on Windows
+        # runners; Node expands this pattern itself on both platforms.
+        run: node --test "copilot/bridge/*.test.mjs"
 
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -70,6 +74,11 @@ jobs:
 
       - name: Exercise generated fallback launcher
         run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite copilot_fallback
+
+      - name: Exercise station-intent reconciliation
+        # Same macOS/Windows coverage as the fallback E2E: the intent store, the owner-private
+        # credential rules, and the producer probe are all platform-specific.
+        run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite station_intent_
 
   feature-check:
     name: Feature combinations build
