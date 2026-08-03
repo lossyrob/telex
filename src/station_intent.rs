@@ -535,6 +535,35 @@ pub enum PendingWrite {
     KeptExistingLive { generation: u64 },
 }
 
+/// What [`IntentStore::stamp_armed_proof`] actually did.
+///
+/// Three-way rather than a bool, because the daemon has to tell "this binding has no durable
+/// record, so there is nothing to prove" (an ordinary pull attach, or a push attach from a client
+/// that writes no intent) apart from "the record that was here is gone, so the proof this register
+/// owes cannot be persisted". Collapsing those into one `false` is what let a register whose
+/// record had been deleted under it still report durable success.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArmedProofStamp {
+    /// No record exists for this binding at all.
+    NoRecord,
+    /// The proof was written; the record now sits at this generation.
+    Stamped { generation: u64 },
+    /// The record already carried a proof, so nothing was written and the generation did not move.
+    /// Idempotency is load-bearing: the hot re-register path must not churn the generation and
+    /// invalidate concurrent CAS holders.
+    AlreadyArmed { generation: u64 },
+}
+
+impl ArmedProofStamp {
+    /// Whether a durable armed proof exists for the binding as a result of this call.
+    pub fn is_proven(&self) -> bool {
+        matches!(
+            self,
+            ArmedProofStamp::Stamped { .. } | ArmedProofStamp::AlreadyArmed { .. }
+        )
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The intent record
 // ---------------------------------------------------------------------------------------------
@@ -653,6 +682,31 @@ impl StationIntentV1 {
     /// between, where the daemon armed delivery and the record has not been promoted yet.
     pub fn is_armed(&self) -> bool {
         self.armed.is_some() || self.state == IntentRecoveryState::Live
+    }
+
+    /// The **pending lifecycle clock**: the moment the `Pending` TTL is measured from.
+    ///
+    /// Deliberately *not* `updated_at_ms`. That field is refreshed by every `write_pending`, and
+    /// `write_pending` is what a re-attach performs — so a producer whose finalize keeps failing
+    /// (a bridge stuck mid-reload, a probe that never answers) re-attaches every few seconds and
+    /// pushed the five-minute TTL out indefinitely. The record that GC exists to collect was the
+    /// one record it could never reach.
+    ///
+    /// Each of the two pending TTLs is therefore anchored to the event it is actually about, and
+    /// neither event can be replayed by retrying:
+    ///
+    /// * An **unarmed** `pending` record is "an attach that may never have reached the daemon", so
+    ///   it ages from `created_at_ms`. `write_pending` carries that field forward from the record
+    ///   it replaces precisely so a re-attach cannot reset it.
+    /// * An **armed** `pending` record is "a daemon really did arm push for this binding", so it
+    ///   ages from the armed proof's own timestamp. `stamp_armed_proof` is idempotent, so a
+    ///   re-register cannot move that either. Floored at `created_at_ms` so a hand-edited or
+    ///   clock-skewed proof can never age a record from *before* it existed.
+    pub fn pending_clock_ms(&self) -> i64 {
+        match self.armed.as_ref() {
+            Some(proof) => proof.armed_at_ms.max(self.created_at_ms),
+            None => self.created_at_ms,
+        }
     }
 
     /// The last moment the producer behind this intent was actually *proven* — a successful
@@ -968,6 +1022,11 @@ impl IntentStore {
     /// about one attach attempt, and dropping it on a re-attach that then crashes re-opens the
     /// crash-between-`Register`-and-finalize window it exists to close. It can never arm anything
     /// on its own: restoration still requires `live`, a proven producer, and the epoch fence.
+    ///
+    /// `updated_at_ms` moves (this *is* a write), but it is deliberately not the clock any pending
+    /// TTL reads — see [`StationIntentV1::pending_clock_ms`]. `created_at_ms` and the armed proof
+    /// are both carried forward, so repeating this call cannot extend the lifetime of the record
+    /// it keeps replacing.
     pub fn write_pending(&self, intent: &StationIntentV1) -> Result<PendingWrite> {
         if intent.state != IntentRecoveryState::Pending {
             return Err(IntentError::Invalid(
@@ -1003,39 +1062,66 @@ impl IntentStore {
 
     /// Stamp the durable armed proof onto an existing record, under the per-intent write lock.
     ///
-    /// Called by the daemon at the moment it commits an armed push member, so a crash anywhere
-    /// after `Register` returns leaves a record that says so. Idempotent: an already-armed record
-    /// is left untouched rather than churning the generation on every re-register, which would
-    /// invalidate concurrent CAS holders for no gain.
+    /// Called by the daemon **as part of committing** an armed push member, before the member is
+    /// installed, so there is no window in which a register has committed and its proof has not.
+    /// That ordering is what makes the proof transactional rather than advisory: the caller aborts
+    /// the registration (releasing anything it claimed) when this cannot be persisted, and a
+    /// concurrent attach rollback either loses the per-intent lock race — in which case it finds an
+    /// armed record and refuses to delete it — or wins it, in which case this reports
+    /// [`ArmedProofStamp::NoRecord`] and the register fails instead of silently returning a durable
+    /// success it cannot back.
     ///
-    /// Returns `false` when there is no record for the binding (the ordinary pull-attach case) or
-    /// when it is already armed.
-    pub fn mark_armed(
+    /// Idempotent: an already-armed record is left untouched rather than churning the generation on
+    /// every re-register, which would invalidate concurrent CAS holders for no gain. Idempotency is
+    /// also what keeps the armed pending TTL honest — the proof timestamp is the clock that TTL
+    /// reads, so a re-register must not be able to move it.
+    pub fn stamp_armed_proof(
         &self,
         store_key: &str,
         session_id: &str,
         address: &str,
         daemon_instance_id: &str,
         now_ms: i64,
-    ) -> Result<bool> {
+    ) -> Result<ArmedProofStamp> {
         let id = IntentId::derive(store_key, session_id, address);
         if !self.path_for(&id).exists() {
-            return Ok(false);
+            return Ok(ArmedProofStamp::NoRecord);
         }
+        let mut already = None;
         let updated = self.update_locked(&id, |intent| {
             if intent.armed.is_some() {
+                already = Some(intent.generation);
                 return false;
             }
-            // Deliberately does *not* move `updated_at_ms`. That field is the GC clock for the
-            // pending and terminal TTLs, and arming is not a producer proof — moving it here would
-            // let a re-register extend a TTL the record has not earned.
+            // Deliberately does *not* move `updated_at_ms`. Arming is not a producer proof, and the
+            // pending TTLs read `pending_clock_ms` rather than that field precisely so no repeated
+            // call here or in `write_pending` can extend a lifetime the record has not earned.
             intent.armed = Some(ArmedProofV1 {
                 armed_at_ms: now_ms,
                 daemon_instance_id: daemon_instance_id.to_string(),
             });
             true
-        })?;
-        Ok(updated.is_some())
+        });
+        match updated {
+            Ok(Some(intent)) => Ok(ArmedProofStamp::Stamped {
+                generation: intent.generation,
+            }),
+            Ok(None) => match already {
+                Some(generation) => Ok(ArmedProofStamp::AlreadyArmed { generation }),
+                // `update_locked` only declines when the mutation returned `false`, and the only
+                // `false` above sets `already`. Treat anything else as "the record went away",
+                // which is a refusal, never a silent success.
+                None => Ok(ArmedProofStamp::NoRecord),
+            },
+            // The record vanished between the existence check and the locked load. That is exactly
+            // the rollback race, and it must surface as "no record" rather than as an I/O error the
+            // caller might classify as transient.
+            Err(IntentError::Io(detail)) if !self.path_for(&id).exists() => {
+                let _ = detail;
+                Ok(ArmedProofStamp::NoRecord)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Acquire the per-intent write lock, or fail rather than write unserialized.
@@ -1325,14 +1411,15 @@ impl IntentStore {
     /// Every reason is **TTL-governed and state-scoped**, because deleting an intent is the one GC
     /// action recovery cannot undo:
     ///
-    /// * An unarmed `Pending` record is governed **solely** by [`STATION_INTENT_PENDING_TTL`].
-    ///   Nothing else may delete it: on a first attach the producer does not exist yet by
-    ///   construction (the bridge extension has been written but not loaded), so a
-    ///   credential-existence or producer-liveness rule would delete exactly the record the
-    ///   turn-boundary finalizer is waiting to promote.
+    /// * An unarmed `Pending` record is governed **solely** by [`STATION_INTENT_PENDING_TTL`],
+    ///   measured from `created_at_ms` ([`StationIntentV1::pending_clock_ms`]). Nothing else may
+    ///   delete it: on a first attach the producer does not exist yet by construction (the bridge
+    ///   extension has been written but not loaded), so a credential-existence or producer-liveness
+    ///   rule would delete exactly the record the turn-boundary finalizer is waiting to promote.
     /// * An **armed** `Pending` record — one a daemon durably proved it armed push for — is
-    ///   governed by [`STATION_INTENT_ARMED_PENDING_TTL`] instead, because deleting it at five
-    ///   minutes silently disarms recovery for a binding that is delivering right now.
+    ///   governed by [`STATION_INTENT_ARMED_PENDING_TTL`] measured from the armed proof, because
+    ///   deleting it at five minutes silently disarms recovery for a binding that is delivering
+    ///   right now.
     /// * A persisted terminal state (`Unverifiable` / `Insecure` / `Revoked`) expires after
     ///   [`STATION_INTENT_UNVERIFIABLE_TTL`].
     /// * A finalized intent whose credential file is gone expires after
@@ -1345,10 +1432,12 @@ impl IntentStore {
     ///   [`STATION_INTENT_UNVERIFIABLE_TTL`], so a session that died without `sessionEnd` cannot
     ///   wedge its binding forever.
     ///
-    /// Both TTL clocks are read from *proof*, never from retry attempts. The reconciler persists
-    /// scheduling state on every genuine failure, so an attempt-based clock is refreshed every few
-    /// seconds forever and neither the credential-missing nor the orphan rule can ever fire for
-    /// exactly the abandoned records they exist to collect.
+    /// Both TTL clocks are read from *proof*, never from retry attempts, and the pending clocks are
+    /// read from creation or from the arming proof, never from the last write. The reconciler
+    /// persists scheduling state on every genuine failure and a failing attach rewrites its pending
+    /// record on every retry, so an attempt- or write-based clock is refreshed every few seconds
+    /// forever and none of these rules can ever fire for exactly the abandoned records they exist
+    /// to collect.
     ///
     /// Every deletion is re-checked under the per-intent write lock against the generation and the
     /// state the decision was made from ([`IntentStore::remove_if_unchanged`]), so a record that a
@@ -1446,12 +1535,17 @@ impl IntentStore {
         if intent.state == IntentRecoveryState::Pending {
             // Pending is governed by its own TTL and by nothing else — a longer one once a daemon
             // has durably proven it armed push for the binding.
+            //
+            // Aged from `pending_clock_ms`, never from `updated_at_ms`: a re-attach rewrites the
+            // record through `write_pending`, so an `updated_at_ms` clock let a producer that
+            // failed to finalize keep its leftover alive forever simply by retrying.
             let ttl = if intent.is_armed() {
                 STATION_INTENT_ARMED_PENDING_TTL
             } else {
                 STATION_INTENT_PENDING_TTL
             };
-            return (age_ms > ttl.as_millis() as i64).then(|| {
+            let pending_age_ms = now_ms.saturating_sub(intent.pending_clock_ms());
+            return (pending_age_ms > ttl.as_millis() as i64).then(|| {
                 if intent.is_armed() {
                     "armed pending intent past its TTL (never finalized)".to_string()
                 } else {
@@ -1917,6 +2011,9 @@ mod tests {
 
         let mut pending = sample_intent("sqlite:/a", "sess", "pending");
         pending.state = IntentRecoveryState::Pending;
+        // The pending TTL is aged from creation, not from the last write: a re-attach rewrites the
+        // record and must not be able to extend its own leftover's life.
+        pending.created_at_ms = 0;
         pending.updated_at_ms = 0;
         pending.producer.credential.path = credential.clone();
         store.write_atomic(&pending).expect("write pending");
@@ -1928,6 +2025,7 @@ mod tests {
 
         let mut fresh_pending = sample_intent("sqlite:/a", "sess", "fresh-pending");
         fresh_pending.state = IntentRecoveryState::Pending;
+        fresh_pending.created_at_ms = 1_000_000;
         fresh_pending.updated_at_ms = 1_000_000;
         fresh_pending.producer.credential.path = credential.clone();
         store
@@ -1973,6 +2071,7 @@ mod tests {
 
         let mut pending = sample_intent("sqlite:/a", "sess", "first-attach");
         pending.state = IntentRecoveryState::Pending;
+        pending.created_at_ms = 1_000_000;
         pending.updated_at_ms = 1_000_000;
         // Exactly what `write_pending_intent` records on a first attach: a credential path that
         // does not exist, and the placeholder producer identity.
@@ -2138,10 +2237,13 @@ mod tests {
         assert!(!pending.is_armed(), "a fresh pending record is not armed");
         store.write_pending(&pending).expect("write pending");
 
-        assert!(
+        assert_eq!(
             store
-                .mark_armed("sqlite:/a", "sess", "addr", "inst-1", 2_000)
+                .stamp_armed_proof("sqlite:/a", "sess", "addr", "inst-1", 2_000)
                 .expect("mark armed"),
+            ArmedProofStamp::Stamped {
+                generation: pending.generation + 1
+            },
             "the first arming stamp writes"
         );
         let armed = store.load(&pending.id()).expect("reload");
@@ -2161,26 +2263,66 @@ mod tests {
             "but it must not move the TTL clock: arming is not a producer proof"
         );
 
-        assert!(
-            !store
-                .mark_armed("sqlite:/a", "sess", "addr", "inst-2", 3_000)
+        assert_eq!(
+            store
+                .stamp_armed_proof("sqlite:/a", "sess", "addr", "inst-2", 3_000)
                 .expect("re-stamp"),
+            ArmedProofStamp::AlreadyArmed {
+                generation: armed.generation
+            },
             "re-arming is idempotent, so the hot register path does not churn the generation"
         );
         assert_eq!(
             store.load(&pending.id()).expect("reload").generation,
             armed.generation
         );
+        assert_eq!(
+            store
+                .load(&pending.id())
+                .expect("reload")
+                .pending_clock_ms(),
+            2_000,
+            "and a re-register cannot move the clock the armed pending TTL reads"
+        );
 
-        // No record for the binding at all is the ordinary pull-attach case, not an error.
-        assert!(!store
-            .mark_armed("sqlite:/a", "sess", "never-attached", "inst-1", 4_000)
-            .expect("no record"));
+        // No record for the binding at all is the ordinary pull-attach case. Reported as its own
+        // variant, never folded into "already armed": the daemon has to be able to tell it apart
+        // from "the record this register owed a proof to was deleted under it".
+        assert_eq!(
+            store
+                .stamp_armed_proof("sqlite:/a", "sess", "never-attached", "inst-1", 4_000)
+                .expect("no record"),
+            ArmedProofStamp::NoRecord
+        );
+        assert!(!ArmedProofStamp::NoRecord.is_proven());
 
         // `live` needs no explicit proof.
         let live = sample_intent("sqlite:/a", "sess", "live-addr");
         assert_eq!(live.state, IntentRecoveryState::Live);
         assert!(live.is_armed());
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// A record the stamp cannot read is a **refusal**, never a silent success.
+    ///
+    /// The daemon commits this stamp as part of committing an armed push member, and it aborts the
+    /// registration when the stamp does not prove anything. That only works if a corrupt or
+    /// unreadable manifest surfaces as an error rather than as "nothing to do".
+    #[test]
+    fn an_unreadable_record_refuses_the_arming_stamp_rather_than_reporting_success() {
+        let run_dir = temp_run_dir("armed-proof-unreadable");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+
+        let mut pending = sample_intent("sqlite:/a", "sess", "addr");
+        pending.state = IntentRecoveryState::Pending;
+        store.write_pending(&pending).expect("write pending");
+        std::fs::write(store.path_for(&pending.id()), b"{ not json").expect("corrupt the manifest");
+
+        let stamped = store.stamp_armed_proof("sqlite:/a", "sess", "addr", "inst-1", 2_000);
+        assert!(
+            stamped.is_err(),
+            "an unreadable record must not report a durable proof, got {stamped:?}"
+        );
         let _ = std::fs::remove_dir_all(&run_dir);
     }
 
@@ -2211,7 +2353,7 @@ mod tests {
         // An armed proof survives a re-attach: it is a fact about the binding, and dropping it
         // would re-open the crash-between-Register-and-finalize window.
         store
-            .mark_armed("sqlite:/a", "sess", "addr", "inst-1", 7_000)
+            .stamp_armed_proof("sqlite:/a", "sess", "addr", "inst-1", 7_000)
             .expect("arm");
         store.write_pending(&again).expect("third write");
         assert!(
@@ -2300,6 +2442,10 @@ mod tests {
 
         let mut unarmed = sample_intent("sqlite:/a", "sess", "unarmed");
         unarmed.state = IntentRecoveryState::Pending;
+        // The clock each TTL actually reads: creation for the unarmed record, the arming proof for
+        // the armed one. `updated_at_ms` is deliberately set far *later* than both, so a rule that
+        // still consulted it would keep both records alive and fail this test.
+        unarmed.created_at_ms = 1_000_000;
         unarmed.updated_at_ms = 1_000_000;
         unarmed.producer.credential.path = run_dir.join("never-written.json");
         unarmed.producer.pid = 0;
@@ -2313,7 +2459,7 @@ mod tests {
         armed.handler.session_id = armed.session_id.clone();
         store.write_pending(&armed).expect("write armed");
         store
-            .mark_armed("sqlite:/a", "sess", "armed", "inst-1", 1_000_000)
+            .stamp_armed_proof("sqlite:/a", "sess", "armed", "inst-1", 1_000_000)
             .expect("arm");
 
         let just_past_pending_ttl =
@@ -2339,6 +2485,138 @@ mod tests {
         assert!(
             report.removed.contains(&armed.id()),
             "it is still bounded, so an abandoned armed record does not accumulate forever"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// A pending record's TTL must be **unreachable by retrying**.
+    ///
+    /// `write_pending` refreshes `updated_at_ms`, and a failing attach re-runs it on every retry —
+    /// so while the pending TTL was aged from that field, a producer whose finalize never succeeded
+    /// pushed its own leftover's expiry out indefinitely simply by re-attaching. GC could never
+    /// collect the exact class of record it exists for, and the scope grew a permanent resident per
+    /// wedged binding.
+    ///
+    /// Both halves are asserted: a re-attach loop spanning far more than the TTL stays collectable,
+    /// while the legitimate state transitions each still get the clock they are supposed to have —
+    /// arming moves the record onto the armed proof's own (much longer) clock, and revoking moves
+    /// it onto the terminal clock measured from the revocation.
+    #[test]
+    fn a_repeated_pending_write_cannot_push_the_pending_ttl_out_forever() {
+        let run_dir = temp_run_dir("pending-clock");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let ttl_ms = STATION_INTENT_PENDING_TTL.as_millis() as i64;
+
+        let mut pending = sample_intent("sqlite:/a", "sess", "retried");
+        pending.state = IntentRecoveryState::Pending;
+        pending.created_at_ms = 1_000;
+        pending.updated_at_ms = 1_000;
+        pending.producer.credential.path = run_dir.join("never-written.json");
+        pending.producer.pid = 0;
+        pending.producer.start_time = 0;
+        store.write_pending(&pending).expect("first attach");
+
+        // The failing re-attach loop: eleven attempts spread over more than twice the TTL, each one
+        // rewriting the record with a fresh `updated_at_ms` exactly as `write_pending_intent` does.
+        let mut now = 1_000;
+        for _ in 0..10 {
+            now += ttl_ms / 5;
+            let mut retry = pending.clone();
+            retry.created_at_ms = now;
+            retry.updated_at_ms = now;
+            store.write_pending(&retry).expect("re-attach");
+        }
+        let stored = store.load(&pending.id()).expect("reload");
+        assert_eq!(
+            stored.created_at_ms, 1_000,
+            "the creation clock is carried forward, so a re-attach cannot reset it"
+        );
+        assert!(
+            stored.updated_at_ms > 1_000 + ttl_ms,
+            "precondition: the last-write clock really was refreshed past the TTL"
+        );
+        assert_eq!(stored.pending_clock_ms(), 1_000);
+
+        let report = store.gc(now, Some("host"), Some("boot")).expect("gc");
+        assert!(
+            report.removed.contains(&pending.id()),
+            "a record re-attached in a loop for longer than the TTL must still be collectable, got {:?}",
+            report.reasons
+        );
+
+        // The legitimate transition: arming really does move the record onto the armed clock, and
+        // the same GC that just collected the unarmed leftover keeps this one.
+        let mut armed = sample_intent("sqlite:/a", "sess", "armed-transition");
+        armed.state = IntentRecoveryState::Pending;
+        armed.created_at_ms = 1_000;
+        armed.updated_at_ms = 1_000;
+        armed.producer.credential.path = run_dir.join("never-written.json");
+        armed.producer.pid = 0;
+        armed.producer.start_time = 0;
+        store.write_pending(&armed).expect("write");
+        let armed_at_ms = 1_000 + ttl_ms * 2;
+        store
+            .stamp_armed_proof(
+                "sqlite:/a",
+                "sess",
+                "armed-transition",
+                "inst-1",
+                armed_at_ms,
+            )
+            .expect("arm");
+        let stored = store.load(&armed.id()).expect("reload");
+        assert_eq!(
+            stored.pending_clock_ms(),
+            armed_at_ms,
+            "an armed record ages from the proof, which is the event its TTL is about"
+        );
+        let report = store
+            .gc(armed_at_ms + ttl_ms, Some("host"), Some("boot"))
+            .expect("gc");
+        assert!(
+            !report.removed.contains(&armed.id()),
+            "the arming transition earned the longer clock, got {:?}",
+            report.reasons
+        );
+
+        // And the other legitimate transition: a revocation is aged from when it was revoked. Its
+        // own record, because a revoked record must carry a concrete producer identity (only
+        // `Pending` may omit one) and must have a resolvable credential for the terminal TTL to be
+        // the rule under test.
+        let credential = run_dir.join("cred.json");
+        std::fs::write(&credential, b"{\"secret\":\"x\"}").expect("credential");
+        let mut revocable = sample_intent("sqlite:/a", "sess", "revoked-transition");
+        revocable.created_at_ms = 1_000;
+        revocable.updated_at_ms = 1_000;
+        revocable.producer.credential.path = credential;
+        store.write_atomic(&revocable).expect("write live");
+        let revoked_at_ms = armed_at_ms + ttl_ms;
+        store
+            .revoke("sqlite:/a", "sess", "revoked-transition", revoked_at_ms)
+            .expect("revoke");
+        let report = store
+            .gc(
+                revoked_at_ms + STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64 - 1_000,
+                Some("host"),
+                Some("boot"),
+            )
+            .expect("gc");
+        assert!(
+            !report.removed.contains(&revocable.id()),
+            "a revocation is visible for its own TTL, measured from the revocation, got {:?}",
+            report.reasons
+        );
+        let report = store
+            .gc(
+                revoked_at_ms + STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64 + 1_000,
+                Some("host"),
+                Some("boot"),
+            )
+            .expect("gc");
+        assert!(
+            report.removed.contains(&revocable.id()),
+            "and it is still bounded, got {:?}",
+            report.reasons
         );
         let _ = std::fs::remove_dir_all(&run_dir);
     }

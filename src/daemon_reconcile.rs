@@ -32,8 +32,8 @@ use crate::daemon_ipc::{
 use crate::handler_kinds::{self, StoreSelector};
 use crate::platform_fs;
 use crate::station_intent::{
-    self, IntentEvidence, IntentId, IntentStore, ProducerTransport, StationIntentV1,
-    BRIDGE_PROBE_TIMEOUT, STATION_INTENT_MAX_COUNT,
+    self, ArmedProofStamp, IntentEvidence, IntentId, IntentStore, ProducerTransport,
+    StationIntentV1, BRIDGE_PROBE_TIMEOUT, STATION_INTENT_MAX_COUNT,
 };
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
@@ -485,28 +485,57 @@ impl DaemonState {
         }
     }
 
-    /// Stamp the durable **armed proof** on a binding's intent record, if it has one.
+    /// Stamp the durable **armed proof** on a binding's intent record, as part of committing an
+    /// armed push registration.
     ///
-    /// Called by `register_member` at the moment it commits an armed push member. That placement
-    /// is the point: it closes the window between `Register` returning and the producer-side
-    /// finalize, in which a crash (of the CLI, of the agent, of the machine) left a `pending`
-    /// record that the five-minute pending TTL then deleted while push delivery went on working —
-    /// so recovery was silently disarmed and the user only found out after the next daemon
-    /// replacement.
+    /// Called by `register_member` **before** it installs the member, not after it returns. That
+    /// placement is the whole point: it closes the window between `Register` committing and the
+    /// producer-side finalize, in which a crash (of the CLI, of the agent, of the machine) left a
+    /// `pending` record that the five-minute pending TTL then deleted while push delivery went on
+    /// working — and it closes the narrower window in which a *concurrent* attach's rollback could
+    /// delete the record between the member commit and the stamp, leaving an armed station with no
+    /// durable proof at all while the register still reported success.
     ///
-    /// Best effort and never fatal to a register: the proof strictly *adds* recoverability, and a
-    /// register that succeeded must not be reported as failed because a diagnostic stamp could not
-    /// be written. Idempotent, so the hot re-register path costs a stat and nothing else.
-    pub(crate) fn mark_intent_armed(&self, store_key: &str, session_id: &str, address: &str) {
+    /// Deliberately **not** best effort, and deliberately not swallowing its result: the caller
+    /// decides, and a register that owes a proof it could not persist is aborted rather than
+    /// reported as a durable push registration. Idempotent, so the hot re-register path costs a
+    /// stat and nothing else.
+    pub(crate) fn stamp_intent_armed(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+    ) -> std::result::Result<ArmedProofStamp, String> {
         let Some(store) = self.intent_store() else {
-            return;
+            return Err("the station-intent scope could not be opened".to_string());
         };
-        match store.mark_armed(store_key, session_id, address, &self.instance_id, now_ms()) {
-            Ok(_) => {}
-            Err(e) => self.push_recent_error(
-                "StationIntent",
-                format!("recording the armed proof for {session_id}/{address}: {e}"),
-            ),
+        store
+            .stamp_armed_proof(store_key, session_id, address, &self.instance_id, now_ms())
+            .map_err(|e| e.to_string())
+    }
+
+    /// Whether the durable intent scope currently holds a record for this binding.
+    ///
+    /// Read before an arming register runs, so the daemon knows whether that register *owes* a
+    /// durable proof. Without it, "no record at the stamp" is ambiguous: it is the ordinary pull
+    /// or plain-`--on-deliver` attach (nothing to prove) and it is also "a concurrent rollback
+    /// deleted the record this register was going to stamp" (everything to prove).
+    ///
+    /// `Err` is "the scope exists but could not be read", which the caller fails closed on exactly
+    /// as the anti-downgrade guard does — an unreadable scope is the `Insecure` condition the rest
+    /// of this design refuses to guess about. A scope that does not exist at all is `Ok(false)`:
+    /// this host has never attached, so there is genuinely nothing to prove.
+    pub(crate) fn durable_intent_present(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+    ) -> std::result::Result<bool, String> {
+        match self.intent_store_readonly()? {
+            None => Ok(false),
+            Some(store) => Ok(store
+                .path_for(&IntentId::derive(store_key, session_id, address))
+                .exists()),
         }
     }
 
@@ -618,8 +647,15 @@ impl DaemonState {
     ///
     /// The two sources are combined so neither can mask the other:
     ///
-    /// * A cached projection that names a *problem* (degraded, incompatible, revoked) wins. That
-    ///   is real evidence from an attempt, and a successor will hit the same wall.
+    /// * A cached projection that names a *problem* (degraded, incompatible, revoked) wins **only
+    ///   while it still describes the manifest on disk**. That is real evidence from an attempt,
+    ///   and a successor will hit the same wall — but only if the record it will read is the one
+    ///   the attempt failed against. Generation is what decides that: every durable state
+    ///   transition (a finalize, a producer-identity refresh, an arming stamp, a re-attach) moves
+    ///   it, while the reconciler's own evidence writes deliberately do not. A cached
+    ///   `producer_identity_mismatch` for generation N therefore stops applying the moment the
+    ///   turn-boundary hook writes generation N+1, and holding on to it made `upgrade` report a
+    ///   freshly repaired binding as degraded and skip the hand-off it exists to perform.
     /// * Otherwise the durable manifest wins, because it is what the successor will actually read.
     pub(crate) fn drain_intent_report(&self) -> DrainIntentReport {
         let snapshot = self.intent_index_snapshot();
@@ -630,28 +666,35 @@ impl DaemonState {
             index_as_of_ms: snapshot.as_of_ms,
             ..Default::default()
         };
-        let mut states: BTreeMap<IntentKey, IntentRecoveryState> = BTreeMap::new();
+        // `(state, generation)` throughout: the state alone cannot say which record it describes.
+        let mut states: BTreeMap<IntentKey, (IntentRecoveryState, u64)> = BTreeMap::new();
         for (key, entry) in snapshot.entries.iter() {
-            states.insert(key.clone(), entry.state);
+            states.insert(key.clone(), (entry.state, entry.generation));
         }
-        for (key, durable_state) in durable {
-            let effective = match states.get(&key) {
+        for (key, (durable_state, durable_generation)) in durable {
+            let cached = states.get(&key).copied();
+            let effective = match cached {
                 // A cached failure/incompatibility/revocation is evidence the successor will hit
-                // the same wall; keep it. Anything else (never seen, still `pending` because no
-                // pass has run since the finalize, or an already-recoverable projection) defers to
-                // the manifest the successor will read.
-                Some(cached)
-                    if !cached.is_recoverable()
-                        && *cached != IntentRecoveryState::Pending
-                        && *cached != IntentRecoveryState::Unknown =>
+                // the same wall — provided it was recorded against the generation the successor
+                // will read. Anything else (never seen, still `pending` because no pass has run
+                // since the finalize, an already-recoverable projection, or a projection that is
+                // now stale because the manifest moved on) defers to the manifest.
+                Some((cached_state, cached_generation))
+                    if cached_generation >= durable_generation
+                        && !cached_state.is_recoverable()
+                        && cached_state != IntentRecoveryState::Pending
+                        && cached_state != IntentRecoveryState::Unknown =>
                 {
-                    *cached
+                    cached_state
                 }
                 _ => durable_state,
             };
-            states.insert(key, effective);
+            let generation = cached
+                .map(|(_, cached_generation)| cached_generation.max(durable_generation))
+                .unwrap_or(durable_generation);
+            states.insert(key, (effective, generation));
         }
-        for state in states.values() {
+        for (state, _) in states.values() {
             match state {
                 IntentRecoveryState::Live
                 | IntentRecoveryState::Restored
@@ -682,13 +725,19 @@ impl DaemonState {
         report
     }
 
-    /// The durable state of every readable record in the scope, read without creating it.
+    /// The durable state **and generation** of every readable record in the scope, read without
+    /// creating it.
+    ///
+    /// The generation travels with the state because the caller has to compare it against the
+    /// cached projection's: a cached problem only describes the record a successor will read while
+    /// the two generations agree, and a manifest that moved on has invalidated the attempt that
+    /// produced the cached verdict.
     ///
     /// Bounded by the per-scope cap and free of any network or probe I/O. An unreadable scope or
     /// an unreadable manifest simply contributes nothing: the cached index (and the pass's own
     /// `unidentifiable` count) already carries what is known about those, and inventing a state
     /// for a record we could not read would be worse than deferring to what the last pass proved.
-    fn durable_intent_states(&self) -> BTreeMap<IntentKey, IntentRecoveryState> {
+    fn durable_intent_states(&self) -> BTreeMap<IntentKey, (IntentRecoveryState, u64)> {
         let mut states = BTreeMap::new();
         let Ok(Some(store)) = self.intent_store_readonly() else {
             return states;
@@ -706,7 +755,7 @@ impl DaemonState {
                     session_id: intent.session_id.clone(),
                     address: intent.address.clone(),
                 },
-                intent.state,
+                (intent.state, intent.generation),
             );
         }
         states

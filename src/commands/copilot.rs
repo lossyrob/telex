@@ -4488,7 +4488,7 @@ mod tests {
         // only durable trace of an arming that really happened.
         store.write_pending(&intent).expect("write");
         store
-            .mark_armed(
+            .stamp_armed_proof(
                 &intent.store_key,
                 &intent.session_id,
                 &intent.address,

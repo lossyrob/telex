@@ -1717,6 +1717,89 @@ async fn station_intent_a_finalize_is_visible_to_the_very_next_drain_decision() 
     assert_eq!(after.pending, 0);
 }
 
+/// The pre-drain backfill keeps a cached *problem* because a successor will hit the same wall — but
+/// only while that problem still describes the record the successor is going to read.
+///
+/// The canonical sequence is the one this whole recovery path exists for: a bridge reloads, the
+/// pass fails `producer_identity_mismatch` against the stale `(pid, start_time)` and caches
+/// `Unverifiable` for generation N, and then the turn-boundary hook re-records the live identity at
+/// generation N+1. Nothing refreshes the cached projection in between — only a reconcile pass does
+/// that, and `upgrade` drains before the next tick. Holding the stale verdict made a binding that
+/// had *just been repaired* drain as `degraded`, so successor verification skipped the hand-off it
+/// exists to perform and push delivery was silently dropped across the replacement.
+///
+/// Generation is what decides applicability: durable state transitions move it, and the reconciler's
+/// evidence-only rewrites deliberately do not.
+#[tokio::test]
+async fn station_intent_a_cached_failure_never_outlives_the_generation_it_was_recorded_against() {
+    let scenario = Scenario::new("intent-drain-generation", ProducerBehavior::Healthy).await;
+    // The bridge reloaded: the record still names the old process identity.
+    let mut stale = scenario.intent.clone();
+    stale.generation = 2;
+    stale.producer.start_time = stale.producer.start_time.wrapping_add(1);
+    scenario.reseed(&stale);
+
+    let report = scenario.daemon.reconcile_once().await;
+    assert_eq!(report.failed, 1);
+    assert_eq!(
+        scenario.failure_code().as_deref(),
+        Some("producer_identity_mismatch")
+    );
+    let before = scenario.daemon.drain_intent_report();
+    assert_eq!(
+        before.degraded, 1,
+        "while the cached verdict still describes the manifest on disk, it wins: a successor \
+         reading generation 2 really will fail the same way"
+    );
+    assert_eq!(before.recoverable, 0);
+
+    // Exactly the durable transition the turn-boundary hook performs, in the producer's process,
+    // with no reconcile pass and no index refresh in between.
+    scenario
+        .daemon
+        .intent_store()
+        .update_locked(&scenario.intent.id(), |intent| {
+            intent.producer.start_time = scenario.intent.producer.start_time;
+            intent.state = IntentRecoveryState::Live;
+            true
+        })
+        .expect("identity refresh")
+        .expect("the record must still exist");
+    let refreshed_generation = scenario
+        .daemon
+        .intent_store()
+        .load(&scenario.intent.id())
+        .expect("reload")
+        .generation;
+    assert!(
+        refreshed_generation > 2,
+        "precondition: the repair is a real durable transition"
+    );
+    assert_eq!(
+        scenario
+            .daemon
+            .intent_index()
+            .entries
+            .values()
+            .next()
+            .expect("an index entry")
+            .generation,
+        2,
+        "precondition: no pass has refreshed the cached projection"
+    );
+
+    let after = scenario.daemon.drain_intent_report();
+    assert_eq!(
+        after.recoverable, 1,
+        "a drain started immediately after the repair must hand over the binding it repaired"
+    );
+    assert_eq!(
+        after.degraded, 0,
+        "the cached failure described a generation that no longer exists"
+    );
+    assert_eq!(after.pending, 0);
+}
+
 /// The daemon writes the durable **armed proof** itself, at `Register`, so a crash anywhere between
 /// arming push and the producer-side finalize leaves a record that says push was armed.
 #[tokio::test]

@@ -3924,57 +3924,14 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
     (response, ClientAction::Continue)
 }
 
-/// `Register`, with the durable **armed proof** stamped on the way out.
+/// `Register`.
 ///
-/// The stamp lives here, at the single seam every register response passes through, rather than in
-/// the three places inside [`register_member_inner`] that build a `Registered`. What it closes is
-/// the crash window between the daemon committing an armed push member and the producer-side
-/// finalize promoting the record to `live`: before this, that window left a `pending` record which
-/// the five-minute pending TTL deleted while push delivery kept working, so recovery was silently
-/// disarmed and the user discovered it only after the next daemon replacement.
-///
-/// Only an *armed* register stamps (`on_deliver.is_some()`), and only when a record for the binding
-/// already exists. A pull attach writes no intent and gets no proof.
+/// An **arming** register (`on_deliver.is_some()`) is a *durable* push registration whenever the
+/// binding has a station-intent record: the durable armed proof is committed inside this function,
+/// immediately before the member is installed, and a register that cannot persist the proof it owes
+/// is aborted rather than reported as a success — see [`commit_armed_proof`].
 #[allow(clippy::too_many_arguments)]
 async fn register_member(
-    state: Arc<DaemonState>,
-    store_key: String,
-    address: String,
-    session_id: String,
-    occupant: String,
-    description: Option<String>,
-    scope: Option<String>,
-    tags: Option<String>,
-    watch_pids: Vec<WatchPidSpec>,
-    recovery: bool,
-    on_deliver: Option<Vec<String>>,
-    replace_on_deliver: bool,
-    on_deliver_wake_on_cc: bool,
-) -> Response {
-    let arming_push = on_deliver.is_some();
-    let response = register_member_inner(
-        state.clone(),
-        store_key.clone(),
-        address.clone(),
-        session_id.clone(),
-        occupant,
-        description,
-        scope,
-        tags,
-        watch_pids,
-        recovery,
-        on_deliver,
-        replace_on_deliver,
-        on_deliver_wake_on_cc,
-    )
-    .await;
-    if arming_push && matches!(response, Response::Registered { .. }) {
-        state.mark_intent_armed(&store_key, &session_id, &address);
-    }
-    response
-}
-
-async fn register_member_inner(
     state: Arc<DaemonState>,
     store_key: String,
     address: String,
@@ -4004,6 +3961,43 @@ async fn register_member_inner(
         .await;
     let _delivery_admission_guard = delivery_admission.lock().await;
     let watch_pids = capture_watch_pids(watch_pids);
+
+    // Does this register *owe* a durable armed proof?
+    //
+    // Read once, here, under the per-station admission guard and before any commit path runs. The
+    // question it answers cannot be answered at stamp time: "no record for this binding" is both
+    // the ordinary pull or plain `--on-deliver` attach (nothing was ever written, so nothing is
+    // owed) and a concurrent attach rollback that deleted the record this register was about to
+    // stamp (everything is owed). Observing the record's existence up front separates the two, and
+    // the two possible interleavings after this point are both safe: a record created between here
+    // and the stamp is stamped anyway, and a record deleted between here and the stamp aborts the
+    // register instead of returning an unbacked durable success.
+    //
+    // An unreadable scope fails closed for exactly the reason the anti-downgrade guard below does:
+    // it is the `Insecure` condition the rest of this design refuses to guess about, and guessing
+    // "no record" here is guessing in the direction that silently loses recovery.
+    let owes_armed_proof = if on_deliver.is_some() {
+        match state.durable_intent_present(&store_key, &session_id, &address) {
+            Ok(present) => present,
+            Err(detail) => {
+                state.push_recent_error(
+                    "StationIntent",
+                    format!(
+                        "refused push registration because the station-intent scope could not be read store={store_key} session={session_id} address={address}: {detail}"
+                    ),
+                );
+                return proto::incompatible_with_reason(
+                    format!(
+                        "the station-intent scope could not be read ({detail}), so push for {address} cannot be registered durably; \
+                         fix the scope permissions and re-run the attach"
+                    ),
+                    NeedsAttachReason::PushIntentUnrecoverable,
+                );
+            }
+        }
+    } else {
+        false
+    };
 
     if on_deliver.is_some() && state.has_live_waiter_for(&store_key, &session_id, &address) {
         state.push_recent_error(
@@ -4088,13 +4082,29 @@ async fn register_member_inner(
                     );
                 }
                 state.check_session_id_reuse_tripwire(&refreshed);
-                if !recovery {
-                    state.clear_definite_session_end(&store_key, &session_id);
-                }
                 #[cfg(test)]
                 state
                     .delivery_admission_before_commit(DeliveryAdmissionKind::Register)
                     .await;
+                // Commit the durable proof *before* the member, and before any other side effect
+                // this branch performs. On failure the pre-existing member is left exactly as it
+                // was: `existing` is still the installed record, its epoch lease is untouched, and
+                // nothing this call built has been published — which is the whole reason the stamp
+                // sits here rather than after the commit.
+                if on_deliver.is_some() {
+                    if let Err(response) = commit_armed_proof(
+                        &state,
+                        &store_key,
+                        &session_id,
+                        &address,
+                        owes_armed_proof,
+                    ) {
+                        return response;
+                    }
+                }
+                if !recovery {
+                    state.clear_definite_session_end(&store_key, &session_id);
+                }
                 state.insert_member(refreshed.clone());
                 // Reset the push retry state and re-scan backlog only on an explicit
                 // (re-)provision; a plain refresh that merely preserved the handler keeps its
@@ -4402,9 +4412,6 @@ async fn register_member_inner(
         on_deliver_cc_after_ms,
     };
     state.check_session_id_reuse_tripwire(&record);
-    if !recovery {
-        state.clear_definite_session_end(&store_key, &session_id);
-    }
     let backlog = if record.on_deliver.is_some() {
         Some(record.clone())
     } else {
@@ -4414,6 +4421,25 @@ async fn register_member_inner(
     state
         .delivery_admission_before_commit(DeliveryAdmissionKind::Register)
         .await;
+    // Commit the durable proof *before* the member, and treat a failure as a failed registration.
+    //
+    // Everything fallible is already done at this point, so on success the in-memory commit below
+    // cannot fail, and on failure nothing has been published: the only thing this call has claimed
+    // is the epoch lease, which is released here so a refused register leaves the address exactly
+    // as it found it.
+    if record.on_deliver.is_some() {
+        if let Err(response) =
+            commit_armed_proof(&state, &store_key, &session_id, &address, owes_armed_proof)
+        {
+            let _ = backend
+                .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                .await;
+            return response;
+        }
+    }
+    if !recovery {
+        state.clear_definite_session_end(&store_key, &session_id);
+    }
     state.insert_member(record);
     if let Some(member) = backlog {
         state.on_deliver_forget_member(&MemberKey {
@@ -4426,6 +4452,60 @@ async fn register_member_inner(
     Response::Registered {
         lease_epoch: claimed.lease_epoch,
         owner_instance_id: claimed.owner_instance_id,
+    }
+}
+
+/// Commit the durable **armed proof** for an arming push registration, or refuse the registration.
+///
+/// This is the transactional half of the arming register. It runs immediately before the member is
+/// installed, so:
+///
+/// * There is no window in which a register has committed a member and not yet persisted its
+///   proof. That window was real: a concurrent attach's rollback, deleting the `pending` record it
+///   had just written, could land inside it — and the register still returned success for a push
+///   station whose only durable trace had been destroyed.
+/// * The per-intent write lock serializes this against `write_pending` and against the conditional
+///   rollback delete, so a concurrent rollback either runs first (this reports `NoRecord`, and the
+///   register is refused) or second (it finds an armed record and refuses to delete it). There is
+///   no interleaving that yields "member armed, nothing durable".
+///
+/// `owes_proof` is the observation made at the top of the register, before any of this: it is what
+/// separates "this binding has no intent record, so a proof is neither owed nor meaningful" — the
+/// ordinary pull attach, or `telex attach --on-deliver` from a client that writes no intent — from
+/// "the record that was here is gone".
+fn commit_armed_proof(
+    state: &Arc<DaemonState>,
+    store_key: &str,
+    session_id: &str,
+    address: &str,
+    owes_proof: bool,
+) -> std::result::Result<(), Response> {
+    let refuse = |detail: String| {
+        state.push_recent_error(
+            "StationIntent",
+            format!(
+                "refused push registration because the armed proof could not be persisted store={store_key} session={session_id} address={address}: {detail}"
+            ),
+        );
+        Err(proto::incompatible_with_reason(
+            format!(
+                "push for {address} was not registered: the station-intent record that proves it is armed could not be written ({detail}); \
+                 re-run `telex --address {address} copilot resume` once the station-intent scope is writable"
+            ),
+            NeedsAttachReason::PushIntentUnrecoverable,
+        ))
+    };
+    match state.stamp_intent_armed(store_key, session_id, address) {
+        Ok(stamp) if stamp.is_proven() => Ok(()),
+        // No record at all. Only a refusal when one was observed before this register started —
+        // otherwise this is a push attach for a binding that never had an intent, which is a
+        // supported, fully durable-free mode.
+        Ok(_) if owes_proof => refuse(
+            "the station-intent record for this binding was removed while the registration was in flight"
+                .to_string(),
+        ),
+        Ok(_) => Ok(()),
+        Err(detail) => refuse(detail),
     }
 }
 
@@ -6122,6 +6202,366 @@ mod p3_tests {
     async fn concurrent_push_and_pull_admission_is_linearizable_in_both_orders() {
         run_concurrent_delivery_admission_case(true).await;
         run_concurrent_delivery_admission_case(false).await;
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The arming-proof transaction (issue #106 / ADR 0050).
+    //
+    // A push register that owes a durable armed proof commits that proof *before* the member, and
+    // fails the whole registration when it cannot. These tests drive each way the proof can fail
+    // deterministically, through the same admission commit gate the linearizability test above
+    // uses, so the interleaving is scheduled rather than raced.
+    // -----------------------------------------------------------------------------------------
+
+    /// Open the daemon's own intent scope, creating the run dir the way the real startup path does.
+    fn intent_scope(state: &Arc<DaemonState>) -> crate::station_intent::IntentStore {
+        std::fs::create_dir_all(&state.paths.run_dir).expect("create test run dir");
+        crate::station_intent::IntentStore::open(&state.paths.run_dir, &state.paths.singleton_hash)
+            .expect("open intent scope")
+    }
+
+    /// Seed the `Pending` record a first attach writes, and return its id.
+    fn seed_pending_intent(
+        state: &Arc<DaemonState>,
+        store: &str,
+        session: &str,
+        address: &str,
+    ) -> crate::station_intent::IntentId {
+        let intent = crate::intent_test_support::pending_intent(
+            store,
+            session,
+            address,
+            &state.paths.singleton_hash,
+        );
+        let id = intent.id();
+        intent_scope(state).write_pending(&intent).expect("seed");
+        id
+    }
+
+    fn push_register_req(store: &str, session: &str, address: &str) -> Request {
+        let mut req = register_req(store, session, address);
+        if let Request::Register {
+            on_deliver,
+            replace_on_deliver,
+            ..
+        } = &mut req
+        {
+            // Empty argv: `push_registered` is true and the daemon never execs a handler.
+            *on_deliver = Some(Vec::new());
+            *replace_on_deliver = true;
+        }
+        req
+    }
+
+    /// Drive one arming register up to its commit gate, run `interleave` while it is parked there,
+    /// then let it finish. The register is paused *after* every fallible step and *before* the
+    /// proof commit, which is exactly the window a concurrent attach rollback lands in.
+    async fn register_push_with_interleave<F>(
+        state: &Arc<DaemonState>,
+        store: &str,
+        session: &str,
+        address: &str,
+        interleave: F,
+    ) -> Response
+    where
+        F: FnOnce(),
+    {
+        let control = Arc::new(DeliveryAdmissionTestControl::new());
+        *state.delivery_admission_control.lock().unwrap() = Some(control.clone());
+        control.release_before_lock(DeliveryAdmissionKind::Register);
+
+        let request_state = state.clone();
+        let req = push_register_req(store, session, address);
+        let task = tokio::spawn(async move { request(request_state, req).await });
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            control.wait_before_commit(DeliveryAdmissionKind::Register),
+        )
+        .await
+        .expect("arming register reached its commit gate");
+        interleave();
+        control.release_commit(DeliveryAdmissionKind::Register);
+
+        let response = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("arming register completed")
+            .expect("register task joined");
+        *state.delivery_admission_control.lock().unwrap() = None;
+        response
+    }
+
+    fn assert_refused_for_unrecoverable_proof(response: &Response) {
+        match response {
+            Response::Error {
+                code,
+                needs_attach_reason,
+                ..
+            } => {
+                assert_eq!(code, proto::ERROR_INCOMPATIBLE, "got {response:?}");
+                assert_eq!(
+                    needs_attach_reason.as_ref(),
+                    Some(&NeedsAttachReason::PushIntentUnrecoverable),
+                    "the refusal must carry the typed reason the client acts on: {response:?}"
+                );
+            }
+            other => panic!("expected a typed refusal, got {other:?}"),
+        }
+    }
+
+    /// The exact concurrent-attach race the finding names, scheduled rather than hoped for.
+    ///
+    /// Attach A writes its `pending` record and registers. Concurrent attach B, for the same
+    /// binding, replaces that record with its own generation, then fails downstream and rolls its
+    /// write back — deleting the file. Before the fix, A's proof was stamped *after* A had already
+    /// committed its member and A's response had been decided, so the delete landed in between: the
+    /// stamp found nothing, the miss was swallowed as "the ordinary pull-attach case", and A
+    /// returned a successful push registration whose only durable trace had been destroyed. The
+    /// station delivered until the next daemon replacement and then silently stopped.
+    ///
+    /// Now the proof is committed before the member, so this interleaving cannot produce an armed
+    /// member with no record: it produces a refusal, with the lease released and no member.
+    #[tokio::test]
+    async fn a_concurrent_pending_rollback_before_the_proof_refuses_the_register() {
+        let state = test_state("arming-proof-missing-manifest");
+        let store = store_key("arming-proof-missing-manifest");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+
+        let scope = intent_scope(&state);
+        let racing_scope = scope.clone();
+        let racing_id = id.clone();
+        let racing_store = store.clone();
+        let racing_hash = state.paths.singleton_hash.clone();
+        let response = register_push_with_interleave(&state, &store, "s1", "addr:a", move || {
+            // B's pending write: the same binding, a new generation, no armed proof yet.
+            let replacement = crate::intent_test_support::pending_intent(
+                &racing_store,
+                "s1",
+                "addr:a",
+                &racing_hash,
+            );
+            let crate::station_intent::PendingWrite::Created { generation } = racing_scope
+                .write_pending(&replacement)
+                .expect("concurrent pending write")
+            else {
+                panic!("the concurrent attach must have created its own generation");
+            };
+            // B fails and rolls back exactly what it wrote. Both of the rollback's own gates still
+            // hold at this instant — the record is `Pending` and unarmed — so the delete happens.
+            assert!(
+                racing_scope
+                    .remove_if_unchanged(&racing_id, generation, |c| c.state
+                        == crate::daemon_ipc::IntentRecoveryState::Pending
+                        && !c.is_armed())
+                    .expect("rollback delete"),
+                "precondition: the concurrent rollback really removed the record"
+            );
+        })
+        .await;
+
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(
+            state.get_member(&store, "s1", "addr:a").is_none(),
+            "a refused register must not leave an armed member with no durable proof behind"
+        );
+        assert!(
+            scope.load(&id).is_err(),
+            "and it must not resurrect the record the rollback deleted"
+        );
+        // The epoch lease is released, so the address is claimable again rather than wedged by a
+        // registration that was refused.
+        let backend = state.backend_for(&store).await.expect("backend");
+        let claimed = backend
+            .claim_epoch_lease("addr:a", "another-instance", 30)
+            .await
+            .expect("claim");
+        assert!(
+            matches!(claimed, EpochClaimResult::Claimed(_)),
+            "the refused register must have released its lease, got {claimed:?}"
+        );
+    }
+
+    /// The narrower shape of the same failure: the manifest is simply **missing** at the moment the
+    /// proof would be written, with no concurrent writer involved (an operator wipe, an external
+    /// cleaner, a scope on a volume that went away). A register that observed a record when it
+    /// started still owes a proof, so this is a refusal, not a silent downgrade to "nothing to do".
+    #[tokio::test]
+    async fn a_register_whose_manifest_is_missing_at_the_proof_is_refused() {
+        let state = test_state("arming-proof-manifest-gone");
+        let store = store_key("arming-proof-manifest-gone");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+
+        let gone = scope.clone();
+        let gone_id = id.clone();
+        let response = register_push_with_interleave(&state, &store, "s1", "addr:a", move || {
+            std::fs::remove_file(gone.path_for(&gone_id)).expect("remove the manifest");
+        })
+        .await;
+
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(state.get_member(&store, "s1", "addr:a").is_none());
+    }
+
+    /// A record that exists but cannot be *written* is the same refusal.
+    ///
+    /// The stamp is the durability guarantee, so "the manifest is corrupt / the scope is broken"
+    /// must fail the register rather than being logged and shrugged off.
+    #[tokio::test]
+    async fn a_register_whose_proof_cannot_be_written_is_refused_and_leaves_no_member() {
+        let state = test_state("arming-proof-write-failure");
+        let store = store_key("arming-proof-write-failure");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+
+        let corrupt = scope.clone();
+        let corrupt_id = id.clone();
+        let response = register_push_with_interleave(&state, &store, "s1", "addr:a", move || {
+            std::fs::write(corrupt.path_for(&corrupt_id), b"{ truncated")
+                .expect("corrupt the manifest under the register");
+        })
+        .await;
+
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(
+            state.get_member(&store, "s1", "addr:a").is_none(),
+            "a register that could not persist its proof must not leave a member behind"
+        );
+    }
+
+    /// A **committed** register's record cannot be removed by a concurrent rollback before the
+    /// proof lands, because the proof lands first.
+    ///
+    /// The rollback's own conditional delete is the second gate: once the record carries the proof,
+    /// `rollback_removable` no longer holds and the generation has moved, so the delete is refused
+    /// twice over. The register is idempotent across a repeat, which is what a re-attach does.
+    #[tokio::test]
+    async fn a_concurrent_rollback_cannot_delete_the_record_of_a_committed_register() {
+        let state = test_state("arming-proof-rollback-race");
+        let store = store_key("arming-proof-rollback-race");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+        let before = scope.load(&id).expect("seeded record");
+
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "got {response:?}"
+        );
+        let armed = scope.load(&id).expect("the record must still be here");
+        assert!(
+            armed.is_armed(),
+            "a successful arming register is only successful once its proof is durable"
+        );
+        assert!(armed.generation > before.generation);
+
+        // The losing half of the race: a concurrent attach's rollback, deciding from the
+        // generation it wrote, now tries to delete this record.
+        assert!(
+            !scope
+                .remove_if_unchanged(&id, before.generation, |c| c.state
+                    == crate::daemon_ipc::IntentRecoveryState::Pending
+                    && !c.is_armed())
+                .expect("stale-generation rollback"),
+            "a rollback holding the pre-register generation must never delete the proof"
+        );
+        assert!(
+            !scope
+                .remove_if_unchanged(&id, armed.generation, |c| c.state
+                    == crate::daemon_ipc::IntentRecoveryState::Pending
+                    && !c.is_armed())
+                .expect("current-generation rollback"),
+            "and even at the current generation the armed record is not the rollback's to delete"
+        );
+        assert!(scope.load(&id).is_ok(), "the proof survives both attempts");
+
+        // Idempotency: a re-register (a re-attach, a resume) proves the same thing without
+        // churning the generation, so concurrent CAS holders stay valid.
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "got {response:?}"
+        );
+        let again = scope.load(&id).expect("reload");
+        assert_eq!(
+            again.generation, armed.generation,
+            "an idempotent re-register must not move the generation"
+        );
+        assert_eq!(again.armed, armed.armed);
+    }
+
+    /// A binding with **no** durable record is a supported mode, and it must stay one.
+    ///
+    /// A plain `telex attach --on-deliver` (and every pull attach) writes no intent, so there is
+    /// nothing to prove and nothing to fail. Refusing those would break push for every client that
+    /// is not the Copilot bridge — which is why the register observes whether a record exists
+    /// *before* it runs, rather than inferring it from a missing record at stamp time.
+    #[tokio::test]
+    async fn a_push_register_for_a_binding_with_no_intent_record_still_succeeds() {
+        let state = test_state("arming-proof-no-record");
+        let store = store_key("arming-proof-no-record");
+        let scope = intent_scope(&state);
+
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "a push attach that never wrote an intent must not be refused, got {response:?}"
+        );
+        assert!(state
+            .get_member(&store, "s1", "addr:a")
+            .is_some_and(|member| member.on_deliver.is_some()));
+        assert!(
+            scope
+                .load(&crate::station_intent::IntentId::derive(
+                    &store, "s1", "addr:a"
+                ))
+                .is_err(),
+            "and it must not invent a record either"
+        );
+    }
+
+    /// A refused proof on a **refresh** must not disturb the member that was already there.
+    ///
+    /// The refresh path adopts an existing member and its epoch lease. Rolling the refresh back by
+    /// removing the member (or releasing that lease) would turn a failed *diagnostic* write into
+    /// the loss of a working station, so the proof is committed before the refreshed record is
+    /// installed and a failure simply leaves the incumbent alone.
+    #[tokio::test]
+    async fn a_failed_proof_on_a_refresh_leaves_the_pre_existing_member_untouched() {
+        let state = test_state("arming-proof-refresh-rollback");
+        let store = store_key("arming-proof-refresh-rollback");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+
+        // First register: succeeds and stamps, so a member and a lease now exist.
+        let first = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        let Response::Registered {
+            lease_epoch,
+            owner_instance_id,
+        } = first
+        else {
+            panic!("expected the first register to succeed, got {first:?}");
+        };
+        let adopted = state
+            .get_member(&store, "s1", "addr:a")
+            .expect("member installed");
+
+        // Now break the record and re-register. The refresh path must refuse, and the incumbent
+        // member must be exactly as it was.
+        std::fs::write(scope.path_for(&id), b"{ truncated").expect("corrupt the manifest");
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert_refused_for_unrecoverable_proof(&response);
+
+        let after = state
+            .get_member(&store, "s1", "addr:a")
+            .expect("the pre-existing member must survive a refused refresh");
+        assert_eq!(after.lease_epoch, lease_epoch);
+        assert_eq!(after.owner_instance_id, owner_instance_id);
+        assert_eq!(after.on_deliver, adopted.on_deliver);
+        assert!(
+            !after.idle,
+            "the incumbent must not be demoted by a refused refresh"
+        );
     }
 
     #[test]

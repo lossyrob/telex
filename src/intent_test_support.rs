@@ -361,3 +361,70 @@ pub fn live_intent(
         extra: Default::default(),
     }
 }
+
+/// Build the `Pending` intent a *first* attach writes, with no producer at all.
+///
+/// This is deliberately producer-free: on a first attach the bridge extension has been written but
+/// not loaded, so the record carries the placeholder identity and a credential path that does not
+/// exist yet. Tests about the daemon's arming-proof transaction need exactly that shape and must
+/// not have to stand up a [`FakeProducer`] to get it — the record is never reconciled in this state,
+/// so no probe is ever attempted against it.
+pub fn pending_intent(
+    store_key: &str,
+    session_id: &str,
+    address: &str,
+    singleton_hash: &str,
+) -> StationIntentV1 {
+    let now = crate::model::now_ms();
+    StationIntentV1 {
+        schema_version: STATION_INTENT_SCHEMA_VERSION,
+        generation: 1,
+        created_at_ms: now,
+        updated_at_ms: now,
+        state: IntentRecoveryState::Pending,
+        store_key: store_key.to_string(),
+        session_id: session_id.to_string(),
+        address: address.to_string(),
+        occupant: "fixture-occupant".to_string(),
+        description: None,
+        scope: None,
+        tags: None,
+        delivery_mode: "push".to_string(),
+        wake_on_cc: false,
+        cc_watermark_ms: None,
+        handler: HandlerDescriptorV1 {
+            kind: crate::handler_kinds::COPILOT_PUSH_HANDLER_KIND.to_string(),
+            session_id: session_id.to_string(),
+        },
+        producer: ProducerDescriptorV1 {
+            kind: PRODUCER_KIND_LOCAL_ENDPOINT_CHALLENGE_V1.to_string(),
+            transport: if cfg!(windows) {
+                ProducerTransport::NamedPipe
+            } else {
+                ProducerTransport::UnixSocket
+            },
+            endpoint_path: format!("telex-fixture-{session_id}"),
+            exe_path: PathBuf::from("not-loaded-yet"),
+            pid: 0,
+            start_time: 0,
+            host_id: String::new(),
+            boot_id: String::new(),
+            protocol: ProtocolRange { min: 2, max: 2 },
+            credential: CredentialDescriptorV1 {
+                kind: CREDENTIAL_KIND_OWNER_PRIVATE_JSON_FIELD_V1.to_string(),
+                root_id: "copilot_bridge_root".to_string(),
+                path: PathBuf::from("not-created-yet.json"),
+                pointer: "/secret".to_string(),
+                max_age_ms: 60_000,
+            },
+        },
+        daemon_compat: DaemonCompat {
+            protocol_major: crate::daemon_ipc::PROTOCOL_MAJOR,
+            protocol_minor: crate::daemon_ipc::PROTOCOL_MINOR,
+        },
+        singleton_hash: singleton_hash.to_string(),
+        evidence: IntentEvidence::default(),
+        armed: None,
+        extra: Default::default(),
+    }
+}
