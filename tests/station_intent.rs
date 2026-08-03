@@ -692,6 +692,20 @@ async fn station_intent_over_budget_scope_is_bounded_complete_and_never_pruned()
         attempted >= total,
         "the round-robin cursor must reach every intent within the published ceiling ({attempted} of {total} in {passes} passes)"
     );
+    // `attempted` sums *attempts*, not distinct intents: a regression where the cursor stalls and
+    // the same 64 intents are re-attempted every pass satisfies the sum while the tail starves.
+    // The index is keyed per binding, so counting entries that were actually attempted is the
+    // assertion the row is really about.
+    let distinct_attempted = daemon
+        .intent_index()
+        .entries
+        .values()
+        .filter(|entry| entry.attempts > 0)
+        .count();
+    assert_eq!(
+        distinct_attempted, total,
+        "every distinct intent must be attempted, not the same 64 repeatedly"
+    );
     assert_eq!(
         store.list_ids().expect("list").len(),
         total,
@@ -940,23 +954,60 @@ async fn station_intent_reconcile_request_requires_an_admin_proof() {
 #[tokio::test]
 async fn station_intent_trigger_seam_drives_a_pass_without_a_wall_clock_sleep() {
     let scenario = Scenario::new("intent-trigger", ProducerBehavior::Healthy).await;
+    // Wire the trigger half of the production heartbeat loop. Without a consumer the pulse has
+    // nowhere to go, the await times out, and the test's fallback (`reconcile_once` directly)
+    // asserts nothing about the seam at all — while costing the full timeout to say so.
+    let consumer = scenario.daemon.spawn_trigger_consumer();
     let mut reports = scenario.daemon.reconcile_reports();
     let before = reports.borrow_and_update().pass_seq;
     let report = scenario
         .daemon
         .pulse_reconcile_and_wait(Duration::from_secs(10))
-        .await;
-    // The plain TestDaemon has no heartbeat loop, so a pulse alone parks; the harness therefore
-    // drives the pass directly and publishes it on the same seam a production tick would.
-    let report = match report {
-        Some(report) => report,
-        None => scenario.daemon.reconcile_once().await,
-    };
+        .await
+        .expect("a pulse on the trigger seam must drive a pass and publish its report");
     assert!(report.pass_seq > before);
+    assert!(report.ran, "a pulse-driven pass must actually run");
+    assert_eq!(
+        report.restored, 1,
+        "the pulse-driven pass must do the same work a tick-driven pass does"
+    );
     let observed = reports.borrow_and_update().clone();
     assert!(
         observed.pass_seq >= report.pass_seq,
         "every completed pass must be published on the report seam"
+    );
+    consumer.abort();
+}
+
+/// A pass that did not run must be distinguishable from one that ran and found nothing.
+///
+/// This is what `telex upgrade`'s successor verification and the `agentStop` drain hook rely on:
+/// both previously printed `restored 0` for a suppressed pass, reporting a completed verification
+/// for a recovery that never started.
+#[tokio::test]
+async fn station_intent_a_suppressed_pass_is_reported_as_not_run() {
+    let scenario = Scenario::new("intent-not-run", ProducerBehavior::Healthy).await;
+    let ran = scenario.daemon.reconcile_once().await;
+    assert!(ran.ran, "an ordinary pass reports that it ran");
+    assert_eq!(ran.skipped_reason, None);
+
+    let (_drain, action) = scenario
+        .daemon
+        .request_with_action(Request::Drain {
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        })
+        .await;
+    assert_eq!(action, telex::daemon::test_support::TestClientAction::Drain);
+    let suppressed = scenario.daemon.reconcile_once().await;
+    assert!(
+        !suppressed.ran,
+        "a drain-suppressed pass must not claim to have run"
+    );
+    assert_eq!(suppressed.skipped_reason.as_deref(), Some("draining"));
+    assert_eq!(suppressed.restored, 0);
+    assert!(
+        suppressed.pass_seq > ran.pass_seq,
+        "the pass sequence still advances, which is exactly why `ran` is needed"
     );
 }
 
@@ -1148,5 +1199,314 @@ async fn station_intent_anti_downgrade_guard_works_before_the_first_reconcile_pa
     assert!(
         scenario.member_push_registered().await,
         "a pull-only Register before the first pass must still not downgrade a live push intent"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Regressions from the final adversarial review pass
+// ---------------------------------------------------------------------------------------------
+
+/// A transient credential condition must take the failure ladder, not the one-hour quarantine
+/// cadence.
+///
+/// The credential is the bridge registry: rewritten on a 15 s heartbeat, deleted and recreated on
+/// every `/clear` or `extensions_reload`, and read by the reconciler every 5 s. Classifying a
+/// stale mtime (or a truncated read, or a missing field) as `Terminal` parked the binding for an
+/// hour with nothing to shorten the wait, replacing the published recovery bounds with a wedge.
+#[tokio::test]
+async fn station_intent_transient_credential_conditions_take_the_backoff_ladder() {
+    let stale = Scenario::new("intent-cred-ladder", ProducerBehavior::Healthy).await;
+    let mut aged = stale.intent.clone();
+    aged.producer.credential.max_age_ms = 1;
+    aged.generation = 2;
+    stale.reseed(&aged);
+    tokio::time::sleep(Duration::from_millis(25)).await;
+
+    let report = stale.daemon.reconcile_once().await;
+    assert_eq!(
+        report.failed, 1,
+        "a stale credential is a retryable failure, not an inert terminal state"
+    );
+    assert_eq!(stale.failure_code().as_deref(), Some("credential_stale"));
+    assert_eq!(
+        stale.intent_state(),
+        IntentRecoveryState::Unverifiable,
+        "the projected state stays Unverifiable: retry policy and projection are separate axes"
+    );
+
+    let entry = stale
+        .daemon
+        .intent_index()
+        .entries
+        .values()
+        .next()
+        .cloned()
+        .expect("an index entry");
+    assert_eq!(
+        entry.consecutive_failures, 1,
+        "a transient condition must climb the ladder so it can climb back down"
+    );
+    let next = entry.next_attempt_ms.expect("a scheduled next attempt");
+    let delay = next - entry.last_attempt_ms.expect("a last attempt");
+    assert!(
+        delay < 60_000,
+        "the next attempt must be on the backoff ladder, not the one-hour quarantine cadence \
+         (got {delay} ms)"
+    );
+}
+
+/// A restore must never rewind a live member's CC watermark, and the durable watermark must be
+/// refreshed so a later restore replays only the outage window.
+#[tokio::test]
+async fn station_intent_cc_watermark_is_refreshed_and_never_rewound() {
+    let scenario = Scenario::new("intent-cc-watermark", ProducerBehavior::Healthy).await;
+    let mut wake = scenario.intent.clone();
+    wake.wake_on_cc = true;
+    wake.cc_watermark_ms = Some(1_000);
+    wake.generation = 2;
+    scenario.reseed(&wake);
+
+    scenario.daemon.reconcile_once().await;
+    assert!(scenario.member_push_registered().await);
+
+    // The member advances its watermark in memory as CC traffic is accepted.
+    scenario.daemon.set_member_cc_after_ms(
+        &scenario.store_key,
+        &scenario.intent.session_id,
+        &scenario.intent.address,
+        Some(9_000),
+    );
+    scenario.daemon.reconcile_once().await;
+
+    let persisted = scenario
+        .daemon
+        .intent_store()
+        .load(&scenario.intent.id())
+        .expect("reload the manifest");
+    assert_eq!(
+        persisted.cc_watermark_ms,
+        Some(9_000),
+        "the durable watermark must track the live member, or every daemon replacement replays \
+         the whole session's CC history"
+    );
+
+    // And a restore over a member that has advanced further must not lower it.
+    let mut behind = persisted.clone();
+    behind.cc_watermark_ms = Some(2_000);
+    behind.generation = persisted.generation + 1;
+    scenario.reseed(&behind);
+    scenario.daemon.forget_member(
+        &scenario.store_key,
+        &scenario.intent.session_id,
+        &scenario.intent.address,
+    );
+    scenario.daemon.reconcile_once().await;
+    let restored = scenario
+        .daemon
+        .member_cc_after_ms(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+        )
+        .expect("a restored member");
+    assert_eq!(
+        restored,
+        Some(2_000),
+        "with no live member to compare against, the manifest floor is what keeps gap-committed \
+         CC messages visible"
+    );
+}
+
+/// `telex station reset` is the one deliberate operator action with no durable tombstone, so it
+/// was the one the reconciler could not see: the next pass re-registered the member within a tick.
+#[tokio::test]
+async fn station_intent_operator_reset_is_not_undone_by_the_reconciler() {
+    let scenario = Scenario::new("intent-reset", ProducerBehavior::Healthy).await;
+    scenario.daemon.reconcile_once().await;
+    assert!(scenario.member_push_registered().await);
+
+    let reset = scenario
+        .daemon
+        .request(Request::Reset {
+            store_key: scenario.store_key.clone(),
+            address: scenario.intent.address.clone(),
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        })
+        .await;
+    assert!(matches!(reset, Response::Ack { .. }), "{reset:?}");
+    let idle_after_reset = scenario
+        .status()
+        .await
+        .members
+        .iter()
+        .any(|m| m.address == scenario.intent.address && m.idle);
+    assert!(
+        idle_after_reset,
+        "precondition: reset marks the member idle"
+    );
+
+    for _ in 0..3 {
+        let report = scenario.daemon.reconcile_once().await;
+        assert_eq!(
+            report.restored, 0,
+            "the reconciler must not re-arm a station the operator reset"
+        );
+        let still_idle = scenario
+            .status()
+            .await
+            .members
+            .iter()
+            .any(|m| m.address == scenario.intent.address && m.idle);
+        assert!(
+            still_idle,
+            "a reset station must stay idle until an explicit resume"
+        );
+    }
+    let persisted = scenario
+        .daemon
+        .intent_store()
+        .load(&scenario.intent.id())
+        .expect("reload the manifest");
+    assert_eq!(
+        persisted.state,
+        IntentRecoveryState::Revoked,
+        "reset withdraws the desired state durably, so it survives a daemon replacement too"
+    );
+}
+
+/// `Pending` is never reconciled, so counting it as `recoverable` told the operator that bindings
+/// would come back automatically when they cannot, and made `telex upgrade` wait out its
+/// successor timeout for a pass that could restore nothing.
+#[tokio::test]
+async fn station_intent_drain_report_counts_pending_separately_from_recoverable() {
+    let scenario = Scenario::new("intent-drain-pending", ProducerBehavior::Healthy).await;
+    let mut pending = scenario.intent.clone();
+    pending.state = IntentRecoveryState::Pending;
+    pending.generation = 2;
+    scenario.reseed(&pending);
+    scenario.daemon.reconcile_once().await;
+
+    let report = scenario.daemon.drain_intent_report();
+    assert_eq!(
+        report.recoverable, 0,
+        "a pending intent is not something a successor restores automatically"
+    );
+    assert_eq!(report.pending, 1, "but it must still be visible");
+}
+
+/// A manifest rejected by a schema or descriptor check must still reach the index whenever the
+/// binding it names can be read, or `telex status` and the drain report show nothing at all for
+/// exactly the intents they exist to flag.
+#[tokio::test]
+async fn station_intent_rejected_manifests_are_visible_in_status_and_the_drain_report() {
+    let scenario = Scenario::new("intent-rejected-visible", ProducerBehavior::Healthy).await;
+    let path = scenario
+        .daemon
+        .intent_store()
+        .path_for(&scenario.intent.id());
+    let raw = std::fs::read_to_string(&path).expect("read intent");
+    let mut doc: serde_json::Value = serde_json::from_str(&raw).expect("parse intent");
+    doc["schema_version"] = serde_json::json!(99);
+    let _ = std::fs::remove_file(&path);
+    telex::platform_fs::write_owner_only_file_atomic(
+        &path,
+        serde_json::to_vec(&doc).expect("encode").as_slice(),
+    )
+    .expect("write skewed intent");
+
+    scenario.daemon.reconcile_once().await;
+    let row = scenario
+        .daemon
+        .intent_statuses()
+        .into_iter()
+        .find(|row| row.address == scenario.intent.address)
+        .expect("a rejected manifest must still produce a status row");
+    assert_eq!(row.state, IntentRecoveryState::Incompatible);
+    let drain = scenario.daemon.drain_intent_report();
+    assert_eq!(
+        drain.incompatible, 1,
+        "the drain report must not report zero for an intent this build cannot reconcile"
+    );
+}
+
+/// Backoff and quarantine live in the in-memory index, which starts empty on every daemon start —
+/// the event most likely to follow a crash loop. The durable evidence block is what carries them
+/// across, and it was written every pass and never read back.
+#[tokio::test]
+async fn station_intent_retry_state_survives_a_daemon_replacement() {
+    let scenario = Scenario::new("intent-evidence", ProducerBehavior::WrongNonce).await;
+    scenario.daemon.reconcile_once().await;
+    let persisted = scenario
+        .daemon
+        .intent_store()
+        .load(&scenario.intent.id())
+        .expect("reload the manifest");
+    assert_eq!(
+        persisted.evidence.consecutive_failures, 1,
+        "a genuine failure must be recorded durably"
+    );
+    assert!(persisted.evidence.next_attempt_ms.is_some());
+
+    // A successor daemon sees the same scope for the first time.
+    scenario.daemon.clear_intent_index();
+    scenario.daemon.reconcile_once().await;
+    let entry = scenario
+        .daemon
+        .intent_index()
+        .entries
+        .values()
+        .next()
+        .cloned()
+        .expect("an index entry");
+    assert!(
+        entry.consecutive_failures >= 1,
+        "a successor must not hand a wedged intent a fresh full-rate retry budget"
+    );
+}
+
+/// T15: two sessions holding a live intent for one address must never both end up with an armed
+/// member. The per-address dedupe was keyed on the full `(store, session, address)` tuple, which
+/// no two manifests can ever share, so it rejected nothing; and the `AlreadyOwned` adoption branch
+/// treated "this daemon already owns the address" as licence to adopt the lease for a second
+/// session.
+#[tokio::test]
+async fn station_intent_two_sessions_never_both_attend_one_address() {
+    let first = Scenario::with_session(
+        "intent-competing",
+        ProducerBehavior::Healthy,
+        "sess-a",
+        "addr:contested",
+    )
+    .await;
+    // A second session's live intent for the same address, in the same store and scope.
+    let second = live_intent(
+        &first.store_key,
+        "sess-a",
+        "addr:contested",
+        first.daemon.singleton_hash(),
+        &first.producer,
+        first.intent.producer.credential.root_id.as_str(),
+        &first.credential_path,
+    );
+    let mut rival = second.clone();
+    rival.session_id = "sess-b".to_string();
+    rival.handler.session_id = "sess-b".to_string();
+    rival.generation = 1;
+    first.reseed(&rival);
+
+    for _ in 0..3 {
+        first.daemon.reconcile_once().await;
+    }
+    let armed: Vec<String> = first
+        .status()
+        .await
+        .members
+        .iter()
+        .filter(|m| m.address == "addr:contested" && m.push_registered && !m.idle)
+        .map(|m| m.session_id.clone())
+        .collect();
+    assert!(
+        armed.len() <= 1,
+        "one address must never have two armed push members: {armed:?}"
     );
 }

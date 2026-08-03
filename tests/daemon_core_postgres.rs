@@ -1174,9 +1174,35 @@ async fn postgres_station_intent_restore_is_single_writer() {
         "a second daemon must not steal a fresh owner's address"
     );
     assert_eq!(
-        rival_report.deferred_lease + rival_report.failed,
-        1,
-        "the rival attempt must be deferred or failed, never silently succeed: {rival_report:?}"
+        rival_report.deferred_lease, 1,
+        "an incumbent whose lease is merely not stale yet is a *waiting* outcome on a fixed \
+         cadence, never a failure: classifying it `epoch_claim_lost` sends the intent into the \
+         exponential ladder and eventually quarantine, which breaks the published crash-recovery \
+         bound. The old `deferred_lease + failed == 1` form passed for exactly that regression. \
+         {rival_report:?}"
+    );
+    assert_eq!(
+        rival_report.failed, 0,
+        "and it must not be counted as a failure at all: {rival_report:?}"
+    );
+    let rival_entry = second
+        .intent_index()
+        .entries
+        .values()
+        .next()
+        .cloned()
+        .expect("an index entry for the rival intent");
+    assert_eq!(
+        rival_entry.consecutive_failures, 0,
+        "a DeferredLease must not advance the failure counter"
+    );
+    let next = rival_entry
+        .next_attempt_ms
+        .expect("a deferred lease must schedule a next attempt");
+    let delay = next - rival_entry.last_attempt_ms.expect("a last attempt");
+    assert!(
+        delay <= telex::daemon_reconcile::RECONCILE_DEFERRED_LEASE_RETRY.as_millis() as i64 + 250,
+        "the fixed 5 s cadence is what makes the crash bound derivable, got {delay} ms"
     );
 
     let backend = first.open_backend(&store_key).await;

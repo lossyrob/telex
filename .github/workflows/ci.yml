@@ -21,6 +21,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Node
+        # Pinned: the bridge contract step below relies on Node's own positional-glob expansion,
+        # which requires Node >= 21. Without a pin the step silently depends on whatever the
+        # runner image ships, and on Node 20 the quoted pattern is passed through literally and
+        # matches nothing.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Check embedded bridge JS syntax
         run: node --check copilot/bridge/extension.mjs
 
@@ -77,8 +86,11 @@ jobs:
 
       - name: Exercise station-intent reconciliation
         # Same macOS/Windows coverage as the fallback E2E: the intent store, the owner-private
-        # credential rules, and the producer probe are all platform-specific.
-        run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite station_intent_
+        # credential rules, and the producer probe are all platform-specific — and those live in
+        # the *core* station-intent suite, not only in the three process tests, so both run here.
+        # `build-test` covers Linux and Windows; without this line macOS never exercises the
+        # credential rules, the probe transports, or the scan cursor at all.
+        run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite --test station_intent station_intent_
 
   feature-check:
     name: Feature combinations build
