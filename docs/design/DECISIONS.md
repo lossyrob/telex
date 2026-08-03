@@ -2174,14 +2174,39 @@ The daemon owns reconciliation as its own operation, not as a `Register` side ef
    the member had been committed and the response decided, and a rollback landing in between left an
    armed station with no durable trace and a `Registered` response saying otherwise. The stamp stays
    idempotent, so a re-attach neither churns the generation nor moves the armed TTL clock.
+
+8b. **What "the proof could not be stamped" means is a table — added after the final approval
+   gate.** The commit rule lives in `station_intent::armed_proof_admission(stamp, owes_proof)`, and
+   it distinguishes conditions that are about *this binding's record* from conditions that are not.
+   A record that is present and unreadable refuses the register whether or not a proof was observed
+   as owed: that is durable state that could not be verified, and it fails closed like every other
+   unverifiable condition, including in the window where a record can appear between the up-front
+   observation and the stamp. A failure to open the **scope** refuses only a register that owes a
+   proof. The stamp therefore uses the same non-creating open the observation does, so a scope with
+   no directory is "no record" rather than a failure — a register that writes no intent neither
+   creates a scope nor is denied because one could not be created. Opening the creating path there
+   turned every push registration on a host where the scope could not be made into
+   `PushIntentUnrecoverable`, including for the clients that have no durable state to lose.
 9. **Deleting an intent is conditional.** GC and the attach rollback both decide from a snapshot, so
    the unlink re-takes the per-intent write lock, reloads, and requires the generation *and* the
    caller's own condition to still hold. Every TTL clock is read from the **event it is about** and
    is unreachable by retrying: the orphan clocks read proof (a successful reconcile, a verified
    probe, or the durable transition a finalize performs) rather than a retry attempt, and the two
-   pending clocks read `created_at_ms` (carried forward across re-attaches) and the armed proof's own
-   timestamp (never moved by the idempotent stamp) rather than `updated_at_ms`, which every failing
-   re-attach rewrites.
+   pending clocks read `created_at_ms` and the armed proof's own timestamp (never moved by the
+   idempotent stamp) rather than `updated_at_ms`, which every failing re-attach rewrites.
+
+9a. **A pending clock and an armed proof belong to one lifecycle — added after the final approval
+   gate.** `write_pending` inherits `created_at_ms` and the armed proof only when the record it
+   replaces is itself `pending`, because only then is the write a *retry* of the same unfinalized
+   attach; that is what makes the TTL unreachable by retrying. A write over a `revoked` or otherwise
+   inert record is a **new** attach, and it starts a new lifecycle: its own creation clock, and no
+   proof. Inheriting them was wrong both ways. A tombstone lives for the seven-day terminal TTL, so
+   every re-attach after a detach, a fallback downgrade, an operator reset, or a session end was born
+   `pending` with an expired clock and was collected before `extensions_reload` and the finalize
+   could promote it. And a revocation is the teardown of the arming its proof describes, so
+   inheriting the proof would have let decision 8's `armed_durably` arm promote a brand-new attach on
+   a previous daemon's authority. The generation still advances monotonically across the transition,
+   so the rollback's generation gate and every CAS holder are unaffected.
 
 **Bounded ADR 0028 exception.** `upgrade` and `rollback` spawn the successor they just installed and
 wait, bounded, for one reconcile report. Without this, the issue's motivating scenario — `telex

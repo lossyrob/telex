@@ -91,9 +91,10 @@ reconciler already honors.
 | One pass cannot overrun its tick | `RECONCILE_PASS_DEADLINE` (4 s) < `RECONCILE_INTERVAL` (5 s), enforced by a `const` assertion |
 | A wedged intent cannot starve others | Per-intent timeout, per-pass budget, exponential backoff on genuine failures only, quarantine after 10 |
 | Push is never silently downgraded to pull | Anti-downgrade guard inside `register_member`, so it also covers old clients and plain `telex attach` |
-| A successful push registration is always durably recoverable | For a binding with a station-intent record, the armed proof is committed inside `register_member` before the member is installed, and a proof that cannot be persisted refuses the whole registration; `write_pending`, the attach rollback's delete, and the stamp all take the same per-intent write lock, so no interleaving leaves an armed member with nothing on disk |
-| A rollback removes only what its own invocation created | Every delete is conditional on the generation the caller wrote *and* on the caller's predicate re-evaluated under the lock; on the daemon side a refused proof releases only the lease that call claimed, and never touches a pre-existing adopted member |
-| A GC TTL cannot be extended by retrying | Every clock is anchored to the event it is about — the orphan clocks read *proof*, the unarmed pending clock reads `created_at_ms` (carried forward across re-attaches), the armed pending clock reads the idempotent proof's own timestamp — never `evidence.last_attempt_ms` or `updated_at_ms`, both of which a failing retry rewrites |
+| A successful push registration is always durably recoverable | For a binding with a station-intent record, the armed proof is committed inside `register_member` before the member is installed, and a proof that cannot be persisted refuses the whole registration; `write_pending`, the attach rollback's delete, and the stamp all take the same per-intent write lock, so no interleaving leaves an armed member with nothing on disk. A binding with *no* record owes no proof: the stamp opens the scope through the non-creating path, so a scope that does not exist is "nothing to prove" rather than a failure, and a client that writes no intent is never refused for a scope it never used |
+| A rollback removes only what its own invocation created | Every delete is conditional on the generation the caller wrote *and* on the caller's predicate re-evaluated under the lock; the generation advances monotonically even across a lifecycle transition, so a re-attach over a tombstone can still clean up after itself; on the daemon side a refused proof releases only the lease that call claimed, and never touches a pre-existing adopted member |
+| A GC TTL cannot be extended by retrying | Every clock is anchored to the event it is about — the orphan clocks read *proof*, the unarmed pending clock reads `created_at_ms`, the armed pending clock reads the idempotent proof's own timestamp — never `evidence.last_attempt_ms` or `updated_at_ms`, both of which a failing retry rewrites. `write_pending` inherits those two clocks only from a record that is *itself* `pending`, so a retry of one attach cannot reset them and a genuinely new attach over a tombstone is not born expired |
+| Arming authority never outlives the lifecycle that earned it | The armed proof is inherited only across a retry of the same pending attach; a write over a revoked or otherwise inert record starts a new lifecycle with no proof, so `finalize_admission` cannot promote a new attach on a previous daemon's arming |
 | A stale projection cannot outlive the record it described | The pre-drain report compares the cached entry's generation against the durable manifest's, and prefers the newer manifest; every durable transition moves the generation while evidence-only rewrites do not |
 | A recovery-state condition never wedges a session | The turn guard *warns and allows* |
 
@@ -771,6 +772,123 @@ tests with `expected a typed refusal, got Registered { .. }`; neutralizing the g
 fails the G2 test on `recoverable` `0 != 1`; reverting `pending_clock_ms` to `updated_at_ms` fails
 the G3 clock assertion.
 
+## Corrections made during the final approval gate
+
+A gate over the final-gate result found two further defects — 1 high, 1 medium. Both are cases where
+a fix from the previous pass was right about the *mechanism* and too broad about the *scope* it
+applied to: one inherited a lifecycle's clock and proof across a boundary where the lifecycle had
+ended, and the other treated every failure to reach the intent scope as a durability failure even
+for registrations with no durability to lose.
+
+### 1. HIGH — a re-attach after a teardown was born already expired
+
+`write_pending` carried `created_at_ms` and the armed proof forward from *whatever* record it
+replaced. That is exactly right for a retry of an attach that has not finalized — it is what makes
+the pending TTL unreachable by retrying (finding G3 above) — and exactly wrong for a genuinely new
+attach.
+
+A `revoked` tombstone is kept for the seven-day terminal TTL, so it is still on disk for a week after
+a `copilot detach`, a fallback downgrade, a `station reset`, or a session end. Re-attaching that
+binding wrote a new `pending` record that inherited the *original* attach's creation time, so its
+pending clock was already days past the five-minute TTL. The next GC pass deleted it — before
+`extensions_reload` had loaded the bridge and before the turn-boundary finalize could promote it. The
+attach reported success, its record vanished seconds later, and it did so again on every retry for a
+week. The armed variant was worse in a second way: the tombstone's `armed` proof came along too, so
+`finalize_admission` would have promoted the new attach on the strength of a *previous* daemon's
+arming (`armed_durably`), which is precisely the "a merely-existing bridge arms an attach that was
+never registered" hole the admission rules exist to close. It also made the attach unable to roll
+itself back, since `rollback_removable` refuses an armed record — a failing attach could not delete
+the record it had just written.
+
+**Fix — the two fields belong to a lifecycle, not to a file.** `write_pending` now distinguishes the
+two things that reach it:
+
+- The record it replaces is itself `Pending`: this write is another attempt at the *same*
+  unfinalized attach. It inherits that lifecycle's `created_at_ms` and its armed proof, so no
+  amount of retrying buys more life than the one attach earned, and a crash between `Register` and
+  the finalize still has the proof it needs to be repaired. The durable proof also *wins* over
+  anything the caller supplied, because only `stamp_armed_proof` may mint one.
+- The record it replaces is `Revoked` or otherwise inert: the lifecycle is over, and this is a new
+  attach that happens to reuse the binding. It keeps its own `created_at_ms` — a full pending TTL to
+  reach its finalize — and carries **no** proof. It earns the longer armed clock the only way a
+  lifecycle can: a new daemon stamps it.
+
+The generation is the one field still inherited-and-advanced across the transition: it is a per-file
+compare-and-set token, not a lifecycle property, so the attach rollback's generation gate and every
+concurrent CAS holder are unaffected.
+
+**Tests.** `a_new_attach_over_a_finished_lifecycle_starts_its_own_pending_clock` ages a revoked
+record six days, re-attaches, and asserts the record survives a GC pass just inside its *new* TTL and
+is collected just past it — so the fresh clock is a full TTL and not an exemption.
+`a_new_pending_lifecycle_never_inherits_the_previous_ones_armed_proof` does the same over a
+tombstone that *was* armed, asserting the new record is unarmed, that
+`finalize_admission` refuses to promote it with no live member, that it is governed by the unarmed
+TTL, and then that a new daemon stamp gives it a proof naming the new instance and moves it onto the
+24 h clock. `a_fresh_pending_lifecycle_earns_one_clock_and_no_retry_can_earn_another` is the
+anti-regression guard in the other direction: ten retries spanning more than twice the TTL after the
+transition, asserting the clock was set once and the record is still collected.
+`attach_rollback_only_deletes_the_record_this_attach_left_behind` gains a fourth case for the
+re-attach-after-teardown shape, asserting the new record is unarmed and that the attach can remove
+exactly what it wrote.
+
+### 2. MEDIUM — an ordinary push register was refused for a scope it never used
+
+`commit_armed_proof` refused the registration on *any* error from the stamp, including when
+`owes_proof` was `false`. And `stamp_intent_armed` opened the intent scope through the **creating**
+path, so on a host where the scope could not be made — a read-only or full run directory, or debris
+where the `intents` directory belongs — every arming register failed with `Incompatible` /
+`PushIntentUnrecoverable`, including for the clients that write no intent at all. Those clients have
+no durable state to protect, so the refusal protected nothing and denied a registration that would
+have worked. It also created a scope as a side effect of a registration with nothing to put in it —
+the same "a read path creates what it documents as not creating" smell the re-review closed
+elsewhere.
+
+**Fix — make the rule a table, and read the scope the way the observation does.**
+
+- `station_intent::armed_proof_admission(stamp, owes_proof)` is the decision, decidable without a
+  daemon or a filesystem fault, alongside `finalize_admission`. A stamped or already-armed record
+  commits. A missing record, or a scope that could not be opened, refuses **only** a register that
+  owes a proof. A record that is present and unreadable refuses **either way**.
+- `stamp_intent_armed` returns a classified `ArmedProofRefusal` (`ScopeUnavailable` /
+  `RecordUnusable`) instead of a bare string, so the decision is made from a closed set rather than
+  by matching on a message.
+- The stamp now opens the scope through `intent_store_readonly`, the same non-creating open
+  `durable_intent_present` uses. A scope with no directory holds no records, so that case is
+  `ArmedProofStamp::NoRecord` — provably nothing to prove — and it is then gated by `owes_proof`
+  exactly as a missing manifest is.
+
+Fail-closed is unchanged everywhere it was load-bearing: a register that observed a durable record
+and then could not stamp it is still refused, and so is a register that finds a record present and
+unreadable even when the up-front observation saw nothing — which is the concurrent-attach window,
+where a record can appear between the observation and the stamp.
+
+**Tests.** `armed_proof_admission_is_the_whole_daemon_side_proof_table` asserts all five outcomes
+against both values of the obligation.
+`a_push_register_owing_no_proof_survives_a_scope_that_cannot_be_created` drives a real register
+against a run directory with a file where the `intents` directory belongs, asserting `Registered`,
+an armed member, and that no scope was created.
+`the_proof_commit_gate_refuses_an_unowed_register_only_for_a_broken_record` drives the gate directly
+across all three shapes: no record (unowed commits, owed refuses), a healthy record (stamped even
+when unowed — the benign half of the observation race), and a corrupt record (refused in both
+directions).
+
+### Test discrimination for this gate
+
+Both fixes were mutation-checked in **both** directions, since each is a scoping rule and the failure
+modes are symmetric:
+
+- `write_pending` reverted to inheriting unconditionally: the three new lifecycle tests and the
+  rollback test fail (`a new lifecycle is not a retry of the one it replaced` — `left: 1000`,
+  `right: 518701000`).
+- `write_pending` mutated to never inherit: `a_repeated_pending_write_cannot_push_the_pending_ttl_out_forever`,
+  `write_pending_is_generation_safe_and_never_demotes_a_live_record`, and
+  `a_fresh_pending_lifecycle_earns_one_clock_and_no_retry_can_earn_another` fail — so the fix cannot
+  be "corrected" into re-opening G3.
+- `armed_proof_admission` reverted to refusing every failure (with the creating open restored):
+  the table test fails on `Err(ScopeUnavailable)` and the register test fails on its precondition.
+- `armed_proof_admission` mutated to gate *every* failure on the obligation: the table test fails on
+  `Err(RecordUnusable)` and the gate test fails on `a broken record refuses even an unowed register`.
+
 ## Operating notes
 
 - Intent scopes are namespaced by user identity, **canonicalized config root**, and protocol major.
@@ -794,7 +912,13 @@ the G3 clock assertion.
   and a register that cannot write it is refused with `Incompatible` / `PushIntentUnrecoverable` —
   no member created, any epoch lease it claimed released, and a station that was already attended
   left exactly as it was. A binding with no intent record (a pull attach, or a plain
-  `telex attach --on-deliver`) owes no proof and is unaffected.
+  `telex attach --on-deliver`) owes no proof and is unaffected, including on a host where the intent
+  scope cannot be created at all — the proof commit reads the scope without creating it, so "no
+  scope" is "nothing to prove" rather than a failure.
+- Re-attaching a station you detached (or that a session end revoked) starts a **new** attach
+  lifecycle rather than resuming the old one: it gets the full five-minute window to finalize, and
+  the daemon has to arm it again before anything may promote it. The tombstone's own arming proof is
+  never inherited.
 - `telex copilot gc` reads station intents **first**: a session named by a non-revoked intent is
   kept even when its bridge heartbeat is stale, because deleting the bridge under a live intent is
   the one action GC could take that recovery cannot undo. `.bindings.json` is a secondary hint, and
@@ -810,8 +934,8 @@ the G3 clock assertion.
 
 - `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`
 - `cargo build --workspace`
-- `cargo test --workspace` — 20 test binaries, 0 failures (includes `tests/station_intent.rs`, 39
-  rows, and `tests/daemon_process_sqlite.rs`, 43 rows)
+- `cargo test --workspace` — 20 test binaries, 0 failures (lib 364, `tests/station_intent.rs` 39,
+  and `tests/daemon_process_sqlite.rs` 43)
 - `cargo test --no-default-features --features sqlite --test daemon_process_sqlite --test station_intent station_intent_`
 - `cargo test --no-default-features --features sqlite --test daemon_process_sqlite copilot_fallback`
 - `cargo test --all-features --test conformance --test daemon_core_postgres` (Postgres rows skip

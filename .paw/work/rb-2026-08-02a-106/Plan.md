@@ -58,8 +58,8 @@ assert a literal where a constant exists (SF-2, MF-5).
 | `RECONCILE_DEFERRED_LEASE_RETRY` | `src/daemon_reconcile.rs` | `RECONCILE_INTERVAL` (5 s), fixed, no exponential growth, no jitter | retry cadence for the `DeferredLease` outcome - an incumbent lease that is simply not stale yet (MF2-1a) |
 | `RECONCILE_QUARANTINE_AFTER` | `src/daemon_reconcile.rs` | 10 consecutive failures -> hourly retry | wedge prevention (MF-10); `DeferredLease` and `DeferredPullWaiter` do not increment the counter |
 | `STATION_INTENT_MAX_COUNT` / `_MAX_BYTES` | `src/station_intent.rs` | 512 per scope / 16 KiB per file | input domain bound (MF-10, CO-5); over-cap scan behavior is defined in decision 15 (CO2-1) |
-| `STATION_INTENT_PENDING_TTL` | `src/station_intent.rs` | 5 min, aged from `created_at_ms` | GC for crash-during-attach (MF-9); the clock is `StationIntentV1::pending_clock_ms()`, never `updated_at_ms`, which a failing re-attach rewrites (pivot 25) |
-| `STATION_INTENT_ARMED_PENDING_TTL` | `src/station_intent.rs` | 24 h, aged from `armed.armed_at_ms` | GC for a `pending` record a daemon durably proved it armed (pivot 15); the idempotent stamp cannot move the clock (pivot 25) |
+| `STATION_INTENT_PENDING_TTL` | `src/station_intent.rs` | 5 min, aged from this lifecycle's `created_at_ms` | GC for crash-during-attach (MF-9); the clock is `StationIntentV1::pending_clock_ms()`, never `updated_at_ms`, which a failing re-attach rewrites (pivot 25); a new attach over an inert record starts a new lifecycle and gets the whole TTL (pivot 26) |
+| `STATION_INTENT_ARMED_PENDING_TTL` | `src/station_intent.rs` | 24 h, aged from `armed.armed_at_ms` | GC for a `pending` record a daemon durably proved it armed (pivot 15); the idempotent stamp cannot move the clock (pivot 25), and only an arming *this* lifecycle earned puts a record on it (pivot 26) |
 | `STATION_INTENT_UNVERIFIABLE_TTL` | `src/station_intent.rs` | 7 days | GC for orphans (MF-10) |
 | `CREDENTIAL_MAX_AGE_MS_DEFAULT` | `src/station_intent.rs` | 24 h; a descriptor may only lower it | ceiling for the `max_age_ms` field of the credential descriptor (MF2-2) |
 | `COPILOT_BRIDGE_PROTOCOL` | `src/commands/copilot.rs:72` | `1` -> `2` | `probe` verb added |
@@ -1059,6 +1059,13 @@ this is what is actually asserted. Recorded honestly rather than left implying f
 | G2 stale cached failure outlived a generation-changing refresh in the drain backfill | Pivot 24: `durable_intent_states` returns `(state, generation)`; `drain_intent_report` keeps a cached problem only while `cached_generation >= durable_generation`. Test: `station_intent_a_cached_failure_never_outlives_the_generation_it_was_recorded_against`. Closes re-review residual risk #4 |
 | G3 repeated failed re-attach extended the pending TTL indefinitely | Pivot 25: `StationIntentV1::pending_clock_ms()` (creation for unarmed, the armed proof for armed), and `gc_reason` reads it instead of `updated_at_ms`. Tests: `a_repeated_pending_write_cannot_push_the_pending_ttl_out_forever`, `gc_governs_an_armed_pending_record_by_its_own_longer_ttl` (tightened) |
 
+**Final approval gate** (A1..A2):
+
+| Finding | Resolved by |
+|---|---|
+| A1 a re-attach over an aged tombstone was born with an expired pending clock and an inherited arming proof | Pivot 26: `write_pending` inherits `created_at_ms` and `armed` only when the record it replaces is itself `Pending` (a retry of the same lifecycle); a write over a `Revoked`/inert record starts a new lifecycle with its own clock and no proof, while the generation still advances monotonically. Tests: `a_new_attach_over_a_finished_lifecycle_starts_its_own_pending_clock`, `a_new_pending_lifecycle_never_inherits_the_previous_ones_armed_proof`, `a_fresh_pending_lifecycle_earns_one_clock_and_no_retry_can_earn_another`, `attach_rollback_only_deletes_the_record_this_attach_left_behind` (case d) |
+| A2 an arming register that owed no proof was refused when the intent scope could not be created | Pivot 27: `station_intent::armed_proof_admission(stamp, owes_proof)` as the decidable table; `stamp_intent_armed` returns a classified `ArmedProofRefusal` (`ScopeUnavailable` / `RecordUnusable`) and opens the scope through the same non-creating path `durable_intent_present` uses, so an absent scope is `NoRecord`. A present-but-unreadable record still refuses either way. Tests: `armed_proof_admission_is_the_whole_daemon_side_proof_table`, `a_push_register_owing_no_proof_survives_a_scope_that_cannot_be_created`, `the_proof_commit_gate_refuses_an_unowed_register_only_for_a_broken_record` |
+
 ### Trade-offs -> decisions
 
 | Trade-off | Decision taken | Where |
@@ -1282,3 +1289,32 @@ three findings are in `Docs.md`, "Corrections made during the final gate".
     cannot reset it) and `armed.armed_at_ms` for an armed one (floored at `created_at_ms`, and never
     moved by the idempotent stamp). Deliberate transitions keep their intended clocks — arming moves
     the record onto the 24 h armed clock, and a revocation ages from the revocation.
+
+### Pivots from the final approval gate
+
+Both scope a rule an earlier pivot stated too broadly. Mechanisms and tests are in `Docs.md`,
+"Corrections made during the final approval gate".
+
+26. **A pending clock and an armed proof belong to a lifecycle, not to a file.** Pivot 25 relied on
+    `write_pending` carrying `created_at_ms` forward from the record it replaces, and pivot 14 on it
+    carrying the armed proof forward. Both are correct for a *retry* of an unfinalized attach and
+    wrong for a new one: a `revoked` tombstone survives the seven-day terminal TTL, so every
+    re-attach after a detach, a fallback downgrade, an operator reset, or a session end was born
+    `pending` with an already-expired clock and was collected before `extensions_reload` and the
+    finalize could promote it — and, when the tombstone had been armed, arrived carrying an arming
+    authority that decision 8's `armed_durably` arm would have honoured. `write_pending` now
+    inherits both fields only from a record that is itself `Pending`; a write over an inert record
+    starts a new lifecycle with its own clock and no proof. The generation still advances
+    monotonically across the transition, so the rollback's generation gate is unaffected — and the
+    new record is unarmed, so `rollback_removable` lets a failing attach delete what it wrote.
+27. **"The proof could not be stamped" is three conditions, not one.** Pivot 23 refused the register
+    on any stamp failure. For a register that owes no proof — a pull attach, or a plain
+    `telex attach --on-deliver` — a scope-level failure says nothing about a record that does not
+    exist, and the stamp used the *creating* open, so a host where the intent scope could not be
+    made refused push for every client and created a scope as a side effect of registrations with
+    nothing to write. The rule is now the table
+    `station_intent::armed_proof_admission(stamp, owes_proof)`: a missing record or an unopenable
+    scope refuses only an owed register, while a record that is present and unreadable refuses
+    either way. `stamp_intent_armed` classifies its failure (`ScopeUnavailable` / `RecordUnusable`)
+    and reads the scope through the same non-creating open `durable_intent_present` uses, so the
+    observation and the commit now agree on what "no scope" means.

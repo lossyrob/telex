@@ -1994,6 +1994,25 @@ any work, whether the binding has a durable record at all. If it does, that regi
   is otherwise indistinguishable from "the record this register owed a proof to was deleted under
   it".
 
+The commit rule is a table (`station_intent::armed_proof_admission`), because "the proof could not
+be stamped" is three conditions and only one of them is always about this binding:
+
+| Stamp outcome | Register owes no proof | Register owes a proof |
+|---|---|---|
+| stamped, or already armed | commit | commit |
+| no record for this binding | commit | refuse |
+| the scope could not be opened | commit | refuse |
+| the record is present and unreadable | **refuse** | refuse |
+
+The last two rows carry the asymmetry. The stamp opens the scope through the **read** path, which
+never creates it, so a scope with no directory is "no record" — provably nothing to prove — and the
+same non-creating open the up-front observation uses. Opening the *creating* path there made a run
+directory in which the scope could not be made refuse push for every client, including the ones that
+write no intent and therefore have no durable state to lose; it also created a scope as a side
+effect of a registration with nothing to put in it. A record that is present and unreadable is
+refused either way, because that is durable state about this binding that could not be verified —
+including in the concurrent window, where a record can appear between the observation and the stamp.
+
 That ordering is also what closes the concurrent-attach race. Attach A writes its `pending` record
 and registers; concurrent attach B replaces the record at a new generation, fails, and rolls its own
 write back — deleting the file. `write_pending`, the conditional rollback delete, and the arming
@@ -2047,7 +2066,7 @@ GC is the only place an intent file is deleted, so every reason is state-scoped 
 
 | Reason | Applies to | TTL |
 |---|---|---|
-| attach never finalized | unarmed `pending` **only** | `STATION_INTENT_PENDING_TTL` (5 min) since `created_at_ms` |
+| attach never finalized | unarmed `pending` **only** | `STATION_INTENT_PENDING_TTL` (5 min) since this lifecycle's `created_at_ms` |
 | armed but never finalized | `pending` carrying an armed proof | `STATION_INTENT_ARMED_PENDING_TTL` (24 h) since `armed.armed_at_ms` |
 | terminal past its TTL | persisted `unverifiable` / `insecure` / `revoked` | `STATION_INTENT_UNVERIFIABLE_TTL` (7 d) since the transition |
 | credential file gone | finalized intents | `STATION_INTENT_CREDENTIAL_MISSING_TTL` (15 min) since the producer was last **proven** |
@@ -2065,14 +2084,36 @@ push delivery a daemon really armed, so collecting it at five minutes silently d
 a binding that is working right now.
 
 Each pending TTL is anchored to the **event it is about**, and neither event can be replayed by
-retrying (`StationIntentV1::pending_clock_ms`). An unarmed record ages from `created_at_ms`, which
-`write_pending` carries forward from the record it replaces; an armed one ages from the proof's own
-timestamp, which the idempotent stamp never moves. Aging either from `updated_at_ms` made the TTL
-*unreachable* for the records it exists for: a re-attach rewrites the record through `write_pending`,
-so a producer whose finalize kept failing pushed its own leftover's expiry out indefinitely simply by
-retrying, and the scope grew a permanent resident per wedged binding. Deliberate state transitions
-still get the clock they are supposed to have — arming moves the record onto the armed clock, and a
-revocation ages from the revocation.
+retrying (`StationIntentV1::pending_clock_ms`). An unarmed record ages from `created_at_ms`; an
+armed one ages from the proof's own timestamp, which the idempotent stamp never moves. Aging either
+from `updated_at_ms` made the TTL *unreachable* for the records it exists for: a re-attach rewrites
+the record through `write_pending`, so a producer whose finalize kept failing pushed its own
+leftover's expiry out indefinitely simply by retrying, and the scope grew a permanent resident per
+wedged binding. Deliberate state transitions still get the clock they are supposed to have — arming
+moves the record onto the armed clock, and a revocation ages from the revocation.
+
+Which clock a `pending` write inherits depends on **whether it continues a pending lifecycle or
+starts a new one**, and `write_pending` is where that is decided:
+
+- The record on disk is already `pending` — this write is another attempt at the *same*
+  unfinalized attach. It inherits that lifecycle's `created_at_ms` and its armed proof, so no
+  amount of retrying buys the record more life than the one attach earned, and a crash between
+  `Register` and the finalize still has the proof it needs to be repaired.
+- The record on disk is `revoked` or otherwise inert — its lifecycle is over, and this is a
+  genuinely new attach that happens to reuse the binding. It keeps its own `created_at_ms`, which
+  gives it the full pending TTL to reach its finalize, and it carries **no** armed proof.
+
+Carrying the finished lifecycle's fields into a new attach was wrong in both directions. A
+`revoked` tombstone lives for the seven-day terminal TTL, so every re-attach after a detach, a
+fallback downgrade, an operator reset, or a session end was born `pending` with an already-expired
+pending clock, and the next GC pass deleted it *before* `extensions_reload` and the turn-boundary
+finalize could promote it — for a week. And a revocation is the explicit teardown of the arming its
+proof describes, so inheriting that proof would let `finalize_admission` promote a brand-new attach
+on the strength of a previous daemon's arming, which is the "a merely-existing bridge arms an attach
+that was never registered" hole the admission rules exist to close. A new lifecycle proves itself
+with a new daemon stamp, or it does not promote. The generation is the one field that is always
+inherited-and-advanced across the transition: it is a per-file compare-and-set token, not a lifecycle
+property, so the attach rollback's generation gate keeps working across a re-attach.
 
 A *missing credential* is a transient producer condition (the bridge deletes and rewrites its
 registry on every reload), not a teardown, so it is TTL-governed rather than acted on immediately.

@@ -217,7 +217,13 @@ Three conditions are named explicitly in status:
   refuses the whole registration if that write fails. So there is no state in which push is armed
   and nothing on disk says so — you either get a working, recoverable station or a typed refusal
   (`PushIntentUnrecoverable`) with no member created and any claimed lease released. A station that
-  was already attended is left exactly as it was.
+  was already attended is left exactly as it was. A station with **no** intent record — a pull
+  attach, or a plain `telex attach --on-deliver` — has nothing to prove and is never refused by
+  this; that includes on a host where the intent scope could not be created at all.
+- **It never re-uses a torn-down station's arming.** Re-attaching an address you detached (or that
+  a session end revoked) starts a fresh attach: it gets the full attach window to finish, and it has
+  to be armed again by the daemon before anything can promote it. The old record's proof is not
+  carried over.
 
 ### Recovering from a bridge reload
 

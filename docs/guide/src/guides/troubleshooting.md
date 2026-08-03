@@ -116,9 +116,14 @@ delivery — that record is the *only* thing that carries push across a daemon r
 registration that cannot write it is refused instead of leaving you with push that works now and no
 recovery later. The message names the write that failed. Causes are almost always local:
 
+- the station-intent record for this station is present but unreadable (corrupt, or written by a
+  build this one cannot verify), or
 - the station-intent scope is not writable (check the permissions on the daemon run directory), or
 - a concurrent `copilot attach`/`copilot resume` for the same station raced this one and rolled its
   own record back.
+
+A station with no intent record at all — a pull attach, or a plain `telex attach --on-deliver` —
+owes no proof and is never refused by this, even if the intent scope cannot be created on this host.
 
 Nothing is left half-armed: no member is created, and any epoch lease the attempt claimed is
 released. Re-run the attach — `telex --address <addr> copilot resume` — once the scope is writable
