@@ -45,6 +45,18 @@ pub const STATION_INTENT_MAX_BYTES: u64 = 16 * 1024;
 /// A `pending` intent is one an attach wrote but never finalized. It is never reconciled, so a
 /// crash mid-attach cannot leave a claimable record; this TTL removes the leftovers.
 pub const STATION_INTENT_PENDING_TTL: Duration = Duration::from_secs(5 * 60);
+/// TTL for a `pending` intent that carries a durable **armed proof** — a daemon accepted
+/// `Register` for this binding and armed push delivery, but the producer was never proven (the
+/// attach, or the whole process, died between the two).
+///
+/// Deliberately far longer than [`STATION_INTENT_PENDING_TTL`], because the two records mean
+/// opposite things. A bare `pending` record is an attach that may never have reached the daemon at
+/// all, so five minutes is generous. An *armed* one describes push delivery that a daemon really
+/// did arm: deleting it at five minutes silently disarms recovery for a binding that is working
+/// right now, and the user only discovers it after the next daemon replacement — precisely the
+/// failure this feature exists to remove. The turn-boundary hook promotes it on the first turn
+/// stop after the bridge loads, so this TTL only has to outlast an idle gap between turns.
+pub const STATION_INTENT_ARMED_PENDING_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 /// Orphan TTL for intents that stayed unverifiable/insecure: long enough that a laptop closed for
 /// a week still recovers, short enough that abandoned state does not accumulate forever.
 pub const STATION_INTENT_UNVERIFIABLE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
@@ -421,6 +433,108 @@ pub struct IntentEvidence {
     pub recovery_latency_ms: Option<i64>,
 }
 
+/// Durable proof that a daemon accepted `Register` for this binding **and armed push delivery**.
+///
+/// Written by the daemon itself at the moment it commits the push member, never by the producer
+/// side, and never inferred from the existence of a credential file. That is the whole point: a
+/// `pending` record with no proof is an attach that may have failed before it ever reached a
+/// daemon, and it must not be promotable just because a bridge happens to be running. A record
+/// with one describes push delivery that really was armed, so the turn-boundary finalizer may
+/// promote it even after the arming daemon is gone.
+///
+/// It is *not* an authorization to deliver. `is_reconcilable` stays `Live`-only, so an armed
+/// `pending` record is still never reconciled, and restoration still requires the full
+/// peer-verification and probe chain plus the daemon epoch fence.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArmedProofV1 {
+    /// When the daemon armed push for this binding.
+    pub armed_at_ms: i64,
+    /// The arming daemon's instance id. Diagnostic and audit only — a later daemon is a different
+    /// instance by construction, and requiring a match would reintroduce exactly the dependency on
+    /// daemon memory this proof exists to remove.
+    pub daemon_instance_id: String,
+}
+
+/// What a producer-side finalize is allowed to do to a durable record.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FinalizeAdmission {
+    /// `pending` → `live`: the attach is being completed.
+    Promote,
+    /// `live` → `live`: the producer identity of an already-armed record is being re-recorded
+    /// after a bridge reload.
+    Refresh,
+    /// A `pending` record with no durable armed proof, and no daemon reporting an armed member
+    /// right now. Promoting it would let a merely-existing bridge credential arm an attach that
+    /// was never registered.
+    RefusedNotArmed,
+    /// An explicit teardown (detach, session end, fallback downgrade, operator reset) landed while
+    /// the finalize was in flight. Tombstone-wins: a revocation is never undone by a finalize.
+    RefusedRevoked,
+    /// Anything else — a state this build does not persist, so it is not a transition it owns.
+    RefusedState,
+}
+
+impl FinalizeAdmission {
+    pub fn is_allowed(self) -> bool {
+        matches!(
+            self,
+            FinalizeAdmission::Promote | FinalizeAdmission::Refresh
+        )
+    }
+
+    pub fn reason(self) -> &'static str {
+        match self {
+            FinalizeAdmission::Promote => "promote",
+            FinalizeAdmission::Refresh => "refresh",
+            FinalizeAdmission::RefusedNotArmed => "the daemon has not armed push for this binding",
+            FinalizeAdmission::RefusedRevoked => "the binding was revoked concurrently",
+            FinalizeAdmission::RefusedState => "the record is not in a finalizable state",
+        }
+    }
+}
+
+/// The one place the producer-side `pending`/`live` transition rules live.
+///
+/// Split out of the finalize call site so the rules are decidable — and testable — without a
+/// daemon, a bridge, or a filesystem. Two independent authorities may permit a promotion, and the
+/// distinction between them is the whole of the fix for the reload-plus-replacement deadlock:
+///
+/// * `armed_now` — a daemon reports an armed push member for this binding *right now*. This is
+///   what a first attach has, and it is the only authority a record with no durable proof gets.
+/// * `armed_durably` — the record itself carries an armed proof, or is already `live`. This
+///   survives the daemon, so a bridge that reloaded after a daemon crash can re-record its
+///   identity without first needing the member that cannot exist until the identity is right.
+pub fn finalize_admission(
+    state: IntentRecoveryState,
+    armed_durably: bool,
+    armed_now: bool,
+) -> FinalizeAdmission {
+    match state {
+        IntentRecoveryState::Live => FinalizeAdmission::Refresh,
+        IntentRecoveryState::Pending => {
+            if armed_durably || armed_now {
+                FinalizeAdmission::Promote
+            } else {
+                FinalizeAdmission::RefusedNotArmed
+            }
+        }
+        IntentRecoveryState::Revoked | IntentRecoveryState::Tombstoned => {
+            FinalizeAdmission::RefusedRevoked
+        }
+        _ => FinalizeAdmission::RefusedState,
+    }
+}
+
+/// The record a mutating store call actually wrote, so a caller can roll back exactly what it
+/// created and nothing else.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PendingWrite {
+    /// A `pending` record was created (or replaced a non-live one) at this generation.
+    Created { generation: u64 },
+    /// A `live` record already existed and was left untouched; finalize updates it in place.
+    KeptExistingLive { generation: u64 },
+}
+
 // ---------------------------------------------------------------------------------------------
 // The intent record
 // ---------------------------------------------------------------------------------------------
@@ -461,6 +575,10 @@ pub struct StationIntentV1 {
     pub singleton_hash: String,
     #[serde(default)]
     pub evidence: IntentEvidence,
+    /// Durable proof that a daemon armed push delivery for this binding. Absent on every record
+    /// written before this field existed, which is treated exactly like "never armed".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub armed: Option<ArmedProofV1>,
     /// Unknown-field passthrough: a V1 daemon rewriting an intent written by a future build must
     /// not silently drop fields it does not understand.
     #[serde(flatten, default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -526,6 +644,33 @@ impl StationIntentV1 {
     /// Whether this intent was written by this host and this boot.
     pub fn matches_local_identity(&self, host: &str, boot: &str) -> bool {
         self.producer.host_id == host && self.producer.boot_id == boot
+    }
+
+    /// Whether a daemon has durably proven it armed push delivery for this binding.
+    ///
+    /// `Live` implies it: a record only reaches `live` through a finalize, which only runs after
+    /// the daemon confirmed `push_registered`. The explicit proof matters for the window in
+    /// between, where the daemon armed delivery and the record has not been promoted yet.
+    pub fn is_armed(&self) -> bool {
+        self.armed.is_some() || self.state == IntentRecoveryState::Live
+    }
+
+    /// The last moment the producer behind this intent was actually *proven* — a successful
+    /// reconcile, a verified probe, or the durable state transition a finalize performs (which is
+    /// itself gated on a live probe).
+    ///
+    /// Deliberately excludes `evidence.last_attempt_ms`. An attempt is not proof, and because the
+    /// reconciler persists scheduling state on every genuine failure, an intent whose producer is
+    /// permanently gone gets its attempt clock refreshed every few seconds forever — which made
+    /// both the credential-missing TTL and the dead-producer orphan TTL unreachable for exactly
+    /// the records they exist to collect.
+    pub fn last_proven_ms(&self) -> i64 {
+        self.evidence
+            .last_success_ms
+            .max(self.evidence.producer_verified_ms)
+            .unwrap_or(i64::MIN)
+            .max(self.updated_at_ms)
+            .max(self.created_at_ms)
     }
 }
 
@@ -807,6 +952,92 @@ impl IntentStore {
         Ok(Some(intent))
     }
 
+    /// Create (or replace) the `pending` record for one binding, serialized by the per-intent
+    /// write lock and generation-safe.
+    ///
+    /// The check and the write have to be one critical section. Unserialized, two attaches for the
+    /// same binding both read "no live record", both compute `existing.generation + 1`, and the
+    /// second silently clobbers the first at the same generation — which then defeats every
+    /// generation-CAS guard downstream, because a CAS holder cannot tell that the record under it
+    /// was replaced. The lock also makes the "leave an existing `live` record alone" rule real: a
+    /// resume whose finalize later fails must not have already demoted a working record to
+    /// `pending`, where GC would remove it.
+    ///
+    /// A durable armed proof on the record being replaced is **carried forward**. The proof is a
+    /// fact about the binding ("a daemon armed push for exactly this store/session/address"), not
+    /// about one attach attempt, and dropping it on a re-attach that then crashes re-opens the
+    /// crash-between-`Register`-and-finalize window it exists to close. It can never arm anything
+    /// on its own: restoration still requires `live`, a proven producer, and the epoch fence.
+    pub fn write_pending(&self, intent: &StationIntentV1) -> Result<PendingWrite> {
+        if intent.state != IntentRecoveryState::Pending {
+            return Err(IntentError::Invalid(
+                "write_pending may only write a pending record".to_string(),
+            ));
+        }
+        let id = intent.id();
+        let _lock = self.lock_intent(&id)?;
+        let existing = self.load(&id).ok();
+        if let Some(existing) = existing.as_ref() {
+            if existing.state == IntentRecoveryState::Live {
+                return Ok(PendingWrite::KeptExistingLive {
+                    generation: existing.generation,
+                });
+            }
+        }
+        let mut next = intent.clone();
+        if let Some(existing) = existing.as_ref() {
+            // Generation must be monotonic, never reset: a reconcile pass that read generation N
+            // and then wrote back under a compare-and-set would otherwise be able to clobber a
+            // *newer* manifest that happened to cycle back to N.
+            next.generation = existing.generation.saturating_add(1);
+            next.created_at_ms = existing.created_at_ms;
+            if next.armed.is_none() {
+                next.armed = existing.armed.clone();
+            }
+        }
+        self.write_atomic(&next)?;
+        Ok(PendingWrite::Created {
+            generation: next.generation,
+        })
+    }
+
+    /// Stamp the durable armed proof onto an existing record, under the per-intent write lock.
+    ///
+    /// Called by the daemon at the moment it commits an armed push member, so a crash anywhere
+    /// after `Register` returns leaves a record that says so. Idempotent: an already-armed record
+    /// is left untouched rather than churning the generation on every re-register, which would
+    /// invalidate concurrent CAS holders for no gain.
+    ///
+    /// Returns `false` when there is no record for the binding (the ordinary pull-attach case) or
+    /// when it is already armed.
+    pub fn mark_armed(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+        daemon_instance_id: &str,
+        now_ms: i64,
+    ) -> Result<bool> {
+        let id = IntentId::derive(store_key, session_id, address);
+        if !self.path_for(&id).exists() {
+            return Ok(false);
+        }
+        let updated = self.update_locked(&id, |intent| {
+            if intent.armed.is_some() {
+                return false;
+            }
+            // Deliberately does *not* move `updated_at_ms`. That field is the GC clock for the
+            // pending and terminal TTLs, and arming is not a producer proof — moving it here would
+            // let a re-register extend a TTL the record has not earned.
+            intent.armed = Some(ArmedProofV1 {
+                armed_at_ms: now_ms,
+                daemon_instance_id: daemon_instance_id.to_string(),
+            });
+            true
+        })?;
+        Ok(updated.is_some())
+    }
+
     /// Acquire the per-intent write lock, or fail rather than write unserialized.
     ///
     /// Bounded (never blocks a reconcile pass past its per-intent budget) and stale-tolerant: a
@@ -902,7 +1133,76 @@ impl IntentStore {
         Ok(revoked)
     }
 
-    pub fn remove(&self, id: &IntentId) -> Result<bool> {
+    /// Delete one intent, but **only** while holding its write lock and only if the record on disk
+    /// still matches what the caller decided about.
+    ///
+    /// Deleting an intent is the one action recovery cannot undo, and every caller decides from a
+    /// snapshot: GC classifies a record it loaded earlier in the pass, and an attach rollback
+    /// removes "the record this invocation created". Between the decision and the unlink, a
+    /// concurrent turn-boundary finalize can promote the very same file to `live`, or a fresh
+    /// attach can replace it — and the unconditional unlink destroyed the newer record with no
+    /// trace.
+    ///
+    /// So the delete re-reads under the lock and re-checks two things: the generation is exactly
+    /// the one the decision was made against, and `still_deletable` still holds on the freshly
+    /// loaded record. The generation catches every state transition (`update_locked`,
+    /// `write_pending`, and `revoke` all bump it); the predicate catches everything else the
+    /// caller cares about, including an evidence-only rewrite that moved a TTL clock without
+    /// moving the generation.
+    ///
+    /// Returns `false` — never an error — when the record is gone, unreadable, or no longer
+    /// matches. A refused delete is always the safe outcome.
+    pub fn remove_if_unchanged<F>(
+        &self,
+        id: &IntentId,
+        expected_generation: u64,
+        still_deletable: F,
+    ) -> Result<bool>
+    where
+        F: FnOnce(&StationIntentV1) -> bool,
+    {
+        let _lock = self.lock_intent(id)?;
+        let current = match self.load(id) {
+            Ok(current) => current,
+            // Already gone, or it became unreadable under us. Either way this caller's decision no
+            // longer describes what is on disk, and `remove_unreadable_if_unchanged` is the only
+            // path allowed to delete something it cannot read.
+            Err(_) => return Ok(false),
+        };
+        if current.generation != expected_generation || !still_deletable(&current) {
+            return Ok(false);
+        }
+        self.unlink(id)
+    }
+
+    /// Delete a manifest that cannot be read at all, re-confirming under the write lock that it is
+    /// *still* unreadable and *still* past `min_age`.
+    ///
+    /// Separate from [`IntentStore::remove_if_unchanged`] because there is no generation to compare
+    /// against: the record has no readable one. Re-loading under the lock is what keeps a manifest
+    /// that was merely mid-rewrite (a torn read, a Windows sharing violation) from being deleted
+    /// because one unlucky pass could not parse it.
+    pub fn remove_unreadable_if_unchanged(
+        &self,
+        id: &IntentId,
+        now_ms: i64,
+        min_age: Duration,
+    ) -> Result<bool> {
+        let _lock = self.lock_intent(id)?;
+        if self.load(id).is_ok() {
+            return Ok(false);
+        }
+        let past_ttl = file_age_ms(&self.path_for(id), now_ms)
+            .is_some_and(|age| age > min_age.as_millis() as i64);
+        if !past_ttl {
+            return Ok(false);
+        }
+        self.unlink(id)
+    }
+
+    /// The raw unlink. Private on purpose: every deletion in this module goes through one of the
+    /// two conditional, lock-held entry points above.
+    fn unlink(&self, id: &IntentId) -> Result<bool> {
         match std::fs::remove_file(self.path_for(id)) {
             Ok(()) => Ok(true),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(false),
@@ -1025,22 +1325,35 @@ impl IntentStore {
     /// Every reason is **TTL-governed and state-scoped**, because deleting an intent is the one GC
     /// action recovery cannot undo:
     ///
-    /// * `Pending` is governed **solely** by [`STATION_INTENT_PENDING_TTL`]. Nothing else may
-    ///   delete a pending record: on a first attach the producer does not exist yet by
+    /// * An unarmed `Pending` record is governed **solely** by [`STATION_INTENT_PENDING_TTL`].
+    ///   Nothing else may delete it: on a first attach the producer does not exist yet by
     ///   construction (the bridge extension has been written but not loaded), so a
     ///   credential-existence or producer-liveness rule would delete exactly the record the
     ///   turn-boundary finalizer is waiting to promote.
+    /// * An **armed** `Pending` record — one a daemon durably proved it armed push for — is
+    ///   governed by [`STATION_INTENT_ARMED_PENDING_TTL`] instead, because deleting it at five
+    ///   minutes silently disarms recovery for a binding that is delivering right now.
     /// * A persisted terminal state (`Unverifiable` / `Insecure` / `Revoked`) expires after
     ///   [`STATION_INTENT_UNVERIFIABLE_TTL`].
     /// * A finalized intent whose credential file is gone expires after
-    ///   [`STATION_INTENT_CREDENTIAL_MISSING_TTL`], measured from the last time the daemon proved
-    ///   or attempted the producer (`evidence`), not from manifest age — a bridge reload makes the
-    ///   registry momentarily absent on a binding that may have been live for days.
+    ///   [`STATION_INTENT_CREDENTIAL_MISSING_TTL`], measured from the last time the producer was
+    ///   *proven* ([`StationIntentV1::last_proven_ms`]), not from manifest age — a bridge reload
+    ///   makes the registry momentarily absent on a binding that may have been live for days.
     /// * An intent whose identity belongs to another host or boot *and* whose producer is provably
     ///   dead is removed immediately: it can never be restored here.
     /// * A finalized intent whose producer is provably dead expires after
     ///   [`STATION_INTENT_UNVERIFIABLE_TTL`], so a session that died without `sessionEnd` cannot
     ///   wedge its binding forever.
+    ///
+    /// Both TTL clocks are read from *proof*, never from retry attempts. The reconciler persists
+    /// scheduling state on every genuine failure, so an attempt-based clock is refreshed every few
+    /// seconds forever and neither the credential-missing nor the orphan rule can ever fire for
+    /// exactly the abandoned records they exist to collect.
+    ///
+    /// Every deletion is re-checked under the per-intent write lock against the generation and the
+    /// state the decision was made from ([`IntentStore::remove_if_unchanged`]), so a record that a
+    /// concurrent finalize promoted, or that a concurrent attach replaced, is never destroyed by a
+    /// decision taken against the older copy.
     ///
     /// `local_host`/`local_boot` are `None` when identity cannot be resolved; identity-derived
     /// reasons are then skipped rather than guessed.
@@ -1067,82 +1380,113 @@ impl IntentStore {
                 }
                 Err(e) => {
                     // A manifest we cannot even parse securely is GC-eligible once it is older
-                    // than the orphan TTL; until then it stays visible in status.
-                    if file_age_ms(&self.path_for(&id), now_ms)
-                        .is_some_and(|age| age > STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64)
-                    {
-                        self.remove(&id)?;
-                        report.removed.push(id.clone());
-                        report
-                            .reasons
-                            .push((id, format!("unreadable past TTL: {e}")));
-                    } else {
-                        report.kept += 1;
+                    // than the orphan TTL; until then it stays visible in status. Re-checked under
+                    // the write lock, so a manifest that was merely mid-rewrite survives. A lock
+                    // we could not take is a keep, never a delete.
+                    match self.remove_unreadable_if_unchanged(
+                        &id,
+                        now_ms,
+                        STATION_INTENT_UNVERIFIABLE_TTL,
+                    ) {
+                        Ok(true) => {
+                            report.removed.push(id.clone());
+                            report
+                                .reasons
+                                .push((id, format!("unreadable past TTL: {e}")));
+                        }
+                        Ok(false) | Err(_) => report.kept += 1,
                     }
                     continue;
                 }
             };
-            let age_ms = now_ms.saturating_sub(intent.updated_at_ms);
-            // "How long has this binding been without a proven producer" — the durable evidence
-            // block is the only clock that is not reset by an ordinary state rewrite.
-            let unproven_ms = now_ms.saturating_sub(
-                intent
-                    .evidence
-                    .last_success_ms
-                    .or(intent.evidence.last_attempt_ms)
-                    .unwrap_or(intent.updated_at_ms)
-                    .max(intent.updated_at_ms),
-            );
-            let producer_dead = intent.producer.pid != 0
-                && !crate::session_watch::process_alive_with_start_time(
-                    intent.producer.pid,
-                    Some(intent.producer.start_time),
-                );
-            let reason = if intent.state == IntentRecoveryState::Pending {
-                // Pending is governed by its own TTL and by nothing else.
-                (age_ms > STATION_INTENT_PENDING_TTL.as_millis() as i64)
-                    .then(|| "pending intent past its TTL (attach never finalized)".to_string())
-            } else if matches!(
-                intent.state,
-                IntentRecoveryState::Unverifiable
-                    | IntentRecoveryState::Insecure
-                    | IntentRecoveryState::Revoked
-            ) && age_ms > STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64
-            {
-                Some("terminal intent past its TTL".to_string())
-            } else if !intent.producer.credential.path.exists()
-                && unproven_ms > STATION_INTENT_CREDENTIAL_MISSING_TTL.as_millis() as i64
-            {
-                Some("credential file has been gone past its TTL".to_string())
-            } else if let (Some(host), Some(boot)) = (local_host, local_boot) {
-                if !intent.matches_local_identity(host, boot) && producer_dead {
-                    Some("foreign host/boot identity with a dead producer".to_string())
-                } else if producer_dead
-                    && unproven_ms > STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64
-                {
-                    // The orphan case decision 15 promised: a session that died without
-                    // `sessionEnd` must not hold its binding hostage forever.
-                    Some(
-                        "producer is dead and the intent has been unproven past its TTL"
-                            .to_string(),
-                    )
-                } else {
-                    None
-                }
-            } else {
-                None
+            let Some(reason) = Self::gc_reason(&intent, now_ms, local_host, local_boot) else {
+                report.kept += 1;
+                continue;
             };
-            match reason {
-                Some(reason) => {
-                    self.remove(&id)?;
-                    report.removed.push(id.clone());
-                    report.reasons.push((id, reason));
-                }
-                None => report.kept += 1,
+            // Re-decide under the lock on the record as it is *now*: between the classification
+            // above and the unlink, a turn-boundary finalize can promote this exact file to `live`
+            // and a fresh attach can replace it at a new generation. A lock this pass could not
+            // take is also a keep — the next pass will reconsider.
+            let generation = intent.generation;
+            let removed = self
+                .remove_if_unchanged(&id, generation, |current| {
+                    Self::gc_reason(current, now_ms, local_host, local_boot).is_some()
+                })
+                .unwrap_or(false);
+            if removed {
+                report.removed.push(id.clone());
+                report.reasons.push((id, reason));
+            } else {
+                report.kept += 1;
             }
         }
         self.sweep_write_debris(now_ms);
         Ok(report)
+    }
+
+    /// Why this record is GC-eligible right now, or `None` to keep it.
+    ///
+    /// Pure and side-effect free so it can be applied twice: once to classify, and again under the
+    /// per-intent write lock on the record as it actually is at unlink time.
+    fn gc_reason(
+        intent: &StationIntentV1,
+        now_ms: i64,
+        local_host: Option<&str>,
+        local_boot: Option<&str>,
+    ) -> Option<String> {
+        let age_ms = now_ms.saturating_sub(intent.updated_at_ms);
+        // "How long has this binding been without a *proven* producer." Never an attempt clock:
+        // see `StationIntentV1::last_proven_ms`.
+        let unproven_ms = now_ms.saturating_sub(intent.last_proven_ms());
+        let producer_dead = intent.producer.pid != 0
+            && !crate::session_watch::process_alive_with_start_time(
+                intent.producer.pid,
+                Some(intent.producer.start_time),
+            );
+        if intent.state == IntentRecoveryState::Pending {
+            // Pending is governed by its own TTL and by nothing else — a longer one once a daemon
+            // has durably proven it armed push for the binding.
+            let ttl = if intent.is_armed() {
+                STATION_INTENT_ARMED_PENDING_TTL
+            } else {
+                STATION_INTENT_PENDING_TTL
+            };
+            return (age_ms > ttl.as_millis() as i64).then(|| {
+                if intent.is_armed() {
+                    "armed pending intent past its TTL (never finalized)".to_string()
+                } else {
+                    "pending intent past its TTL (attach never finalized)".to_string()
+                }
+            });
+        }
+        if matches!(
+            intent.state,
+            IntentRecoveryState::Unverifiable
+                | IntentRecoveryState::Insecure
+                | IntentRecoveryState::Revoked
+        ) && age_ms > STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64
+        {
+            return Some("terminal intent past its TTL".to_string());
+        }
+        if !intent.producer.credential.path.exists()
+            && unproven_ms > STATION_INTENT_CREDENTIAL_MISSING_TTL.as_millis() as i64
+        {
+            return Some("credential file has been gone past its TTL".to_string());
+        }
+        let (Some(host), Some(boot)) = (local_host, local_boot) else {
+            return None;
+        };
+        if !intent.matches_local_identity(host, boot) && producer_dead {
+            return Some("foreign host/boot identity with a dead producer".to_string());
+        }
+        if producer_dead && unproven_ms > STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64 {
+            // The orphan case decision 15 promised: a session that died without `sessionEnd` must
+            // not hold its binding hostage forever.
+            return Some(
+                "producer is dead and the intent has been unproven past its TTL".to_string(),
+            );
+        }
+        None
     }
 
     /// Remove orphaned atomic-write temp files and abandoned write locks.
@@ -1273,6 +1617,7 @@ mod tests {
             },
             singleton_hash: "hash".to_string(),
             evidence: IntentEvidence::default(),
+            armed: None,
             extra: BTreeMap::new(),
         }
     }
@@ -1318,6 +1663,38 @@ mod tests {
             decoded.extra.get("future_field"),
             Some(&serde_json::json!({"kept": true})),
             "a V1 daemon must not drop a future build's field on rewrite"
+        );
+
+        // The armed proof is an *optional* field inside schema version 1, so a manifest written
+        // before it existed must read back cleanly — and, critically, as **never armed**. Defaulting
+        // it the other way would make every pre-existing `pending` record promotable by any running
+        // bridge, which is the one thing the proof exists to prevent.
+        let mut older: serde_json::Value = serde_json::to_value(&intent).expect("to value");
+        older
+            .as_object_mut()
+            .expect("object")
+            .remove("armed")
+            .map(|_| ())
+            .unwrap_or_default();
+        let older: StationIntentV1 = serde_json::from_value(older).expect("decode an older shape");
+        assert!(older.armed.is_none());
+        assert_eq!(
+            finalize_admission(IntentRecoveryState::Pending, false, false),
+            FinalizeAdmission::RefusedNotArmed
+        );
+        // And it survives a round trip once present.
+        let mut armed = intent.clone();
+        armed.armed = Some(ArmedProofV1 {
+            armed_at_ms: 7,
+            daemon_instance_id: "inst".to_string(),
+        });
+        let encoded = serde_json::to_vec(&armed).expect("encode");
+        let decoded: StationIntentV1 = serde_json::from_slice(&encoded).expect("decode");
+        assert_eq!(decoded.armed, armed.armed);
+        assert!(
+            !String::from_utf8_lossy(&serde_json::to_vec(&intent).expect("encode"))
+                .contains("armed"),
+            "an unarmed record must not carry a null field into the manifest"
         );
     }
 
@@ -1693,5 +2070,355 @@ mod tests {
         assert!(!encoded.contains("\"secret\":"));
         // The credential is a pointer, not a value.
         assert!(encoded.contains("\"pointer\":\"/secret\""));
+    }
+
+    // -----------------------------------------------------------------------------------------
+    // The durable state machine
+    // -----------------------------------------------------------------------------------------
+
+    /// The whole producer-side transition table, in one place, without a daemon or a bridge.
+    ///
+    /// The two authorities are deliberately *not* interchangeable, and the asymmetry is the fix
+    /// for the reload-plus-replacement deadlock:
+    ///
+    /// * A `pending` record needs one of them. Without either, a bridge that merely exists could
+    ///   arm an attach that was never registered — the security property this whole path rests on.
+    /// * A `live` record needs neither, because being `live` is itself the durable proof that the
+    ///   binding was armed. Requiring a live member there made the only repair for a stale
+    ///   producer identity depend on the member that the stale identity prevents from ever
+    ///   existing.
+    #[test]
+    fn finalize_admission_is_the_whole_producer_side_transition_table() {
+        use FinalizeAdmission::*;
+        // (state, armed_durably, armed_now) -> admission
+        let cases = [
+            // A live record refreshes with no daemon knowledge at all. This row is the deadlock
+            // fix: bridge reloads, daemon crashes, successor has no member, and the identity can
+            // still be re-recorded.
+            (IntentRecoveryState::Live, false, false, Refresh),
+            (IntentRecoveryState::Live, true, true, Refresh),
+            // A pending record promotes on either authority...
+            (IntentRecoveryState::Pending, false, true, Promote),
+            (IntentRecoveryState::Pending, true, false, Promote),
+            (IntentRecoveryState::Pending, true, true, Promote),
+            // ...and on neither, it is refused.
+            (IntentRecoveryState::Pending, false, false, RefusedNotArmed),
+            // A revocation always wins, however armed the binding is.
+            (IntentRecoveryState::Revoked, true, true, RefusedRevoked),
+            (IntentRecoveryState::Tombstoned, true, true, RefusedRevoked),
+            // Runtime projections are not states this build persists, so they are not transitions
+            // it owns.
+            (IntentRecoveryState::Unverifiable, true, true, RefusedState),
+            (IntentRecoveryState::Quarantined, true, true, RefusedState),
+            (IntentRecoveryState::Unknown, true, true, RefusedState),
+        ];
+        for (state, armed_durably, armed_now, expected) in cases {
+            assert_eq!(
+                finalize_admission(state, armed_durably, armed_now),
+                expected,
+                "finalize_admission({state:?}, durable={armed_durably}, now={armed_now})"
+            );
+        }
+        assert!(Promote.is_allowed() && Refresh.is_allowed());
+        for refused in [RefusedNotArmed, RefusedRevoked, RefusedState] {
+            assert!(!refused.is_allowed(), "{refused:?} must never write");
+        }
+    }
+
+    /// The armed proof is what makes a `pending` record promotable after the arming daemon is
+    /// gone, and `live` implies it without one (every `live` record was finalized, which only runs
+    /// after the daemon confirmed `push_registered`).
+    #[test]
+    fn the_armed_proof_is_durable_daemon_evidence_and_live_implies_it() {
+        let run_dir = temp_run_dir("armed-proof");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+
+        let mut pending = sample_intent("sqlite:/a", "sess", "addr");
+        pending.state = IntentRecoveryState::Pending;
+        assert!(!pending.is_armed(), "a fresh pending record is not armed");
+        store.write_pending(&pending).expect("write pending");
+
+        assert!(
+            store
+                .mark_armed("sqlite:/a", "sess", "addr", "inst-1", 2_000)
+                .expect("mark armed"),
+            "the first arming stamp writes"
+        );
+        let armed = store.load(&pending.id()).expect("reload");
+        assert!(armed.is_armed());
+        assert_eq!(armed.armed.as_ref().expect("proof").armed_at_ms, 2_000);
+        assert_eq!(
+            armed.armed.as_ref().expect("proof").daemon_instance_id,
+            "inst-1"
+        );
+        assert_eq!(
+            armed.generation,
+            pending.generation + 1,
+            "the stamp is a real durable transition, so it moves the generation"
+        );
+        assert_eq!(
+            armed.updated_at_ms, pending.updated_at_ms,
+            "but it must not move the TTL clock: arming is not a producer proof"
+        );
+
+        assert!(
+            !store
+                .mark_armed("sqlite:/a", "sess", "addr", "inst-2", 3_000)
+                .expect("re-stamp"),
+            "re-arming is idempotent, so the hot register path does not churn the generation"
+        );
+        assert_eq!(
+            store.load(&pending.id()).expect("reload").generation,
+            armed.generation
+        );
+
+        // No record for the binding at all is the ordinary pull-attach case, not an error.
+        assert!(!store
+            .mark_armed("sqlite:/a", "sess", "never-attached", "inst-1", 4_000)
+            .expect("no record"));
+
+        // `live` needs no explicit proof.
+        let live = sample_intent("sqlite:/a", "sess", "live-addr");
+        assert_eq!(live.state, IntentRecoveryState::Live);
+        assert!(live.is_armed());
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// `write_pending` is the serialized, generation-safe replacement for a bare
+    /// load-check-`write_atomic`.
+    #[test]
+    fn write_pending_is_generation_safe_and_never_demotes_a_live_record() {
+        let run_dir = temp_run_dir("write-pending");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+
+        let mut pending = sample_intent("sqlite:/a", "sess", "addr");
+        pending.state = IntentRecoveryState::Pending;
+        pending.created_at_ms = 500;
+        let first = store.write_pending(&pending).expect("first write");
+        assert_eq!(first, PendingWrite::Created { generation: 1 });
+
+        // A second attach for the same binding advances the generation and preserves the original
+        // creation time, so the pending TTL is not extended by re-attaching in a loop.
+        let mut again = pending.clone();
+        again.created_at_ms = 9_000;
+        assert_eq!(
+            store.write_pending(&again).expect("second write"),
+            PendingWrite::Created { generation: 2 }
+        );
+        let stored = store.load(&pending.id()).expect("reload");
+        assert_eq!(stored.created_at_ms, 500);
+
+        // An armed proof survives a re-attach: it is a fact about the binding, and dropping it
+        // would re-open the crash-between-Register-and-finalize window.
+        store
+            .mark_armed("sqlite:/a", "sess", "addr", "inst-1", 7_000)
+            .expect("arm");
+        store.write_pending(&again).expect("third write");
+        assert!(
+            store.load(&pending.id()).expect("reload").is_armed(),
+            "a re-attach must not silently drop the daemon's arming proof"
+        );
+
+        // A live record is never demoted: a resume whose finalize later fails must not have
+        // already destroyed a working recovery record.
+        let live = sample_intent("sqlite:/a", "sess", "live-addr");
+        store.write_atomic(&live).expect("seed live");
+        let mut demote = live.clone();
+        demote.state = IntentRecoveryState::Pending;
+        assert_eq!(
+            store.write_pending(&demote).expect("kept"),
+            PendingWrite::KeptExistingLive { generation: 1 }
+        );
+        assert_eq!(
+            store.load(&live.id()).expect("reload live").state,
+            IntentRecoveryState::Live
+        );
+
+        // And it refuses to write anything that is not a pending record at all.
+        assert!(store.write_pending(&live).is_err());
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// Deletion is the one action recovery cannot undo, so it is conditional on the record still
+    /// being what the caller decided about — the attach-rollback and GC race in one test.
+    #[test]
+    fn deletion_is_refused_when_the_record_moved_under_the_decision() {
+        let run_dir = temp_run_dir("conditional-remove");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+
+        let mut pending = sample_intent("sqlite:/a", "sess", "addr");
+        pending.state = IntentRecoveryState::Pending;
+        store.write_pending(&pending).expect("write");
+        let id = pending.id();
+
+        // The shape of the rollback race: a failing attach decided to remove generation 1, but a
+        // concurrent turn-boundary finalize promoted that exact file to `live` first.
+        store
+            .update_locked(&id, |intent| {
+                intent.state = IntentRecoveryState::Live;
+                true
+            })
+            .expect("finalize");
+        assert!(
+            !store
+                .remove_if_unchanged(&id, 1, |current| current.state
+                    == IntentRecoveryState::Pending)
+                .expect("conditional remove"),
+            "a stale generation must never delete a newer record"
+        );
+        assert!(store.load(&id).is_ok(), "the promoted record must survive");
+
+        // Even at the right generation, the predicate is the second gate.
+        assert!(
+            !store
+                .remove_if_unchanged(&id, 2, |current| current.state
+                    == IntentRecoveryState::Pending)
+                .expect("conditional remove"),
+            "the caller's own condition must still hold on the freshly loaded record"
+        );
+        assert!(store.load(&id).is_ok());
+
+        // Both gates satisfied: the delete happens.
+        assert!(store
+            .remove_if_unchanged(&id, 2, |current| current.state == IntentRecoveryState::Live)
+            .expect("conditional remove"),);
+        assert!(store.load(&id).is_err());
+        // And a delete of something that is already gone is `false`, never an error.
+        assert!(!store
+            .remove_if_unchanged(&id, 2, |_| true)
+            .expect("already gone"));
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// An armed `pending` record describes push delivery a daemon really armed. Collecting it on
+    /// the five-minute pending TTL silently disarms recovery for a binding that is working right
+    /// now, and the user only discovers it after the next daemon replacement.
+    #[test]
+    fn gc_governs_an_armed_pending_record_by_its_own_longer_ttl() {
+        let run_dir = temp_run_dir("gc-armed-pending");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+
+        let mut unarmed = sample_intent("sqlite:/a", "sess", "unarmed");
+        unarmed.state = IntentRecoveryState::Pending;
+        unarmed.updated_at_ms = 1_000_000;
+        unarmed.producer.credential.path = run_dir.join("never-written.json");
+        unarmed.producer.pid = 0;
+        unarmed.producer.start_time = 0;
+        unarmed.producer.host_id = String::new();
+        unarmed.producer.boot_id = String::new();
+        store.write_pending(&unarmed).expect("write unarmed");
+
+        let mut armed = unarmed.clone();
+        armed.address = "armed".to_string();
+        armed.handler.session_id = armed.session_id.clone();
+        store.write_pending(&armed).expect("write armed");
+        store
+            .mark_armed("sqlite:/a", "sess", "armed", "inst-1", 1_000_000)
+            .expect("arm");
+
+        let just_past_pending_ttl =
+            1_000_000 + STATION_INTENT_PENDING_TTL.as_millis() as i64 + 1_000;
+        let report = store
+            .gc(just_past_pending_ttl, Some("host"), Some("boot"))
+            .expect("gc");
+        assert!(
+            report.removed.contains(&unarmed.id()),
+            "an unarmed pending record past its TTL is a crash-during-attach leftover"
+        );
+        assert!(
+            !report.removed.contains(&armed.id()),
+            "but an armed one describes delivery a daemon actually armed, got {:?}",
+            report.reasons
+        );
+
+        let past_armed_ttl =
+            1_000_000 + STATION_INTENT_ARMED_PENDING_TTL.as_millis() as i64 + 1_000;
+        let report = store
+            .gc(past_armed_ttl, Some("host"), Some("boot"))
+            .expect("gc past the armed ttl");
+        assert!(
+            report.removed.contains(&armed.id()),
+            "it is still bounded, so an abandoned armed record does not accumulate forever"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// Both TTL clocks read *proof*, never retry attempts.
+    ///
+    /// The reconciler persists scheduling state on every genuine failure, so a clock that
+    /// consulted `evidence.last_attempt_ms` was refreshed every few seconds forever — and the two
+    /// rules that exist to collect abandoned records could never fire for exactly the records they
+    /// were written for. This drives the failing case directly: a dead producer that is still
+    /// being attempted right now.
+    #[test]
+    fn gc_orphan_clocks_are_never_refreshed_by_a_retry_attempt() {
+        let run_dir = temp_run_dir("gc-orphan-clock");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let credential = run_dir.join("cred.json");
+        std::fs::write(&credential, b"{\"secret\":\"x\"}").expect("credential");
+
+        // A live intent whose producer is provably dead (a pid/start-time pair that cannot be
+        // alive), never once verified, with the reconciler still hammering it.
+        let mut orphan = sample_intent("sqlite:/a", "sess", "orphan");
+        orphan.created_at_ms = 0;
+        orphan.updated_at_ms = 0;
+        orphan.producer.credential.path = credential.clone();
+        let now = STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64 + 60_000;
+        orphan.evidence = IntentEvidence {
+            // The clock the old rule used: refreshed to *now* on every single pass.
+            last_attempt_ms: Some(now),
+            last_success_ms: None,
+            attempts: 5_000,
+            consecutive_failures: 4_000,
+            failure_code: Some("producer_unreachable".to_string()),
+            producer_verified_ms: None,
+            next_attempt_ms: Some(now + 1_000),
+            recovery_latency_ms: None,
+        };
+        store.write_atomic(&orphan).expect("write orphan");
+
+        let report = store.gc(now, Some("host"), Some("boot")).expect("gc");
+        assert!(
+            report.removed.contains(&orphan.id()),
+            "an intent unproven past its TTL must expire even while attempts continue, got {:?}",
+            report.reasons
+        );
+
+        // The same clock governs the credential-missing rule, and it was unreachable for the same
+        // reason: the credential is missing, so every attempt fails, so every attempt refreshed
+        // the clock that decides whether it has been missing long enough.
+        let mut gone = sample_intent("sqlite:/a", "sess", "credential-gone");
+        gone.created_at_ms = 0;
+        gone.updated_at_ms = 0;
+        gone.producer.credential.path = run_dir.join("deleted.json");
+        let now = STATION_INTENT_CREDENTIAL_MISSING_TTL.as_millis() as i64 + 60_000;
+        gone.evidence.last_attempt_ms = Some(now);
+        gone.evidence.consecutive_failures = 300;
+        store.write_atomic(&gone).expect("write credential-gone");
+        let report = store.gc(now, Some("host"), Some("boot")).expect("gc");
+        assert!(
+            report.removed.contains(&gone.id()),
+            "a credential gone past its TTL must expire even while attempts continue, got {:?}",
+            report.reasons
+        );
+
+        // And proof — not an attempt — is what holds a record: the same shape with a recent
+        // success survives.
+        let mut proven = sample_intent("sqlite:/a", "sess", "proven");
+        proven.created_at_ms = 0;
+        proven.updated_at_ms = 0;
+        proven.producer.credential.path = credential;
+        proven.evidence.last_success_ms = Some(now - 1_000);
+        proven.evidence.last_attempt_ms = Some(now);
+        store.write_atomic(&proven).expect("write proven");
+        let report = store
+            .gc(now, Some("host"), Some("boot"))
+            .expect("gc proven");
+        assert!(
+            !report.removed.contains(&proven.id()),
+            "a producer proven a second ago is not an orphan, got {:?}",
+            report.reasons
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
     }
 }

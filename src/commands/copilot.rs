@@ -682,6 +682,9 @@ fn build_pending_intent(
         },
         singleton_hash: singleton_hash.to_string(),
         evidence: IntentEvidence::default(),
+        // Never set here. The armed proof is written by the *daemon*, at the moment it commits an
+        // armed push member — a producer-side path that could mint its own would defeat the point.
+        armed: None,
         extra: Default::default(),
     };
     intent
@@ -737,8 +740,11 @@ async fn probe_local_bridge(session: &str, secret: &str) -> Result<()> {
 /// actually created.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PendingIntentWrite {
-    /// This invocation created (or replaced a non-live) intent record.
-    Created,
+    /// This invocation created (or replaced a non-live) intent record, at this generation. The
+    /// generation is what makes the rollback safe: it is the only thing that distinguishes "the
+    /// record this attach wrote" from "the record a concurrent attach, a daemon arming stamp, or a
+    /// turn-boundary finalize has since replaced".
+    Created { generation: u64 },
     /// A `live` intent already existed and was left alone; finalize will update it in place.
     KeptExistingLive,
 }
@@ -754,6 +760,10 @@ enum PendingIntentWrite {
 /// a probe rate limit — silently destroys a working recovery record and GC deletes it five minutes
 /// later, leaving push that works now and no recovery after the next daemon replacement. That is
 /// precisely the state this feature exists to remove.
+///
+/// The check-then-write is performed inside `IntentStore::write_pending`, under the same per-intent
+/// write lock every other mutating path takes, so two concurrent attaches cannot both read "no live
+/// record" and both write the same generation.
 fn write_pending_intent(
     ctx: &Ctx,
     session: &str,
@@ -773,21 +783,13 @@ fn write_pending_intent(
     let paths = crate::daemon::DaemonPaths::current()
         .map_err(|e| anyhow!("resolving daemon paths for the station intent: {e}"))?;
     let store = intent_store()?;
-    let id = crate::station_intent::IntentId::derive(&store_key, session, address);
-    let existing = store.load(&id).ok();
-    if existing
-        .as_ref()
-        .is_some_and(|intent| intent.state == crate::daemon_ipc::IntentRecoveryState::Live)
-    {
-        return Ok(PendingIntentWrite::KeptExistingLive);
-    }
 
     // A live bridge (the `resume` case) already gives real identity; a first attach does not, and
     // that is what `Pending` is for.
     let identity = capture_producer_identity(session)
         .map(|(identity, _)| identity)
         .unwrap_or_else(|_| placeholder_producer_identity());
-    let mut intent = build_pending_intent(
+    let intent = build_pending_intent(
         &store_key,
         session,
         address,
@@ -799,34 +801,60 @@ fn write_pending_intent(
         &paths.singleton_hash,
         &identity,
     )?;
-    // Generation must be monotonic, never reset: a reconcile pass that read generation N and then
-    // wrote back under a compare-and-set would otherwise be able to clobber a *newer* manifest that
-    // happened to cycle back to N, restoring a stale producer descriptor over a fresh one.
-    if let Some(existing) = existing.as_ref() {
-        intent.generation = existing.generation.saturating_add(1);
-        intent.created_at_ms = existing.created_at_ms;
+    match store
+        .write_pending(&intent)
+        .map_err(|e| anyhow!("writing the pending station intent: {e}"))?
+    {
+        crate::station_intent::PendingWrite::Created { generation } => {
+            Ok(PendingIntentWrite::Created { generation })
+        }
+        crate::station_intent::PendingWrite::KeptExistingLive { .. } => {
+            Ok(PendingIntentWrite::KeptExistingLive)
+        }
     }
-    store
-        .write_atomic(&intent)
-        .map_err(|e| anyhow!("writing the pending station intent: {e}"))?;
-    Ok(PendingIntentWrite::Created)
 }
 
-/// Finalize a `pending` intent to `live` after the daemon armed push and the local probe succeeded.
+/// Finalize a binding's intent: promote a `pending` record to `live`, or re-record the producer
+/// identity of one that is already `live`.
+///
+/// Two independent authorities can permit this, and keeping them apart is what breaks the
+/// reload-plus-replacement deadlock without weakening the security property underneath:
+///
+/// * `member` — the daemon reports an armed push member for this binding *right now*. This is the
+///   only authority a record with no durable proof ever gets, so a bridge that merely exists can
+///   never arm an attach that was never registered.
+/// * the record's own durable state — already `live`, or carrying the armed proof the daemon wrote
+///   at `Register`. This survives the daemon, which is the point: after a bridge reload followed by
+///   a daemon crash, the recorded `(pid, start_time)` is stale, so every reconcile pass fails
+///   `producer_identity_mismatch`, so no member is ever created — and requiring a member here made
+///   the only repair path depend on the thing it was supposed to repair.
+///
+/// In both cases the producer is *proven* first (identity captured through the shared primitives,
+/// then the same probe the daemon will run), the admission decision is re-made under the per-intent
+/// write lock against the record as it actually is, and a concurrent revocation always wins.
 async fn finalize_intent(
     ctx: &Ctx,
     session: &str,
     address: &str,
-    member: &MemberStatus,
+    member: Option<&MemberStatus>,
 ) -> Result<()> {
     let store_key = ctx.store_key()?;
     let store = intent_store()?;
     let id = crate::station_intent::IntentId::derive(&store_key, session, address);
     // Confirm the record exists before doing the (comparatively expensive) capture + probe, so a
     // missing manifest still reports the same error it always did.
-    store
+    let existing = store
         .load(&id)
         .map_err(|e| anyhow!("reloading the pending station intent: {e}"))?;
+    let armed_now = member.is_some();
+    let admission =
+        crate::station_intent::finalize_admission(existing.state, existing.is_armed(), armed_now);
+    if !admission.is_allowed() {
+        return Err(anyhow!(
+            "finalizing the station intent: {}",
+            admission.reason()
+        ));
+    }
 
     // Re-capture identity at finalize time rather than trusting what the pending write recorded:
     // the bridge may have reloaded between provisioning and arming.
@@ -836,10 +864,24 @@ async fn finalize_intent(
     // Under the per-intent write lock: a turn-boundary finalize and a daemon reconcile pass are
     // genuinely concurrent writers, and the loser of an unserialized read-modify-write would
     // silently discard the other's update.
-    let cc_watermark_ms = member.push_cc_after_ms;
-    let wake_on_cc = member.push_wake_on_cc;
+    let cc_watermark_ms = member.and_then(|member| member.push_cc_after_ms);
+    let wake_on_cc = member.map(|member| member.push_wake_on_cc);
+    let member = member.cloned();
+    let mut refused = None;
     let updated = store
         .update_locked(&id, |intent| {
+            // Re-decided here, not only above: between the check and the lock a detach, a session
+            // end, or an operator reset can revoke this binding, and a finalize that overwrote a
+            // revocation would auto-return a station the user explicitly gave up.
+            let admission = crate::station_intent::finalize_admission(
+                intent.state,
+                intent.is_armed(),
+                armed_now,
+            );
+            if !admission.is_allowed() {
+                refused = Some(admission);
+                return false;
+            }
             intent.producer.pid = identity.pid;
             intent.producer.start_time = identity.start_time;
             intent.producer.exe_path = identity.exe_path.clone();
@@ -848,23 +890,34 @@ async fn finalize_intent(
             intent.producer.protocol = identity.protocol;
             // Address metadata the user may have changed on a later `copilot resume`: refreshed
             // here so a restore cannot revert a description/scope/tags/occupant edit to whatever
-            // the *first* attach recorded.
-            intent.occupant = member.occupant.clone();
-            if member.description.is_some() {
-                intent.description = member.description.clone();
-            }
-            if member.scope.is_some() {
-                intent.scope = member.scope.clone();
-            }
-            if member.tags.is_some() {
-                intent.tags = member.tags.clone();
+            // the *first* attach recorded. Only from a live member — a memberless identity refresh
+            // knows nothing about the address and must not overwrite what the record already says.
+            if let Some(member) = member.as_ref() {
+                intent.occupant = member.occupant.clone();
+                if member.description.is_some() {
+                    intent.description = member.description.clone();
+                }
+                if member.scope.is_some() {
+                    intent.scope = member.scope.clone();
+                }
+                if member.tags.is_some() {
+                    intent.tags = member.tags.clone();
+                }
             }
             // The CC lower bound the daemon actually recorded. Persisting it here is what lets a
             // later reconcile pass restore the member without moving the watermark forward to
             // "now", which would make every CC message committed during the restart gap
-            // permanently invisible.
-            intent.cc_watermark_ms = cc_watermark_ms;
-            intent.wake_on_cc = wake_on_cc;
+            // permanently invisible. Never *lowered*: a memberless refresh keeps the stored floor.
+            if let Some(cc_watermark_ms) = cc_watermark_ms {
+                intent.cc_watermark_ms = Some(
+                    intent
+                        .cc_watermark_ms
+                        .map_or(cc_watermark_ms, |stored| stored.max(cc_watermark_ms)),
+                );
+            }
+            if let Some(wake_on_cc) = wake_on_cc {
+                intent.wake_on_cc = wake_on_cc;
+            }
             intent.state = crate::daemon_ipc::IntentRecoveryState::Live;
             intent.updated_at_ms = now_ms();
             true
@@ -872,15 +925,36 @@ async fn finalize_intent(
         .map_err(|e| anyhow!("finalizing the station intent: {e}"))?;
     if updated.is_none() {
         return Err(anyhow!(
-            "finalizing the station intent: the record was withdrawn concurrently"
+            "finalizing the station intent: {}",
+            refused.map_or(
+                "the record was withdrawn concurrently",
+                crate::station_intent::FinalizeAdmission::reason
+            )
         ));
     }
     Ok(())
 }
 
+/// Whether the attach-rollback path may delete this record.
+///
+/// The rollback runs on the failure path of an attach that wrote a `pending` record, and it must
+/// remove *only* what that attach left behind. Two things can have happened in between, and both
+/// mean "not mine to delete": the daemon stamped its armed proof (so push really was armed, and the
+/// record is now the only durable trace of it), or a turn-boundary finalize promoted the record to
+/// `live` (so deleting it destroys a working recovery record on the strength of an unrelated
+/// failure). The generation check at the call site catches both as well — every one of those paths
+/// moves it — so this is the second, independent gate rather than the only one.
+fn rollback_removable(current: &crate::station_intent::StationIntentV1) -> bool {
+    current.state == crate::daemon_ipc::IntentRecoveryState::Pending && !current.is_armed()
+}
+
 /// Remove a binding's intent outright. Used only by the attach rollback path, where the intent was
 /// never live and leaving it behind would be misleading rather than protective.
-fn remove_intent_best_effort(ctx: &Ctx, session: &str, address: &str) {
+///
+/// Conditional on the generation this invocation wrote *and* on [`rollback_removable`]. Removing it
+/// unconditionally let a failing attach delete a record a concurrent attach, a daemon arming stamp,
+/// or a turn-boundary finalize had already moved on from.
+fn remove_intent_best_effort(ctx: &Ctx, session: &str, address: &str, expect_generation: u64) {
     let Ok(store_key) = ctx.store_key() else {
         return;
     };
@@ -888,7 +962,7 @@ fn remove_intent_best_effort(ctx: &Ctx, session: &str, address: &str) {
         return;
     };
     let id = crate::station_intent::IntentId::derive(&store_key, session, address);
-    let _ = store.remove(&id);
+    let _ = store.remove_if_unchanged(&id, expect_generation, rollback_removable);
 }
 
 /// Revoke a binding's intent. Used by every deliberate teardown: detach, fallback downgrade, GC,
@@ -1556,6 +1630,22 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
 /// `producer_identity_mismatch` with no automatic path back. This hook already reads that registry
 /// and already runs at every turn boundary, so it is the natural place to close the window.
 ///
+/// **The refresh must not require a live member**, which is the deadlock the first version of this
+/// hook still had. Trace it: the bridge reloads (recorded identity now stale), then the daemon is
+/// replaced. The successor has no member for the binding, and it cannot create one — every pass
+/// fails `producer_identity_mismatch` against the stale identity. Gating the repair on
+/// `push_registered` therefore gated it on the exact thing the repair was supposed to restore, and
+/// the binding stayed unrecoverable for as long as the record survived. An already-`live` record is
+/// itself durable proof that this binding was armed, so a bridge that proves it is alive *right
+/// now* may re-record its own identity with no daemon involvement at all. Nothing about restoration
+/// is weakened: that still requires the credential, `verify_server_peer`, the probe, and the daemon
+/// epoch fence.
+///
+/// A `pending` record is different and stays gated. It may only be promoted when either the daemon
+/// reports an armed push member for the binding right now, or the record carries the durable armed
+/// proof the daemon writes at `Register`. A bridge that merely exists must never be able to arm an
+/// attach that was never registered.
+///
 /// Best effort and fail-open: the turn-stop hook must never fail because recovery could not be
 /// armed. Returns a short outcome string for the hook's JSON output so the state is observable
 /// rather than silent.
@@ -1574,65 +1664,95 @@ async fn finalize_pending_intents_for_session(
     // The live producer's identity, if the bridge is answering right now. Used to decide which
     // `live` intents have gone stale; a failure here simply means nothing is refreshed.
     let live_identity = capture_producer_identity(session).ok();
-    let stale_live: Vec<crate::station_intent::StationIntentV1> = match &live_identity {
-        Some((identity, _)) => ids
+    let mine: Vec<crate::station_intent::StationIntentV1> = ids
+        .iter()
+        .filter_map(|id| store.load(id).ok())
+        .filter(|intent| intent.store_key == store_key && intent.session_id == session)
+        .collect();
+    let stale_live: Vec<&crate::station_intent::StationIntentV1> = match &live_identity {
+        Some((identity, _)) => mine
             .iter()
-            .filter_map(|id| store.load(id).ok())
             .filter(|intent| {
-                intent.store_key == store_key
-                    && intent.session_id == session
-                    && intent.state == crate::daemon_ipc::IntentRecoveryState::Live
+                intent.state == crate::daemon_ipc::IntentRecoveryState::Live
                     && (intent.producer.pid != identity.pid
                         || intent.producer.start_time != identity.start_time)
             })
             .collect(),
         None => Vec::new(),
     };
-    let pending: Vec<crate::station_intent::StationIntentV1> = ids
+    let pending: Vec<&crate::station_intent::StationIntentV1> = mine
         .iter()
-        .filter_map(|id| store.load(id).ok())
-        .filter(|intent| {
-            intent.store_key == store_key
-                && intent.session_id == session
-                && intent.state == crate::daemon_ipc::IntentRecoveryState::Pending
-        })
+        .filter(|intent| intent.state == crate::daemon_ipc::IntentRecoveryState::Pending)
         .collect();
     if pending.is_empty() && stale_live.is_empty() {
         return "none_pending".to_string();
     }
-    let Ok((mut client, _cap)) = connect_existing_with_cap(store_key).await else {
-        return "daemon_unavailable".to_string();
+    // The daemon's view is *supporting* evidence, not a precondition. A daemon that is down, too
+    // old, or simply has no member for this binding cannot authorize a promotion — but it also must
+    // not block re-recording the identity of a record that is already `live`, which is exactly the
+    // state a bridge reload followed by a daemon replacement leaves behind.
+    let members = match connect_existing_with_cap(store_key).await {
+        Ok((mut client, _cap)) => match daemon_status(&mut client, store_key, admin_cap).await {
+            Ok(status) if ensure_reconcile_capability(&status).is_ok() => {
+                Some(active_session_members(&status, store_key, session))
+            }
+            _ => None,
+        },
+        Err(_) => None,
     };
-    let Ok(status) = daemon_status(&mut client, store_key, admin_cap).await else {
-        return "status_unavailable".to_string();
-    };
-    if ensure_reconcile_capability(&status).is_err() {
-        return "daemon_too_old".to_string();
-    }
-    let members = active_session_members(&status, store_key, session);
     let mut finalized = 0usize;
     let mut refreshed = 0usize;
+    let mut unarmed = 0usize;
     let mut failed = 0usize;
     // `finalize_intent` is the same operation for both: re-capture identity, re-probe, and write
     // the result under the per-intent lock. A `live` intent simply stays `live`.
     for (intent, is_pending) in pending
         .iter()
-        .map(|intent| (intent, true))
-        .chain(stale_live.iter().map(|intent| (intent, false)))
+        .map(|intent| (*intent, true))
+        .chain(stale_live.iter().map(|intent| (*intent, false)))
     {
-        let Some(member) = members
-            .iter()
-            .find(|m| m.address == intent.address && m.push_registered)
-        else {
+        let member = members.as_ref().and_then(|members| {
+            members
+                .iter()
+                .find(|m| m.address == intent.address && m.push_registered)
+        });
+        if is_pending && member.is_none() && !intent.is_armed() {
+            // Neither authority applies: no daemon reports push armed for this binding right now,
+            // and the record carries no durable proof that one ever did. Promoting it here would
+            // let a bridge that merely exists arm an attach that was never registered.
+            unarmed += 1;
             continue;
-        };
+        }
         match finalize_intent(ctx, session, &intent.address, member).await {
             Ok(()) if is_pending => finalized += 1,
             Ok(()) => refreshed += 1,
             Err(_) => failed += 1,
         }
     }
-    format!("finalized={finalized} refreshed={refreshed} failed={failed}")
+    format!("finalized={finalized} refreshed={refreshed} unarmed={unarmed} failed={failed}")
+}
+
+/// Ask the running daemon to reconcile immediately after a producer-side finalize.
+///
+/// The durable record is written by *this* process; the daemon's cached index — which is what the
+/// pre-drain report, `telex status`, and the turn guard project from — is only refreshed by a
+/// reconcile pass. Without this, everything that inspects intent state between a finalize and the
+/// next 5 s tick sees the pre-finalize picture, and `upgrade` in particular concluded there was
+/// nothing recoverable to hand to its successor.
+///
+/// Returns `None` on success, or `Some(detail)` describing why the daemon could not be told. Never
+/// spawns a daemon and never fails the attach: the drain report reads durable state too, so this is
+/// a latency fix rather than the correctness mechanism.
+async fn inform_daemon_of_finalize(store_key: &str) -> Option<String> {
+    let (mut client, cap) = match connect_existing_with_cap(store_key).await {
+        Ok(connected) => connected,
+        Err(e) => return Some(e),
+    };
+    let outcome = request_reconcile_best_effort(&mut client, &cap.admin_cap).await;
+    if outcome.starts_with("pass=") {
+        return None;
+    }
+    Some(outcome)
 }
 
 /// Ask an already-connected daemon to run a reconciliation pass. Never spawns a daemon.
@@ -1857,12 +1977,27 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
                                 );
                                 result = Ok(1);
                             } else if let Err(e) =
-                                finalize_intent(ctx, &session, &address, &member).await
+                                finalize_intent(ctx, &session, &address, Some(&member)).await
                             {
                                 eprintln!(
                                     "telex: push is armed, but station-intent recovery is not finalized yet ({e}). \
                                      Run `extensions_reload`; the next turn boundary finalizes it automatically."
                                 );
+                            } else {
+                                // Tell the daemon straight away. The pre-drain report is projected
+                                // from the daemon's cached index, and only a reconcile pass
+                                // refreshes it — so an `attach` immediately followed by `upgrade`
+                                // drained with `recoverable = 0` for a binding that had just been
+                                // finalized, and the successor-verification step skipped itself on
+                                // "no recoverable station intents". The drain report also reads the
+                                // durable scope now, so this is the fast path rather than the
+                                // correctness backstop, and it stays best effort.
+                                let reconciled = inform_daemon_of_finalize(&store_key).await;
+                                if let Some(detail) = reconciled {
+                                    eprintln!(
+                                        "telex: station-intent recovery finalized, but the daemon could not be asked to reconcile immediately ({detail}); the next tick picks it up."
+                                    );
+                                }
                             }
                         }
                         Ok(None) | Err(_) => {
@@ -1891,10 +2026,12 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     // so a failed bind never leaves an orphaned bridge that reloads on a later resume.
     if bridge_provisioned && !matches!(result, Ok(0)) {
         if let Ok(address) = ctx.cfg.require_address(&ctx.address) {
-            // Only remove an intent *this invocation created*. A failed re-attach must not delete
-            // the still-good recovery record of an already-live binding.
-            if intent_write == Some(PendingIntentWrite::Created) {
-                remove_intent_best_effort(ctx, &session, &address);
+            // Only remove an intent *this invocation created*, and only if nothing has touched it
+            // since. A failed re-attach must not delete the still-good recovery record of an
+            // already-live binding, and it must not delete one a concurrent attach, a daemon
+            // arming stamp, or a turn-boundary finalize has moved on from.
+            if let Some(PendingIntentWrite::Created { generation }) = intent_write {
+                remove_intent_best_effort(ctx, &session, &address, generation);
             }
             // Same rule for the bridge binding ref-count: removing a binding this invocation did
             // not add lets a later detach of an unrelated address delete the shared bridge (and
@@ -4308,6 +4445,96 @@ mod tests {
             "the record the drain hook finalizes must survive a GC pass, got {:?}",
             report.reasons
         );
+        let _ = std::fs::remove_dir_all(&run_dir);
+        let _ = std::fs::remove_dir_all(&home);
+    }
+
+    /// The attach rollback deletes an intent, and deleting one is the single action recovery
+    /// cannot undo. It ran unconditionally, so a failing attach could destroy a record that a
+    /// concurrent attach had replaced, that the daemon had armed, or that a turn-boundary finalize
+    /// had already promoted to `live` — turning an unrelated failure into silent loss of a working
+    /// push binding.
+    #[test]
+    fn attach_rollback_only_deletes_the_record_this_attach_left_behind() {
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let session = format!("rollback-{}", std::process::id());
+        let prior_home = std::env::var_os("COPILOT_HOME");
+        let home = std::env::temp_dir().join(format!("telex-rollback-{}", std::process::id()));
+        std::fs::create_dir_all(home.join("telex-bridge")).expect("bridge root");
+        std::env::set_var("COPILOT_HOME", &home);
+        let intent = build_pending_intent(
+            "sqlite:/tmp/telex.db",
+            &session,
+            "addr:rollback",
+            "occupant",
+            None,
+            None,
+            None,
+            false,
+            "singleton-hash",
+            &placeholder_producer_identity(),
+        )
+        .expect("pending intent");
+        restore_env("COPILOT_HOME", prior_home);
+
+        let run_dir =
+            std::env::temp_dir().join(format!("telex-rollback-run-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&run_dir);
+        let store = crate::station_intent::IntentStore::open(&run_dir, "singleton-hash")
+            .expect("intent scope");
+        let id = intent.id();
+
+        // (a) The daemon armed push before the attach failed downstream. The record is now the
+        // only durable trace of an arming that really happened.
+        store.write_pending(&intent).expect("write");
+        store
+            .mark_armed(
+                &intent.store_key,
+                &intent.session_id,
+                &intent.address,
+                "inst-1",
+                intent.updated_at_ms,
+            )
+            .expect("arm");
+        assert!(!rollback_removable(&store.load(&id).expect("reload")));
+        assert!(!store
+            .remove_if_unchanged(&id, 1, rollback_removable)
+            .expect("conditional remove"));
+        assert!(store.load(&id).is_ok(), "an armed record must survive");
+
+        // (b) A turn-boundary finalize promoted it first — with a real producer identity, exactly
+        // as `finalize_intent` does before it writes the state.
+        store
+            .update_locked(&id, |current| {
+                current.producer.pid = std::process::id();
+                current.producer.start_time = 1;
+                current.producer.exe_path = std::path::PathBuf::from("exe");
+                current.producer.host_id = "host".to_string();
+                current.producer.boot_id = "boot".to_string();
+                current.state = IntentRecoveryState::Live;
+                true
+            })
+            .expect("finalize");
+        let promoted = store.load(&id).expect("reload");
+        assert!(!rollback_removable(&promoted));
+        assert!(!store
+            .remove_if_unchanged(&id, promoted.generation, rollback_removable)
+            .expect("conditional remove"));
+        assert!(store.load(&id).is_ok(), "a live record must survive");
+
+        // (c) Nothing touched it: this attach's own leftover is removed, as it always was.
+        let _ = std::fs::remove_dir_all(&run_dir);
+        let store = crate::station_intent::IntentStore::open(&run_dir, "singleton-hash")
+            .expect("intent scope");
+        let written = store.write_pending(&intent).expect("write");
+        let crate::station_intent::PendingWrite::Created { generation } = written else {
+            panic!("a fresh binding must be created, got {written:?}");
+        };
+        assert!(rollback_removable(&store.load(&id).expect("reload")));
+        assert!(store
+            .remove_if_unchanged(&id, generation, rollback_removable)
+            .expect("conditional remove"));
+        assert!(store.load(&id).is_err());
         let _ = std::fs::remove_dir_all(&run_dir);
         let _ = std::fs::remove_dir_all(&home);
     }

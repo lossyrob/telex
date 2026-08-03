@@ -357,6 +357,7 @@ pub fn live_intent(
         },
         singleton_hash: singleton_hash.to_string(),
         evidence: IntentEvidence::default(),
+        armed: None,
         extra: Default::default(),
     }
 }

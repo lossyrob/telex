@@ -802,7 +802,7 @@ async fn station_intent_inline_reconcile_completes_under_a_held_admission_guard(
 // ---------------------------------------------------------------------------------------------
 
 #[tokio::test]
-async fn station_intent_drain_report_is_index_only_and_suppresses_reconciliation() {
+async fn station_intent_drain_report_prefers_the_index_and_never_reconciles() {
     let scenario = Scenario::new("intent-drain", ProducerBehavior::Healthy).await;
     scenario.daemon.reconcile_once().await;
 
@@ -815,8 +815,9 @@ async fn station_intent_drain_report_is_index_only_and_suppresses_reconciliation
         "the report must carry its own staleness"
     );
 
-    // Removing the manifest must not change the report: it is computed from the cached index only,
-    // which is what keeps a graceful drain free of directory I/O.
+    // Removing the manifest must not change the report. The durable read only *adds* bindings the
+    // index has no fresh answer for; it never retracts what a real pass proved, so a scope that
+    // vanished under a running daemon is still reported from what that daemon knows.
     let path = scenario
         .daemon
         .intent_store()
@@ -825,7 +826,7 @@ async fn station_intent_drain_report_is_index_only_and_suppresses_reconciliation
     let after = scenario.daemon.drain_intent_report();
     assert_eq!(
         after.recoverable, report.recoverable,
-        "the drain report must not read the intent directory"
+        "the cached projection is not retracted by a durable read"
     );
 
     // Draining suppresses reconciliation entirely.
@@ -1469,6 +1470,12 @@ async fn station_intent_retry_state_survives_a_daemon_replacement() {
 /// no two manifests can ever share, so it rejected nothing; and the `AlreadyOwned` adoption branch
 /// treated "this daemon already owns the address" as licence to adopt the lease for a second
 /// session.
+///
+/// Asserted as **exactly one, and the expected one**. `<= 1` passed for the two failures that
+/// matter most — zero armed members (nothing recovered at all) and the wrong session winning — so
+/// it could not distinguish the property from its own absence. Both rivals get a *healthy*
+/// producer and their own credential here, so nothing but the ordering rule decides the winner:
+/// scan order is `(store_key, address, generation desc)`, so the higher generation wins.
 #[tokio::test]
 async fn station_intent_two_sessions_never_both_attend_one_address() {
     let first = Scenario::with_session(
@@ -1478,19 +1485,33 @@ async fn station_intent_two_sessions_never_both_attend_one_address() {
         "addr:contested",
     )
     .await;
-    // A second session's live intent for the same address, in the same store and scope.
-    let second = live_intent(
+    // The incumbent, at a decisively higher generation than its rival.
+    let mut incumbent = first.intent.clone();
+    incumbent.generation = 5;
+    first.reseed(&incumbent);
+
+    // A second session's live intent for the same address, in the same store and scope, with a
+    // producer of its own that answers correctly for `sess-b`. Without that, the rival would lose
+    // on `probe_session_mismatch` and the test would pass without the dedupe existing at all.
+    let root = first
+        .credential_path
+        .parent()
+        .expect("credential root")
+        .to_path_buf();
+    let rival_secret = "r".repeat(64);
+    let rival_producer =
+        FakeProducer::start(&root, "sess-b", &rival_secret, ProducerBehavior::Healthy).await;
+    let rival_credential = root.join("sess-b.json");
+    write_credential_file(&rival_credential, &rival_secret);
+    let mut rival = live_intent(
         &first.store_key,
-        "sess-a",
+        "sess-b",
         "addr:contested",
         first.daemon.singleton_hash(),
-        &first.producer,
+        &rival_producer,
         first.intent.producer.credential.root_id.as_str(),
-        &first.credential_path,
+        &rival_credential,
     );
-    let mut rival = second.clone();
-    rival.session_id = "sess-b".to_string();
-    rival.handler.session_id = "sess-b".to_string();
     rival.generation = 1;
     first.reseed(&rival);
 
@@ -1505,10 +1526,345 @@ async fn station_intent_two_sessions_never_both_attend_one_address() {
         .filter(|m| m.address == "addr:contested" && m.push_registered && !m.idle)
         .map(|m| m.session_id.clone())
         .collect();
-    assert!(
-        armed.len() <= 1,
-        "one address must never have two armed push members: {armed:?}"
+    assert_eq!(
+        armed,
+        vec!["sess-a".to_string()],
+        "exactly one session must attend a contested address, and it must be the \
+         highest-generation intent the deterministic scan order names first"
     );
+    // The loser is not silently dropped: it stays visible so an operator can see the conflict.
+    let rows = first.daemon.intent_statuses();
+    assert!(
+        rows.iter()
+            .any(|row| row.session_id == "sess-b" && row.address == "addr:contested"),
+        "the losing intent must still be indexed, got {rows:?}"
+    );
+}
+
+/// An **inert** record must never consume the per-address winner slot.
+///
+/// The dedupe used to run before the `is_reconcilable` check, so the highest-generation manifest
+/// for an address claimed the slot whatever its state. A `revoked` generation 3 for one session
+/// therefore shadowed a `live` generation 2 for another — and not merely as a scheduling delay:
+/// the shadowed record was `continue`d *before* it was indexed, so for as long as the tombstone
+/// survived (up to its seven-day TTL) the live binding was invisible to `telex status`, absent
+/// from the pre-drain report, unseen by the turn guard, and attempted by no pass at all.
+#[tokio::test]
+async fn station_intent_a_revoked_record_never_shadows_a_live_one_for_the_same_address() {
+    let live = Scenario::with_session(
+        "intent-shadowed",
+        ProducerBehavior::Healthy,
+        "sess-live",
+        "addr:shadowed",
+    )
+    .await;
+    let mut current = live.intent.clone();
+    current.generation = 2;
+    live.reseed(&current);
+
+    // A *higher*-generation tombstone for the same address, left by another session's detach.
+    let mut revoked = live.intent.clone();
+    revoked.session_id = "sess-gone".to_string();
+    revoked.handler.session_id = "sess-gone".to_string();
+    revoked.state = IntentRecoveryState::Revoked;
+    revoked.generation = 3;
+    live.reseed(&revoked);
+
+    let report = live.daemon.reconcile_once().await;
+    assert_eq!(
+        report.restored, 1,
+        "the live record must be attempted, not shadowed by the tombstone"
+    );
+    assert_eq!(
+        report.inert, 1,
+        "the tombstone is inert, and counted as such"
+    );
+
+    let armed: Vec<String> = live
+        .status()
+        .await
+        .members
+        .iter()
+        .filter(|m| m.address == "addr:shadowed" && m.push_registered && !m.idle)
+        .map(|m| m.session_id.clone())
+        .collect();
+    assert_eq!(
+        armed,
+        vec!["sess-live".to_string()],
+        "exactly one armed member, and it must be the live intent's session"
+    );
+
+    // Both records reach the index: the live one so status/drain/guard can see it, the tombstone
+    // so an operator can see why the address looks contested.
+    let rows = live.daemon.intent_statuses();
+    let live_row = rows
+        .iter()
+        .find(|row| row.session_id == "sess-live")
+        .expect("the live intent must be indexed");
+    assert_eq!(live_row.state, IntentRecoveryState::Restored);
+    let revoked_row = rows
+        .iter()
+        .find(|row| row.session_id == "sess-gone")
+        .expect("the revoked intent must be indexed");
+    assert_eq!(revoked_row.state, IntentRecoveryState::Revoked);
+
+    let drain = live.daemon.drain_intent_report();
+    assert_eq!(
+        drain.recoverable, 1,
+        "the drain report must see the live binding a successor will restore"
+    );
+}
+
+/// The failure ladder is earned by a *producer descriptor*, not by a binding, and a durable state
+/// transition replaces the descriptor. Carrying the ladder across one means the repair for a
+/// reload is followed by a wait the repaired record did not earn — and past
+/// `RECONCILE_QUARANTINE_AFTER`, an hour of it, which is long enough that "recovery is automatic"
+/// stops being true in practice. An *evidence* rewrite is deliberately not a transition (it writes
+/// under the same generation), so it must not clear anything.
+#[tokio::test]
+async fn station_intent_a_durable_transition_clears_a_ladder_the_old_descriptor_earned() {
+    let scenario = Scenario::new("intent-ladder-reset", ProducerBehavior::WrongNonce).await;
+    for _ in 0..3 {
+        scenario.daemon.reconcile_once().await;
+    }
+    let wedged = scenario
+        .daemon
+        .intent_index()
+        .entries
+        .values()
+        .next()
+        .cloned()
+        .expect("an index entry");
+    assert!(
+        wedged.consecutive_failures >= 1,
+        "precondition: the intent is on the ladder"
+    );
+    assert!(wedged.next_attempt_ms.is_some());
+
+    // A pass that only rewrites evidence keeps the ladder: the record did not change.
+    scenario.daemon.reconcile_once().await;
+    let still_wedged = scenario
+        .daemon
+        .intent_index()
+        .entries
+        .values()
+        .next()
+        .cloned()
+        .expect("an index entry");
+    assert!(
+        still_wedged.consecutive_failures >= wedged.consecutive_failures,
+        "an evidence rewrite is not a state transition and must not forgive failures"
+    );
+
+    // A durable transition — exactly what a turn-boundary producer-identity refresh performs —
+    // does clear it, and the very next pass attempts the binding again.
+    scenario
+        .daemon
+        .intent_store()
+        .update_locked(&scenario.intent.id(), |intent| {
+            intent.updated_at_ms += 1;
+            true
+        })
+        .expect("transition")
+        .expect("the record must still exist");
+    let report = scenario.daemon.reconcile_once().await;
+    assert_eq!(
+        report.scanned, 1,
+        "the transition must re-admit the binding to the fast cadence instead of leaving it \
+         parked on a schedule its previous descriptor earned"
+    );
+}
+
+/// A producer-side finalize is written by a *different process* than the daemon, and the pre-drain
+/// report is projected from the daemon's cached index — which only a reconcile pass refreshes. So
+/// `attach` immediately followed by `upgrade` drained with `recoverable = 0` for a binding that
+/// had just been fully armed and finalized, and the successor-verification step skipped itself on
+/// "no recoverable station intents": the one path that is supposed to carry push delivery across a
+/// daemon replacement quietly became a no-op.
+#[tokio::test]
+async fn station_intent_a_finalize_is_visible_to_the_very_next_drain_decision() {
+    let scenario = Scenario::new("intent-finalize-drain", ProducerBehavior::Healthy).await;
+    let mut pending = scenario.intent.clone();
+    pending.state = IntentRecoveryState::Pending;
+    pending.generation = 2;
+    scenario.reseed(&pending);
+    scenario.daemon.reconcile_once().await;
+
+    let before = scenario.daemon.drain_intent_report();
+    assert_eq!(before.pending, 1);
+    assert_eq!(
+        before.recoverable, 0,
+        "a pending record is not something a successor restores"
+    );
+
+    // Exactly the durable transition `finalize_intent` performs under the per-intent write lock,
+    // and nothing else: no reconcile pass, no daemon involvement, no index refresh.
+    scenario
+        .daemon
+        .intent_store()
+        .update_locked(&scenario.intent.id(), |intent| {
+            intent.state = IntentRecoveryState::Live;
+            true
+        })
+        .expect("finalize")
+        .expect("the record must still exist");
+
+    let after = scenario.daemon.drain_intent_report();
+    assert_eq!(
+        after.recoverable, 1,
+        "an upgrade started immediately after a finalize must see the binding it has to hand over"
+    );
+    assert_eq!(after.pending, 0);
+}
+
+/// The daemon writes the durable **armed proof** itself, at `Register`, so a crash anywhere between
+/// arming push and the producer-side finalize leaves a record that says push was armed.
+#[tokio::test]
+async fn station_intent_the_daemon_stamps_the_armed_proof_when_it_arms_push() {
+    let scenario = Scenario::new("intent-armed-proof", ProducerBehavior::Healthy).await;
+    let mut pending = scenario.intent.clone();
+    pending.state = IntentRecoveryState::Pending;
+    pending.generation = 2;
+    scenario.reseed(&pending);
+
+    let register = |on_deliver: Option<Vec<String>>| Request::Register {
+        store_key: scenario.store_key.clone(),
+        address: scenario.intent.address.clone(),
+        session_id: scenario.intent.session_id.clone(),
+        occupant: "occupant".to_string(),
+        description: None,
+        scope: None,
+        tags: None,
+        watch_pids: Vec::new(),
+        recovery: false,
+        on_deliver,
+        replace_on_deliver: true,
+        on_deliver_wake_on_cc: false,
+    };
+
+    // A pull attach writes no intent and must earn no proof.
+    assert!(matches!(
+        scenario.daemon.request(register(None)).await,
+        Response::Registered { .. }
+    ));
+    assert!(
+        !scenario
+            .daemon
+            .intent_store()
+            .load(&scenario.intent.id())
+            .expect("reload")
+            .is_armed(),
+        "a pull register must never stamp an armed proof"
+    );
+
+    // Arming push does.
+    assert!(matches!(
+        scenario.daemon.request(register(Some(Vec::new()))).await,
+        Response::Registered { .. }
+    ));
+    let armed = scenario
+        .daemon
+        .intent_store()
+        .load(&scenario.intent.id())
+        .expect("reload");
+    assert!(
+        armed.is_armed(),
+        "the daemon must record that it armed push, so the record survives a crash before finalize"
+    );
+    assert_eq!(
+        armed.state,
+        IntentRecoveryState::Pending,
+        "arming is not finalizing: the record is still never reconciled"
+    );
+    let report = scenario.daemon.reconcile_once().await;
+    assert_eq!(
+        report.restored, 0,
+        "an armed pending record is still not claimable"
+    );
+    assert_eq!(report.inert, 1);
+}
+
+/// The deadlock the turn-boundary refresh exists to break, traced end to end at the durable level.
+///
+/// A bridge reload gives the producer a new pid and start time while the `live` record still names
+/// the old pair. The daemon is then replaced. The successor has no member for the binding, and it
+/// cannot make one: every pass fails `producer_identity_mismatch` against the stale identity. So a
+/// refresh gated on `push_registered` was gated on the exact thing it existed to restore, and the
+/// binding never recovered.
+///
+/// Being `live` is itself durable proof that the binding was armed, so the refresh is admitted with
+/// no member at all — while an unarmed `pending` record in the same position is not, which is what
+/// keeps a merely-existing bridge from arming an attach that was never registered.
+#[tokio::test]
+async fn station_intent_a_reloaded_producer_recovers_with_no_member_to_start_from() {
+    let scenario = Scenario::new("intent-reload-deadlock", ProducerBehavior::Healthy).await;
+    // The bridge reloaded: same endpoint, new process identity.
+    let mut reloaded = scenario.intent.clone();
+    let real_start_time = reloaded.producer.start_time;
+    reloaded.producer.start_time = real_start_time.wrapping_add(1);
+    reloaded.generation = 2;
+    scenario.reseed(&reloaded);
+
+    // The daemon replacement: no member exists, and no pass can create one.
+    for _ in 0..2 {
+        let report = scenario.daemon.reconcile_once().await;
+        assert_eq!(report.restored, 0);
+    }
+    assert_eq!(
+        scenario.failure_code().as_deref(),
+        Some("producer_identity_mismatch")
+    );
+    assert!(
+        !scenario.member_push_registered().await,
+        "the precondition of the deadlock: there is no member, and none can be created"
+    );
+
+    // The turn-boundary hook's decision, with the daemon contributing nothing.
+    let durable = scenario
+        .daemon
+        .intent_store()
+        .load(&scenario.intent.id())
+        .expect("reload");
+    assert_eq!(
+        telex::station_intent::finalize_admission(
+            durable.state,
+            durable.is_armed(),
+            /* armed_now */ false,
+        ),
+        telex::station_intent::FinalizeAdmission::Refresh,
+        "an already-live record must be refreshable without a live member"
+    );
+    // ...and the same decision for a record that was never armed is a refusal, which is the
+    // security property this must not trade away.
+    assert_eq!(
+        telex::station_intent::finalize_admission(
+            IntentRecoveryState::Pending,
+            /* armed_durably */ false,
+            /* armed_now */ false,
+        ),
+        telex::station_intent::FinalizeAdmission::RefusedNotArmed
+    );
+
+    // Exactly the durable write `finalize_intent` performs once the live bridge has been probed.
+    scenario
+        .daemon
+        .intent_store()
+        .update_locked(&scenario.intent.id(), |intent| {
+            intent.producer.start_time = real_start_time;
+            intent.state = IntentRecoveryState::Live;
+            true
+        })
+        .expect("refresh")
+        .expect("the record must still exist");
+
+    let report = scenario.daemon.reconcile_once().await;
+    assert_eq!(
+        report.restored, 1,
+        "with the identity re-recorded, the very next pass restores the binding: the failure \
+         ladder was earned by a producer that no longer exists, and a durable state transition \
+         drops it with the descriptor it described"
+    );
+    assert!(scenario.member_push_registered().await);
 }
 
 /// A bridge *reload* — `extensions_reload`, `/clear`, an extension-host restart — gives the

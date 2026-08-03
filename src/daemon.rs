@@ -3924,7 +3924,57 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
     (response, ClientAction::Continue)
 }
 
+/// `Register`, with the durable **armed proof** stamped on the way out.
+///
+/// The stamp lives here, at the single seam every register response passes through, rather than in
+/// the three places inside [`register_member_inner`] that build a `Registered`. What it closes is
+/// the crash window between the daemon committing an armed push member and the producer-side
+/// finalize promoting the record to `live`: before this, that window left a `pending` record which
+/// the five-minute pending TTL deleted while push delivery kept working, so recovery was silently
+/// disarmed and the user discovered it only after the next daemon replacement.
+///
+/// Only an *armed* register stamps (`on_deliver.is_some()`), and only when a record for the binding
+/// already exists. A pull attach writes no intent and gets no proof.
+#[allow(clippy::too_many_arguments)]
 async fn register_member(
+    state: Arc<DaemonState>,
+    store_key: String,
+    address: String,
+    session_id: String,
+    occupant: String,
+    description: Option<String>,
+    scope: Option<String>,
+    tags: Option<String>,
+    watch_pids: Vec<WatchPidSpec>,
+    recovery: bool,
+    on_deliver: Option<Vec<String>>,
+    replace_on_deliver: bool,
+    on_deliver_wake_on_cc: bool,
+) -> Response {
+    let arming_push = on_deliver.is_some();
+    let response = register_member_inner(
+        state.clone(),
+        store_key.clone(),
+        address.clone(),
+        session_id.clone(),
+        occupant,
+        description,
+        scope,
+        tags,
+        watch_pids,
+        recovery,
+        on_deliver,
+        replace_on_deliver,
+        on_deliver_wake_on_cc,
+    )
+    .await;
+    if arming_push && matches!(response, Response::Registered { .. }) {
+        state.mark_intent_armed(&store_key, &session_id, &address);
+    }
+    response
+}
+
+async fn register_member_inner(
     state: Arc<DaemonState>,
     store_key: String,
     address: String,

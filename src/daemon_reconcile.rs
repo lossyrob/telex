@@ -485,6 +485,31 @@ impl DaemonState {
         }
     }
 
+    /// Stamp the durable **armed proof** on a binding's intent record, if it has one.
+    ///
+    /// Called by `register_member` at the moment it commits an armed push member. That placement
+    /// is the point: it closes the window between `Register` returning and the producer-side
+    /// finalize, in which a crash (of the CLI, of the agent, of the machine) left a `pending`
+    /// record that the five-minute pending TTL then deleted while push delivery went on working —
+    /// so recovery was silently disarmed and the user only found out after the next daemon
+    /// replacement.
+    ///
+    /// Best effort and never fatal to a register: the proof strictly *adds* recoverability, and a
+    /// register that succeeded must not be reported as failed because a diagnostic stamp could not
+    /// be written. Idempotent, so the hot re-register path costs a stat and nothing else.
+    pub(crate) fn mark_intent_armed(&self, store_key: &str, session_id: &str, address: &str) {
+        let Some(store) = self.intent_store() else {
+            return;
+        };
+        match store.mark_armed(store_key, session_id, address, &self.instance_id, now_ms()) {
+            Ok(_) => {}
+            Err(e) => self.push_recent_error(
+                "StationIntent",
+                format!("recording the armed proof for {session_id}/{address}: {e}"),
+            ),
+        }
+    }
+
     /// Status projection for intent rows, built from the cached index only.
     pub(crate) fn intent_statuses(&self, store_filter: Option<&str>) -> Vec<IntentStatus> {
         let snapshot = self.intent_index_snapshot();
@@ -579,19 +604,55 @@ impl DaemonState {
 
     /// The pre/post-drain intent signal.
     ///
-    /// Computed from the cached index only — no directory scan, no probe, no network I/O — so it
-    /// can never push a graceful drain past `--drain-timeout-ms`. It is evaluated *before* the
+    /// Built from the cached index, with a **bounded durable backfill** for bindings the index has
+    /// no fresh answer for. No probe, no connection, no backend or network I/O — so it still
+    /// cannot push a graceful drain past `--drain-timeout-ms` — and it is evaluated *before* the
     /// lease-release loop, so it describes what a successor will find.
+    ///
+    /// The backfill exists because the index is only refreshed by a reconcile pass, while the
+    /// durable record is written by a *producer-side* finalize in a different process. `attach`
+    /// immediately followed by `upgrade` therefore drained with `recoverable = 0` for a binding
+    /// that was fully armed and finalized seconds earlier, and the successor-verification step
+    /// skipped itself on "no recoverable station intents" — silently turning the one path that is
+    /// supposed to hand push delivery across a daemon replacement into a no-op.
+    ///
+    /// The two sources are combined so neither can mask the other:
+    ///
+    /// * A cached projection that names a *problem* (degraded, incompatible, revoked) wins. That
+    ///   is real evidence from an attempt, and a successor will hit the same wall.
+    /// * Otherwise the durable manifest wins, because it is what the successor will actually read.
     pub(crate) fn drain_intent_report(&self) -> DrainIntentReport {
         let snapshot = self.intent_index_snapshot();
+        let durable = self.durable_intent_states();
         let mut report = DrainIntentReport {
             over_cap: snapshot.over_cap,
             observed_count: snapshot.observed_count,
             index_as_of_ms: snapshot.as_of_ms,
             ..Default::default()
         };
-        for entry in snapshot.entries.values() {
-            match entry.state {
+        let mut states: BTreeMap<IntentKey, IntentRecoveryState> = BTreeMap::new();
+        for (key, entry) in snapshot.entries.iter() {
+            states.insert(key.clone(), entry.state);
+        }
+        for (key, durable_state) in durable {
+            let effective = match states.get(&key) {
+                // A cached failure/incompatibility/revocation is evidence the successor will hit
+                // the same wall; keep it. Anything else (never seen, still `pending` because no
+                // pass has run since the finalize, or an already-recoverable projection) defers to
+                // the manifest the successor will read.
+                Some(cached)
+                    if !cached.is_recoverable()
+                        && *cached != IntentRecoveryState::Pending
+                        && *cached != IntentRecoveryState::Unknown =>
+                {
+                    *cached
+                }
+                _ => durable_state,
+            };
+            states.insert(key, effective);
+        }
+        for state in states.values() {
+            match state {
                 IntentRecoveryState::Live
                 | IntentRecoveryState::Restored
                 | IntentRecoveryState::DeferredLease
@@ -615,10 +676,40 @@ impl DaemonState {
         }
         // Entries the scan could not identify at all (a manifest rejected before its
         // `(store, session, address)` could be read) cannot reach the keyed index, so they are
-        // carried separately rather than silently reported as zero.
+        // carried separately rather than lost.
         report.unidentifiable = snapshot.unidentifiable;
         report.degraded += snapshot.unidentifiable;
         report
+    }
+
+    /// The durable state of every readable record in the scope, read without creating it.
+    ///
+    /// Bounded by the per-scope cap and free of any network or probe I/O. An unreadable scope or
+    /// an unreadable manifest simply contributes nothing: the cached index (and the pass's own
+    /// `unidentifiable` count) already carries what is known about those, and inventing a state
+    /// for a record we could not read would be worse than deferring to what the last pass proved.
+    fn durable_intent_states(&self) -> BTreeMap<IntentKey, IntentRecoveryState> {
+        let mut states = BTreeMap::new();
+        let Ok(Some(store)) = self.intent_store_readonly() else {
+            return states;
+        };
+        let Ok(ids) = store.list_ids() else {
+            return states;
+        };
+        for id in ids.into_iter().take(STATION_INTENT_MAX_COUNT) {
+            let Ok(intent) = store.load(&id) else {
+                continue;
+            };
+            states.insert(
+                IntentKey {
+                    store_key: intent.store_key.clone(),
+                    session_id: intent.session_id.clone(),
+                    address: intent.address.clone(),
+                },
+                intent.state,
+            );
+        }
+        states
     }
 }
 
@@ -1449,6 +1540,13 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
     // scan order makes the first one seen the highest-generation one. Keying this on the full
     // `IntentKey` made the filter a no-op (the filename is derived from all three fields, so two
     // entries can never share a key) and let both sessions be reconciled in the same wave.
+    //
+    // Only *reconcilable* records compete for the slot, and the claim is taken **after** the
+    // `is_reconcilable` check rather than before it. Taking it first let an inert record — a
+    // `revoked` generation 3 for one session — consume the address and shadow a `live`
+    // generation 2 for another, which is not merely a scheduling delay: the shadowed record was
+    // `continue`d before it was indexed, so for up to a full TTL it was invisible to the status
+    // projection, the drain report, and the turn guard, and no pass would ever attempt it.
     let mut seen_addresses: BTreeSet<(String, String)> = BTreeSet::new();
     // The position of the last entry this pass *considered* but did not attempt. Used only when the
     // pass attempts nothing at all, so the cursor still advances and the next pass moves on.
@@ -1469,14 +1567,16 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
         }
         last_considered_position = Some(position.clone());
         let key = IntentKey::from_intent(&intent);
-        if !seen_addresses.insert((intent.store_key.clone(), intent.address.clone())) {
-            report.skipped += 1;
-            continue;
-        }
-        // Seed the index from the manifest header even for intents this pass will not attempt, so
-        // the drain report and status are never blind to an entry the budget skipped.
+        // Seed the index from the manifest header for *every* record this pass loaded, including
+        // the ones it will not attempt, so the drain report and status are never blind to an entry
+        // the budget skipped or the per-address dedupe shadowed.
         let mut entry = state.index_entry(&key).unwrap_or_default();
         let first_sight = entry.first_seen_ms.is_none();
+        // A durable *state transition* on the record — a finalize, a producer-identity refresh, an
+        // arming stamp, a re-attach — moves the generation. An evidence write does not (it rewrites
+        // under the same generation on purpose), so this is precisely "the record materially
+        // changed since the schedule that is parking it was computed".
+        let generation_moved = !first_sight && entry.generation != intent.generation;
         entry.generation = intent.generation;
         entry.wake_on_cc = intent.wake_on_cc;
         entry.cc_watermark_ms = intent.cc_watermark_ms;
@@ -1496,6 +1596,18 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
             if entry.consecutive_failures >= RECONCILE_QUARANTINE_AFTER {
                 entry.state = IntentRecoveryState::Quarantined;
             }
+        } else if generation_moved {
+            // The ladder is earned by a *descriptor*, not by a binding. The canonical case is the
+            // one this whole recovery path exists for: a bridge reloads, every pass fails
+            // `producer_identity_mismatch` against the stale `(pid, start_time)`, and the
+            // turn-boundary hook then re-records the live identity. Carrying the old ladder across
+            // that transition means the repair is followed by a wait the repaired record did not
+            // earn — and, past `RECONCILE_QUARANTINE_AFTER`, an hour of it. The failures describe a
+            // producer that no longer exists, so they are dropped with it.
+            entry.consecutive_failures = 0;
+            entry.next_attempt_ms = None;
+            entry.failure_code = None;
+            entry.state = intent.state;
         }
         if entry.state == IntentRecoveryState::default() || !intent.is_reconcilable() {
             entry.state = intent.state;
@@ -1504,6 +1616,10 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
 
         if !intent.is_reconcilable() {
             report.inert += 1;
+            continue;
+        }
+        if !seen_addresses.insert((intent.store_key.clone(), intent.address.clone())) {
+            report.skipped += 1;
             continue;
         }
         if entry
@@ -1823,12 +1939,16 @@ fn log_outcome_event(
 }
 
 /// Exponential backoff with +/- jitter, capped at `RECONCILE_BACKOFF_MAX`.
+///
+/// `consecutive_failures` is 1-based — it is the count *including* the failure being scheduled —
+/// so the exponent is `failures - 1`. Without that, the first transient failure waited
+/// `2 * RECONCILE_BACKOFF_INITIAL`, and the published ladder ("5 s → 5 min") was wrong at exactly
+/// the rung that matters most: a bridge mid-reload, which is over within a tick or two.
 pub fn backoff_delay(consecutive_failures: u32) -> Duration {
     let base = RECONCILE_BACKOFF_INITIAL.as_millis() as u64;
     let max = RECONCILE_BACKOFF_MAX.as_millis() as u64;
-    let scaled = base
-        .saturating_mul(1u64 << consecutive_failures.min(16))
-        .min(max);
+    let exponent = consecutive_failures.saturating_sub(1);
+    let scaled = base.saturating_mul(1u64 << exponent.min(16)).min(max);
     let jitter_span = scaled * RECONCILE_BACKOFF_JITTER_PCT / 100;
     if jitter_span == 0 {
         return Duration::from_millis(scaled);
@@ -2010,8 +2130,33 @@ mod tests {
 
     #[test]
     fn backoff_grows_and_is_capped_with_jitter_inside_the_stated_band() {
-        let first = backoff_delay(1);
-        assert!(first >= Duration::from_millis(8_000) && first <= Duration::from_millis(12_000));
+        // `consecutive_failures` counts the failure being scheduled, so the *first* transient
+        // failure must wait `RECONCILE_BACKOFF_INITIAL`, not twice it. The exponent used to be the
+        // count itself, which made the published "5 s → 5 min" ladder wrong at exactly the rung
+        // that matters most: a bridge mid-reload, which is over within a tick or two.
+        let band = |ms: u64| {
+            let jitter = ms * RECONCILE_BACKOFF_JITTER_PCT / 100;
+            (ms - jitter, ms + jitter)
+        };
+        for (failures, expected) in [(1u32, 5_000u64), (2, 10_000), (3, 20_000), (4, 40_000)] {
+            let (low, high) = band(expected);
+            let delay = backoff_delay(failures).as_millis() as u64;
+            assert!(
+                delay >= low && delay <= high,
+                "failure {failures} must schedule around {expected} ms, got {delay}"
+            );
+        }
+        assert_eq!(
+            RECONCILE_BACKOFF_INITIAL.as_millis() as u64,
+            5_000,
+            "the documented ladder starts at the constant, and the first rung must use it"
+        );
+        // A zero count (the `DeferredPullWaiter` cadence, which never advances the counter) must
+        // not underflow the exponent.
+        let (low, high) = band(5_000);
+        let zero = backoff_delay(0).as_millis() as u64;
+        assert!(zero >= low && zero <= high);
+
         let capped = backoff_delay(30);
         let max = RECONCILE_BACKOFF_MAX.as_millis() as u64;
         let band = max * RECONCILE_BACKOFF_JITTER_PCT / 100;
