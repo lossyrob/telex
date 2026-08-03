@@ -1510,3 +1510,42 @@ async fn station_intent_two_sessions_never_both_attend_one_address() {
         "one address must never have two armed push members: {armed:?}"
     );
 }
+
+/// A bridge *reload* — `extensions_reload`, `/clear`, an extension-host restart — gives the
+/// producer a new pid and start time while a `live` intent still names the old pair. Treating
+/// that as terminal parked the binding for the quarantine hour with no automatic path back, on
+/// the single most routine event in a Copilot session.
+#[tokio::test]
+async fn station_intent_a_reloaded_producer_is_retried_not_parked() {
+    let scenario = Scenario::new("intent-reload-identity", ProducerBehavior::Healthy).await;
+    let mut reloaded = scenario.intent.clone();
+    reloaded.producer.start_time = reloaded.producer.start_time.wrapping_add(1);
+    reloaded.generation = 2;
+    scenario.reseed(&reloaded);
+
+    let report = scenario.daemon.reconcile_once().await;
+    assert_eq!(report.restored, 0);
+    assert_eq!(
+        report.failed, 1,
+        "an identity mismatch is retryable: the turn-boundary hook refreshes the recorded \
+         identity, and the ladder is what lets that heal"
+    );
+    assert_eq!(
+        scenario.failure_code().as_deref(),
+        Some("producer_identity_mismatch")
+    );
+    let entry = scenario
+        .daemon
+        .intent_index()
+        .entries
+        .values()
+        .next()
+        .cloned()
+        .expect("an index entry");
+    let next = entry.next_attempt_ms.expect("a scheduled next attempt");
+    let delay = next - entry.last_attempt_ms.expect("a last attempt");
+    assert!(
+        delay < 60_000,
+        "a reloaded producer must not be parked on the quarantine cadence (got {delay} ms)"
+    );
+}

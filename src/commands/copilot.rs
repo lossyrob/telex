@@ -1545,7 +1545,16 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
     Ok(0)
 }
 
-/// Finalize every `pending` intent for this session, now that the bridge is loaded and answering.
+/// Finalize every `pending` intent for this session, and refresh any `live` intent whose recorded
+/// producer identity no longer matches the running bridge.
+///
+/// The refresh half matters as much as the finalize half. `finalize_intent` is otherwise reached
+/// only from an explicit `attach`/`resume`, so a reload of an *already live* binding — an
+/// `extensions_reload`, a `/clear`, an extension-host restart — gives the bridge a new pid and
+/// start time while the intent keeps the old pair. The daemon verifies `(exe, pid, start_time)`
+/// before sending a byte, so the next pass after a daemon replacement would fail
+/// `producer_identity_mismatch` with no automatic path back. This hook already reads that registry
+/// and already runs at every turn boundary, so it is the natural place to close the window.
 ///
 /// Best effort and fail-open: the turn-stop hook must never fail because recovery could not be
 /// armed. Returns a short outcome string for the hook's JSON output so the state is observable
@@ -1562,6 +1571,23 @@ async fn finalize_pending_intents_for_session(
     let Ok(ids) = store.list_ids() else {
         return "scan_failed".to_string();
     };
+    // The live producer's identity, if the bridge is answering right now. Used to decide which
+    // `live` intents have gone stale; a failure here simply means nothing is refreshed.
+    let live_identity = capture_producer_identity(session).ok();
+    let stale_live: Vec<crate::station_intent::StationIntentV1> = match &live_identity {
+        Some((identity, _)) => ids
+            .iter()
+            .filter_map(|id| store.load(id).ok())
+            .filter(|intent| {
+                intent.store_key == store_key
+                    && intent.session_id == session
+                    && intent.state == crate::daemon_ipc::IntentRecoveryState::Live
+                    && (intent.producer.pid != identity.pid
+                        || intent.producer.start_time != identity.start_time)
+            })
+            .collect(),
+        None => Vec::new(),
+    };
     let pending: Vec<crate::station_intent::StationIntentV1> = ids
         .iter()
         .filter_map(|id| store.load(id).ok())
@@ -1571,7 +1597,7 @@ async fn finalize_pending_intents_for_session(
                 && intent.state == crate::daemon_ipc::IntentRecoveryState::Pending
         })
         .collect();
-    if pending.is_empty() {
+    if pending.is_empty() && stale_live.is_empty() {
         return "none_pending".to_string();
     }
     let Ok((mut client, _cap)) = connect_existing_with_cap(store_key).await else {
@@ -1585,8 +1611,15 @@ async fn finalize_pending_intents_for_session(
     }
     let members = active_session_members(&status, store_key, session);
     let mut finalized = 0usize;
+    let mut refreshed = 0usize;
     let mut failed = 0usize;
-    for intent in pending {
+    // `finalize_intent` is the same operation for both: re-capture identity, re-probe, and write
+    // the result under the per-intent lock. A `live` intent simply stays `live`.
+    for (intent, is_pending) in pending
+        .iter()
+        .map(|intent| (intent, true))
+        .chain(stale_live.iter().map(|intent| (intent, false)))
+    {
         let Some(member) = members
             .iter()
             .find(|m| m.address == intent.address && m.push_registered)
@@ -1594,11 +1627,12 @@ async fn finalize_pending_intents_for_session(
             continue;
         };
         match finalize_intent(ctx, session, &intent.address, member).await {
-            Ok(()) => finalized += 1,
+            Ok(()) if is_pending => finalized += 1,
+            Ok(()) => refreshed += 1,
             Err(_) => failed += 1,
         }
     }
-    format!("finalized={finalized} failed={failed}")
+    format!("finalized={finalized} refreshed={refreshed} failed={failed}")
 }
 
 /// Ask an already-connected daemon to run a reconciliation pass. Never spawns a daemon.

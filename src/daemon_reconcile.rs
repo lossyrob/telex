@@ -826,10 +826,12 @@ async fn probe_producer(
     )
     .is_err()
     {
-        return Err(IntentOutcome::terminal(
-            IntentRecoveryState::Unverifiable,
-            "producer_identity_mismatch",
-        ));
+        // Retryable, not terminal: the overwhelmingly common cause is a bridge *reload*
+        // (`extensions_reload`, `/clear`, an extension-host restart), which gives the producer a
+        // new pid and start time while the manifest still names the old pair. The turn-boundary
+        // hook refreshes the recorded identity from the live registry, so the ladder is what lets
+        // this heal on its own instead of parking the binding for the quarantine hour.
+        return Err(IntentOutcome::failed("producer_identity_mismatch"));
     }
 
     let nonce = probe_nonce();
