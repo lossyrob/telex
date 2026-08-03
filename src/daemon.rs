@@ -560,6 +560,7 @@ impl DaemonState {
 
     fn status_minimal(&self) -> DaemonStatus {
         DaemonStatus {
+            capabilities: proto::daemon_capabilities(),
             protocol_version: current_protocol_version(),
             daemon_version: proto::DAEMON_VERSION.to_string(),
             instance_id: self.instance_id.clone(),
@@ -780,6 +781,7 @@ impl DaemonState {
         let intent_index = self.intent_index_snapshot();
         let intents = self.intent_statuses(None);
         DaemonStatus {
+            capabilities: proto::daemon_capabilities(),
             protocol_version: current_protocol_version(),
             daemon_version: proto::DAEMON_VERSION.to_string(),
             instance_id: self.instance_id.clone(),
@@ -3299,21 +3301,33 @@ fn spawn_on_deliver_backlog(state: Arc<DaemonState>, member: MemberRecord) {
 }
 
 async fn heartbeat_loop(state: Arc<DaemonState>) {
+    // One loop, two responsibilities. Reconciliation rides the existing heartbeat tick rather
+    // than adding a second timer, and it also wakes on an explicit trigger pulse (startup,
+    // upgrade/rollback, `ReconcileIntents`, tests) so callers can drive a pass without waiting
+    // out the interval. A pulse only *schedules* work: per-intent backoff, quarantine, and
+    // deferred cadences are still honored inside the pass.
+    //
+    // The heartbeat deadline is tracked explicitly rather than by recreating a sleep each
+    // iteration. Recreating it meant any trigger pulse restarted the elapsed heartbeat time, so a
+    // caller pulsing faster than `HEARTBEAT_INTERVAL` starved `heartbeat_members_once` — the one
+    // thing that renews every member's epoch lease — and let leases go stale inside
+    // `liveness_window_secs()`, inviting a successor to claim them.
+    let mut next_heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
     loop {
-        // One loop, two responsibilities. Reconciliation rides the existing heartbeat tick rather
-        // than adding a second timer, and it also wakes on an explicit trigger pulse (startup,
-        // upgrade/rollback, `ReconcileIntents`, tests) so callers can drive a pass without waiting
-        // out the interval. A pulse only *schedules* work: per-intent backoff, quarantine, and
-        // deferred cadences are still honored inside the pass.
-        let tick = tokio::time::sleep(HEARTBEAT_INTERVAL);
+        let tick = tokio::time::sleep_until(next_heartbeat.into());
         tokio::pin!(tick);
-        let mut heartbeat_due = false;
         tokio::select! {
-            _ = &mut tick => heartbeat_due = true,
+            _ = &mut tick => {}
             _ = state.intents.trigger.notified() => {}
         }
-        if heartbeat_due {
+        if Instant::now() >= next_heartbeat {
             heartbeat_members_once(state.clone()).await;
+            // Anchored to the deadline, not to "now", so a slow heartbeat or a long pass cannot
+            // make the effective interval drift outward tick after tick.
+            let now = Instant::now();
+            while next_heartbeat <= now {
+                next_heartbeat += HEARTBEAT_INTERVAL;
+            }
         }
         // The pass is bounded by `RECONCILE_PASS_DEADLINE < HEARTBEAT_INTERVAL`, so it cannot
         // overrun the tick that started it.
@@ -4103,55 +4117,81 @@ async fn register_member(
         };
         // Consult the **durable manifest**, not only the cached index. The index is populated by the
         // first reconcile pass, and `serve()` accepts connections before that pass runs — which is
-        // exactly the daemon-replacement window this guard exists to protect. An index hit with an
-        // unreadable manifest still fails closed.
-        let manifest = state.load_live_intent(&intent_key);
+        // exactly the daemon-replacement window this guard exists to protect.
+        //
+        // Three-way, deliberately: "the scope could not be opened" is the `Insecure` condition the
+        // rest of the design fails closed on, and folding it into "no intent" made the guard fail
+        // **open** in that same window — before the index is populated, an unopenable scope plus an
+        // empty index meant a pull-only member was created over a live push intent on disk.
+        let lookup = state.lookup_live_intent(&intent_key);
         let indexed_live = state.live_push_intent(&intent_key).is_some();
-        if manifest.is_some() || indexed_live {
-            match manifest {
-                Some(intent) => {
-                    let outcome = reconcile::reconcile_intent_locked(state.clone(), &intent).await;
-                    match outcome {
-                        // Push was restored (or was already live): treat the incoming registration
-                        // as a refresh of the now-push member rather than creating a pull-only one.
-                        reconcile::IntentOutcome::Restored
-                        | reconcile::IntentOutcome::RefreshedNoOp => {
-                            if let Some(restored) =
-                                state.get_member(&store_key, &session_id, &address)
-                            {
-                                return Response::Registered {
-                                    lease_epoch: restored.lease_epoch,
-                                    owner_instance_id: restored.owner_instance_id,
-                                };
+        match lookup {
+            reconcile::LiveIntentLookup::Unavailable(detail) => {
+                state.push_recent_error(
+                    "PushIntentUnrecoverable",
+                    format!(
+                        "refused pull-only registration because the station-intent scope could not be read store={store_key} session={session_id} address={address}: {detail}"
+                    ),
+                );
+                return proto::incompatible_with_reason(
+                    format!(
+                        "the station-intent scope could not be read ({detail}), so a live push intent for {address} cannot be ruled out; \
+                         fix the scope permissions, or re-provision push with `telex --address {address} copilot resume` before attaching pull-only"
+                    ),
+                    NeedsAttachReason::PushIntentUnrecoverable,
+                );
+            }
+            reconcile::LiveIntentLookup::Live(intent) => {
+                let outcome = reconcile::reconcile_intent_locked(state.clone(), &intent).await;
+                match outcome {
+                    // Push was restored (or was already live): treat the incoming registration
+                    // as a refresh of the now-push member rather than creating a pull-only one.
+                    reconcile::IntentOutcome::Restored
+                    | reconcile::IntentOutcome::RefreshedNoOp => {
+                        if let Some(restored) = state.get_member(&store_key, &session_id, &address)
+                        {
+                            // Carry the incoming registration's process anchors onto the restored
+                            // member: dropping them silently disabled `WatchPidDeath` reaping for
+                            // a caller that registered with `--watch-pid`.
+                            if !watch_pids.is_empty() {
+                                let mut anchored = restored.clone();
+                                anchored.watch_pids = watch_pids.clone();
+                                state.insert_member(anchored);
                             }
-                        }
-                        // A live armed pull waiter wins (decision 13): the anti-downgrade guarantee
-                        // is explicitly scoped to the no-live-waiter case, so fall through and let
-                        // the normal pull registration proceed.
-                        reconcile::IntentOutcome::DeferredPullWaiter => {}
-                        // Anything else means we could not prove the push path is recoverable, so
-                        // we fail closed with a typed reason instead of creating a pull-only member
-                        // over a live push intent.
-                        other => {
-                            let code = other.failure_code().unwrap_or("unrecoverable").to_string();
-                            state.push_recent_error(
-                                "PushIntentUnrecoverable",
-                                format!(
-                                    "refused pull-only registration over a live push intent store={store_key} session={session_id} address={address}: {code}"
-                                ),
-                            );
-                            return proto::incompatible_with_reason(
-                                format!(
-                                    "address {address} has a live push intent for session {session_id} that could not be restored ({code}); \
-                                     re-provision push with `telex --address {address} copilot resume`, or detach it with `telex --address {address} copilot detach` before attaching pull-only"
-                                ),
-                                NeedsAttachReason::PushIntentUnrecoverable,
-                            );
+                            return Response::Registered {
+                                lease_epoch: restored.lease_epoch,
+                                owner_instance_id: restored.owner_instance_id,
+                            };
                         }
                     }
+                    // A live armed pull waiter wins (decision 13): the anti-downgrade guarantee
+                    // is explicitly scoped to the no-live-waiter case, so fall through and let
+                    // the normal pull registration proceed.
+                    reconcile::IntentOutcome::DeferredPullWaiter => {}
+                    // Anything else means we could not prove the push path is recoverable, so
+                    // we fail closed with a typed reason instead of creating a pull-only member
+                    // over a live push intent.
+                    other => {
+                        let code = other.failure_code().unwrap_or("unrecoverable").to_string();
+                        state.push_recent_error(
+                            "PushIntentUnrecoverable",
+                            format!(
+                                "refused pull-only registration over a live push intent store={store_key} session={session_id} address={address}: {code}"
+                            ),
+                        );
+                        return proto::incompatible_with_reason(
+                            format!(
+                                "address {address} has a live push intent for session {session_id} that could not be restored ({code}); \
+                                 re-provision push with `telex --address {address} copilot resume`, or detach it with `telex --address {address} copilot detach` before attaching pull-only"
+                            ),
+                            NeedsAttachReason::PushIntentUnrecoverable,
+                        );
+                    }
                 }
-                None => {
-                    // The index says live but the manifest is gone or unreadable. Fail closed
+            }
+            reconcile::LiveIntentLookup::Absent => {
+                if indexed_live {
+                    // The index says live but the manifest is gone or no longer live. Fail closed
                     // rather than guess.
                     return proto::incompatible_with_reason(
                         format!(
@@ -4523,6 +4563,14 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
     };
     let affected =
         state.mark_address_idle(&store_key, &address, "Reset", "operator reset requested");
+    // Reset is a deliberate operator withdrawal of attendance, so the *desired* state has to be
+    // withdrawn with it. Without this the station intent stayed `live` and the next reconcile pass
+    // re-registered the member within a tick — silently undoing the one operator action that had
+    // no durable marker. Revocation is exact per binding and reversible with an explicit
+    // `telex --address <address> copilot resume`.
+    for member in &affected {
+        state.revoke_intent_for_binding(&member.store_key, &member.session_id, &member.address);
+    }
     if affected.is_empty() {
         state.push_recent_error(
             "Reset",
@@ -10259,7 +10307,29 @@ pub mod test_support {
             reconcile::reconcile_once(self.state.clone(), None).await
         }
 
+        /// Run the trigger half of the production `heartbeat_loop`: wake on a trigger pulse and
+        /// drive a pass. Nothing else from that loop, so a test still controls every tick.
+        ///
+        /// This exists so the trigger seam can be asserted for real. `TestDaemon` does not run
+        /// `serve()`, so before this the only consumer of `IntentRuntime::trigger` in a test
+        /// process was nothing at all: a pulse-and-wait always timed out and fell back to calling
+        /// `reconcile_once` directly, which means the seam could have been completely unwired
+        /// with the "seam works" test still green (and taking the full timeout to say so).
+        pub fn spawn_trigger_consumer(&self) -> tokio::task::JoinHandle<()> {
+            let state = self.state.clone();
+            tokio::spawn(async move {
+                loop {
+                    state.intents.trigger.notified().await;
+                    reconcile::reconcile_once(state.clone(), None).await;
+                }
+            })
+        }
+
         /// Pulse the reconcile trigger and await the report of the pass it drives.
+        ///
+        /// Requires a trigger consumer to be running — see [`TestDaemon::spawn_trigger_consumer`].
+        /// Without one the pulse has nowhere to go and this necessarily times out, which is
+        /// exactly how a "the seam is wired" test can pass while the seam is entirely unwired.
         pub async fn pulse_reconcile_and_wait(
             &self,
             timeout: Duration,
@@ -10282,6 +10352,41 @@ pub mod test_support {
 
         pub fn drain_intent_report(&self) -> crate::daemon_ipc::DrainIntentReport {
             self.state.drain_intent_report()
+        }
+
+        /// Model the daemon's in-memory advance of a push member's CC watermark, which normally
+        /// happens as CC notifications are accepted.
+        pub fn set_member_cc_after_ms(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+            value: Option<i64>,
+        ) {
+            let key = DaemonState::member_key(store_key, session_id, address);
+            let mut members = self.state.members.lock().unwrap();
+            if let Some(member) = members.get_mut(&key) {
+                member.on_deliver_cc_after_ms = value;
+            }
+        }
+
+        pub fn member_cc_after_ms(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+        ) -> Option<Option<i64>> {
+            self.state
+                .get_member(store_key, session_id, address)
+                .map(|member| member.on_deliver_cc_after_ms)
+        }
+
+        /// Model a daemon replacement for the cached index only: the durable scope survives, the
+        /// in-memory projection does not.
+        pub fn clear_intent_index(&self) {
+            let mut index = self.state.intents.index_for_test().lock().unwrap();
+            index.entries.clear();
+            index.as_of_ms = crate::model::now_ms();
         }
 
         /// The intent-row projection the authenticated status surface exposes.

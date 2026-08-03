@@ -37,7 +37,7 @@ use crate::station_intent::{
 };
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
-use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 // ---------------------------------------------------------------------------------------------
 // Constants and published bounds
@@ -79,6 +79,13 @@ pub const RECONCILE_DEFERRED_LEASE_RETRY: Duration = RECONCILE_INTERVAL;
 pub const RECONCILE_QUARANTINE_AFTER: u32 = 10;
 pub const RECONCILE_QUARANTINE_RETRY: Duration = Duration::from_secs(60 * 60);
 
+/// How often an *unchanged* healthy intent's evidence block is refreshed on disk.
+///
+/// Long enough that a steady state costs one manifest rewrite per intent per minute rather than
+/// per tick, short enough that `evidence.last_success_ms` stays a usable "the producer was proven
+/// this recently" clock for GC and for a successor daemon seeding its retry state.
+pub const EVIDENCE_REFRESH_INTERVAL: Duration = Duration::from_secs(60);
+
 /// Client-side capability gate: below this daemon minor, a client must not write or finalize an
 /// intent, because the daemon would never act on it.
 pub const RECONCILE_MIN_DAEMON_MINOR: u16 = 5;
@@ -90,6 +97,35 @@ pub const BRIDGE_PROBE_MIN_PROTOCOL: u32 = 2;
 /// Byte cap for a producer credential file. Generous enough for a real bridge registry, small
 /// enough that a hostile file cannot be used to exhaust memory.
 pub const CREDENTIAL_MAX_BYTES: u64 = 64 * 1024;
+
+/// Frame cap for a probe response, and the length cap for any failure code derived from it. The
+/// producer is peer-verified but never trusted to be well-behaved, and this is the only external
+/// JSON line the daemon reads.
+pub const PROBE_MAX_RESPONSE_BYTES: u64 = 16 * 1024;
+pub const FAILURE_CODE_MAX_CHARS: usize = 64;
+
+/// Reduce a producer-supplied error code to something safe to retain and re-serialize: lowercase
+/// `[a-z0-9_]`, length-capped, never empty.
+fn sanitize_failure_code(code: &str) -> String {
+    let mut out = String::with_capacity(FAILURE_CODE_MAX_CHARS);
+    for ch in code.chars() {
+        if out.len() >= FAILURE_CODE_MAX_CHARS {
+            break;
+        }
+        let ch = ch.to_ascii_lowercase();
+        if ch.is_ascii_alphanumeric() || ch == '_' {
+            out.push(ch);
+        } else if !out.ends_with('_') && !out.is_empty() {
+            out.push('_');
+        }
+    }
+    let trimmed = out.trim_matches('_');
+    if trimmed.is_empty() {
+        "rejected".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
 
 /// Rotating reconcile event log, reusing the hook-log idiom (single rotation, size cap).
 const RECONCILE_EVENT_LOG_FILE: &str = "reconcile-events.ndjson";
@@ -246,6 +282,20 @@ pub struct IntentIndexSnapshot {
     pub as_of_ms: i64,
     pub over_cap: bool,
     pub observed_count: usize,
+    /// Manifests the last pass rejected before it could establish which binding they name. They
+    /// cannot reach the keyed index at all, so they are carried here rather than lost.
+    pub unidentifiable: usize,
+}
+
+/// Result of consulting the durable intent scope for one binding on a read path.
+#[derive(Debug)]
+pub(crate) enum LiveIntentLookup {
+    /// The scope was readable and holds a live intent for this binding.
+    Live(Box<StationIntentV1>),
+    /// The scope was readable and holds no live intent for this binding.
+    Absent,
+    /// The scope (or the manifest) could not be read. Callers must fail closed.
+    Unavailable(String),
 }
 
 /// Everything the daemon holds for reconciliation: the cached index, the single-flight guard, and
@@ -275,13 +325,21 @@ impl Default for IntentRuntime {
     }
 }
 
+impl IntentRuntime {
+    /// The cached index, for the test-support harness only: a test that models a daemon
+    /// replacement has to be able to drop the projection while the durable scope survives.
+    #[cfg(feature = "sqlite")]
+    pub(crate) fn index_for_test(&self) -> &Mutex<IntentIndexSnapshot> {
+        &self.index
+    }
+}
+
 impl DaemonState {
     /// Pulse the reconcile trigger. Schedules work; never bypasses backoff, quarantine, or a
     /// deferred outcome's next-attempt time.
     pub fn pulse_reconcile(&self) {
         self.intents.trigger.notify_one();
     }
-
     /// Subscribe to per-pass reports. Callers await the next `pass_seq` instead of polling a clock.
     pub fn reconcile_reports(&self) -> tokio::sync::watch::Receiver<ReconcileReport> {
         self.intents.report_rx.clone()
@@ -294,6 +352,7 @@ impl DaemonState {
             as_of_ms: index.as_of_ms,
             over_cap: index.over_cap,
             observed_count: index.observed_count,
+            unidentifiable: index.unidentifiable,
         }
     }
 
@@ -335,8 +394,10 @@ impl DaemonState {
         }
     }
 
-    /// The intent store for this daemon's scope, opened lazily. `open_existing` on the read path so
-    /// a status call on a host that never attached does not create a scope as a side effect.
+    /// The intent store for this daemon's scope, opened lazily.
+    ///
+    /// Creating: used by the reconciler and by every path that may legitimately have to bring the
+    /// scope into existence. Read-only callers use [`DaemonState::intent_store_readonly`].
     pub(crate) fn intent_store(&self) -> Option<IntentStore> {
         match IntentStore::open(&self.paths.run_dir, &self.paths.singleton_hash) {
             Ok(store) => Some(store),
@@ -348,6 +409,17 @@ impl DaemonState {
                 None
             }
         }
+    }
+
+    /// The intent scope for **read paths**, which must not create it as a side effect.
+    ///
+    /// `Ok(None)` is "this host never attached"; `Err` is "the scope exists but could not be
+    /// opened", which callers must treat as fail-closed rather than as "no intents". A status call
+    /// on a host that never attached now genuinely creates nothing — the previous comment claimed
+    /// this while calling the creating variant.
+    pub(crate) fn intent_store_readonly(&self) -> std::result::Result<Option<IntentStore>, String> {
+        IntentStore::open_existing(&self.paths.run_dir, &self.paths.singleton_hash)
+            .map_err(|e| e.to_string())
     }
 
     /// Revoke every intent for a session, in every store the daemon knows about. Used by the
@@ -462,14 +534,28 @@ impl DaemonState {
         })
     }
 
-    /// Load the durable manifest behind an index entry, returning it only when it is still `Live`.
+    /// Three-way lookup of the durable live intent for a binding.
+    ///
     /// The index is a cache; the manifest is the truth, so the anti-downgrade guard re-reads it
-    /// rather than acting on a possibly-stale cached state.
-    pub(crate) fn load_live_intent(&self, key: &IntentKey) -> Option<StationIntentV1> {
-        let store = self.intent_store()?;
+    /// rather than acting on a possibly-stale cached state. It needs the third case as well:
+    /// "the scope could not be opened" is exactly the `Insecure` condition the rest of the design
+    /// fails closed on, and folding it into "no intent" made the guard fail **open** in the one
+    /// window it exists for — a daemon replacement where the index has not been populated yet.
+    pub(crate) fn lookup_live_intent(&self, key: &IntentKey) -> LiveIntentLookup {
+        let store = match self.intent_store_readonly() {
+            Ok(Some(store)) => store,
+            Ok(None) => return LiveIntentLookup::Absent,
+            Err(e) => return LiveIntentLookup::Unavailable(e),
+        };
         let id = IntentId::derive(&key.store_key, &key.session_id, &key.address);
-        let intent = store.load(&id).ok()?;
-        intent.is_reconcilable().then_some(intent)
+        if !store.path_for(&id).exists() {
+            return LiveIntentLookup::Absent;
+        }
+        match store.load(&id) {
+            Ok(intent) if intent.is_reconcilable() => LiveIntentLookup::Live(Box::new(intent)),
+            Ok(_) => LiveIntentLookup::Absent,
+            Err(e) => LiveIntentLookup::Unavailable(e.to_string()),
+        }
     }
 
     /// Whether a `pending` (not yet finalized) push intent exists for this binding.
@@ -482,7 +568,7 @@ impl DaemonState {
         session_id: &str,
         address: &str,
     ) -> bool {
-        let Some(store) = self.intent_store() else {
+        let Ok(Some(store)) = self.intent_store_readonly() else {
             return false;
         };
         let id = IntentId::derive(store_key, session_id, address);
@@ -509,8 +595,13 @@ impl DaemonState {
                 IntentRecoveryState::Live
                 | IntentRecoveryState::Restored
                 | IntentRecoveryState::DeferredLease
-                | IntentRecoveryState::DeferredPullWaiter
-                | IntentRecoveryState::Pending => report.recoverable += 1,
+                | IntentRecoveryState::DeferredPullWaiter => report.recoverable += 1,
+                // `Pending` is **not** recoverable: it is never reconciled by construction
+                // (`is_reconcilable` is `Live`-only), so counting it as "a compatible successor
+                // will restore this automatically" overstated the pre-drain signal and made
+                // `upgrade` wait out its successor timeout for a pass that could restore nothing.
+                // It gets its own counter so the number is still visible.
+                IntentRecoveryState::Pending => report.pending += 1,
                 IntentRecoveryState::Unverifiable
                 | IntentRecoveryState::Insecure
                 | IntentRecoveryState::Quarantined
@@ -522,6 +613,11 @@ impl DaemonState {
                 IntentRecoveryState::Unknown => report.unknown += 1,
             }
         }
+        // Entries the scan could not identify at all (a manifest rejected before its
+        // `(store, session, address)` could be read) cannot reach the keyed index, so they are
+        // carried separately rather than silently reported as zero.
+        report.unidentifiable = snapshot.unidentifiable;
+        report.degraded += snapshot.unidentifiable;
         report
     }
 }
@@ -621,10 +717,18 @@ struct ProbeSuccess {
 
 /// Resolve the producer credential.
 ///
-/// Every failure mode is explicit, and the `Insecure` / `Unverifiable` split is deliberate: a
-/// failed *security* check is `Insecure` (terminal, surfaced, GC-governed), while an unresolvable
-/// or stale credential is `Unverifiable` (also surfaced, but retryable once the producer rewrites
-/// it). In no failure mode is a secret read, a connection made, or a probe sent.
+/// Two independent axes, deliberately kept apart:
+///
+/// * **Projected state** — a failed *security* check is `Insecure`, an unresolvable or stale
+///   credential is `Unverifiable`. That is what status and the drain report show.
+/// * **Retry policy** — `IntentOutcome::Terminal` means "inert, retried only on the quarantine
+///   cadence"; `IntentOutcome::Failed` means "take the 5 s → 5 min ladder". Every *transient*
+///   producer condition takes the ladder even though it projects `Unverifiable`: the credential is
+///   the bridge registry, rewritten on a heartbeat and deleted/recreated on every reload, so a
+///   stale mtime, a truncated read, or a missing field is routinely a one-tick condition. Parking
+///   those for an hour replaces the published recovery bounds with a wedge that never self-heals.
+///
+/// In no failure mode is a secret read, a connection made, or a probe sent.
 fn resolve_credential(intent: &StationIntentV1) -> std::result::Result<String, IntentOutcome> {
     let credential = &intent.producer.credential;
     let resolved = handler_kinds::resolve_credential_path(&credential.root_id, &credential.path)
@@ -633,66 +737,48 @@ fn resolve_credential(intent: &StationIntentV1) -> std::result::Result<String, I
                 IntentRecoveryState::Unverifiable,
                 "credential_root_unregistered",
             ),
+            // A containment *decision* is a security verdict; a containment check that could not
+            // be made because the file is not there right now is not. `resolve_credential_path`
+            // keeps the two apart so an absent registry during a bridge reload is retried rather
+            // than declared insecure.
+            handler_kinds::RegistryError::ContainmentUnreadable(_) => {
+                IntentOutcome::failed("credential_unresolved")
+            }
             handler_kinds::RegistryError::Containment(_) => {
                 IntentOutcome::terminal(IntentRecoveryState::Insecure, "credential_outside_root")
             }
-            _ => {
-                IntentOutcome::terminal(IntentRecoveryState::Unverifiable, "credential_unresolved")
-            }
+            _ => IntentOutcome::failed("credential_unresolved"),
         })?;
 
-    // Age first, on the checked handle, so a stale credential is never brought into memory.
-    let meta =
-        platform_fs::stat_owner_only_file(&resolved, CREDENTIAL_MAX_BYTES).map_err(
+    // One open handle for the age gate *and* the read: Plan decision 2 requires that the age or
+    // size decision can never be made against a different inode than the bytes that were used.
+    // The size, owner, DACL, and reparse checks all run on that handle before any byte is copied.
+    // The trade-off this makes explicit: a stale file's bytes do reach memory, but the age gate
+    // below runs before the secret is ever extracted from them, connected to, or sent.
+    let (bytes, meta) =
+        platform_fs::read_owner_only_file_with_meta(&resolved, CREDENTIAL_MAX_BYTES).map_err(
             |e| match e {
                 platform_fs::FsError::Unsupported { .. } => {
                     IntentOutcome::terminal(IntentRecoveryState::Insecure, "credential_insecure")
                 }
-                platform_fs::FsError::Io { .. } => IntentOutcome::terminal(
-                    IntentRecoveryState::Unverifiable,
-                    "credential_unreadable",
-                ),
+                platform_fs::FsError::Io { .. } => IntentOutcome::failed("credential_unreadable"),
             },
         )?;
     let max_age_ms = credential.clamped_max_age_ms();
     let now = now_ms();
     match meta.modified_ms {
         Some(modified_ms) if now.saturating_sub(modified_ms) > max_age_ms => {
-            return Err(IntentOutcome::terminal(
-                IntentRecoveryState::Unverifiable,
-                "credential_stale",
-            ));
+            return Err(IntentOutcome::failed("credential_stale"));
         }
         Some(_) => {}
-        None => {
-            return Err(IntentOutcome::terminal(
-                IntentRecoveryState::Unverifiable,
-                "credential_age_unknown",
-            ))
-        }
+        None => return Err(IntentOutcome::failed("credential_age_unknown")),
     }
 
-    let bytes = platform_fs::read_owner_only_file(&resolved, CREDENTIAL_MAX_BYTES).map_err(
-        |e| match e {
-            platform_fs::FsError::Unsupported { .. } => {
-                IntentOutcome::terminal(IntentRecoveryState::Insecure, "credential_insecure")
-            }
-            platform_fs::FsError::Io { .. } => {
-                IntentOutcome::terminal(IntentRecoveryState::Unverifiable, "credential_unreadable")
-            }
-        },
-    )?;
-    let document: serde_json::Value = serde_json::from_slice(&bytes).map_err(|_| {
-        IntentOutcome::terminal(IntentRecoveryState::Unverifiable, "credential_malformed")
-    })?;
+    let document: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|_| IntentOutcome::failed("credential_malformed"))?;
     station_intent::json_pointer_str(&document, &credential.pointer)
         .map(|s| s.to_string())
-        .ok_or_else(|| {
-            IntentOutcome::terminal(
-                IntentRecoveryState::Unverifiable,
-                "credential_field_missing",
-            )
-        })
+        .ok_or_else(|| IntentOutcome::failed("credential_field_missing"))
 }
 
 fn producer_endpoint(intent: &StationIntentV1) -> Option<Endpoint> {
@@ -758,7 +844,12 @@ async fn probe_producer(
     line.push('\n');
 
     let (read_half, mut write_half) = tokio::io::split(conn);
-    let mut reader = BufReader::new(read_half);
+    // Frame cap on the producer's answer, mirroring the daemon's own `MAX_JSONL_FRAME_BYTES`
+    // policy. This is the only place the daemon reads an external JSON line, and the producer is
+    // verified but never *trusted*: an unbounded `read_line` lets a buggy or hostile bridge
+    // stream until the probe timeout and hand an arbitrarily large string to the status
+    // projection, which then exceeds the IPC frame cap and fails every `telex status` call.
+    let mut reader = BufReader::new(read_half.take(PROBE_MAX_RESPONSE_BYTES));
     let exchange = async {
         write_half.write_all(line.as_bytes()).await?;
         write_half.flush().await?;
@@ -771,6 +862,9 @@ async fn probe_producer(
         Ok(Err(_)) => return Err(IntentOutcome::failed("probe_io_failed")),
         Err(_) => return Err(IntentOutcome::failed("probe_timeout")),
     };
+    if response.len() as u64 >= PROBE_MAX_RESPONSE_BYTES {
+        return Err(IntentOutcome::failed("probe_response_too_large"));
+    }
     let parsed: serde_json::Value = serde_json::from_str(response.trim())
         .map_err(|_| IntentOutcome::failed("probe_malformed_response"))?;
     if parsed.get("ok").and_then(|v| v.as_bool()) != Some(true) {
@@ -786,7 +880,12 @@ async fn probe_producer(
                 "legacy_producer",
             ));
         }
-        return Err(IntentOutcome::failed(format!("probe_{code}")));
+        // Clamped and charset-restricted before it becomes a `failure_code`: this string is
+        // retained in the in-memory index and copied into every `Status` response.
+        return Err(IntentOutcome::failed(format!(
+            "probe_{}",
+            sanitize_failure_code(code)
+        )));
     }
     if parsed.get("nonce").and_then(|v| v.as_str()) != Some(nonce.as_str()) {
         return Err(IntentOutcome::failed("probe_nonce_mismatch"));
@@ -866,7 +965,9 @@ async fn register_member_reconciled(
         Err(_) => return IntentOutcome::failed("tombstone_check_failed"),
     }
 
-    // An address already attended by a *different* session in this daemon is never stolen.
+    // An address already attended by a *different* session in this daemon is never stolen. The
+    // `idle` filter is deliberately absent for the conflict check that matters below: an idle
+    // member is still this daemon's record of who attends the address.
     if let Some(conflict) = state
         .members
         .lock()
@@ -896,14 +997,32 @@ async fn register_member_reconciled(
         {
             Ok(true) => {
                 if existing.on_deliver.is_some() {
-                    // Already push-covered: a no-op refresh performs no backend write at all, and
-                    // must not reset retry/backoff state or re-scan the backlog.
-                    return IntentOutcome::RefreshedNoOp;
+                    if existing.on_deliver.as_deref() == Some(argv.as_slice()) {
+                        // Already push-covered with the argv this daemon would build: a no-op
+                        // refresh performs no backend write at all, and must not reset
+                        // retry/backoff state or re-scan the backlog.
+                        return IntentOutcome::RefreshedNoOp;
+                    }
+                    // Same member, *different* argv — in practice a stale `--daemon-instance`
+                    // epoch fence from an attach that raced a daemon replacement. Left alone,
+                    // every push to this station dead-letters permanently, and the no-op
+                    // short-circuit means nothing would ever rebuild it. Repair it in place.
+                    let mut refreshed = existing.clone();
+                    refreshed.on_deliver = Some(argv);
+                    refreshed.on_deliver_wake_on_cc = intent.wake_on_cc;
+                    refreshed.on_deliver_cc_after_ms =
+                        max_watermark(existing.on_deliver_cc_after_ms, intent.cc_watermark_ms);
+                    state.insert_member(refreshed);
+                    return IntentOutcome::Restored;
                 }
                 let mut refreshed = existing.clone();
                 refreshed.on_deliver = Some(argv);
                 refreshed.on_deliver_wake_on_cc = intent.wake_on_cc;
-                refreshed.on_deliver_cc_after_ms = intent.cc_watermark_ms;
+                // Never *lower* a live member's watermark: the manifest value is the floor that
+                // keeps gap-committed CC messages visible, but a member that has already advanced
+                // past it must not be rewound into replaying its own history.
+                refreshed.on_deliver_cc_after_ms =
+                    max_watermark(existing.on_deliver_cc_after_ms, intent.cc_watermark_ms);
                 refreshed.idle = false;
                 refreshed.idle_rearmable = false;
                 state.insert_member(refreshed.clone());
@@ -948,6 +1067,23 @@ async fn register_member_reconciled(
                 // We already own this address and simply have no in-memory member for it — the
                 // shape a lost or forgotten member leaves behind. Adopt the lease we already hold
                 // rather than deferring forever against ourselves, which would wedge the binding.
+                //
+                // Restricted to the case where **no other session in this daemon** holds the
+                // address at all (idle or not): "we already own it" is a statement about the
+                // daemon, not about this session, so adopting it unconditionally would let two
+                // sessions' intents for one address both end up with an armed member and deliver
+                // the same message twice.
+                let held_by_other_session = state.members.lock().unwrap().values().any(|m| {
+                    m.store_key == intent.store_key
+                        && m.address == intent.address
+                        && m.session_id != intent.session_id
+                });
+                if held_by_other_session {
+                    return IntentOutcome::terminal(
+                        IntentRecoveryState::OwnershipConflict,
+                        "address_attended",
+                    );
+                }
                 (lease_epoch, owner_instance_id)
             } else {
                 // The distinction that makes the crash bound derivable: an incumbent whose lease is
@@ -1033,6 +1169,18 @@ async fn register_member_reconciled(
     state.insert_member(record.clone());
     spawn_on_deliver_backlog(state.clone(), record);
     IntentOutcome::Restored
+}
+
+/// The later of a live member's CC watermark and the manifest's, treating `None` as "no bound".
+///
+/// Monotonic by construction: the manifest value is a floor that keeps gap-committed CC messages
+/// visible, and a member that has already advanced past it must never be rewound.
+fn max_watermark(existing: Option<i64>, from_intent: Option<i64>) -> Option<i64> {
+    match (existing, from_intent) {
+        (Some(a), Some(b)) => Some(a.max(b)),
+        (Some(a), None) => Some(a),
+        (None, b) => b,
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1128,12 +1276,27 @@ pub async fn reconcile_intent_locked(
         }
     };
 
-    // If the member already exists and is push-covered, nothing needs proving: skip the probe
-    // entirely so a healthy steady state costs no I/O at all.
+    // If the member already exists and is push-covered with exactly the argv this daemon builds,
+    // nothing needs proving: skip the probe entirely so a healthy steady state costs no I/O at
+    // all. A *different* argv means the stored handler names a stale daemon instance, which must
+    // be repaired rather than short-circuited.
     if let Some(existing) = state.get_member(&intent.store_key, &intent.session_id, &intent.address)
     {
-        if existing.on_deliver.is_some() && !existing.idle {
+        if existing.on_deliver.is_some()
+            && !existing.idle
+            && existing.on_deliver.as_deref() == Some(argv.as_slice())
+        {
             return IntentOutcome::RefreshedNoOp;
+        }
+        // An operator `telex station reset` marks the member idle **and** clears
+        // `idle_rearmable`, which is precisely "do not re-arm this automatically". Reset is the
+        // one deliberate operator action with no durable tombstone, so it is the one the
+        // reconciler could not otherwise see — restoring over it silently undid the reset within
+        // a tick. Treat it as a revocation of the intent (the same terminal outcome a durable
+        // tombstone produces), so it is durable, visible, and reversible only by an explicit
+        // `telex --address <station> copilot resume`.
+        if existing.idle && !existing.idle_rearmable {
+            return IntentOutcome::terminal(IntentRecoveryState::Revoked, "operator_reset");
         }
     }
 
@@ -1172,24 +1335,30 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
     let started = Instant::now();
     let mut report = ReconcileReport {
         pass_seq,
+        ran: true,
         index_as_of_ms: now_ms(),
         ..Default::default()
     };
 
     // Drain suppression, exactly as `heartbeat_members_once` does: a draining daemon must not arm
-    // new delivery.
+    // new delivery. Reported as a *skipped* pass so a caller (upgrade's successor verification,
+    // the turn-boundary hook) can tell "did not run" from "ran and found nothing" and retry,
+    // rather than printing `restored 0` for a recovery that never started.
     if state.is_draining() {
+        report = ReconcileReport::skipped_pass(pass_seq, "draining");
         publish(&state, &report);
         return report;
     }
     // Single-flight per scope. A pass that would overlap simply does not start; because the pass
     // deadline is shorter than the tick, this is not expected to trigger in the normal case.
     let Ok(_single_flight) = state.intents.single_flight.try_lock() else {
+        report = ReconcileReport::skipped_pass(pass_seq, "single_flight");
         publish(&state, &report);
         return report;
     };
 
     let Some(store) = state.intent_store() else {
+        report = ReconcileReport::skipped_pass(pass_seq, "scope_unavailable");
         publish(&state, &report);
         return report;
     };
@@ -1203,6 +1372,7 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
         Ok(page) => page,
         Err(e) => {
             state.push_recent_error("StationIntent", format!("scanning intent scope: {e}"));
+            report = ReconcileReport::skipped_pass(pass_seq, "scan_failed");
             publish(&state, &report);
             return report;
         }
@@ -1227,25 +1397,57 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
         );
     }
 
-    // Entries rejected by a security or schema check are indexed (so they are visible in status and
-    // the drain report) but never attempted.
-    for (id, state_projection, detail) in &page.rejected {
+    // Entries rejected by a security or schema check are indexed whenever the binding they name
+    // could be established (so they are visible in status and the drain report) but never
+    // attempted. A rejection that could not even be identified is counted, so the operator-facing
+    // number is never silently zero.
+    let mut unidentifiable = 0usize;
+    for (id, rejection) in &page.rejected {
         report.inert += 1;
+        match &rejection.identity {
+            Some(identity) => {
+                let key = IntentKey {
+                    store_key: identity.store_key.clone(),
+                    session_id: identity.session_id.clone(),
+                    address: identity.address.clone(),
+                };
+                let mut entry = state.index_entry(&key).unwrap_or_default();
+                // Highest-precedence-wins: several states can apply to one binding at once (a
+                // cached projection plus a fresh rejection), and the rejection must not be masked
+                // by a stale success.
+                entry.state = rejection.state.max(entry.state);
+                entry.failure_code = Some(sanitize_failure_code(&rejection.detail));
+                entry.last_attempt_ms = Some(now_ms());
+                entry.first_seen_ms.get_or_insert(now_ms());
+                state.index_upsert(key, entry);
+            }
+            None => unidentifiable += 1,
+        }
         log_event(
             &store,
             serde_json::json!({
                 "event": "intent_rejected",
                 "pass_seq": pass_seq,
                 "intent_id": id.to_string(),
-                "state": state_projection,
-                "detail": detail,
+                "state": rejection.state,
+                "identified": rejection.identity.is_some(),
+                "detail": rejection.detail,
             }),
         );
+    }
+    {
+        let mut index = state.intents.index.lock().unwrap();
+        index.unidentifiable = unidentifiable;
     }
 
     let now = now_ms();
     let mut due: Vec<(String, StationIntentV1)> = Vec::new();
-    let mut seen_keys: BTreeSet<IntentKey> = BTreeSet::new();
+    // Deduped by `(store_key, address)`, not by the full key: two *different sessions* can hold a
+    // live intent for one address, and the deterministic `(store_key, address, generation desc)`
+    // scan order makes the first one seen the highest-generation one. Keying this on the full
+    // `IntentKey` made the filter a no-op (the filename is derived from all three fields, so two
+    // entries can never share a key) and let both sessions be reconciled in the same wave.
+    let mut seen_addresses: BTreeSet<(String, String)> = BTreeSet::new();
     // The position of the last entry this pass *considered* but did not attempt. Used only when the
     // pass attempts nothing at all, so the cursor still advances and the next pass moves on.
     let mut last_considered_position: Option<String> = None;
@@ -1254,25 +1456,45 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
         .into_iter()
         .zip(page.loaded_positions.into_iter())
     {
-        last_considered_position = Some(position.clone());
         if let Some(filter) = scope.as_deref() {
+            // Below the scope filter, deliberately: the cursor is shared by every store, so
+            // advancing it past an out-of-scope intent would let a scoped pass skip intents it
+            // never considered for a full round — weakening exactly the guaranteed-progress
+            // property the queue-delay bound rests on.
             if intent.store_key != filter {
                 continue;
             }
         }
+        last_considered_position = Some(position.clone());
         let key = IntentKey::from_intent(&intent);
-        // Deterministic ordering already sorted by `(store_key, address, generation desc)`, so the
-        // first intent seen for an address is the highest-generation one: first-live-wins.
-        if !seen_keys.insert(key.clone()) {
+        if !seen_addresses.insert((intent.store_key.clone(), intent.address.clone())) {
+            report.skipped += 1;
             continue;
         }
         // Seed the index from the manifest header even for intents this pass will not attempt, so
         // the drain report and status are never blind to an entry the budget skipped.
         let mut entry = state.index_entry(&key).unwrap_or_default();
+        let first_sight = entry.first_seen_ms.is_none();
         entry.generation = intent.generation;
         entry.wake_on_cc = intent.wake_on_cc;
         entry.cc_watermark_ms = intent.cc_watermark_ms;
         entry.first_seen_ms.get_or_insert(now);
+        if first_sight {
+            // Seed retry state from the durable evidence block on first sight. Without this,
+            // backoff and quarantine reset on every daemon replacement — the event most likely to
+            // follow a crash loop — so a wedged intent got a fresh full-rate retry budget every
+            // time, and `recovery_latency_ms` restarted the clock on the exact event it measures.
+            entry.attempts = intent.evidence.attempts;
+            entry.consecutive_failures = intent.evidence.consecutive_failures;
+            entry.next_attempt_ms = intent.evidence.next_attempt_ms;
+            entry.last_attempt_ms = intent.evidence.last_attempt_ms;
+            entry.last_success_ms = intent.evidence.last_success_ms;
+            entry.producer_verified_ms = intent.evidence.producer_verified_ms;
+            entry.failure_code = intent.evidence.failure_code.clone();
+            if entry.consecutive_failures >= RECONCILE_QUARANTINE_AFTER {
+                entry.state = IntentRecoveryState::Quarantined;
+            }
+        }
         if entry.state == IntentRecoveryState::default() || !intent.is_reconcilable() {
             entry.state = intent.state;
         }
@@ -1401,6 +1623,7 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
             "observed_count": report.observed_count,
             "duration_ms": report.duration_ms,
             "deadline_reached": report.deadline_reached,
+            "ran": report.ran,
         }),
     );
     publish(&state, &report);
@@ -1478,18 +1701,53 @@ fn apply_outcome(
             // cadence, and they do not advance the failure counter.
             entry.next_attempt_ms = Some(now + RECONCILE_QUARANTINE_RETRY.as_millis() as i64);
             if *projected == IntentRecoveryState::Revoked {
-                // A durable tombstone outranks the local manifest: mark it so the next pass does
-                // not even attempt it.
-                let _ = store.revoke(&intent.store_key, &intent.session_id, &intent.address, now);
+                // A durable tombstone (or an operator reset) outranks the local manifest: revoke
+                // it so the next pass does not even attempt it. `revoke` bumps the generation, so
+                // the evidence write below is deliberately skipped — writing back the pre-revoke
+                // copy under the old generation would either fail the CAS or, worse, resurrect
+                // `Live`.
+                match store.revoke(&intent.store_key, &intent.session_id, &intent.address, now) {
+                    Ok(_) => {}
+                    Err(e) => state.push_recent_error(
+                        "StationIntent",
+                        format!("revoking intent for {}: {e}", intent.address),
+                    ),
+                }
                 entry.next_attempt_ms = None;
+                state.index_upsert(key, entry);
+                log_outcome_event(store, intent, &outcome, pass_seq);
+                return;
             }
         }
     }
 
+    // Refresh the durable CC watermark from the live member.
+    //
+    // The manifest value is written once at finalize and would otherwise never move, while the
+    // member's `on_deliver_cc_after_ms` advances in memory and dies with the daemon. A restored
+    // member then received the *attach-time* bound and re-injected every CC message the station
+    // had seen since attach. Persisting the live value bounds replay to the outage window while
+    // keeping the pass-through property that makes gap-committed CC messages visible: the
+    // persisted value lags "now" by at most one tick and is never recomputed as "now".
+    let live_watermark = state
+        .get_member(&intent.store_key, &intent.session_id, &intent.address)
+        .and_then(|member| member.on_deliver_cc_after_ms);
+    let refreshed_watermark = if outcome.is_success() {
+        max_watermark(live_watermark, intent.cc_watermark_ms)
+    } else {
+        intent.cc_watermark_ms
+    };
+    entry.cc_watermark_ms = refreshed_watermark;
+
     // Persist evidence with a generation CAS so a concurrent attach or revoke wins over a pass
     // that read a now-stale manifest.
-    let mut updated = intent.clone();
-    updated.evidence = IntentEvidence {
+    //
+    // Only when something actually changed, and **without** bumping `updated_at_ms`: rewriting
+    // every live manifest on every 5 s tick to record an unchanged `RefreshedNoOp` cost one atomic
+    // file rewrite per intent per tick, contradicted the "a healthy steady state costs no I/O at
+    // all" optimization it sits beside, and — because GC ages an intent from `updated_at_ms` —
+    // reset every orphan TTL on every attempt, so no live intent could ever expire.
+    let evidence = IntentEvidence {
         last_attempt_ms: entry.last_attempt_ms,
         last_success_ms: entry.last_success_ms,
         attempts: entry.attempts,
@@ -1499,15 +1757,54 @@ fn apply_outcome(
         next_attempt_ms: entry.next_attempt_ms,
         recovery_latency_ms: entry.recovery_latency_ms,
     };
-    updated.updated_at_ms = now;
-    if let Err(e) = store.write_cas(intent.generation, &updated) {
-        state.push_recent_error(
-            "StationIntent",
-            format!("persisting intent evidence for {}: {e}", intent.address),
-        );
+    if evidence_write_due(&intent.evidence, &evidence, now)
+        || refreshed_watermark != intent.cc_watermark_ms
+    {
+        let mut updated = intent.clone();
+        updated.evidence = evidence;
+        updated.cc_watermark_ms = refreshed_watermark;
+        if let Err(e) = store.write_cas(intent.generation, &updated) {
+            state.push_recent_error(
+                "StationIntent",
+                format!("persisting intent evidence for {}: {e}", intent.address),
+            );
+        }
     }
 
     state.index_upsert(key, entry);
+    log_outcome_event(store, intent, &outcome, pass_seq);
+}
+
+/// Whether the evidence block has changed enough to be worth an atomic manifest rewrite.
+///
+/// Any change to the scheduling-relevant fields is persisted immediately (that state has to
+/// survive a daemon replacement); an unchanged healthy intent is refreshed at most once per
+/// `EVIDENCE_REFRESH_INTERVAL`, which is what keeps `last_success_ms` a usable "the producer was
+/// proven this recently" clock for GC without paying a write every tick.
+fn evidence_write_due(current: &IntentEvidence, next: &IntentEvidence, now: i64) -> bool {
+    if current.consecutive_failures != next.consecutive_failures
+        || current.failure_code != next.failure_code
+        || current.next_attempt_ms != next.next_attempt_ms
+        || current.recovery_latency_ms != next.recovery_latency_ms
+        || current.producer_verified_ms != next.producer_verified_ms
+    {
+        return true;
+    }
+    let last_persisted = current.last_success_ms.or(current.last_attempt_ms);
+    match last_persisted {
+        Some(persisted) => {
+            now.saturating_sub(persisted) >= EVIDENCE_REFRESH_INTERVAL.as_millis() as i64
+        }
+        None => true,
+    }
+}
+
+fn log_outcome_event(
+    store: &IntentStore,
+    intent: &StationIntentV1,
+    outcome: &IntentOutcome,
+    pass_seq: u64,
+) {
     log_event(
         store,
         serde_json::json!({
@@ -1769,6 +2066,123 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn a_producer_supplied_failure_code_is_clamped_before_it_enters_the_status_projection() {
+        // The producer is peer-verified but never trusted to be well-behaved, and `failure_code`
+        // is retained in the in-memory index and copied into every `Status` response — so an
+        // unbounded string there pushes the status frame past `MAX_JSONL_FRAME_BYTES` and makes
+        // every `telex status` call fail until the daemon is restarted.
+        let long = "x".repeat(4096);
+        let clamped = sanitize_failure_code(&long);
+        assert!(clamped.len() <= FAILURE_CODE_MAX_CHARS);
+        assert_eq!(sanitize_failure_code("Bridge Busy!"), "bridge_busy");
+        assert_eq!(sanitize_failure_code("   "), "rejected");
+        assert_eq!(sanitize_failure_code("\u{1b}[31mred"), "31mred");
+        assert!(
+            sanitize_failure_code("a\nb\r\nc")
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_'),
+            "no control characters may survive into a status field"
+        );
+    }
+
+    #[test]
+    fn a_restore_never_lowers_a_live_members_cc_watermark() {
+        assert_eq!(max_watermark(Some(9), Some(2)), Some(9));
+        assert_eq!(max_watermark(Some(2), Some(9)), Some(9));
+        assert_eq!(max_watermark(None, Some(2)), Some(2));
+        assert_eq!(max_watermark(Some(2), None), Some(2));
+        assert_eq!(max_watermark(None, None), None);
+    }
+
+    #[test]
+    fn unchanged_evidence_is_not_rewritten_on_every_tick() {
+        // The healthy steady state used to rewrite every live manifest every 5 s to record an
+        // unchanged `RefreshedNoOp`, which contradicted the "a healthy steady state costs no I/O
+        // at all" optimization next to it and — because GC ages an intent from `updated_at_ms` —
+        // reset every orphan TTL on every attempt.
+        let base = IntentEvidence {
+            last_attempt_ms: Some(1_000),
+            last_success_ms: Some(1_000),
+            attempts: 3,
+            consecutive_failures: 0,
+            failure_code: None,
+            producer_verified_ms: Some(900),
+            next_attempt_ms: None,
+            recovery_latency_ms: Some(10),
+        };
+        let mut next = base.clone();
+        next.attempts = 4;
+        next.last_attempt_ms = Some(1_500);
+        next.last_success_ms = Some(1_500);
+        assert!(
+            !evidence_write_due(&base, &next, 1_500),
+            "an unchanged healthy intent must not be rewritten every tick"
+        );
+        assert!(
+            evidence_write_due(
+                &base,
+                &next,
+                1_000 + EVIDENCE_REFRESH_INTERVAL.as_millis() as i64
+            ),
+            "but it must be refreshed periodically so `last_success_ms` stays a usable clock"
+        );
+
+        let mut failed = base.clone();
+        failed.consecutive_failures = 1;
+        failed.failure_code = Some("credential_stale".to_string());
+        failed.next_attempt_ms = Some(1_100);
+        assert!(
+            evidence_write_due(&base, &failed, 1_001),
+            "scheduling state must be persisted immediately: it has to survive a replacement"
+        );
+    }
+
+    #[test]
+    fn a_transient_credential_condition_is_not_a_terminal_outcome() {
+        // Retry policy and projected state are separate axes: these all project `Unverifiable`
+        // for status, and all take the backoff ladder rather than the one-hour quarantine cadence.
+        for code in [
+            "credential_stale",
+            "credential_age_unknown",
+            "credential_unreadable",
+            "credential_malformed",
+            "credential_field_missing",
+            "credential_unresolved",
+        ] {
+            let outcome = IntentOutcome::failed(code);
+            assert_eq!(outcome.projected_state(), IntentRecoveryState::Unverifiable);
+            assert!(matches!(outcome, IntentOutcome::Failed { .. }));
+        }
+        // The security and genuinely-inert classes stay terminal.
+        for (state, code) in [
+            (IntentRecoveryState::Insecure, "credential_outside_root"),
+            (IntentRecoveryState::Insecure, "credential_insecure"),
+            (
+                IntentRecoveryState::Unverifiable,
+                "credential_root_unregistered",
+            ),
+            (IntentRecoveryState::Unverifiable, "foreign_host_or_boot"),
+            (IntentRecoveryState::LegacyProducer, "legacy_producer"),
+        ] {
+            let outcome = IntentOutcome::terminal(state, code);
+            assert!(matches!(outcome, IntentOutcome::Terminal { .. }));
+        }
+    }
+
+    #[test]
+    fn a_skipped_pass_is_distinguishable_from_an_empty_one() {
+        let skipped = ReconcileReport::skipped_pass(7, "draining");
+        assert!(!skipped.ran);
+        assert_eq!(skipped.skipped_reason.as_deref(), Some("draining"));
+        assert_eq!(skipped.restored, 0);
+        // A report deserialized from a daemon that predates the field describes a pass that ran.
+        let legacy: ReconcileReport =
+            serde_json::from_str(r#"{"pass_seq":1,"scanned":0,"restored":0,"refreshed_no_op":0,"deferred_lease":0,"deferred_pull_waiter":0,"failed":0,"skipped":0,"inert":0,"over_cap":false,"observed_count":0,"duration_ms":0,"deadline_reached":false,"index_as_of_ms":0}"#)
+                .expect("older report shape");
+        assert!(legacy.ran);
     }
 
     #[test]

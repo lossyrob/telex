@@ -371,10 +371,13 @@ pub enum IntentRecoveryState {
     /// Too many consecutive genuine failures; retried on a slow cadence so one wedged intent can
     /// never consume the pass budget.
     Quarantined,
-    /// Explicitly revoked locally (detach, session end, fallback downgrade).
+    /// A durable detach tombstone exists for this binding, so the station is deliberately gone.
+    /// Highest precedence of all: an explicitly detached station never auto-returns. Reserved for
+    /// a future projection that distinguishes the durable tombstone from the local revocation
+    /// below; this build reports both as `Revoked`, which is what is persisted.
     Tombstoned,
-    /// A durable detach tombstone exists for this binding. Highest precedence of all: an
-    /// explicitly detached station never auto-returns.
+    /// Explicitly revoked (detach, session end, fallback downgrade), or reconciled against a
+    /// durable detach tombstone. The only terminal state this build ever *persists*.
     Revoked,
     /// Another owner holds the address and is not stale.
     OwnershipConflict,
@@ -388,8 +391,10 @@ impl IntentRecoveryState {
     /// the projection is deterministic rather than dependent on evaluation order.
     pub fn precedence(self) -> u8 {
         match self {
-            IntentRecoveryState::Revoked => 13,
-            IntentRecoveryState::Tombstoned => 12,
+            // Plan decision 16 order: a durable tombstone outranks a local revocation, which
+            // outranks every diagnosable failure.
+            IntentRecoveryState::Tombstoned => 13,
+            IntentRecoveryState::Revoked => 12,
             IntentRecoveryState::Insecure => 11,
             IntentRecoveryState::Incompatible => 10,
             IntentRecoveryState::OwnershipConflict => 9,
@@ -485,6 +490,16 @@ pub struct IntentStatus {
 pub struct ReconcileReport {
     /// Monotonically increasing pass sequence number.
     pub pass_seq: u64,
+    /// Whether this pass actually ran. A pass suppressed by drain or by single-flight contention
+    /// still publishes a report with a fresh `pass_seq` and all-zero counts, and a caller that
+    /// cannot tell that apart from "ran and found nothing" reports a completed verification for an
+    /// upgrade that restored nothing.
+    #[serde(default = "ReconcileReport::default_ran")]
+    pub ran: bool,
+    /// Why the pass did not run, when `ran` is false (`draining`, `single_flight`,
+    /// `scope_unavailable`, `scan_failed`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped_reason: Option<String>,
     pub scanned: usize,
     pub restored: usize,
     pub refreshed_no_op: usize,
@@ -504,6 +519,23 @@ pub struct ReconcileReport {
     pub index_as_of_ms: i64,
 }
 
+impl ReconcileReport {
+    fn default_ran() -> bool {
+        true
+    }
+
+    /// A report for a pass that did not run, so a caller can retry rather than report success on
+    /// zero counts.
+    pub fn skipped_pass(pass_seq: u64, reason: &str) -> Self {
+        Self {
+            pass_seq,
+            ran: false,
+            skipped_reason: Some(reason.to_string()),
+            ..Default::default()
+        }
+    }
+}
+
 /// Pre/post-drain intent signal, computed from in-memory state only (members + the cached intent
 /// index). No directory scan, no probe, no network I/O — so producing it can never push a graceful
 /// drain past `--drain-timeout-ms`.
@@ -511,12 +543,21 @@ pub struct ReconcileReport {
 pub struct DrainIntentReport {
     /// Intents a compatible successor is expected to restore automatically.
     pub recoverable: usize,
+    /// Intents written by an attach that has not finalized yet. Never reconciled, so never
+    /// "restored automatically" — counted separately rather than folded into `recoverable`.
+    #[serde(default)]
+    pub pending: usize,
     /// Intents that need operator action (unverifiable, insecure, quarantined).
     pub degraded: usize,
     /// Intents this build cannot reconcile (schema or descriptor incompatibility, legacy producer).
     pub incompatible: usize,
     /// Intents whose state is not yet known to the index.
     pub unknown: usize,
+    /// Manifests the scan rejected before it could establish which binding they name. Included in
+    /// `degraded` so the operator-facing total is never silently zero, and reported separately so
+    /// "unreadable" is distinguishable from "readable but broken".
+    #[serde(default)]
+    pub unidentifiable: usize,
     pub over_cap: bool,
     pub observed_count: usize,
     /// Index freshness, so an operator sees staleness rather than assuming the report is live.
@@ -635,6 +676,11 @@ pub struct SentReceipt {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonStatus {
+    /// Optional capabilities this daemon advertises, so a client can gate on the capability
+    /// string as well as on the protocol minor (the minor is the axis most likely to be reused
+    /// for an unrelated additive change later). Absent from an older daemon's status.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     pub protocol_version: ProtocolVersion,
     pub daemon_version: String,
     pub instance_id: String,
