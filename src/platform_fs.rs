@@ -612,12 +612,22 @@ mod imp {
     use std::path::{Path, PathBuf};
 
     pub(super) fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
-        if !path.exists() {
-            let mut builder = std::fs::DirBuilder::new();
-            builder.recursive(true).mode(0o700);
-            builder
-                .create(path)
-                .map_err(|e| io_err("creating owner-private daemon directory", e))?;
+        match std::fs::symlink_metadata(path) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                let mut builder = std::fs::DirBuilder::new();
+                builder.recursive(true).mode(0o700);
+                match builder.create(path) {
+                    Ok(()) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
+                    Err(error) => {
+                        return Err(io_err("creating owner-private daemon directory", error));
+                    }
+                }
+            }
+            Err(error) => {
+                return Err(io_err("checking owner-private daemon directory", error));
+            }
         }
         let link_meta = std::fs::symlink_metadata(path)
             .map_err(|e| io_err("checking owner-private daemon directory", e))?;
@@ -2502,6 +2512,29 @@ mod tests {
             .count();
         assert_eq!(leftovers, 0, "atomic write left a temp file behind");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_owner_private_directory_creation_is_idempotent() {
+        let base = temp_dir("concurrent-create");
+        let dir = base.join("scope");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(8));
+        let threads = (0..8)
+            .map(|_| {
+                let dir = dir.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    ensure_owner_private_dir(&dir)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for thread in threads {
+            assert_eq!(thread.join().expect("creator thread").expect("scope"), dir);
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     #[test]
