@@ -2187,6 +2187,24 @@ The daemon owns reconciliation as its own operation, not as a `Register` side ef
    creates a scope nor is denied because one could not be created. Opening the creating path there
    turned every push registration on a host where the scope could not be made into
    `PushIntentUnrecoverable`, including for the clients that have no durable state to lose.
+
+8c. **Absence is proven, never inferred from a failed look — added after the final approval gate.**
+   Every rule above that branches on "is there a record here?" is an authority rule, and in every one
+   of them the answer *no* is the permissive branch: no record means no proof is owed, no live intent
+   blocks a pull-only downgrade, nothing is left to revoke, the slot is free to create into, and the
+   credential the record points at has been deleted. `Path::exists()` cannot express the third
+   answer — it maps every metadata failure (a denied ACL, an untraversable parent, a volume that went
+   away, a name the platform rejects) onto that same permissive `no`. An intent scope full of records
+   the daemon could not see therefore read as a host that had never attached.
+
+   So the probe is `platform_fs::path_present`, whose `Ok(false)` is only ever a positive `NotFound`
+   and whose every other outcome is an error the caller must classify. For the arming stamp and the
+   up-front observation that is `RecordUnusable` / a closed register; for the anti-downgrade guard it
+   is `Unavailable` rather than `Absent`; for GC it means the credential is *not* provably gone, so
+   the record survives; for a compare-and-set it is a failure rather than a create. The three
+   non-authority uses say so explicitly at the call site — the scan cursor is a scheduling hint, the
+   drain's no-bridge fast path costs one round-trip to be wrong about, and a SQLite store file that
+   could not be stat'd is a *transient* backend condition rather than the terminal `store_missing`.
 9. **Deleting an intent is conditional.** GC and the attach rollback both decide from a snapshot, so
    the unlink re-takes the per-intent write lock, reloads, and requires the generation *and* the
    caller's own condition to still hold. Every TTL clock is read from the **event it is about** and

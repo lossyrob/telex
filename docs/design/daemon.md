@@ -2013,6 +2013,17 @@ effect of a registration with nothing to put in it. A record that is present and
 refused either way, because that is durable state about this binding that could not be verified —
 including in the concurrent window, where a record can appear between the observation and the stamp.
 
+**Every row of that table depends on being able to tell "not there" from "could not look".** Both
+the up-front observation and the stamp probe the filesystem through `platform_fs::path_present`,
+never `Path::exists()`. `exists()` maps a denied ACL, an untraversable parent, a volume that went
+away, and a name the platform rejects all onto the same `false` — which is the *permissive* answer
+here: the register would owe nothing, the stamp would report "no record" for the same reason, and
+the top-left cell of the table would commit an armed member over a durable record it had never
+proven anything about. `path_present` answers `false` only for a positive `NotFound`; anything else
+is an error, which the daemon classifies as "the record is present and unreadable" (the bottom row)
+and refuses in both columns. Absence is the answer that admits, so absence is the answer that has to
+be proven.
+
 That ordering is also what closes the concurrent-attach race. Attach A writes its `pending` record
 and registers; concurrent attach B replaces the record at a new generation, fails, and rolls its own
 write back — deleting the file. `write_pending`, the conditional rollback delete, and the arming
@@ -2117,6 +2128,12 @@ property, so the attach rollback's generation gate keeps working across a re-att
 
 A *missing credential* is a transient producer condition (the bridge deletes and rewrites its
 registry on every reload), not a teardown, so it is TTL-governed rather than acted on immediately.
+"Missing" also has to mean *proven* missing: the credential is the bridge registry, which lives in a
+directory telex shares with an external producer, so an antivirus lock, a permissions change, or a
+mount that hiccupped is a metadata failure rather than a deletion. The rule reads
+`platform_fs::path_present` and fires only on a positive `NotFound`; a credential telex could not
+look at leaves the record in place. Deletion is the one GC action recovery cannot undo, so it is
+never taken on the strength of "I could not see it".
 
 Both orphan clocks read **proof** — a successful reconcile, a verified probe, or the durable
 transition a finalize performs, which is itself gated on a live probe. Never

@@ -1066,6 +1066,16 @@ this is what is actually asserted. Recorded honestly rather than left implying f
 | A1 a re-attach over an aged tombstone was born with an expired pending clock and an inherited arming proof | Pivot 26: `write_pending` inherits `created_at_ms` and `armed` only when the record it replaces is itself `Pending` (a retry of the same lifecycle); a write over a `Revoked`/inert record starts a new lifecycle with its own clock and no proof, while the generation still advances monotonically. Tests: `a_new_attach_over_a_finished_lifecycle_starts_its_own_pending_clock`, `a_new_pending_lifecycle_never_inherits_the_previous_ones_armed_proof`, `a_fresh_pending_lifecycle_earns_one_clock_and_no_retry_can_earn_another`, `attach_rollback_only_deletes_the_record_this_attach_left_behind` (case d) |
 | A2 an arming register that owed no proof was refused when the intent scope could not be created | Pivot 27: `station_intent::armed_proof_admission(stamp, owes_proof)` as the decidable table; `stamp_intent_armed` returns a classified `ArmedProofRefusal` (`ScopeUnavailable` / `RecordUnusable`) and opens the scope through the same non-creating path `durable_intent_present` uses, so an absent scope is `NoRecord`. A present-but-unreadable record still refuses either way. Tests: `armed_proof_admission_is_the_whole_daemon_side_proof_table`, `a_push_register_owing_no_proof_survives_a_scope_that_cannot_be_created`, `the_proof_commit_gate_refuses_an_unowed_register_only_for_a_broken_record` |
 
+**Existence-probe gate** (E1..E5):
+
+| Finding | Resolved by |
+|---|---|
+| E1 (high) an inaccessible station-intent record read as `NoRecord`, so `owes_armed_proof` was false and an ordinary admission committed | Pivot 28: `platform_fs::path_present` as the single existence primitive; `durable_intent_present` and `stamp_armed_proof` return errors for an undecidable record, which `stamp_intent_armed` classifies `RecordUnusable` — the row that refuses in both columns of pivot 27's table. The vanished-record remap now requires `Ok(false)` from its re-check. Tests: `an_unstatable_record_refuses_an_arming_register_that_owed_no_proof`, `an_unstatable_record_makes_an_arming_register_fail_closed_up_front`, `an_unstatable_record_is_never_reported_as_no_record`, `the_vanished_record_remap_requires_a_proven_absence`, `path_present_reports_absence_only_when_it_can_prove_it` |
+| E2 (high) the same collapse in `open_existing` (an unstatable scope root read as "this host never attached") and in `lookup_live_intent` (an unstatable record read as `Absent`, failing the anti-downgrade guard open) | Pivot 28: both probe through `path_present`; the root is an `Err` from `open_existing`, and the record is `LiveIntentLookup::Unavailable`. Tests: `an_unstatable_scope_root_is_an_error_not_an_absent_scope`, `an_unstatable_scope_root_is_not_an_empty_scope`, `an_unstatable_record_refuses_a_pull_only_downgrade_rather_than_allowing_it` |
+| E3 (medium) GC deleted a finalized record because the credential file could not be stat'd | Pivot 28: `credential_provably_absent` fires only on `Ok(false)`. Test: `gc_keeps_a_record_whose_credential_could_not_be_stat_ed` |
+| E4 (medium) `revoke` reported "nothing to revoke", `write_cas` turned a lost CAS into a create, and an unreadable SQLite store was classified terminal | Pivot 28: all three surface the error; `store_missing` is now reserved for a proven absence and an unreadable store file returns `store_unreadable` (transient). Tests: `an_unstatable_record_cannot_be_reported_as_nothing_to_revoke`, `a_cas_against_an_unstatable_record_fails_rather_than_creating_one`, `an_unreadable_sqlite_store_file_is_transient_not_terminal` |
+| E5 (low) the `copilot drain` hook reported `no_bridge` for a registry it could not stat, opting itself out on every turn stop | Pivot 28: `no_bridge_fast_path` takes the fast path only on a proven absence. Test: `an_unstatable_bridge_registry_does_not_report_no_bridge` |
+
 ### Trade-offs -> decisions
 
 | Trade-off | Decision taken | Where |
@@ -1318,3 +1328,24 @@ Both scope a rule an earlier pivot stated too broadly. Mechanisms and tests are 
     either way. `stamp_intent_armed` classifies its failure (`ScopeUnavailable` / `RecordUnusable`)
     and reads the scope through the same non-creating open `durable_intent_present` uses, so the
     observation and the commit now agree on what "no scope" means.
+
+### Pivots from the existence-probe gate
+
+One pivot, scoping the primitive every rule above is decided from. Mechanisms and tests are in
+`Docs.md`, "Corrections made during the existence-probe gate".
+
+28. **Absence is proven, never inferred from a failed look.** Pivots 23 and 27 both turn on "does
+    this binding have a durable record?", and pivot 26 on "has the credential really gone?" — and
+    every one of them decided it with `Path::exists()`, which maps a denied ACL, an untraversable
+    parent, a departed volume, and a rejected name all onto `false`. In each rule `false` is the
+    *permissive* branch, so the whole family shared one fail-open: a record that exists but cannot
+    be stat'd read as a binding that never existed, which made `owes_armed_proof` false, made the
+    stamp report `NoRecord`, and put pivot 27's table in the cell that **commits** — the
+    `RecordUnusable` row that exists to refuse this was unreachable through the stat path. Existence
+    is now decided by `platform_fs::path_present`, whose `Ok(false)` is only a positive `NotFound`;
+    every other outcome is an error the caller classifies (`RecordUnusable` for the stamp and the
+    obligation observation, `Unavailable` for the anti-downgrade guard, "not provably gone" for the
+    GC credential rule, a failed CAS rather than a create, a transient rather than terminal store
+    condition). The three non-authority uses opt out explicitly at the call site. The seam that
+    makes it testable is `platform_fs::stat_faults`, because every real cause is platform-specific
+    and flaky while the behavior under test is platform-independent.

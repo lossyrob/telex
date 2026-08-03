@@ -118,6 +118,10 @@ recovery later. The message names the write that failed. Causes are almost alway
 
 - the station-intent record for this station is present but unreadable (corrupt, or written by a
   build this one cannot verify), or
+- the station-intent record or the scope that holds it exists but the operating system will not
+  report on it — a permissions change, a file lock, a profile on a network volume that went away.
+  Telex refuses here rather than assuming the station is new, because assuming that would commit
+  push with nothing recoverable behind it, and
 - the station-intent scope is not writable (check the permissions on the daemon run directory), or
 - a concurrent `copilot attach`/`copilot resume` for the same station raced this one and rolled its
   own record back.

@@ -96,6 +96,7 @@ reconciler already honors.
 | A GC TTL cannot be extended by retrying | Every clock is anchored to the event it is about — the orphan clocks read *proof*, the unarmed pending clock reads `created_at_ms`, the armed pending clock reads the idempotent proof's own timestamp — never `evidence.last_attempt_ms` or `updated_at_ms`, both of which a failing retry rewrites. `write_pending` inherits those two clocks only from a record that is *itself* `pending`, so a retry of one attach cannot reset them and a genuinely new attach over a tombstone is not born expired |
 | Arming authority never outlives the lifecycle that earned it | The armed proof is inherited only across a retry of the same pending attach; a write over a revoked or otherwise inert record starts a new lifecycle with no proof, so `finalize_admission` cannot promote a new attach on a previous daemon's arming |
 | A stale projection cannot outlive the record it described | The pre-drain report compares the cached entry's generation against the durable manifest's, and prefers the newer manifest; every durable transition moves the generation while evidence-only rewrites do not |
+| "There is no record" is always a proven answer, never a failed look | Every authority-bearing existence check goes through `platform_fs::path_present`, whose `Ok(false)` is only a positive `NotFound`; an undecidable answer is an `Err` each caller classifies (`RecordUnusable` for the arming stamp and the obligation observation, `Unavailable` for the anti-downgrade guard, "not provably gone" for the GC credential rule, a failed CAS rather than a create). `Path::exists()` collapsed all of those onto the permissive branch |
 | A recovery-state condition never wedges a session | The turn guard *warns and allows* |
 
 ## Published bounds
@@ -889,6 +890,164 @@ modes are symmetric:
 - `armed_proof_admission` mutated to gate *every* failure on the obligation: the table test fails on
   `Err(RecordUnusable)` and the gate test fails on `a broken record refuses even an unowed register`.
 
+## Corrections made during the existence-probe gate
+
+A gate pass over the admission and lifecycle rules the previous two gates installed asked one
+question of each: *how is "there is no record here" actually decided?* The answer everywhere was
+`Path::exists()`, which is the one std API that cannot express "I could not tell" — it maps every
+metadata failure onto `false`. In each of these rules `false` is the **permissive** branch, so the
+whole set had a shared fail-open: a durable record that exists but cannot be stat'd reads as a
+binding that never existed.
+
+One high finding, plus the audit of every sibling check it implicated. All fixed in one pass,
+because they share a cause and a fix.
+
+### 1. HIGH — an inaccessible station-intent record read as "no record", and an ordinary admission committed
+
+`DaemonState::durable_intent_present` and `IntentStore::stamp_armed_proof` both decided existence
+with `Path::exists()`. For a record that is on disk but whose metadata the platform refuses to hand
+over — a denied ACL, an untraversable parent directory, a volume that went away, an antivirus lock —
+both answered "not there":
+
+1. The up-front observation set `owes_armed_proof = false`, putting the register in the **permissive
+   column** of the admission table.
+2. The stamp returned `ArmedProofStamp::NoRecord` for the same reason.
+3. `armed_proof_admission(Ok(NoRecord), false)` is `Commit`.
+
+So the register committed an armed push member over a durable record it had never read, never
+stamped, and never even confirmed was there — including over a `live` record mid-reconcile. The
+`RecordUnusable` row, which exists precisely to refuse this, was unreachable through the stat path:
+it could only be reached by a record that stat'd *successfully* and then failed to load. The
+response said `Registered`; the durable state said something else; nothing reconciled the two.
+
+The same collapse also made `stamp_armed_proof`'s deliberate "the record vanished under me" remap
+unsound in the other direction: it converted a genuine `Io` failure into `NoRecord` whenever the
+re-check could not decide either.
+
+**Fix — one probe, and absence has to be proven.**
+
+- `platform_fs::path_present(path) -> Result<bool>` is the single existence primitive. `Ok(false)`
+  is only ever a positive `NotFound` from the platform; every other outcome is an `Err` the caller
+  must classify. It lives in `platform_fs` because that module's stated rule 1 is "anything that
+  cannot be positively verified is an error, never a silent 'assume fine'", and `exists()` was the
+  one hole in it.
+- `durable_intent_present` returns `Err` for an undecidable record, and the register fails closed
+  with the same typed `PushIntentUnrecoverable` refusal it already used for an unreadable scope.
+- `stamp_armed_proof` returns `Err` rather than `NoRecord`, which `stamp_intent_armed` classifies
+  `RecordUnusable` — the row that refuses in **both** columns of the table, which is what makes the
+  fix hold for the `owes_proof == false` case the finding is about.
+- The vanished-record remap now requires `Ok(false)` from the re-check. An undecidable re-check
+  leaves the original `Io` failure standing.
+
+### 2. HIGH — the same collapse in the anti-downgrade guard and the scope root
+
+The audit the finding asked for turned up two more instances on the same admission path, both
+reachable by the same condition:
+
+- `IntentStore::open_existing` decided "this host never attached" with `root.exists()`. An intent
+  scope full of records whose root could not be stat'd therefore reported `Ok(None)` — an empty
+  scope — to *every* read path at once: `durable_intent_present`, the arming stamp, the
+  anti-downgrade guard, and the drain report.
+- `DaemonState::lookup_live_intent` decided `LiveIntentLookup::Absent` with `path_for(&id).exists()`.
+  `Absent` is the answer that lets a pull-only registration proceed over a push binding, and the
+  guard's whole reason for re-reading the manifest is the daemon-replacement window in which the
+  cached index is empty — so a record it could not stat produced exactly the silent downgrade the
+  guard exists to prevent. The three-way `Unavailable` arm was already there and already refused;
+  it was simply unreachable through the stat path.
+
+**Fix.** Both now use `path_present`. An undecidable root is an `Err` from `open_existing` (which
+`intent_store_readonly` already documents callers must fail closed on), and an undecidable record is
+`LiveIntentLookup::Unavailable`, not `Absent`.
+
+### 3. MEDIUM — GC could delete a record because it could not look at the credential
+
+`gc_reason`'s credential rule read `!intent.producer.credential.path.exists()`. The credential is
+the bridge registry, which lives in a directory telex deliberately *shares* with an external
+producer, so a permissions change, an antivirus lock, or a mount that hiccupped is a routine
+metadata failure there — and each of them read as "the credential file is gone". Past the
+15-minute TTL, GC then deleted the durable record of a binding that may have been delivering the
+whole time. Deletion is the one GC action recovery cannot undo.
+
+**Fix.** `credential_provably_absent` fires only on `Ok(false)`. A credential telex could not look
+at keeps the record; the rule still fires normally for a credential that is provably gone.
+
+### 4. MEDIUM — three more lifecycle checks with the same shape
+
+- `IntentStore::revoke` returned `Ok(false)` — "there was nothing here to revoke", which every
+  caller treats as success — for a record it could not stat. The daemon's session-end and detach
+  paths would then consider a live intent retired while the record on disk still said the station
+  was armed. Now an `Err`.
+- `IntentStore::write_cas_locked` treats "no record" plus `expected_generation == 0` as *create*, so
+  an undecidable record turned a lost compare-and-set into an unconditional overwrite of a record
+  the caller had never read. Now an `Err`. (`write_atomic`'s cap check is the same probe and was
+  fixed with it; the mutation check below reverts both, because either one alone still refuses.)
+- `backend_open_existing_only` classified a SQLite store file it could not stat as `store_missing`,
+  which is **terminal** — the intent parks on the hour-long quarantine cadence on the reasoning that
+  a store which does not exist will not start existing. A locked or briefly unreadable store file is
+  the opposite kind of condition, so it now returns `store_unreadable` and takes the ordinary retry
+  ladder.
+
+### 5. LOW — the drain hook could disable itself
+
+`copilot drain`'s fast path skipped the daemon round-trip entirely when the bridge registry did not
+`exists()`. A registry telex could not stat therefore produced `no_bridge` on *every turn stop* for
+as long as the condition lasted — the drain hook silently opting out for exactly the sessions it
+serves. `no_bridge_fast_path` now takes the fast path only on a proven absence; an undecidable
+answer costs one daemon round-trip.
+
+Two checks were audited and deliberately left best-effort, with the reasoning recorded at the call
+site: `read_cursor` (the scan cursor is a scheduling hint whose read path already defaults on
+failure) and `ensure_owner_private_dir` / `ensure_owner_private_producer_root` (which create and
+then validate, so an undecidable path fails at the create or the shape check rather than silently
+passing).
+
+### The test seam, and why it is one
+
+The behavior under test is "what does telex do when the filesystem answers with an error", not "how
+does this platform produce that error". Every real way to produce one is platform-specific and flaky
+in CI: `chmod 000` on a parent is a no-op under a root test runner and has no Windows equivalent, a
+Windows deny-ACE has no Unix equivalent, and the paths each platform rejects outright differ. So the
+error is injected at the single function that asks — `platform_fs::stat_faults::Unstatable`, a
+`#[cfg(test)]` RAII guard keyed by exact path, following the same pattern as the daemon's existing
+`delivery_admission_control` seam. It carries an optional "answer the first N probes truthfully"
+count, which is what makes the *re-check* in `stamp_armed_proof` pinnable separately from the entry
+check.
+
+**Tests** (11 new):
+
+| Test | Pins |
+|---|---|
+| `path_present_reports_absence_only_when_it_can_prove_it` | the probe's contract, and that the fault is scoped |
+| `an_unstatable_record_refuses_an_arming_register_that_owed_no_proof` | **the finding**, end to end: nothing exists at the observation (`owes == false`), the record appears and becomes unstatable at the commit gate, the register is refused, no member, no false proof — and the control on the same state, with the fault gone, registers and stamps |
+| `an_unstatable_record_makes_an_arming_register_fail_closed_up_front` | the observation itself: `durable_intent_present` errors, and the register commits nothing |
+| `an_unstatable_scope_root_is_not_an_empty_scope` (daemon) and `an_unstatable_scope_root_is_an_error_not_an_absent_scope` (store) | the scope-root collapse, plus that a provably absent scope is still `None` |
+| `an_unstatable_record_refuses_a_pull_only_downgrade_rather_than_allowing_it` | the anti-downgrade guard: `Unavailable` not `Absent`, the pull register refused — and that a readable non-live record still admits it |
+| `an_unstatable_record_is_never_reported_as_no_record` | the stamp's entry check, with a genuinely absent binding as the control |
+| `the_vanished_record_remap_requires_a_proven_absence` | both halves of the remap, driven through the real race (the per-intent lock is held, so the locked load fails with I/O after the entry check passed): a record deleted mid-stamp is `NoRecord`, an undecidable re-check is not |
+| `gc_keeps_a_record_whose_credential_could_not_be_stat_ed` | the GC rule in both directions |
+| `an_unstatable_record_cannot_be_reported_as_nothing_to_revoke` | revoke, with both a readable record and a provably absent one as controls |
+| `a_cas_against_an_unstatable_record_fails_rather_than_creating_one` | the CAS-becomes-create path |
+| `an_unreadable_sqlite_store_file_is_transient_not_terminal` | the missing-versus-unreadable store classification, with the terminal verdict for a provably absent store as the control |
+| `an_unstatable_bridge_registry_does_not_report_no_bridge` | the drain fast path, with the pull-only no-op it exists for as the control |
+
+### Test discrimination for this gate
+
+Every guard was reverted to the defect — the probe's error collapsed back into `false` at that call
+site, which is exactly what `Path::exists()` did — and the suite re-run. All ten mutants are caught:
+
+| Mutation | Result |
+|---|---|
+| `stamp_armed_proof` entry probe | 2 tests fail |
+| `durable_intent_present` | 1 fails |
+| `open_existing` root probe | 2 fail |
+| `lookup_live_intent` | 1 fails |
+| GC credential rule | 1 fails |
+| `revoke` | 1 fails |
+| `write_cas_locked` + `write_atomic` (its second guard; either alone still refuses) | 1 fails |
+| vanished-record remap re-check | 1 fails |
+| `no_bridge_fast_path` | 1 fails |
+| `backend_open_existing_only` | 1 fails |
+
 ## Operating notes
 
 - Intent scopes are namespaced by user identity, **canonicalized config root**, and protocol major.
@@ -934,7 +1093,7 @@ modes are symmetric:
 
 - `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`
 - `cargo build --workspace`
-- `cargo test --workspace` — 20 test binaries, 0 failures (lib 364, `tests/station_intent.rs` 39,
+- `cargo test --workspace` — 20 test binaries, 0 failures (lib 377, `tests/station_intent.rs` 39,
   and `tests/daemon_process_sqlite.rs` 43)
 - `cargo test --no-default-features --features sqlite --test daemon_process_sqlite --test station_intent station_intent_`
 - `cargo test --no-default-features --features sqlite --test daemon_process_sqlite copilot_fallback`

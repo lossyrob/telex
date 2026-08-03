@@ -224,6 +224,14 @@ Three conditions are named explicitly in status:
   a session end revoked) starts a fresh attach: it gets the full attach window to finish, and it has
   to be armed again by the daemon before anything can promote it. The old record's proof is not
   carried over.
+- **It never treats "I could not read that" as "there is nothing there".** Every recovery decision
+  that turns on whether a station has a durable record — may this register commit, may this pull
+  attach downgrade push, has this station's credential really been deleted — is decided from a
+  *positive* answer. If the intent scope, a station's record, or a bridge credential exists but the
+  operating system will not report on it (a permissions change, a lock, a profile on a volume that
+  went away), telex refuses or waits rather than proceeding as if the station were new. You may see
+  a `PushIntentUnrecoverable` refusal you would not have seen before; the alternative was a
+  registration that reported success and left nothing recoverable behind.
 
 ### Recovering from a bridge reload
 
