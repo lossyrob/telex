@@ -556,6 +556,12 @@ impl DaemonState {
     /// as the anti-downgrade guard does — an unreadable scope is the `Insecure` condition the rest
     /// of this design refuses to guess about. A scope that does not exist at all is `Ok(false)`:
     /// this host has never attached, so there is genuinely nothing to prove.
+    ///
+    /// The record probe is [`platform_fs::path_present`], never `Path::exists()`. `Ok(false)` here
+    /// means "this register owes no proof", so a record that is present but unstatable — an ACL, an
+    /// untraversable parent, a volume that went away — must not be able to produce it: the register
+    /// would then owe nothing, the stamp would report `NoRecord` for the same reason, and an
+    /// ordinary admission would commit an armed member over a durable record it never proved.
     pub(crate) fn durable_intent_present(
         &self,
         store_key: &str,
@@ -564,9 +570,11 @@ impl DaemonState {
     ) -> std::result::Result<bool, String> {
         match self.intent_store_readonly()? {
             None => Ok(false),
-            Some(store) => Ok(store
-                .path_for(&IntentId::derive(store_key, session_id, address))
-                .exists()),
+            Some(store) => {
+                let path = store.path_for(&IntentId::derive(store_key, session_id, address));
+                platform_fs::path_present(&path)
+                    .map_err(|e| format!("checking {}: {e}", path.display()))
+            }
         }
     }
 
@@ -633,8 +641,18 @@ impl DaemonState {
             Err(e) => return LiveIntentLookup::Unavailable(e),
         };
         let id = IntentId::derive(&key.store_key, &key.session_id, &key.address);
-        if !store.path_for(&id).exists() {
-            return LiveIntentLookup::Absent;
+        // `Absent` is the answer that lets the downgrade through, so it is owed a proof of absence.
+        // `Path::exists()` gave it away for a record it merely could not stat, which fails the
+        // guard **open** for exactly the record it is meant to protect.
+        match platform_fs::path_present(&store.path_for(&id)) {
+            Ok(true) => {}
+            Ok(false) => return LiveIntentLookup::Absent,
+            Err(e) => {
+                return LiveIntentLookup::Unavailable(format!(
+                    "checking {}: {e}",
+                    store.path_for(&id).display()
+                ))
+            }
         }
         match store.load(&id) {
             Ok(intent) if intent.is_reconcilable() => LiveIntentLookup::Live(Box::new(intent)),
@@ -855,7 +873,10 @@ pub fn store_selector_for_key(store_key: &str) -> std::result::Result<StoreSelec
 ///
 /// A missing SQLite file or an unconfigured profile marks the intent `Unverifiable`; reconciliation
 /// must never bring a store into existence as a side effect of restoring a handler.
-async fn backend_open_existing_only(
+///
+/// `pub(super)` so the daemon's own test module can pin the missing-versus-unreadable distinction
+/// below directly; it has no other caller outside this module.
+pub(super) async fn backend_open_existing_only(
     state: &Arc<DaemonState>,
     store_key: &str,
 ) -> std::result::Result<Arc<dyn Backend>, String> {
@@ -864,8 +885,15 @@ async fn backend_open_existing_only(
     }
     #[cfg(feature = "sqlite")]
     if let Some(path) = store_key.strip_prefix("sqlite:") {
-        if !Path::new(path).exists() {
-            return Err("store_missing".to_string());
+        // Only a proven absence is `store_missing`, because that code is **terminal**: it parks the
+        // intent on the hour-long quarantine cadence on the reasoning that a store which does not
+        // exist will not start existing. A store file whose metadata could not be read is the
+        // opposite kind of condition — a lock, an ACL, a mount that came back — so it takes the
+        // ordinary retry ladder with every other transient backend failure.
+        match platform_fs::path_present(Path::new(path)) {
+            Ok(true) => {}
+            Ok(false) => return Err("store_missing".to_string()),
+            Err(e) => return Err(format!("store_unreadable: {e}")),
         }
     }
     match state.backend_for(store_key).await {

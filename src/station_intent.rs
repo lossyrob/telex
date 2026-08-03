@@ -177,6 +177,19 @@ impl From<platform_fs::FsError> for IntentError {
 
 pub type Result<T> = std::result::Result<T, IntentError>;
 
+/// Existence of one path in this module's error type, with the path in the message.
+///
+/// Never `Path::exists()`. Every existence question in this module is an authority question — "does
+/// this binding already have a durable record?", "is there still a record to revoke?", "has the
+/// producer's credential really gone?" — and `exists()` answers *no* for a record that is sitting
+/// right there behind an ACL, a broken mount, or an untraversable parent. That answer routes the
+/// caller down the "this binding is new / this record is gone" branch, which is the branch that
+/// commits, deletes, or overwrites. See [`platform_fs::path_present`].
+fn path_present(path: &Path) -> Result<bool> {
+    platform_fs::path_present(path)
+        .map_err(|e| IntentError::Io(format!("checking {}: {e}", path.display())))
+}
+
 // ---------------------------------------------------------------------------------------------
 // Identity
 // ---------------------------------------------------------------------------------------------
@@ -900,9 +913,14 @@ impl IntentStore {
 
     /// Open the scope **without** creating it, for read-only paths that must not have a side
     /// effect (e.g. a status projection on a host that never attached).
+    ///
+    /// `Ok(None)` means the scope directory provably is not there. A root whose existence could not
+    /// be decided is `Err`, not `Ok(None)`: callers treat "no scope" as "this host never attached,
+    /// so no binding here has a durable record", and handing them that answer for a scope full of
+    /// records they simply could not see is how an unreadable scope becomes a silent green light.
     pub fn open_existing(run_dir: &Path, singleton_hash: &str) -> Result<Option<Self>> {
         let root = run_dir.join("intents").join(singleton_hash);
-        if !root.exists() {
+        if !path_present(&root)? {
             return Ok(None);
         }
         Self::open(run_dir, singleton_hash).map(Some)
@@ -1019,7 +1037,7 @@ impl IntentStore {
         intent.validate()?;
         let id = intent.id();
         let path = self.path_for(&id);
-        if !path.exists() {
+        if !path_present(&path)? {
             let count = self.list_ids()?.len();
             if count >= STATION_INTENT_MAX_COUNT {
                 return Err(IntentError::CapExceeded {
@@ -1055,7 +1073,9 @@ impl IntentStore {
 
     fn write_cas_locked(&self, expected_generation: u64, intent: &StationIntentV1) -> Result<bool> {
         let id = intent.id();
-        if !self.path_for(&id).exists() {
+        // An undecidable existence here would otherwise take the `expected_generation == 0` branch
+        // and *create* — overwriting a record the caller could not see rather than losing the CAS.
+        if !path_present(&self.path_for(&id))? {
             if expected_generation == 0 {
                 self.write_atomic(intent)?;
                 return Ok(true);
@@ -1199,7 +1219,13 @@ impl IntentStore {
         now_ms: i64,
     ) -> Result<ArmedProofStamp> {
         let id = IntentId::derive(store_key, session_id, address);
-        if !self.path_for(&id).exists() {
+        // `NoRecord` is a *proof of absence*, because the caller treats it as "this binding never
+        // had a durable record, so there is nothing to prove and the register may commit". An
+        // existence check that answers `false` for a record it merely could not stat therefore
+        // hands an ordinary admission exactly the wrong answer about a record that is really there.
+        // Undecidable existence is an error, which `stamp_intent_armed` classifies `RecordUnusable`
+        // and the admission table refuses whether or not a proof was owed.
+        if !path_present(&self.path_for(&id))? {
             return Ok(ArmedProofStamp::NoRecord);
         }
         let mut already = None;
@@ -1230,11 +1256,13 @@ impl IntentStore {
             },
             // The record vanished between the existence check and the locked load. That is exactly
             // the rollback race, and it must surface as "no record" rather than as an I/O error the
-            // caller might classify as transient.
-            Err(IntentError::Io(detail)) if !self.path_for(&id).exists() => {
-                let _ = detail;
-                Ok(ArmedProofStamp::NoRecord)
-            }
+            // caller might classify as transient. Only a *proven* absence earns the remap: if the
+            // re-check cannot decide either, the original failure stands, because downgrading an
+            // unreadable record to `NoRecord` is the same fail-open this whole path exists to close.
+            Err(IntentError::Io(detail)) => match path_present(&self.path_for(&id)) {
+                Ok(false) => Ok(ArmedProofStamp::NoRecord),
+                _ => Err(IntentError::Io(detail)),
+            },
             Err(e) => Err(e),
         }
     }
@@ -1284,7 +1312,9 @@ impl IntentStore {
         now_ms: i64,
     ) -> Result<bool> {
         let id = IntentId::derive(store_key, session_id, address);
-        if !self.path_for(&id).exists() {
+        // `Ok(false)` is "there is nothing here to revoke", which every caller treats as success.
+        // A record that could not be stat'd has not been revoked, so it must not report that.
+        if !path_present(&self.path_for(&id))? {
             return Ok(false);
         }
         let updated = self.update_locked(&id, |intent| {
@@ -1499,7 +1529,11 @@ impl IntentStore {
 
     fn read_cursor(&self) -> Result<ScanCursor> {
         let path = self.root.join(SCAN_CURSOR_FILE);
-        if !path.exists() {
+        // Only a proven absence short-circuits. This is the one existence check in the module that
+        // is *not* an authority question — the cursor is a scheduling hint, and the read below
+        // already defaults on failure — so an undecidable answer simply falls through to it rather
+        // than failing the pass.
+        if matches!(platform_fs::path_present(&path), Ok(false)) {
             return Ok(ScanCursor::default());
         }
         // A corrupt or unreadable cursor is a scheduling hint, not authority: restart from the
@@ -1678,7 +1712,7 @@ impl IntentStore {
         {
             return Some("terminal intent past its TTL".to_string());
         }
-        if !intent.producer.credential.path.exists()
+        if credential_provably_absent(&intent.producer.credential.path)
             && unproven_ms > STATION_INTENT_CREDENTIAL_MISSING_TTL.as_millis() as i64
         {
             return Some("credential file has been gone past its TTL".to_string());
@@ -1730,6 +1764,18 @@ fn sort_position(key: &IntentSortKey) -> String {
         "{}\u{1f}{}\u{1f}{:020}\u{1f}{}",
         key.store_key, key.address, key.generation_desc, key.id
     )
+}
+
+/// Is the producer's credential file **provably** gone?
+///
+/// The GC reason this feeds is the one that deletes a *finalized* record, and deletion is the one
+/// GC action recovery cannot undo. So the question has to be asked in the direction that only a
+/// positive `NotFound` can answer: a credential whose metadata could not be read is a permissions,
+/// mount, or antivirus condition — the bridge registry lives in a directory telex shares with an
+/// external producer — and treating it as "gone" would have GC destroy the durable proof of a
+/// binding that is delivering right now, on evidence that is really "I could not look".
+fn credential_provably_absent(path: &Path) -> bool {
+    matches!(platform_fs::path_present(path), Ok(false))
 }
 
 fn file_age_ms(path: &Path, now_ms: i64) -> Option<i64> {
@@ -2438,6 +2484,247 @@ mod tests {
         assert!(
             stamped.is_err(),
             "an unreadable record must not report a durable proof, got {stamped:?}"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// The narrower, nastier shape of the same rule: a record that cannot be **stat'd**.
+    ///
+    /// `NoRecord` is consumed by the daemon as a proof of *absence* — "this binding never had a
+    /// durable record, so an ordinary admission may commit" — and `Path::exists()` produced exactly
+    /// that answer for a record that is on disk but whose metadata the platform refuses to hand
+    /// over. The record is there, its contents are never consulted, and the register commits.
+    ///
+    /// The error is injected rather than provoked: `chmod 000` is a no-op under a root test runner
+    /// and has no Windows equivalent, a deny-ACE has no Unix equivalent, and neither is the
+    /// behavior under test. What is under test is that the answer *is an error*, so only a proven
+    /// `NotFound` may become `NoRecord`.
+    #[test]
+    fn an_unstatable_record_is_never_reported_as_no_record() {
+        let run_dir = temp_run_dir("armed-proof-unstatable");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+
+        let mut pending = sample_intent("sqlite:/a", "sess", "addr");
+        pending.state = IntentRecoveryState::Pending;
+        store.write_pending(&pending).expect("write pending");
+
+        let path = store.path_for(&pending.id());
+        let fault = platform_fs::stat_faults::Unstatable::new(&path);
+        let stamped = store.stamp_armed_proof("sqlite:/a", "sess", "addr", "inst-1", 2_000);
+        assert!(
+            stamped.is_err(),
+            "a record whose existence could not be decided must not be reported as absent, got {stamped:?}"
+        );
+
+        // The record is intact and unarmed: the refusal wrote nothing.
+        drop(fault);
+        assert!(!store.load(&pending.id()).expect("reload").is_armed());
+
+        // The control: a binding that genuinely has no record still reports `NoRecord`, so this is
+        // a distinction the stamp draws rather than a blanket failure.
+        assert_eq!(
+            store
+                .stamp_armed_proof("sqlite:/a", "sess", "never-attached", "inst-1", 4_000)
+                .expect("no record"),
+            ArmedProofStamp::NoRecord
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// The `NoRecord` remap on the *second* look is owed the same proof.
+    ///
+    /// `stamp_armed_proof` deliberately converts "the locked load failed with I/O and the file is
+    /// now gone" into `NoRecord`, because that is the concurrent-rollback race rather than a real
+    /// failure. The re-check has to be a *proof* of absence for the same reason the entry check
+    /// does: a re-check that cannot decide must leave the original I/O failure standing, or the
+    /// remap becomes a laundry for exactly the unreadable record the entry check now refuses.
+    ///
+    /// Both halves are driven through the real race: the per-intent write lock is held, so the
+    /// locked load fails with I/O after the entry check has already passed.
+    #[test]
+    fn the_vanished_record_remap_requires_a_proven_absence() {
+        let run_dir = temp_run_dir("armed-proof-remap");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+
+        let mut pending = sample_intent("sqlite:/a", "sess", "addr");
+        pending.state = IntentRecoveryState::Pending;
+        store.write_pending(&pending).expect("write pending");
+        let path = store.path_for(&pending.id());
+        let lock = store
+            .root()
+            .join(format!("{}{INTENT_LOCK_SUFFIX}", pending.id().file_name()));
+
+        // A held lock makes the locked load fail with I/O, and the record really is deleted while
+        // the stamp is waiting for it — the rollback race the remap exists for.
+        std::fs::write(&lock, b"held by another writer").expect("hold the lock");
+        let racing_path = path.clone();
+        let deleter = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            std::fs::remove_file(&racing_path).expect("the concurrent rollback deletes the record");
+        });
+        let stamped = store.stamp_armed_proof("sqlite:/a", "sess", "addr", "inst-1", 2_000);
+        deleter.join().expect("deleter");
+        assert_eq!(
+            stamped.expect("a record that provably went away is NoRecord"),
+            ArmedProofStamp::NoRecord
+        );
+
+        // The same interleaving, except the re-check cannot decide. `after(.., 1)` lets the entry
+        // check answer truthfully and faults only the re-check, which is the decision under test.
+        std::fs::remove_file(&lock).expect("release the lock between the two halves");
+        store.write_pending(&pending).expect("rewrite pending");
+        std::fs::write(&lock, b"held by another writer").expect("hold the lock again");
+        let _fault = platform_fs::stat_faults::Unstatable::after(&path, 1);
+        assert!(
+            store
+                .stamp_armed_proof("sqlite:/a", "sess", "addr", "inst-1", 2_000)
+                .is_err(),
+            "an undecidable re-check must not launder an I/O failure into 'nothing to prove'"
+        );
+        let _ = std::fs::remove_file(&lock);
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// A scope root that cannot be stat'd is not an empty scope.
+    ///
+    /// `open_existing` is the read path for every "does this host have durable records?" question,
+    /// and `Ok(None)` is how it says "this host never attached". Answering that for a scope whose
+    /// root merely could not be read is the same fail-open one directory higher.
+    #[test]
+    fn an_unstatable_scope_root_is_an_error_not_an_absent_scope() {
+        let run_dir = temp_run_dir("scope-root-unstatable");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let mut pending = sample_intent("sqlite:/a", "sess", "addr");
+        pending.state = IntentRecoveryState::Pending;
+        store.write_pending(&pending).expect("write pending");
+
+        let root = run_dir.join("intents").join("hash");
+        let fault = platform_fs::stat_faults::Unstatable::new(&root);
+        assert!(
+            IntentStore::open_existing(&run_dir, "hash").is_err(),
+            "an unreadable scope root must fail closed rather than report an empty scope"
+        );
+        drop(fault);
+
+        assert!(
+            IntentStore::open_existing(&run_dir, "hash")
+                .expect("readable scope")
+                .is_some(),
+            "and the readable scope still opens"
+        );
+        assert!(
+            IntentStore::open_existing(&run_dir, "never-used-hash")
+                .expect("absent scope")
+                .is_none(),
+            "while a scope that provably does not exist is still `None`"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// "Nothing here to revoke" is a success every caller believes.
+    ///
+    /// `revoke` returning `Ok(false)` means the binding has no record, and the session-end and
+    /// detach paths treat that as "done". A record that could not be stat'd has not been revoked,
+    /// so reporting it that way retires a live intent in the daemon's bookkeeping while the durable
+    /// record keeps saying the station is armed.
+    #[test]
+    fn an_unstatable_record_cannot_be_reported_as_nothing_to_revoke() {
+        let run_dir = temp_run_dir("revoke-unstatable");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let intent = sample_intent("sqlite:/a", "sess", "addr");
+        store.write_atomic(&intent).expect("write");
+
+        let fault = platform_fs::stat_faults::Unstatable::new(store.path_for(&intent.id()));
+        assert!(
+            store.revoke("sqlite:/a", "sess", "addr", 1_000).is_err(),
+            "an undecidable record must not report 'there was nothing to revoke'"
+        );
+        drop(fault);
+
+        assert!(
+            store
+                .revoke("sqlite:/a", "sess", "addr", 1_000)
+                .expect("revoke"),
+            "the readable record still revokes"
+        );
+        assert!(
+            !store
+                .revoke("sqlite:/a", "sess", "never-attached", 1_000)
+                .expect("absent"),
+            "and a binding that provably has no record is still an honest `false`"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// GC's credential rule deletes a finalized record, and deletion is the one GC action recovery
+    /// cannot undo — so "the credential is gone" has to be *proven*.
+    ///
+    /// The credential is the bridge registry, which lives in a directory telex shares with an
+    /// external producer: an antivirus lock, a permissions change, or a mount that hiccupped is a
+    /// metadata failure, not a deletion. `Path::exists()` reported all three as "gone", and GC then
+    /// destroyed the durable proof of a binding that may be delivering right now.
+    #[test]
+    fn gc_keeps_a_record_whose_credential_could_not_be_stat_ed() {
+        let run_dir = temp_run_dir("gc-credential-unstatable");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let credential = run_dir.join("cred.json");
+        std::fs::write(&credential, b"{\"secret\":\"x\"}").expect("credential");
+
+        // The shape the credential rule collects: finalized, unproven for longer than the TTL.
+        let mut intent = sample_intent("sqlite:/a", "sess", "addr");
+        intent.created_at_ms = 0;
+        intent.updated_at_ms = 0;
+        intent.producer.credential.path = credential.clone();
+        store.write_atomic(&intent).expect("write");
+        let now = STATION_INTENT_CREDENTIAL_MISSING_TTL.as_millis() as i64 + 60_000;
+
+        let fault = platform_fs::stat_faults::Unstatable::new(&credential);
+        let report = store.gc(now, Some("host"), Some("boot")).expect("gc");
+        assert!(
+            !report.removed.contains(&intent.id()),
+            "a credential telex could not look at is not a credential that is gone, got {:?}",
+            report.reasons
+        );
+        drop(fault);
+
+        // And the rule still fires for a credential that provably is not there, so the guard did
+        // not simply disable it.
+        std::fs::remove_file(&credential).expect("delete the credential");
+        let report = store.gc(now, Some("host"), Some("boot")).expect("gc");
+        assert!(
+            report.removed.contains(&intent.id()),
+            "a credential that is provably gone past its TTL must still expire, got {:?}",
+            report.reasons
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// A compare-and-set must lose, not **create**, when it cannot see the record.
+    ///
+    /// `write_cas` treats "no record" plus `expected_generation == 0` as "create it". An existence
+    /// check that answered `false` for an unreadable record therefore turned a lost CAS into an
+    /// unconditional overwrite of a record the caller never read.
+    #[test]
+    fn a_cas_against_an_unstatable_record_fails_rather_than_creating_one() {
+        let run_dir = temp_run_dir("cas-unstatable");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let existing = sample_intent("sqlite:/a", "sess", "addr");
+        store.write_atomic(&existing).expect("write");
+
+        let mut replacement = existing.clone();
+        replacement.generation = 0;
+        replacement.occupant = "usurper".to_string();
+
+        let fault = platform_fs::stat_faults::Unstatable::new(store.path_for(&existing.id()));
+        assert!(
+            store.write_cas(0, &replacement).is_err(),
+            "an undecidable record must not be treated as a free slot to create into"
+        );
+        drop(fault);
+        assert_eq!(
+            store.load(&existing.id()).expect("reload").occupant,
+            existing.occupant,
+            "and the record it could not see is untouched"
         );
         let _ = std::fs::remove_dir_all(&run_dir);
     }

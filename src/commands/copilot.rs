@@ -1471,6 +1471,22 @@ fn drain_enabled() -> bool {
     )
 }
 
+/// May the drain skip the daemon entirely because this session provably has no bridge registry?
+///
+/// Only a **proven** absence takes the fast path. `Path::exists()` answered "no bridge" for a
+/// registry it merely could not stat — an antivirus lock, a permissions change on the shared bridge
+/// root, a profile on a network volume — and the drain then silently returned `no_bridge` for a
+/// session with deferred pushes waiting, on every turn stop, for as long as the condition lasted.
+/// An undecidable answer costs one daemon round-trip and nothing else, so it is the cheap side to
+/// be wrong on.
+fn no_bridge_fast_path(registry_path: Result<PathBuf>) -> bool {
+    match registry_path {
+        Ok(path) => matches!(crate::platform_fs::path_present(&path), Ok(false)),
+        // The path could not even be derived, so there is no registry to consult either way.
+        Err(_) => true,
+    }
+}
+
 /// `telex copilot drain`: the dedicated, ungated `agentStop` drain trigger (issue #65). On turn
 /// stop it asks the daemon to re-attempt messages this session deferred while the bridge was busy.
 /// Independent of `TELEX_TURN_GUARD`/nudge caps, but honors its own `TELEX_COPILOT_DRAIN`
@@ -1504,10 +1520,7 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
     // Fast path: a session that never provisioned a bridge has no registry file and therefore no
     // possible deferred pushes, so skip the daemon round-trip entirely. This keeps the drain a true
     // no-op for pull-only / non-bridge sessions, which run this hook on every turn-stop too.
-    if !bridge_registry_path(&session)
-        .map(|p| p.exists())
-        .unwrap_or(false)
-    {
+    if no_bridge_fast_path(bridge_registry_path(&session)) {
         print_json(
             &serde_json::json!({"drain": false, "session_id": session, "outcome": "no_bridge"}),
         );
@@ -3919,6 +3932,39 @@ mod tests {
                 .unwrap_or_else(|| panic!("missing ordered segment {needle:?} in {text:?}"));
             remainder = after;
         }
+    }
+
+    /// The turn-stop drain skips the daemon only for a registry that is **provably** not there.
+    ///
+    /// `exists()` reported "no bridge" for a registry it merely could not stat, so a session with
+    /// deferred pushes waiting got a silent `no_bridge` on every turn stop for as long as the
+    /// condition lasted — the drain hook disabling itself for exactly the sessions it serves.
+    #[test]
+    fn an_unstatable_bridge_registry_does_not_report_no_bridge() {
+        let dir = std::env::temp_dir().join(format!(
+            "telex-drain-fastpath-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or_default()
+        ));
+        std::fs::create_dir_all(&dir).expect("temp dir");
+        let registry = dir.join("session.json");
+
+        // Provable absence still takes the fast path — the no-op for pull-only sessions is the
+        // whole reason it exists.
+        assert!(no_bridge_fast_path(Ok(registry.clone())));
+
+        std::fs::write(&registry, b"{}").expect("write registry");
+        assert!(!no_bridge_fast_path(Ok(registry.clone())));
+
+        let _fault = crate::platform_fs::stat_faults::Unstatable::new(&registry);
+        assert!(
+            !no_bridge_fast_path(Ok(registry.clone())),
+            "a registry telex could not stat is not a session without a bridge"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

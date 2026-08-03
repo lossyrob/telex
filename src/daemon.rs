@@ -6265,7 +6265,10 @@ mod p3_tests {
     /// Drive one arming register up to its commit gate, run `interleave` while it is parked there,
     /// then let it finish. The register is paused *after* every fallible step and *before* the
     /// proof commit, which is exactly the window a concurrent attach rollback lands in.
-    async fn register_push_with_interleave<F>(
+    ///
+    /// Whatever `interleave` returns is held alive until the register has completed, so a scoped
+    /// guard (an RAII filesystem fault, say) covers the proof commit rather than only the closure.
+    async fn register_push_with_interleave<F, T>(
         state: &Arc<DaemonState>,
         store: &str,
         session: &str,
@@ -6273,7 +6276,7 @@ mod p3_tests {
         interleave: F,
     ) -> Response
     where
-        F: FnOnce(),
+        F: FnOnce() -> T,
     {
         let control = Arc::new(DeliveryAdmissionTestControl::new());
         *state.delivery_admission_control.lock().unwrap() = Some(control.clone());
@@ -6289,13 +6292,14 @@ mod p3_tests {
         )
         .await
         .expect("arming register reached its commit gate");
-        interleave();
+        let held = interleave();
         control.release_commit(DeliveryAdmissionKind::Register);
 
         let response = tokio::time::timeout(Duration::from_secs(5), task)
             .await
             .expect("arming register completed")
             .expect("register task joined");
+        drop(held);
         *state.delivery_admission_control.lock().unwrap() = None;
         response
     }
@@ -6526,6 +6530,230 @@ mod p3_tests {
                 ))
                 .is_err(),
             "and it must not invent a record either"
+        );
+    }
+
+    /// The whole point of the previous test, held apart from the failure this one pins: **absence**
+    /// is what commits, and absence has to be *proven*.
+    ///
+    /// `Path::exists()` answers `false` for a record it could not stat — an ACL, an untraversable
+    /// parent, a volume that went away — so an existing record that had become invisible read as
+    /// "this binding is new": the up-front observation said no proof was owed, the stamp said
+    /// `NoRecord` for the same reason, and the admission table then *committed* an armed member
+    /// over a durable record it had never proven anything about. The register reported a durable
+    /// push registration, and the record on disk — possibly a `live` one mid-reconcile — was
+    /// neither armed nor consulted.
+    ///
+    /// Scheduled at the exact interleaving that makes it worst: nothing exists when the register
+    /// makes its `owes` observation (so `owes_armed_proof == false`, the permissive column of the
+    /// admission table), and the record appears and becomes unstatable while the register is parked
+    /// at its commit gate. `RecordUnusable` is the one outcome that refuses in *both* columns, so
+    /// this must be a refusal.
+    #[tokio::test]
+    async fn an_unstatable_record_refuses_an_arming_register_that_owed_no_proof() {
+        let state = test_state("arming-proof-unstatable-record");
+        let store = store_key("arming-proof-unstatable-record");
+        let scope = intent_scope(&state);
+        let id = crate::station_intent::IntentId::derive(&store, "s1", "addr:a");
+        assert!(
+            !scope.path_for(&id).exists(),
+            "precondition: the register must observe no record, so it owes no proof"
+        );
+
+        let racing_scope = scope.clone();
+        let racing_store = store.clone();
+        let racing_hash = state.paths.singleton_hash.clone();
+        let faulted_path = scope.path_for(&id);
+        let response = register_push_with_interleave(&state, &store, "s1", "addr:a", move || {
+            // A record for this binding appears after the observation — a concurrent attach, a
+            // resume, an operator restore — and its metadata then becomes unreadable.
+            let appeared = crate::intent_test_support::pending_intent(
+                &racing_store,
+                "s1",
+                "addr:a",
+                &racing_hash,
+            );
+            racing_scope
+                .write_pending(&appeared)
+                .expect("the record appears after the owes observation");
+            crate::platform_fs::stat_faults::Unstatable::new(faulted_path)
+        })
+        .await;
+
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(
+            state.get_member(&store, "s1", "addr:a").is_none(),
+            "an unprovable record must not leave an armed member behind"
+        );
+        let record = scope
+            .load(&id)
+            .expect("the refused register must leave the record it could not read alone");
+        assert!(
+            !record.is_armed(),
+            "and it must not have claimed a proof it never wrote"
+        );
+
+        // The control, on the same state and the same binding: with the fault gone the record is
+        // visible again, so the identical register now succeeds *and* stamps its proof. The refusal
+        // above was caused by the unreadable record and by nothing else about this scenario.
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "a readable record must still register, got {response:?}"
+        );
+        assert!(
+            scope.load(&id).expect("reload").is_armed(),
+            "and the register that succeeded must have left its durable proof"
+        );
+    }
+
+    /// The same collapse one step earlier, in the observation itself.
+    ///
+    /// `durable_intent_present` answers "does this register owe a proof?". An existing record it
+    /// could not stat used to answer `false` — no proof owed — which is the permissive column of
+    /// the admission table for every subsequent outcome. Undecidable existence is now an error, and
+    /// the register fails closed exactly as it does for an unreadable scope.
+    #[tokio::test]
+    async fn an_unstatable_record_makes_an_arming_register_fail_closed_up_front() {
+        let state = test_state("arming-proof-unstatable-observation");
+        let store = store_key("arming-proof-unstatable-observation");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+
+        let _fault = crate::platform_fs::stat_faults::Unstatable::new(scope.path_for(&id));
+        assert!(
+            state
+                .durable_intent_present(&store, "s1", "addr:a")
+                .is_err(),
+            "an undecidable record must not be reported as 'this binding has no record'"
+        );
+
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(
+            state.get_member(&store, "s1", "addr:a").is_none(),
+            "a register that could not tell whether it owes a proof must commit nothing"
+        );
+    }
+
+    /// A scope whose *root* cannot be stat'd is not an empty scope.
+    ///
+    /// `open_existing` returns `Ok(None)` for "this host never attached", which every read path
+    /// treats as "no binding here has a durable record". Handing that answer to a scope full of
+    /// records the daemon merely could not see is the same fail-open one directory higher up.
+    #[tokio::test]
+    async fn an_unstatable_scope_root_is_not_an_empty_scope() {
+        let state = test_state("arming-proof-unstatable-scope");
+        let store = store_key("arming-proof-unstatable-scope");
+        seed_pending_intent(&state, &store, "s1", "addr:a");
+
+        let _fault = crate::platform_fs::stat_faults::Unstatable::new(
+            state
+                .paths
+                .run_dir
+                .join("intents")
+                .join(&state.paths.singleton_hash),
+        );
+        assert!(
+            state
+                .durable_intent_present(&store, "s1", "addr:a")
+                .is_err(),
+            "an unreadable scope root must fail closed, not report an empty scope"
+        );
+
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(state.get_member(&store, "s1", "addr:a").is_none());
+    }
+
+    /// The anti-downgrade guard is the other consumer of the same question, and it fails open in
+    /// the same way.
+    ///
+    /// A pull-only registration over a binding that has a durable push intent must be refused. The
+    /// guard re-reads the manifest precisely because the cached index is empty in the
+    /// daemon-replacement window it protects — and then `Path::exists()` handed it `Absent` for a
+    /// record it could not stat, which is the one answer that lets the downgrade through.
+    #[tokio::test]
+    async fn an_unstatable_record_refuses_a_pull_only_downgrade_rather_than_allowing_it() {
+        let state = test_state("anti-downgrade-unstatable-record");
+        let store = store_key("anti-downgrade-unstatable-record");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+
+        let key = reconcile::IntentKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        let fault = crate::platform_fs::stat_faults::Unstatable::new(scope.path_for(&id));
+        assert!(
+            matches!(
+                state.lookup_live_intent(&key),
+                reconcile::LiveIntentLookup::Unavailable(_)
+            ),
+            "a record the guard could not stat must be 'unavailable', never 'absent'"
+        );
+
+        let response = request(state.clone(), register_req(&store, "s1", "addr:a")).await;
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(
+            state.get_member(&store, "s1", "addr:a").is_none(),
+            "a pull-only member must not be created over a record the guard could not read"
+        );
+
+        // And a scope the guard *can* read still admits the pull-only registration: absence is
+        // proven here, not assumed.
+        drop(fault);
+        assert!(
+            matches!(
+                state.lookup_live_intent(&key),
+                reconcile::LiveIntentLookup::Absent
+            ),
+            "a readable non-live record is genuinely absent for the guard's purposes"
+        );
+        let response = request(state.clone(), register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "got {response:?}"
+        );
+    }
+
+    /// A store file whose metadata could not be read is **transient**, not terminal.
+    ///
+    /// `store_missing` parks the intent on the hour-long quarantine cadence, on the reasoning that
+    /// a store which does not exist will not start existing. `Path::exists()` handed that verdict
+    /// to a store file behind a lock, an ACL, or a mount that came back a second later — replacing
+    /// the published recovery bounds with an hour of silence for a condition that self-heals.
+    #[tokio::test]
+    async fn an_unreadable_sqlite_store_file_is_transient_not_terminal() {
+        let state = test_state("store-open-unstatable");
+        let store = store_key("store-open-unstatable");
+        let path = crate::daemon::test_support::store_path_from_key(&store).expect("sqlite path");
+
+        // Provable absence keeps its terminal verdict, which is what makes the other half a real
+        // distinction rather than a blanket downgrade.
+        assert!(!path.exists(), "precondition: nothing has opened the store");
+        let absent = reconcile::backend_open_existing_only(&state, &store).await;
+        assert!(
+            matches!(
+                absent.as_ref().err().map(String::as_str),
+                Some("store_missing")
+            ),
+            "an absent store keeps its terminal verdict, got {:?}",
+            absent.as_ref().err()
+        );
+
+        std::fs::write(&path, b"").expect("create the store file");
+        let _fault = crate::platform_fs::stat_faults::Unstatable::new(&path);
+        let unreadable = reconcile::backend_open_existing_only(&state, &store).await;
+        let detail = unreadable
+            .as_ref()
+            .err()
+            .cloned()
+            .unwrap_or_else(|| "opened a store it could not stat".to_string());
+        assert!(
+            detail.starts_with("store_unreadable"),
+            "an undecidable store file must take the retry ladder, got {detail:?}"
         );
     }
 

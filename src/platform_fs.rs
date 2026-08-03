@@ -165,6 +165,106 @@ fn sibling_tmp_path(path: &Path) -> PathBuf {
     ))
 }
 
+/// Does this path exist — with "could not tell" kept as its own answer.
+///
+/// [`Path::exists`] collapses *every* failure into `false`: an ACL that denies metadata, a
+/// directory the process may not traverse, a volume that went away, a name the platform rejects.
+/// That is precisely rule 1 of this module inverted — it turns "unverifiable" into a confident
+/// negative — and every authority-bearing decision that asks "is there a record here?" is a
+/// decision where the confident negative is the *unsafe* direction: an existing record that cannot
+/// be stat'd reads as no record at all, and the caller then does whatever it does when a binding is
+/// genuinely new.
+///
+/// So `Ok(false)` here is only ever a **positive** `NotFound` from the platform. Anything else is
+/// `Err`, and the caller decides which of its typed failure states that is. Callers that legitimately
+/// want a best-effort answer say so explicitly at the call site (`matches!(.., Ok(false))`,
+/// `unwrap_or(true)`) rather than inheriting it from the probe.
+pub fn path_present(path: &Path) -> Result<bool> {
+    #[cfg(test)]
+    if let Some(error) = stat_faults::injected(path) {
+        return Err(io_err("checking whether a path exists", error));
+    }
+    path.try_exists()
+        .map_err(|e| io_err("checking whether a path exists", e))
+}
+
+/// Test seam for the one condition a test cannot portably *produce*: a filesystem that answers
+/// "I cannot tell you whether this exists".
+///
+/// Every real way to induce it is platform-specific and flaky in CI — a Unix `chmod 000` on the
+/// parent directory is a no-op when the suite runs as root and has no Windows equivalent, a Windows
+/// deny-ACE has no Unix equivalent, and a path the platform rejects outright is a different error on
+/// each. The behavior under test is not "how does this platform deny metadata"; it is "what does
+/// telex do when the answer is an error", so the error is injected at the single function that asks.
+///
+/// Keyed by exact path and global (not thread-local) so it survives a multi-threaded runtime, and
+/// scoped by an RAII guard so a test cannot leak a fault into its neighbours.
+#[cfg(test)]
+pub(crate) mod stat_faults {
+    use std::collections::HashMap;
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, OnceLock};
+
+    struct Fault {
+        kind: std::io::ErrorKind,
+        /// Probes to answer truthfully before the fault starts applying. Exists because some rules
+        /// probe the same path twice — an entry check and a re-check after a failed load — and the
+        /// second one is a distinct decision that has to be pinned on its own.
+        skip: usize,
+    }
+
+    fn registry() -> &'static Mutex<HashMap<PathBuf, Fault>> {
+        static REGISTRY: OnceLock<Mutex<HashMap<PathBuf, Fault>>> = OnceLock::new();
+        REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    /// While this guard is alive, [`super::path_present`] fails for this exact path instead of
+    /// answering. Dropping it restores the real filesystem.
+    #[must_use = "the fault is only active while the guard is alive"]
+    #[derive(Debug)]
+    pub(crate) struct Unstatable(PathBuf);
+
+    impl Unstatable {
+        /// The common shape: an existing path whose metadata the platform refuses to hand over.
+        pub(crate) fn new(path: impl Into<PathBuf>) -> Self {
+            Self::install(path, std::io::ErrorKind::PermissionDenied, 0)
+        }
+
+        /// The same, but only from the `skip + 1`-th probe of this path onward.
+        pub(crate) fn after(path: impl Into<PathBuf>, skip: usize) -> Self {
+            Self::install(path, std::io::ErrorKind::PermissionDenied, skip)
+        }
+
+        fn install(path: impl Into<PathBuf>, kind: std::io::ErrorKind, skip: usize) -> Self {
+            let path = path.into();
+            registry()
+                .lock()
+                .unwrap()
+                .insert(path.clone(), Fault { kind, skip });
+            Self(path)
+        }
+    }
+
+    impl Drop for Unstatable {
+        fn drop(&mut self) {
+            registry().lock().unwrap().remove(&self.0);
+        }
+    }
+
+    pub(super) fn injected(path: &Path) -> Option<std::io::Error> {
+        let mut registry = registry().lock().unwrap();
+        let fault = registry.get_mut(path)?;
+        if fault.skip > 0 {
+            fault.skip -= 1;
+            return None;
+        }
+        Some(std::io::Error::new(
+            fault.kind,
+            format!("injected stat fault for {}", path.display()),
+        ))
+    }
+}
+
 /// Resolve `path` and prove it is strictly contained under `root`.
 ///
 /// Containment is decided on canonicalized paths (never a string prefix), `..` is rejected in the
@@ -1920,6 +2020,36 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).expect("temp dir");
         dir
+    }
+
+    /// The existence probe's whole contract: `Ok(false)` is a proof of absence and nothing else.
+    ///
+    /// `Path::exists()` collapses every failure into that same `false`, which is why every
+    /// authority-bearing existence check in telex goes through `path_present` instead. The fault is
+    /// injected because the real causes (a deny-ACE, an untraversable parent, a mount that went
+    /// away) are each platform-specific and none of them is what is being tested — the contract is.
+    #[test]
+    fn path_present_reports_absence_only_when_it_can_prove_it() {
+        let dir = temp_dir("path-present");
+        let present = dir.join("here.json");
+        std::fs::write(&present, b"{}").expect("write");
+        let absent = dir.join("not-here.json");
+
+        assert!(path_present(&present).expect("present"));
+        assert!(!path_present(&absent).expect("absent"));
+
+        // The condition `exists()` cannot report: the platform refused to answer.
+        let fault = stat_faults::Unstatable::new(&present);
+        assert!(
+            path_present(&present).is_err(),
+            "an undecidable answer is an error, never a confident 'no'"
+        );
+        drop(fault);
+        assert!(
+            path_present(&present).expect("restored"),
+            "and the fault is scoped: dropping the guard restores the real filesystem"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
