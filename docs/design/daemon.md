@@ -580,6 +580,10 @@ Responses:
 | `StationStopped` | station teardown summary: `store_key`, `session_id`, `address`, `detached`, `waiters_before`, `waiters_after`, remaining `live_waiters`, optional `message`/`lease_epoch` |
 | `Error` | `{ code, message, … }` — incl. **`NeedsAttach`** (the exchange does not know this session/address — the agent must explicitly `Register` then retry; never an implicit rebuild), `NotOwner`, `Unauthorized`, `Incompatible`, `Ambiguous` |
 
+`delivery_quarantine_v1` is optional and advertised. The daemon emits
+`DeliveryQuarantined` only when the peer advertised it; older peers receive a
+decodable `Incompatible` error after the same durable quarantine action.
+
 The `Message` frame carries `lease_epoch` (the delivery-ownership fence —
 [§11](#11-lease-epoch-fence-the-spine)). Delivery is **at-least-once**: the daemon EMITs the
 frame, the waiter **prints** it to stdout (**transport only**), and the **agent** issues an

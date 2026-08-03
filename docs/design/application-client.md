@@ -250,8 +250,10 @@ consume that transport delivery, and return a typed receive-specific quarantine
 outcome containing recipient, message ID, serialized bytes, frame limit, and
 continue-receiving guidance. This outcome is post-acceptance and MUST NOT use
 the pre-acceptance rejection taxonomy. Sender receipt refresh and state deltas
-MUST expose daemon quarantine provenance and MUST NOT report application
-recipient consumption as accepted. This legacy quarantine is an explicit
+MUST expose a sticky structural daemon-quarantine origin that supported
+application disposition APIs cannot mint, and MUST NOT report application
+recipient consumption as accepted even after a later workflow disposition.
+The latest ordinary workflow disposition remains a separate axis. This legacy quarantine is an explicit
 progress exception: the unrepresentable delivery is not handed to the
 application, but it cannot permanently block later receivable deliveries, and
 the durable evidence remains auditable after restart. Notification-only CC

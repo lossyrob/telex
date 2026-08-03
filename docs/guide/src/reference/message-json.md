@@ -76,7 +76,9 @@ telex ack --address <addr> --id <id> --session <session-id>
 
 - `message.json`: the flat delivered message (exit 0 only).
 - `delivery.json`: the envelope `{ message, delivery, status }` (exit 0 only).
-- `status.json`: `{ outcome, exit_code, detail, ... }` (always).
+- `status.json`: `{ outcome, exit_code, detail, quarantine?, ... }` (always).
+  Exit 6 stores its structured evidence in `quarantine` and removes any stale
+  `message.json`/`delivery.json`; it is not a delivered-message artifact.
 - `exit.code`: the integer exit code, written last as the completion marker.
 
 See [Exit codes](exit-codes.md).

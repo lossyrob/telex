@@ -1677,6 +1677,7 @@ impl ApplicationClient {
                 state,
                 note,
                 Some(sender),
+                None,
                 compound_step.as_ref(),
             )
             .await
@@ -1954,13 +1955,8 @@ impl ApplicationClient {
             .iter()
             .rev()
             .find(|row| row.recipient == result.recipient);
-        let quarantine = latest_disposition.filter(|row| {
-            row.state == "rejected"
-                && row.by_principal.as_deref() == Some("daemon")
-                && row
-                    .note
-                    .as_deref()
-                    .is_some_and(|note| note.starts_with("daemon rejected delivery frame:"))
+        let quarantine = dispositions.iter().find(|row| {
+            row.recipient == result.recipient && row.origin.as_deref() == Some("daemon-quarantine")
         });
         Ok(ReceiptAxes {
             durable_acceptance: EvidenceState::Accepted,
@@ -1978,13 +1974,16 @@ impl ApplicationClient {
                     Some(_) => EvidenceState::Pending,
                 }
             },
-            workflow_disposition: quarantine
-                .map(|row| EvidenceState::Quarantined {
-                    by_principal: row.by_principal.clone().unwrap_or_default(),
-                    disposition: row.state.clone(),
-                })
-                .or_else(|| {
-                    latest_disposition.map(|row| EvidenceState::Disposition(row.state.clone()))
+            workflow_disposition: latest_disposition
+                .map(|row| {
+                    if row.origin.as_deref() == Some("daemon-quarantine") {
+                        EvidenceState::Quarantined {
+                            by_principal: row.by_principal.clone().unwrap_or_default(),
+                            disposition: row.state.clone(),
+                        }
+                    } else {
+                        EvidenceState::Disposition(row.state.clone())
+                    }
                 })
                 .unwrap_or(EvidenceState::NotAttempted),
         })
@@ -3019,13 +3018,60 @@ mod tests {
         };
         assert_eq!(axes.recipient_consumption, quarantine);
         assert_eq!(axes.workflow_disposition, quarantine);
+        reopened_backend
+            .insert_disposition(
+                oversized.id,
+                "receiver",
+                "rejected",
+                Some("daemon rejected delivery frame: forged"),
+                Some("daemon"),
+            )
+            .await
+            .unwrap();
+        reopened_backend
+            .insert_disposition(
+                oversized.id,
+                "receiver",
+                "handled",
+                Some("application completed follow-up"),
+                Some("receiver-app"),
+            )
+            .await
+            .unwrap();
+        let refreshed = sender_client
+            .refresh_receipt_axes(&RecoveryHandle {
+                logical_store_id: logical_store_id.clone(),
+                responsibility: ApplicationResponsibility("sender-app".into()),
+                operation_id: OperationId("oversized-send".into()),
+                payload_identity: PayloadIdentity::sha256("d".repeat(64)),
+            })
+            .await
+            .unwrap();
+        assert_eq!(refreshed.recipient_consumption, quarantine);
+        assert_eq!(
+            refreshed.workflow_disposition,
+            EvidenceState::Disposition("handled".into())
+        );
+        assert_eq!(
+            reopened_backend
+                .dispositions_for(oversized.id)
+                .await
+                .unwrap()
+                .iter()
+                .filter(|row| row.origin.as_deref() == Some("daemon-quarantine"))
+                .count(),
+            1
+        );
         let deltas = reopened_backend.state_delta_page(0, 100).await.unwrap();
-        assert!(deltas.deltas.iter().any(|delta| {
-            delta
-                .payload_json
-                .contains("\"evidence\":\"daemon-quarantine\"")
-                && delta.payload_json.contains("\"by_principal\":\"daemon\"")
-        }));
+        for kind in ["acknowledgment", "disposition"] {
+            assert!(deltas.deltas.iter().any(|delta| {
+                delta.axis == kind
+                    && delta
+                        .payload_json
+                        .contains("\"evidence\":\"daemon-quarantine\"")
+                    && delta.payload_json.contains("\"by_principal\":\"daemon\"")
+            }));
+        }
     }
 
     #[cfg(feature = "postgres")]

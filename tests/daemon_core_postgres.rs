@@ -333,18 +333,16 @@ async fn application_client_schema_v3_operation_smoke() {
                     note.contains("serialized_bytes=") && note.contains("max_bytes=")
                 })
         }));
-    assert!(backend
-        .state_delta_page(0, 1_000)
-        .await
-        .unwrap()
-        .deltas
-        .iter()
-        .any(|delta| {
-            delta
-                .payload_json
-                .contains("\"evidence\":\"daemon-quarantine\"")
+    let quarantine_deltas = backend.state_delta_page(0, 1_000).await.unwrap();
+    for kind in ["acknowledgment", "disposition"] {
+        assert!(quarantine_deltas.deltas.iter().any(|delta| {
+            delta.axis == kind
+                && delta
+                    .payload_json
+                    .contains("\"evidence\":\"daemon-quarantine\"")
                 && delta.payload_json.contains("\"by_principal\":\"daemon\"")
         }));
+    }
     assert!(matches!(
         daemon
             .request(Request::Detach {
@@ -355,15 +353,18 @@ async fn application_client_schema_v3_operation_smoke() {
             .await,
         Response::Ack { .. }
     ));
+    let original_instance_id = daemon.instance_id().to_string();
     drop(daemon);
     let restarted = TestDaemon::new("pg-oversized-delivery-progress-restart");
+    assert_ne!(restarted.instance_id(), original_instance_id);
     assert!(matches!(
         restarted
             .register(&store_key, "pg-receiver-session", "pg-frame-recipient")
             .await,
         Response::Registered { .. }
     ));
-    assert!(backend
+    let restarted_backend = restarted.backend(&store_key).await.unwrap();
+    assert!(restarted_backend
         .dispositions_for(oversized_id)
         .await
         .unwrap()

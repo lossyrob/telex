@@ -330,6 +330,7 @@ pub trait Backend: Send + Sync {
         _state: &str,
         _note: Option<&str>,
         _by: Option<&str>,
+        _origin: Option<&str>,
         _compound_step: Option<&CompoundDispositionStep>,
     ) -> Result<(Option<DispositionRow>, DeliveryOutcome)> {
         bail!("application_disposition_with_ack: not supported by this backend")

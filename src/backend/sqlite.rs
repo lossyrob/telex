@@ -873,10 +873,14 @@ fn do_schema(c: &Connection) -> Result<()> {
             state        TEXT NOT NULL,
             note         TEXT,
             by_principal TEXT,
+            origin       TEXT,
             at_ms        INTEGER NOT NULL
         );
         CREATE INDEX IF NOT EXISTS dispositions_msg_idx ON dispositions(message_id, id);",
     )?;
+    if !has_column(c, "dispositions", "origin")? {
+        c.execute_batch("ALTER TABLE dispositions ADD COLUMN origin TEXT;")?;
+    }
 
     // deliveries: create with full v2 shape including consumed_at_ms.
     // If the table already exists (v0), add the new column.
@@ -1042,6 +1046,9 @@ fn ensure_v2_invariants(c: &Connection) -> Result<()> {
 
 fn ensure_v3_invariants(c: &Connection) -> Result<()> {
     ensure_v2_invariants(c)?;
+    if table_exists(c, "dispositions")? && !has_column(c, "dispositions", "origin")? {
+        c.execute_batch("ALTER TABLE dispositions ADD COLUMN origin TEXT;")?;
+    }
     c.execute_batch(
         "CREATE TABLE IF NOT EXISTS application_operations (
              logical_store_id           TEXT NOT NULL,
@@ -2845,11 +2852,7 @@ impl Backend for SqliteBackend {
         self.run(move |c| {
             with_immediate_transaction(c, |c| {
                 let now = advance_clock_hwm(c)?;
-                let quarantine = s == "rejected"
-                    && b.as_deref() == Some("daemon")
-                    && n.as_deref().is_some_and(|note| {
-                        note.starts_with("daemon rejected delivery frame:")
-                    });
+                let quarantine = false;
                 c.execute(
                     "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms) \
                      VALUES (?1,?2,?3,?4,?5,?6)",
@@ -2907,6 +2910,7 @@ impl Backend for SqliteBackend {
                     state: s,
                     note: n,
                     by_principal: b,
+                    origin: None,
                     at_ms: now,
                 })
             })
@@ -2925,6 +2929,7 @@ impl Backend for SqliteBackend {
         state: &str,
         note: Option<&str>,
         by: Option<&str>,
+        origin: Option<&str>,
         compound_step: Option<&CompoundDispositionStep>,
     ) -> Result<(Option<DispositionRow>, DeliveryOutcome)> {
         let recipient = recipient.to_string();
@@ -2932,6 +2937,7 @@ impl Backend for SqliteBackend {
         let state = state.to_string();
         let note = note.map(str::to_string);
         let by = by.map(str::to_string);
+        let origin = origin.map(str::to_string);
         let compound_step = compound_step.cloned();
         self.run(move |c| {
             with_immediate_transaction(c, |c| {
@@ -2970,15 +2976,11 @@ impl Backend for SqliteBackend {
                     }
                 }
                 let now = advance_clock_hwm(c)?;
-                let quarantine = state == "rejected"
-                    && by.as_deref() == Some("daemon")
-                    && note
-                        .as_deref()
-                        .is_some_and(|note| note.starts_with("daemon rejected delivery frame:"));
+                let quarantine = origin.as_deref() == Some("daemon-quarantine");
                 c.execute(
-                    "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms)
-                     VALUES (?1,?2,?3,?4,?5,?6)",
-                    params![message_id, recipient, state, note, by, now],
+                    "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, origin, at_ms)
+                     VALUES (?1,?2,?3,?4,?5,?6,?7)",
+                    params![message_id, recipient, state, note, by, origin, now],
                 )?;
                 let id = c.last_insert_rowid();
                 let mut outcome = if consumed_at_ms.is_some() {
@@ -3066,6 +3068,7 @@ impl Backend for SqliteBackend {
                         state,
                         note,
                         by_principal: by,
+                        origin,
                         at_ms: now,
                     }),
                     outcome,
@@ -3078,7 +3081,7 @@ impl Backend for SqliteBackend {
     async fn dispositions_for(&self, message_id: i64) -> Result<Vec<DispositionRow>> {
         self.run(move |c| {
             let mut stmt = c.prepare(
-                "SELECT id, message_id, recipient, state, note, by_principal, at_ms \
+                "SELECT id, message_id, recipient, state, note, by_principal, origin, at_ms \
                  FROM dispositions WHERE message_id=?1 ORDER BY id",
             )?;
             let rows = stmt
@@ -3090,7 +3093,8 @@ impl Backend for SqliteBackend {
                         state: r.get(3)?,
                         note: r.get(4)?,
                         by_principal: r.get(5)?,
-                        at_ms: r.get(6)?,
+                        origin: r.get(6)?,
+                        at_ms: r.get(7)?,
                     })
                 })?
                 .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -4309,6 +4313,32 @@ mod tests {
             .await
             .expect_err("future schema must be rejected");
         assert!(err.to_string().contains("newer than supported"));
+    }
+
+    #[tokio::test]
+    async fn current_v3_store_adds_missing_disposition_origin() {
+        let path = test_db_path("v3-missing-disposition-origin");
+        let backend = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        backend.init_schema().await.unwrap();
+        backend
+            .run(|c| {
+                c.execute_batch("ALTER TABLE dispositions DROP COLUMN origin;")?;
+                assert!(!has_column(c, "dispositions", "origin")?);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(backend);
+
+        let reopened = SqliteBackend::open(&path.to_string_lossy()).unwrap();
+        reopened.init_schema().await.unwrap();
+        reopened
+            .run(|c| {
+                assert!(has_column(c, "dispositions", "origin")?);
+                Ok(())
+            })
+            .await
+            .unwrap();
     }
 
     #[tokio::test]

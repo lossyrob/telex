@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS dispositions (
     state        text NOT NULL,
     note         text,
     by_principal text,
+    origin       text,
     at_ms        bigint NOT NULL
 );
 CREATE INDEX IF NOT EXISTS dispositions_msg_idx ON dispositions(message_id, id);
@@ -883,6 +884,7 @@ impl Backend for PgBackend {
                 "ALTER TABLE leases ADD COLUMN IF NOT EXISTS lease_epoch bigint;
                  ALTER TABLE leases ADD COLUMN IF NOT EXISTS owner_instance_id text;
                  ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS consumed_at_ms bigint;
+                 ALTER TABLE dispositions ADD COLUMN IF NOT EXISTS origin text;
                  CREATE TABLE IF NOT EXISTS clock_hwm (
                     id     integer PRIMARY KEY CHECK (id = 1),
                     hwm_ms bigint NOT NULL
@@ -1894,9 +1896,7 @@ impl Backend for PgBackend {
         let mut client = self.client().await?;
         let tx = client.transaction().await?;
         let now = pg_tx_advance_clock_hwm(&tx).await?;
-        let quarantine = state == "rejected"
-            && by == Some("daemon")
-            && note.is_some_and(|note| note.starts_with("daemon rejected delivery frame:"));
+        let quarantine = false;
         let id: i64 = tx
             .query_one(
                 "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms) \
@@ -1961,6 +1961,7 @@ impl Backend for PgBackend {
             state: state.to_string(),
             note: note.map(str::to_string),
             by_principal: by.map(str::to_string),
+            origin: None,
             at_ms: now,
         };
         tx.commit().await?;
@@ -1978,6 +1979,7 @@ impl Backend for PgBackend {
         state: &str,
         note: Option<&str>,
         by: Option<&str>,
+        origin: Option<&str>,
         compound_step: Option<&CompoundDispositionStep>,
     ) -> Result<(Option<DispositionRow>, DeliveryOutcome)> {
         let mut client = self.client().await?;
@@ -2022,14 +2024,12 @@ impl Backend for PgBackend {
         }
         let consumed_at_ms: Option<i64> = delivery.get("consumed_at_ms");
         let now = pg_tx_advance_clock_hwm(&tx).await?;
-        let quarantine = state == "rejected"
-            && by == Some("daemon")
-            && note.is_some_and(|note| note.starts_with("daemon rejected delivery frame:"));
+        let quarantine = origin == Some("daemon-quarantine");
         let id: i64 = tx
             .query_one(
-                "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms)
-                 VALUES ($1,$2,$3,$4,$5,$6) RETURNING id",
-                &[&message_id, &recipient, &state, &note, &by, &now],
+                "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, origin, at_ms)
+                 VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id",
+                &[&message_id, &recipient, &state, &note, &by, &origin, &now],
             )
             .await?
             .get("id");
@@ -2125,6 +2125,7 @@ impl Backend for PgBackend {
                 state: state.to_string(),
                 note: note.map(str::to_string),
                 by_principal: by.map(str::to_string),
+                origin: origin.map(str::to_string),
                 at_ms: now,
             }),
             outcome,
@@ -2135,7 +2136,7 @@ impl Backend for PgBackend {
         let client = self.client().await?;
         let rows = client
             .query(
-                "SELECT id, message_id, recipient, state, note, by_principal, at_ms \
+                "SELECT id, message_id, recipient, state, note, by_principal, origin, at_ms \
                  FROM dispositions WHERE message_id=$1 ORDER BY id",
                 &[&message_id],
             )
@@ -2149,6 +2150,7 @@ impl Backend for PgBackend {
                 state: r.get("state"),
                 note: r.get("note"),
                 by_principal: r.get("by_principal"),
+                origin: r.get("origin"),
                 at_ms: r.get("at_ms"),
             })
             .collect())

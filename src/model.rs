@@ -341,6 +341,7 @@ pub struct DispositionRow {
     pub state: String,
     pub note: Option<String>,
     pub by_principal: Option<String>,
+    pub origin: Option<String>,
     pub at_ms: i64,
 }
 

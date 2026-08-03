@@ -3581,12 +3581,26 @@ async fn handle_client(
         }
     };
 
-    let (response, action) = handle_request(state, request).await;
+    let supports_delivery_quarantine = hello
+        .capabilities
+        .iter()
+        .any(|capability| capability == proto::CAP_DELIVERY_QUARANTINE_V1);
+    let (response, action) =
+        handle_request_with_capabilities(state, request, supports_delivery_quarantine).await;
     write_json_line(&mut write_half, &response).await?;
     Ok(action)
 }
 
+#[allow(dead_code)]
 async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response, ClientAction) {
+    handle_request_with_capabilities(state, request, true).await
+}
+
+async fn handle_request_with_capabilities(
+    state: Arc<DaemonState>,
+    request: Request,
+    supports_delivery_quarantine: bool,
+) -> (Response, ClientAction) {
     let response = match request {
         Request::Ping => Response::Pong {
             protocol_version: current_protocol_version(),
@@ -3751,6 +3765,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 timeout_ms,
                 waiter_pid,
                 waiter_start_time,
+                supports_delivery_quarantine,
             )
             .await
         }
@@ -4672,6 +4687,7 @@ async fn wait_for_message(
     timeout_ms: Option<u64>,
     waiter_pid: Option<u32>,
     waiter_start_time: Option<u64>,
+    supports_delivery_quarantine: bool,
 ) -> Response {
     wait_for_message_with_idle_ttl(
         state,
@@ -4684,6 +4700,7 @@ async fn wait_for_message(
         timeout_ms,
         waiter_pid,
         waiter_start_time,
+        supports_delivery_quarantine,
         idle_ttl_duration(),
     )
     .await
@@ -4700,6 +4717,7 @@ async fn wait_for_message_with_idle_ttl(
     timeout_ms: Option<u64>,
     waiter_pid: Option<u32>,
     waiter_start_time: Option<u64>,
+    supports_delivery_quarantine: bool,
     idle_ttl: Duration,
 ) -> Response {
     if state.is_draining() {
@@ -4844,8 +4862,20 @@ async fn wait_for_message_with_idle_ttl(
             return proto::error_response(proto::ERROR_INCOMPATIBLE, e.to_string());
         }
     };
-    let mut reported_oversized_cc = BTreeSet::new();
+    let mut skipped_oversized_cc = BTreeSet::new();
     loop {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            state.record_waiter_exit(
+                &store_key,
+                &session_id,
+                &address,
+                WaiterOutcome::IdleTimeout,
+                Some(2),
+                None,
+                waiter_pid_for_status,
+            );
+            return Response::Timeout;
+        }
         let store_notification = state
             .store_notify(&store_key)
             .map(|notify| notify.notified_owned());
@@ -4936,6 +4966,9 @@ async fn wait_for_message_with_idle_ttl(
                     candidate.message.id
                 ));
             };
+            if notification_only && skipped_oversized_cc.contains(&delivery_id) {
+                continue;
+            }
             let snapshot_version = candidate.snapshot_version;
             let row = candidate.message;
             let current = match state.get_member(&store_key, &session_id, &address) {
@@ -5005,7 +5038,7 @@ async fn wait_for_message_with_idle_ttl(
                 }
                 Ok(len) => {
                     if notification_only {
-                        if reported_oversized_cc.insert(row.id) {
+                        if skipped_oversized_cc.insert(delivery_id) {
                             state.push_recent_error(
                                 "OversizedCcNotificationFrame",
                                 format!(
@@ -5031,6 +5064,7 @@ async fn wait_for_message_with_idle_ttl(
                             Disposition::Rejected.as_str(),
                             Some(&note),
                             Some("daemon"),
+                            Some("daemon-quarantine"),
                             None,
                         )
                         .await;
@@ -5082,12 +5116,22 @@ async fn wait_for_message_with_idle_ttl(
                         }
                     }
                     waiter_guard.suppress_abnormal_on_drop();
-                    return Response::DeliveryQuarantined {
-                        message_id: row.id,
-                        recipient: address.clone(),
-                        serialized_bytes: len,
-                        max_bytes: proto::MAX_JSONL_FRAME_BYTES,
-                        may_continue: true,
+                    return if supports_delivery_quarantine {
+                        Response::DeliveryQuarantined {
+                            message_id: row.id,
+                            recipient: address.clone(),
+                            serialized_bytes: len,
+                            max_bytes: proto::MAX_JSONL_FRAME_BYTES,
+                            may_continue: true,
+                        }
+                    } else {
+                        proto::error_response(
+                            proto::ERROR_INCOMPATIBLE,
+                            format!(
+                                "message {} exceeds the peer response limit; its unchanged delivery was quarantined",
+                                row.id
+                            ),
+                        )
                     };
                 }
                 Err(e) => {
@@ -8956,18 +9000,77 @@ mod p3_tests {
             "controls": "\u{0000}\u{0001}\n\r\t".repeat(2_048),
         })
         .to_string();
-        let near_limit = NewMessage {
+        let worst_recipient = "\\\"\u{0001}".repeat(2_048);
+        let normalized_cc = vec!["short".to_string(), worst_recipient.clone()];
+        let mut near_limit = NewMessage {
             from_addr: Some("sender".into()),
             to_addr: "recipient".into(),
+            cc: Some(normalized_cc.join(",")),
             kind: "note".into(),
             attention: Attention::Background,
-            body: "x".repeat(proto::MAX_MESSAGE_BODY_METADATA_BYTES),
+            body: String::new(),
             sent_at_ms: now_ms(),
             ..Default::default()
         };
-        let mature_frame = conservative_delivery_frame(&near_limit, i64::MAX, &[]);
-        assert!(proto::json_line_frame_len(&mature_frame).unwrap() <= proto::MAX_JSONL_FRAME_BYTES);
-        assert!(validate_message_delivery_frame_size(&near_limit, i64::MAX, &[]).is_ok());
+        let expected_empty = Response::Message {
+            id: i64::MAX,
+            thread_id: i64::MAX,
+            parent_id: None,
+            from_addr: Some("sender".into()),
+            to_addr: "recipient".into(),
+            delivered_to: worst_recipient,
+            primary_to: "recipient".into(),
+            cc: normalized_cc.clone(),
+            delivery_role: "unknown".into(),
+            kind: "note".into(),
+            attention: "background".into(),
+            requires_disposition: false,
+            requires_disposition_for_current_recipient: false,
+            subject: None,
+            body: String::new(),
+            metadata: None,
+            sent_at_ms: i64::MAX,
+            buffered_at_ms: i64::MAX,
+            delivery_id: Some(i64::MAX),
+            snapshot_version: Some(i64::MAX),
+            lease_epoch: Some(i64::MAX),
+        };
+        let empty_len = proto::json_line_frame_len(&expected_empty).unwrap();
+        near_limit.body = "x".repeat(proto::MAX_JSONL_FRAME_BYTES - empty_len);
+        let expected = Response::Message {
+            id: i64::MAX,
+            thread_id: i64::MAX,
+            parent_id: None,
+            from_addr: Some("sender".into()),
+            to_addr: "recipient".into(),
+            delivered_to: "\\\"\u{0001}".repeat(2_048),
+            primary_to: "recipient".into(),
+            cc: normalized_cc.clone(),
+            delivery_role: "unknown".into(),
+            kind: "note".into(),
+            attention: "background".into(),
+            requires_disposition: false,
+            requires_disposition_for_current_recipient: false,
+            subject: None,
+            body: near_limit.body.clone(),
+            metadata: None,
+            sent_at_ms: i64::MAX,
+            buffered_at_ms: i64::MAX,
+            delivery_id: Some(i64::MAX),
+            snapshot_version: Some(i64::MAX),
+            lease_epoch: Some(i64::MAX),
+        };
+        assert_eq!(
+            proto::json_line_frame_len(&expected).unwrap(),
+            proto::MAX_JSONL_FRAME_BYTES
+        );
+        assert!(
+            validate_message_delivery_frame_size(&near_limit, i64::MAX, &normalized_cc).is_ok()
+        );
+        near_limit.body.push('x');
+        assert!(
+            validate_message_delivery_frame_size(&near_limit, i64::MAX, &normalized_cc).is_err()
+        );
 
         let send = request(
             state.clone(),
@@ -9454,6 +9557,62 @@ mod p3_tests {
                 .collect::<Vec<_>>(),
             vec![following_id]
         );
+    }
+
+    #[tokio::test]
+    async fn quarantine_response_is_capability_fenced() {
+        let daemon = crate::daemon::test_support::TestDaemon::new("quarantine-capability");
+        let store = daemon.store_key("quarantine-capability");
+        assert!(matches!(
+            daemon
+                .register(&store, "old-session", "old-recipient")
+                .await,
+            Response::Registered { .. }
+        ));
+        assert!(matches!(
+            daemon
+                .register(&store, "new-session", "new-recipient")
+                .await,
+            Response::Registered { .. }
+        ));
+        let backend = daemon.backend(&store).await.unwrap();
+        for recipient in ["old-recipient", "new-recipient"] {
+            backend
+                .insert_message(&NewMessage {
+                    from_addr: Some("sender".into()),
+                    to_addr: recipient.into(),
+                    kind: "note".into(),
+                    attention: Attention::Background,
+                    body: "x".repeat(proto::MAX_JSONL_FRAME_BYTES + 1),
+                    sent_at_ms: now_ms(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+        let old = daemon
+            .request_without_delivery_quarantine(wait_req(
+                &store,
+                "old-session",
+                "old-recipient",
+                1_000,
+            ))
+            .await;
+        assert!(matches!(
+            old,
+            Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
+        ));
+        let new = daemon
+            .wait(&store, "new-session", "new-recipient", 1_000)
+            .await;
+        assert!(matches!(
+            new,
+            Response::DeliveryQuarantined {
+                ref recipient,
+                may_continue: true,
+                ..
+            } if recipient == "new-recipient"
+        ));
     }
 
     #[tokio::test]
@@ -10812,6 +10971,7 @@ mod p3_tests {
             Some(5_000),
             Some(std::process::id()),
             crate::session_watch::capture_process_start_time(std::process::id()),
+            true,
             Duration::from_millis(20),
         )
         .await;
@@ -11141,6 +11301,12 @@ pub mod test_support {
             handle_request(self.state.clone(), request).await.0
         }
 
+        pub async fn request_without_delivery_quarantine(&self, request: Request) -> Response {
+            handle_request_with_capabilities(self.state.clone(), request, false)
+                .await
+                .0
+        }
+
         pub async fn request_with_action(&self, request: Request) -> (Response, TestClientAction) {
             let (response, action) = handle_request(self.state.clone(), request).await;
             (response, action.into())
@@ -11194,6 +11360,7 @@ pub mod test_support {
                 Some(timeout_ms),
                 Some(std::process::id()),
                 crate::session_watch::capture_process_start_time(std::process::id()),
+                true,
                 idle_ttl,
             )
             .await

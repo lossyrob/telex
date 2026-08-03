@@ -48,6 +48,7 @@ pub const ON_DELIVER_DEFERRED_EXIT: i32 = 4;
 /// `DrainDeferred`, which is bounded and self-resolves on daemon restart).
 pub const CAP_ON_DELIVER_DEFERRED: &str = "on_deliver_deferred_v1";
 pub const CAP_APPLICATION_CLIENT_V1: &str = "application_client_v1";
+pub const CAP_DELIVERY_QUARANTINE_V1: &str = "delivery_quarantine_v1";
 
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
@@ -846,6 +847,7 @@ pub fn daemon_capabilities() -> Vec<String> {
     // deferred outcome + `DrainDeferred`, so version skew against an older daemon is diagnosable.
     caps.push(CAP_ON_DELIVER_DEFERRED.to_string());
     caps.push(CAP_APPLICATION_CLIENT_V1.to_string());
+    caps.push(CAP_DELIVERY_QUARANTINE_V1.to_string());
     caps
 }
 

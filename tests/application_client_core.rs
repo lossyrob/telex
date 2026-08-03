@@ -396,6 +396,7 @@ async fn compound_terminal_disposition_is_fenced_and_atomic() {
             "handled",
             None,
             Some("station:sender"),
+            None,
             Some(&effect),
         )
         .await
@@ -442,6 +443,7 @@ async fn compound_terminal_disposition_is_fenced_and_atomic() {
             "handled",
             None,
             Some("station:sender"),
+            None,
             Some(&effect),
         )
         .await
@@ -472,6 +474,7 @@ async fn compound_terminal_disposition_is_fenced_and_atomic() {
             "closed",
             None,
             Some("station:sender"),
+            None,
             None,
         )
         .await
