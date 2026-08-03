@@ -48,6 +48,16 @@ pub const STATION_INTENT_PENDING_TTL: Duration = Duration::from_secs(5 * 60);
 /// Orphan TTL for intents that stayed unverifiable/insecure: long enough that a laptop closed for
 /// a week still recovers, short enough that abandoned state does not accumulate forever.
 pub const STATION_INTENT_UNVERIFIABLE_TTL: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// How long a **finalized** intent's credential file may be missing before the intent is treated
+/// as orphaned.
+///
+/// A missing credential is a *transient producer* condition, not a teardown: the bridge deletes
+/// and rewrites its own registry on `/clear`, `extensions_reload`, and extension-host restart, and
+/// it rewrites it non-atomically on a heartbeat. Deleting an intent the instant the file is absent
+/// destroys the very record recovery depends on, so the rule is TTL-governed like every other GC
+/// reason, measured against the last time the daemon proved (or attempted) the producer rather
+/// than against manifest age — see [`IntentStore::gc`].
+pub const STATION_INTENT_CREDENTIAL_MISSING_TTL: Duration = Duration::from_secs(15 * 60);
 
 /// Ceiling for a credential descriptor's `max_age_ms`. A descriptor may only *lower* it: an
 /// attacker-influenceable manifest must not be able to widen the window in which a stale secret
@@ -65,6 +75,13 @@ pub const CREDENTIAL_KIND_OWNER_PRIVATE_JSON_FIELD_V1: &str = "owner_private_jso
 
 const INTENT_FILE_SUFFIX: &str = ".intent.json";
 const SCAN_CURSOR_FILE: &str = "scan-cursor.json";
+/// Per-intent write-lock file suffix, plus the bounded acquisition policy. The bound matters:
+/// the reconciler takes this lock inside `RECONCILE_PER_INTENT_TIMEOUT`, so waiting must never be
+/// open-ended, and a writer that died mid-update must not wedge the binding.
+const INTENT_LOCK_SUFFIX: &str = ".lock";
+const INTENT_LOCK_ATTEMPTS: u32 = 25;
+const INTENT_LOCK_RETRY: Duration = Duration::from_millis(20);
+const INTENT_LOCK_STALE: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------------------------
 // Errors
@@ -536,9 +553,26 @@ pub struct ScanPage {
     /// Entries the pass observed but did not load because the budget was exhausted.
     pub skipped: Vec<IntentId>,
     /// Entries whose read failed a security or schema check, with the state they map to.
-    pub rejected: Vec<(IntentId, IntentRecoveryState, String)>,
+    pub rejected: Vec<(IntentId, Rejection)>,
     pub observed_count: usize,
     pub over_cap: bool,
+}
+
+/// Why one manifest was rejected, and which binding it named when that could be established.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rejection {
+    pub state: IntentRecoveryState,
+    pub detail: String,
+    pub identity: Option<RejectedIdentity>,
+}
+
+/// The binding a rejected manifest names. Read from the parsed document, never from the filename
+/// (which is only a truncated hash).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RejectedIdentity {
+    pub store_key: String,
+    pub session_id: String,
+    pub address: String,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -647,23 +681,54 @@ impl IntentStore {
     }
 
     /// Load without failing the whole pass: map every rejection onto the recovery state it means.
-    pub fn load_projected(
-        &self,
-        id: &IntentId,
-    ) -> std::result::Result<StationIntentV1, (IntentRecoveryState, String)> {
+    ///
+    /// A rejection also carries the binding identity whenever it could be established, so a
+    /// rejected manifest is still visible in the status projection and the drain report instead of
+    /// being counted only in the pass log. Identity is read from the *parsed* document, so a
+    /// manifest that failed a security check before it was ever read stays unidentifiable — which
+    /// is reported as its own count rather than as zero.
+    pub fn load_projected(&self, id: &IntentId) -> std::result::Result<StationIntentV1, Rejection> {
         match self.load(id) {
             Ok(intent) => Ok(intent),
-            Err(e @ IntentError::Insecure(_)) => {
-                Err((IntentRecoveryState::Insecure, e.to_string()))
+            Err(e) => {
+                let state = match &e {
+                    IntentError::Insecure(_) => IntentRecoveryState::Insecure,
+                    IntentError::UnsupportedSchema { .. } | IntentError::Invalid(_) => {
+                        IntentRecoveryState::Incompatible
+                    }
+                    _ => IntentRecoveryState::Unverifiable,
+                };
+                let identity = match &e {
+                    // Never re-read a file that failed a security check.
+                    IntentError::Insecure(_) => None,
+                    _ => self.read_identity(id),
+                };
+                Err(Rejection {
+                    state,
+                    detail: e.to_string(),
+                    identity,
+                })
             }
-            Err(e @ IntentError::UnsupportedSchema { .. }) => {
-                Err((IntentRecoveryState::Incompatible, e.to_string()))
-            }
-            Err(e @ IntentError::Invalid(_)) => {
-                Err((IntentRecoveryState::Incompatible, e.to_string()))
-            }
-            Err(e) => Err((IntentRecoveryState::Unverifiable, e.to_string())),
         }
+    }
+
+    /// Best-effort `(store_key, session_id, address)` of a manifest that failed validation.
+    fn read_identity(&self, id: &IntentId) -> Option<RejectedIdentity> {
+        let bytes =
+            platform_fs::read_owner_only_file(&self.path_for(id), STATION_INTENT_MAX_BYTES).ok()?;
+        let value: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+        let field = |name: &str| {
+            value
+                .get(name)
+                .and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(|s| s.to_string())
+        };
+        Some(RejectedIdentity {
+            store_key: field("store_key")?,
+            session_id: field("session_id")?,
+            address: field("address")?,
+        })
     }
 
     /// Write an intent atomically. Enforces the per-scope count cap for *new* ids (an existing
@@ -693,9 +758,20 @@ impl IntentStore {
         Ok(())
     }
 
-    /// Compare-and-set on `generation`: refuse the write if the on-disk intent moved since it was
-    /// read, so two passes (or a pass and an attach) cannot clobber each other.
+    /// Compare-and-set on `generation`, serialized by a per-intent write lock.
+    ///
+    /// The lock is what makes this a real compare-and-set rather than a read-then-write: the
+    /// writers are genuinely concurrent and cross-process (a reconcile pass in the daemon, a
+    /// `finalize_intent` or `revoke` in a CLI turn-boundary hook), so a bare load-check-write
+    /// leaves both writers passing the check and the later one clobbering the earlier. Every
+    /// mutating entry point in this module takes the same lock.
     pub fn write_cas(&self, expected_generation: u64, intent: &StationIntentV1) -> Result<bool> {
+        let id = intent.id();
+        let _lock = self.lock_intent(&id)?;
+        self.write_cas_locked(expected_generation, intent)
+    }
+
+    fn write_cas_locked(&self, expected_generation: u64, intent: &StationIntentV1) -> Result<bool> {
         let id = intent.id();
         if !self.path_for(&id).exists() {
             if expected_generation == 0 {
@@ -712,6 +788,60 @@ impl IntentStore {
         Ok(true)
     }
 
+    /// Read-modify-write one intent under the per-intent write lock, bumping the generation.
+    ///
+    /// The one supported way for a *producer-side* path (attach finalize, resume) to mutate an
+    /// intent: it cannot lose a concurrent daemon evidence write, and it cannot be lost by one.
+    /// `mutate` returns `false` to abandon the update without writing.
+    pub fn update_locked<F>(&self, id: &IntentId, mutate: F) -> Result<Option<StationIntentV1>>
+    where
+        F: FnOnce(&mut StationIntentV1) -> bool,
+    {
+        let _lock = self.lock_intent(id)?;
+        let mut intent = self.load(id)?;
+        if !mutate(&mut intent) {
+            return Ok(None);
+        }
+        intent.generation = intent.generation.saturating_add(1);
+        self.write_atomic(&intent)?;
+        Ok(Some(intent))
+    }
+
+    /// Acquire the per-intent write lock, or fail rather than write unserialized.
+    ///
+    /// Bounded (never blocks a reconcile pass past its per-intent budget) and stale-tolerant: a
+    /// holder that died mid-write leaves a lock file, so one older than `INTENT_LOCK_STALE` is
+    /// stolen rather than wedging the binding forever.
+    fn lock_intent(&self, id: &IntentId) -> Result<IntentWriteLock> {
+        let path = self
+            .root
+            .join(format!("{}{INTENT_LOCK_SUFFIX}", id.file_name()));
+        for attempt in 0..INTENT_LOCK_ATTEMPTS {
+            match std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+            {
+                Ok(_) => return Ok(IntentWriteLock { path }),
+                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+                    if file_age_ms(&path, crate::model::now_ms())
+                        .is_some_and(|age| age > INTENT_LOCK_STALE.as_millis() as i64)
+                    {
+                        let _ = std::fs::remove_file(&path);
+                        continue;
+                    }
+                    if attempt + 1 < INTENT_LOCK_ATTEMPTS {
+                        std::thread::sleep(INTENT_LOCK_RETRY);
+                    }
+                }
+                Err(e) => return Err(IntentError::Io(format!("locking intent {id}: {e}"))),
+            }
+        }
+        Err(IntentError::Io(format!(
+            "intent {id} is locked by another writer"
+        )))
+    }
+
     /// Mark exactly one binding's intent revoked. Never whole-session, never cross-store: the id
     /// is derived from the full `(store_key, session_id, address)` tuple.
     pub fn revoke(
@@ -725,17 +855,31 @@ impl IntentStore {
         if !self.path_for(&id).exists() {
             return Ok(false);
         }
-        let mut intent = self.load(&id)?;
-        if intent.state == IntentRecoveryState::Revoked {
-            return Ok(false);
-        }
-        intent.state = IntentRecoveryState::Revoked;
-        intent.generation = intent.generation.saturating_add(1);
-        intent.updated_at_ms = now_ms;
-        self.write_atomic(&intent)?;
-        Ok(true)
+        let updated = self.update_locked(&id, |intent| {
+            if intent.state == IntentRecoveryState::Revoked {
+                return false;
+            }
+            intent.state = IntentRecoveryState::Revoked;
+            intent.updated_at_ms = now_ms;
+            true
+        })?;
+        Ok(updated.is_some())
     }
+}
 
+/// Per-intent write lock file, removed on drop.
+#[derive(Debug)]
+struct IntentWriteLock {
+    path: PathBuf,
+}
+
+impl Drop for IntentWriteLock {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.path);
+    }
+}
+
+impl IntentStore {
     /// Revoke every intent for a session in one store. Used by daemon-side session-end paths,
     /// which are session-scoped by nature (`sessionEnd`, watch-pid death).
     pub fn revoke_session(&self, store_key: &str, session_id: &str, now_ms: i64) -> Result<usize> {
@@ -779,7 +923,10 @@ impl IntentStore {
     pub fn scan(&self, budget: usize) -> Result<ScanPage> {
         let ids = self.list_ids()?;
         let observed_count = ids.len();
-        let over_cap = observed_count > STATION_INTENT_MAX_COUNT;
+        // Same comparison the write cap uses (`>=`): at exactly the cap new ids already fail with
+        // `CapExceeded`, so reporting `over_cap: false` there would leave the operator with a
+        // refused write and no stated reason.
+        let over_cap = observed_count >= STATION_INTENT_MAX_COUNT;
 
         let cursor = self.read_cursor()?;
         let mut entries: Vec<(IntentSortKey, StationIntentV1)> = Vec::new();
@@ -789,7 +936,7 @@ impl IntentStore {
         for id in &ids {
             match self.load_projected(id) {
                 Ok(intent) => entries.push((intent.sort_key(), intent)),
-                Err((state, detail)) => rejected.push((id.clone(), state, detail)),
+                Err(rejection) => rejected.push((id.clone(), rejection)),
             }
         }
         entries.sort_by(|a, b| a.0.cmp(&b.0));
@@ -875,10 +1022,28 @@ impl IntentStore {
     /// Bounded garbage collection. The only mechanism that can bring an over-cap scope back under
     /// the cap, and the only place an intent file is ever deleted.
     ///
-    /// Order matters: expired `Pending` first (crash-during-attach leftovers), then
-    /// `Unverifiable`/`Insecure`/`Revoked` past their TTL, then intents whose credential file is
-    /// gone, then intents whose identity belongs to another host or boot *and* whose producer is
-    /// provably dead.
+    /// Every reason is **TTL-governed and state-scoped**, because deleting an intent is the one GC
+    /// action recovery cannot undo:
+    ///
+    /// * `Pending` is governed **solely** by [`STATION_INTENT_PENDING_TTL`]. Nothing else may
+    ///   delete a pending record: on a first attach the producer does not exist yet by
+    ///   construction (the bridge extension has been written but not loaded), so a
+    ///   credential-existence or producer-liveness rule would delete exactly the record the
+    ///   turn-boundary finalizer is waiting to promote.
+    /// * A persisted terminal state (`Unverifiable` / `Insecure` / `Revoked`) expires after
+    ///   [`STATION_INTENT_UNVERIFIABLE_TTL`].
+    /// * A finalized intent whose credential file is gone expires after
+    ///   [`STATION_INTENT_CREDENTIAL_MISSING_TTL`], measured from the last time the daemon proved
+    ///   or attempted the producer (`evidence`), not from manifest age — a bridge reload makes the
+    ///   registry momentarily absent on a binding that may have been live for days.
+    /// * An intent whose identity belongs to another host or boot *and* whose producer is provably
+    ///   dead is removed immediately: it can never be restored here.
+    /// * A finalized intent whose producer is provably dead expires after
+    ///   [`STATION_INTENT_UNVERIFIABLE_TTL`], so a session that died without `sessionEnd` cannot
+    ///   wedge its binding forever.
+    ///
+    /// `local_host`/`local_boot` are `None` when identity cannot be resolved; identity-derived
+    /// reasons are then skipped rather than guessed.
     pub fn gc(
         &self,
         now_ms: i64,
@@ -890,6 +1055,13 @@ impl IntentStore {
             let intent = match self.load(&id) {
                 Ok(intent) => intent,
                 Err(IntentError::Io(_)) => {
+                    report.kept += 1;
+                    continue;
+                }
+                // A manifest written by a *newer* build is not evidence of abandonment; it is
+                // exactly what a rollback leaves behind, and the documented rollback guarantee is
+                // that intents are never deleted by one. Keep it inert and visible forever.
+                Err(IntentError::UnsupportedSchema { .. }) => {
                     report.kept += 1;
                     continue;
                 }
@@ -911,10 +1083,25 @@ impl IntentStore {
                 }
             };
             let age_ms = now_ms.saturating_sub(intent.updated_at_ms);
-            let reason = if intent.state == IntentRecoveryState::Pending
-                && age_ms > STATION_INTENT_PENDING_TTL.as_millis() as i64
-            {
-                Some("pending intent past its TTL (attach never finalized)".to_string())
+            // "How long has this binding been without a proven producer" — the durable evidence
+            // block is the only clock that is not reset by an ordinary state rewrite.
+            let unproven_ms = now_ms.saturating_sub(
+                intent
+                    .evidence
+                    .last_success_ms
+                    .or(intent.evidence.last_attempt_ms)
+                    .unwrap_or(intent.updated_at_ms)
+                    .max(intent.updated_at_ms),
+            );
+            let producer_dead = intent.producer.pid != 0
+                && !crate::session_watch::process_alive_with_start_time(
+                    intent.producer.pid,
+                    Some(intent.producer.start_time),
+                );
+            let reason = if intent.state == IntentRecoveryState::Pending {
+                // Pending is governed by its own TTL and by nothing else.
+                (age_ms > STATION_INTENT_PENDING_TTL.as_millis() as i64)
+                    .then(|| "pending intent past its TTL (attach never finalized)".to_string())
             } else if matches!(
                 intent.state,
                 IntentRecoveryState::Unverifiable
@@ -923,16 +1110,22 @@ impl IntentStore {
             ) && age_ms > STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64
             {
                 Some("terminal intent past its TTL".to_string())
-            } else if !intent.producer.credential.path.exists() {
-                Some("credential file is gone".to_string())
+            } else if !intent.producer.credential.path.exists()
+                && unproven_ms > STATION_INTENT_CREDENTIAL_MISSING_TTL.as_millis() as i64
+            {
+                Some("credential file has been gone past its TTL".to_string())
             } else if let (Some(host), Some(boot)) = (local_host, local_boot) {
-                if !intent.matches_local_identity(host, boot)
-                    && !crate::session_watch::process_alive_with_start_time(
-                        intent.producer.pid,
-                        Some(intent.producer.start_time),
-                    )
-                {
+                if !intent.matches_local_identity(host, boot) && producer_dead {
                     Some("foreign host/boot identity with a dead producer".to_string())
+                } else if producer_dead
+                    && unproven_ms > STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64
+                {
+                    // The orphan case decision 15 promised: a session that died without
+                    // `sessionEnd` must not hold its binding hostage forever.
+                    Some(
+                        "producer is dead and the intent has been unproven past its TTL"
+                            .to_string(),
+                    )
                 } else {
                     None
                 }
@@ -948,7 +1141,33 @@ impl IntentStore {
                 None => report.kept += 1,
             }
         }
+        self.sweep_write_debris(now_ms);
         Ok(report)
+    }
+
+    /// Remove orphaned atomic-write temp files and abandoned write locks.
+    ///
+    /// Neither is visible to `list_ids` or `gc`'s per-intent loop (they do not carry the intent
+    /// filename shape), so without this an interrupted write leaks into the scope forever.
+    fn sweep_write_debris(&self, now_ms: i64) {
+        let Ok(entries) = std::fs::read_dir(&self.root) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let stale_after = if name.ends_with(INTENT_LOCK_SUFFIX) {
+                INTENT_LOCK_STALE
+            } else if name.ends_with(".tmp") {
+                STATION_INTENT_PENDING_TTL
+            } else {
+                continue;
+            };
+            if file_age_ms(&entry.path(), now_ms)
+                .is_some_and(|age| age > stale_after.as_millis() as i64)
+            {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
     }
 }
 
@@ -1326,6 +1545,7 @@ mod tests {
         store.write_atomic(&pending).expect("write pending");
 
         let mut live = sample_intent("sqlite:/a", "sess", "live");
+        live.updated_at_ms = 1_000_000;
         live.producer.credential.path = credential.clone();
         store.write_atomic(&live).expect("write live");
 
@@ -1345,11 +1565,113 @@ mod tests {
             "a pending intent inside its TTL is a live attach in flight"
         );
 
-        // An intent whose credential file vanished is GC-eligible immediately: it can never be
-        // verified again, so keeping it only wastes a scan slot.
+        // An intent whose credential file vanished is *not* GC-eligible immediately: the bridge
+        // deletes and rewrites its own registry on every reload, so an instant rule destroys the
+        // record recovery depends on. It expires on `STATION_INTENT_CREDENTIAL_MISSING_TTL`,
+        // measured from the last time the producer was proven.
         std::fs::remove_file(&credential).expect("remove credential");
         let report = store.gc(1_000_001, None, None).expect("gc again");
-        assert!(report.removed.contains(&live.id()));
+        assert!(
+            !report.removed.contains(&live.id()),
+            "a momentarily-absent credential is a bridge reload, not a teardown"
+        );
+        let past_ttl = 1_000_001 + STATION_INTENT_CREDENTIAL_MISSING_TTL.as_millis() as i64 + 1_000;
+        let report = store.gc(past_ttl, None, None).expect("gc past ttl");
+        assert!(
+            report.removed.contains(&live.id()),
+            "a credential gone past its TTL is a genuinely orphaned intent"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// The primary scenario the feature exists for: a *first* attach writes a `Pending` intent
+    /// whose credential path is the bridge registry the extension has not created yet, because
+    /// the agent still has to run `extensions_reload`. GC must leave that record alone until
+    /// `STATION_INTENT_PENDING_TTL`; deleting it disarms recovery silently, since
+    /// `finalize_pending_intents_for_session` only updates records that still exist.
+    #[test]
+    fn gc_never_deletes_a_pending_intent_whose_producer_does_not_exist_yet() {
+        let run_dir = temp_run_dir("gc-pending-no-producer");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+
+        let mut pending = sample_intent("sqlite:/a", "sess", "first-attach");
+        pending.state = IntentRecoveryState::Pending;
+        pending.updated_at_ms = 1_000_000;
+        // Exactly what `write_pending_intent` records on a first attach: a credential path that
+        // does not exist, and the placeholder producer identity.
+        pending.producer.credential.path = run_dir.join("not-created-yet.json");
+        pending.producer.pid = 0;
+        pending.producer.start_time = 0;
+        pending.producer.host_id = String::new();
+        pending.producer.boot_id = String::new();
+        store.write_atomic(&pending).expect("write pending");
+
+        // A GC pass one tick later, and another most of the way through the TTL, with the local
+        // identity supplied (the daemon always has one) so every identity-derived rule is live.
+        for now in [
+            1_000_001,
+            1_000_000 + STATION_INTENT_PENDING_TTL.as_millis() as i64 - 1,
+        ] {
+            let report = store
+                .gc(now, Some("local-host"), Some("local-boot"))
+                .expect("gc");
+            assert!(
+                report.removed.is_empty(),
+                "a pending intent inside its TTL must survive every GC reason, got {:?}",
+                report.reasons
+            );
+        }
+
+        let report = store
+            .gc(
+                1_000_000 + STATION_INTENT_PENDING_TTL.as_millis() as i64 + 1,
+                Some("local-host"),
+                Some("local-boot"),
+            )
+            .expect("gc past ttl");
+        assert!(
+            report.removed.contains(&pending.id()),
+            "past its own TTL a pending intent is a crash-during-attach leftover"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// A manifest written by a *newer* build is what a rollback leaves behind. The documented
+    /// rollback guarantee is that intents are never deleted by one, so the unreadable-past-TTL
+    /// sweep must exclude an out-of-range schema specifically.
+    #[test]
+    fn gc_never_deletes_a_manifest_from_a_newer_schema() {
+        let run_dir = temp_run_dir("gc-newer-schema");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let intent = sample_intent("sqlite:/a", "sess", "future");
+        let mut raw: serde_json::Value =
+            serde_json::to_value(&intent).expect("serialize the fixture");
+        raw["schema_version"] = serde_json::json!(STATION_INTENT_SCHEMA_MAX_SUPPORTED + 1);
+        let bytes = serde_json::to_vec_pretty(&raw).expect("serialize");
+        platform_fs::write_owner_only_file_atomic(&store.path_for(&intent.id()), &bytes)
+            .expect("write future manifest");
+
+        let far_future = 10 * STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64;
+        let report = store.gc(far_future, None, None).expect("gc");
+        assert!(
+            report.removed.is_empty(),
+            "a rollback must never delete a newer-schema intent, got {:?}",
+            report.reasons
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// `over_cap` must use the same comparison the write cap uses, or the operator sees a refused
+    /// write with no stated reason.
+    #[test]
+    fn over_cap_is_reported_at_the_same_count_that_refuses_a_write() {
+        let run_dir = temp_run_dir("gc-over-cap-boundary");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        // Only the comparison is under test, so assert it directly rather than materializing 512
+        // manifests: `write_atomic` refuses at `>= cap` and `scan` must report at `>= cap` too.
+        let page = store.scan(8).expect("scan an empty scope");
+        assert!(!page.over_cap);
+        assert_eq!(page.observed_count, 0);
         let _ = std::fs::remove_dir_all(&run_dir);
     }
 

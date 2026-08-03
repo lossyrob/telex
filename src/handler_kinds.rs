@@ -34,7 +34,13 @@ pub enum RegistryError {
     UnknownHandlerKind(String),
     UnknownProducerRoot(String),
     InvalidParameter(String),
+    /// The path was *decided* to be outside the registered root. A security verdict.
     Containment(String),
+    /// The containment check could not be *made* — the file is not there right now, or the walk
+    /// hit a transient I/O error. Distinct from `Containment` because collapsing the two turns an
+    /// ordinary producer restart (the registry is deleted and rewritten on every bridge reload)
+    /// into a permanent `Insecure` verdict.
+    ContainmentUnreadable(String),
 }
 
 impl std::fmt::Display for RegistryError {
@@ -48,6 +54,9 @@ impl std::fmt::Display for RegistryError {
             }
             RegistryError::InvalidParameter(msg) => write!(f, "invalid handler parameter: {msg}"),
             RegistryError::Containment(msg) => write!(f, "credential path rejected: {msg}"),
+            RegistryError::ContainmentUnreadable(msg) => {
+                write!(f, "credential path could not be checked: {msg}")
+            }
         }
     }
 }
@@ -209,8 +218,17 @@ pub fn producer_root(id: &str) -> Option<ProducerRoot> {
 pub fn resolve_credential_path(root_id: &str, path: &Path) -> Result<PathBuf> {
     let root = producer_root(root_id)
         .ok_or_else(|| RegistryError::UnknownProducerRoot(root_id.to_string()))?;
-    crate::platform_fs::contained_under(&root.path, path)
-        .map_err(|e| RegistryError::Containment(e.to_string()))
+    crate::platform_fs::contained_under(&root.path, path).map_err(|e| match e {
+        // `Io` means the check could not be made (most often: the producer is mid-restart and its
+        // credential file does not exist this instant). `Unsupported` is the actual security
+        // verdict — outside the root, a `..` component, a symlink or reparse point on the chain.
+        crate::platform_fs::FsError::Io { .. } => {
+            RegistryError::ContainmentUnreadable(e.to_string())
+        }
+        crate::platform_fs::FsError::Unsupported { .. } => {
+            RegistryError::Containment(e.to_string())
+        }
+    })
 }
 
 /// Rebuild the argv for a registered handler kind.
