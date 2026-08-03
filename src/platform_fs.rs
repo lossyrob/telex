@@ -617,11 +617,12 @@ mod imp {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 let mut builder = std::fs::DirBuilder::new();
                 builder.recursive(true).mode(0o700);
-                match builder.create(path) {
-                    Ok(()) => {}
-                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
-                    Err(error) => {
-                        return Err(io_err("creating owner-private daemon directory", error));
+                if let Err(create_error) = builder.create(path) {
+                    if std::fs::symlink_metadata(path).is_err() {
+                        return Err(io_err(
+                            "creating owner-private daemon directory",
+                            create_error,
+                        ));
                     }
                 }
             }
