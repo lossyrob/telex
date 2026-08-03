@@ -300,6 +300,18 @@ pub fn boot_id() -> Result<String> {
     }
 }
 
+/// [`boot_id`] with the per-process memoization bypassed.
+///
+/// `#[doc(hidden)]`: a test seam, not API. Every consumer wants the cached value; a test that
+/// asserts "two independent processes agree" must not be able to satisfy itself from a `OnceLock`
+/// that was populated once, because that asserts nothing about the resolver at all. This calls the
+/// platform resolver each time, which on Windows means exercising the persistence and read-back
+/// path on every call.
+#[doc(hidden)]
+pub fn boot_id_uncached() -> Result<String> {
+    imp::raw_boot_id().map(|raw| hashed_identity("boot", &raw))
+}
+
 fn hashed_identity(domain: &str, raw: &str) -> String {
     let mut material = Vec::with_capacity(domain.len() + raw.len() + 1);
     material.extend_from_slice(domain.as_bytes());
@@ -1489,16 +1501,40 @@ mod imp {
             capability: "boot session identity",
             message: format!("serializing the boot session id: {e}"),
         })?;
-        // Best effort: a host where the record cannot be persisted still gets a *usable* id for
-        // this process, it just cannot be shared with another process, so recovery degrades to
-        // the pre-existing behavior rather than failing.
-        if write_boot_id_record(&encoded).is_err() {
-            return Ok(id);
-        }
+        // Fail **explicitly** when the record cannot be persisted or read back, rather than
+        // returning a per-process value. See `resolve_minted_boot_id`.
+        resolve_minted_boot_id(
+            write_boot_id_record(&encoded),
+            read_valid(uptime_ms, boot_instant_ms),
+        )
+    }
+
+    /// Decide the outcome of a mint: persisted and read back, or an explicit failure.
+    ///
+    /// Extracted so the failure branch is reachable from a test on any host — denying a write to
+    /// `HKCU\Software\telex` for real would mean changing the machine the suite runs on, so the
+    /// decision is tested rather than the ACL.
+    ///
+    /// The tempting degradation this replaces — "keep a usable id for *this* process" — is not a
+    /// degradation at all. The value is compared for **exact equality** across processes: the
+    /// attaching CLI writes it into a station intent, the daemon recomputes it. A per-process id
+    /// therefore makes every intent `foreign_host_or_boot` the instant anyone else reads it, which
+    /// is terminal; GC then removes the record as a foreign identity with a dead producer; and the
+    /// anti-downgrade guard turns the same condition into a hard refusal of an unrelated
+    /// `telex attach`. Silently minting an identity that is *guaranteed* to disagree is strictly
+    /// worse than saying so — an explicit error surfaces at `copilot attach`, naming the cause,
+    /// instead of as an unexplained recovery failure hours later. `boot_id()` memoizes the error
+    /// too, so the answer is at least consistent for the life of the process.
+    fn resolve_minted_boot_id(written: Result<()>, read_back: Option<String>) -> Result<String> {
+        written?;
         // Re-read rather than trusting our own write: two processes minting at the same instant
         // both write, and the read-back is what makes them converge on one value instead of each
-        // keeping its own — which is precisely the cross-process disagreement being removed.
-        Ok(read_valid(uptime_ms, boot_instant_ms).unwrap_or(id))
+        // keeping its own — which is precisely the cross-process disagreement being removed. A
+        // read-back that does not come back is the same failure as a write that did not land.
+        read_back.ok_or(FsError::Unsupported {
+            capability: "boot session identity",
+            message: "the persisted boot session id could not be read back".into(),
+        })
     }
 
     #[derive(serde::Serialize, serde::Deserialize)]
@@ -1743,6 +1779,53 @@ mod imp {
             len += 1;
         }
         String::from_utf16_lossy(std::slice::from_raw_parts(ptr, len))
+    }
+
+    #[cfg(test)]
+    mod boot_id_tests {
+        use super::*;
+
+        /// A host where the per-boot record cannot be persisted, or cannot be read back, must
+        /// produce an **explicit** failure rather than a per-process value.
+        ///
+        /// Denying a write to `HKCU\Software\telex` for real would mean mutating the machine the
+        /// suite runs on, so the decision is driven directly. The regression this pins is the old
+        /// `if write_boot_id_record(&encoded).is_err() { return Ok(id) }`: every process then
+        /// minted its own identity, every station intent written by one and read by another
+        /// terminated as `foreign_host_or_boot`, GC removed those records as foreign identities
+        /// with dead producers, and the anti-downgrade guard turned the same condition into a hard
+        /// refusal of unrelated attaches — all with no error anywhere naming the cause.
+        #[test]
+        fn a_boot_id_that_cannot_be_persisted_fails_explicitly() {
+            let denied = || {
+                Err(FsError::Unsupported {
+                    capability: "boot session identity",
+                    message: "persisting the boot session id failed with status 5".into(),
+                })
+            };
+            let err = resolve_minted_boot_id(denied(), Some("would-have-been-used".to_string()))
+                .expect_err("a denied persist must not yield a usable per-process identity");
+            let message = err.to_string();
+            assert!(
+                message.contains("persisting the boot session id"),
+                "the failure must name its cause, got {message}"
+            );
+
+            let err = resolve_minted_boot_id(Ok(()), None)
+                .expect_err("a write that cannot be read back is the same failure");
+            assert!(
+                err.to_string().contains("could not be read back"),
+                "got {err}"
+            );
+
+            // The success path is unchanged: the value that comes back is the *persisted* one, not
+            // the one this process happened to mint.
+            assert_eq!(
+                resolve_minted_boot_id(Ok(()), Some("persisted".to_string()))
+                    .expect("a persisted, readable identity resolves"),
+                "persisted"
+            );
+        }
     }
 }
 
@@ -2046,19 +2129,29 @@ mod tests {
     /// an unrelated `telex attach`. On Windows it used to be derived as
     /// `SystemTime::now() - GetTickCount64()`, which jitters across a second boundary a few
     /// percent of the time and shifts outright on any clock step; it is now minted once and
-    /// persisted. Hammering it here is what makes that stability a checked property rather than a
-    /// claim in a comment.
+    /// persisted.
+    ///
+    /// Hammering the **uncached** resolver is what makes that stability a checked property rather
+    /// than a claim in a comment. The previous version of this test called `boot_id()`, which is
+    /// memoized in a `OnceLock`: after the first call it compared a clone of a cached `String` to
+    /// itself two hundred times, so it would have passed unchanged against the jittering
+    /// implementation it exists to rule out. Each iteration here re-enters the platform resolver,
+    /// which on Windows means a full registry read-back (and, on the first call of the boot, a
+    /// mint plus persist plus read-back).
     #[test]
     fn boot_identity_is_stable_across_repeated_independent_resolutions() {
-        let first = boot_id().expect("boot id");
+        let first = boot_id_uncached().expect("boot id");
+        assert_eq!(first.len(), 32);
         for _ in 0..200 {
             assert_eq!(
                 first,
-                boot_id().expect("boot id again"),
+                boot_id_uncached().expect("boot id again"),
                 "the boot identity must not jitter: two processes resolving it independently \
                  must agree, or every station intent fails closed"
             );
             std::thread::sleep(std::time::Duration::from_millis(1));
         }
+        // And the cached accessor must agree with the resolver it caches.
+        assert_eq!(first, boot_id().expect("cached boot id"));
     }
 }
