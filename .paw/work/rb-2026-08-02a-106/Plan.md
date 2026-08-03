@@ -58,7 +58,8 @@ assert a literal where a constant exists (SF-2, MF-5).
 | `RECONCILE_DEFERRED_LEASE_RETRY` | `src/daemon_reconcile.rs` | `RECONCILE_INTERVAL` (5 s), fixed, no exponential growth, no jitter | retry cadence for the `DeferredLease` outcome - an incumbent lease that is simply not stale yet (MF2-1a) |
 | `RECONCILE_QUARANTINE_AFTER` | `src/daemon_reconcile.rs` | 10 consecutive failures -> hourly retry | wedge prevention (MF-10); `DeferredLease` and `DeferredPullWaiter` do not increment the counter |
 | `STATION_INTENT_MAX_COUNT` / `_MAX_BYTES` | `src/station_intent.rs` | 512 per scope / 16 KiB per file | input domain bound (MF-10, CO-5); over-cap scan behavior is defined in decision 15 (CO2-1) |
-| `STATION_INTENT_PENDING_TTL` | `src/station_intent.rs` | 5 min | GC for crash-during-attach (MF-9) |
+| `STATION_INTENT_PENDING_TTL` | `src/station_intent.rs` | 5 min, aged from `created_at_ms` | GC for crash-during-attach (MF-9); the clock is `StationIntentV1::pending_clock_ms()`, never `updated_at_ms`, which a failing re-attach rewrites (pivot 25) |
+| `STATION_INTENT_ARMED_PENDING_TTL` | `src/station_intent.rs` | 24 h, aged from `armed.armed_at_ms` | GC for a `pending` record a daemon durably proved it armed (pivot 15); the idempotent stamp cannot move the clock (pivot 25) |
 | `STATION_INTENT_UNVERIFIABLE_TTL` | `src/station_intent.rs` | 7 days | GC for orphans (MF-10) |
 | `CREDENTIAL_MAX_AGE_MS_DEFAULT` | `src/station_intent.rs` | 24 h; a descriptor may only lower it | ceiling for the `max_age_ms` field of the credential descriptor (MF2-2) |
 | `COPILOT_BRIDGE_PROTOCOL` | `src/commands/copilot.rs:72` | `1` -> `2` | `probe` verb added |
@@ -1050,6 +1051,14 @@ this is what is actually asserted. Recorded honestly rather than left implying f
 | CO2-3 `MIN_COMPATIBLE_PLUGIN_VERSION` | Constants table + `documentation`: added as the fourth release axis and recorded as unchanged, with the reason |
 | CO2-4 anti-downgrade matrix row | T25 (matched-version case), referenced from the acceptance-criteria table |
 
+**Final gate** (G1..G3):
+
+| Finding | Resolved by |
+|---|---|
+| G1 successful push registration could lose its only durable proof | Pivot 23: `owes_armed_proof` pre-observation (`DaemonState::durable_intent_present`) under the admission guard; `IntentStore::stamp_armed_proof` returning three-way `ArmedProofStamp`; the stamp moved inside `register_member` immediately before `insert_member` on both branches; `commit_armed_proof` refusing the register with `Incompatible` / `PushIntentUnrecoverable`; lease released on the new-member branch and the pre-existing adopted member untouched on the refresh branch. Tests: `a_concurrent_pending_rollback_before_the_proof_refuses_the_register`, `a_register_whose_manifest_is_missing_at_the_proof_is_refused`, `a_register_whose_proof_cannot_be_written_is_refused_and_leaves_no_member`, `a_failed_proof_on_a_refresh_leaves_the_pre_existing_member_untouched`, `a_concurrent_rollback_cannot_delete_the_record_of_a_committed_register`, `a_push_register_for_a_binding_with_no_intent_record_still_succeeds`, `an_unreadable_record_refuses_the_arming_stamp_rather_than_reporting_success` |
+| G2 stale cached failure outlived a generation-changing refresh in the drain backfill | Pivot 24: `durable_intent_states` returns `(state, generation)`; `drain_intent_report` keeps a cached problem only while `cached_generation >= durable_generation`. Test: `station_intent_a_cached_failure_never_outlives_the_generation_it_was_recorded_against`. Closes re-review residual risk #4 |
+| G3 repeated failed re-attach extended the pending TTL indefinitely | Pivot 25: `StationIntentV1::pending_clock_ms()` (creation for unarmed, the armed proof for armed), and `gc_reason` reads it instead of `updated_at_ms`. Tests: `a_repeated_pending_write_cannot_push_the_pending_ttl_out_forever`, `gc_governs_an_armed_pending_record_by_its_own_longer_ttl` (tightened) |
+
 ### Trade-offs -> decisions
 
 | Trade-off | Decision taken | Where |
@@ -1237,3 +1246,39 @@ eight findings are in `Docs.md`, "Corrections made during the independent re-rev
     memoized accessor.
 22. **The backoff ladder starts where the constants table says.** `RECONCILE_BACKOFF_INITIAL` is
     5 s and the first transient failure now waits 5 s; the exponent was off by one.
+### Pivots from the final gate
+
+Recorded on the same basis: each changes a property this plan states. Mechanisms and tests for all
+three findings are in `Docs.md`, "Corrections made during the final gate".
+
+23. **The armed proof is part of the registration transaction, not a diagnostic on the way out.**
+    Pivot 14 introduced the proof and placed the stamp at the outer `register_member` seam, after
+    the inner register returned, with its result discarded — so a missing manifest or a failed write
+    still produced `Registered`. Push registration therefore had no durability guarantee at all: a
+    concurrent attach's `write_pending` + rollback landing between the member commit and the stamp
+    left an armed station with nothing on disk, and so did a daemon crash in the same window. An
+    arming register now observes up front whether the binding has a durable record (so it knows
+    whether it *owes* a proof), commits the proof immediately **before** `insert_member` on both the
+    new-member and refresh branches, and **refuses** the registration when a proof it owes cannot be
+    persisted. `IntentStore::mark_armed` becomes `stamp_armed_proof`, returning a three-way
+    `ArmedProofStamp` so "no record to prove" is distinguishable from "the record was deleted under
+    me". Rollback ownership is stated explicitly: the new-member branch releases only the lease it
+    just claimed, and the refresh branch touches nothing, so a pre-existing adopted member and its
+    lease survive a failed write. A binding with no intent record — a pull attach, or a plain
+    `telex attach --on-deliver` — owes nothing and is unaffected.
+24. **The pre-drain composition rule is generation-scoped.** Pivot 20 said a cached *problem*
+    projection is never masked and never retracted. Unqualified, that kept a verdict recorded
+    against generation N alive after the manifest moved to N+1 — precisely the bridge-reload repair
+    the whole recovery path exists for, drained as `degraded` seconds after it was fixed. The rule
+    is now "a cached problem wins **while it still describes the record on disk**", decided by
+    comparing the cached entry's generation with the durable manifest's. `durable_intent_states`
+    carries the generation for that comparison. This closes residual risk #4 of the re-review, which
+    named this combination as argued rather than demonstrated.
+25. **The `Pending` TTLs get an explicit lifecycle clock.** The plan's GC table said `Pending` is
+    governed by its own TTL, but the clock was `updated_at_ms` — which `write_pending` refreshes and
+    which a re-attach therefore rewrites, making the TTL unreachable for exactly the wedged bindings
+    it exists to collect. `StationIntentV1::pending_clock_ms()` anchors each TTL to the event it is
+    about: `created_at_ms` for an unarmed record (carried forward by `write_pending`, so a re-attach
+    cannot reset it) and `armed.armed_at_ms` for an armed one (floored at `created_at_ms`, and never
+    moved by the idempotent stamp). Deliberate transitions keep their intended clocks — arming moves
+    the record onto the 24 h armed clock, and a revocation ages from the revocation.

@@ -2140,7 +2140,7 @@ The daemon owns reconciliation as its own operation, not as a `Register` side ef
 
    - A `pending` record may be promoted only when a daemon reports push armed for the binding
      *right now*, **or** when the record carries a durable **armed proof** — an `armed` block the
-     *daemon* writes inside `register_member` at the moment it commits an armed push member. A
+     *daemon* writes inside `register_member` as part of committing an armed push member. A
      bridge that merely exists is never sufficient: a merely-running producer must not be able to
      arm an attach that was never registered.
    - A record that is already `live` may re-record its producer identity with **no daemon
@@ -2157,12 +2157,31 @@ The daemon owns reconciliation as its own operation, not as a `Register` side ef
    `pending` record is still never reconciled, and restoration still requires the credential rules,
    `verify_server_peer`, the probe, and the daemon epoch fence. A revocation always beats a
    finalize, and the admission decision is re-made inside the per-intent write lock.
+8a. **The armed proof is part of the registration transaction — added after the final gate.** An
+   arming register observes up front whether the binding has a durable record; if it does, the
+   register *owes* a proof. The proof is committed **before** the member is installed, at the point
+   where every fallible step has already succeeded, and a register that owes a proof it cannot
+   persist is **refused** (typed `Incompatible` / `PushIntentUnrecoverable`) rather than reported as
+   a durable success. On the new-member path the epoch lease is released; on the refresh path the
+   pre-existing (possibly adopted) member and its lease are left untouched, because tearing down a
+   working station over a failed write is strictly worse than the failure. A binding with no durable
+   record owes nothing, so a pull attach and a plain `telex attach --on-deliver` are unaffected.
+
+   The ordering is what closes the concurrent-attach race: `write_pending`, the conditional rollback
+   delete, and the stamp all take the same per-intent write lock, so a concurrent attach's rollback
+   either lands before the stamp (the register is refused, and no member is armed) or after it (the
+   record carries the proof, so both of the rollback's gates refuse). Previously the stamp ran after
+   the member had been committed and the response decided, and a rollback landing in between left an
+   armed station with no durable trace and a `Registered` response saying otherwise. The stamp stays
+   idempotent, so a re-attach neither churns the generation nor moves the armed TTL clock.
 9. **Deleting an intent is conditional.** GC and the attach rollback both decide from a snapshot, so
    the unlink re-takes the per-intent write lock, reloads, and requires the generation *and* the
-   caller's own condition to still hold. Both TTL clocks are read from **proof** — a successful
-   reconcile, a verified probe, or the durable transition a finalize performs — never from a retry
-   attempt, which the reconciler refreshes every few seconds for exactly the abandoned records the
-   TTLs exist to collect.
+   caller's own condition to still hold. Every TTL clock is read from the **event it is about** and
+   is unreachable by retrying: the orphan clocks read proof (a successful reconcile, a verified
+   probe, or the durable transition a finalize performs) rather than a retry attempt, and the two
+   pending clocks read `created_at_ms` (carried forward across re-attaches) and the armed proof's own
+   timestamp (never moved by the idempotent stamp) rather than `updated_at_ms`, which every failing
+   re-attach rewrites.
 
 **Bounded ADR 0028 exception.** `upgrade` and `rollback` spawn the successor they just installed and
 wait, bounded, for one reconcile report. Without this, the issue's motivating scenario — `telex

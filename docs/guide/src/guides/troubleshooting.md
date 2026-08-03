@@ -89,8 +89,12 @@ guard warns rather than blocking, so an unrestored intent never wedges a session
 
 ## Copilot: `telex attach` refuses with `PushIntentUnrecoverable`
 
-The address has a live push intent that could not be restored, and telex refused to create a
-**pull-only** member over it rather than silently downgrading your delivery mode.
+This code covers two refusals, both of which fail *toward* telling you rather than quietly
+degrading.
+
+**A pull attach over a live push intent.** The address has a live push intent that could not be
+restored, and telex refused to create a **pull-only** member over it rather than silently
+downgrading your delivery mode.
 
 Either restore push:
 
@@ -105,3 +109,17 @@ telex --address <addr> copilot detach
 ```
 
 after which a plain `telex attach` works normally.
+
+**A push registration whose durable proof could not be written.** A push attach for a binding that
+has a station-intent record only succeeds once the daemon has durably recorded that it armed
+delivery — that record is the *only* thing that carries push across a daemon replacement, so a
+registration that cannot write it is refused instead of leaving you with push that works now and no
+recovery later. The message names the write that failed. Causes are almost always local:
+
+- the station-intent scope is not writable (check the permissions on the daemon run directory), or
+- a concurrent `copilot attach`/`copilot resume` for the same station raced this one and rolled its
+  own record back.
+
+Nothing is left half-armed: no member is created, and any epoch lease the attempt claimed is
+released. Re-run the attach — `telex --address <addr> copilot resume` — once the scope is writable
+or the competing attach has finished.

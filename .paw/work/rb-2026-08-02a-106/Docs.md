@@ -39,13 +39,19 @@ keeps this from being the "rebuild membership from history" that ADR 0023 forbid
 2. **Before `Register`**, a `pending` intent is written. Order matters: a crash between here and a
    successful register leaves a record the daemon never acts on and GC removes. The reverse order
    would leave a window where push is armed with no durable record of the desired state.
-3. `Register` arms push.
+3. `Register` arms push. For a binding that has a station-intent record, the daemon commits its
+   durable **armed proof** onto that record *before* it installs the member — after every fallible
+   step, so a successful stamp is followed only by an infallible in-memory commit. A register that
+   owes a proof and cannot persist it is refused (`Incompatible` / `PushIntentUnrecoverable`), with
+   the lease it claimed released and no member created.
 4. After `daemon_armed_push` confirms it, telex runs *the same probe the daemon will*, re-captures
    producer identity, records the member's actual `cc_watermark_ms`, and finalizes the intent to
    `live` with `generation + 1`.
 5. Any failure rolls back: the intent is removed **first**, then the bridge binding, because a
    half-armed bridge with a leftover intent is the one shape that could later claim a station the
-   user never successfully attached.
+   user never successfully attached. The removal is conditional on the generation this invocation
+   wrote *and* on the record still being an unarmed `pending` one, so it can never destroy a record
+   the daemon's stamp, a concurrent attach, or a turn-boundary finalize has moved on from.
 
 ### Reconcile
 
@@ -85,6 +91,10 @@ reconciler already honors.
 | One pass cannot overrun its tick | `RECONCILE_PASS_DEADLINE` (4 s) < `RECONCILE_INTERVAL` (5 s), enforced by a `const` assertion |
 | A wedged intent cannot starve others | Per-intent timeout, per-pass budget, exponential backoff on genuine failures only, quarantine after 10 |
 | Push is never silently downgraded to pull | Anti-downgrade guard inside `register_member`, so it also covers old clients and plain `telex attach` |
+| A successful push registration is always durably recoverable | For a binding with a station-intent record, the armed proof is committed inside `register_member` before the member is installed, and a proof that cannot be persisted refuses the whole registration; `write_pending`, the attach rollback's delete, and the stamp all take the same per-intent write lock, so no interleaving leaves an armed member with nothing on disk |
+| A rollback removes only what its own invocation created | Every delete is conditional on the generation the caller wrote *and* on the caller's predicate re-evaluated under the lock; on the daemon side a refused proof releases only the lease that call claimed, and never touches a pre-existing adopted member |
+| A GC TTL cannot be extended by retrying | Every clock is anchored to the event it is about — the orphan clocks read *proof*, the unarmed pending clock reads `created_at_ms` (carried forward across re-attaches), the armed pending clock reads the idempotent proof's own timestamp — never `evidence.last_attempt_ms` or `updated_at_ms`, both of which a failing retry rewrites |
+| A stale projection cannot outlive the record it described | The pre-drain report compares the cached entry's generation against the durable manifest's, and prefers the newer manifest; every durable transition moves the generation while evidence-only rewrites do not |
 | A recovery-state condition never wedges a session | The turn guard *warns and allows* |
 
 ## Published bounds
@@ -633,6 +643,134 @@ rival now has a healthy producer and its own credential, generations make the ex
 deterministic, and the assertion is `armed == ["sess-a"]` — exactly one, and the expected one — plus
 a check that the loser is still indexed rather than silently dropped.
 
+## Corrections made during the final gate
+
+A final gate pass over the re-review result found three further defects — 1 high, 2 medium — two of
+which land on residual risks the re-review had recorded rather than closed.
+
+### 1. HIGH — a successful push registration could lose its only durable proof
+
+The armed stamp was applied at the outer `register_member` seam, *after* `register_member_inner` had
+returned, and its result was discarded: `mark_armed` returning `Ok(false)` (no manifest for the
+binding) or an outright error still produced `Registered`. That made the proof a diagnostic rather
+than part of the registration, and two orderings exploited it.
+
+The race, exactly: attach A writes its `pending` record and registers. Concurrent attach B, for the
+same binding, replaces the record at a new generation via `write_pending`, then fails downstream and
+rolls its own write back — deleting the file. If that delete lands after A committed its member and
+before A stamped, A's stamp finds nothing, the miss is swallowed as "the ordinary pull-attach case",
+and A returns a successful push registration whose only durable trace has been destroyed. The
+station delivers until the next daemon replacement and then silently stops. A crash of the daemon in
+the same window does the same thing, and an unwritable scope did it without any race at all.
+
+**Fix — make the proof part of the registration transaction.**
+
+- **Observe the obligation up front.** An arming register (`on_deliver.is_some()`) asks
+  `DaemonState::durable_intent_present` — under the per-station admission guard, before any work —
+  whether the binding has a durable record. If it does, this register *owes* a proof. That question
+  cannot be answered at stamp time: "no record" there is both "a pull or plain `--on-deliver` attach
+  that never wrote an intent" (nothing owed) and "the record was deleted under me" (everything
+  owed). An unreadable scope fails closed with the same typed `Incompatible` /
+  `PushIntentUnrecoverable` shape the anti-downgrade guard in the same function already uses.
+- **Make the stamp's outcome legible.** `IntentStore::mark_armed` became `stamp_armed_proof`,
+  returning `ArmedProofStamp::{NoRecord, Stamped{generation}, AlreadyArmed{generation}}` instead of a
+  bool that collapsed "nothing to prove" into "already proven".
+- **Commit the proof before the member.** The stamp moved *inside* `register_member`, immediately
+  before `state.insert_member(...)` on both the new-member and the refresh branch — after every
+  fallible step, so a successful stamp is followed only by an infallible in-memory commit. There is
+  no longer any state in which a member is armed and nothing durable says so.
+- **Refuse rather than report a success it cannot back.** `commit_armed_proof` returns the typed
+  refusal when a proof is owed and the record is gone, corrupt, or unwritable.
+- **Roll back exactly what this call created.** The new-member branch releases only the epoch lease
+  it just claimed and installs no member. The refresh branch touches nothing at all, so a
+  pre-existing (possibly adopted) member and its lease survive a failed write — tearing down a
+  working station because a diagnostic write failed would be strictly worse than the failure.
+  `clear_definite_session_end` moved after the commit so a refused register has no side effect.
+- **Idempotency preserved.** `AlreadyArmed` is a success and does not move the generation, so a
+  re-attach neither churns concurrent CAS holders nor moves the clock the armed pending TTL reads.
+
+The ordering is what closes the race rather than merely narrowing it: `write_pending`, the
+conditional rollback delete, and the stamp all take the same per-intent write lock, so a concurrent
+rollback either lands *before* the stamp (the register is refused and no armed member exists) or
+*after* it (the record carries the proof, so both of the rollback's gates refuse). No interleaving
+yields "member armed, nothing durable".
+
+**Tests.** `a_concurrent_pending_rollback_before_the_proof_refuses_the_register` schedules the exact
+B-replaces-then-rolls-back sequence through the admission commit gate and asserts a typed refusal,
+no member, no resurrected record, and a released lease.
+`a_register_whose_manifest_is_missing_at_the_proof_is_refused` covers the plain missing-manifest
+shape; `a_register_whose_proof_cannot_be_written_is_refused_and_leaves_no_member` covers a corrupt
+manifest; `a_failed_proof_on_a_refresh_leaves_the_pre_existing_member_untouched` pins the adopted
+member, its lease epoch, and its owner instance id across a refused refresh;
+`a_concurrent_rollback_cannot_delete_the_record_of_a_committed_register` pins the post-commit
+invariant and idempotency; `a_push_register_for_a_binding_with_no_intent_record_still_succeeds`
+guards the non-bridge push clients against the new refusal; and
+`an_unreadable_record_refuses_the_arming_stamp_rather_than_reporting_success` pins the store-level
+contract.
+
+### 2. MEDIUM — a stale cached failure outlived the generation it was recorded against
+
+Residual risk #4 of the re-review, realized. The pre-drain durable backfill kept a cached *problem*
+projection whenever one existed, because neither the cached entry nor the durable read carried a
+generation to compare — so the rule "a cached failure is evidence the successor will hit the same
+wall" was applied to a record the successor would never read.
+
+The sequence is the routine one this whole recovery path exists for: a bridge reloads, the pass
+fails `producer_identity_mismatch` against the stale `(pid, start_time)` and caches `unverifiable`
+for generation N, and the turn-boundary hook then re-records the live identity at generation N+1.
+Nothing refreshes the cached projection in between — only a reconcile pass does, and `upgrade`
+drains before the next tick. So a binding that had *just been repaired* drained as `degraded`, and
+successor verification skipped the hand-off it exists to perform.
+
+**Fix.** `durable_intent_states` now returns `(state, generation)`, and `drain_intent_report` keeps a
+cached problem only while `cached_generation >= durable_generation`; otherwise the newer manifest
+wins. Generation is the right discriminator because every durable transition (a finalize, an identity
+refresh, an arming stamp, a re-attach) moves it, while the reconciler's evidence-only rewrites
+deliberately do not. Rejected manifests are unaffected: they cannot be loaded, so they never reach
+`durable_intent_states` and their cached verdict is untouched.
+
+**Test.** `station_intent_a_cached_failure_never_outlives_the_generation_it_was_recorded_against`
+asserts `degraded == 1` while the cached verdict still describes generation 2, performs the identity
+repair with no pass in between, asserts the cached projection is *still* at generation 2 (so the
+test is about the composition rule, not about a refresh), then asserts `recoverable == 1` and
+`degraded == 0`.
+
+### 3. MEDIUM — a failing re-attach could push the pending TTL out forever
+
+`write_pending` refreshes `updated_at_ms`, and the `Pending` GC arms aged from that field. A
+re-attach *is* a `write_pending`, so a producer whose finalize kept failing — a bridge stuck
+mid-reload, a probe that never answers — extended its own leftover's expiry every few seconds. GC
+could never collect the exact class of record it exists for, and the scope grew a permanent resident
+per wedged binding.
+
+**Fix.** `StationIntentV1::pending_clock_ms()` is an explicit lifecycle clock, anchored to the event
+each TTL is actually about, and neither event can be replayed by retrying:
+
+- An **unarmed** `pending` record ages from `created_at_ms`. `write_pending` already carries that
+  field forward from the record it replaces, so a re-attach cannot reset it.
+- An **armed** one ages from `armed.armed_at_ms`, floored at `created_at_ms` so a clock-skewed or
+  hand-edited proof cannot age a record from before it existed. The stamp is idempotent, so a
+  re-register cannot move it either.
+
+`updated_at_ms` remains an honest last-write field; it is simply no longer any pending TTL's clock.
+Deliberate state transitions still get the clock they are supposed to have: arming moves the record
+onto the 24 h armed clock, and a revocation ages from the revocation.
+
+**Tests.** `a_repeated_pending_write_cannot_push_the_pending_ttl_out_forever` runs ten re-attaches
+spanning more than twice the TTL, asserts the last-write clock really was refreshed past it, and
+asserts the record is still collected — then walks both legitimate transitions (arming earns the
+longer clock; a revocation is visible for its own TTL and then bounded).
+`gc_governs_an_armed_pending_record_by_its_own_longer_ttl` was tightened so `updated_at_ms` is set
+*later* than both clocks, meaning a rule that still read it would keep both records and fail.
+
+### Test discrimination
+
+Each fix was mutation-checked rather than assumed: the guard was temporarily reverted to the pre-fix
+behavior and the suite re-run. `commit_armed_proof` forced to `Ok(())` fails the four G1 register
+tests with `expected a typed refusal, got Registered { .. }`; neutralizing the generation comparison
+fails the G2 test on `recoverable` `0 != 1`; reverting `pending_clock_ms` to `updated_at_ms` fails
+the G3 clock assertion.
+
 ## Operating notes
 
 - Intent scopes are namespaced by user identity, **canonicalized config root**, and protocol major.
@@ -648,7 +786,15 @@ a check that the loser is still indexed rather than silently dropped.
   answer for — no probe, no connection, no backend or network I/O, so it still cannot slow a drain.
   The backfill is what makes a station attached seconds before the drain visible: the record is
   written by a producer-side finalize in another process, and only a reconcile pass refreshes the
-  index.
+  index. The two sources are composed **by generation**: a cached problem projection wins only while
+  it still describes the record on disk, so a binding whose producer identity was just repaired is
+  reported as recoverable rather than carrying forward the failure the repair fixed.
+- A push registration for a station that has a station-intent record only succeeds once the daemon
+  has durably recorded that it armed delivery. The proof is written before the member is installed,
+  and a register that cannot write it is refused with `Incompatible` / `PushIntentUnrecoverable` —
+  no member created, any epoch lease it claimed released, and a station that was already attended
+  left exactly as it was. A binding with no intent record (a pull attach, or a plain
+  `telex attach --on-deliver`) owes no proof and is unaffected.
 - `telex copilot gc` reads station intents **first**: a session named by a non-revoked intent is
   kept even when its bridge heartbeat is stale, because deleting the bridge under a live intent is
   the one action GC could take that recovery cannot undo. `.bindings.json` is a secondary hint, and
@@ -663,10 +809,15 @@ a check that the loser is still indexed rather than silently dropped.
 ## Verification
 
 - `cargo fmt --check`, `cargo clippy --workspace -- -D warnings`
-- `cargo test --workspace` (includes `tests/station_intent.rs`, 20 daemon-core rows)
-- `cargo test --no-default-features --features sqlite --test daemon_process_sqlite station_intent_`
+- `cargo build --workspace`
+- `cargo test --workspace` — 20 test binaries, 0 failures (includes `tests/station_intent.rs`, 39
+  rows, and `tests/daemon_process_sqlite.rs`, 43 rows)
+- `cargo test --no-default-features --features sqlite --test daemon_process_sqlite --test station_intent station_intent_`
+- `cargo test --no-default-features --features sqlite --test daemon_process_sqlite copilot_fallback`
 - `cargo test --all-features --test conformance --test daemon_core_postgres` (Postgres rows skip
   cleanly when `TELEX_PG_URL` is unset)
-- `node --test "copilot/bridge/*.test.mjs"`
-- Feature-matrix builds: `--no-default-features --features sqlite`, `--features postgres`,
-  `--features entra`, `--features "sqlite,self-update"`
+- `node --check copilot/bridge/extension.mjs`, `node --test "copilot/bridge/*.test.mjs"` — 20 pass
+- Feature-matrix builds with `RUSTFLAGS=-D warnings`: `--no-default-features --features sqlite`,
+  `--features postgres`, `--features entra`, default, `--features sqlite,self-update`
+- Compiled-out `telex upgrade` fail-closed check — exits 1 with the documented message
+- `mdbook build docs/guide`

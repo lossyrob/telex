@@ -212,6 +212,12 @@ Three conditions are named explicitly in status:
   permission to turn a half-written attach into a live push binding. Finalizing one requires either
   a daemon that reports push armed for it right now, or the daemon's own durable record that it
   armed the binding earlier.
+- **It never reports a push registration it cannot prove.** For a station that has a station-intent
+  record, the daemon writes its durable "I armed this" proof *before* it installs the member, and
+  refuses the whole registration if that write fails. So there is no state in which push is armed
+  and nothing on disk says so — you either get a working, recoverable station or a typed refusal
+  (`PushIntentUnrecoverable`) with no member created and any claimed lease released. A station that
+  was already attended is left exactly as it was.
 
 ### Recovering from a bridge reload
 
@@ -243,6 +249,11 @@ turn boundary (after `extensions_reload`), and only then becomes recoverable. `d
 `incompatible` need action: run `telex --address <station> copilot resume` after the switch.
 Rolling back to a binary that predates this feature returns those stations to manual resume, and the
 rollback output warns about it.
+
+The report reads the durable records as well as the daemon's cached view, so a station you attached
+seconds ago is counted correctly, and a station whose recorded producer identity was *just* repaired
+(the usual case after `extensions_reload`) is counted as recoverable rather than carrying forward the
+failure the repair fixed.
 
 The report reads the durable records as well as the daemon's own view, so a station you attached
 seconds before draining is counted correctly rather than appearing as nothing to hand over.
