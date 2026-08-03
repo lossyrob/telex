@@ -200,19 +200,30 @@ Three conditions are named explicitly in status:
   Explicit attach is the only way back.
 - **It never crosses hosts.** Intents are local files bound to this machine and this boot, so a
   shared Postgres store — or a synced home directory — cannot let one host restore another's bridge.
+- **It never re-arms a station you reset.** `telex station reset` (and `telex daemon reset`)
+  withdraws the desired state as well as the membership: the affected intents are revoked, so the
+  reconciler leaves the station idle. `telex --address <station> copilot resume` is the way back.
 
 ### Before you drain
 
 `telex daemon stop --drain`, `telex upgrade`, and `telex rollback` print a pre-drain intent report:
 
 ```
-station intents  recoverable 2 degraded 0 incompatible 0 unknown 0
+station intents  recoverable 2 pending 0 degraded 0 incompatible 0 unknown 0
 ```
 
-`recoverable` is what a successor is expected to restore automatically. `degraded` and
+`recoverable` is what a successor is expected to restore automatically. `pending` is a push attach
+that has not finalized yet — it is **not** restored automatically; it finalizes at the next Copilot
+turn boundary (after `extensions_reload`), and only then becomes recoverable. `degraded` and
 `incompatible` need action: run `telex --address <station> copilot resume` after the switch.
 Rolling back to a binary that predates this feature returns those stations to manual resume, and the
 rollback output warns about it.
+
+`telex upgrade` and `telex rollback` then drive one reconciliation pass on the successor by invoking
+the binary the switch just selected (`telex daemon reconcile` on that binary). That indirection is
+required, not cosmetic: the daemon only accepts IPC from a client whose executable matches its own,
+so a pass requested from the pre-switch process would either spawn the wrong binary or be refused.
+The successor summary distinguishes a pass that *ran and restored nothing* from one that never ran.
 
 ### Destructive testing
 

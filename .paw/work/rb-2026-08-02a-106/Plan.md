@@ -975,6 +975,16 @@ level may proceed in parallel.
 | T27 | Over-budget scope: 600 intents against the 512 cap - no pass exceeds `RECONCILE_PASS_DEADLINE`, nothing is deleted for being over cap, `over_cap` is reported, and every intent is attempted within the published queue-delay formula (MF2-1b, CO2-1) | daemon core SQLite | `tests` |
 | T28 | Credential read security: file outside the registered producer root, relaxed Windows DACL, reparse point, and past-`max_age_ms` mtime each yield `Insecure`/`Unverifiable` with no secret read and no connection (MF2-2) | `platform-fs` unit + daemon core SQLite | `tests` |
 
+**Coverage as built (corrected after the final review).** The table above is the *ownership* map;
+this is what is actually asserted. Recorded honestly rather than left implying full coverage.
+
+| Row | State |
+|---|---|
+| T1, T6, T9, T10, T11, T13, T14, T17, T18, T19, T20, T23, T24, T25, T27, T28 | covered |
+| T15 | covered as of the final review (`station_intent_two_sessions_never_both_attend_one_address`) |
+| T7, T8, T16, T26 | **partial** — the restart path is covered by graceful stop; no test kills the daemon, so the `AlreadyOwned` / `DeferredLease` crash path is exercised only at daemon-core level (`postgres_station_intent_restore_is_single_writer`, tightened in the final review to assert `deferred_lease == 1 && failed == 0`, no failure-counter advance, and the fixed cadence) |
+| T2, T3, T4, T5, T12, T21, T22 | **not covered** — no test sends a message across a restart gap, drives a busy bridge, resumes after a tombstone, or fails one store of a multi-store drain. `T21` has the `--daemon-instance` fence half only. Carried as follow-up work; none of these is a *new* gap introduced by the fixes, and each is a test gap rather than a known defect |
+
 ### Review findings -> resolution
 
 **Cycle 1** (MF-1..MF-17, SF-1..SF-18, CO-1..CO-5):
@@ -1081,10 +1091,16 @@ Four direction-preserving deviations, each recorded with the reason. Full detail
    (reproduced: `read` on a pre-existing `.bindings.json` failed with `Access is denied` immediately
    after hardening). Replaced by `ensure_owner_private_producer_root`: create-strict for a directory
    telex creates, validate-never-rewrite for one that already exists, with an ACE allowlist of
-   current user / `SYSTEM` / local `Administrators` / logon-session SID / AppContainer SID. Posture
-   unchanged (a broadly-ACLed root still fails closed); per-file credential checks still apply
-   independently. Regression test:
+   current user / `SYSTEM` / local `Administrators` / logon-session SID. Posture unchanged (a
+   broadly-ACLed root still fails closed); per-file credential checks still apply independently.
+   Regression test:
    `platform_fs::tests::producer_root_hardening_never_strips_an_existing_producer_file`.
+   **Pivot (final review):** the allowlist as first written also accepted the broad AppContainer
+   groups `S-1-15-2-*` and capability SIDs `S-1-15-3-*`. Those prefixes existed only in a
+   `#[cfg(test)]` SDDL helper before this work; promoting them into the *enforced* validator
+   widened the two validate-only paths this feature added (the producer credential read and an
+   existing bridge root) to accept `ALL APPLICATION PACKAGES`, a group comparable in reach to
+   `Users`. They are removed.
 2. **Intent finalization also happens at the turn boundary.** On a *first* attach the bridge
    extension is written but not yet loaded, so there is no producer to probe or describe and attach
    alone cannot finalize the very first binding. `ProducerDescriptorV1::validate` therefore requires
@@ -1101,6 +1117,68 @@ Four direction-preserving deviations, each recorded with the reason. Full detail
    neither `DeferredLease` nor `Failed`: both would wedge a binding whose member was lost from
    memory while the lease is still held. The reconciler adopts the lease it already holds. No new
    claim, no steal, and the post-claim tombstone re-check still runs.
+   **Pivot (final review):** adoption is now conditional on no *other session in this daemon*
+   holding a member for the address (idle or not). "We already own it" is a statement about the
+   daemon, not the session, and unconditional adoption let two sessions' intents for one address
+   both end up with an armed member.
+
+### Pivots from the final adversarial review
+
+Behavioral changes to what the plan specified, recorded here because each changes a stated
+property. The full list of 40 fixes with mechanisms and tests is in `Docs.md`, "Corrections made
+during the final adversarial review".
+
+5. **GC is state-scoped and TTL-governed on every reason.** Decision 15 described GC reasons
+   without saying which states each applies to, and as built the credential-existence and
+   identity rules applied to `Pending` too. On a first attach that deletes the record deviation 2
+   exists to promote, roughly 60 s after the attach. `Pending` is now governed by
+   `STATION_INTENT_PENDING_TTL` and by nothing else, a missing credential needs a new
+   `STATION_INTENT_CREDENTIAL_MISSING_TTL` (15 min, measured from the durable `evidence` clock,
+   not manifest age), and an unsupported schema version is never deleted at all — which is what
+   makes the documented "a rollback never deletes intents" guarantee true rather than
+   time-limited.
+6. **Retry policy is decided separately from projected state.** Decision 3 said a `max_age_ms`
+   expiry is "backoff-eligible", but as built every credential condition returned `Terminal`,
+   which carries the one-hour quarantine cadence. All six transient credential conditions now
+   return `Failed` while still projecting `Unverifiable`; `RegistryError` gained
+   `ContainmentUnreadable` so an absent file during a bridge reload is no longer a *security*
+   verdict.
+7. **Durable evidence is authoritative for retry state.** The plan treated `evidence` as
+   diagnostics. It is now read back: the index seeds backoff, quarantine, and attempt counts from
+   the manifest on first sight, so a crash loop cannot reset them by replacing the daemon. In
+   exchange, evidence is written only when it changes or once per `EVIDENCE_REFRESH_INTERVAL`
+   (60 s), and no longer bumps `updated_at_ms` — which also gives GC an age clock that an ordinary
+   retry cannot reset.
+8. **The CC watermark is refreshed, not only passed through.** Decision 7 required pass-through so
+   gap-committed CC messages stay visible. Pass-through alone meant the durable value never moved
+   after finalize, so every replacement replayed the whole session's CC history. The durable value
+   is now refreshed from the live member on a successful outcome, and every restore takes
+   `max(member, manifest)` so a live member is never rewound.
+9. **`station reset` withdraws the intent.** The plan did not consider reset. It is the one
+   deliberate operator action with no durable marker, so the reconciler re-armed it within a tick.
+   `reset_station` now revokes the affected intents, and the reconciler treats an
+   `idle && !idle_rearmable` member as a revocation.
+10. **Trigger (c) invokes the successor binary rather than `connect_or_spawn`.** Decision 14(c)
+    said "upgrade/rollback spawning the successor they installed". `connect_or_spawn` spawns
+    `current_exe()`, which during an upgrade is the *pre-switch* binary — and because the daemon's
+    peer check requires a matching executable, that left the old binary serving and locked every
+    new-binary client out. A new `telex daemon reconcile` subcommand is invoked on the
+    newly-selected binary instead; it retries a draining predecessor and a pass that did not run.
+    `ReconcileReport` gained `ran` / `skipped_reason` so those are distinguishable.
+11. **`Pending` is not `recoverable`.** The drain report folded it in, contradicting
+    `IntentRecoveryState::is_recoverable` and `is_reconcilable`. It has its own counter, and
+    rejected-but-identifiable manifests are indexed so status and the drain report are not blind to
+    them (`DrainIntentReport::unidentifiable` counts the rest).
+12. **Windows `boot_id` is minted and persisted, not derived.** The plan assumed a stable boot
+    identifier existed on every platform. On Windows the derivation
+    (`SystemTime::now() - GetTickCount64()`) is not stable within one boot, and an exact-equality
+    comparison across two processes made every intent fail closed. The identifier is now minted
+    once per boot, persisted in `HKCU\Software\telex` (environment-independent, unlike any file
+    path), validated against monotonic uptime and a tolerant boot instant, and cached per process.
+13. **The release-contract fixture declares expected movement.** The runbook step "roll the fixture
+    forward" could not be executed without turning CI red, because the test hardcoded both sides of
+    every comparison. The fixture now carries `expected_movement` and the test asserts that
+    relationship.
 
 Minor, non-behavioral:
 

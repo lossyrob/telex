@@ -1953,12 +1953,39 @@ daemon is running **and** this producer proves it is alive, restore this exact p
 Persisted: `pending`, `live`, `revoked`. Everything else is a runtime projection held in an
 in-memory index, so a transient probe failure never rewrites durable state.
 
-Precedence, highest first: `revoked` > `tombstoned` > `insecure` > `incompatible` >
+Precedence, highest first: `tombstoned` > `revoked` > `insecure` > `incompatible` >
 `ownership_conflict` > `quarantined` > `unverifiable` > `legacy_producer` > `deferred_pull_waiter` >
-`deferred_lease` > `pending` > `restored` > `live`.
+`deferred_lease` > `pending` > `restored` > `live`. (`tombstoned` is reserved for a future
+projection that distinguishes a durable tombstone from a local revocation; this build persists and
+projects `revoked` for both.)
 
 `pending` is written **before** `Register` and is never reconciled, so a crash mid-attach cannot
-leave a claimable record.
+leave a claimable record. It is also **not** counted as recoverable anywhere: the pre-drain report
+carries its own `pending` count, because a successor cannot restore an intent that has not been
+finalized.
+
+### 18.2.1 Garbage collection
+
+GC is the only place an intent file is deleted, so every reason is state-scoped and TTL-governed:
+
+| Reason | Applies to | TTL |
+|---|---|---|
+| attach never finalized | `pending` **only** | `STATION_INTENT_PENDING_TTL` (5 min) |
+| terminal past its TTL | persisted `unverifiable` / `insecure` / `revoked` | `STATION_INTENT_UNVERIFIABLE_TTL` (7 d) |
+| credential file gone | finalized intents | `STATION_INTENT_CREDENTIAL_MISSING_TTL` (15 min) since the producer was last proven or attempted |
+| foreign host/boot with a dead producer | finalized intents | immediate (it can never be restored here) |
+| producer dead and unproven past its TTL | finalized intents | `STATION_INTENT_UNVERIFIABLE_TTL` |
+| unreadable past its TTL | manifests that fail validation, **except** an unsupported schema version | `STATION_INTENT_UNVERIFIABLE_TTL` |
+
+Two rules carry most of the weight. `pending` is governed by its own TTL and by nothing else,
+because on a first attach the credential path is a bridge registry the extension has not written yet
+and the producer identity is a placeholder — any other rule would delete exactly the record the
+turn-boundary finalizer exists to promote. And a *missing credential* is a transient producer
+condition (the bridge deletes and rewrites its registry on every reload), not a teardown, so it is
+TTL-governed against the durable `evidence` clock rather than acted on immediately.
+
+An unsupported schema version is never deleted: that is what a rollback leaves behind, and
+"intents are never deleted by a rollback" is a documented guarantee.
 
 ### 18.3 What restoration requires
 
@@ -1972,10 +1999,22 @@ In order, and all fail-closed:
 4. No live armed pull waiter (`deferred_pull_waiter` otherwise; pull-waiter precedence is preserved).
 5. The store selector resolves, and the store is opened **open-existing-only**.
 6. The credential resolves: a registered producer root, canonical containment, per-file
-   owner-private checks, and an mtime inside `max_age_ms` — checked *before* the secret is read.
+   owner-private checks, and an mtime inside `max_age_ms` — all decided on **one open handle**, and
+   the age gate runs before the secret is extracted from the bytes, connected to, or sent.
 7. `verify_server_peer` succeeds **before anything is sent**: same user, matching executable,
    matching pid + start time.
-8. The probe answers with the echoed nonce, the expected session, and protocol ≥ 2.
+8. The probe answers with the echoed nonce, the expected session, and protocol ≥ 2. The response is
+   frame-capped and any producer-supplied error code is clamped to 64 `[a-z0-9_]` characters before
+   it can enter the status projection.
+9. The member is not idle-and-not-re-armable. That combination is what `telex station reset`
+   leaves, and it means "do not re-arm this automatically": the reconciler treats it as a
+   revocation rather than restoring over the one deliberate operator action that has no durable
+   tombstone. `reset_station` revokes the affected intents directly for the same reason.
+
+Restoration also never *lowers* a live member's CC watermark, and a successful outcome refreshes the
+durable watermark from the live member. The manifest value is a floor that keeps CC messages
+committed during a restart gap visible; leaving it frozen at attach time made every daemon
+replacement replay the whole session's CC history as injected turns.
 
 ### 18.4 Scheduling and bounds
 
@@ -1993,6 +2032,27 @@ In order, and all fail-closed:
 Outcome classes drive retry policy and nothing else: `Restored` / `RefreshedNoOp` (success),
 `DeferredLease` (fixed cadence, no backoff, no quarantine counter), `DeferredPullWaiter` (its own
 backoff), `Failed` (the only backoff-eligible class), and terminal/inert classes.
+
+Retry policy and *projected state* are deliberately independent axes. Every transient producer
+condition — `credential_stale`, `credential_age_unknown`, `credential_unreadable`,
+`credential_malformed`, `credential_field_missing`, `credential_unresolved` — projects
+`unverifiable` for status while taking the `Failed` ladder, because the credential is a bridge
+registry rewritten on a 15 s heartbeat and deleted/recreated on every reload. Only the security
+classes (`credential_outside_root`, `credential_insecure`) and the genuinely inert ones
+(`credential_root_unregistered`, `foreign_host_or_boot`, `handler_kind_unregistered`,
+`legacy_producer`, `store_missing`, `store_selector_unresolved`, `tombstoned`, `operator_reset`)
+are terminal.
+
+The scheduling state that drives this — `attempts`, `consecutive_failures`, `next_attempt_ms` — is
+persisted in the manifest's `evidence` block and **seeded back** into the index the first time a
+daemon sees an intent, so backoff and quarantine survive the daemon replacement that is most likely
+to follow a crash loop. Evidence is written when a scheduling-relevant field changes, and otherwise
+at most once per `EVIDENCE_REFRESH_INTERVAL` (60 s), so a healthy steady state does not rewrite every
+manifest on every tick.
+
+A pass that does not run — drain suppression, single-flight contention, an unopenable scope, a
+failed scan — publishes a report with `ran: false` and a `skipped_reason`. Zero counts on a pass
+that never started are not evidence of a completed verification.
 
 ### 18.5 Two-level API
 
@@ -2016,10 +2076,18 @@ intent revocation second, so a crash between them leaves tombstone-wins.
 ### 18.7 Triggers
 
 (a) daemon startup scan (asynchronous; `serve()` accepts connections immediately);
-(b) the heartbeat tick; (c) `upgrade`/`rollback` spawning the successor they installed (a bounded
+(b) the heartbeat tick; (c) `upgrade`/`rollback` driving the successor they installed (a bounded
 ADR 0028 exception); (d) `Request::ReconcileIntents { proof, scope }`, admin-proofed exactly like
 `Drain` because reconciliation arms delivery and spawns processes.
 
-All four pulse one trigger, and every completed pass publishes a `ReconcileReport` with a monotonic
+(c) is *not* an in-process `connect_or_spawn`. That helper spawns `current_exe()`, which during an
+upgrade is the pre-switch binary, and the daemon's peer check requires the server executable to
+match the client's — so an in-process attempt both spawned the wrong binary and then locked every
+subsequent (new-binary) client out of a daemon that has no idle shutdown. `upgrade`/`rollback`
+instead invoke `telex daemon reconcile` **on the binary the switch just selected**, which spawns
+its own matched-version daemon and retries both a draining predecessor and a pass that did not run.
+
+All triggers pulse one seam, and every completed pass publishes a `ReconcileReport` with a monotonic
 `pass_seq`. Callers await a report rather than polling a clock. Pulses schedule work; they never
-bypass `next_attempt_ms`.
+bypass `next_attempt_ms`. The heartbeat loop tracks its own tick deadline explicitly, so a stream of
+pulses can never starve the epoch-lease heartbeat.

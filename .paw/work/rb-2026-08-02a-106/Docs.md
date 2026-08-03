@@ -191,6 +191,213 @@ claim, no steal, and the post-claim tombstone re-check still runs.
   dependency graph behind the optional `self-update` feature. Intent identity must be identical in
   every feature combination, including `--no-default-features --features sqlite`.
 
+## Corrections made during the final adversarial review
+
+A society-of-thought final review (architecture, correctness, edge cases, security, testing,
+release, plus an adversarial rubber-duck trace) found a further set of defects. All blocking, high,
+and medium findings are fixed; each behavior change is recorded here because each one changes a
+documented property.
+
+### Lifecycle and GC
+
+1. **GC deleted a first-attach `Pending` intent within ~60 s.** The credential-existence rule was an
+   unguarded `else if` after the pending-TTL arm, and on a first attach the credential path is the
+   bridge registry the extension has not written yet (the agent still has to run
+   `extensions_reload`). The record the turn-boundary finalizer promotes was therefore gone before
+   it could run, silently leaving push armed with **no durable intent** — the exact state the
+   feature exists to remove. **Fix:** `Pending` is now governed by `STATION_INTENT_PENDING_TTL` and
+   by nothing else. Tests:
+   `station_intent::tests::gc_never_deletes_a_pending_intent_whose_producer_does_not_exist_yet`,
+   `commands::copilot::tests::a_first_attach_pending_intent_is_valid_and_survives_gc`.
+2. **GC deleted a `Live` intent whenever the registry was momentarily absent.** The bridge deletes
+   and rewrites its own registry on `/clear`, `extensions_reload`, and extension-host restart, so
+   any GC pass landing in that window destroyed a healthy recovery record — the only place a `Live`
+   intent was destroyed with no tombstone and no TTL. **Fix:** the credential-absent rule now
+   requires `STATION_INTENT_CREDENTIAL_MISSING_TTL` (15 min) measured from the last time the daemon
+   *proved or attempted* the producer (`evidence`), not from manifest age.
+3. **An orphaned `Live` intent could never expire.** Runtime failure states are deliberately never
+   persisted, so the `STATION_INTENT_UNVERIFIABLE_TTL` orphan branch was unreachable for anything
+   but `Revoked`; and because `apply_outcome` bumped `updated_at_ms` on every attempt, the TTL clock
+   reset forever. **Fix:** evidence writes no longer bump `updated_at_ms`, and a finalized intent
+   whose producer is provably dead expires on the orphan TTL.
+4. **A rollback could delete newer-schema intents.** `UnsupportedSchema` fell into the
+   unreadable-past-TTL sweep, contradicting the documented "intents are never deleted by a
+   rollback". **Fix:** a manifest this build cannot read *because of its schema version* is kept
+   forever. Test: `station_intent::tests::gc_never_deletes_a_manifest_from_a_newer_schema`.
+5. **Interrupted-write debris was invisible to GC.** Orphaned `*.tmp` files (and now `*.lock`) are
+   swept on the GC cadence.
+
+### Retry policy
+
+6. **Transient credential conditions were `Terminal`, parking a live binding for an hour.**
+   `credential_stale`, `credential_age_unknown`, `credential_unreadable`, `credential_malformed`,
+   `credential_field_missing`, and `credential_unresolved` are all ordinary conditions of a *live*
+   producer whose registry is rewritten on a 15 s heartbeat. **Fix:** retry policy and projected
+   state are now separate axes — these return `IntentOutcome::Failed` (still projecting
+   `Unverifiable`) and take the 5 s → 5 min ladder, while the security and genuinely-inert classes
+   (`credential_outside_root`, `credential_insecure`, `credential_root_unregistered`,
+   `foreign_host_or_boot`, `handler_kind_unregistered`, `legacy_producer`, `store_missing`,
+   `store_selector_unresolved`) stay `Terminal`. `RegistryError` also gained
+   `ContainmentUnreadable`, so an absent file during a bridge reload is no longer collapsed into a
+   *security* verdict. Tests:
+   `station_intent_transient_credential_conditions_take_the_backoff_ladder`,
+   `daemon::reconcile::tests::a_transient_credential_condition_is_not_a_terminal_outcome`.
+7. **The bridge registry was rewritten non-atomically.** `writeFile` truncates first, so a read
+   landing in that window saw a partial document. **Fix:** `writeRegistry()` writes a temp file and
+   renames. Test: `probe-protocol.test.mjs` "the registry is written atomically…".
+8. **Retry state did not survive a daemon replacement.** The durable `evidence` block was written
+   every pass and never read back, so backoff and quarantine reset on the event most likely to
+   follow a crash loop, and `recovery_latency_ms` restarted the clock on the exact event it
+   measures. **Fix:** the index seeds `attempts`, `consecutive_failures`, `next_attempt_ms`,
+   `last_attempt_ms`, `last_success_ms`, `producer_verified_ms`, and `failure_code` from the
+   manifest on first sight. Test: `station_intent_retry_state_survives_a_daemon_replacement`.
+9. **The healthy steady state rewrote every manifest every 5 s.** **Fix:** evidence is persisted
+   when a scheduling-relevant field changes, and otherwise at most once per
+   `EVIDENCE_REFRESH_INTERVAL` (60 s) so `last_success_ms` stays a usable clock for GC. Test:
+   `daemon::reconcile::tests::unchanged_evidence_is_not_rewritten_on_every_tick`.
+
+### Delivery correctness
+
+10. **The CC watermark was frozen at attach time.** The durable value was written once at finalize
+    while the member's `on_deliver_cc_after_ms` advanced in memory and died with the daemon, so
+    every replacement re-injected the whole session's CC history as agent turns. **Fix:**
+    `apply_outcome` refreshes the durable watermark from the live member on a successful outcome,
+    and every restore takes `max(existing_member, manifest)` so a live member is never rewound.
+    Test: `station_intent_cc_watermark_is_refreshed_and_never_rewound`.
+11. **`telex station reset` was undone by the reconciler within a tick.** Reset was the one
+    deliberate operator action with no durable marker. **Fix:** `reset_station` revokes the affected
+    intents (exact per binding, reversible with `copilot resume`), and the reconciler treats an
+    `idle && !idle_rearmable` member as `Terminal(Revoked, "operator_reset")` as a second line of
+    defence. Test: `station_intent_operator_reset_is_not_undone_by_the_reconciler`.
+12. **Two sessions could both attend one address.** The per-address dedupe was keyed on the full
+    `(store, session, address)` tuple — which no two manifests can share, so it rejected nothing —
+    and the `AlreadyOwned` self-adoption branch treated "this daemon owns the address" as licence to
+    adopt it for a second session. **Fix:** dedupe on `(store_key, address)`, and adopt a
+    self-owned lease only when no other session in this daemon holds the address. Test:
+    `station_intent_two_sessions_never_both_attend_one_address`.
+13. **A stale `--daemon-instance` fence dead-lettered every message permanently.** The fence value
+    is read before `Register`; if the daemon is replaced in that window the handler names a dead
+    instance and `copilot push` returns `PUSH_EXIT_PERMANENT`, which the daemon treats as
+    non-retryable — and the reconcile no-op short-circuit meant the argv was never rebuilt.
+    **Fix:** attach compares `MemberStatus::owner_instance_id` against the baked fence and fails
+    closed on a mismatch, and reconciliation repairs a member whose stored argv differs from the
+    argv this daemon builds.
+14. **The turn guard's new branch suppressed every other coverage check.** **Fix:** the
+    unrestored-intent branch moved to just before the `covered` early return, guarded on all
+    coverage sets being empty; the mixed case reports both. Tests:
+    `guard_reports_an_unrestored_intent_without_suppressing_a_real_coverage_gap`,
+    `guard_reports_an_unrestored_intent_when_nothing_else_is_uncovered`.
+15. **A scoped `ReconcileIntents` advanced the shared cursor past out-of-scope intents.** **Fix:**
+    `last_considered_position` is assigned below the scope filter.
+16. **The heartbeat loop could be starved by trigger pulses.** The tick was recreated each
+    iteration, so a pulse stream faster than `HEARTBEAT_INTERVAL` starved `heartbeat_members_once`
+    and let epoch leases go stale. **Fix:** the heartbeat deadline is tracked explicitly and
+    anchored, so a trigger wake never skips a due heartbeat.
+
+### Safety and fail-closed posture
+
+17. **The anti-downgrade guard failed *open* when the intent scope could not be opened.** Both
+    inputs were false in exactly the window the guard exists for. **Fix:** `lookup_live_intent`
+    returns `Live` / `Absent` / `Unavailable`, and `Unavailable` fails closed with
+    `PushIntentUnrecoverable`.
+18. **Read paths created the intent scope as a side effect.** **Fix:** `intent_store_readonly` uses
+    `open_existing`, and `intent_statuses` / `pending_push_intent` / the anti-downgrade lookup use
+    it. The comment now matches the code.
+19. **The credential age check and the read used two separate opens.** **Fix:** one
+    `read_owner_only_file_with_meta` handle, per Plan decision 2. The trade-off is recorded in the
+    code: the bytes reach memory, but the age gate runs before the secret is extracted, connected
+    to, or sent.
+20. **`write_cas` was a read-then-write.** **Fix:** every mutating entry point takes a bounded,
+    stale-tolerant per-intent write lock, and `finalize_intent` goes through `update_locked`
+    instead of a bare `write_atomic` with no CAS at all.
+21. **Windows: the ACE allowlist had been silently widened** to accept `ALL APPLICATION PACKAGES`
+    (`S-1-15-2-*`) and capability SIDs on the two *validate-only* paths this feature added — the
+    producer credential read and the existing bridge root. **Fix:** the enforced allowlist is back
+    to current user / `SYSTEM` / `Administrators` / logon-session SID.
+22. **Windows: `boot_id` was not stable within one boot.** It was derived as
+    `SystemTime::now() - GetTickCount64()`, which jitters across a second boundary and shifts on any
+    clock step; a one-second divergence between the CLI and the daemon made every intent
+    `foreign_host_or_boot` and, through the anti-downgrade guard, blocked unrelated `telex attach`
+    calls. **Fix:** the identifier is minted once per boot and persisted owner-private under
+    `%LOCALAPPDATA%\telex\boot-id.json`, validated against monotonic uptime *and* a tolerant boot
+    instant, claimed with create-new semantics so concurrent minters converge, and cached per
+    process. Test: `platform_fs::tests::boot_identity_is_stable_across_repeated_independent_resolutions`.
+23. **Windows: an atomic intent write failed when any reader held the file open.**
+    `open_owner_only_file` used `FILE_SHARE_READ` only, so `rename` returned `ERROR_ACCESS_DENIED`
+    (mapped to `PermissionDenied`, which the fallback branch did not handle). **Fix:**
+    `FILE_SHARE_DELETE | FILE_SHARE_WRITE` on the read handle, plus a bounded
+    `PermissionDenied` retry in `write_owner_only_file_atomic` for foreign readers.
+24. **The probe response was read uncapped and its error code retained verbatim.** A 1 MiB `error`
+    string would push every `StatusReport` past `MAX_JSONL_FRAME_BYTES` and break `telex status`
+    for the whole daemon until restart. **Fix:** `PROBE_MAX_RESPONSE_BYTES` frames the read and
+    `sanitize_failure_code` clamps the code to 64 `[a-z0-9_]` characters.
+25. **`copilot detach` with the daemon down revoked nothing.** The `?` propagated the connect error
+    and skipped every local teardown step, so the `Live` intent survived with no tombstone and the
+    next daemon start auto-returned a station the user had detached. **Fix:** the local revoke and
+    bridge-binding teardown run on the error path too, with an explicit "the durable tombstone was
+    NOT written" message and a non-zero exit.
+26. **The attach rollback removed a bridge binding it did not create.** That silently decremented
+    the ref-count, so a later detach of an unrelated address deleted the shared bridge and registry
+    out from under a live push station. **Fix:** `BridgeBindingWrite` mirrors `PendingIntentWrite`;
+    rollback removes only what the invocation added.
+27. **`copilot gc` failed open on a per-file intent read error.** **Fix:** a per-file failure is as
+    disqualifying as an unreadable scope; `station_intents_readable` reflects it, a new
+    `station_intents_unreadable` count is reported, and binding/intent drift is now reported in both
+    directions.
+
+### Operator-facing reporting
+
+28. **`Pending` was counted as `recoverable` in the drain report.** It is never reconciled, so the
+    pre-drain signal overstated what a successor restores and `upgrade` burned its successor
+    timeout on it. **Fix:** `DrainIntentReport::pending` is its own counter, rendered separately by
+    `daemon stop --drain`, `upgrade`, and `rollback`.
+29. **Rejected manifests were invisible.** The comment claimed they were indexed; no `index_upsert`
+    happened, so `telex status` and the drain report showed nothing for exactly the intents they
+    exist to flag. **Fix:** `ScanPage::rejected` carries the binding identity when the document
+    parsed far enough to know it, those entries are indexed (highest-precedence-wins), and
+    `DrainIntentReport::unidentifiable` counts the rest and folds them into `degraded`. Test:
+    `station_intent_rejected_manifests_are_visible_in_status_and_the_drain_report`.
+30. **A skipped pass was indistinguishable from an empty one.** **Fix:** `ReconcileReport::ran` and
+    `skipped_reason`. Test: `station_intent_a_suppressed_pass_is_reported_as_not_run`.
+31. **`upgrade`/`rollback` spawned the *pre-switch* binary as the "successor".**
+    `connect_or_spawn` spawns `current_exe()`, which during an upgrade is
+    `versions/<old-tag>/telex`; the daemon left running was the old binary, and because
+    `connect_existing` requires the server executable to match the client's, every subsequent
+    client (all the new binary) got `Unauthorized` from a daemon with no idle shutdown — including
+    `telex daemon stop`. On rollback it resurrected the binary being rolled back from. **Fix:** a
+    new `telex daemon reconcile` subcommand, invoked as a child process of the **newly selected**
+    binary, which retries a draining predecessor and a pass that did not run.
+32. **The successor probe reported success on a zeroed report.** Covered by 30 and 31 together:
+    `daemon reconcile` retries until a pass reports `ran`.
+33. **`CAP_STATION_INTENT` was advertised with no consumer.** **Fix:** `DaemonStatus` carries the
+    daemon's capability list and `ensure_reconcile_capability` gates on it as well as on the minor.
+34. **Following the release runbook broke the release-contract test.** It hardcoded both sides of
+    every comparison, so rolling the fixture forward as the checklist demands turned CI red with no
+    instruction to also edit the test. **Fix:** the fixture declares `expected_movement`
+    (`unchanged` / `changed` / `introduced`) and the test asserts that relationship; the runbook
+    step now says to reset it.
+35. **`over_cap` was off by one** against the write cap (`>` vs `>=`).
+36. **`Revoked` / `Tombstoned` precedence and doc comments were swapped** relative to Plan decision
+    16. Corrected; `Tombstoned` is documented as reserved, since this build persists and projects
+    `Revoked` for both causes.
+
+### Test-integrity fixes
+
+37. `station_intent_trigger_seam_drives_a_pass_without_a_wall_clock_sleep` always timed out and
+    fell back to calling `reconcile_once` directly, so the seam could have been entirely unwired
+    with the test green (and it was the slowest test in the suite). `TestDaemon` gained
+    `spawn_trigger_consumer`, and the test now asserts the pulse drives a real pass.
+38. The Postgres `DeferredLease` assertion was `deferred_lease + failed == 1`, which passes for the
+    exact regression that matters (classifying a fresh incumbent as `epoch_claim_lost` breaks the
+    published crash bound). Tightened to `deferred_lease == 1 && failed == 0`, plus assertions that
+    the failure counter did not advance and the retry is the fixed cadence.
+39. The over-budget test summed *attempts* rather than distinct intents, so a stalled cursor
+    re-attempting the same 64 intents satisfied it. It now counts distinct attempted bindings.
+40. macOS ran only the three process-level station-intent tests; the credential rules, probe
+    transports, and scan cursor all live in the core suite. CI now runs `--test station_intent`
+    there too, and Node is pinned (the bridge-contract step needs Node >= 21 for its own glob
+    expansion).
+
 ## Corrections made during implementation review
 
 Six defects an adversarial review of the diff surfaced, all fixed. Recorded because each is a
