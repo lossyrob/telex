@@ -32,12 +32,23 @@ use crate::daemon_ipc::{
 use crate::handler_kinds::{self, StoreSelector};
 use crate::platform_fs;
 use crate::station_intent::{
-    self, ArmedProofStamp, IntentEvidence, IntentId, IntentStore, ProducerTransport,
-    StationIntentV1, BRIDGE_PROBE_TIMEOUT, STATION_INTENT_MAX_COUNT,
+    self, ArmedProofFailure, ArmedProofStamp, IntentEvidence, IntentId, IntentStore,
+    ProducerTransport, StationIntentV1, BRIDGE_PROBE_TIMEOUT, STATION_INTENT_MAX_COUNT,
 };
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+/// A stamp that could not be performed, with the classification the register's admission rule
+/// reads and the operator-facing detail it reports.
+///
+/// The classification is separate from the detail on purpose: the *decision* must be made from a
+/// small closed set (see `station_intent::armed_proof_admission`), never by matching on a message.
+#[derive(Debug, Clone)]
+pub(crate) struct ArmedProofRefusal {
+    pub(crate) failure: ArmedProofFailure,
+    pub(crate) detail: String,
+}
 
 // ---------------------------------------------------------------------------------------------
 // Constants and published bounds
@@ -496,22 +507,42 @@ impl DaemonState {
     /// delete the record between the member commit and the stamp, leaving an armed station with no
     /// durable proof at all while the register still reported success.
     ///
+    /// Opens the scope through the **read** path, which never creates it. A binding with no durable
+    /// record has nothing to prove, and a scope with no directory holds no records, so that case is
+    /// [`ArmedProofStamp::NoRecord`] rather than a failure — a register that owes no proof must not
+    /// be refused because a directory it had nothing to put in could not be created. The stamp
+    /// still *writes* through this handle whenever the scope does exist, which is the only case in
+    /// which a record can be there to stamp.
+    ///
     /// Deliberately **not** best effort, and deliberately not swallowing its result: the caller
-    /// decides, and a register that owes a proof it could not persist is aborted rather than
-    /// reported as a durable push registration. Idempotent, so the hot re-register path costs a
-    /// stat and nothing else.
+    /// decides (through `station_intent::armed_proof_admission`), and a register that owes a proof
+    /// it could not persist is aborted rather than reported as a durable push registration.
+    /// Idempotent, so the hot re-register path costs a stat and nothing else.
     pub(crate) fn stamp_intent_armed(
         &self,
         store_key: &str,
         session_id: &str,
         address: &str,
-    ) -> std::result::Result<ArmedProofStamp, String> {
-        let Some(store) = self.intent_store() else {
-            return Err("the station-intent scope could not be opened".to_string());
+    ) -> std::result::Result<ArmedProofStamp, ArmedProofRefusal> {
+        let store = match self.intent_store_readonly() {
+            Ok(Some(store)) => store,
+            // No scope on disk at all, so no record for this binding either.
+            Ok(None) => return Ok(ArmedProofStamp::NoRecord),
+            Err(detail) => {
+                return Err(ArmedProofRefusal {
+                    failure: ArmedProofFailure::ScopeUnavailable,
+                    detail,
+                })
+            }
         };
+        // Every error `stamp_armed_proof` can return is about the record itself: an absent manifest
+        // is reported as `NoRecord`, never as an error.
         store
             .stamp_armed_proof(store_key, session_id, address, &self.instance_id, now_ms())
-            .map_err(|e| e.to_string())
+            .map_err(|e| ArmedProofRefusal {
+                failure: ArmedProofFailure::RecordUnusable,
+                detail: e.to_string(),
+            })
     }
 
     /// Whether the durable intent scope currently holds a record for this binding.

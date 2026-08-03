@@ -21,6 +21,7 @@ use crate::model::{
     cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient, Attention,
     DeliveryOutcome, EpochClaimResult, MessageRow, NewMessage, STATUS_RETIRED,
 };
+use crate::station_intent;
 #[cfg(feature = "postgres")]
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -4473,6 +4474,14 @@ async fn register_member(
 /// separates "this binding has no intent record, so a proof is neither owed nor meaningful" — the
 /// ordinary pull attach, or `telex attach --on-deliver` from a client that writes no intent — from
 /// "the record that was here is gone".
+///
+/// The decision itself is the table in [`station_intent::armed_proof_admission`], so what this
+/// function contributes is the wiring and the message, not a policy of its own. The part worth
+/// stating here is the one that is *not* symmetric: a failure to open the scope refuses only a
+/// register that owes a proof, because for a register that owes nothing the scope open is a
+/// *create* of a directory it has nothing to put in — refusing push for every client that writes no
+/// intent because that create failed is a denial with no durable state to protect. A record that is
+/// present but unreadable is refused either way.
 fn commit_armed_proof(
     state: &Arc<DaemonState>,
     store_key: &str,
@@ -4480,33 +4489,33 @@ fn commit_armed_proof(
     address: &str,
     owes_proof: bool,
 ) -> std::result::Result<(), Response> {
-    let refuse = |detail: String| {
-        state.push_recent_error(
-            "StationIntent",
-            format!(
-                "refused push registration because the armed proof could not be persisted store={store_key} session={session_id} address={address}: {detail}"
-            ),
-        );
-        Err(proto::incompatible_with_reason(
-            format!(
-                "push for {address} was not registered: the station-intent record that proves it is armed could not be written ({detail}); \
-                 re-run `telex --address {address} copilot resume` once the station-intent scope is writable"
-            ),
-            NeedsAttachReason::PushIntentUnrecoverable,
-        ))
+    let stamped = state.stamp_intent_armed(store_key, session_id, address);
+    let outcome = match &stamped {
+        Ok(stamp) => Ok(*stamp),
+        Err(refusal) => Err(refusal.failure),
     };
-    match state.stamp_intent_armed(store_key, session_id, address) {
-        Ok(stamp) if stamp.is_proven() => Ok(()),
-        // No record at all. Only a refusal when one was observed before this register started —
-        // otherwise this is a push attach for a binding that never had an intent, which is a
-        // supported, fully durable-free mode.
-        Ok(_) if owes_proof => refuse(
-            "the station-intent record for this binding was removed while the registration was in flight"
-                .to_string(),
-        ),
-        Ok(_) => Ok(()),
-        Err(detail) => refuse(detail),
+    if station_intent::armed_proof_admission(outcome, owes_proof)
+        == station_intent::ArmedProofAdmission::Commit
+    {
+        return Ok(());
     }
+    let detail = match &stamped {
+        Ok(_) => "the station-intent record for this binding was removed while the registration was in flight".to_string(),
+        Err(refusal) => refusal.detail.clone(),
+    };
+    state.push_recent_error(
+        "StationIntent",
+        format!(
+            "refused push registration because the armed proof could not be persisted store={store_key} session={session_id} address={address}: {detail}"
+        ),
+    );
+    Err(proto::incompatible_with_reason(
+        format!(
+            "push for {address} was not registered: the station-intent record that proves it is armed could not be written ({detail}); \
+             re-run `telex --address {address} copilot resume` once the station-intent scope is writable"
+        ),
+        NeedsAttachReason::PushIntentUnrecoverable,
+    ))
 }
 
 async fn on_deliver_cc_lower_bound(
@@ -6562,6 +6571,103 @@ mod p3_tests {
             !after.idle,
             "the incumbent must not be demoted by a refused refresh"
         );
+    }
+
+    /// A register that owes **no** proof must not be refused because the scope could not be
+    /// *created*.
+    ///
+    /// The proof commit opened the scope through the creating path, so a run directory in which the
+    /// intent scope cannot be made — here a plain file where the `intents` directory belongs, but
+    /// equally a read-only volume, a full disk, or leftover debris — turned every push registration
+    /// into `Incompatible` / `PushIntentUnrecoverable`, including the ones for clients that write no
+    /// intent at all and therefore have no durable state to lose. That is a denial with nothing to
+    /// protect: the register is refused to guard a record that provably does not exist.
+    ///
+    /// The stamp now opens the scope through the read path, so a scope with no directory is
+    /// `NoRecord` — "provably nothing to prove" — rather than a failure, and it creates nothing as a
+    /// side effect of a registration that has nothing to write.
+    #[tokio::test]
+    async fn a_push_register_owing_no_proof_survives_a_scope_that_cannot_be_created() {
+        let state = test_state("arming-proof-uncreatable-scope");
+        let store = store_key("arming-proof-uncreatable-scope");
+        std::fs::create_dir_all(&state.paths.run_dir).expect("run dir");
+        // A file where the scope's parent directory belongs: the scope cannot be created, and it
+        // does not exist, so nothing about this binding is durable.
+        std::fs::write(state.paths.run_dir.join("intents"), b"not a directory")
+            .expect("block the scope");
+
+        assert!(
+            matches!(
+                state.stamp_intent_armed(&store, "s1", "addr:a"),
+                Ok(crate::station_intent::ArmedProofStamp::NoRecord)
+            ),
+            "precondition: a scope that does not exist holds no records"
+        );
+
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "a push register with no durable record must not be refused by a scope it never used, got {response:?}"
+        );
+        assert!(state
+            .get_member(&store, "s1", "addr:a")
+            .is_some_and(|member| member.on_deliver.is_some()));
+        assert!(
+            !state.paths.run_dir.join("intents").is_dir(),
+            "and the proof commit must not have created a scope it had nothing to put in"
+        );
+    }
+
+    /// The proof-commit gate, driven directly across both values of the obligation.
+    ///
+    /// `commit_armed_proof` is the whole difference between "a push registration that is durably
+    /// recoverable" and "one that says it is", so its two directions are pinned here rather than
+    /// only through the register paths above: a *scope-level* failure refuses only a register that
+    /// owes a proof, while a record that is present and unreadable refuses **either way** — that is
+    /// durable state about this binding that could not be verified, and it fails closed exactly as
+    /// the anti-downgrade guard does.
+    #[test]
+    fn the_proof_commit_gate_refuses_an_unowed_register_only_for_a_broken_record() {
+        let state = test_state("arming-proof-gate");
+        let store = store_key("arming-proof-gate");
+
+        // (a) No record and no scope: nothing is owed, nothing is provable, and a register that
+        // owes nothing commits. A register that *did* observe a record fails closed.
+        assert!(commit_armed_proof(&state, &store, "s1", "addr:a", false).is_ok());
+        let refused = commit_armed_proof(&state, &store, "s1", "addr:a", true)
+            .expect_err("an owed proof with no record must refuse");
+        assert_refused_for_unrecoverable_proof(&refused);
+
+        // (b) A healthy record is stamped whether or not the up-front observation saw it. This is
+        // the benign half of the observation race: a record created between the observation and the
+        // stamp is proven anyway.
+        let id = seed_pending_intent(&state, &store, "s1", "addr:b");
+        let scope = intent_scope(&state);
+        assert!(commit_armed_proof(&state, &store, "s1", "addr:b", false).is_ok());
+        assert!(
+            scope.load(&id).expect("reload").is_armed(),
+            "an unowed commit still stamps a record that is there"
+        );
+
+        // (c) A record that is present and unreadable is a refusal in both directions.
+        let broken = seed_pending_intent(&state, &store, "s1", "addr:c");
+        std::fs::write(scope.path_for(&broken), b"{ truncated").expect("corrupt the manifest");
+        assert!(
+            matches!(
+                state.stamp_intent_armed(&store, "s1", "addr:c"),
+                Err(reconcile::ArmedProofRefusal {
+                    failure: crate::station_intent::ArmedProofFailure::RecordUnusable,
+                    ..
+                })
+            ),
+            "precondition: a corrupt record is classified as the record's failure, not the scope's"
+        );
+        let refused = commit_armed_proof(&state, &store, "s1", "addr:c", false)
+            .expect_err("a broken record refuses even an unowed register");
+        assert_refused_for_unrecoverable_proof(&refused);
+        let refused = commit_armed_proof(&state, &store, "s1", "addr:c", true)
+            .expect_err("and certainly an owed one");
+        assert_refused_for_unrecoverable_proof(&refused);
     }
 
     #[test]

@@ -4535,6 +4535,58 @@ mod tests {
             .remove_if_unchanged(&id, generation, rollback_removable)
             .expect("conditional remove"));
         assert!(store.load(&id).is_err());
+
+        // (d) A re-attach *after a teardown* is a new lifecycle, and its rollback still owns what it
+        // wrote. While the pending write inherited the revoked record's armed proof, this attach's
+        // own leftover was `is_armed()` on the strength of an arming that had already been revoked:
+        // `rollback_removable` refused, so a failing attach could not clean up after itself, and
+        // the record it left behind claimed a proof no live daemon had given it.
+        let _ = std::fs::remove_dir_all(&run_dir);
+        let store = crate::station_intent::IntentStore::open(&run_dir, "singleton-hash")
+            .expect("intent scope");
+        store.write_pending(&intent).expect("first attach");
+        store
+            .stamp_armed_proof(
+                &intent.store_key,
+                &intent.session_id,
+                &intent.address,
+                "inst-1",
+                intent.updated_at_ms,
+            )
+            .expect("arm");
+        store
+            .update_locked(&id, |current| {
+                current.producer.pid = std::process::id();
+                current.producer.start_time = 1;
+                current.producer.exe_path = std::path::PathBuf::from("exe");
+                current.producer.host_id = "host".to_string();
+                current.producer.boot_id = "boot".to_string();
+                current.state = IntentRecoveryState::Live;
+                true
+            })
+            .expect("finalize");
+        assert!(store
+            .revoke(
+                &intent.store_key,
+                &intent.session_id,
+                &intent.address,
+                intent.updated_at_ms + 1,
+            )
+            .expect("detach"));
+        let written = store.write_pending(&intent).expect("re-attach");
+        let crate::station_intent::PendingWrite::Created { generation } = written else {
+            panic!("a re-attach over a tombstone must create, got {written:?}");
+        };
+        let reattached = store.load(&id).expect("reload");
+        assert!(
+            !reattached.is_armed(),
+            "a new attach must not inherit the proof the teardown revoked"
+        );
+        assert!(rollback_removable(&reattached));
+        assert!(store
+            .remove_if_unchanged(&id, generation, rollback_removable)
+            .expect("conditional remove"));
+        assert!(store.load(&id).is_err());
         let _ = std::fs::remove_dir_all(&run_dir);
         let _ = std::fs::remove_dir_all(&home);
     }

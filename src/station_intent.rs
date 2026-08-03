@@ -44,6 +44,11 @@ pub const STATION_INTENT_MAX_BYTES: u64 = 16 * 1024;
 
 /// A `pending` intent is one an attach wrote but never finalized. It is never reconciled, so a
 /// crash mid-attach cannot leave a claimable record; this TTL removes the leftovers.
+///
+/// Measured from the *attach lifecycle's* creation ([`StationIntentV1::pending_clock_ms`]): a retry
+/// of an unfinalized attach inherits the clock (so retrying cannot extend the lifetime), while an
+/// attach over a revoked or otherwise inert record starts a new lifecycle and gets the whole
+/// window.
 pub const STATION_INTENT_PENDING_TTL: Duration = Duration::from_secs(5 * 60);
 /// TTL for a `pending` intent that carries a durable **armed proof** — a daemon accepted
 /// `Register` for this binding and armed push delivery, but the producer was never proven (the
@@ -564,6 +569,80 @@ impl ArmedProofStamp {
     }
 }
 
+/// Why an armed-proof stamp could not be performed at all.
+///
+/// The distinction is not cosmetic: one of these two says something about *this binding's durable
+/// record* and the other says nothing about it, and a register that owes no proof must not be
+/// refused by a condition that cannot be about a record it does not have.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArmedProofFailure {
+    /// The intent scope itself could not be opened, so nothing about this binding was observable —
+    /// not even whether it has a durable record. A scope that simply does not exist is *not* this:
+    /// that is [`ArmedProofStamp::NoRecord`], because a scope with no directory has no records.
+    ScopeUnavailable,
+    /// The scope was reachable, this binding has a record in it, and that record could not be
+    /// read, locked, or written. Durable state about this binding exists and could not be
+    /// verified.
+    RecordUnusable,
+}
+
+/// What an arming register must do with the outcome of its proof commit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ArmedProofAdmission {
+    /// Commit the member: the proof is durable, or there is provably nothing to prove.
+    Commit,
+    /// Refuse the registration rather than report a durable success it cannot back.
+    Refuse,
+}
+
+/// The one place the daemon-side "may this arming register commit?" rule lives.
+///
+/// Split out of the register call site for the same reason [`finalize_admission`] is: the rule is
+/// then decidable — and testable — without a daemon, a scope, or a filesystem fault. `owes_proof`
+/// is the observation the register made up front, under the per-station admission guard, about
+/// whether the binding had a durable record before any of this started.
+///
+/// | Stamp outcome | `owes_proof == false` | `owes_proof == true` |
+/// |---|---|---|
+/// | `Stamped` / `AlreadyArmed` | commit | commit |
+/// | `NoRecord` | commit | refuse |
+/// | `Err(ScopeUnavailable)` | commit | refuse |
+/// | `Err(RecordUnusable)` | **refuse** | refuse |
+///
+/// Two asymmetries carry the whole rule:
+///
+/// * **A register that owes nothing is not refused by a scope-level failure.** A pull attach and a
+///   plain `telex attach --on-deliver` write no intent, so the scope may not exist at all — and
+///   opening it is then a *create*, which can fail for reasons that have nothing to do with this
+///   registration (a read-only run dir, a stray file where the scope should be, a full disk).
+///   Refusing push for every non-bridge client because a directory the register had nothing to put
+///   in could not be created is a denial with no safety value: there is no durable record to lose.
+/// * **A broken record fails closed either way.** `RecordUnusable` means the scope was reachable
+///   *and* a record for this exact binding is there and unverifiable. That is durable state about
+///   the binding, so it is refused even when the up-front observation said nothing was owed — which
+///   is the concurrent-attach window, where a record can appear after the observation and before
+///   the stamp.
+pub fn armed_proof_admission(
+    stamped: std::result::Result<ArmedProofStamp, ArmedProofFailure>,
+    owes_proof: bool,
+) -> ArmedProofAdmission {
+    match stamped {
+        Ok(ArmedProofStamp::Stamped { .. } | ArmedProofStamp::AlreadyArmed { .. }) => {
+            ArmedProofAdmission::Commit
+        }
+        // The record this register owed a proof to is gone, or the scope that would hold it could
+        // not be opened. Both are fail-closed *only* when a proof was owed.
+        Ok(ArmedProofStamp::NoRecord) | Err(ArmedProofFailure::ScopeUnavailable) => {
+            if owes_proof {
+                ArmedProofAdmission::Refuse
+            } else {
+                ArmedProofAdmission::Commit
+            }
+        }
+        Err(ArmedProofFailure::RecordUnusable) => ArmedProofAdmission::Refuse,
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // The intent record
 // ---------------------------------------------------------------------------------------------
@@ -696,12 +775,16 @@ impl StationIntentV1 {
     /// neither event can be replayed by retrying:
     ///
     /// * An **unarmed** `pending` record is "an attach that may never have reached the daemon", so
-    ///   it ages from `created_at_ms`. `write_pending` carries that field forward from the record
-    ///   it replaces precisely so a re-attach cannot reset it.
+    ///   it ages from `created_at_ms`. Within one pending lifecycle `write_pending` carries that
+    ///   field forward from the record it replaces, precisely so a re-attach cannot reset it; a
+    ///   *new* lifecycle (an attach over a revoked or otherwise finished record) gets its own
+    ///   creation time, because it is a different attach and has not spent any of its TTL yet.
     /// * An **armed** `pending` record is "a daemon really did arm push for this binding", so it
     ///   ages from the armed proof's own timestamp. `stamp_armed_proof` is idempotent, so a
-    ///   re-register cannot move that either. Floored at `created_at_ms` so a hand-edited or
-    ///   clock-skewed proof can never age a record from *before* it existed.
+    ///   re-register cannot move that either, and a new lifecycle never inherits a proof, so the
+    ///   longer clock only ever measures an arming this lifecycle earned. Floored at
+    ///   `created_at_ms` so a hand-edited or clock-skewed proof can never age a record from
+    ///   *before* it existed.
     pub fn pending_clock_ms(&self) -> i64 {
         match self.armed.as_ref() {
             Some(proof) => proof.armed_at_ms.max(self.created_at_ms),
@@ -1017,16 +1100,38 @@ impl IntentStore {
     /// resume whose finalize later fails must not have already demoted a working record to
     /// `pending`, where GC would remove it.
     ///
-    /// A durable armed proof on the record being replaced is **carried forward**. The proof is a
-    /// fact about the binding ("a daemon armed push for exactly this store/session/address"), not
-    /// about one attach attempt, and dropping it on a re-attach that then crashes re-opens the
-    /// crash-between-`Register`-and-finalize window it exists to close. It can never arm anything
-    /// on its own: restoration still requires `live`, a proven producer, and the epoch fence.
+    /// Two different things reach this function, and telling them apart is the whole of its
+    /// lifetime and proof rules:
+    ///
+    /// * A **retry of the pending lifecycle already in progress** — the record on disk is already
+    ///   `Pending`. The attach it describes has not finalized, and this write is another attempt at
+    ///   finishing the same thing. It inherits that lifecycle's `created_at_ms` and its armed
+    ///   proof, so no amount of retrying can buy the record more life than the one attach earned
+    ///   (see [`StationIntentV1::pending_clock_ms`]) and a crash between `Register` and finalize
+    ///   still has the proof it needs to be repaired.
+    /// * A **new attach over a record whose lifecycle is over** — `Revoked`, `Tombstoned`, or any
+    ///   other persisted-but-inert state. This is a genuinely new attach that happens to reuse a
+    ///   binding, so it starts a new lifecycle: it keeps its own `created_at_ms`, which gives it
+    ///   the full pending TTL to reach its finalize, and it carries **no** armed proof.
+    ///
+    /// Carrying the old lifecycle's fields into a new attach was wrong in both directions. The
+    /// clock was the serious one: a `Revoked` record lives for the 7-day terminal TTL, so every
+    /// re-attach after a detach or a fallback downgrade was born `Pending` with an already-expired
+    /// pending clock, and the next GC pass deleted it *before* `extensions_reload` and the
+    /// turn-boundary finalize could promote it — the attach silently lost its record, and would
+    /// keep losing it for a week. The proof was the subtler one: a revocation is an explicit
+    /// teardown of the arming it describes, so inheriting it would let `finalize_admission` promote
+    /// a brand-new attach on the strength of a *previous* daemon's arming (`armed_durably`), which
+    /// is exactly the "a merely-existing bridge arms an attach that was never registered" hole the
+    /// admission rules exist to close. A new lifecycle proves itself with a new daemon stamp or it
+    /// does not promote.
+    ///
+    /// The generation is the one field that is *always* inherited-and-advanced: it is a
+    /// per-file compare-and-set token, not a lifecycle property, and resetting it would let a
+    /// stale CAS holder clobber a newer record.
     ///
     /// `updated_at_ms` moves (this *is* a write), but it is deliberately not the clock any pending
-    /// TTL reads — see [`StationIntentV1::pending_clock_ms`]. `created_at_ms` and the armed proof
-    /// are both carried forward, so repeating this call cannot extend the lifetime of the record
-    /// it keeps replacing.
+    /// TTL reads.
     pub fn write_pending(&self, intent: &StationIntentV1) -> Result<PendingWrite> {
         if intent.state != IntentRecoveryState::Pending {
             return Err(IntentError::Invalid(
@@ -1047,11 +1152,21 @@ impl IntentStore {
         if let Some(existing) = existing.as_ref() {
             // Generation must be monotonic, never reset: a reconcile pass that read generation N
             // and then wrote back under a compare-and-set would otherwise be able to clobber a
-            // *newer* manifest that happened to cycle back to N.
+            // *newer* manifest that happened to cycle back to N. True for both branches below —
+            // the generation belongs to the file, not to the lifecycle.
             next.generation = existing.generation.saturating_add(1);
-            next.created_at_ms = existing.created_at_ms;
-            if next.armed.is_none() {
+            if existing.state == IntentRecoveryState::Pending {
+                // Same lifecycle, another attempt. Neither of these may be refreshed by retrying.
+                next.created_at_ms = existing.created_at_ms;
+                // The durable record's proof is the only one that survives: the proof is the
+                // *daemon's* to write, and only `stamp_armed_proof` mints one, so a caller-supplied
+                // `armed` block is never honoured here.
                 next.armed = existing.armed.clone();
+            } else {
+                // A new lifecycle over a finished one. It gets its own clock (so it has the full
+                // pending TTL to reach its finalize) and no proof (so it must earn a new daemon
+                // stamp before anything may promote it).
+                next.armed = None;
             }
         }
         self.write_atomic(&next)?;
@@ -1412,7 +1527,8 @@ impl IntentStore {
     /// action recovery cannot undo:
     ///
     /// * An unarmed `Pending` record is governed **solely** by [`STATION_INTENT_PENDING_TTL`],
-    ///   measured from `created_at_ms` ([`StationIntentV1::pending_clock_ms`]). Nothing else may
+    ///   measured from this attach lifecycle's `created_at_ms`
+    ///   ([`StationIntentV1::pending_clock_ms`]). Nothing else may
     ///   delete it: on a first attach the producer does not exist yet by construction (the bridge
     ///   extension has been written but not loaded), so a credential-existence or producer-liveness
     ///   rule would delete exactly the record the turn-boundary finalizer is waiting to promote.
@@ -2698,5 +2814,313 @@ mod tests {
             report.reasons
         );
         let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// Seed a binding whose *previous* pending lifecycle is over: attached, optionally armed by a
+    /// daemon, then explicitly revoked — the durable shape a detach, a fallback downgrade, an
+    /// operator reset, or a session end leaves behind. Returns the revoked record.
+    fn seed_finished_lifecycle(
+        store: &IntentStore,
+        run_dir: &Path,
+        address: &str,
+        armed_at_ms: Option<i64>,
+        revoked_at_ms: i64,
+    ) -> StationIntentV1 {
+        let credential = run_dir.join("cred.json");
+        if !credential.exists() {
+            std::fs::write(&credential, b"{\"secret\":\"x\"}").expect("credential");
+        }
+        let mut original = sample_intent("sqlite:/a", "sess", address);
+        original.state = IntentRecoveryState::Pending;
+        original.created_at_ms = 1_000;
+        original.updated_at_ms = 1_000;
+        original.producer.credential.path = credential;
+        store
+            .write_pending(&original)
+            .expect("seed the first attach");
+        if let Some(armed_at_ms) = armed_at_ms {
+            store
+                .stamp_armed_proof("sqlite:/a", "sess", address, "inst-old", armed_at_ms)
+                .expect("the old daemon arms the old lifecycle");
+        }
+        store
+            .revoke("sqlite:/a", "sess", address, revoked_at_ms)
+            .expect("revoke");
+        let revoked = store.load(&original.id()).expect("reload the tombstone");
+        assert_eq!(revoked.state, IntentRecoveryState::Revoked);
+        revoked
+    }
+
+    /// The `pending` record a fresh attach writes: a placeholder producer, exactly as
+    /// `write_pending_intent` records before `extensions_reload` has loaded the bridge.
+    fn fresh_attach(address: &str, now_ms: i64) -> StationIntentV1 {
+        let mut attach = sample_intent("sqlite:/a", "sess", address);
+        attach.state = IntentRecoveryState::Pending;
+        attach.created_at_ms = now_ms;
+        attach.updated_at_ms = now_ms;
+        attach.producer.pid = 0;
+        attach.producer.start_time = 0;
+        attach.producer.host_id = String::new();
+        attach.producer.boot_id = String::new();
+        attach.producer.exe_path = PathBuf::from("not-loaded-yet");
+        attach
+    }
+
+    /// A **new attach** over a finished lifecycle is not a retry of it, and must get its own clock.
+    ///
+    /// `write_pending` carried `created_at_ms` forward from whatever record it replaced, which is
+    /// exactly right for a retry of an unfinalized attach and exactly wrong for a new one. A
+    /// `revoked` tombstone lives for the seven-day terminal TTL, so every re-attach after a detach,
+    /// a fallback downgrade, an operator reset, or a session end was born `pending` with an
+    /// already-expired pending clock — and the next GC pass deleted it *before* `extensions_reload`
+    /// and the turn-boundary finalize could promote it. The attach reported success, the record was
+    /// gone seconds later, and it stayed that way for a week.
+    #[test]
+    fn a_new_attach_over_a_finished_lifecycle_starts_its_own_pending_clock() {
+        let run_dir = temp_run_dir("pending-lifecycle-restart");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let ttl_ms = STATION_INTENT_PENDING_TTL.as_millis() as i64;
+
+        let revoked_at_ms = 1_000 + ttl_ms;
+        let revoked = seed_finished_lifecycle(&store, &run_dir, "addr", None, revoked_at_ms);
+
+        // Days later — still inside the terminal TTL, so the tombstone is very much still on disk —
+        // the user attaches this binding again.
+        let attached_at_ms = revoked_at_ms + 6 * 24 * 60 * 60 * 1_000;
+        let attach = fresh_attach("addr", attached_at_ms);
+        assert_eq!(
+            store.write_pending(&attach).expect("re-attach"),
+            PendingWrite::Created {
+                generation: revoked.generation + 1
+            },
+            "the generation is a per-file CAS token, so it stays monotonic across the transition"
+        );
+
+        let stored = store.load(&attach.id()).expect("reload");
+        assert_eq!(
+            stored.created_at_ms, attached_at_ms,
+            "a new lifecycle is not a retry of the one it replaced, so it keeps its own creation"
+        );
+        assert_eq!(stored.pending_clock_ms(), attached_at_ms);
+
+        // It survives its *whole* new TTL — the window `extensions_reload` and the turn-boundary
+        // finalize need in order to exist at all.
+        let report = store
+            .gc(attached_at_ms + ttl_ms - 1_000, Some("host"), Some("boot"))
+            .expect("gc inside the new TTL");
+        assert!(
+            !report.removed.contains(&attach.id()),
+            "a brand-new attach must not be collected on the previous lifecycle's clock, got {:?}",
+            report.reasons
+        );
+
+        // And it is still bounded: the fresh clock is a full TTL, not an exemption.
+        let report = store
+            .gc(attached_at_ms + ttl_ms + 1_000, Some("host"), Some("boot"))
+            .expect("gc past the new TTL");
+        assert!(
+            report.removed.contains(&attach.id()),
+            "an attach that never finalized is still collected, got {:?}",
+            report.reasons
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// A new lifecycle never inherits the **armed proof** of the one it replaced.
+    ///
+    /// The proof says "a daemon armed push for this binding", and a revocation is the explicit
+    /// teardown of exactly that. Carrying it into a new attach let `finalize_admission` promote a
+    /// record on the strength of a *previous* daemon's arming — the "a merely-existing bridge arms
+    /// an attach that was never registered" hole the admission rules exist to close — and quietly
+    /// moved the new record onto the 24 h armed clock measured from an arming that happened days
+    /// ago, so it was born expired against that clock too.
+    ///
+    /// The new lifecycle proves itself with a new daemon stamp, or it does not promote.
+    #[test]
+    fn a_new_pending_lifecycle_never_inherits_the_previous_ones_armed_proof() {
+        let run_dir = temp_run_dir("pending-lifecycle-proof");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let ttl_ms = STATION_INTENT_PENDING_TTL.as_millis() as i64;
+        let revoked_at_ms = 3_000;
+        let attached_at_ms = revoked_at_ms + 6 * 24 * 60 * 60 * 1_000;
+
+        let revoked = seed_finished_lifecycle(&store, &run_dir, "addr", Some(2_000), revoked_at_ms);
+        assert!(
+            revoked.armed.is_some(),
+            "precondition: the tombstone still carries the proof its lifecycle was armed with"
+        );
+
+        let attach = fresh_attach("addr", attached_at_ms);
+        store.write_pending(&attach).expect("re-attach");
+        let stored = store.load(&attach.id()).expect("reload");
+
+        assert!(
+            stored.armed.is_none(),
+            "a new attach must not inherit a proof it did not earn, got {:?}",
+            stored.armed
+        );
+        assert!(!stored.is_armed());
+        assert_eq!(
+            finalize_admission(stored.state, stored.is_armed(), false),
+            FinalizeAdmission::RefusedNotArmed,
+            "and with no live member either, a new lifecycle has no authority to promote"
+        );
+        assert_eq!(
+            stored.pending_clock_ms(),
+            attached_at_ms,
+            "it ages from its own attach, on the unarmed TTL"
+        );
+        // The unarmed TTL really is the one governing it. An inherited proof would have put it on
+        // the 24 h clock measured from `armed_at_ms` (2_000) — expired before it was written.
+        let report = store
+            .gc(attached_at_ms + ttl_ms - 1_000, Some("host"), Some("boot"))
+            .expect("gc inside the new TTL");
+        assert!(
+            !report.removed.contains(&attach.id()),
+            "{:?}",
+            report.reasons
+        );
+        let report = store
+            .gc(attached_at_ms + ttl_ms + 1_000, Some("host"), Some("boot"))
+            .expect("gc past the new TTL");
+        assert!(
+            report.removed.contains(&attach.id()),
+            "an unarmed pending record is bounded by the unarmed TTL, got {:?}",
+            report.reasons
+        );
+
+        // The new lifecycle earns the longer clock the only way it can: a *new* daemon stamps it.
+        // Nothing about the proof it now carries refers to anything before this attach.
+        seed_finished_lifecycle(&store, &run_dir, "re-armed", Some(2_000), revoked_at_ms);
+        let attach = fresh_attach("re-armed", attached_at_ms);
+        store.write_pending(&attach).expect("re-attach");
+        let armed_at_ms = attached_at_ms + 1_000;
+        assert!(matches!(
+            store
+                .stamp_armed_proof("sqlite:/a", "sess", "re-armed", "inst-new", armed_at_ms)
+                .expect("the new daemon arms the new lifecycle"),
+            ArmedProofStamp::Stamped { .. }
+        ));
+        let stored = store.load(&attach.id()).expect("reload");
+        let proof = stored.armed.as_ref().expect("the new proof");
+        assert_eq!(proof.armed_at_ms, armed_at_ms);
+        assert_eq!(
+            proof.daemon_instance_id, "inst-new",
+            "the proof describes the daemon that armed *this* lifecycle"
+        );
+        assert_eq!(stored.pending_clock_ms(), armed_at_ms);
+        let report = store
+            .gc(armed_at_ms + ttl_ms + 1_000, Some("host"), Some("boot"))
+            .expect("gc past the unarmed TTL");
+        assert!(
+            !report.removed.contains(&attach.id()),
+            "an arming this lifecycle earned moves it onto the longer clock, got {:?}",
+            report.reasons
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// The fresh clock is granted **once, at the transition** — never by a retry.
+    ///
+    /// This is the property that keeps the fix above from undoing the one before it. A new attach
+    /// over a finished lifecycle gets a full TTL because it is a different attach; every subsequent
+    /// `write_pending` for that attach is a retry and inherits the clock, so a producer whose
+    /// finalize keeps failing still cannot buy itself an unbounded lifetime.
+    #[test]
+    fn a_fresh_pending_lifecycle_earns_one_clock_and_no_retry_can_earn_another() {
+        let run_dir = temp_run_dir("pending-lifecycle-bounded");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let ttl_ms = STATION_INTENT_PENDING_TTL.as_millis() as i64;
+
+        let revoked_at_ms = 1_000 + ttl_ms;
+        seed_finished_lifecycle(&store, &run_dir, "addr", None, revoked_at_ms);
+        let attached_at_ms = revoked_at_ms + 6 * 24 * 60 * 60 * 1_000;
+        let attach = fresh_attach("addr", attached_at_ms);
+        store.write_pending(&attach).expect("re-attach");
+
+        // The failing re-attach loop, now starting from the new lifecycle: ten more attempts spread
+        // over more than twice the TTL, each rewriting the record exactly as the attach path does.
+        let mut now = attached_at_ms;
+        for _ in 0..10 {
+            now += ttl_ms / 5;
+            store
+                .write_pending(&fresh_attach("addr", now))
+                .expect("retry");
+        }
+        let stored = store.load(&attach.id()).expect("reload");
+        assert_eq!(
+            stored.created_at_ms, attached_at_ms,
+            "the new lifecycle's clock was set once, by the transition, and no retry moved it"
+        );
+        assert!(
+            stored.updated_at_ms > attached_at_ms + ttl_ms,
+            "precondition: the last-write clock really was refreshed past the TTL"
+        );
+        let report = store.gc(now, Some("host"), Some("boot")).expect("gc");
+        assert!(
+            report.removed.contains(&attach.id()),
+            "a re-attach loop must stay collectable across a lifecycle transition too, got {:?}",
+            report.reasons
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// The daemon-side proof rule, as a table, decided without a daemon or a filesystem fault.
+    ///
+    /// Two asymmetries are the whole rule, and each one is a defect if it is dropped:
+    ///
+    /// * A register that owes **no** proof is not refused by a scope-level failure. For those
+    ///   clients — a pull attach, a plain `telex attach --on-deliver` — opening the scope is a
+    ///   *create* of a directory the register has nothing to put in, and refusing push because that
+    ///   create failed denies a working registration to protect durable state that does not exist.
+    /// * A record that is present but unreadable is refused **either way**. That is the concurrent
+    ///   window: a record can appear between the up-front observation and the stamp, and durable
+    ///   state about the binding that cannot be verified always fails closed.
+    #[test]
+    fn armed_proof_admission_is_the_whole_daemon_side_proof_table() {
+        let table: [(
+            std::result::Result<ArmedProofStamp, ArmedProofFailure>,
+            ArmedProofAdmission,
+            ArmedProofAdmission,
+        ); 5] = [
+            // outcome, owes_proof = false, owes_proof = true
+            (
+                Ok(ArmedProofStamp::Stamped { generation: 2 }),
+                ArmedProofAdmission::Commit,
+                ArmedProofAdmission::Commit,
+            ),
+            (
+                Ok(ArmedProofStamp::AlreadyArmed { generation: 2 }),
+                ArmedProofAdmission::Commit,
+                ArmedProofAdmission::Commit,
+            ),
+            (
+                Ok(ArmedProofStamp::NoRecord),
+                ArmedProofAdmission::Commit,
+                ArmedProofAdmission::Refuse,
+            ),
+            (
+                Err(ArmedProofFailure::ScopeUnavailable),
+                ArmedProofAdmission::Commit,
+                ArmedProofAdmission::Refuse,
+            ),
+            (
+                Err(ArmedProofFailure::RecordUnusable),
+                ArmedProofAdmission::Refuse,
+                ArmedProofAdmission::Refuse,
+            ),
+        ];
+        for (outcome, unowed, owed) in table {
+            assert_eq!(
+                armed_proof_admission(outcome, false),
+                unowed,
+                "a register owing no proof, given {outcome:?}"
+            );
+            assert_eq!(
+                armed_proof_admission(outcome, true),
+                owed,
+                "a register owing a proof, given {outcome:?}"
+            );
+        }
     }
 }
