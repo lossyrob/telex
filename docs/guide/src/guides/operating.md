@@ -181,6 +181,11 @@ stale yet, so the successor is **waiting for it to expire**, not failing. It ret
 cadence, never backs off exponentially, and never counts toward quarantine. `next_attempt_ms` says
 when it will try again.
 
+A genuine failure takes a jittered `5 s → 10 s → 20 s → … → 5 min` ladder, and after ten consecutive
+failures drops to an hourly cadence. Repairing the *cause* does not leave you waiting out the
+ladder: any durable change to the record — the turn-boundary producer refresh after a bridge
+reload, a `copilot resume`, a re-attach — clears it, and the next tick attempts the binding again.
+
 Three conditions are named explicitly in status:
 
 - `live_intent_missing_member` — push is desired here but not currently armed.
@@ -203,6 +208,26 @@ Three conditions are named explicitly in status:
 - **It never re-arms a station you reset.** `telex station reset` (and `telex daemon reset`)
   withdraws the desired state as well as the membership: the affected intents are revoked, so the
   reconciler leaves the station idle. `telex --address <station> copilot resume` is the way back.
+- **It never arms an attach that was never registered.** A running bridge is not by itself
+  permission to turn a half-written attach into a live push binding. Finalizing one requires either
+  a daemon that reports push armed for it right now, or the daemon's own durable record that it
+  armed the binding earlier.
+
+### Recovering from a bridge reload
+
+`extensions_reload`, `/clear`, and an extension-host restart all give the Copilot bridge a new
+process. The daemon proves a producer by executable, pid, and process start time before it sends
+anything, so a reloaded bridge no longer matches what the intent recorded, and status shows
+`producer_identity_mismatch`.
+
+This heals on its own: the next Copilot turn boundary re-records the running bridge's identity —
+after proving it answers a liveness probe — and the following reconcile tick restores the binding.
+It does **not** need a daemon that already has the station armed, which is the case that used to
+deadlock: a reload followed by a daemon replacement leaves a successor that cannot create the member
+because the identity is stale, and cannot refresh the identity if refreshing required the member.
+
+If a session ends before a turn boundary happens, `telex --address <station> copilot resume` does
+the same thing immediately.
 
 ### Before you drain
 
@@ -218,6 +243,9 @@ turn boundary (after `extensions_reload`), and only then becomes recoverable. `d
 `incompatible` need action: run `telex --address <station> copilot resume` after the switch.
 Rolling back to a binary that predates this feature returns those stations to manual resume, and the
 rollback output warns about it.
+
+The report reads the durable records as well as the daemon's own view, so a station you attached
+seconds before draining is counted correctly rather than appearing as nothing to hand over.
 
 `telex upgrade` and `telex rollback` then drive one reconciliation pass on the successor by invoking
 the binary the switch just selected (`telex daemon reconcile` on that binary). That indirection is

@@ -2133,6 +2133,36 @@ The daemon owns reconciliation as its own operation, not as a `Register` side ef
    intent, the daemon reconciles inline; on failure it returns typed `Incompatible` /
    `PushIntentUnrecoverable` rather than creating a pull-only member. A live armed pull waiter
    still wins (the guarantee is scoped to the no-live-waiter case).
+8. **Who may promote an intent to `live` — added after the independent re-review.** The
+   producer-side transition rules are stated once, in
+   `station_intent::finalize_admission(state, armed_durably, armed_now)`, and are deliberately
+   asymmetric:
+
+   - A `pending` record may be promoted only when a daemon reports push armed for the binding
+     *right now*, **or** when the record carries a durable **armed proof** — an `armed` block the
+     *daemon* writes inside `register_member` at the moment it commits an armed push member. A
+     bridge that merely exists is never sufficient: a merely-running producer must not be able to
+     arm an attach that was never registered.
+   - A record that is already `live` may re-record its producer identity with **no daemon
+     involvement at all**, because being `live` is itself durable proof that the binding was armed.
+
+   The asymmetry is load-bearing. Requiring a live member for the `live` case created a circular
+   dependency: a bridge reload makes the recorded `(pid, start_time)` stale, so a replaced daemon
+   fails `producer_identity_mismatch` on every pass and can never create the member — and the repair
+   was gated on the member it was supposed to restore. The armed proof independently closes the
+   crash window between `Register` returning and the finalize, where a bare `pending` record was
+   collected by its five-minute TTL while push delivery went on working.
+
+   Neither is an authorization to deliver. `is_reconcilable` remains `live`-only, so an armed
+   `pending` record is still never reconciled, and restoration still requires the credential rules,
+   `verify_server_peer`, the probe, and the daemon epoch fence. A revocation always beats a
+   finalize, and the admission decision is re-made inside the per-intent write lock.
+9. **Deleting an intent is conditional.** GC and the attach rollback both decide from a snapshot, so
+   the unlink re-takes the per-intent write lock, reloads, and requires the generation *and* the
+   caller's own condition to still hold. Both TTL clocks are read from **proof** — a successful
+   reconcile, a verified probe, or the durable transition a finalize performs — never from a retry
+   attempt, which the reconciler refreshes every few seconds for exactly the abandoned records the
+   TTLs exist to collect.
 
 **Bounded ADR 0028 exception.** `upgrade` and `rollback` spawn the successor they just installed and
 wait, bounded, for one reconcile report. Without this, the issue's motivating scenario — `telex
@@ -2144,7 +2174,10 @@ recoverable intents.
 
 - New release axes: `STATION_INTENT_SCHEMA_VERSION` (1), `COPILOT_BRIDGE_PROTOCOL` (1 → 2),
   `PROTOCOL_MINOR` (4 → 5). `MIN_COMPATIBLE_PLUGIN_VERSION` is asserted **unchanged** against a
-  frozen fixture, because the plugin hook surface is untouched.
+  frozen fixture, because the plugin hook surface is untouched. The `armed` proof added in point 8
+  is an *optional* field inside schema version 1: absent on every record written before it, and
+  round-tripped by an older build through the manifest's unknown-field passthrough, so it moves no
+  release axis.
 - Fail-closed is scoped to *advertised-but-unverifiable* producers. A pre-probe bridge is
   `legacy_producer`: never auto-restored, never wedged, and the documented manual
   `telex copilot resume` path keeps working exactly as before.

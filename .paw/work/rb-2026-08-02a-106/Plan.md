@@ -981,7 +981,7 @@ this is what is actually asserted. Recorded honestly rather than left implying f
 | Row | State |
 |---|---|
 | T1, T6, T9, T10, T11, T13, T14, T17, T18, T19, T20, T23, T24, T25, T27, T28 | covered |
-| T15 | covered as of the final review (`station_intent_two_sessions_never_both_attend_one_address`) |
+| T15 | covered as of the final review, and **tightened in the re-review**: the assertion was `armed.len() <= 1`, which is satisfied by zero armed members and by the wrong session winning, and both rivals shared one producer so the loser failed on `probe_session_mismatch` rather than on the dedupe under test. It is now `armed == ["sess-a"]` with a healthy producer and credential per rival, deterministic generations, and a check that the loser is still indexed. A companion row asserts an inert (`revoked`, higher-generation) record never shadows a live one for the same address |
 | T7, T8, T16, T26 | **partial** — the restart path is covered by graceful stop; no test kills the daemon, so the `AlreadyOwned` / `DeferredLease` crash path is exercised only at daemon-core level (`postgres_station_intent_restore_is_single_writer`, tightened in the final review to assert `deferred_lease == 1 && failed == 0`, no failure-counter advance, and the fixed cadence) |
 | T2, T3, T4, T5, T12, T21, T22 | **not covered** — no test sends a message across a restart gap, drives a busy bridge, resumes after a tombstone, or fails one store of a multi-store drain. `T21` has the `--daemon-instance` fence half only. Carried as follow-up work; none of these is a *new* gap introduced by the fixes, and each is a test gap rather than a known defect |
 
@@ -1190,3 +1190,50 @@ Minor, non-behavioral:
 - SHA-256 is implemented in `platform_fs` rather than taken from `sha2`, which is only in the
   dependency graph behind the optional `self-update` feature. Intent identity must be byte-identical
   in every feature combination, including `--no-default-features --features sqlite`.
+
+### Pivots from the independent re-review
+
+Recorded on the same basis: each changes a property this plan states. Mechanisms and tests for all
+eight findings are in `Docs.md`, "Corrections made during the independent re-review".
+
+14. **A durable armed proof, and an asymmetric finalize admission rule.** Decision 5 made the
+    `pending` → `live` promotion conditional on the daemon reporting `push_registered`. That is
+    right for a record with no history, and wrong for one that is already `live`: after a bridge
+    reload plus a daemon replacement, the successor has no member and cannot create one (the
+    identity is stale), so the repair was gated on the thing the repair restores. `StationIntentV1`
+    gains an optional `armed` proof written by the *daemon* at `Register`, and
+    `station_intent::finalize_admission` states the whole table — `live` refreshes with no daemon
+    involvement, `pending` promotes on either authority, a revocation always wins. The security
+    property is unchanged and is now explicit rather than implied by a call-site filter: a bridge
+    that merely exists cannot arm an attach that was never registered.
+15. **`STATION_INTENT_ARMED_PENDING_TTL` (24 h) joins the constants table.** An armed `pending`
+    record describes delivery a daemon really armed; the five-minute rule would collect it while
+    push was working.
+16. **A durable state transition clears the failure ladder.** The plan treated backoff as a property
+    of a binding. It is a property of a *producer descriptor*, and a generation move replaces the
+    descriptor — so carrying the ladder (or, past `RECONCILE_QUARANTINE_AFTER`, the quarantine hour)
+    across the repair for a reload made recovery wait out a schedule the repaired record never
+    earned. Evidence writes do not move the generation and forgive nothing.
+17. **Deletion is conditional and lock-held.** Decision 15 said GC is the only place an intent is
+    deleted; it did not say the delete has to be re-checked against the record as it is at unlink
+    time. `IntentStore::remove` is replaced by `remove_if_unchanged` / `remove_unreadable_if_unchanged`,
+    and `write_pending` moves the check-then-write inside the same per-intent lock.
+18. **Only reconcilable records compete for the per-address slot.** The dedupe ran before the
+    `is_reconcilable` check, so an inert higher-generation record shadowed a live lower-generation
+    one *and* kept it out of the index. Every loaded record is now indexed; only the winner is
+    attempted.
+19. **The orphan TTL clocks read proof, never attempts.** `StationIntentV1::last_proven_ms()`
+    replaces the `last_success.or(last_attempt)` chain, which the reconciler's own failure writes
+    refreshed forever.
+20. **The pre-drain report is index-plus-durable, not index-only.** Pivot 11 and the "no directory
+    scan" note assumed the index was a sufficient projection. It is refreshed only by a pass, while
+    the record is written by a finalize in another process, so `attach` then `upgrade` reported
+    nothing to hand over. A bounded read-only backfill closes it, composed so a cached *problem*
+    projection is never masked and never retracted.
+21. **The Windows boot identity fails explicitly rather than degrading.** Pivot 12 kept a
+    best-effort fallback to a per-process value when persistence failed. Given the exact-equality
+    comparison the same pivot describes, that fallback is guaranteed to disagree — so it is now an
+    error, and the identity is asserted across a genuinely independent process rather than through a
+    memoized accessor.
+22. **The backoff ladder starts where the constants table says.** `RECONCILE_BACKOFF_INITIAL` is
+    5 s and the first transient failure now waits 5 s; the exponent was off by one.

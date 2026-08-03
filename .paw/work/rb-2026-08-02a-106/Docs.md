@@ -444,6 +444,195 @@ subtle failure mode that a passing test suite did not catch, and the reasoning i
    in the same function. **Fix:** only a genuinely absent store (`store_missing`) is terminal; a
    connection error takes the ordinary 5 s → 5 min failure ladder.
 
+## Corrections made during the independent re-review
+
+The final-review remediation was applied by the pass that found it, so an independent re-review
+followed, focused on the GC/`Pending` lifecycle, the retry split, the guard precedence order, and
+the new successor path. It found eight further defects — one blocking, two high, five medium. All
+are fixed. Each changes a documented property, so each is recorded here.
+
+### 1. BLOCKING — the reload-plus-replacement deadlock, and the crash between `Register` and finalize
+
+Two routine events combined into a binding that could never recover, and the fix for the first half
+had a circular dependency that left the second half open.
+
+**The deadlock.** A bridge reload (`extensions_reload`, `/clear`, an extension-host restart) gives
+the producer a new `(pid, start_time)` while the `live` intent still names the old pair. The daemon
+proves that pair before it sends a byte, so every pass fails `producer_identity_mismatch`. The
+turn-boundary hook exists to re-record the identity — but it only acted on bindings for which the
+*currently connected daemon* reported `push_registered`. Trace it with a daemon replacement in the
+middle: the successor has no member, and it cannot create one, because creating one is what the
+stale identity prevents. The repair was gated on the thing the repair was supposed to restore, and
+the binding stayed unrecoverable for as long as the record survived.
+
+**The crash window.** Between `Register` returning (push armed) and the producer-side finalize
+(record promoted to `live`), the durable record is a bare `pending` one. A crash there — of the CLI,
+the agent, or the machine — left push delivering with a record the five-minute pending TTL then
+deleted. Recovery was silently disarmed for a station that worked, and the user found out only after
+the next daemon replacement.
+
+**Fix — an explicit durable armed proof, and an asymmetric transition table.**
+
+`StationIntentV1` gains `armed: Option<ArmedProofV1> { armed_at_ms, daemon_instance_id }`, written by
+the **daemon** inside `register_member` at the moment it commits an armed push member — never by the
+producer side, never inferred from a credential file existing. Additive and optional, so records
+written before it read back as "never armed", and an older build round-trips it through the
+unknown-field passthrough.
+
+`station_intent::finalize_admission(state, armed_durably, armed_now)` is now the single place the
+producer-side transition rules live, and it is deliberately asymmetric:
+
+- `live` → **refresh**, with no daemon involvement at all. Being `live` *is* durable proof the
+  binding was armed, so a bridge that proves it is alive right now may re-record its own identity.
+  This is what breaks the deadlock.
+- `pending` → **promote**, but only on one of two authorities: a daemon reporting `push_registered`
+  for the binding right now, or the record's own armed proof. A merely-existing bridge still cannot
+  arm an attach that was never registered — the security property is unchanged, and is now stated as
+  a table rather than implied by a call-site filter.
+- `revoked`/`tombstoned` → **refused**, always. A detach, session end, or operator reset that lands
+  mid-finalize wins.
+
+The decision is re-made *inside* the per-intent write lock against the record as it actually is, so
+the check and the write are one critical section. Restoration is untouched: it still requires the
+credential rules, `verify_server_peer`, the probe, and the daemon epoch fence. GC governs an armed
+`pending` record by `STATION_INTENT_ARMED_PENDING_TTL` (24 h) instead of the five-minute rule,
+because it describes delivery that really was armed.
+
+One further defect fell out of the trace: after the identity was repaired, the binding was still
+parked on the ladder its *stale* descriptor had earned — up to the quarantine hour. The ladder
+belongs to a descriptor, not a binding, so a durable state transition (any generation move) now
+clears `consecutive_failures` and `next_attempt_ms`. Evidence writes deliberately do not move the
+generation and therefore forgive nothing.
+
+Tests: `station_intent::tests::finalize_admission_is_the_whole_producer_side_transition_table`
+(the full table, including every refusal),
+`station_intent::tests::the_armed_proof_is_durable_daemon_evidence_and_live_implies_it`,
+`station_intent_a_reloaded_producer_recovers_with_no_member_to_start_from` (the trace end to end,
+asserting the memberless refresh is admitted *and* that an unarmed `pending` record in the same
+position is refused), `station_intent_the_daemon_stamps_the_armed_proof_when_it_arms_push` (a pull
+register earns none; an armed one does; an armed `pending` record is still not claimable),
+`station_intent::tests::gc_governs_an_armed_pending_record_by_its_own_longer_ttl`,
+`station_intent_a_durable_transition_clears_a_ladder_the_old_descriptor_earned`.
+
+### 2. HIGH — destructive deletion races
+
+`IntentStore::remove` was an unconditional unlink taking no lock. Every caller decides from a
+snapshot, so between the decision and the unlink the record can change: GC classified a record it
+loaded earlier in the pass, and the attach rollback removed "the record this invocation created"
+without checking that it still was. A failing older attach could therefore delete a `live` record a
+concurrent finalize had just promoted, and a GC pass could delete a newer generation than the one it
+judged.
+
+**Fix.** `remove` is gone. Deletion goes through `remove_if_unchanged(id, expected_generation,
+predicate)` — which re-acquires the per-intent write lock, reloads, and requires both the generation
+and the caller's own condition to still hold — or `remove_unreadable_if_unchanged`, which re-confirms
+under the lock that the manifest is still unreadable and still past its TTL (so a manifest that was
+merely mid-rewrite is not deleted because one unlucky pass could not parse it). `gc_reason` was
+extracted as a pure function so the same decision can be applied twice: once to classify, once under
+the lock. A lock the pass could not take is a keep, never a delete. The attach rollback passes the
+generation `write_pending` returned and the predicate "still an unarmed `pending` record".
+
+`write_pending_intent`'s check-then-write moved into `IntentStore::write_pending`, under the same
+per-intent lock: unserialized, two concurrent attaches both read "no live record", both compute
+`existing.generation + 1`, and the second clobbers the first at the *same* generation — which
+defeats every downstream generation CAS, since a CAS holder cannot tell the record under it was
+replaced. It also carries an existing armed proof forward, so a re-attach that then crashes does not
+re-open the window above.
+
+Tests: `station_intent::tests::deletion_is_refused_when_the_record_moved_under_the_decision`,
+`station_intent::tests::write_pending_is_generation_safe_and_never_demotes_a_live_record`,
+`commands::copilot::tests::attach_rollback_only_deletes_the_record_this_attach_left_behind`.
+
+### 3. HIGH — an inert record could shadow a live one for up to a TTL
+
+`reconcile_once` claimed the per-`(store_key, address)` winner slot **before** the `is_reconcilable`
+check. Scan order is generation-descending, so a `revoked` generation 3 for one session consumed the
+address and the `live` generation 2 for another lost. That is not a scheduling delay: the shadowed
+record was `continue`d before it was indexed, so for as long as the tombstone survived (up to its
+seven-day TTL) the live binding was invisible to `telex status`, absent from the pre-drain report,
+unseen by the turn guard, and attempted by no pass at all.
+
+**Fix.** Every record the pass loads is indexed first; only *reconcilable* records then compete for
+the address slot. Test:
+`station_intent_a_revoked_record_never_shadows_a_live_one_for_the_same_address` — a revoked
+generation 3 against a live generation 2, asserting exactly one armed member, that it is the live
+intent's session, that **both** rows reach the index, and that the drain report sees the binding.
+
+### 4. MEDIUM — the orphan TTL clocks were unreachable
+
+`gc` measured "how long unproven" from `last_success_ms.or(last_attempt_ms)`. The reconciler persists
+scheduling state on every genuine failure, so for a record that had never once succeeded the attempt
+clock was refreshed every few seconds forever — and neither the dead-producer orphan rule nor the
+credential-missing rule could ever fire for exactly the abandoned records they exist to collect.
+
+**Fix.** `StationIntentV1::last_proven_ms()` reads *proof* only: `last_success_ms`,
+`producer_verified_ms`, and the durable state transition a finalize performs (which is itself gated
+on a live probe). An attempt is not proof and no longer appears in the clock at all. Test:
+`station_intent::tests::gc_orphan_clocks_are_never_refreshed_by_a_retry_attempt` drives the failing
+case directly — a dead producer past the TTL with `last_attempt_ms` pinned to *now* and 4,000
+consecutive failures — for both rules, plus the negative control that a producer proven a second ago
+is not an orphan.
+
+### 5. MEDIUM — a finalize was invisible to an immediately following drain
+
+The pre-drain report was projected from the daemon's cached index, which only a reconcile pass
+refreshes — while the record is written by a producer-side finalize in a *different process*. So
+`copilot attach` immediately followed by `telex upgrade` drained with `recoverable: 0` for a binding
+that had just been fully armed and finalized, and the successor-verification step skipped itself on
+"no recoverable station intents". The one path that exists to carry push delivery across a daemon
+replacement quietly became a no-op.
+
+**Fix, on both sides.** `drain_intent_report` gained a bounded durable backfill (`list_ids` + `load`,
+capped at the per-scope cap; still no probe, no connection, no backend or network I/O), composed so
+neither source masks the other: a cached projection naming a *problem* wins, otherwise the manifest
+the successor will actually read wins, and a cached projection is never retracted by the durable
+read. And the attach path now asks the daemon to reconcile immediately after a successful finalize,
+so the index is warm rather than merely eventually correct. Test:
+`station_intent_a_finalize_is_visible_to_the_very_next_drain_decision` performs the durable
+transition with no pass at all and asserts the next drain decision counts it.
+
+### 6. MEDIUM — the Windows boot identity degraded to a per-process value
+
+If the per-boot record could not be persisted to `HKCU\Software\telex`, the resolver returned the
+value it had just minted "for this process". That is not a degradation. The identity is compared for
+**exact equality** across processes, so a per-process value makes every intent
+`foreign_host_or_boot` the instant anyone else reads it — terminal, after which GC removes the record
+as a foreign identity with a dead producer and the anti-downgrade guard refuses unrelated attaches,
+with nothing anywhere naming the cause.
+
+**Fix.** A failed persist, or a persist that cannot be read back, is now an explicit error;
+`boot_id()` memoizes it, so the answer is at least consistent for the process's life. The decision is
+factored into `resolve_minted_boot_id` so the denied-persistence branch is reachable from a test
+without mutating the machine the suite runs on.
+
+The old stability test called the *memoized* `boot_id()` two hundred times, so it compared a cached
+`String` to itself and would have passed unchanged against the jittering implementation it existed to
+rule out. `platform_fs::boot_id_uncached()` (a `#[doc(hidden)]` test seam) re-enters the resolver
+every call, and `tests/boot_identity.rs` spawns a genuinely **independent process** — the test binary
+re-invoked on an emitter test — and requires exact agreement, including for a third process started
+later. Tests: `platform_fs::imp::boot_id_tests::a_boot_id_that_cannot_be_persisted_fails_explicitly`,
+`platform_fs::tests::boot_identity_is_stable_across_repeated_independent_resolutions`,
+`boot_identity_agrees_across_an_independent_process`,
+`boot_identity_survives_repeated_independent_mint_attempts`.
+
+### 7. MEDIUM — the first backoff rung was twice what the docs promised
+
+`backoff_delay` used `consecutive_failures` as the exponent, but that counter includes the failure
+being scheduled, so the first transient failure waited 10 s against a documented
+`RECONCILE_BACKOFF_INITIAL` of 5 s. Wrong at exactly the rung that matters most — a bridge
+mid-reload, which is over within a tick or two. **Fix:** the exponent is `failures - 1`, giving the
+documented `5 s → 10 s → 20 s → … → 5 min`. The test now pins four rungs and the zero-count case
+(the `DeferredPullWaiter` cadence, which never advances the counter) rather than one band.
+
+### 8. MEDIUM — the two-session exclusivity test asserted almost nothing
+
+`armed.len() <= 1` is satisfied by the two failures that matter most: zero armed members (nothing
+recovered at all) and the *wrong* session winning. Both rivals also shared one producer, so the
+loser failed on `probe_session_mismatch` and the dedupe under test never had to work. **Fix:** each
+rival now has a healthy producer and its own credential, generations make the expected winner
+deterministic, and the assertion is `armed == ["sess-a"]` — exactly one, and the expected one — plus
+a check that the loser is still indexed rather than silently dropped.
+
 ## Operating notes
 
 - Intent scopes are namespaced by user identity, **canonicalized config root**, and protocol major.
@@ -455,7 +644,11 @@ subtle failure mode that a passing test suite did not catch, and the reasoning i
   member, plus the three issue-named conditions `live_intent_missing_member`,
   `member_missing_live_producer`, and `intent_protocol_incompatible`.
 - `telex daemon stop --drain`, `telex upgrade`, and `telex rollback` print a pre-drain intent report
-  computed from the cached index only — no directory scan, no probe — so it cannot slow a drain.
+  built from the cached index plus a bounded durable backfill for bindings the index has no fresh
+  answer for — no probe, no connection, no backend or network I/O, so it still cannot slow a drain.
+  The backfill is what makes a station attached seconds before the drain visible: the record is
+  written by a producer-side finalize in another process, and only a reconcile pass refreshes the
+  index.
 - `telex copilot gc` reads station intents **first**: a session named by a non-revoked intent is
   kept even when its bridge heartbeat is stale, because deleting the bridge under a live intent is
   the one action GC could take that recovery cannot undo. `.bindings.json` is a secondary hint, and

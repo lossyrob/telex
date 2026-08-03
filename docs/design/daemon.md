@@ -1964,25 +1964,91 @@ leave a claimable record. It is also **not** counted as recoverable anywhere: th
 carries its own `pending` count, because a successor cannot restore an intent that has not been
 finalized.
 
-### 18.2.1 Garbage collection
+#### 18.2.1 The armed proof, and who may finalize
+
+A `pending` record additionally carries an optional **armed proof** (`armed: { armed_at_ms,
+daemon_instance_id }`), written by the *daemon* inside `register_member` at the moment it commits an
+armed push member. It is never written by the producer side and never inferred from the existence of
+a credential file.
+
+It exists for the window between `Register` returning and the producer-side finalize. A crash there
+— of the CLI, the agent, or the machine — used to leave a bare `pending` record that the five-minute
+pending TTL deleted while push delivery went on working, so recovery was silently disarmed and the
+user discovered it only after the next daemon replacement.
+
+The proof is **not** an authorization to deliver: `is_reconcilable` stays `live`-only, so an armed
+`pending` record is still never reconciled, and restoration still requires the whole chain in
+sec. 18.3 plus the daemon epoch fence.
+
+The producer-side transition table (`station_intent::finalize_admission`) is:
+
+| Durable state | Armed durably (`armed` present, or already `live`) | Daemon reports an armed member now | Result |
+|---|---|---|---|
+| `live` | — | — | **refresh** the producer identity |
+| `pending` | yes | either | **promote** to `live` |
+| `pending` | no | yes | **promote** to `live` |
+| `pending` | no | no | refused: not armed |
+| `revoked` / `tombstoned` | — | — | refused: a revocation is never undone by a finalize |
+| any runtime projection | — | — | refused: not a transition this build owns |
+
+Two properties fall out of that asymmetry, and both matter:
+
+- **A merely-existing bridge can never arm an attach that was never registered.** A `pending`
+  record needs one of the two authorities, and the only one a proofless record can get is a daemon
+  that reports `push_registered` right now.
+- **An already-armed binding can re-record its producer identity with no daemon involvement.** This
+  is what breaks the reload-plus-replacement deadlock: a bridge reload gives the producer a new
+  `(pid, start_time)`, then the daemon is replaced, and the successor cannot create a member because
+  every pass fails `producer_identity_mismatch` against the stale pair. Gating the repair on
+  `push_registered` gated it on precisely the thing the repair was supposed to restore.
+
+The admission decision is re-made *inside* the per-intent write lock against the record as it
+actually is, so a detach, session end, or operator reset that lands mid-finalize always wins.
+
+A durable state transition also **clears the failure ladder**. The ladder is earned by a producer
+descriptor, not by a binding, and a generation move means the descriptor was replaced; carrying the
+backoff (or, past `RECONCILE_QUARANTINE_AFTER`, the quarantine hour) across the repair would make
+recovery wait out a schedule the repaired record never earned. Evidence writes deliberately do not
+move the generation, so they never clear anything.
+
+### 18.2.2 Garbage collection
 
 GC is the only place an intent file is deleted, so every reason is state-scoped and TTL-governed:
 
 | Reason | Applies to | TTL |
 |---|---|---|
-| attach never finalized | `pending` **only** | `STATION_INTENT_PENDING_TTL` (5 min) |
+| attach never finalized | unarmed `pending` **only** | `STATION_INTENT_PENDING_TTL` (5 min) |
+| armed but never finalized | `pending` carrying an armed proof | `STATION_INTENT_ARMED_PENDING_TTL` (24 h) |
 | terminal past its TTL | persisted `unverifiable` / `insecure` / `revoked` | `STATION_INTENT_UNVERIFIABLE_TTL` (7 d) |
-| credential file gone | finalized intents | `STATION_INTENT_CREDENTIAL_MISSING_TTL` (15 min) since the producer was last proven or attempted |
+| credential file gone | finalized intents | `STATION_INTENT_CREDENTIAL_MISSING_TTL` (15 min) since the producer was last **proven** |
 | foreign host/boot with a dead producer | finalized intents | immediate (it can never be restored here) |
-| producer dead and unproven past its TTL | finalized intents | `STATION_INTENT_UNVERIFIABLE_TTL` |
+| producer dead and unproven past its TTL | finalized intents | `STATION_INTENT_UNVERIFIABLE_TTL` since last **proven** |
 | unreadable past its TTL | manifests that fail validation, **except** an unsupported schema version | `STATION_INTENT_UNVERIFIABLE_TTL` |
 
-Two rules carry most of the weight. `pending` is governed by its own TTL and by nothing else,
-because on a first attach the credential path is a bridge registry the extension has not written yet
-and the producer identity is a placeholder — any other rule would delete exactly the record the
-turn-boundary finalizer exists to promote. And a *missing credential* is a transient producer
-condition (the bridge deletes and rewrites its registry on every reload), not a teardown, so it is
-TTL-governed against the durable `evidence` clock rather than acted on immediately.
+Four rules carry most of the weight.
+
+`pending` is governed by its own TTL and by nothing else, because on a first attach the credential
+path is a bridge registry the extension has not written yet and the producer identity is a
+placeholder — any other rule would delete exactly the record the turn-boundary finalizer exists to
+promote. An *armed* `pending` record gets a much longer TTL for the opposite reason: it describes
+push delivery a daemon really armed, so collecting it at five minutes silently disarms recovery for
+a binding that is working right now.
+
+A *missing credential* is a transient producer condition (the bridge deletes and rewrites its
+registry on every reload), not a teardown, so it is TTL-governed rather than acted on immediately.
+
+Both TTL clocks read **proof** — a successful reconcile, a verified probe, or the durable transition
+a finalize performs, which is itself gated on a live probe. Never `evidence.last_attempt_ms`. The
+reconciler persists scheduling state on every genuine failure, so an attempt-based clock is
+refreshed every few seconds forever, and both the credential-missing rule and the dead-producer
+orphan rule became unreachable for exactly the abandoned records they exist to collect.
+
+Every deletion is **conditional and lock-held**. GC classifies from a snapshot, then re-acquires the
+per-intent write lock, reloads, and re-checks both the generation and the reason before unlinking.
+Without that, a record a concurrent turn-boundary finalize had just promoted to `live`, or that a
+fresh attach had replaced at a new generation, was destroyed by a decision taken against the older
+copy. The attach-rollback path takes the same route, conditioned on the generation *it* wrote and on
+the record still being an unarmed `pending` one.
 
 An unsupported schema version is never deleted: that is what a rollback leaves behind, and
 "intents are never deleted by a rollback" is a documented guarantee.
@@ -1991,7 +2057,13 @@ An unsupported schema version is never deleted: that is what a rollback leaves b
 
 In order, and all fail-closed:
 
-1. Host and boot identity match this machine and this boot.
+1. Host and boot identity match this machine and this boot. Both are resolved fail-closed: on
+   Windows the boot identity is minted once per boot and persisted in `HKCU\Software\telex`, and if
+   it cannot be persisted *or* read back the resolver reports an error rather than handing out a
+   per-process value. A per-process value is not a degradation here — it is compared for exact
+   equality across processes, so it would make every intent `foreign_host_or_boot`, have GC remove
+   those records as foreign identities with dead producers, and turn the anti-downgrade guard into
+   a refusal of unrelated attaches, all with nothing anywhere naming the cause.
 2. The handler kind is registered (composition-time registry — the daemon core learns an opaque id,
    never a Copilot symbol).
 3. The producer advertises probe protocol ≥ 2; below that it is `legacy_producer` — never restored,
@@ -2016,6 +2088,14 @@ durable watermark from the live member. The manifest value is a floor that keeps
 committed during a restart gap visible; leaving it frozen at attach time made every daemon
 replacement replay the whole session's CC history as injected turns.
 
+At most one intent per `(store_key, address)` is attempted per pass, and only **reconcilable**
+records compete for that slot. An inert one — a higher-generation `revoked` tombstone from another
+session, say — must not consume it: taking the slot before the reconcilability check meant the
+shadowed `live` record was skipped *before it was indexed*, so for as long as the tombstone survived
+(up to its seven-day TTL) the live binding was invisible to `telex status`, absent from the
+pre-drain report, unseen by the turn guard, and attempted by no pass at all. Every record the pass
+loads is indexed; only the winner is attempted.
+
 ### 18.4 Scheduling and bounds
 
 | Constant | Value | Why |
@@ -2028,6 +2108,16 @@ replacement replay the whole session's CC history as injected turns.
 | `RECONCILE_DEFERRED_LEASE_RETRY` | 5 s fixed | a not-yet-stale incumbent is *waiting*, not failing |
 | `RECONCILE_BACKOFF_INITIAL`/`_MAX` | 5 s / 5 min ±20 % | genuine failures only |
 | `RECONCILE_QUARANTINE_AFTER` | 10 consecutive failures → hourly | one wedged intent cannot eat the budget |
+
+The ladder is `5 s → 10 s → 20 s → … → 5 min`, and the **first** transient failure waits
+`RECONCILE_BACKOFF_INITIAL`, not twice it: `consecutive_failures` counts the failure being
+scheduled, so the exponent is `failures - 1`. Getting that off by one made the published ladder
+wrong at exactly the rung that matters most — a bridge mid-reload, which is over within a tick or
+two.
+
+A durable state transition (a finalize, a producer-identity refresh, an arming stamp, a re-attach —
+anything that moves the generation) resets `consecutive_failures` and `next_attempt_ms`. An evidence
+write does not move the generation and therefore forgives nothing.
 
 Outcome classes drive retry policy and nothing else: `Restored` / `RefreshedNoOp` (success),
 `DeferredLease` (fixed cadence, no backoff, no quarantine counter), `DeferredPullWaiter` (its own
@@ -2091,3 +2181,26 @@ All triggers pulse one seam, and every completed pass publishes a `ReconcileRepo
 `pass_seq`. Callers await a report rather than polling a clock. Pulses schedule work; they never
 bypass `next_attempt_ms`. The heartbeat loop tracks its own tick deadline explicitly, so a stream of
 pulses can never starve the epoch-lease heartbeat.
+
+A producer-side finalize additionally asks the daemon to reconcile straight away, because the
+durable record is written by a *different process* than the one that owns the index.
+
+### 18.8 The pre-drain report
+
+`drain_intent_report()` answers one question: what will a compatible successor find. It is
+projected from the cached index, with a **bounded durable backfill** for bindings the index has no
+fresh answer for. No probe, no connection, no backend or network I/O, and it is evaluated before the
+lease-release loop, so it still cannot push a graceful drain past `--drain-timeout-ms`.
+
+The backfill is not an optimization. The index is refreshed only by a reconcile pass, while the
+record is written by a producer-side finalize in another process — so `copilot attach` immediately
+followed by `telex upgrade` drained with `recoverable: 0` for a binding that had just been fully
+armed and finalized, and the successor-verification step skipped itself on "no recoverable station
+intents". The one path that exists to carry push delivery across a daemon replacement quietly
+became a no-op.
+
+The two sources are combined so neither masks the other: a cached projection that names a *problem*
+(degraded, incompatible, revoked) wins, because that is real evidence from an attempt and a
+successor will hit the same wall; otherwise the durable manifest wins, because it is what the
+successor will actually read. A cached projection is never *retracted* by the durable read, so a
+scope that vanishes under a running daemon is still reported from what that daemon proved.
