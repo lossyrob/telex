@@ -240,14 +240,23 @@ shapes MUST preserve identical delivery and acknowledgment semantics.
 Message acceptance MUST verify that the actual recipient-specific serialized
 receive frame fits the supported transport limit before persisting the message
 or any delivery row. The check MUST include JSON escaping and generated delivery
-fields. If an older store already contains a row that cannot be represented
-without changing its body, subject, or metadata, the daemon MUST preserve those
-stored values, atomically record a terminal `rejected` disposition for the exact
-recipient delivery with a bounded diagnostic note, consume that delivery, and
-return a typed compatibility error. This legacy quarantine is an explicit
+fields, MUST parse and deduplicate recipients once, and MUST enforce the
+protocol recipient-count limit before creating destination address records.
+If an older store already contains a row that cannot be represented without
+changing its body, subject, or metadata, the daemon MUST preserve those stored
+values, atomically record a terminal `rejected` disposition for the exact
+recipient delivery with daemon provenance and a bounded diagnostic note,
+consume that transport delivery, and return a typed receive-specific quarantine
+outcome containing recipient, message ID, serialized bytes, frame limit, and
+continue-receiving guidance. This outcome is post-acceptance and MUST NOT use
+the pre-acceptance rejection taxonomy. Sender receipt refresh and state deltas
+MUST expose daemon quarantine provenance and MUST NOT report application
+recipient consumption as accepted. This legacy quarantine is an explicit
 progress exception: the unrepresentable delivery is not handed to the
 application, but it cannot permanently block later receivable deliveries, and
-the durable disposition remains auditable after restart.
+the durable evidence remains auditable after restart. Notification-only CC
+copies MUST be skipped with an operator diagnostic rather than fabricating an
+obligation-bearing workflow disposition.
 
 ### AC-C10: Acknowledgment follows durable application ingest
 

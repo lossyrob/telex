@@ -14,6 +14,7 @@ pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_MESSAGE_BODY_METADATA_BYTES: usize = MAX_JSONL_FRAME_BYTES - (64 * 1024);
+pub const MAX_MESSAGE_RECIPIENTS: usize = 256;
 
 pub const CAP_JSONL: &str = "jsonl_v1";
 pub const CAP_ADMIN_CAP: &str = "admin_cap_v1";
@@ -425,6 +426,13 @@ pub enum Response {
         snapshot_version: Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lease_epoch: Option<i64>,
+    },
+    DeliveryQuarantined {
+        message_id: i64,
+        recipient: String,
+        serialized_bytes: usize,
+        max_bytes: usize,
+        may_continue: bool,
     },
     Sent {
         receipt: SentReceipt,

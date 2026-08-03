@@ -310,7 +310,15 @@ async fn application_client_schema_v3_operation_smoke() {
                 1_000,
             )
             .await,
-        Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
+        Response::DeliveryQuarantined {
+            message_id,
+            ref recipient,
+            serialized_bytes,
+            max_bytes,
+            may_continue: true,
+        } if message_id == oversized_id
+            && recipient == "pg-frame-recipient"
+            && serialized_bytes > max_bytes
     ));
     assert!(backend
         .dispositions_for(oversized_id)
@@ -325,8 +333,48 @@ async fn application_client_schema_v3_operation_smoke() {
                     note.contains("serialized_bytes=") && note.contains("max_bytes=")
                 })
         }));
+    assert!(backend
+        .state_delta_page(0, 1_000)
+        .await
+        .unwrap()
+        .deltas
+        .iter()
+        .any(|delta| {
+            delta
+                .payload_json
+                .contains("\"evidence\":\"daemon-quarantine\"")
+                && delta.payload_json.contains("\"by_principal\":\"daemon\"")
+        }));
     assert!(matches!(
         daemon
+            .request(Request::Detach {
+                store_key: store_key.clone(),
+                session_id: "pg-receiver-session".into(),
+                address: "pg-frame-recipient".into(),
+            })
+            .await,
+        Response::Ack { .. }
+    ));
+    drop(daemon);
+    let restarted = TestDaemon::new("pg-oversized-delivery-progress-restart");
+    assert!(matches!(
+        restarted
+            .register(&store_key, "pg-receiver-session", "pg-frame-recipient")
+            .await,
+        Response::Registered { .. }
+    ));
+    assert!(backend
+        .dispositions_for(oversized_id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|disposition| {
+            disposition.recipient == "pg-frame-recipient"
+                && disposition.state == Disposition::Rejected.as_str()
+                && disposition.by_principal.as_deref() == Some("daemon")
+        }));
+    assert!(matches!(
+        restarted
             .wait(
                 &store_key,
                 "pg-receiver-session",

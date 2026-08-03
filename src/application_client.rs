@@ -145,6 +145,13 @@ pub enum ApplicationClientError {
         retryability: RejectionRetryability,
         detail: String,
     },
+    DeliveryQuarantined {
+        message_id: i64,
+        recipient: String,
+        serialized_bytes: usize,
+        max_bytes: usize,
+        may_continue: bool,
+    },
     TransportUncertain(String),
     Unavailable(String),
 }
@@ -183,6 +190,15 @@ impl fmt::Display for ApplicationClientError {
             } => write!(
                 f,
                 "operation rejected before acceptance: {code} ({retryability:?})"
+            ),
+            Self::DeliveryQuarantined {
+                message_id,
+                recipient,
+                may_continue,
+                ..
+            } => write!(
+                f,
+                "delivery {message_id} for {recipient} was quarantined; continue receiving: {may_continue}"
             ),
             Self::TransportUncertain(detail) => {
                 write!(f, "application transport outcome is uncertain: {detail}")
@@ -290,6 +306,10 @@ pub enum EvidenceState {
     Accepted,
     Rejected,
     Disposition(String),
+    Quarantined {
+        by_principal: String,
+        disposition: String,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -1382,7 +1402,7 @@ impl ApplicationClient {
                 "receive requires bidirectional membership".to_string(),
             ));
         }
-        match self
+        let response = self
             .request(
                 Request::Wait {
                     store_key: self.store_key.clone(),
@@ -1399,8 +1419,16 @@ impl ApplicationClient {
                 },
                 false,
             )
-            .await?
-        {
+            .await?;
+        self.project_receive_response(address, response).await
+    }
+
+    async fn project_receive_response(
+        &self,
+        address: &str,
+        response: Response,
+    ) -> Result<Option<ReceivedDelivery>, ApplicationClientError> {
+        match response {
             Response::Message {
                 id,
                 thread_id,
@@ -1461,6 +1489,19 @@ impl ApplicationClient {
                 address: address.to_string(),
                 reason: MembershipLossReason::PredicateDeath,
                 detail: "receive presence ended".to_string(),
+            }),
+            Response::DeliveryQuarantined {
+                message_id,
+                recipient,
+                serialized_bytes,
+                max_bytes,
+                may_continue,
+            } => Err(ApplicationClientError::DeliveryQuarantined {
+                message_id,
+                recipient,
+                serialized_bytes,
+                max_bytes,
+                may_continue,
             }),
             Response::Error {
                 code,
@@ -1909,20 +1950,42 @@ impl ApplicationClient {
             .dispositions_for(result.message_id)
             .await
             .map_err(unavailable)?;
+        let latest_disposition = dispositions
+            .iter()
+            .rev()
+            .find(|row| row.recipient == result.recipient);
+        let quarantine = latest_disposition.filter(|row| {
+            row.state == "rejected"
+                && row.by_principal.as_deref() == Some("daemon")
+                && row
+                    .note
+                    .as_deref()
+                    .is_some_and(|note| note.starts_with("daemon rejected delivery frame:"))
+        });
         Ok(ReceiptAxes {
             durable_acceptance: EvidenceState::Accepted,
             occupied_at_acceptance: result.axes.occupied_at_acceptance,
             push_acceptance: EvidenceState::Unavailable,
-            recipient_consumption: match delivery {
-                None => EvidenceState::NotAttempted,
-                Some(row) if row.consumed_at_ms.is_some() => EvidenceState::Accepted,
-                Some(_) => EvidenceState::Pending,
+            recipient_consumption: if let Some(row) = quarantine {
+                EvidenceState::Quarantined {
+                    by_principal: row.by_principal.clone().unwrap_or_default(),
+                    disposition: row.state.clone(),
+                }
+            } else {
+                match delivery {
+                    None => EvidenceState::NotAttempted,
+                    Some(row) if row.consumed_at_ms.is_some() => EvidenceState::Accepted,
+                    Some(_) => EvidenceState::Pending,
+                }
             },
-            workflow_disposition: dispositions
-                .iter()
-                .rev()
-                .find(|row| row.recipient == result.recipient)
-                .map(|row| EvidenceState::Disposition(row.state.clone()))
+            workflow_disposition: quarantine
+                .map(|row| EvidenceState::Quarantined {
+                    by_principal: row.by_principal.clone().unwrap_or_default(),
+                    disposition: row.state.clone(),
+                })
+                .or_else(|| {
+                    latest_disposition.map(|row| EvidenceState::Disposition(row.state.clone()))
+                })
                 .unwrap_or(EvidenceState::NotAttempted),
         })
     }
@@ -2778,6 +2841,191 @@ mod tests {
         assert_eq!(first_id, second_id);
         assert!(first_id.starts_with("store-v1-"));
         assert!(!first_id.contains(&path));
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn receive_quarantine_is_typed_and_sender_axes_preserve_provenance() {
+        use crate::daemon::test_support::{registered_epoch, TestDaemon};
+
+        let daemon = TestDaemon::new("application-client-quarantine");
+        let store_key = daemon.store_key("application-client-quarantine");
+        let path = store_key
+            .strip_prefix("sqlite:")
+            .expect("SQLite test store")
+            .to_string();
+        let backend = daemon.backend(&store_key).await.unwrap();
+        let logical_store_id = LogicalStoreId::persisted(backend.logical_store_id().await.unwrap());
+        let runtime_id = RuntimeId("receiver-session".to_string());
+        let (lease_epoch, owner_instance_id) =
+            registered_epoch(&daemon, &store_key, &runtime_id.0, "receiver").await;
+        let client = ApplicationClient {
+            responsibility: ApplicationResponsibility("receiver-app".into()),
+            runtime_id: runtime_id.clone(),
+            logical_store_id: logical_store_id.clone(),
+            store_key: store_key.clone(),
+            profile: crate::profiles::implicit_sqlite(Some(&path)),
+            backend: backend.clone(),
+            memberships: Mutex::new(BTreeMap::from([(
+                "receiver".to_string(),
+                LocalMembership {
+                    handle: MembershipHandle {
+                        logical_store_id: logical_store_id.clone(),
+                        responsibility: ApplicationResponsibility("receiver-app".into()),
+                        runtime_id,
+                        address: "receiver".into(),
+                        capability: ApplicationCapability::Bidirectional,
+                        lease_epoch,
+                        owner_instance_id,
+                    },
+                    recovering: false,
+                    last_recovery_failure: None,
+                },
+            )])),
+            outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
+        };
+        let fingerprint = "d".repeat(64);
+        let operation = NewApplicationOperation {
+            logical_store_id: logical_store_id.0.clone(),
+            application_responsibility: "sender-app".into(),
+            operation_id: "oversized-send".into(),
+            operation_kind: "send".into(),
+            sender: "sender".into(),
+            recipients_json: r#"["receiver"]"#.into(),
+            payload_fingerprint: fingerprint.clone(),
+            retry_budget: 1,
+            created_at_ms: now_ms(),
+        };
+        backend
+            .begin_application_operation(&operation)
+            .await
+            .unwrap();
+        let oversized = backend
+            .insert_application_message(
+                &crate::model::NewMessage {
+                    from_addr: Some("sender".into()),
+                    to_addr: "receiver".into(),
+                    kind: "note".into(),
+                    attention: crate::model::Attention::Background,
+                    body: "x".repeat(crate::daemon_ipc::MAX_JSONL_FRAME_BYTES + 1),
+                    sent_at_ms: now_ms(),
+                    ..Default::default()
+                },
+                &crate::model::ApplicationMessageOperation {
+                    logical_store_id: logical_store_id.0.clone(),
+                    application_responsibility: "sender-app".into(),
+                    operation_id: "oversized-send".into(),
+                    payload_fingerprint: fingerprint.clone(),
+                },
+            )
+            .await
+            .unwrap();
+        let accepted = SendResult {
+            logical_store_id: logical_store_id.clone(),
+            operation_id: OperationId("oversized-send".into()),
+            message_id: oversized.id,
+            thread_id: oversized.thread_id,
+            sender: "sender".into(),
+            recipient: "receiver".into(),
+            axes: ReceiptAxes {
+                durable_acceptance: EvidenceState::Accepted,
+                occupied_at_acceptance: Some(true),
+                push_acceptance: EvidenceState::Unknown,
+                recipient_consumption: EvidenceState::Unknown,
+                workflow_disposition: EvidenceState::Unknown,
+            },
+            payload_identity: PayloadIdentity::sha256(fingerprint.clone()),
+            replayed: false,
+        };
+        backend
+            .complete_application_operation(
+                &logical_store_id.0,
+                "sender-app",
+                "oversized-send",
+                "accepted",
+                Some(&serde_json::to_string(&accepted).unwrap()),
+                None,
+            )
+            .await
+            .unwrap();
+        let following = backend
+            .insert_message(&crate::model::NewMessage {
+                from_addr: Some("sender".into()),
+                to_addr: "receiver".into(),
+                kind: "note".into(),
+                attention: crate::model::Attention::Background,
+                body: "following".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let quarantined = daemon
+            .wait(&store_key, "receiver-session", "receiver", 1_000)
+            .await;
+        assert!(matches!(
+            client
+                .project_receive_response("receiver", quarantined)
+                .await,
+            Err(ApplicationClientError::DeliveryQuarantined {
+                message_id,
+                ref recipient,
+                serialized_bytes,
+                max_bytes,
+                may_continue: true,
+            }) if message_id == oversized.id
+                && recipient == "receiver"
+                && serialized_bytes > max_bytes
+        ));
+        let received = client
+            .project_receive_response(
+                "receiver",
+                daemon
+                    .wait(&store_key, "receiver-session", "receiver", 1_000)
+                    .await,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(received.delivery.message_id, following.id);
+
+        let reopened_backend = Arc::new(SqliteBackend::open(&path).unwrap());
+        reopened_backend.init_schema().await.unwrap();
+        let sender_client = ApplicationClient {
+            responsibility: ApplicationResponsibility("sender-app".into()),
+            runtime_id: RuntimeId("sender-session".into()),
+            logical_store_id: logical_store_id.clone(),
+            store_key: store_key.clone(),
+            profile: crate::profiles::implicit_sqlite(Some(&path)),
+            backend: reopened_backend.clone(),
+            memberships: Mutex::new(BTreeMap::new()),
+            outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
+        };
+        let axes = sender_client
+            .refresh_receipt_axes(&RecoveryHandle {
+                logical_store_id: logical_store_id.clone(),
+                responsibility: ApplicationResponsibility("sender-app".into()),
+                operation_id: OperationId("oversized-send".into()),
+                payload_identity: PayloadIdentity::sha256(fingerprint),
+            })
+            .await
+            .unwrap();
+        let quarantine = EvidenceState::Quarantined {
+            by_principal: "daemon".into(),
+            disposition: "rejected".into(),
+        };
+        assert_eq!(axes.recipient_consumption, quarantine);
+        assert_eq!(axes.workflow_disposition, quarantine);
+        let deltas = reopened_backend.state_delta_page(0, 100).await.unwrap();
+        assert!(deltas.deltas.iter().any(|delta| {
+            delta
+                .payload_json
+                .contains("\"evidence\":\"daemon-quarantine\"")
+                && delta.payload_json.contains("\"by_principal\":\"daemon\"")
+        }));
     }
 
     #[cfg(feature = "postgres")]

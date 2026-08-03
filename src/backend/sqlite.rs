@@ -2845,6 +2845,11 @@ impl Backend for SqliteBackend {
         self.run(move |c| {
             with_immediate_transaction(c, |c| {
                 let now = advance_clock_hwm(c)?;
+                let quarantine = s == "rejected"
+                    && b.as_deref() == Some("daemon")
+                    && n.as_deref().is_some_and(|note| {
+                        note.starts_with("daemon rejected delivery frame:")
+                    });
                 c.execute(
                     "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms) \
                      VALUES (?1,?2,?3,?4,?5,?6)",
@@ -2873,6 +2878,8 @@ impl Backend for SqliteBackend {
                                 "delivery_id": delivery_id,
                                 "message_id": message_id,
                                 "recipient": r,
+                                "by_principal": b,
+                                "evidence": quarantine.then_some("daemon-quarantine"),
                             })
                             .to_string(),
                         )?;
@@ -2888,6 +2895,8 @@ impl Backend for SqliteBackend {
                         "recipient": r,
                         "state": s,
                         "is_terminal": Disposition::is_terminal_str(&s),
+                        "by_principal": b,
+                        "evidence": quarantine.then_some("daemon-quarantine"),
                     })
                     .to_string(),
                 )?;
@@ -2961,6 +2970,11 @@ impl Backend for SqliteBackend {
                     }
                 }
                 let now = advance_clock_hwm(c)?;
+                let quarantine = state == "rejected"
+                    && by.as_deref() == Some("daemon")
+                    && note
+                        .as_deref()
+                        .is_some_and(|note| note.starts_with("daemon rejected delivery frame:"));
                 c.execute(
                     "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms)
                      VALUES (?1,?2,?3,?4,?5,?6)",
@@ -2986,6 +3000,8 @@ impl Backend for SqliteBackend {
                             "delivery_id": delivery_id,
                             "message_id": message_id,
                             "recipient": recipient,
+                            "by_principal": by,
+                            "evidence": quarantine.then_some("daemon-quarantine"),
                         })
                         .to_string(),
                     )?;
@@ -3037,6 +3053,8 @@ impl Backend for SqliteBackend {
                         "recipient": recipient,
                         "state": state,
                         "is_terminal": Disposition::is_terminal_str(&state),
+                        "by_principal": by,
+                        "evidence": quarantine.then_some("daemon-quarantine"),
                     })
                     .to_string(),
                 )?;

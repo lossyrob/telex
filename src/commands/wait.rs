@@ -249,7 +249,10 @@ async fn wait_loop<C: WaitConnector>(
                     }
                 }
             }
-            Response::Message { .. } | Response::Timeout | Response::PresenceEnded => {
+            Response::Message { .. }
+            | Response::DeliveryQuarantined { .. }
+            | Response::Timeout
+            | Response::PresenceEnded => {
                 return Ok(WaitTerminal::Response(response));
             }
             Response::Error { code, message, .. } => return Err(anyhow!("{code}: {message}")),
@@ -498,6 +501,24 @@ impl WaitOutcome {
                 outcome: "presence-ended",
                 detail: None,
                 message: None,
+            }),
+            Response::DeliveryQuarantined {
+                message_id,
+                recipient,
+                serialized_bytes,
+                max_bytes,
+                may_continue,
+            } => Ok(WaitOutcome {
+                exit_code: 6,
+                outcome: "delivery-quarantined",
+                detail: None,
+                message: Some(serde_json::json!({
+                    "message_id": message_id,
+                    "recipient": recipient,
+                    "serialized_bytes": serialized_bytes,
+                    "max_bytes": max_bytes,
+                    "may_continue": may_continue,
+                })),
             }),
             other => Err(anyhow!("unexpected daemon wait response: {other:?}")),
         }

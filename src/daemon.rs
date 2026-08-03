@@ -4844,6 +4844,7 @@ async fn wait_for_message_with_idle_ttl(
             return proto::error_response(proto::ERROR_INCOMPATIBLE, e.to_string());
         }
     };
+    let mut reported_oversized_cc = BTreeSet::new();
     loop {
         let store_notification = state
             .store_notify(&store_key)
@@ -4920,13 +4921,14 @@ async fn wait_for_message_with_idle_ttl(
                 return Response::PresenceEnded;
             }
         }
-        if let Some(candidate) = candidates.into_iter().find(|candidate| {
+        for candidate in candidates.into_iter().filter(|candidate| {
             wait_attention_matches(
                 candidate.message.attention.as_str(),
                 attention.as_deref(),
                 parsed_min_attention,
             )
         }) {
+            let notification_only = candidate.notification_only;
             let Some(delivery_id) = candidate.delivery_id else {
                 waiter_guard.suppress_abnormal_on_drop();
                 return proto::internal(format!(
@@ -4990,7 +4992,7 @@ async fn wait_for_message_with_idle_ttl(
                 snapshot_version: Some(snapshot_version),
                 lease_epoch: Some(current.lease_epoch),
             };
-            return match proto::json_line_frame_len(&response) {
+            match proto::json_line_frame_len(&response) {
                 Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => {
                     state.record_waiter_message_exit(
                         &store_key,
@@ -4999,9 +5001,22 @@ async fn wait_for_message_with_idle_ttl(
                         row.id,
                         waiter_pid,
                     );
-                    response
+                    return response;
                 }
                 Ok(len) => {
+                    if notification_only {
+                        if reported_oversized_cc.insert(row.id) {
+                            state.push_recent_error(
+                                "OversizedCcNotificationFrame",
+                                format!(
+                                    "skipped oversized notification-only CC frame store={store_key} address={address} message_id={} delivery_id={delivery_id}: serialized frame is {len} bytes, limit is {}",
+                                    row.id,
+                                    proto::MAX_JSONL_FRAME_BYTES
+                                ),
+                            );
+                        }
+                        continue;
+                    }
                     let note = format!(
                         "daemon rejected delivery frame: serialized_bytes={len}; max_bytes={}",
                         proto::MAX_JSONL_FRAME_BYTES
@@ -5067,20 +5082,19 @@ async fn wait_for_message_with_idle_ttl(
                         }
                     }
                     waiter_guard.suppress_abnormal_on_drop();
-                    proto::error_response(
-                        proto::ERROR_INCOMPATIBLE,
-                        format!(
-                            "message {} serializes to {len} bytes, exceeding IPC frame limit {}; its unchanged payload was not delivered and this recipient delivery was durably rejected so later messages can progress",
-                            row.id,
-                            proto::MAX_JSONL_FRAME_BYTES
-                        ),
-                    )
+                    return Response::DeliveryQuarantined {
+                        message_id: row.id,
+                        recipient: address.clone(),
+                        serialized_bytes: len,
+                        max_bytes: proto::MAX_JSONL_FRAME_BYTES,
+                        may_continue: true,
+                    };
                 }
                 Err(e) => {
                     waiter_guard.suppress_abnormal_on_drop();
-                    proto::internal(format!("sizing message {} IPC frame: {e}", row.id))
+                    return proto::internal(format!("sizing message {} IPC frame: {e}", row.id));
                 }
-            };
+            }
         }
         if let Some(deadline) = deadline {
             let now = Instant::now();
@@ -5360,57 +5374,93 @@ fn validate_message_payload_size(
 fn validate_message_delivery_frame_size(
     message: &NewMessage,
     thread_id: i64,
+    cc: &[String],
 ) -> std::result::Result<(), Response> {
-    let cc = cc_recipients(message.cc.as_deref());
-    let recipients = std::iter::once(message.to_addr.as_str()).chain(cc.iter().map(String::as_str));
-    for recipient in recipients {
-        let response = Response::Message {
-            id: i64::MAX,
-            thread_id,
-            parent_id: message.parent_id,
-            from_addr: message.from_addr.clone(),
-            to_addr: message.to_addr.clone(),
-            delivered_to: recipient.to_string(),
-            primary_to: message.to_addr.clone(),
-            cc: cc.clone(),
-            delivery_role: delivery_role(recipient, &message.to_addr, message.cc.as_deref())
-                .to_string(),
-            kind: message.kind.clone(),
-            attention: message.attention.as_str().to_string(),
-            requires_disposition: message.requires_disposition,
-            requires_disposition_for_current_recipient: requires_disposition_for_recipient(
-                message.requires_disposition,
-                recipient,
-                &message.to_addr,
+    let response = conservative_delivery_frame(message, thread_id, cc);
+    let recipient = match &response {
+        Response::Message { delivered_to, .. } => delivered_to.as_str(),
+        _ => unreachable!("conservative delivery frame is always a message"),
+    };
+    match proto::json_line_frame_len(&response) {
+        Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => Ok(()),
+        Ok(len) => Err(proto::error_response(
+            proto::ERROR_INCOMPATIBLE,
+            format!(
+                "message delivery frame for {recipient} serializes to {len} bytes; limit is {} bytes",
+                proto::MAX_JSONL_FRAME_BYTES
             ),
-            subject: message.subject.clone(),
-            body: message.body.clone(),
-            metadata: message.metadata.clone(),
-            sent_at_ms: i64::MAX,
-            buffered_at_ms: i64::MAX,
-            delivery_id: Some(i64::MAX),
-            snapshot_version: Some(i64::MAX),
-            lease_epoch: Some(i64::MAX),
-        };
-        match proto::json_line_frame_len(&response) {
-            Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => {}
-            Ok(len) => {
-                return Err(proto::error_response(
-                    proto::ERROR_INCOMPATIBLE,
-                    format!(
-                        "message delivery frame for {recipient} serializes to {len} bytes; limit is {} bytes",
-                        proto::MAX_JSONL_FRAME_BYTES
-                    ),
-                ))
-            }
-            Err(e) => {
-                return Err(proto::internal(format!(
-                    "sizing message delivery frame for {recipient}: {e}"
-                )))
-            }
-        }
+        )),
+        Err(e) => Err(proto::internal(format!(
+            "sizing message delivery frame for {recipient}: {e}"
+        ))),
     }
-    Ok(())
+}
+
+fn conservative_delivery_frame(message: &NewMessage, thread_id: i64, cc: &[String]) -> Response {
+    let recipient = std::iter::once(message.to_addr.as_str())
+        .chain(cc.iter().map(String::as_str))
+        .max_by_key(|recipient| {
+            serde_json::to_string(recipient)
+                .map(|encoded| encoded.len())
+                .unwrap_or(usize::MAX)
+        })
+        .unwrap_or(message.to_addr.as_str());
+    Response::Message {
+        id: i64::MAX,
+        thread_id,
+        parent_id: message.parent_id,
+        from_addr: message.from_addr.clone(),
+        to_addr: message.to_addr.clone(),
+        delivered_to: recipient.to_string(),
+        primary_to: message.to_addr.clone(),
+        cc: cc.to_vec(),
+        // Longer than either actual role and therefore conservative.
+        delivery_role: "unknown".to_string(),
+        kind: message.kind.clone(),
+        attention: message.attention.as_str().to_string(),
+        requires_disposition: message.requires_disposition,
+        // `false` serializes one byte longer than `true`.
+        requires_disposition_for_current_recipient: false,
+        subject: message.subject.clone(),
+        body: message.body.clone(),
+        metadata: message.metadata.clone(),
+        sent_at_ms: i64::MAX,
+        buffered_at_ms: i64::MAX,
+        delivery_id: Some(i64::MAX),
+        snapshot_version: Some(i64::MAX),
+        lease_epoch: Some(i64::MAX),
+    }
+}
+
+fn normalize_message_recipients(
+    primary: &str,
+    cc: Option<&str>,
+) -> std::result::Result<(Option<String>, Vec<String>), Response> {
+    let mut recipients = BTreeSet::from([primary.to_string()]);
+    let mut recipient_entries = 1usize;
+    for recipient in cc
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|recipient| !recipient.is_empty())
+    {
+        recipient_entries += 1;
+        if recipient_entries > proto::MAX_MESSAGE_RECIPIENTS {
+            return Err(proto::error_response(
+                proto::ERROR_INCOMPATIBLE,
+                format!(
+                    "message has more than {} recipient entries",
+                    proto::MAX_MESSAGE_RECIPIENTS
+                ),
+            ));
+        }
+        recipients.insert(recipient.to_string());
+    }
+    let cc: Vec<String> = recipients
+        .into_iter()
+        .filter(|recipient| recipient != primary)
+        .collect();
+    Ok(((!cc.is_empty()).then(|| cc.join(",")), cc))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5454,6 +5504,26 @@ async fn send_message(
         Ok(from) => from,
         Err(response) => return response,
     };
+    let (cc, cc_recipients) = match normalize_message_recipients(&to_addr, cc.as_deref()) {
+        Ok(recipients) => recipients,
+        Err(response) => return response,
+    };
+    let new = NewMessage {
+        parent_id: None,
+        from_addr: Some(from.clone()),
+        to_addr: to_addr.clone(),
+        cc,
+        kind,
+        attention,
+        requires_disposition,
+        subject,
+        body,
+        metadata,
+        sent_at_ms: now_ms(),
+    };
+    if let Err(response) = validate_message_delivery_frame_size(&new, i64::MAX, &cc_recipients) {
+        return response;
+    }
     match backend.get_address(&to_addr).await {
         Ok(Some(addr)) if addr.status == STATUS_RETIRED => {
             return proto::error_response(
@@ -5468,22 +5538,6 @@ async fn send_message(
             }
         }
         Err(e) => return proto::internal(format!("checking destination {to_addr}: {e:#}")),
-    }
-    let new = NewMessage {
-        parent_id: None,
-        from_addr: Some(from.clone()),
-        to_addr: to_addr.clone(),
-        cc,
-        kind,
-        attention,
-        requires_disposition,
-        subject,
-        body,
-        metadata,
-        sent_at_ms: now_ms(),
-    };
-    if let Err(response) = validate_message_delivery_frame_size(&new, i64::MAX) {
-        return response;
     }
     let row = match application_operation {
         Some((logical_store_id, application_responsibility, operation_id, payload_fingerprint)) => {
@@ -5596,9 +5650,10 @@ async fn reply_message(
             )
         }
     };
-    if let Err(e) = backend.ensure_address(&to, None, None, None).await {
-        return proto::internal(format!("ensuring reply destination {to}: {e:#}"));
-    }
+    let (cc, cc_recipients) = match normalize_message_recipients(&to, cc.as_deref()) {
+        Ok(recipients) => recipients,
+        Err(response) => return response,
+    };
     let subject = subject.or_else(|| parent.subject.as_ref().map(|s| format!("Re: {s}")));
     let new = NewMessage {
         parent_id: Some(parent.id),
@@ -5613,8 +5668,13 @@ async fn reply_message(
         metadata,
         sent_at_ms: now_ms(),
     };
-    if let Err(response) = validate_message_delivery_frame_size(&new, parent.thread_id) {
+    if let Err(response) =
+        validate_message_delivery_frame_size(&new, parent.thread_id, &cc_recipients)
+    {
         return response;
+    }
+    if let Err(e) = backend.ensure_address(&to, None, None, None).await {
+        return proto::internal(format!("ensuring reply destination {to}: {e:#}"));
     }
     let row = match application_operation {
         Some((logical_store_id, application_responsibility, operation_id, payload_fingerprint)) => {
@@ -8789,11 +8849,51 @@ mod p3_tests {
             deliveries_before
         );
 
+        let too_many_cc = (0..proto::MAX_MESSAGE_RECIPIENTS)
+            .map(|index| format!("cc:{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(backend.get_address("cap-dest").await.unwrap().is_none());
+        let capped = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                from_addr: Some("addr:a".to_string()),
+                to_addr: "cap-dest".to_string(),
+                cc: Some(too_many_cc),
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: "bounded".to_string(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            capped,
+            Response::Error { ref code, ref message, .. }
+                if code == proto::ERROR_INCOMPATIBLE
+                    && message.contains("recipient entries")
+        ));
+        assert!(backend.get_address("cap-dest").await.unwrap().is_none());
+        assert!(backend
+            .inbox("cap-dest", true, 100)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            backend.delivery_retention_count().await.unwrap(),
+            deliveries_before
+        );
+
         let parent_id = insert_test_message(&backend, "addr:a", None).await;
+        let reply_deliveries_before = backend.delivery_retention_count().await.unwrap();
         let reply = request(
-            state,
+            state.clone(),
             Request::Reply {
-                store_key: store,
+                store_key: store.clone(),
                 session_id: "s1".to_string(),
                 from_addr: Some("addr:a".to_string()),
                 message_id: parent_id,
@@ -8811,6 +8911,38 @@ mod p3_tests {
             Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
         ));
         assert_eq!(backend.inbox("addr:a", true, 100).await.unwrap().len(), 1);
+
+        let escaped_reply = request(
+            state,
+            Request::ApplicationReply {
+                store_key: store,
+                session_id: "s1".to_string(),
+                from_addr: "addr:a".to_string(),
+                message_id: parent_id,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                cc: None,
+                body: String::new(),
+                metadata: Some(escape_heavy_metadata),
+                logical_store_id: backend.logical_store_id().await.unwrap(),
+                application_responsibility: "reply-test".to_string(),
+                operation_id: "escape-heavy-reply".to_string(),
+                payload_fingerprint: "e".repeat(64),
+            },
+        )
+        .await;
+        assert!(matches!(
+            escaped_reply,
+            Response::Error { ref code, ref message, .. }
+                if code == proto::ERROR_INCOMPATIBLE
+                    && message.contains("delivery frame")
+        ));
+        assert_eq!(
+            backend.delivery_retention_count().await.unwrap(),
+            reply_deliveries_before
+        );
     }
 
     #[tokio::test]
@@ -8824,6 +8956,18 @@ mod p3_tests {
             "controls": "\u{0000}\u{0001}\n\r\t".repeat(2_048),
         })
         .to_string();
+        let near_limit = NewMessage {
+            from_addr: Some("sender".into()),
+            to_addr: "recipient".into(),
+            kind: "note".into(),
+            attention: Attention::Background,
+            body: "x".repeat(proto::MAX_MESSAGE_BODY_METADATA_BYTES),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        };
+        let mature_frame = conservative_delivery_frame(&near_limit, i64::MAX, &[]);
+        assert!(proto::json_line_frame_len(&mature_frame).unwrap() <= proto::MAX_JSONL_FRAME_BYTES);
+        assert!(validate_message_delivery_frame_size(&near_limit, i64::MAX, &[]).is_ok());
 
         let send = request(
             state.clone(),
@@ -8849,6 +8993,7 @@ mod p3_tests {
             wait_req(&store, "recipient-session", "recipient", 1_000),
         )
         .await;
+        assert!(proto::json_line_frame_len(&received).unwrap() <= proto::MAX_JSONL_FRAME_BYTES);
         assert!(matches!(
             received,
             Response::Message {
@@ -9245,10 +9390,16 @@ mod p3_tests {
 
         let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
         match wait {
-            Response::Error { code, message, .. } => {
-                assert_eq!(code, proto::ERROR_INCOMPATIBLE);
-                assert!(message.contains(&message_id.to_string()));
-                assert!(message.contains("IPC frame"));
+            Response::DeliveryQuarantined {
+                message_id: quarantined_id,
+                ref recipient,
+                serialized_bytes,
+                max_bytes,
+                may_continue: true,
+            } => {
+                assert_eq!(quarantined_id, message_id);
+                assert_eq!(recipient, "addr:a");
+                assert!(serialized_bytes > max_bytes);
             }
             other => panic!("expected oversized-frame error, got {other:?}"),
         }
@@ -9427,6 +9578,86 @@ mod p3_tests {
         )
         .await;
         assert!(matches!(rearm, Response::Timeout));
+    }
+
+    #[tokio::test]
+    async fn oversized_notification_only_cc_is_skipped_without_workflow_disposition() {
+        let state = test_state("oversized-cc-notification");
+        let store = store_key("oversized-cc-notification");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let waiter_state = state.clone();
+        let waiter_store = store.clone();
+        let waiter = tokio::spawn(async move {
+            request(
+                waiter_state,
+                Request::Wait {
+                    store_key: waiter_store,
+                    session_id: "s1".into(),
+                    address: "addr:a".into(),
+                    attention: None,
+                    min_attention: None,
+                    wake_on_cc: true,
+                    timeout_ms: Some(1_000),
+                    waiter_pid: Some(std::process::id()),
+                    waiter_start_time: crate::session_watch::capture_process_start_time(
+                        std::process::id(),
+                    ),
+                },
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let oversized_id = backend
+            .insert_message(&NewMessage {
+                from_addr: Some("sender".into()),
+                to_addr: "primary".into(),
+                cc: Some("addr:a".into()),
+                kind: "note".into(),
+                attention: Attention::Background,
+                body: "x".repeat(proto::MAX_JSONL_FRAME_BYTES + 1),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .id;
+        let following_id = backend
+            .insert_message(&NewMessage {
+                from_addr: Some("sender".into()),
+                to_addr: "primary".into(),
+                cc: Some("addr:a".into()),
+                kind: "note".into(),
+                attention: Attention::Background,
+                body: "following".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .id;
+
+        let wait = waiter.await.unwrap();
+        match wait {
+            Response::Message {
+                id, delivery_role, ..
+            } => {
+                assert_eq!(id, following_id);
+                assert_eq!(delivery_role, "cc");
+            }
+            other => panic!("expected following CC notification, got {other:?}"),
+        }
+        assert!(backend
+            .dispositions_for(oversized_id)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(state
+            .status()
+            .await
+            .recent_errors
+            .iter()
+            .any(|error| error.kind == "OversizedCcNotificationFrame"));
     }
 
     #[tokio::test]

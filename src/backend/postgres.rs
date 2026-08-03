@@ -1894,6 +1894,9 @@ impl Backend for PgBackend {
         let mut client = self.client().await?;
         let tx = client.transaction().await?;
         let now = pg_tx_advance_clock_hwm(&tx).await?;
+        let quarantine = state == "rejected"
+            && by == Some("daemon")
+            && note.is_some_and(|note| note.starts_with("daemon rejected delivery frame:"));
         let id: i64 = tx
             .query_one(
                 "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms) \
@@ -1928,6 +1931,8 @@ impl Backend for PgBackend {
                         "delivery_id": delivery_id,
                         "message_id": message_id,
                         "recipient": recipient,
+                        "by_principal": by,
+                        "evidence": quarantine.then_some("daemon-quarantine"),
                     })
                     .to_string(),
                 )
@@ -1943,6 +1948,8 @@ impl Backend for PgBackend {
                 "recipient": recipient,
                 "state": state,
                 "is_terminal": Disposition::is_terminal_str(state),
+                "by_principal": by,
+                "evidence": quarantine.then_some("daemon-quarantine"),
             })
             .to_string(),
         )
@@ -2015,6 +2022,9 @@ impl Backend for PgBackend {
         }
         let consumed_at_ms: Option<i64> = delivery.get("consumed_at_ms");
         let now = pg_tx_advance_clock_hwm(&tx).await?;
+        let quarantine = state == "rejected"
+            && by == Some("daemon")
+            && note.is_some_and(|note| note.starts_with("daemon rejected delivery frame:"));
         let id: i64 = tx
             .query_one(
                 "INSERT INTO dispositions(message_id, recipient, state, note, by_principal, at_ms)
@@ -2043,6 +2053,8 @@ impl Backend for PgBackend {
                     "delivery_id": delivery_id,
                     "message_id": message_id,
                     "recipient": recipient,
+                    "by_principal": by,
+                    "evidence": quarantine.then_some("daemon-quarantine"),
                 })
                 .to_string(),
             )
@@ -2098,6 +2110,8 @@ impl Backend for PgBackend {
                 "recipient": recipient,
                 "state": state,
                 "is_terminal": Disposition::is_terminal_str(state),
+                "by_principal": by,
+                "evidence": quarantine.then_some("daemon-quarantine"),
             })
             .to_string(),
         )
