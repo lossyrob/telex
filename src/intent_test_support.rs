@@ -74,10 +74,10 @@ impl FakeProducer {
             std::process::id()
         );
         #[cfg(unix)]
-        let socket_path = dir.join(format!("p{unique}.sock"));
+        let socket_path =
+            PathBuf::from("/tmp").join(format!("telex-fp-{}-{unique}.sock", std::process::id()));
         #[cfg(unix)]
         let endpoint_path = socket_path.to_string_lossy().into_owned();
-        #[cfg(not(unix))]
         let _ = dir;
 
         let producer = Self {
