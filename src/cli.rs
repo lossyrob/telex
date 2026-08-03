@@ -431,8 +431,24 @@ pub enum DaemonCmd {
     Reset(DaemonResetArgs),
     /// Mark all stations for a session idle without destroying membership or buffered deliveries.
     SessionEnd(DaemonSessionEndArgs),
+    /// Run one station-intent reconciliation pass, spawning the daemon if needed.
+    ///
+    /// Used by `telex upgrade`/`telex rollback` to drive the *successor* they installed: the
+    /// daemon only accepts IPC from a client whose executable matches its own, so the switch has
+    /// to invoke the newly selected binary rather than request a pass from the old one.
+    Reconcile(DaemonReconcileArgs),
     /// Stop the daemon.
     Stop(DaemonStopArgs),
+}
+
+#[derive(Args)]
+pub struct DaemonReconcileArgs {
+    /// Restrict the pass to one store key.
+    #[arg(long)]
+    pub scope: Option<String>,
+    /// Overall bound, including spawning and waiting out a draining predecessor.
+    #[arg(long, default_value_t = 30_000)]
+    pub timeout_ms: u64,
 }
 
 #[derive(Args)]

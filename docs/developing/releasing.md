@@ -82,7 +82,13 @@ Run through this before pushing a tag:
       reporting** is enabled on the repository (referenced by `SECURITY.md`).
 - [ ] Review the **version axes** below and update
       `tests/fixtures/release/version-axes-previous.json` to record this release's values
-      before starting the next one.
+      before starting the next one: set every entry under `axes` to the value this release
+      ships, set `recorded_for_release` to this release's tag, and reset every entry under
+      `expected_movement` to `"unchanged"` (an axis that has not moved *yet* in the next
+      release is by definition unchanged). `tests/release_contract.rs` asserts the
+      relationship the fixture declares, so performing this step keeps the suite green;
+      the next change to an axis flips its `expected_movement` to `"changed"` (or
+      `"introduced"` for a brand-new axis) in the same commit that bumps the constant.
 
 ## Version axes
 
@@ -91,6 +97,12 @@ for its own reason. `tests/release_contract.rs` asserts each against a frozen pr
 fixture (`tests/fixtures/release/version-axes-previous.json`), so an axis that is supposed to stay
 put is checked against a **recorded** value rather than against a second copy of the current
 constant — which would assert nothing.
+
+The fixture carries an `expected_movement` map (`unchanged` / `changed` / `introduced`) alongside
+the recorded values, and the test asserts that relationship rather than a hardcoded current value.
+That is what makes the checklist step above executable: rolling the fixture forward and resetting
+`expected_movement` leaves CI green, and the *next* commit that bumps an axis declares the movement
+in the same change.
 
 | Axis | Where | Bump when |
 |---|---|---|

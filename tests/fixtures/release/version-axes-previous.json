@@ -1,5 +1,5 @@
 {
-  "_comment": "Frozen version-axis contract as of the release BEFORE station-intent reconciliation (issue #106). tests/release_contract.rs compares the current constants against this file, so an axis that must not move is asserted against a recorded previous value rather than against a second copy of the current constant (which would assert nothing).",
+  "_comment": "Frozen version-axis contract as of the release BEFORE the one being prepared. tests/release_contract.rs compares the current constants against this file, so an axis that must not move is asserted against a recorded previous value rather than against a second copy of the current constant (which would assert nothing). `expected_movement` is what makes the fixture rollable forward: the test asserts the *relationship* between the recorded and the current value, so performing the runbook step (record this release's values, reset every axis to `unchanged`) leaves the test green instead of red.",
   "recorded_for_release": "0.1.2",
   "axes": {
     "station_intent_schema_version": null,
@@ -7,9 +7,12 @@
     "protocol_minor": 4,
     "min_compatible_plugin_version": "0.1.0"
   },
-  "unchanged_axes": [
-    "min_compatible_plugin_version"
-  ],
+  "expected_movement": {
+    "station_intent_schema_version": "introduced",
+    "copilot_bridge_protocol": "changed",
+    "protocol_minor": "changed",
+    "min_compatible_plugin_version": "unchanged"
+  },
   "notes": {
     "station_intent_schema_version": "Did not exist before this release; introduced at 1.",
     "copilot_bridge_protocol": "Bumped 1 -> 2 by the `probe` verb.",

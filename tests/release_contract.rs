@@ -829,49 +829,67 @@ fn plugin_versions_track_the_crate_version() {
 /// Comparing a constant to itself asserts nothing. Comparing it to a recorded previous value is
 /// what makes "this axis is deliberately unchanged" a real, failing check: if someone bumps
 /// `MIN_COMPATIBLE_PLUGIN_VERSION`, this test fails and forces the runbook to be updated with it.
+///
+/// The assertions are on the **relationship** the fixture declares (`expected_movement`), not on
+/// hardcoded current values. That is what makes the runbook step executable: rolling the fixture
+/// forward to record this release's values and resetting every axis to `unchanged` leaves this
+/// test green, where a test that hardcoded both sides turned the documented step into an
+/// instant CI failure with no instruction to also edit the test.
 #[test]
 fn station_intent_version_axes_match_the_frozen_previous_release_contract() {
     let fixture: Value =
         serde_json::from_str(&read("tests/fixtures/release/version-axes-previous.json"))
             .expect("parse the frozen version-axis fixture");
     let previous = &fixture["axes"];
+    let movement = &fixture["expected_movement"];
+    let expected = |axis: &str| {
+        movement
+            .get(axis)
+            .and_then(Value::as_str)
+            .unwrap_or("unchanged")
+            .to_string()
+    };
 
-    // Axes this work deliberately moves.
-    assert_eq!(
-        previous["copilot_bridge_protocol"].as_u64(),
-        Some(1),
-        "the fixture must record the pre-change bridge protocol"
-    );
-    assert_eq!(
+    let check_u64 = |axis: &str, current: u64| {
+        let recorded = previous[axis].as_u64();
+        match expected(axis).as_str() {
+            "introduced" => assert!(
+                previous[axis].is_null(),
+                "{axis} is declared newly introduced, so the fixture must record it as null"
+            ),
+            "changed" => {
+                let recorded = recorded.unwrap_or_else(|| {
+                    panic!("{axis} is declared changed, so it must be recorded")
+                });
+                assert!(
+                    current > recorded,
+                    "{axis} is declared changed: current {current} must be greater than the \
+                     recorded previous {recorded}"
+                );
+            }
+            "unchanged" => assert_eq!(
+                recorded,
+                Some(current),
+                "{axis} is an asserted-unchanged axis for this release; if it really changed, \
+                 update tests/fixtures/release/version-axes-previous.json AND the release runbook"
+            ),
+            other => panic!("unknown expected_movement {other:?} for {axis}"),
+        }
+    };
+
+    check_u64(
+        "copilot_bridge_protocol",
         telex::commands::copilot::COPILOT_BRIDGE_PROTOCOL as u64,
-        2,
-        "the probe verb bumps the bridge protocol to 2"
     );
-    assert_eq!(
-        previous["protocol_minor"].as_u64(),
-        Some(4),
-        "the fixture must record the pre-change daemon protocol minor"
-    );
-    assert_eq!(
-        telex::daemon_ipc::PROTOCOL_MINOR as u64,
-        5,
-        "ReconcileIntents plus the intent status projection bumps the daemon protocol minor to 5"
+    check_u64("protocol_minor", telex::daemon_ipc::PROTOCOL_MINOR as u64);
+    check_u64(
+        "station_intent_schema_version",
+        telex::station_intent::STATION_INTENT_SCHEMA_VERSION as u64,
     );
     assert_eq!(
         telex::daemon_reconcile::RECONCILE_MIN_DAEMON_MINOR,
         telex::daemon_ipc::PROTOCOL_MINOR,
         "the client capability gate must name the minor that actually introduced reconciliation"
-    );
-
-    // The axis introduced by this work.
-    assert!(
-        previous["station_intent_schema_version"].is_null(),
-        "the station-intent schema did not exist in the previous release"
-    );
-    assert_eq!(
-        telex::station_intent::STATION_INTENT_SCHEMA_VERSION,
-        1,
-        "the station-intent schema starts at 1"
     );
     assert_eq!(
         telex::station_intent::STATION_INTENT_SCHEMA_MIN_SUPPORTED,
@@ -879,10 +897,15 @@ fn station_intent_version_axes_match_the_frozen_previous_release_contract() {
     );
     assert_eq!(
         telex::station_intent::STATION_INTENT_SCHEMA_MAX_SUPPORTED,
-        1
+        telex::station_intent::STATION_INTENT_SCHEMA_VERSION
     );
 
-    // The axis asserted UNCHANGED.
+    // The axis asserted UNCHANGED: a string, so it does not go through `check_u64`.
+    assert_eq!(
+        expected("min_compatible_plugin_version"),
+        "unchanged",
+        "MIN_COMPATIBLE_PLUGIN_VERSION is an asserted-unchanged axis for this release"
+    );
     assert_eq!(
         previous["min_compatible_plugin_version"].as_str(),
         Some(telex::commands::copilot::MIN_COMPATIBLE_PLUGIN_VERSION),
@@ -903,6 +926,10 @@ fn station_intent_version_axes_match_the_frozen_previous_release_contract() {
             "docs/developing/releasing.md must document the {axis} release axis"
         );
     }
+    assert!(
+        runbook.contains("expected_movement"),
+        "the runbook must tell the releaser to reset expected_movement when rolling the fixture forward"
+    );
 }
 
 /// A frozen V1 manifest must still load, and a rewrite must preserve a field this build does not
