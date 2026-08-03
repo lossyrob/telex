@@ -90,6 +90,12 @@ button {
   background: #4c3518;
 }
 
+.status-pill.neutral {
+  color: #c5ccd8;
+  border-color: #667085;
+  background: #29303d;
+}
+
 .runtime-banner,
 .error-banner {
   padding: 9px 24px;

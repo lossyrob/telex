@@ -114,4 +114,25 @@ describe("App", () => {
       }),
     );
   });
+
+  it("shows a neutral status when operator agent polling is disabled", async () => {
+    vi.mocked(invoke).mockImplementation(async (command) => {
+      if (command === "initial_state") {
+        return {
+          ...state,
+          status: {
+            ...state.status,
+            ingress: null,
+          },
+        };
+      }
+      throw new Error(`unexpected command: ${command}`);
+    });
+
+    render(<App />);
+
+    expect(
+      await screen.findByText("Operator agent: not monitored"),
+    ).toHaveClass("neutral");
+  });
 });

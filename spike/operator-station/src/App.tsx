@@ -336,15 +336,25 @@ export default function App() {
         <div className="header-status">
           <StatusPill
             label={`Courier: ${state.status.courierState}`}
-            healthy={state.status.courierState === "armed"}
+            tone={state.status.courierState === "armed" ? "healthy" : "warning"}
           />
           <StatusPill
             label={`Station: ${occupancyLabel(state.status.station?.occupied)}`}
-            healthy={state.status.station?.occupied === true}
+            tone={state.status.station?.occupied === true ? "healthy" : "warning"}
           />
           <StatusPill
-            label={`Operator agent: ${occupancyLabel(state.status.ingress?.occupied)}`}
-            healthy={state.status.ingress?.occupied === true}
+            label={
+              state.status.ingress
+                ? `Operator agent: ${occupancyLabel(state.status.ingress.occupied)}`
+                : "Operator agent: not monitored"
+            }
+            tone={
+              state.status.ingress
+                ? state.status.ingress.occupied
+                  ? "healthy"
+                  : "warning"
+                : "neutral"
+            }
           />
         </div>
       </header>
@@ -585,12 +595,12 @@ function sourceResolutionLabel(
 
 function StatusPill({
   label,
-  healthy,
+  tone,
 }: {
   label: string;
-  healthy: boolean;
+  tone: "healthy" | "warning" | "neutral";
 }) {
-  return <span className={`status-pill ${healthy ? "healthy" : "warning"}`}>{label}</span>;
+  return <span className={`status-pill ${tone}`}>{label}</span>;
 }
 
 function occupancyLabel(occupied: boolean | undefined): string {
