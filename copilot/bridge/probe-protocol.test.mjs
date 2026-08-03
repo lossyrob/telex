@@ -152,3 +152,20 @@ test("the extension advertises the protocol and wires the probe verb", () => {
   // The push path must use the constant-time comparison too, not `!==`.
   assert.match(extension, /!secretMatches\(input\.secret, secret\)/);
 });
+
+test("the registry is written atomically so a reader never sees a truncated document", () => {
+  const extension = readFileSync(new URL("./extension.mjs", import.meta.url), "utf8");
+  // `writeFile` truncates before it writes, and the daemon reads this file on every reconcile
+  // pass to resolve the producer credential: a read landing in that window is classified as a
+  // credential failure for the binding, which at a 15 s heartbeat cadence made spurious failures
+  // routine. The write must therefore go to a temp path and be renamed into place.
+  assert.match(extension, /import \{[^}]*\brename\b[^}]*\} from "node:fs\/promises"/);
+  assert.match(extension, /const tmpPath = `\$\{registryPath\}\./);
+  assert.match(extension, /await writeFile\(tmpPath,/);
+  assert.match(extension, /await rename\(tmpPath, registryPath\)/);
+  assert.doesNotMatch(
+    extension,
+    /await writeFile\(\s*registryPath/,
+    "the registry must never be written in place",
+  );
+});

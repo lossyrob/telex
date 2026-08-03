@@ -27,7 +27,7 @@
 // The bridge forwards `mode` verbatim; the attention->mode decision
 // (interrupt -> immediate, else -> enqueue) is made by `telex copilot push`.
 
-import { mkdir, writeFile, rm, chmod, readFile } from "node:fs/promises";
+import { mkdir, writeFile, rm, chmod, readFile, rename } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
@@ -291,10 +291,15 @@ const createdAt = new Date().toISOString();
 // Registry write, re-run on a heartbeat so `telex copilot push` and the turn guard can tell a
 // live bridge (fresh heartbeat + live pid) from a stale registry a crashed process left behind.
 // It also advertises the max request size so push can preflight against the real (negotiated) cap.
+//
+// Written temp-then-rename rather than in place: a plain `writeFile` truncates first, so a reader
+// landing in that window sees a partial document. The daemon reads this file on every reconcile
+// pass to resolve the producer credential, and a truncated read there is classified as a
+// credential failure for the binding, so the partial-write window was a routine source of
+// spurious failures at the 15 s heartbeat cadence.
+let registrySeq = 0;
 async function writeRegistry() {
-  await writeFile(
-    registryPath,
-    JSON.stringify(
+  const payload = JSON.stringify(
       {
         sessionId,
         endpoint,
@@ -324,9 +329,18 @@ async function writeRegistry() {
       },
       null,
       2,
-    ),
-    "utf8",
-  );
+    );
+  const tmpPath = `${registryPath}.${process.pid}.${registrySeq++}.tmp`;
+  try {
+    await writeFile(tmpPath, payload, { encoding: "utf8", mode: 0o600 });
+    if (isPosix) {
+      await chmod(tmpPath, 0o600).catch(() => {});
+    }
+    await rename(tmpPath, registryPath);
+  } catch (e) {
+    await rm(tmpPath, { force: true }).catch(() => {});
+    throw e;
+  }
   if (isPosix) {
     await chmod(registryPath, 0o600).catch(() => {});
   }
