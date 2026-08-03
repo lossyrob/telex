@@ -1078,7 +1078,10 @@ owner-only-enforcement primitive removes the need for the opt-out.
 ## 0023 — Minimal session/presence/delivery model: supersede the incarnation-currency machinery
 
 - **Date:** 2026-06-23
-- **Status:** Accepted (design)
+- **Status:** Accepted (design); **amended by 0050** — a durable *station intent* records desired
+  push registration and lets a successor daemon restore it after verifying the producer is alive.
+  The invariant this ADR set stands: membership is still never rebuilt from durable history, and an
+  intent is desired state, not attendance.
 - **Revises:** 0017 (liveness), 0019 (daemon-native session ownership), 0015 (the delivery-commit
   model — waiter-ACK → agent-ACK), and 0020 (the `sessions`-table migration instruction) —
   supersedes their session-incarnation/currency / `occupied_stale` / force-takeover / waiter-ACK /
@@ -2069,3 +2072,191 @@ prove both capabilities without weakening either domain. The
 `application-client-ready` checkpoint is design-only: it unlocks that downstream work
 but does not claim an implementation, binding, conformance result, consumer
 integration, or production readiness.
+
+## 0050 — Durable station intent and daemon-owned reconciliation
+
+- **Date:** 2026-08-02
+- **Status:** Accepted (issue #106)
+- **Revises:** 0023 (amended — intent is desired state, not membership; the
+  never-rebuild-membership-from-history invariant is preserved), 0025 (extended — `run_dir` now
+  also carries intent manifests), 0028 (bounded exception — `upgrade`/`rollback` may spawn the
+  successor they just installed), 0039 push-delivery (clarified — generic descriptor kinds keep
+  the daemon harness-agnostic)
+
+**Context.** Push delivery (ADR 0039) arms a station by registering an `on_deliver` handler in the
+daemon's in-memory `MemberRecord`. That record does not survive daemon replacement. A `telex
+upgrade`, a `daemon stop --drain`, or a crash therefore silently converts a push-attended Copilot
+session into an unattended one: messages stay durable, but nothing arrives as a turn until a human
+notices and runs `telex copilot resume`. An idle session is exactly the case where nobody notices.
+
+The tempting fix — rebuild membership from durable history — is precisely what ADR 0023 forbids,
+and for good reason: a station that returns because a *record* exists, rather than because a
+*producer is alive*, is resurrection, and it reintroduces the double-delivery and stale-owner
+problems the epoch lease exists to prevent.
+
+**Decision.** Introduce a host-local, owner-private, versioned **station intent**: the exact desired
+push registration for one `(store_key, session_id, address)` binding. Intents are *desired state*,
+never attendance. In-memory `MemberRecord` plus the backend epoch lease remain the only authority
+for who is attending an address and who may deliver to it.
+
+The daemon owns reconciliation as its own operation, not as a `Register` side effect:
+
+1. **Storage.** `<run_dir>/intents/<singleton_hash>/<hashed-id>.intent.json`. `run_dir` is the
+   directory ADR 0025 designates as authority-bearing and the only one with a real fail-closed
+   owner-private check on both platforms. `<singleton_hash>` hashes user identity, canonicalized
+   config root, and protocol major, so scopes are isolated per config root and namespaced per
+   protocol major. Filenames are `sha256(store_key | 0x1f | session_id | 0x1f | address)`, so
+   address and store strings never reach a filesystem path.
+2. **Restoration requires a live, verified producer.** The daemon connects to a generic producer
+   descriptor, calls `verify_server_peer` (same user, matching executable, matching pid +
+   start time) *before sending anything*, then sends an authenticated `probe` whose nonce must be
+   echoed. `host_id` and `boot_id` are bound too, so a synced home directory or a rebooted machine
+   cannot make a stale `(pid, start_time)` pair verify. Any platform that cannot resolve one of
+   these fails closed.
+3. **The daemon stays harness-agnostic.** It knows a *registered handler kind* and a *registered
+   producer root id* — never a Copilot path, filename, or symbol. Argv is rebuilt by one shared
+   builder from the daemon's own executable and store resolution; it is never persisted, so a
+   tampered manifest cannot inject argv and an upgrade cannot restore a handler pointing at a
+   binary that no longer exists.
+4. **No secret is ever stored.** The intent carries a *constrained pointer* to an owner-private
+   credential file under a registered root, resolved fresh at reconcile time. The bridge's
+   per-process rotating secret is therefore a non-issue rather than a permanent fail-closed.
+5. **An explicitly detached station never returns.** The reconcile path checks the durable detach
+   tombstone unconditionally before and after the epoch claim, and contains no call to
+   `clear_detach_tombstone` at all — clearing is an explicit-attach-only operation.
+6. **Bounded and non-overrunning.** Reconciliation rides the existing heartbeat tick, is
+   single-flight per scope, drain-suppressed, budgeted by both a per-pass count and a wall-clock
+   deadline shorter than the tick, and per-intent timed out. A lease that is merely *not stale yet*
+   is a **waiting** outcome on a fixed cadence, never a failure — which is what makes the published
+   crash-recovery bound derivable rather than asserted.
+7. **Anti-downgrade.** When a `Register` would create a *new* member for a key that has a live push
+   intent, the daemon reconciles inline; on failure it returns typed `Incompatible` /
+   `PushIntentUnrecoverable` rather than creating a pull-only member. A live armed pull waiter
+   still wins (the guarantee is scoped to the no-live-waiter case).
+8. **Who may promote an intent to `live` — added after the independent re-review.** The
+   producer-side transition rules are stated once, in
+   `station_intent::finalize_admission(state, armed_durably, armed_now)`, and are deliberately
+   asymmetric:
+
+   - A `pending` record may be promoted only when a daemon reports push armed for the binding
+     *right now*, **or** when the record carries a durable **armed proof** — an `armed` block the
+     *daemon* writes inside `register_member` as part of committing an armed push member. A
+     bridge that merely exists is never sufficient: a merely-running producer must not be able to
+     arm an attach that was never registered.
+   - A record that is already `live` may re-record its producer identity with **no daemon
+     involvement at all**, because being `live` is itself durable proof that the binding was armed.
+
+   The asymmetry is load-bearing. Requiring a live member for the `live` case created a circular
+   dependency: a bridge reload makes the recorded `(pid, start_time)` stale, so a replaced daemon
+   fails `producer_identity_mismatch` on every pass and can never create the member — and the repair
+   was gated on the member it was supposed to restore. The armed proof independently closes the
+   crash window between `Register` returning and the finalize, where a bare `pending` record was
+   collected by its five-minute TTL while push delivery went on working.
+
+   Neither is an authorization to deliver. `is_reconcilable` remains `live`-only, so an armed
+   `pending` record is still never reconciled, and restoration still requires the credential rules,
+   `verify_server_peer`, the probe, and the daemon epoch fence. A revocation always beats a
+   finalize, and the admission decision is re-made inside the per-intent write lock.
+8a. **The armed proof is part of the registration transaction — added after the final gate.** An
+   arming register observes up front whether the binding has a durable record; if it does, the
+   register *owes* a proof. The proof is committed **before** the member is installed, at the point
+   where every fallible step has already succeeded, and a register that owes a proof it cannot
+   persist is **refused** (typed `Incompatible` / `PushIntentUnrecoverable`) rather than reported as
+   a durable success. On the new-member path the epoch lease is released; on the refresh path the
+   pre-existing (possibly adopted) member and its lease are left untouched, because tearing down a
+   working station over a failed write is strictly worse than the failure. A binding with no durable
+   record owes nothing, so a pull attach and a plain `telex attach --on-deliver` are unaffected.
+
+   The ordering is what closes the concurrent-attach race: `write_pending`, the conditional rollback
+   delete, and the stamp all take the same per-intent write lock, so a concurrent attach's rollback
+   either lands before the stamp (the register is refused, and no member is armed) or after it (the
+   record carries the proof, so both of the rollback's gates refuse). Previously the stamp ran after
+   the member had been committed and the response decided, and a rollback landing in between left an
+   armed station with no durable trace and a `Registered` response saying otherwise. The stamp stays
+   idempotent, so a re-attach neither churns the generation nor moves the armed TTL clock.
+
+8b. **What "the proof could not be stamped" means is a table — added after the final approval
+   gate.** The commit rule lives in `station_intent::armed_proof_admission(stamp, owes_proof)`, and
+   it distinguishes conditions that are about *this binding's record* from conditions that are not.
+   A record that is present and unreadable refuses the register whether or not a proof was observed
+   as owed: that is durable state that could not be verified, and it fails closed like every other
+   unverifiable condition, including in the window where a record can appear between the up-front
+   observation and the stamp. A failure to open the **scope** refuses only a register that owes a
+   proof. The stamp therefore uses the same non-creating open the observation does, so a scope with
+   no directory is "no record" rather than a failure — a register that writes no intent neither
+   creates a scope nor is denied because one could not be created. Opening the creating path there
+   turned every push registration on a host where the scope could not be made into
+   `PushIntentUnrecoverable`, including for the clients that have no durable state to lose.
+
+8c. **Absence is proven, never inferred from a failed look — added after the final approval gate.**
+   Every rule above that branches on "is there a record here?" is an authority rule, and in every one
+   of them the answer *no* is the permissive branch: no record means no proof is owed, no live intent
+   blocks a pull-only downgrade, nothing is left to revoke, the slot is free to create into, and the
+   credential the record points at has been deleted. `Path::exists()` cannot express the third
+   answer — it maps every metadata failure (a denied ACL, an untraversable parent, a volume that went
+   away, a name the platform rejects) onto that same permissive `no`. An intent scope full of records
+   the daemon could not see therefore read as a host that had never attached.
+
+   So the probe is `platform_fs::path_present`, whose `Ok(false)` is only ever a positive `NotFound`
+   and whose every other outcome is an error the caller must classify. For the arming stamp and the
+   up-front observation that is `RecordUnusable` / a closed register; for the anti-downgrade guard it
+   is `Unavailable` rather than `Absent`; for GC it means the credential is *not* provably gone, so
+   the record survives; for a compare-and-set it is a failure rather than a create. The three
+   non-authority uses say so explicitly at the call site — the scan cursor is a scheduling hint, the
+   drain's no-bridge fast path costs one round-trip to be wrong about, and a SQLite store file that
+   could not be stat'd is a *transient* backend condition rather than the terminal `store_missing`.
+9. **Deleting an intent is conditional.** GC and the attach rollback both decide from a snapshot, so
+   the unlink re-takes the per-intent write lock, reloads, and requires the generation *and* the
+   caller's own condition to still hold. Every TTL clock is read from the **event it is about** and
+   is unreachable by retrying: the orphan clocks read proof (a successful reconcile, a verified
+   probe, or the durable transition a finalize performs) rather than a retry attempt, and the two
+   pending clocks read `created_at_ms` and the armed proof's own timestamp (never moved by the
+   idempotent stamp) rather than `updated_at_ms`, which every failing re-attach rewrites.
+
+9a. **A pending clock and an armed proof belong to one lifecycle — added after the final approval
+   gate.** `write_pending` inherits `created_at_ms` and the armed proof only when the record it
+   replaces is itself `pending`, because only then is the write a *retry* of the same unfinalized
+   attach; that is what makes the TTL unreachable by retrying. A write over a `revoked` or otherwise
+   inert record is a **new** attach, and it starts a new lifecycle: its own creation clock, and no
+   proof. Inheriting them was wrong both ways. A tombstone lives for the seven-day terminal TTL, so
+   every re-attach after a detach, a fallback downgrade, an operator reset, or a session end was born
+   `pending` with an expired clock and was collected before `extensions_reload` and the finalize
+   could promote it. And a revocation is the teardown of the arming its proof describes, so
+   inheriting the proof would have let decision 8's `armed_durably` arm promote a brand-new attach on
+   a previous daemon's authority. The generation still advances monotonically across the transition,
+   so the rollback's generation gate and every CAS holder are unaffected.
+
+**Bounded ADR 0028 exception.** `upgrade` and `rollback` spawn the successor they just installed and
+wait, bounded, for one reconcile report. Without this, the issue's motivating scenario — `telex
+upgrade` with an idle Copilot session — still needs a human. The exception is narrow: only these two
+commands, only immediately after a switch they performed, and only when the drained daemon reported
+recoverable intents.
+
+**Consequences.**
+
+- New release axes: `STATION_INTENT_SCHEMA_VERSION` (1), `COPILOT_BRIDGE_PROTOCOL` (1 → 2),
+  `PROTOCOL_MINOR` (4 → 5). `MIN_COMPATIBLE_PLUGIN_VERSION` is asserted **unchanged** against a
+  frozen fixture, because the plugin hook surface is untouched. The `armed` proof added in point 8
+  is an *optional* field inside schema version 1: absent on every record written before it, and
+  round-tripped by an older build through the manifest's unknown-field passthrough, so it moves no
+  release axis.
+- Fail-closed is scoped to *advertised-but-unverifiable* producers. A pre-probe bridge is
+  `legacy_producer`: never auto-restored, never wedged, and the documented manual
+  `telex copilot resume` path keeps working exactly as before.
+- The turn guard **warns and allows** on an unrestored push intent. Blocking would convert one
+  orphaned intent into a wedged session and buys no delivery correctness.
+- Legacy `.bindings.json` remains authoritative only for the extension teardown ref-count and is
+  scheduled for removal in the release after this one. No intent is ever synthesized from it.
+- Rolling back to a binary that predates this work returns those stations to manual `copilot
+  resume`; the rollback output says so. Intents are never deleted by a rollback, and the
+  singleton-hash namespacing plus schema range keep a pre-feature binary inert with respect to them.
+
+**Deviation from the plan, recorded.** The plan specified `ensure_owner_private_dir` for the producer
+root. On Windows that rewrites the directory to a *protected* DACL, which re-propagates inheritance
+and leaves pre-existing children with an empty DACL — unreadable even to the process that wrote
+them, which would break the bridge itself. The producer root is therefore **created** strictly (with
+the owner-only descriptor, when telex creates it) and **validated, never rewritten**, when it
+already exists: owner must be the current user and every ACE must name the current user, `SYSTEM`,
+local `Administrators`, the logon-session SID, or an AppContainer SID. The posture is unchanged — a
+broadly-ACLed root still fails closed — and per-file credential checks still apply independently, so
+containment in this directory is never the only thing being trusted.

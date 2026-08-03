@@ -420,6 +420,7 @@ mod tests {
             address: Some("addr:a".to_string()),
             message_id: Some(7),
             lease_epoch: Some(2),
+            drain_intents: None,
         }
     }
 

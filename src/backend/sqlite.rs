@@ -73,21 +73,45 @@ fn store_lock_dir() -> Result<std::path::PathBuf> {
 fn ensure_private_local_dir(path: &std::path::Path) -> Result<()> {
     use std::os::unix::fs::{DirBuilderExt, MetadataExt};
 
-    if path.exists() {
-        let link_meta = std::fs::symlink_metadata(path)
-            .with_context(|| format!("checking store lock directory {:?}", path))?;
-        if link_meta.file_type().is_symlink() {
-            bail!("store lock directory {:?} is a symlink", path);
+    let link_meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            let mut builder = std::fs::DirBuilder::new();
+            builder.mode(0o700);
+            let mut create_error = None;
+            for _ in 0..25 {
+                match builder.create(path) {
+                    Ok(()) => {
+                        create_error = None;
+                        break;
+                    }
+                    Err(error) => {
+                        create_error = Some(error);
+                        if std::fs::symlink_metadata(path).is_ok() {
+                            create_error = None;
+                            break;
+                        }
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                    }
+                }
+            }
+            if let Some(error) = create_error {
+                return Err(error).with_context(|| {
+                    format!("creating owner-private store lock directory {:?}", path)
+                });
+            }
+            std::fs::symlink_metadata(path)
+                .with_context(|| format!("checking store lock directory {:?}", path))?
         }
-        if !link_meta.is_dir() {
-            bail!("store lock directory {:?} is not a directory", path);
+        Err(error) => {
+            return Err(error).with_context(|| format!("checking store lock directory {:?}", path));
         }
-    } else {
-        let mut builder = std::fs::DirBuilder::new();
-        builder.mode(0o700);
-        builder
-            .create(path)
-            .with_context(|| format!("creating owner-private store lock directory {:?}", path))?;
+    };
+    if link_meta.file_type().is_symlink() {
+        bail!("store lock directory {:?} is a symlink", path);
+    }
+    if !link_meta.is_dir() {
+        bail!("store lock directory {:?} is not a directory", path);
     }
 
     let meta = std::fs::metadata(path)
@@ -2565,6 +2589,37 @@ mod tests {
             .join("sqlite-p6-tests");
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(format!("{label}-{}-{seq}.db", std::process::id()))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn concurrent_store_lock_directory_creation_is_idempotent() {
+        let seq = TEST_SEQ.fetch_add(1, Ordering::SeqCst);
+        let base = std::env::temp_dir().join(format!(
+            "telex-store-lock-race-{}-{seq}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&base).expect("test parent");
+        let dir = base.join("locks");
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(16));
+        let threads = (0..16)
+            .map(|_| {
+                let dir = dir.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    ensure_private_local_dir(&dir)
+                })
+            })
+            .collect::<Vec<_>>();
+
+        for thread in threads {
+            thread
+                .join()
+                .expect("creator thread")
+                .expect("private lock dir");
+        }
+        let _ = std::fs::remove_dir_all(&base);
     }
 
     fn cc_message(to_addr: &str, cc: &str) -> NewMessage {

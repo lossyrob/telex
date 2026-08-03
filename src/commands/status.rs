@@ -107,6 +107,40 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
         info["foreign_members"] = serde_json::to_value(&foreign_members)?;
         info["live_waiters"] = serde_json::to_value(&live_waiters)?;
         info["also_active_on"] = serde_json::to_value(&also_active_on)?;
+        // Station-intent rows for this address (issue #106 / ADR 0050), including **intent-only**
+        // rows with no member — which is exactly the degraded state a daemon replacement leaves
+        // behind and the one a member-only projection cannot show.
+        let station_intents: Vec<_> = daemon_status
+            .as_ref()
+            .map(|status| {
+                status
+                    .intents
+                    .iter()
+                    .filter(|intent| intent.store_key == store_key && intent.address == addr)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default();
+        info["station_intents"] = serde_json::to_value(&station_intents)?;
+        info["station_intent_index_as_of_ms"] = serde_json::json!(daemon_status
+            .as_ref()
+            .and_then(|status| status.intent_index_as_of_ms));
+        // The three issue-named conditions, derived once so a reader does not have to.
+        info["live_intent_missing_member"] = serde_json::json!(station_intents
+            .iter()
+            .any(|intent| !intent.has_member && intent.state.is_recoverable()));
+        info["member_missing_live_producer"] =
+            serde_json::json!(daemon_members.iter().any(|member| member.push_registered
+                && matches!(
+                    member.push_delivery,
+                    crate::daemon_ipc::PushDeliveryHealth::StaleAccepted
+                )));
+        info["intent_protocol_incompatible"] =
+            serde_json::json!(station_intents.iter().any(|intent| matches!(
+                intent.state,
+                crate::daemon_ipc::IntentRecoveryState::Incompatible
+                    | crate::daemon_ipc::IntentRecoveryState::LegacyProducer
+            )));
         if daemon_members.is_empty() && !also_active_on.is_empty() {
             info["backend_warning"] = serde_json::json!(
                 "address has live station activity on another backend/store; current backend may be wrong"
@@ -138,6 +172,64 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
         }
         if let Some(members) = info.get("daemon_members").and_then(|v| v.as_array()) {
             println!("daemon_members {}", members.len());
+        }
+        if let Some(intents) = info.get("station_intents").and_then(|v| v.as_array()) {
+            for intent in intents {
+                let state = intent
+                    .get("state")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("unknown");
+                let has_member = intent
+                    .get("has_member")
+                    .and_then(|v| v.as_bool())
+                    .unwrap_or(false);
+                let failure = intent
+                    .get("failure_code")
+                    .and_then(|v| v.as_str())
+                    .map(|code| format!(" cause={code}"))
+                    .unwrap_or_default();
+                let next = intent
+                    .get("next_attempt_ms")
+                    .and_then(|v| v.as_i64())
+                    .map(|ms| format!(" next_attempt_ms={ms}"))
+                    .unwrap_or_default();
+                println!(
+                    "station_intent {state} member={has_member} attempts={}{failure}{next}",
+                    intent
+                        .get("attempts")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or_default()
+                );
+            }
+        }
+        if info
+            .get("live_intent_missing_member")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            println!(
+                "station_intent WARNING live_intent_missing_member: push is desired here but not armed; \
+                 run `telex --address <station> copilot resume` (messages stay durable)"
+            );
+        }
+        if info
+            .get("intent_protocol_incompatible")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            println!(
+                "station_intent WARNING intent_protocol_incompatible: this daemon cannot reconcile the recorded intent; \
+                 re-provision with `telex --address <station> copilot resume`"
+            );
+        }
+        if info
+            .get("member_missing_live_producer")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
+        {
+            println!(
+                "station_intent WARNING member_missing_live_producer: push is registered but the producer has gone quiet"
+            );
         }
         if info
             .get("daemon_member_present")

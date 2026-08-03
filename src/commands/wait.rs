@@ -234,6 +234,17 @@ async fn wait_loop<C: WaitConnector>(
                 if needs_attach_reason == Some(NeedsAttachReason::DeliberatelyDetached) {
                     return Err(anyhow!("{code}: {message}"));
                 }
+                // A pending station intent means an attach is mid-flight (or crashed before it
+                // finalized). Re-registering here would race it, and the daemon will not act on a
+                // pending intent anyway, so this is terminal with an actionable message rather
+                // than a silent retry.
+                if needs_attach_reason == Some(NeedsAttachReason::PushIntentPending) {
+                    return Err(anyhow!(
+                        "{code}: {message}. A push attach for this station is still finalizing; \
+                         run `extensions_reload` in the Copilot session, or re-run \
+                         `telex --address <station> copilot resume`"
+                    ));
+                }
                 if !allow_reattach || retried_after_attach {
                     return Err(anyhow!("{code}: {message}"));
                 }

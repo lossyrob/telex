@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Result};
 
-use crate::cli::{Ctx, DaemonCmd, DaemonResetArgs, DaemonSessionEndArgs};
-use crate::daemon_ipc::{Request, Response, ERROR_UNAUTHORIZED};
+use crate::cli::{Ctx, DaemonCmd, DaemonReconcileArgs, DaemonResetArgs, DaemonSessionEndArgs};
+use crate::daemon_ipc::{Request, Response, ERROR_NOT_RUNNING, ERROR_UNAUTHORIZED};
 use crate::identity::resolve_session_id;
 use crate::output::emit;
 
@@ -15,6 +15,7 @@ pub async fn run(ctx: &Ctx, cmd: DaemonCmd) -> Result<i32> {
         DaemonCmd::Version => version(ctx),
         DaemonCmd::Reset(args) => reset(ctx, args).await,
         DaemonCmd::SessionEnd(args) => session_end(ctx, args).await,
+        DaemonCmd::Reconcile(args) => reconcile(ctx, args).await,
         DaemonCmd::Stop(args) => {
             if !args.drain {
                 return Err(anyhow!("only `telex daemon stop --drain` is supported"));
@@ -145,6 +146,92 @@ async fn status(ctx: &Ctx) -> Result<i32> {
     Err(anyhow!("daemon status failed after retry"))
 }
 
+/// Run one reconciliation pass on this store's daemon, spawning it if needed.
+///
+/// Retries while the daemon reports `draining` and while a pass reports that it did **not run**
+/// (drain suppression, single-flight contention). Both were previously indistinguishable from
+/// "ran and restored nothing", so `telex upgrade` could print a successful verification for a
+/// recovery that never started.
+async fn reconcile(ctx: &Ctx, args: DaemonReconcileArgs) -> Result<i32> {
+    let store_key = ctx.store_key()?;
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_millis(args.timeout_ms.max(1));
+    let mut last_error: Option<String> = None;
+    let mut result: Option<crate::daemon_ipc::ReconcileReport> = None;
+    while std::time::Instant::now() < deadline {
+        match reconcile_attempt(&store_key, args.scope.clone()).await {
+            Ok(report) if report.ran => {
+                result = Some(report);
+                break;
+            }
+            Ok(report) => {
+                last_error = Some(format!(
+                    "pass {} did not run ({})",
+                    report.pass_seq,
+                    report.skipped_reason.as_deref().unwrap_or("unknown")
+                ));
+            }
+            Err(e) => last_error = Some(e),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+    }
+    let payload = match &result {
+        Some(report) => serde_json::json!({
+            "reconciled": true,
+            "store_key": store_key,
+            "report": report,
+        }),
+        None => serde_json::json!({
+            "reconciled": false,
+            "store_key": store_key,
+            "error": last_error
+                .clone()
+                .unwrap_or_else(|| "no reconcile pass completed before the timeout".to_string()),
+        }),
+    };
+    emit(ctx.fmt, &payload, || match &result {
+        Some(report) => println!(
+            "reconciled pass {} restored {} refreshed {} deferred {} failed {}",
+            report.pass_seq,
+            report.restored,
+            report.refreshed_no_op,
+            report.deferred_lease,
+            report.failed
+        ),
+        None => println!(
+            "reconcile incomplete: {}",
+            last_error.as_deref().unwrap_or("timed out")
+        ),
+    });
+    Ok(if result.is_some() { 0 } else { 1 })
+}
+
+async fn reconcile_attempt(
+    store_key: &str,
+    scope: Option<String>,
+) -> std::result::Result<crate::daemon_ipc::ReconcileReport, String> {
+    let mut client = crate::daemon::connect_or_spawn(store_key)
+        .await
+        .map_err(|e| e.to_string())?;
+    let paths = crate::daemon::DaemonPaths::current().map_err(|e| e.to_string())?;
+    let cap = crate::daemon::read_cap_file(&paths.cap_path).map_err(|e| e.to_string())?;
+    let response = client
+        .request(&Request::ReconcileIntents {
+            proof: Some(cap.admin_cap),
+            scope,
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    match response {
+        Response::Reconciled { report } => Ok(report),
+        Response::Error { code, message, .. } if code == ERROR_NOT_RUNNING => {
+            Err(format!("{code}: {message}"))
+        }
+        Response::Error { code, message, .. } => Err(format!("{code}: {message}")),
+        other => Err(format!("unexpected daemon reconcile response: {other:?}")),
+    }
+}
+
 async fn stop_drain(ctx: &Ctx) -> Result<i32> {
     let paths = crate::daemon::DaemonPaths::current()?;
     let cap = crate::daemon::read_cap_file(&paths.cap_path)?;
@@ -156,9 +243,53 @@ async fn stop_drain(ctx: &Ctx) -> Result<i32> {
         })
         .await?;
     match response {
-        Response::Ack { .. } => {
-            emit(ctx.fmt, &serde_json::json!({"draining": true}), || {
+        Response::Ack { drain_intents, .. } => {
+            // The pre-drain station-intent signal (issue #106). Computed by the daemon from
+            // in-memory state before it released any lease, so it describes what a successor will
+            // find rather than what is true after the fact. An older daemon omits it entirely,
+            // which is rendered as "unavailable" rather than silently as zero.
+            let report = drain_intents.clone();
+            let payload = serde_json::json!({
+                "draining": true,
+                "station_intents": report,
+            });
+            emit(ctx.fmt, &payload, || {
                 println!("daemon drain requested");
+                match &report {
+                    Some(report) => {
+                        println!(
+                            "station intents  recoverable {} pending {} degraded {} incompatible {} unknown {}",
+                            report.recoverable,
+                            report.pending,
+                            report.degraded,
+                            report.incompatible,
+                            report.unknown
+                        );
+                        if report.pending > 0 {
+                            println!(
+                                "station intents  {} pending intent(s) are not finalized and will NOT be restored automatically; \
+                                 they finalize at the next Copilot turn boundary",
+                                report.pending
+                            );
+                        }
+                        if report.over_cap {
+                            println!(
+                                "station intents  WARNING: {} entries exceed the per-scope write cap; run `telex copilot gc`",
+                                report.observed_count
+                            );
+                        }
+                        if report.degraded > 0 || report.incompatible > 0 {
+                            println!(
+                                "station intents  {} intent(s) will NOT be restored automatically; run `telex --address <station> copilot resume` after the successor starts",
+                                report.degraded + report.incompatible
+                            );
+                        }
+                        println!("station intents  index_as_of_ms {}", report.index_as_of_ms);
+                    }
+                    None => println!(
+                        "station intents  unavailable (the running daemon predates station-intent reporting)"
+                    ),
+                }
             });
             Ok(0)
         }

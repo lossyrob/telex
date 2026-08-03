@@ -431,8 +431,24 @@ pub enum DaemonCmd {
     Reset(DaemonResetArgs),
     /// Mark all stations for a session idle without destroying membership or buffered deliveries.
     SessionEnd(DaemonSessionEndArgs),
+    /// Run one station-intent reconciliation pass, spawning the daemon if needed.
+    ///
+    /// Used by `telex upgrade`/`telex rollback` to drive the *successor* they installed: the
+    /// daemon only accepts IPC from a client whose executable matches its own, so the switch has
+    /// to invoke the newly selected binary rather than request a pass from the old one.
+    Reconcile(DaemonReconcileArgs),
     /// Stop the daemon.
     Stop(DaemonStopArgs),
+}
+
+#[derive(Args)]
+pub struct DaemonReconcileArgs {
+    /// Restrict the pass to one store key.
+    #[arg(long)]
+    pub scope: Option<String>,
+    /// Overall bound, including spawning and waiting out a draining predecessor.
+    #[arg(long, default_value_t = 30_000)]
+    pub timeout_ms: u64,
 }
 
 #[derive(Args)]
@@ -629,6 +645,13 @@ pub struct CopilotPushArgs {
     /// defaults to COPILOT_AGENT_SESSION_ID.
     #[arg(long)]
     pub session: Option<String>,
+    /// Daemon instance that registered this handler (epoch fence, issue #106). The helper
+    /// re-reads the daemon capability file immediately before injecting a turn and aborts if the
+    /// instance changed, so a helper spawned by a dying daemon cannot inject into a session its
+    /// successor now owns. Always appended by the shared argv builder; not intended to be typed
+    /// by hand.
+    #[arg(long, hide = true)]
+    pub daemon_instance: Option<String>,
 }
 
 #[derive(Args)]
@@ -862,6 +885,11 @@ impl Ctx {
 
 pub async fn run() -> i32 {
     let cli = Cli::parse();
+    // Composition root (ADR 0039 / ADR 0050). The harness layer registers its handler kind and its
+    // producer credential root exactly once per process, *before* any command — including
+    // `daemon serve` — runs. The daemon core therefore only ever learns "kind K and root R are
+    // registered"; it never gains a Copilot symbol, path, or filename.
+    crate::commands::copilot::register_copilot_handler_kind();
     let fmt = Format::resolve(cli.json, cli.text);
     let cfg = match Config::resolve(cli.backend, cli.db, cli.address.clone()) {
         Ok(c) => c,
