@@ -184,8 +184,18 @@ pub fn path_present(path: &Path) -> Result<bool> {
     if let Some(error) = stat_faults::injected(path) {
         return Err(io_err("checking whether a path exists", error));
     }
-    path.try_exists()
-        .map_err(|e| io_err("checking whether a path exists", e))
+    match path.try_exists() {
+        Ok(present) => Ok(present),
+        // `ENOTDIR`: a component of the path is not a directory, so nothing can exist at this path
+        // — a *proof* of absence exactly like `NotFound`, not an inability to tell. The two
+        // platforms simply disagree about which they report: asking Windows about
+        // `some-file\child` answers `Ok(false)`, while Unix raises `ENOTDIR`. Without this, a run
+        // directory with debris where a scope belongs read as "undecidable" on Unix and as "empty"
+        // on Windows, and the same registration was refused on one platform and admitted on the
+        // other.
+        Err(e) if e.kind() == std::io::ErrorKind::NotADirectory => Ok(false),
+        Err(e) => Err(io_err("checking whether a path exists", e)),
+    }
 }
 
 /// Test seam for the one condition a test cannot portably *produce*: a filesystem that answers
@@ -197,15 +207,27 @@ pub fn path_present(path: &Path) -> Result<bool> {
 /// each. The behavior under test is not "how does this platform deny metadata"; it is "what does
 /// telex do when the answer is an error", so the error is injected at the single function that asks.
 ///
-/// Keyed by exact path and global (not thread-local) so it survives a multi-threaded runtime, and
-/// scoped by an RAII guard so a test cannot leak a fault into its neighbours.
+/// **Isolation.** The registry is global (not thread-local) because it has to survive a
+/// multi-threaded runtime, and `cargo test` runs the whole module in one process with many tests in
+/// flight at once. Three things keep one test's fault out of its neighbours':
+///
+/// 1. It applies to **one exact path**. Any other path — including a sibling under the same
+///    directory — is answered by the real filesystem.
+/// 2. Guards are **individually identified**, so overlapping guards stack instead of clobbering
+///    each other. Keying by path alone meant a second guard for the same path silently replaced the
+///    first, and whichever dropped first removed the fault both were relying on.
+/// 3. A guard removes **only its own** entry on drop, including when the drop happens while a
+///    panic unwinds, so a failing test cannot leave a fault armed for whatever runs next.
 #[cfg(test)]
 pub(crate) mod stat_faults {
     use std::collections::HashMap;
     use std::path::{Path, PathBuf};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Mutex, OnceLock};
 
     struct Fault {
+        /// Identifies the guard that installed this fault, so drop removes exactly one entry.
+        id: u64,
         kind: std::io::ErrorKind,
         /// Probes to answer truthfully before the fault starts applying. Exists because some rules
         /// probe the same path twice — an entry check and a re-check after a failed load — and the
@@ -213,16 +235,24 @@ pub(crate) mod stat_faults {
         skip: usize,
     }
 
-    fn registry() -> &'static Mutex<HashMap<PathBuf, Fault>> {
-        static REGISTRY: OnceLock<Mutex<HashMap<PathBuf, Fault>>> = OnceLock::new();
+    fn registry() -> &'static Mutex<HashMap<PathBuf, Vec<Fault>>> {
+        static REGISTRY: OnceLock<Mutex<HashMap<PathBuf, Vec<Fault>>>> = OnceLock::new();
         REGISTRY.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    fn next_id() -> u64 {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        NEXT.fetch_add(1, Ordering::Relaxed)
     }
 
     /// While this guard is alive, [`super::path_present`] fails for this exact path instead of
     /// answering. Dropping it restores the real filesystem.
     #[must_use = "the fault is only active while the guard is alive"]
     #[derive(Debug)]
-    pub(crate) struct Unstatable(PathBuf);
+    pub(crate) struct Unstatable {
+        path: PathBuf,
+        id: u64,
+    }
 
     impl Unstatable {
         /// The common shape: an existing path whose metadata the platform refuses to hand over.
@@ -237,23 +267,39 @@ pub(crate) mod stat_faults {
 
         fn install(path: impl Into<PathBuf>, kind: std::io::ErrorKind, skip: usize) -> Self {
             let path = path.into();
+            let id = next_id();
             registry()
                 .lock()
-                .unwrap()
-                .insert(path.clone(), Fault { kind, skip });
-            Self(path)
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .entry(path.clone())
+                .or_default()
+                .push(Fault { id, kind, skip });
+            Self { path, id }
         }
     }
 
     impl Drop for Unstatable {
         fn drop(&mut self) {
-            registry().lock().unwrap().remove(&self.0);
+            // `unwrap_or_else(into_inner)`: a test panicking while holding this lock must not
+            // poison the seam for every test that runs afterwards.
+            let mut registry = registry()
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(faults) = registry.get_mut(&self.path) {
+                faults.retain(|fault| fault.id != self.id);
+                if faults.is_empty() {
+                    registry.remove(&self.path);
+                }
+            }
         }
     }
 
     pub(super) fn injected(path: &Path) -> Option<std::io::Error> {
-        let mut registry = registry().lock().unwrap();
-        let fault = registry.get_mut(path)?;
+        let mut registry = registry()
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        // Innermost guard wins, so a nested fault shadows the outer one for as long as it lives.
+        let fault = registry.get_mut(path)?.last_mut()?;
         if fault.skip > 0 {
             fault.skip -= 1;
             return None;
@@ -268,8 +314,9 @@ pub(crate) mod stat_faults {
 /// Resolve `path` and prove it is strictly contained under `root`.
 ///
 /// Containment is decided on canonicalized paths (never a string prefix), `..` is rejected in the
-/// input, and every component between `root` and `path` is checked for a symlink/reparse point, so
-/// a link planted inside the root cannot redirect a read out of it.
+/// input, and every component of the **caller's literal path** at or below `root` is checked for a
+/// symlink/reparse point, so a link planted inside the root cannot redirect a read out of it — and
+/// a link is refused even when its target happens to land back inside the root.
 pub fn contained_under(root: &Path, path: &Path) -> Result<PathBuf> {
     if path.components().any(|c| matches!(c, Component::ParentDir)) {
         return Err(unsupported(
@@ -291,15 +338,30 @@ pub fn contained_under(root: &Path, path: &Path) -> Result<PathBuf> {
             ),
         ));
     }
-    // Walk root -> path and reject any link on the chain. Canonicalization alone would silently
-    // accept a link that happens to land back inside the root.
-    let relative = canonical_path
-        .strip_prefix(&canonical_root)
-        .map_err(|_| unsupported("owner-private path containment", "prefix strip failed"))?
-        .to_path_buf();
-    let mut walked = canonical_root.clone();
-    for component in relative.components() {
+    // Walk root -> path and reject any link on the chain.
+    //
+    // The walk is over the **caller's literal path**, not the canonicalized one. Walking the
+    // canonical path was a no-op check: `canonicalize` resolves every link away, so the chain it
+    // produces is symlink-free by construction and this loop could never fire — `contained_under`
+    // accepted a symlink placed directly inside the root as long as its target also landed inside
+    // the root. Canonicalization proves *where the path ends up*; only the literal chain can prove
+    // *how it got there*.
+    //
+    // Only the segment at or below the root is telex's to police, and "at the root" is decided by
+    // resolving each prefix rather than by string matching, so a caller that spells the root
+    // differently (a manifest supplies these paths verbatim) is still covered. The root's own
+    // ancestors are the operator's business — `/tmp` and `/var` are symlinks on macOS — and the
+    // root itself was already resolved above.
+    let mut walked = PathBuf::new();
+    let mut below_root = false;
+    for component in path.components() {
         walked.push(component);
+        if !below_root {
+            below_root = std::fs::canonicalize(&walked)
+                .map(|resolved| resolved == canonical_root)
+                .unwrap_or(false);
+            continue;
+        }
         let meta = std::fs::symlink_metadata(&walked)
             .map_err(|e| io_err("checking owner-private containment chain", e))?;
         if meta.file_type().is_symlink() {
@@ -318,6 +380,19 @@ pub fn contained_under(root: &Path, path: &Path) -> Result<PathBuf> {
                 ));
             }
         }
+    }
+    if !below_root {
+        // The literal chain never passed through the root, so nothing on it was checked. The
+        // resolved path is inside the root, which means it got there through a link above or at
+        // the root — exactly the redirection this function exists to refuse.
+        return Err(unsupported(
+            "owner-private path containment",
+            format!(
+                "{} reaches {} only by traversing a link",
+                path.display(),
+                root.display()
+            ),
+        ));
     }
     Ok(canonical_path)
 }
@@ -342,10 +417,13 @@ pub fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
 /// So the rule here is create-strict, validate-existing:
 /// * A directory that does not exist yet is created with the owner-only descriptor, so it is
 ///   owner-private from birth and has no children to strip.
-/// * A directory that already exists is **validated, never rewritten**: owner must be the current
-///   user, a DACL must be present, and every allowed ACE must name the current user, `SYSTEM`, or
-///   local `Administrators`. `Everyone`, `Authenticated Users`, `Users`, or any foreign SID fails
-///   closed.
+/// * A directory that already exists is **validated, never rewritten**: its owner must be a SID
+///   this process may own objects as (see `imp::self_owner_sids` — the token user, the token's
+///   default owner, and any `SE_GROUP_OWNER` group; on an elevated token that includes
+///   `Administrators`, which is what Windows actually stamps on the directories such a process
+///   creates), a DACL must be present, and every allowed ACE must name the current user, `SYSTEM`,
+///   or local `Administrators`. `Everyone`, `Authenticated Users`, `Users`, or any foreign SID
+///   fails closed.
 ///
 /// The posture is therefore unchanged — a non-owner-private root is still refused — while the
 /// producer's own files keep working. Per-file checks (`read_owner_only_file`) still apply to the
@@ -849,6 +927,7 @@ mod imp {
     use std::os::windows::fs::MetadataExt;
     use std::os::windows::io::{AsRawHandle, FromRawHandle};
     use std::path::{Component, Path, PathBuf, Prefix};
+    use std::sync::OnceLock;
     use windows_sys::Win32::Foundation::{
         CloseHandle, GetLastError, LocalFree, ERROR_ALREADY_EXISTS, HANDLE, INVALID_HANDLE_VALUE,
         PSID,
@@ -860,10 +939,11 @@ mod imp {
     };
     use windows_sys::Win32::Security::{
         AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
-        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation, TokenUser,
-        ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION, DACL_SECURITY_INFORMATION,
-        OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION, SECURITY_ATTRIBUTES,
-        SE_DACL_PRESENT, TOKEN_QUERY, TOKEN_USER,
+        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation, TokenGroups,
+        TokenOwner, TokenUser, ACCESS_ALLOWED_ACE, ACL, ACL_SIZE_INFORMATION,
+        DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
+        SECURITY_ATTRIBUTES, SE_DACL_PRESENT, TOKEN_GROUPS, TOKEN_INFORMATION_CLASS, TOKEN_OWNER,
+        TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateDirectoryW, CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
@@ -884,6 +964,11 @@ mod imp {
     const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
     const ACCESS_DENIED_ACE_TYPE: u8 = 1;
 
+    /// `SE_GROUP_OWNER` / `SE_GROUP_USE_FOR_DENY_ONLY` from `winnt.h`. `windows-sys` 0.52 binds the
+    /// `TOKEN_GROUPS` struct but not these attribute bits, and they are fixed ABI values.
+    const SE_GROUP_OWNER: u32 = 0x0000_0008;
+    const SE_GROUP_USE_FOR_DENY_ONLY: u32 = 0x0000_0010;
+
     /// Whether an ACE trustee is one telex considers safe on an owner-private object.
     ///
     /// The set matches the enforced runtime notion of a strict owner-private descriptor: the
@@ -903,19 +988,22 @@ mod imp {
     /// reach of `Users`.
     fn ace_trustee_is_allowlisted(
         sid: PSID,
-        current: PSID,
+        self_sids: &[String],
         system: PSID,
         admins: PSID,
     ) -> (bool, bool) {
-        let is_current = unsafe { EqualSid(sid, current) } != 0;
-        if is_current {
+        let text = sid_to_string(sid);
+        let is_self = text
+            .as_deref()
+            .is_some_and(|text| self_sids.iter().any(|known| known == text));
+        if is_self {
             return (true, true);
         }
         let privileged = unsafe { EqualSid(sid, system) != 0 || EqualSid(sid, admins) != 0 };
         if privileged {
             return (true, false);
         }
-        match sid_to_string(sid) {
+        match text {
             Some(text) => (text.starts_with("S-1-5-5-"), false),
             None => (false, false),
         }
@@ -932,6 +1020,186 @@ mod imp {
             LocalFree(raw as *mut c_void);
         }
         Some(text)
+    }
+
+    /// The SIDs this process may legitimately be the **owner** of an object as.
+    ///
+    /// This is deliberately not "the token user SID". Windows does not stamp the *user* on objects
+    /// a process creates; it stamps the token's **default owner**, and on an elevated
+    /// administrator token that is `BUILTIN\Administrators` (S-1-5-32-544), not the user. Every
+    /// GitHub Actions Windows runner is such a token, which is why a directory the process had
+    /// just created with `create_dir_all` — and a credential file it had just written — were both
+    /// refused as "not owned by the current SID". That is the check misreading its own artifacts,
+    /// not a real foreign owner.
+    ///
+    /// The set is therefore taken from the token itself, which is the only authority on the
+    /// question:
+    ///
+    /// * `TokenUser` — the user this process runs as.
+    /// * `TokenOwner` — the SID Windows actually stamps on objects this process creates.
+    /// * every `TokenGroups` entry carrying `SE_GROUP_OWNER` — Windows' own definition of "a SID
+    ///   this token is allowed to assign as an object's owner". Deny-only groups are skipped: on a
+    ///   filtered (non-elevated) token `BUILTIN\Administrators` is present but marked
+    ///   `SE_GROUP_USE_FOR_DENY_ONLY`, and such a token may *not* own objects as Administrators.
+    ///
+    /// This does not loosen the posture. A standard user's token yields exactly `{user SID}`, so
+    /// the rule is byte-for-byte what it was. An administrator's token additionally admits
+    /// `Administrators` — a principal the DACL allowlist (`ace_trustee_is_allowlisted`) already
+    /// trusts unconditionally, and one that can take ownership of any object on the machine
+    /// regardless. Anything the token does not name is still refused, so a genuinely foreign owner
+    /// still fails closed.
+    ///
+    /// Cached: a process token's identity does not change for the life of the process, and this is
+    /// consulted on every owner-private read.
+    fn self_owner_sids() -> Result<&'static [String]> {
+        static CACHE: OnceLock<Vec<String>> = OnceLock::new();
+        if let Some(cached) = CACHE.get() {
+            return Ok(cached.as_slice());
+        }
+        let computed = read_self_owner_sids()?;
+        Ok(CACHE.get_or_init(|| computed).as_slice())
+    }
+
+    fn read_self_owner_sids() -> Result<Vec<String>> {
+        let token = current_process_token()?;
+        let mut sids: Vec<String> = Vec::new();
+
+        let user = token_information(token.0, TokenUser, "reading token user information")?;
+        let token_user = unsafe { &*(user.as_ptr() as *const TOKEN_USER) };
+        push_sid(&mut sids, token_user.User.Sid);
+
+        let owner = token_information(token.0, TokenOwner, "reading token owner information")?;
+        let token_owner = unsafe { &*(owner.as_ptr() as *const TOKEN_OWNER) };
+        push_sid(&mut sids, token_owner.Owner);
+
+        let groups = token_information(token.0, TokenGroups, "reading token groups")?;
+        let token_groups = unsafe { &*(groups.as_ptr() as *const TOKEN_GROUPS) };
+        let entries = unsafe {
+            std::slice::from_raw_parts(
+                token_groups.Groups.as_ptr(),
+                token_groups.GroupCount as usize,
+            )
+        };
+        for entry in entries {
+            if entry.Attributes & SE_GROUP_USE_FOR_DENY_ONLY != 0 {
+                continue;
+            }
+            if entry.Attributes & SE_GROUP_OWNER == 0 {
+                continue;
+            }
+            push_sid(&mut sids, entry.Sid);
+        }
+
+        if sids.is_empty() {
+            // Fail closed: with no known self SID every owner comparison would be a guess.
+            return Err(FsError::Unsupported {
+                capability: "owner-only file read",
+                message: "the process token named no SID it can own objects as".into(),
+            });
+        }
+        Ok(sids)
+    }
+
+    fn push_sid(into: &mut Vec<String>, sid: PSID) {
+        if sid.is_null() {
+            return;
+        }
+        if let Some(text) = sid_to_string(sid) {
+            if !into.contains(&text) {
+                into.push(text);
+            }
+        }
+    }
+
+    /// `GetTokenInformation` with the standard size-then-read dance.
+    ///
+    /// The buffer is a `Vec<u64>` rather than a `Vec<u8>` so the returned bytes are guaranteed
+    /// pointer-aligned: every structure read out of it (`TOKEN_USER`, `TOKEN_OWNER`,
+    /// `TOKEN_GROUPS`) starts with a `PSID`, and reading those through a byte-aligned pointer is
+    /// undefined behavior.
+    fn token_information(
+        token: HANDLE,
+        class: TOKEN_INFORMATION_CLASS,
+        action: &'static str,
+    ) -> Result<Vec<u64>> {
+        let mut needed = 0u32;
+        unsafe {
+            GetTokenInformation(token, class, std::ptr::null_mut(), 0, &mut needed);
+        }
+        if needed == 0 {
+            return Err(io_err(action, std::io::Error::last_os_error()));
+        }
+        let mut buf = vec![0u64; needed as usize / std::mem::size_of::<u64>() + 1];
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                class,
+                buf.as_mut_ptr() as *mut c_void,
+                needed,
+                &mut needed,
+            )
+        };
+        if ok == 0 {
+            return Err(io_err(action, std::io::Error::last_os_error()));
+        }
+        Ok(buf)
+    }
+
+    /// Is `owner` a SID this process is allowed to own objects as? See [`self_owner_sids`].
+    fn owner_is_self(owner: PSID, self_sids: &[String]) -> bool {
+        if owner.is_null() {
+            return false;
+        }
+        match sid_to_string(owner) {
+            Some(text) => self_sids.contains(&text),
+            None => false,
+        }
+    }
+
+    /// Owner rejection text that names the SID actually found, so a real foreign-owner refusal is
+    /// diagnosable instead of reading as "the check is broken".
+    fn foreign_owner_message(path: &Path, owner: PSID) -> String {
+        let found = sid_to_string(owner).unwrap_or_else(|| "an unreadable SID".to_string());
+        format!(
+            "{} is owned by {found}, which is not a SID this process can own objects as",
+            path.display()
+        )
+    }
+
+    /// The owner SID a path actually carries, as a string. Test-only: the enforced paths compare
+    /// the raw `PSID` they already hold rather than round-tripping through a `String`.
+    #[cfg(test)]
+    fn owner_sid_of_path(path: &Path) -> Result<String> {
+        let mut sd: *mut c_void = std::ptr::null_mut();
+        let mut owner: PSID = std::ptr::null_mut();
+        let wide = wide_null(path.as_os_str());
+        let rc = unsafe {
+            GetNamedSecurityInfoW(
+                wide.as_ptr(),
+                SE_FILE_OBJECT,
+                OWNER_SECURITY_INFORMATION,
+                &mut owner,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+                &mut sd,
+            )
+        };
+        if rc != 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-private daemon directory",
+                message: format!(
+                    "cannot read owner for {}: {}",
+                    path.display(),
+                    std::io::Error::from_raw_os_error(rc as i32)
+                ),
+            });
+        }
+        let _sd_guard = LocalAllocGuard(sd);
+        sid_to_string(owner).ok_or_else(|| FsError::Unsupported {
+            capability: "owner-private daemon directory",
+            message: format!("owner SID for {} is unreadable", path.display()),
+        })
     }
 
     pub(super) fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
@@ -1136,14 +1404,14 @@ mod imp {
         }
         let _sd_guard = LocalAllocGuard(sd);
 
-        let current_sid = sid_from_string(&current_user_sid()?)?;
+        let self_sids = self_owner_sids()?;
         let system_sid = sid_from_string("S-1-5-18")?;
         let admins_sid = sid_from_string("S-1-5-32-544")?;
 
-        if owner.is_null() || unsafe { EqualSid(owner, current_sid.0) } == 0 {
+        if !owner_is_self(owner, self_sids) {
             return Err(FsError::Unsupported {
                 capability: "owner-only file read",
-                message: format!("{} is not owned by the current SID", path.display()),
+                message: foreign_owner_message(path, owner),
             });
         }
 
@@ -1177,7 +1445,7 @@ mod imp {
             });
         }
 
-        let mut grants_current_user = false;
+        let mut grants_self = false;
         for idx in 0..info.AceCount {
             let mut ace_ptr: *mut c_void = std::ptr::null_mut();
             let ok = unsafe { GetAce(dacl, idx, &mut ace_ptr) };
@@ -1192,8 +1460,8 @@ mod imp {
                 ACCESS_ALLOWED_ACE_TYPE => {
                     let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
                     let sid = (&ace.SidStart as *const u32).cast::<c_void>() as PSID;
-                    let (allowed, is_current) =
-                        ace_trustee_is_allowlisted(sid, current_sid.0, system_sid.0, admins_sid.0);
+                    let (allowed, is_self) =
+                        ace_trustee_is_allowlisted(sid, self_sids, system_sid.0, admins_sid.0);
                     if !allowed {
                         return Err(FsError::Unsupported {
                             capability: "owner-only file read",
@@ -1203,7 +1471,7 @@ mod imp {
                             ),
                         });
                     }
-                    grants_current_user |= is_current;
+                    grants_self |= is_self;
                 }
                 ACCESS_DENIED_ACE_TYPE => {
                     return Err(FsError::Unsupported {
@@ -1222,10 +1490,13 @@ mod imp {
                 }
             }
         }
-        if !grants_current_user {
+        if !grants_self {
             return Err(FsError::Unsupported {
                 capability: "owner-only file read",
-                message: format!("{} does not grant the current user access", path.display()),
+                message: format!(
+                    "{} grants no access to any SID this process owns objects as",
+                    path.display()
+                ),
             });
         }
         Ok(())
@@ -1370,14 +1641,14 @@ mod imp {
         }
         let _sd_guard = LocalAllocGuard(sd);
 
-        let current_sid = sid_from_string(&current_user_sid()?)?;
+        let self_sids = self_owner_sids()?;
         let system_sid = sid_from_string("S-1-5-18")?;
         let admins_sid = sid_from_string("S-1-5-32-544")?;
 
-        if owner.is_null() || unsafe { EqualSid(owner, current_sid.0) } == 0 {
+        if !owner_is_self(owner, self_sids) {
             return Err(FsError::Unsupported {
                 capability: "owner-private daemon directory",
-                message: format!("{} is not owned by the current SID", path.display()),
+                message: foreign_owner_message(path, owner),
             });
         }
 
@@ -1436,7 +1707,7 @@ mod imp {
                     let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
                     let sid = (&ace.SidStart as *const u32).cast::<c_void>() as PSID;
                     let (allowed, _) =
-                        ace_trustee_is_allowlisted(sid, current_sid.0, system_sid.0, admins_sid.0);
+                        ace_trustee_is_allowlisted(sid, self_sids, system_sid.0, admins_sid.0);
                     if !allowed {
                         return Err(FsError::Unsupported {
                             capability: "owner-private daemon directory",
@@ -1734,46 +2005,10 @@ mod imp {
     }
 
     fn sid_string_from_token(token: HANDLE) -> Result<String> {
-        let mut needed = 0u32;
-        unsafe {
-            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
-        }
-        if needed == 0 {
-            return Err(io_err(
-                "sizing token user information",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let mut buf = vec![0u8; needed as usize];
-        let ok = unsafe {
-            GetTokenInformation(
-                token,
-                TokenUser,
-                buf.as_mut_ptr() as *mut c_void,
-                needed,
-                &mut needed,
-            )
-        };
-        if ok == 0 {
-            return Err(io_err(
-                "reading token user information",
-                std::io::Error::last_os_error(),
-            ));
-        }
+        let buf = token_information(token, TokenUser, "reading token user information")?;
         let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
-        let mut sid_ptr: *mut u16 = std::ptr::null_mut();
-        let ok = unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_ptr) };
-        if ok == 0 {
-            return Err(io_err(
-                "converting SID to string",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let sid = unsafe { wide_ptr_to_string(sid_ptr) };
-        unsafe {
-            LocalFree(sid_ptr as *mut c_void);
-        }
-        Ok(sid)
+        sid_to_string(token_user.User.Sid)
+            .ok_or_else(|| io_err("converting SID to string", std::io::Error::last_os_error()))
     }
 
     struct OwnedSid(PSID);
@@ -1884,6 +2119,103 @@ mod imp {
     #[cfg(test)]
     mod boot_id_tests {
         use super::*;
+
+        /// The owner rule admits exactly what this process's token says it may own — and nothing
+        /// else.
+        ///
+        /// The regression: the rule compared an object's owner against `TokenUser` alone. Windows
+        /// does not stamp the user on objects a process creates; it stamps the token's *default
+        /// owner*, which on an elevated administrator token (every GitHub Actions Windows runner,
+        /// and any developer running from an elevated shell) is `BUILTIN\Administrators`. So a
+        /// directory the process had just created and a credential file it had just written were
+        /// both refused as foreign-owned, and `telex copilot attach` could not secure its own
+        /// bridge producer root.
+        ///
+        /// Both halves are asserted together on purpose. The first alone would be satisfied by
+        /// deleting the owner check; the second alone would be satisfied by keeping the broken one.
+        #[test]
+        fn the_owner_rule_admits_this_processs_own_objects_and_no_foreign_sid() {
+            let dir = std::env::temp_dir().join(format!(
+                "telex-owner-rule-{}-{}",
+                std::process::id(),
+                std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_nanos())
+                    .unwrap_or_default()
+            ));
+            std::fs::create_dir_all(&dir).expect("temp dir");
+            let file = dir.join("registry.json");
+            std::fs::write(&file, b"{}").expect("write");
+
+            let selves = self_owner_sids().expect("token owner SIDs");
+            assert!(
+                selves.contains(&current_user_sid().expect("token user SID")),
+                "the token user is always a SID this process may own objects as"
+            );
+
+            // Whatever SID Windows stamped on the two objects this process just created has to be
+            // admissible, or the rule rejects its own artifacts.
+            for made_here in [dir.as_path(), file.as_path()] {
+                let owner = owner_sid_of_path(made_here).expect("owner SID");
+                assert!(
+                    selves.contains(&owner),
+                    "{} was created by this process and is owned by {owner}, which the owner rule \
+                     refused; on an elevated token that SID is BUILTIN\\Administrators",
+                    made_here.display()
+                );
+            }
+
+            // Not a blanket accept. None of these can ever carry `SE_GROUP_OWNER`, so they must
+            // stay outside the set on every host, elevated or not.
+            for foreign in [
+                "S-1-1-0",                                        // Everyone
+                "S-1-5-11",                                       // Authenticated Users
+                "S-1-5-21-1111111111-2222222222-3333333333-1001", // a foreign user
+            ] {
+                assert!(
+                    !selves.iter().any(|known| known == foreign),
+                    "{foreign} must never be treated as a SID this process owns objects as"
+                );
+                let sid = sid_from_string(foreign).expect("parse SID");
+                assert!(
+                    !owner_is_self(sid.0, selves),
+                    "an object owned by {foreign} must still fail closed"
+                );
+            }
+
+            let _ = std::fs::remove_dir_all(&dir);
+        }
+
+        /// A filtered (non-elevated) token carries `BUILTIN\Administrators` as
+        /// `SE_GROUP_USE_FOR_DENY_ONLY`, and such a token may not own objects as Administrators.
+        /// Admitting a deny-only group would be a real widening, so the deny-only filter is pinned
+        /// against the token this test actually runs under.
+        #[test]
+        fn a_deny_only_group_is_never_a_self_owner() {
+            let token = current_process_token().expect("process token");
+            let groups =
+                token_information(token.0, TokenGroups, "reading token groups").expect("groups");
+            let token_groups = unsafe { &*(groups.as_ptr() as *const TOKEN_GROUPS) };
+            let entries = unsafe {
+                std::slice::from_raw_parts(
+                    token_groups.Groups.as_ptr(),
+                    token_groups.GroupCount as usize,
+                )
+            };
+            let selves = self_owner_sids().expect("token owner SIDs");
+            for entry in entries {
+                if entry.Attributes & SE_GROUP_USE_FOR_DENY_ONLY == 0 {
+                    continue;
+                }
+                let Some(text) = sid_to_string(entry.Sid) else {
+                    continue;
+                };
+                assert!(
+                    !selves.contains(&text),
+                    "{text} is deny-only on this token and must not be an admissible owner"
+                );
+            }
+        }
 
         /// A host where the per-boot record cannot be persisted, or cannot be read back, must
         /// produce an **explicit** failure rather than a per-process value.
@@ -2022,6 +2354,24 @@ mod tests {
         dir
     }
 
+    /// Write a file the way the real producer does on this platform.
+    ///
+    /// The bridge extension creates its registry file with mode `0600` (`extension.mjs` passes
+    /// `{ mode: 0o600 }` and then `chmod`s it), because the Unix half of the owner-only read
+    /// rejects any group or world bit. A bare `std::fs::write` here would produce `0644` under the
+    /// default umask and model a producer telex does not have — the assertion would then be about
+    /// the test's own sloppiness rather than about hardening. On Windows the process token's
+    /// ordinary DACL is already the shape the read accepts, so there is nothing to adjust.
+    fn write_producer_file(path: &Path, bytes: &[u8]) {
+        std::fs::write(path, bytes).expect("write producer file");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+                .expect("owner-only producer file");
+        }
+    }
+
     /// The existence probe's whole contract: `Ok(false)` is a proof of absence and nothing else.
     ///
     /// `Path::exists()` collapses every failure into that same `false`, which is why every
@@ -2048,6 +2398,63 @@ mod tests {
         assert!(
             path_present(&present).expect("restored"),
             "and the fault is scoped: dropping the guard restores the real filesystem"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The seam is shared process-wide state, so its scoping is a property the suite depends on:
+    /// `cargo test` runs every one of these in one process with many in flight at once, and a fault
+    /// that escaped its guard would surface as an unrelated test failing somewhere else entirely.
+    ///
+    /// Three escapes are ruled out here — a fault reaching a *different* path, a fault reaching a
+    /// *different thread's* probe of a different path, and one guard's drop disarming another
+    /// guard's fault on the same path.
+    #[test]
+    fn an_injected_stat_fault_reaches_nothing_but_its_own_path() {
+        let dir = temp_dir("fault-isolation");
+        let faulted = dir.join("faulted.json");
+        let neighbour = dir.join("neighbour.json");
+        std::fs::write(&faulted, b"{}").expect("write faulted");
+        std::fs::write(&neighbour, b"{}").expect("write neighbour");
+
+        let outer = stat_faults::Unstatable::new(&faulted);
+        assert!(path_present(&faulted).is_err(), "the faulted path fails");
+        assert!(
+            path_present(&neighbour).expect("a sibling is answered by the real filesystem"),
+            "a fault must not spread to another path in the same directory"
+        );
+
+        // Concurrent probes on other threads see the real filesystem for their own paths, and the
+        // fault for the faulted one. This is the shape the daemon suite actually runs in.
+        std::thread::scope(|scope| {
+            for _ in 0..4 {
+                scope.spawn(|| {
+                    for _ in 0..50 {
+                        assert!(
+                            path_present(&neighbour).expect("neighbour stays statable"),
+                            "a concurrent probe of an unfaulted path must not inherit the fault"
+                        );
+                        assert!(path_present(&faulted).is_err());
+                    }
+                });
+            }
+        });
+
+        // Overlapping guards on the same path are independent: dropping the inner one must not
+        // disarm the outer one's fault.
+        {
+            let _inner = stat_faults::Unstatable::new(&faulted);
+            assert!(path_present(&faulted).is_err());
+        }
+        assert!(
+            path_present(&faulted).is_err(),
+            "an inner guard's drop must not disarm the guard that outlives it"
+        );
+
+        drop(outer);
+        assert!(
+            path_present(&faulted).expect("restored"),
+            "the last guard's drop restores the real filesystem"
         );
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -2201,7 +2608,7 @@ mod tests {
         // The producer-root rule must validate an existing directory, never rewrite it.
         let dir = temp_dir("producer-root");
         let existing = dir.join("registry.json");
-        std::fs::write(&existing, b"{\"secret\":\"x\"}").expect("seed producer file");
+        write_producer_file(&existing, b"{\"secret\":\"x\"}");
         let root = ensure_owner_private_producer_root(&dir).expect("harden producer root");
         assert!(root.is_absolute());
         assert_eq!(
@@ -2211,7 +2618,7 @@ mod tests {
         // Files the producer writes afterwards are still readable and still pass the per-file
         // owner-private check, which is what the credential read actually relies on.
         let later = dir.join("later.json");
-        std::fs::write(&later, b"{}").expect("write later producer file");
+        write_producer_file(&later, b"{}");
         assert!(read_owner_only_file(&later, 4096).is_ok());
         // Idempotent.
         assert!(ensure_owner_private_producer_root(&dir).is_ok());
@@ -2227,7 +2634,7 @@ mod tests {
         assert!(secured.exists());
         // A file written into a freshly created root is readable and owner-private.
         let file = secured.join("registry.json");
-        std::fs::write(&file, b"{}").expect("write into fresh root");
+        write_producer_file(&file, b"{}");
         assert!(read_owner_only_file(&file, 4096).is_ok());
         let _ = std::fs::remove_dir_all(&base);
     }

@@ -2024,6 +2024,14 @@ is an error, which the daemon classifies as "the record is present and unreadabl
 and refuses in both columns. Absence is the answer that admits, so absence is the answer that has to
 be proven.
 
+`ENOTDIR` is the one non-`NotFound` result that is also a *proof*: a path whose parent component is
+not a directory cannot exist. It is admitted as `Ok(false)` because the platforms disagree on
+nothing but the spelling — asking Windows about `some-file\child` answers "no", while Unix raises
+`ENOTDIR` — and without that, a run directory with debris where the scope belongs (a leftover file
+at `<run_dir>/intents`, a read-only volume, a half-finished restore) refused every push registration
+on Unix while admitting the identical one on Windows. Refusing a registration that owes no proof, to
+protect a record the filesystem has just proven cannot exist, is a denial with nothing to defend.
+
 That ordering is also what closes the concurrent-attach race. Attach A writes its `pending` record
 and registers; concurrent attach B replaces the record at a new generation, fails, and rolls its own
 write back — deleting the file. `write_pending`, the conditional rollback delete, and the arming
@@ -2172,6 +2180,27 @@ In order, and all fail-closed:
 6. The credential resolves: a registered producer root, canonical containment, per-file
    owner-private checks, and an mtime inside `max_age_ms` — all decided on **one open handle**, and
    the age gate runs before the secret is extracted from the bytes, connected to, or sent.
+
+   *Containment* is proven twice over: the resolved path must canonicalize strictly under the
+   registered root, **and** every component of the caller's literal path at or below that root must
+   not be a symlink or reparse point. The second half has to walk the literal path, because
+   canonicalization resolves links away — a chain derived from the canonical path is link-free by
+   construction, so checking it accepted a link planted directly inside the root as long as the
+   link's target also landed inside the root.
+
+   *Owner-private* on Windows means the object's owner is a SID **this process may own objects as**,
+   not a SID equal to the token user. Windows stamps new objects with the token's *default owner*,
+   which on an elevated administrator token is `BUILTIN\Administrators`; comparing against the token
+   user alone made telex reject directories and credential files it had created moments earlier, so
+   `copilot attach` could not secure its own bridge producer root on any elevated host (every GitHub
+   Actions Windows runner is one). The admissible set is taken from the token itself — `TokenUser`,
+   `TokenOwner`, and every `TokenGroups` entry carrying `SE_GROUP_OWNER` minus the deny-only ones —
+   which is Windows' own definition of the question. A standard user's token yields exactly the user
+   SID, so the rule is unchanged there; an administrator's additionally admits a principal the DACL
+   allowlist already trusts and that can take ownership of anything on the machine regardless. Any
+   owner the token does not name still fails closed, and the DACL allowlist (current user, `SYSTEM`,
+   `Administrators`, the per-logon-session SID) is untouched: `Everyone`, `Authenticated Users`,
+   `Users`, and any foreign SID are still refused.
 7. `verify_server_peer` succeeds **before anything is sent**: same user, matching executable,
    matching pid + start time.
 8. The probe answers with the echoed nonce, the expected session, and protocol ≥ 2. The response is

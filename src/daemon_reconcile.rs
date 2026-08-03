@@ -1659,11 +1659,7 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
     // The position of the last entry this pass *considered* but did not attempt. Used only when the
     // pass attempts nothing at all, so the cursor still advances and the next pass moves on.
     let mut last_considered_position: Option<String> = None;
-    for (intent, position) in page
-        .loaded
-        .into_iter()
-        .zip(page.loaded_positions.into_iter())
-    {
+    for (intent, position) in page.loaded.into_iter().zip(page.loaded_positions) {
         if let Some(filter) = scope.as_deref() {
             // Below the scope filter, deliberately: the cursor is shared by every store, so
             // advancing it past an out-of-scope intent would let a scoped pass skip intents it

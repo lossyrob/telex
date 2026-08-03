@@ -7024,15 +7024,42 @@ mod p3_tests {
             .id
     }
 
-    fn wait_for_file(path: &std::path::Path, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            if path.exists() {
+    /// How long a test may wait for an out-of-process on-deliver handler to be observed.
+    ///
+    /// Every assertion below that asks "was this pushed?" is really waiting on a **child process
+    /// launch**: the daemon records the attempt only once the handler has exited, so the wait
+    /// covers spawn + interpreter startup + exit. On Windows the recording handler is
+    /// `powershell.exe`, whose cold start is seconds — not milliseconds — on a loaded four-core CI
+    /// runner, and none of that is bounded by anything telex controls.
+    ///
+    /// This is a ceiling, not a measurement. A correct implementation satisfies these waits in
+    /// milliseconds, so the suite stays fast; a broken one still fails, just at the ceiling instead
+    /// of at an arbitrary 2.5s that a busy runner can blow through on its own. The two tests that
+    /// failed on `windows-latest` while every sibling with identical logic passed
+    /// (`on_deliver_wake_on_cc_pushes_live_cc_without_replay`,
+    /// `drain_deferred_repushes_unacked_after_turn_stop`) were exactly the two whose end-to-end
+    /// budget had to cover a PowerShell start.
+    const HANDLER_OBSERVATION_BUDGET: Duration = Duration::from_secs(60);
+
+    /// Poll `observed` until it holds or [`HANDLER_OBSERVATION_BUDGET`] runs out.
+    ///
+    /// Async on purpose: these run on a current-thread runtime, and the push being waited on is a
+    /// task on that same runtime. A blocking sleep would starve the thing under observation.
+    async fn wait_for(mut observed: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + HANDLER_OBSERVATION_BUDGET;
+        loop {
+            if observed() {
                 return true;
             }
-            std::thread::sleep(Duration::from_millis(25));
+            if Instant::now() >= deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        false
+    }
+
+    async fn wait_for_file(path: &std::path::Path) -> bool {
+        wait_for(|| path.exists()).await
     }
 
     #[tokio::test]
@@ -7066,14 +7093,8 @@ mod p3_tests {
             session_id: "rcv".to_string(),
             address: "addr:rcv".to_string(),
         };
-        let mut pushed = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
-                pushed = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let pushed =
+            wait_for(|| state.on_deliver_should_skip(&member_key, id, Instant::now())).await;
         assert!(
             pushed,
             "a successful on-deliver handler should record a push attempt (backed off)"
@@ -7205,17 +7226,11 @@ mod p3_tests {
         );
         assert_eq!(state.on_deliver_cc_candidates(&store, &row).len(), 1);
         state.fire_on_deliver_on_commit(&store, &row);
-        let mut attempted = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, live, Instant::now()) {
-                attempted = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
+        let attempted =
+            wait_for(|| state.on_deliver_should_skip(&member_key, live, Instant::now())).await;
         assert!(attempted, "live CC should record an on-deliver attempt");
         assert!(
-            wait_for_file(&descriptor_path, Duration::from_secs(3)),
+            wait_for_file(&descriptor_path).await,
             "live CC should push to opted-in on-deliver handler"
         );
         let descriptor: serde_json::Value =
@@ -7298,14 +7313,8 @@ mod p3_tests {
             address: "addr:rcv".to_string(),
         };
         // The failed attempt is recorded and backed off (no every-heartbeat hammering)...
-        let mut recorded = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
-                recorded = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let recorded =
+            wait_for(|| state.on_deliver_should_skip(&member_key, id, Instant::now())).await;
         assert!(
             recorded,
             "a failed on-deliver attempt must be recorded and backed off"
@@ -7834,14 +7843,8 @@ mod p3_tests {
             .unwrap();
         state.fire_on_deliver_on_commit(&store, &row);
         let member_key = mk(&store, "rcv", "addr:rcv");
-        let mut accepted = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
-                accepted = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let accepted =
+            wait_for(|| state.on_deliver_should_skip(&member_key, id, Instant::now())).await;
         assert!(
             accepted,
             "the no-disposition note should be pushed and recorded accepted"
@@ -8107,14 +8110,7 @@ mod p3_tests {
             address: "addr:rcv".to_string(),
         };
         // Wait for the permanent-exit handler to run and dead-letter the message.
-        let mut dead = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
-                dead = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let dead = wait_for(|| state.on_deliver_should_skip(&member_key, id, Instant::now())).await;
         assert!(
             dead,
             "a permanent-exit handler must dead-letter the message"
@@ -8224,14 +8220,7 @@ mod p3_tests {
             session_id: "rcv".to_string(),
             address: "addr:rcv".to_string(),
         };
-        let mut deferred = false;
-        for _ in 0..100 {
-            if state.on_deliver_deferred_count(&member_key) == 1 {
-                deferred = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let deferred = wait_for(|| state.on_deliver_deferred_count(&member_key) == 1).await;
         assert!(
             deferred,
             "an ON_DELIVER_DEFERRED_EXIT handler must record a deferred push attempt"
@@ -8425,16 +8414,8 @@ mod p3_tests {
         assert!(matches!(drained, Response::Ack { .. }));
         // Async poll (yields to the runtime so the spawned sweep/child-process can progress; a
         // blocking wait would starve the current-thread executor).
-        let mut pushed = false;
-        for _ in 0..100 {
-            if marker.exists() {
-                pushed = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
         assert!(
-            pushed,
+            wait_for_file(&marker).await,
             "idle drain must re-push a still-unacked deferred message after the turn stops"
         );
     }
@@ -11661,9 +11642,12 @@ fn prepare_runtime_dir() -> Result<PathBuf> {
 #[cfg(unix)]
 mod platform {
     use super::*;
-    use std::os::unix::fs::{
-        DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt,
-    };
+    // Exactly the two extension traits this module still calls through: `FileTypeExt` for
+    // `is_socket()` on the stale-endpoint check, and `OpenOptionsExt` for `.mode(0o600)` on the
+    // endpoint lock. The mode/uid/permission work that needed `DirBuilderExt`, `MetadataExt`, and
+    // `PermissionsExt` moved to `platform_fs::imp` when the owner-private primitives were promoted,
+    // so importing them here is an unused import — and CI builds with `-D warnings`.
+    use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
     use std::os::unix::io::AsRawFd;
     use tokio::net::{UnixListener, UnixStream};
 
