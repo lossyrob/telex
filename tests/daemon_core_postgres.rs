@@ -388,9 +388,9 @@ async fn application_client_schema_v3_operation_smoke() {
         Response::Message { id, .. } if id == following_id
     ));
 
-    for (suffix, version) in [("current_v3_missing_origin", 3), ("upgrade_v2", 2)] {
+    for (suffix, version) in [("v3_no_origin", 3), ("v2_upgrade", 2)] {
         let repair_schema = sanitize_ident(&format!(
-            "telex_origin_repair_{}_{}_{}",
+            "tx_or_{}_{}_{}",
             suffix,
             std::process::id(),
             now_ms()
