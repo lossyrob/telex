@@ -82,7 +82,7 @@ map the harness's own session id for you. Telex fails closed rather than guessin
    On exit, `telex wait --out-dir` writes into `<dir>`:
    - `message.json` — the delivered message (only on exit `0`);
    - `delivery.json` — envelope `{ message, delivery, status }` (only on exit `0`);
-   - `status.json` — `{ outcome, exit_code, detail, address, written_at_ms }`, always;
+   - `status.json` — `{ outcome, exit_code, detail, quarantine?, address, written_at_ms }`, always;
    - `exit.code` — the integer exit code, written **last** as the completion marker.
 
    Trust the artifact `exit.code` as the completion marker rather than a background
@@ -109,6 +109,7 @@ map the harness's own session id for you. Telex fails closed rather than guessin
    | 3 | daemon gone / not running | Run `telex attach` and re-arm. |
    | 4 | daemon hung / no response after a finite wait's `--timeout-ms + --hang-ms` watchdog | Re-arm or restart the daemon if repeated. |
    | 5 | presence ended | Non-destructive reap; live sessions should `attach`/`wait` again. |
+   | 6 | delivery quarantined | Read and preserve `status.json.quarantine`; this is not a delivered message, so do not ack it. Re-arm immediately because later deliveries can progress. |
 
 3. After reading the delivered JSON, explicitly ack it, then apply the workflow
    disposition that reflects the actual outcome:
@@ -139,6 +140,7 @@ then repeat:
   3. read `<dir>\exit.code` (not the shell task exit code):
      0 -> parse `delivery.json` (or `message.json`), run `telex ack --session <session-id>`, dedupe by id, then start a fresh wait before longer processing
      5 -> attach/wait again if the session is still live
+     6 -> preserve `status.json.quarantine`, do not read/ack delivery artifacts, and immediately start a fresh wait
      2/3/4 -> re-arm or restart as indicated above (see `status.json` for detail)
 ```
 

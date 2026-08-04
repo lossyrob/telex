@@ -3018,6 +3018,11 @@ mod tests {
         };
         assert_eq!(axes.recipient_consumption, quarantine);
         assert_eq!(axes.workflow_disposition, quarantine);
+        let before_forgery = reopened_backend
+            .state_delta_page(0, 100)
+            .await
+            .unwrap()
+            .current_version;
         reopened_backend
             .insert_disposition(
                 oversized.id,
@@ -3062,6 +3067,17 @@ mod tests {
                 .count(),
             1
         );
+        let forgery_deltas = reopened_backend
+            .state_delta_page(before_forgery, 100)
+            .await
+            .unwrap();
+        for axis in ["acknowledgment", "disposition"] {
+            assert!(forgery_deltas
+                .deltas
+                .iter()
+                .filter(|delta| delta.axis == axis)
+                .all(|delta| !delta.payload_json.contains("daemon-quarantine")));
+        }
         let deltas = reopened_backend.state_delta_page(0, 100).await.unwrap();
         for kind in ["acknowledgment", "disposition"] {
             assert!(deltas.deltas.iter().any(|delta| {

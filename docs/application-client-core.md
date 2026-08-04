@@ -30,6 +30,11 @@ versioned evidence and must not be interpreted as backend table layouts.
 - Receive results carry message ID, recipient, delivery-row ID, role, store ID,
   and an `AckHandle` bound to that exact delivery. Ack remains an explicit action
   after durable application ingest.
+- Oversized historical primary deliveries return
+  `ApplicationClientError::DeliveryQuarantined` with structured recipient,
+  message, serialized-byte, and frame-limit evidence. `may_continue` is
+  currently always `true`; callers should preserve the field and continue
+  receiving.
 - `ReplyRequest.metadata` is opaque application data. Telex fingerprints and
   transports the bytes unchanged through reply creation, persistence, thread
   reads, and receive projection; interpretation and extension-field semantics
@@ -39,6 +44,10 @@ versioned evidence and must not be interpreted as backend table layouts.
   an acceptance-time snapshot. `refresh_receipt_axes` refreshes exact delivery
   consumption and workflow disposition; push-attempt evidence is currently
   reported as unavailable rather than implied current.
+- `EvidenceState::Quarantined` is sticky recipient-consumption evidence.
+  `DispositionRow.origin == "daemon-quarantine"` is the authoritative
+  structural provenance; principal and note text are descriptive only and
+  cannot mint this origin through supported disposition APIs.
 - Application operations use caller-supplied `OperationId` values. Reuse with the
   same payload reconciles the prior result; reuse with different input is a typed
   `OperationMismatch`.
@@ -61,6 +70,9 @@ SQLite and Postgres implement the same backend trait operations. Schema version
 3 adds application operation records, compound-step records, state versions, and
 ordered deltas. Migration is additive and idempotent. A client refuses a store
 whose schema is newer than the library supports.
+
+Opening schema v3 repairs a missing disposition `origin` column without
+inferring quarantine origin for historical rows from principal or note prose.
 
 SQLite principal strings are `unverified`; local OS identity is not authenticated
 backend evidence. Postgres exposes the configured connection user as

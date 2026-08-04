@@ -638,6 +638,7 @@ pub struct MemberStatus {
 #[serde(rename_all = "kebab-case")]
 pub enum WaiterOutcome {
     Message,
+    DeliveryQuarantined,
     IdleTimeout,
     PresenceEnded,
     AbnormalExit,

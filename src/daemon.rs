@@ -3581,14 +3581,18 @@ async fn handle_client(
         }
     };
 
-    let supports_delivery_quarantine = hello
-        .capabilities
-        .iter()
-        .any(|capability| capability == proto::CAP_DELIVERY_QUARANTINE_V1);
+    let supports_delivery_quarantine = peer_supports_delivery_quarantine(&hello);
     let (response, action) =
         handle_request_with_capabilities(state, request, supports_delivery_quarantine).await;
     write_json_line(&mut write_half, &response).await?;
     Ok(action)
+}
+
+fn peer_supports_delivery_quarantine(hello: &proto::Hello) -> bool {
+    hello
+        .capabilities
+        .iter()
+        .any(|capability| capability == proto::CAP_DELIVERY_QUARANTINE_V1)
 }
 
 #[allow(dead_code)]
@@ -5116,6 +5120,19 @@ async fn wait_for_message_with_idle_ttl(
                         }
                     }
                     waiter_guard.suppress_abnormal_on_drop();
+                    state.record_waiter_exit(
+                        &store_key,
+                        &session_id,
+                        &address,
+                        WaiterOutcome::DeliveryQuarantined,
+                        Some(6),
+                        Some(format!(
+                            "message_id={}; delivery_id={delivery_id}; serialized_bytes={len}; max_bytes={}",
+                            row.id,
+                            proto::MAX_JSONL_FRAME_BYTES
+                        )),
+                        waiter_pid_for_status,
+                    );
                     return if supports_delivery_quarantine {
                         Response::DeliveryQuarantined {
                             message_id: row.id,
@@ -9455,6 +9472,18 @@ mod p3_tests {
         let store = store_key("oversized-frame");
         registered_epoch(state.clone(), &store, "s1", "addr:a").await;
         let backend = state.backend_for(&store).await.unwrap();
+        let prior_id = insert_test_message(&backend, "addr:a", None).await;
+        assert!(matches!(
+            request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await,
+            Response::Message { id, .. } if id == prior_id
+        ));
+        assert!(matches!(
+            request(state.clone(), ack_req(&store, "s1", "addr:a", prior_id)).await,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
         let oversized = "x".repeat(proto::MAX_JSONL_FRAME_BYTES + 1);
         let message_id = backend
             .insert_message(&NewMessage {
@@ -9507,8 +9536,12 @@ mod p3_tests {
             other => panic!("expected oversized-frame error, got {other:?}"),
         }
         let status = state.status().await;
-        assert_eq!(status.members[0].last_waiter_outcome, None);
-        assert_eq!(status.members[0].last_delivered_message_id, None);
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::DeliveryQuarantined)
+        );
+        assert_eq!(status.members[0].last_waiter_exit_code, Some(6));
+        assert_eq!(status.members[0].last_delivered_message_id, Some(prior_id));
         let dispositions = backend.dispositions_for(message_id).await.unwrap();
         assert!(dispositions.iter().any(|disposition| {
             disposition.recipient == "addr:a"
@@ -9561,6 +9594,14 @@ mod p3_tests {
 
     #[tokio::test]
     async fn quarantine_response_is_capability_fenced() {
+        assert!(proto::daemon_capabilities()
+            .iter()
+            .any(|capability| capability == proto::CAP_DELIVERY_QUARANTINE_V1));
+        assert!(!proto::REQUIRED_CAPABILITIES.contains(&proto::CAP_DELIVERY_QUARANTINE_V1));
+        assert!(proto::client_hello("test")
+            .capabilities
+            .iter()
+            .any(|capability| capability == proto::CAP_DELIVERY_QUARANTINE_V1));
         let daemon = crate::daemon::test_support::TestDaemon::new("quarantine-capability");
         let store = daemon.store_key("quarantine-capability");
         assert!(matches!(
@@ -9590,6 +9631,19 @@ mod p3_tests {
                 .await
                 .unwrap();
         }
+        let old_following = backend
+            .insert_message(&NewMessage {
+                from_addr: Some("sender".into()),
+                to_addr: "old-recipient".into(),
+                kind: "note".into(),
+                attention: Attention::Background,
+                body: "following".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .id;
         let old = daemon
             .request_without_delivery_quarantine(wait_req(
                 &store,
@@ -9601,6 +9655,17 @@ mod p3_tests {
         assert!(matches!(
             old,
             Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
+        ));
+        assert!(matches!(
+            daemon
+                .request_without_delivery_quarantine(wait_req(
+                    &store,
+                    "old-session",
+                    "old-recipient",
+                    1_000,
+                ))
+                .await,
+            Response::Message { id, .. } if id == old_following
         ));
         let new = daemon
             .wait(&store, "new-session", "new-recipient", 1_000)
@@ -10374,6 +10439,7 @@ mod p3_tests {
     fn waiter_outcome_serializes_as_stable_kebab_case() {
         let values = [
             (WaiterOutcome::Message, "message"),
+            (WaiterOutcome::DeliveryQuarantined, "delivery-quarantined"),
             (WaiterOutcome::IdleTimeout, "idle-timeout"),
             (WaiterOutcome::PresenceEnded, "presence-ended"),
             (WaiterOutcome::AbnormalExit, "abnormal-exit"),
@@ -11298,13 +11364,28 @@ pub mod test_support {
         }
 
         pub async fn request(&self, request: Request) -> Response {
-            handle_request(self.state.clone(), request).await.0
+            let hello = proto::client_hello("test");
+            handle_request_with_capabilities(
+                self.state.clone(),
+                request,
+                peer_supports_delivery_quarantine(&hello),
+            )
+            .await
+            .0
         }
 
         pub async fn request_without_delivery_quarantine(&self, request: Request) -> Response {
-            handle_request_with_capabilities(self.state.clone(), request, false)
-                .await
-                .0
+            let mut hello = proto::client_hello("test");
+            hello
+                .capabilities
+                .retain(|capability| capability != proto::CAP_DELIVERY_QUARANTINE_V1);
+            handle_request_with_capabilities(
+                self.state.clone(),
+                request,
+                peer_supports_delivery_quarantine(&hello),
+            )
+            .await
+            .0
         }
 
         pub async fn request_with_action(&self, request: Request) -> (Response, TestClientAction) {

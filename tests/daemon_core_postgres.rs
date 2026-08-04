@@ -329,6 +329,7 @@ async fn application_client_schema_v3_operation_smoke() {
             disposition.recipient == "pg-frame-recipient"
                 && disposition.state == Disposition::Rejected.as_str()
                 && disposition.by_principal.as_deref() == Some("daemon")
+                && disposition.origin.as_deref() == Some("daemon-quarantine")
                 && disposition.note.as_deref().is_some_and(|note| {
                     note.contains("serialized_bytes=") && note.contains("max_bytes=")
                 })
@@ -373,6 +374,7 @@ async fn application_client_schema_v3_operation_smoke() {
             disposition.recipient == "pg-frame-recipient"
                 && disposition.state == Disposition::Rejected.as_str()
                 && disposition.by_principal.as_deref() == Some("daemon")
+                && disposition.origin.as_deref() == Some("daemon-quarantine")
         }));
     assert!(matches!(
         restarted
@@ -385,6 +387,55 @@ async fn application_client_schema_v3_operation_smoke() {
             .await,
         Response::Message { id, .. } if id == following_id
     ));
+
+    for (suffix, version) in [("current_v3_missing_origin", 3), ("upgrade_v2", 2)] {
+        let repair_schema = sanitize_ident(&format!(
+            "telex_origin_repair_{}_{}_{}",
+            suffix,
+            std::process::id(),
+            now_ms()
+        ))
+        .unwrap();
+        admin_exec(
+            &cfg,
+            &format!(
+                "CREATE SCHEMA {repair_schema};
+                 CREATE TABLE {repair_schema}.dispositions (
+                    id bigserial PRIMARY KEY,
+                    message_id bigint NOT NULL,
+                    recipient text NOT NULL,
+                    state text NOT NULL,
+                    note text,
+                    by_principal text,
+                    at_ms bigint NOT NULL
+                 );
+                 CREATE TABLE {repair_schema}.telex_schema_version (
+                    singleton integer NOT NULL DEFAULT 1 UNIQUE,
+                    version bigint NOT NULL
+                 );
+                 INSERT INTO {repair_schema}.telex_schema_version(singleton, version)
+                 VALUES (1, {version});"
+            ),
+        )
+        .await
+        .unwrap();
+        let repaired = PgBackend::connect_with(cfg.clone(), Some(&repair_schema))
+            .await
+            .unwrap();
+        repaired.init_schema().await.unwrap();
+        repaired
+            .insert_disposition(99, "recipient", "handled", None, Some("application"))
+            .await
+            .unwrap();
+        assert_eq!(repaired.dispositions_for(99).await.unwrap()[0].origin, None);
+        drop(repaired);
+        admin_exec(
+            &cfg,
+            &format!("DROP SCHEMA IF EXISTS {repair_schema} CASCADE"),
+        )
+        .await
+        .unwrap();
+    }
     restore_env("TELEX_CONFIG", previous_config);
     drop(client);
     drop(backend);
