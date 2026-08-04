@@ -13,14 +13,17 @@ use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
     DeafStationStatus, DeliveryMode, EpochStatus, HandshakeError, HelloAck, IdleStationStatus,
     LiveWaiterStatus, MemberStatus, NeedsAttachReason, PushDeliveryHealth, RecentErrorStatus,
-    Request, Response, RetentionStatus, SentReceipt, StationHealth, StoreStatus, WaiterOutcome,
-    WatchPidRole, WatchPidSpec, WatchPidStatus, ON_DELIVER_DEFERRED_EXIT,
+    Request, Response, RetentionStatus, SentReceipt, StationCapability, StationHealth, StoreStatus,
+    WaiterOutcome, WatchPidRole, WatchPidSpec, WatchPidStatus, ON_DELIVER_DEFERRED_EXIT,
     ON_DELIVER_PERMANENT_EXIT,
 };
 use crate::model::{
-    cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient, Attention,
-    DeliveryOutcome, EpochClaimResult, MessageRow, NewMessage, STATUS_RETIRED,
+    cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient,
+    ApplicationMessageOperation, Attention, DeliveryOutcome, Disposition, EpochClaimResult,
+    MessageRow, NewMessage, STATUS_RETIRED,
 };
+#[cfg(test)]
+use crate::model::{ApplicationOperationBegin, NewApplicationOperation};
 #[cfg(feature = "postgres")]
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -457,6 +460,7 @@ impl DeliveryAdmissionTestControl {
 #[derive(Clone, Debug)]
 struct MemberRecord {
     address: String,
+    capability: StationCapability,
     store_key: String,
     backend: String,
     session_id: String,
@@ -896,11 +900,12 @@ impl DaemonState {
     }
 
     fn has_address_member(&self, store_key: &str, address: &str) -> bool {
-        self.members
-            .lock()
-            .unwrap()
-            .values()
-            .any(|m| m.store_key == store_key && m.address == address && !m.idle)
+        self.members.lock().unwrap().values().any(|m| {
+            m.store_key == store_key
+                && m.address == address
+                && !m.idle
+                && m.capability == StationCapability::Bidirectional
+        })
     }
 
     fn note_backlog_for_unattended_address(&self, store_key: &str, address: &str) {
@@ -1458,6 +1463,7 @@ impl MemberRecord {
             backend: self.backend.clone(),
             session_id: self.session_id.clone(),
             address: self.address.clone(),
+            capability: self.capability,
             occupant: self.occupant.clone(),
             host: self.host.clone(),
             waiters: self.waiters,
@@ -3575,17 +3581,36 @@ async fn handle_client(
         }
     };
 
-    let (response, action) = handle_request(state, request).await;
+    let supports_delivery_quarantine = peer_supports_delivery_quarantine(&hello);
+    let (response, action) =
+        handle_request_with_capabilities(state, request, supports_delivery_quarantine).await;
     write_json_line(&mut write_half, &response).await?;
     Ok(action)
 }
 
+fn peer_supports_delivery_quarantine(hello: &proto::Hello) -> bool {
+    hello
+        .capabilities
+        .iter()
+        .any(|capability| capability == proto::CAP_DELIVERY_QUARANTINE_V1)
+}
+
+#[allow(dead_code)]
 async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response, ClientAction) {
+    handle_request_with_capabilities(state, request, true).await
+}
+
+async fn handle_request_with_capabilities(
+    state: Arc<DaemonState>,
+    request: Request,
+    supports_delivery_quarantine: bool,
+) -> (Response, ClientAction) {
     let response = match request {
         Request::Ping => Response::Pong {
             protocol_version: current_protocol_version(),
             daemon_version: proto::DAEMON_VERSION.to_string(),
             instance_id: state.instance_id.clone(),
+            capabilities: proto::daemon_capabilities(),
         },
         Request::Status { detail, proof, .. } => {
             if detail {
@@ -3677,6 +3702,37 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 on_deliver,
                 replace_on_deliver,
                 on_deliver_wake_on_cc,
+                None,
+            )
+            .await
+        }
+        Request::ApplicationRegister {
+            store_key,
+            address,
+            session_id,
+            occupant,
+            capability,
+            description,
+            scope,
+            tags,
+            watch_pids,
+            recovery,
+        } => {
+            register_member(
+                state.clone(),
+                store_key,
+                address,
+                session_id,
+                occupant,
+                description,
+                scope,
+                tags,
+                watch_pids,
+                recovery,
+                None,
+                false,
+                false,
+                Some(capability),
             )
             .await
         }
@@ -3713,6 +3769,7 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 timeout_ms,
                 waiter_pid,
                 waiter_start_time,
+                supports_delivery_quarantine,
             )
             .await
         }
@@ -3722,6 +3779,23 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
             address,
             message_id,
         } => ack_message(state.clone(), store_key, session_id, address, message_id).await,
+        Request::ApplicationAck {
+            store_key,
+            session_id,
+            address,
+            message_id,
+            delivery_id,
+        } => {
+            ack_exact_delivery(
+                state.clone(),
+                store_key,
+                session_id,
+                address,
+                message_id,
+                delivery_id,
+            )
+            .await
+        }
         Request::Send {
             store_key,
             session_id,
@@ -3748,6 +3822,46 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 subject,
                 body,
                 metadata,
+                None,
+            )
+            .await
+        }
+        Request::ApplicationSend {
+            store_key,
+            session_id,
+            from_addr,
+            to_addr,
+            cc,
+            kind,
+            attention,
+            requires_disposition,
+            subject,
+            body,
+            metadata,
+            logical_store_id,
+            application_responsibility,
+            operation_id,
+            payload_fingerprint,
+        } => {
+            send_message(
+                state.clone(),
+                store_key,
+                session_id,
+                Some(from_addr),
+                to_addr,
+                cc,
+                kind,
+                attention,
+                requires_disposition,
+                subject,
+                body,
+                metadata,
+                Some((
+                    logical_store_id,
+                    application_responsibility,
+                    operation_id,
+                    payload_fingerprint,
+                )),
             )
             .await
         }
@@ -3775,6 +3889,47 @@ async fn handle_request(state: Arc<DaemonState>, request: Request) -> (Response,
                 subject,
                 cc,
                 body,
+                None,
+                None,
+            )
+            .await
+        }
+        Request::ApplicationReply {
+            store_key,
+            session_id,
+            from_addr,
+            message_id,
+            kind,
+            attention,
+            requires_disposition,
+            subject,
+            cc,
+            body,
+            metadata,
+            logical_store_id,
+            application_responsibility,
+            operation_id,
+            payload_fingerprint,
+        } => {
+            reply_message(
+                state.clone(),
+                store_key,
+                session_id,
+                Some(from_addr),
+                message_id,
+                kind,
+                attention,
+                requires_disposition,
+                subject,
+                cc,
+                body,
+                metadata,
+                Some((
+                    logical_store_id,
+                    application_responsibility,
+                    operation_id,
+                    payload_fingerprint,
+                )),
             )
             .await
         }
@@ -3796,6 +3951,7 @@ async fn register_member(
     on_deliver: Option<Vec<String>>,
     replace_on_deliver: bool,
     on_deliver_wake_on_cc: bool,
+    capability: Option<StationCapability>,
 ) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
@@ -3843,6 +3999,18 @@ async fn register_member(
                 refreshed.description = description;
                 refreshed.scope = scope;
                 refreshed.tags = tags;
+                if let Some(capability) = capability {
+                    if capability != existing.capability {
+                        return proto::error_response(
+                            proto::ERROR_CAPABILITY_CONFLICT,
+                            format!(
+                                "address {address} is already attached with {:?} capability; detach before changing capability",
+                                existing.capability
+                            ),
+                        );
+                    }
+                    refreshed.capability = capability;
+                }
                 let preserving_on_deliver =
                     !replace_on_deliver && on_deliver.is_none() && existing.on_deliver.is_some();
                 refreshed.watch_pids = if preserving_on_deliver {
@@ -3889,7 +4057,7 @@ async fn register_member(
                         ),
                     );
                     return proto::error_response(
-                        proto::ERROR_INCOMPATIBLE,
+                        proto::ERROR_COLLISION,
                         format!(
                             "address {address} has a live pull waiter; stop the station before preserving push"
                         ),
@@ -3947,7 +4115,7 @@ async fn register_member(
         .cloned()
     {
         return proto::error_response(
-            proto::ERROR_INCOMPATIBLE,
+            proto::ERROR_COLLISION,
             format!(
                 "address {} is already attended by session {} in this daemon",
                 conflict.address, conflict.session_id
@@ -4075,6 +4243,7 @@ async fn register_member(
     };
     let record = MemberRecord {
         address: address.clone(),
+        capability: capability.unwrap_or_default(),
         store_key: store_key.clone(),
         backend: backend.kind().to_string(),
         session_id: session_id.clone(),
@@ -4522,6 +4691,7 @@ async fn wait_for_message(
     timeout_ms: Option<u64>,
     waiter_pid: Option<u32>,
     waiter_start_time: Option<u64>,
+    supports_delivery_quarantine: bool,
 ) -> Response {
     wait_for_message_with_idle_ttl(
         state,
@@ -4534,6 +4704,7 @@ async fn wait_for_message(
         timeout_ms,
         waiter_pid,
         waiter_start_time,
+        supports_delivery_quarantine,
         idle_ttl_duration(),
     )
     .await
@@ -4550,6 +4721,7 @@ async fn wait_for_message_with_idle_ttl(
     timeout_ms: Option<u64>,
     waiter_pid: Option<u32>,
     waiter_start_time: Option<u64>,
+    supports_delivery_quarantine: bool,
     idle_ttl: Duration,
 ) -> Response {
     if state.is_draining() {
@@ -4557,6 +4729,11 @@ async fn wait_for_message_with_idle_ttl(
     }
 
     match state.get_member(&store_key, &session_id, &address) {
+        Some(member) if member.capability == StationCapability::SendOnly => {
+            return proto::unsupported(format!(
+                "address {address} is attached with send-only capability"
+            ));
+        }
         Some(member) if member.on_deliver.is_some() => {
             state.push_recent_error(
                 "DeliveryModeConflict",
@@ -4615,6 +4792,11 @@ async fn wait_for_message_with_idle_ttl(
     // Repeat the member/mode checks after all async preflight work. The opposite-mode recheck and
     // waiter installation below share the same per-station admission guard.
     match state.get_member(&store_key, &session_id, &address) {
+        Some(member) if member.capability == StationCapability::SendOnly => {
+            return proto::unsupported(format!(
+                "address {address} is attached with send-only capability"
+            ));
+        }
         Some(member) if member.on_deliver.is_some() => {
             state.push_recent_error(
                 "DeliveryModeConflict",
@@ -4684,7 +4866,20 @@ async fn wait_for_message_with_idle_ttl(
             return proto::error_response(proto::ERROR_INCOMPATIBLE, e.to_string());
         }
     };
+    let mut skipped_oversized_cc = BTreeSet::new();
     loop {
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            state.record_waiter_exit(
+                &store_key,
+                &session_id,
+                &address,
+                WaiterOutcome::IdleTimeout,
+                Some(2),
+                None,
+                waiter_pid_for_status,
+            );
+            return Response::Timeout;
+        }
         let store_notification = state
             .store_notify(&store_key)
             .map(|notify| notify.notified_owned());
@@ -4760,13 +4955,25 @@ async fn wait_for_message_with_idle_ttl(
                 return Response::PresenceEnded;
             }
         }
-        if let Some(candidate) = candidates.into_iter().find(|candidate| {
+        for candidate in candidates.into_iter().filter(|candidate| {
             wait_attention_matches(
                 candidate.message.attention.as_str(),
                 attention.as_deref(),
                 parsed_min_attention,
             )
         }) {
+            let notification_only = candidate.notification_only;
+            let Some(delivery_id) = candidate.delivery_id else {
+                waiter_guard.suppress_abnormal_on_drop();
+                return proto::internal(format!(
+                    "wait candidate for message {} recipient {address} has no durable delivery identity",
+                    candidate.message.id
+                ));
+            };
+            if notification_only && skipped_oversized_cc.contains(&delivery_id) {
+                continue;
+            }
+            let snapshot_version = candidate.snapshot_version;
             let row = candidate.message;
             let current = match state.get_member(&store_key, &session_id, &address) {
                 Some(member) => member,
@@ -4815,11 +5022,14 @@ async fn wait_for_message_with_idle_ttl(
                 requires_disposition_for_current_recipient,
                 subject: row.subject,
                 body: row.body,
+                metadata: row.metadata,
                 sent_at_ms: row.sent_at_ms,
                 buffered_at_ms: now_ms(),
+                delivery_id: Some(delivery_id),
+                snapshot_version: Some(snapshot_version),
                 lease_epoch: Some(current.lease_epoch),
             };
-            return match proto::json_line_frame_len(&response) {
+            match proto::json_line_frame_len(&response) {
                 Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => {
                     state.record_waiter_message_exit(
                         &store_key,
@@ -4828,24 +5038,124 @@ async fn wait_for_message_with_idle_ttl(
                         row.id,
                         waiter_pid,
                     );
-                    response
+                    return response;
                 }
                 Ok(len) => {
+                    if notification_only {
+                        if skipped_oversized_cc.insert(delivery_id) {
+                            state.push_recent_error(
+                                "OversizedCcNotificationFrame",
+                                format!(
+                                    "skipped oversized notification-only CC frame store={store_key} address={address} message_id={} delivery_id={delivery_id}: serialized frame is {len} bytes, limit is {}",
+                                    row.id,
+                                    proto::MAX_JSONL_FRAME_BYTES
+                                ),
+                            );
+                        }
+                        continue;
+                    }
+                    let note = format!(
+                        "daemon rejected delivery frame: serialized_bytes={len}; max_bytes={}",
+                        proto::MAX_JSONL_FRAME_BYTES
+                    );
+                    let outcome = backend
+                        .application_disposition_with_ack(
+                            &address,
+                            &current.owner_instance_id,
+                            current.lease_epoch,
+                            row.id,
+                            delivery_id,
+                            Disposition::Rejected.as_str(),
+                            Some(&note),
+                            Some("daemon"),
+                            Some("daemon-quarantine"),
+                            None,
+                        )
+                        .await;
+                    match outcome {
+                        Ok((
+                            Some(_),
+                            DeliveryOutcome::Marked | DeliveryOutcome::AlreadyConsumed,
+                        )) => {
+                            state.push_recent_error(
+                                "OversizedDeliveryFrame",
+                                format!(
+                                    "durably rejected undeliverable historical message store={store_key} address={address} message_id={} delivery_id={delivery_id}: serialized frame is {len} bytes, limit is {}",
+                                    row.id,
+                                    proto::MAX_JSONL_FRAME_BYTES
+                                ),
+                            );
+                        }
+                        Ok((_, DeliveryOutcome::NotOwner)) => {
+                            self_demote_member(
+                                &state,
+                                &current,
+                                "oversized delivery cleanup returned NotOwner",
+                            );
+                            waiter_guard.suppress_abnormal_on_drop();
+                            return needs_attach_for_missing_member(
+                                &state,
+                                &backend,
+                                &store_key,
+                                &session_id,
+                                &address,
+                                "oversized delivery cleanup",
+                            )
+                            .await;
+                        }
+                        Ok((disposition, other)) => {
+                            waiter_guard.suppress_abnormal_on_drop();
+                            return proto::internal(format!(
+                                "rejecting oversized historical message {} delivery {delivery_id} returned {other:?} with disposition={}",
+                                row.id,
+                                disposition.is_some()
+                            ));
+                        }
+                        Err(e) => {
+                            waiter_guard.suppress_abnormal_on_drop();
+                            return proto::internal(format!(
+                                "consuming oversized historical message {} delivery {delivery_id}: {e:#}",
+                                row.id
+                            ));
+                        }
+                    }
                     waiter_guard.suppress_abnormal_on_drop();
-                    proto::error_response(
-                        proto::ERROR_INCOMPATIBLE,
-                        format!(
-                            "message {} serializes to {len} bytes, exceeding IPC frame limit {}",
+                    state.record_waiter_exit(
+                        &store_key,
+                        &session_id,
+                        &address,
+                        WaiterOutcome::DeliveryQuarantined,
+                        Some(6),
+                        Some(format!(
+                            "message_id={}; delivery_id={delivery_id}; serialized_bytes={len}; max_bytes={}",
                             row.id,
                             proto::MAX_JSONL_FRAME_BYTES
-                        ),
-                    )
+                        )),
+                        waiter_pid_for_status,
+                    );
+                    return if supports_delivery_quarantine {
+                        Response::DeliveryQuarantined {
+                            message_id: row.id,
+                            recipient: address.clone(),
+                            serialized_bytes: len,
+                            max_bytes: proto::MAX_JSONL_FRAME_BYTES,
+                            may_continue: true,
+                        }
+                    } else {
+                        proto::error_response(
+                            proto::ERROR_INCOMPATIBLE,
+                            format!(
+                                "message {} exceeds the peer response limit; its unchanged delivery was quarantined",
+                                row.id
+                            ),
+                        )
+                    };
                 }
                 Err(e) => {
                     waiter_guard.suppress_abnormal_on_drop();
-                    proto::internal(format!("sizing message {} IPC frame: {e}", row.id))
+                    return proto::internal(format!("sizing message {} IPC frame: {e}", row.id));
                 }
-            };
+            }
         }
         if let Some(deadline) = deadline {
             let now = Instant::now();
@@ -4961,6 +5271,36 @@ async fn ack_message(
     address: String,
     message_id: i64,
 ) -> Response {
+    ack_message_inner(state, store_key, session_id, address, message_id, None).await
+}
+
+async fn ack_exact_delivery(
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+    address: String,
+    message_id: i64,
+    delivery_id: i64,
+) -> Response {
+    ack_message_inner(
+        state,
+        store_key,
+        session_id,
+        address,
+        message_id,
+        Some(delivery_id),
+    )
+    .await
+}
+
+async fn ack_message_inner(
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+    address: String,
+    message_id: i64,
+    delivery_id: Option<i64>,
+) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
     }
@@ -5024,15 +5364,33 @@ async fn ack_message(
             }
         }
     };
-    match backend
-        .mark_consumed_if_current_owner(
-            &address,
-            &member.owner_instance_id,
-            member.lease_epoch,
-            message_id,
-        )
-        .await
-    {
+    if member.capability == StationCapability::SendOnly {
+        return proto::unsupported("acknowledgment requires bidirectional membership");
+    }
+    let outcome = match delivery_id {
+        Some(delivery_id) => {
+            backend
+                .mark_delivery_consumed_if_current_owner(
+                    &address,
+                    &member.owner_instance_id,
+                    member.lease_epoch,
+                    message_id,
+                    delivery_id,
+                )
+                .await
+        }
+        None => {
+            backend
+                .mark_consumed_if_current_owner(
+                    &address,
+                    &member.owner_instance_id,
+                    member.lease_epoch,
+                    message_id,
+                )
+                .await
+        }
+    };
+    match outcome {
         Ok(outcome) => {
             if outcome == DeliveryOutcome::NotOwner {
                 self_demote_member(
@@ -5074,6 +5432,98 @@ fn validate_message_payload_size(
     Ok(())
 }
 
+fn validate_message_delivery_frame_size(
+    message: &NewMessage,
+    thread_id: i64,
+    cc: &[String],
+) -> std::result::Result<(), Response> {
+    let response = conservative_delivery_frame(message, thread_id, cc);
+    let recipient = match &response {
+        Response::Message { delivered_to, .. } => delivered_to.as_str(),
+        _ => unreachable!("conservative delivery frame is always a message"),
+    };
+    match proto::json_line_frame_len(&response) {
+        Ok(len) if len <= proto::MAX_JSONL_FRAME_BYTES => Ok(()),
+        Ok(len) => Err(proto::error_response(
+            proto::ERROR_INCOMPATIBLE,
+            format!(
+                "message delivery frame for {recipient} serializes to {len} bytes; limit is {} bytes",
+                proto::MAX_JSONL_FRAME_BYTES
+            ),
+        )),
+        Err(e) => Err(proto::internal(format!(
+            "sizing message delivery frame for {recipient}: {e}"
+        ))),
+    }
+}
+
+fn conservative_delivery_frame(message: &NewMessage, thread_id: i64, cc: &[String]) -> Response {
+    let recipient = std::iter::once(message.to_addr.as_str())
+        .chain(cc.iter().map(String::as_str))
+        .max_by_key(|recipient| {
+            serde_json::to_string(recipient)
+                .map(|encoded| encoded.len())
+                .unwrap_or(usize::MAX)
+        })
+        .unwrap_or(message.to_addr.as_str());
+    Response::Message {
+        id: i64::MAX,
+        thread_id,
+        parent_id: message.parent_id,
+        from_addr: message.from_addr.clone(),
+        to_addr: message.to_addr.clone(),
+        delivered_to: recipient.to_string(),
+        primary_to: message.to_addr.clone(),
+        cc: cc.to_vec(),
+        // Longer than either actual role and therefore conservative.
+        delivery_role: "unknown".to_string(),
+        kind: message.kind.clone(),
+        attention: message.attention.as_str().to_string(),
+        requires_disposition: message.requires_disposition,
+        // `false` serializes one byte longer than `true`.
+        requires_disposition_for_current_recipient: false,
+        subject: message.subject.clone(),
+        body: message.body.clone(),
+        metadata: message.metadata.clone(),
+        sent_at_ms: i64::MAX,
+        buffered_at_ms: i64::MAX,
+        delivery_id: Some(i64::MAX),
+        snapshot_version: Some(i64::MAX),
+        lease_epoch: Some(i64::MAX),
+    }
+}
+
+fn normalize_message_recipients(
+    primary: &str,
+    cc: Option<&str>,
+) -> std::result::Result<(Option<String>, Vec<String>), Response> {
+    let mut recipients = BTreeSet::from([primary.to_string()]);
+    let mut recipient_entries = 1usize;
+    for recipient in cc
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|recipient| !recipient.is_empty())
+    {
+        recipient_entries += 1;
+        if recipient_entries > proto::MAX_MESSAGE_RECIPIENTS {
+            return Err(proto::error_response(
+                proto::ERROR_INCOMPATIBLE,
+                format!(
+                    "message has more than {} recipient entries",
+                    proto::MAX_MESSAGE_RECIPIENTS
+                ),
+            ));
+        }
+        recipients.insert(recipient.to_string());
+    }
+    let cc: Vec<String> = recipients
+        .into_iter()
+        .filter(|recipient| recipient != primary)
+        .collect();
+    Ok(((!cc.is_empty()).then(|| cc.join(",")), cc))
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn send_message(
     state: Arc<DaemonState>,
@@ -5088,6 +5538,7 @@ async fn send_message(
     subject: Option<String>,
     body: String,
     metadata: Option<String>,
+    application_operation: Option<(String, String, String, String)>,
 ) -> Response {
     let attention = match Attention::parse(&attention) {
         Ok(attention) => attention,
@@ -5114,6 +5565,26 @@ async fn send_message(
         Ok(from) => from,
         Err(response) => return response,
     };
+    let (cc, cc_recipients) = match normalize_message_recipients(&to_addr, cc.as_deref()) {
+        Ok(recipients) => recipients,
+        Err(response) => return response,
+    };
+    let new = NewMessage {
+        parent_id: None,
+        from_addr: Some(from.clone()),
+        to_addr: to_addr.clone(),
+        cc,
+        kind,
+        attention,
+        requires_disposition,
+        subject,
+        body,
+        metadata,
+        sent_at_ms: now_ms(),
+    };
+    if let Err(response) = validate_message_delivery_frame_size(&new, i64::MAX, &cc_recipients) {
+        return response;
+    }
     match backend.get_address(&to_addr).await {
         Ok(Some(addr)) if addr.status == STATUS_RETIRED => {
             return proto::error_response(
@@ -5129,20 +5600,23 @@ async fn send_message(
         }
         Err(e) => return proto::internal(format!("checking destination {to_addr}: {e:#}")),
     }
-    let new = NewMessage {
-        parent_id: None,
-        from_addr: Some(from.clone()),
-        to_addr: to_addr.clone(),
-        cc,
-        kind,
-        attention,
-        requires_disposition,
-        subject,
-        body,
-        metadata,
-        sent_at_ms: now_ms(),
+    let row = match application_operation {
+        Some((logical_store_id, application_responsibility, operation_id, payload_fingerprint)) => {
+            backend
+                .insert_application_message(
+                    &new,
+                    &ApplicationMessageOperation {
+                        logical_store_id,
+                        application_responsibility,
+                        operation_id,
+                        payload_fingerprint,
+                    },
+                )
+                .await
+        }
+        None => backend.insert_message(&new).await,
     };
-    let row = match backend.insert_message(&new).await {
+    let row = match row {
         Ok(row) => row,
         Err(e) => return proto::internal(format!("inserting message: {e:#}")),
     };
@@ -5190,12 +5664,16 @@ async fn reply_message(
     subject: Option<String>,
     cc: Option<String>,
     body: String,
+    metadata: Option<String>,
+    application_operation: Option<(String, String, String, String)>,
 ) -> Response {
     let attention = match Attention::parse(&attention) {
         Ok(attention) => attention,
         Err(e) => return proto::incompatible(e.to_string()),
     };
-    if let Err(response) = validate_message_payload_size(&body, subject.as_deref(), None) {
+    if let Err(response) =
+        validate_message_payload_size(&body, subject.as_deref(), metadata.as_deref())
+    {
         return response;
     }
     let backend = match state.backend_for(&store_key).await {
@@ -5233,9 +5711,10 @@ async fn reply_message(
             )
         }
     };
-    if let Err(e) = backend.ensure_address(&to, None, None, None).await {
-        return proto::internal(format!("ensuring reply destination {to}: {e:#}"));
-    }
+    let (cc, cc_recipients) = match normalize_message_recipients(&to, cc.as_deref()) {
+        Ok(recipients) => recipients,
+        Err(response) => return response,
+    };
     let subject = subject.or_else(|| parent.subject.as_ref().map(|s| format!("Re: {s}")));
     let new = NewMessage {
         parent_id: Some(parent.id),
@@ -5247,10 +5726,34 @@ async fn reply_message(
         requires_disposition,
         subject,
         body,
-        metadata: None,
+        metadata,
         sent_at_ms: now_ms(),
     };
-    let row = match backend.insert_message(&new).await {
+    if let Err(response) =
+        validate_message_delivery_frame_size(&new, parent.thread_id, &cc_recipients)
+    {
+        return response;
+    }
+    if let Err(e) = backend.ensure_address(&to, None, None, None).await {
+        return proto::internal(format!("ensuring reply destination {to}: {e:#}"));
+    }
+    let row = match application_operation {
+        Some((logical_store_id, application_responsibility, operation_id, payload_fingerprint)) => {
+            backend
+                .insert_application_message(
+                    &new,
+                    &ApplicationMessageOperation {
+                        logical_store_id,
+                        application_responsibility,
+                        operation_id,
+                        payload_fingerprint,
+                    },
+                )
+                .await
+        }
+        None => backend.insert_message(&new).await,
+    };
+    let row = match row {
         Ok(row) => row,
         Err(e) => return proto::internal(format!("inserting reply: {e:#}")),
     };
@@ -5397,6 +5900,10 @@ mod p3_tests {
             .join("target")
             .join("daemon-p3-tests")
             .join(format!("{label}-{seq}"));
+        test_state_at(label, seq, root)
+    }
+
+    fn test_state_at(label: &str, seq: u64, root: PathBuf) -> Arc<DaemonState> {
         std::fs::create_dir_all(&root).unwrap();
         let singleton =
             SingletonKey::from_parts("test-user", root.join("config"), proto::PROTOCOL_MAJOR);
@@ -7530,6 +8037,357 @@ mod p3_tests {
     }
 
     #[tokio::test]
+    async fn send_only_application_membership_is_not_inbound_attendance() {
+        let state = test_state("application-send-only");
+        let store = store_key("application-send-only");
+        let address = "addr:sender-only";
+        let registered = request(
+            state.clone(),
+            Request::ApplicationRegister {
+                store_key: store.clone(),
+                address: address.to_string(),
+                session_id: "application-runtime".to_string(),
+                occupant: "application".to_string(),
+                capability: StationCapability::SendOnly,
+                description: None,
+                scope: None,
+                tags: None,
+                watch_pids: Vec::new(),
+                recovery: false,
+            },
+        )
+        .await;
+        assert!(matches!(registered, Response::Registered { .. }));
+
+        let sent = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "application-runtime".to_string(),
+                from_addr: Some(address.to_string()),
+                to_addr: address.to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: "must remain queued".to_string(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            &sent,
+            Response::Sent {
+                receipt: SentReceipt {
+                    occupied: Some(false),
+                    receipt,
+                    ..
+                }
+            } if receipt == "queued-unoccupied"
+        ));
+        let message_id = match sent {
+            Response::Sent { receipt } => receipt.id,
+            _ => unreachable!(),
+        };
+        let backend = state.backend_for(&store).await.unwrap();
+        let delivery_id = backend
+            .delivery_for_recipient(message_id, address)
+            .await
+            .unwrap()
+            .unwrap()
+            .id;
+        assert!(matches!(
+            request(
+                state.clone(),
+                Request::ApplicationAck {
+                    store_key: store.clone(),
+                    session_id: "application-runtime".to_string(),
+                    address: address.to_string(),
+                    message_id,
+                    delivery_id,
+                }
+            )
+            .await,
+            Response::Error { ref code, .. } if code == proto::ERROR_UNSUPPORTED
+        ));
+
+        let wait = request(
+            state,
+            Request::Wait {
+                store_key: store,
+                session_id: "application-runtime".to_string(),
+                address: address.to_string(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: false,
+                timeout_ms: Some(1),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            wait,
+            Response::Error { ref code, .. } if code == proto::ERROR_UNSUPPORTED
+        ));
+    }
+
+    #[tokio::test]
+    async fn application_membership_capability_change_requires_detach() {
+        let state = test_state("application-capability-change");
+        let store = store_key("application-capability-change");
+        let register = |capability| Request::ApplicationRegister {
+            store_key: store.clone(),
+            address: "addr:app".to_string(),
+            session_id: "application-runtime".to_string(),
+            occupant: "application".to_string(),
+            capability,
+            description: None,
+            scope: None,
+            tags: None,
+            watch_pids: Vec::new(),
+            recovery: false,
+        };
+        assert!(matches!(
+            request(state.clone(), register(StationCapability::Bidirectional)).await,
+            Response::Registered { .. }
+        ));
+        assert!(matches!(
+            request(state.clone(), register(StationCapability::SendOnly)).await,
+            Response::Error { ref code, .. } if code == proto::ERROR_CAPABILITY_CONFLICT
+        ));
+        assert_eq!(
+            state
+                .get_member(&store, "application-runtime", "addr:app")
+                .unwrap()
+                .capability,
+            StationCapability::Bidirectional
+        );
+    }
+
+    #[tokio::test]
+    async fn application_reply_preserves_opaque_metadata_through_thread_and_receive() {
+        let state = test_state("application-reply-metadata");
+        let store = store_key("application-reply-metadata");
+        for (session, address) in [
+            ("sender-runtime", "addr:sender"),
+            ("target-runtime", "addr:target"),
+        ] {
+            assert!(matches!(
+                request(
+                    state.clone(),
+                    Request::ApplicationRegister {
+                        store_key: store.clone(),
+                        address: address.to_string(),
+                        session_id: session.to_string(),
+                        occupant: session.to_string(),
+                        capability: StationCapability::Bidirectional,
+                        description: None,
+                        scope: None,
+                        tags: None,
+                        watch_pids: Vec::new(),
+                        recovery: false,
+                    }
+                )
+                .await,
+                Response::Registered { .. }
+            ));
+        }
+        let backend = state.backend_for(&store).await.unwrap();
+        let parent = backend
+            .insert_message(&NewMessage {
+                from_addr: Some("addr:target".into()),
+                to_addr: "addr:sender".into(),
+                kind: "request".into(),
+                attention: Attention::Background,
+                body: "parent".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        let logical_store_id = backend.logical_store_id().await.unwrap();
+        let operation = NewApplicationOperation {
+            logical_store_id: logical_store_id.clone(),
+            application_responsibility: "metadata-test".into(),
+            operation_id: "reply-operation".into(),
+            operation_kind: "reply".into(),
+            sender: "addr:sender".into(),
+            recipients_json: format!("[{},[]]", parent.id),
+            payload_fingerprint: "opaque-fingerprint".into(),
+            retry_budget: 0,
+            created_at_ms: now_ms(),
+        };
+        assert!(matches!(
+            backend
+                .begin_application_operation(&operation)
+                .await
+                .unwrap(),
+            ApplicationOperationBegin::Started(_)
+        ));
+        let metadata = r#"{"urn:test:opaque":{"nested":[1,true,"value"]}}"#;
+        let sent = request(
+            state.clone(),
+            Request::ApplicationReply {
+                store_key: store.clone(),
+                session_id: "sender-runtime".into(),
+                from_addr: "addr:sender".into(),
+                message_id: parent.id,
+                kind: "reply".into(),
+                attention: "background".into(),
+                requires_disposition: false,
+                subject: None,
+                cc: None,
+                body: "reply".into(),
+                metadata: Some(metadata.into()),
+                logical_store_id,
+                application_responsibility: "metadata-test".into(),
+                operation_id: "reply-operation".into(),
+                payload_fingerprint: "opaque-fingerprint".into(),
+            },
+        )
+        .await;
+        let reply_id = match sent {
+            Response::Sent { receipt } => receipt.id,
+            other => panic!("expected sent reply, got {other:?}"),
+        };
+        assert_eq!(
+            backend
+                .get_message(reply_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .metadata
+                .as_deref(),
+            Some(metadata)
+        );
+        assert!(
+            backend
+                .thread_messages(parent.thread_id)
+                .await
+                .unwrap()
+                .iter()
+                .any(|message| message.id == reply_id
+                    && message.metadata.as_deref() == Some(metadata))
+        );
+        assert!(matches!(
+            request(
+                state,
+                Request::Wait {
+                    store_key: store,
+                    session_id: "target-runtime".into(),
+                    address: "addr:target".into(),
+                    attention: None,
+                    min_attention: None,
+                    wake_on_cc: false,
+                    timeout_ms: Some(100),
+                    waiter_pid: Some(std::process::id()),
+                    waiter_start_time: None,
+                }
+            )
+            .await,
+            Response::Message {
+                id,
+                metadata: Some(actual),
+                ..
+            } if id == reply_id && actual == metadata
+        ));
+    }
+
+    #[tokio::test]
+    async fn bidirectional_application_membership_is_occupied_and_exact_acknowledgeable() {
+        let state = test_state("application-bidirectional");
+        let store = store_key("application-bidirectional");
+        let address = "addr:application";
+        assert!(matches!(
+            request(
+                state.clone(),
+                Request::ApplicationRegister {
+                    store_key: store.clone(),
+                    address: address.to_string(),
+                    session_id: "application-runtime".to_string(),
+                    occupant: "application".to_string(),
+                    capability: StationCapability::Bidirectional,
+                    description: None,
+                    scope: None,
+                    tags: None,
+                    watch_pids: Vec::new(),
+                    recovery: false,
+                }
+            )
+            .await,
+            Response::Registered { .. }
+        ));
+        let sent = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "application-runtime".to_string(),
+                from_addr: Some(address.to_string()),
+                to_addr: address.to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: "deliver".to_string(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            sent,
+            Response::Sent {
+                receipt: SentReceipt {
+                    occupied: Some(true),
+                    ..
+                }
+            }
+        ));
+        let delivered = request(
+            state.clone(),
+            Request::Wait {
+                store_key: store.clone(),
+                session_id: "application-runtime".to_string(),
+                address: address.to_string(),
+                attention: None,
+                min_attention: None,
+                wake_on_cc: false,
+                timeout_ms: Some(100),
+                waiter_pid: Some(std::process::id()),
+                waiter_start_time: None,
+            },
+        )
+        .await;
+        let (message_id, delivery_id) = match delivered {
+            Response::Message {
+                id,
+                delivery_id: Some(delivery_id),
+                ..
+            } => (id, delivery_id),
+            other => panic!("expected exact delivery, got {other:?}"),
+        };
+        assert!(matches!(
+            request(
+                state,
+                Request::ApplicationAck {
+                    store_key: store,
+                    session_id: "application-runtime".to_string(),
+                    address: address.to_string(),
+                    message_id,
+                    delivery_id,
+                }
+            )
+            .await,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
     async fn register_creates_membership_and_wait_unknown_needs_attach() {
         let state = test_state("register-wait");
         let store = store_key("register-wait");
@@ -7978,14 +8836,17 @@ mod p3_tests {
     }
 
     #[tokio::test]
-    async fn send_and_reply_reject_payloads_above_body_metadata_cap_before_insert() {
+    async fn send_and_reply_reject_oversized_delivery_frames_before_insert() {
         let state = test_state("payload-cap");
         let store = store_key("payload-cap");
         registered_epoch(state.clone(), &store, "s1", "addr:a").await;
         registered_epoch(state.clone(), &store, "s2", "dest").await;
         let backend = state.backend_for(&store).await.unwrap();
         let before = backend.inbox("dest", true, 100).await.unwrap().len();
+        let deliveries_before = backend.delivery_retention_count().await.unwrap();
         let too_large = "x".repeat(proto::MAX_MESSAGE_BODY_METADATA_BYTES + 1);
+        let escape_heavy_metadata =
+            "\"".repeat(proto::MAX_MESSAGE_BODY_METADATA_BYTES.saturating_mul(3) / 5);
 
         let send = request(
             state.clone(),
@@ -8012,12 +8873,88 @@ mod p3_tests {
             backend.inbox("dest", true, 100).await.unwrap().len(),
             before
         );
+        assert_eq!(
+            backend.delivery_retention_count().await.unwrap(),
+            deliveries_before
+        );
+
+        let escaped_send = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                from_addr: Some("addr:a".to_string()),
+                to_addr: "dest".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: String::new(),
+                metadata: Some(escape_heavy_metadata.clone()),
+            },
+        )
+        .await;
+        assert!(matches!(
+            escaped_send,
+            Response::Error { ref code, ref message, .. }
+                if code == proto::ERROR_INCOMPATIBLE
+                    && message.contains("delivery frame")
+        ));
+        assert_eq!(
+            backend.inbox("dest", true, 100).await.unwrap().len(),
+            before
+        );
+        assert_eq!(
+            backend.delivery_retention_count().await.unwrap(),
+            deliveries_before
+        );
+
+        let too_many_cc = (0..proto::MAX_MESSAGE_RECIPIENTS)
+            .map(|index| format!("cc:{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        assert!(backend.get_address("cap-dest").await.unwrap().is_none());
+        let capped = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "s1".to_string(),
+                from_addr: Some("addr:a".to_string()),
+                to_addr: "cap-dest".to_string(),
+                cc: Some(too_many_cc),
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                body: "bounded".to_string(),
+                metadata: None,
+            },
+        )
+        .await;
+        assert!(matches!(
+            capped,
+            Response::Error { ref code, ref message, .. }
+                if code == proto::ERROR_INCOMPATIBLE
+                    && message.contains("recipient entries")
+        ));
+        assert!(backend.get_address("cap-dest").await.unwrap().is_none());
+        assert!(backend
+            .inbox("cap-dest", true, 100)
+            .await
+            .unwrap()
+            .is_empty());
+        assert_eq!(
+            backend.delivery_retention_count().await.unwrap(),
+            deliveries_before
+        );
 
         let parent_id = insert_test_message(&backend, "addr:a", None).await;
+        let reply_deliveries_before = backend.delivery_retention_count().await.unwrap();
         let reply = request(
-            state,
+            state.clone(),
             Request::Reply {
-                store_key: store,
+                store_key: store.clone(),
                 session_id: "s1".to_string(),
                 from_addr: Some("addr:a".to_string()),
                 message_id: parent_id,
@@ -8033,6 +8970,156 @@ mod p3_tests {
         assert!(matches!(
             reply,
             Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
+        ));
+        assert_eq!(backend.inbox("addr:a", true, 100).await.unwrap().len(), 1);
+
+        let escaped_reply = request(
+            state,
+            Request::ApplicationReply {
+                store_key: store,
+                session_id: "s1".to_string(),
+                from_addr: "addr:a".to_string(),
+                message_id: parent_id,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: None,
+                cc: None,
+                body: String::new(),
+                metadata: Some(escape_heavy_metadata),
+                logical_store_id: backend.logical_store_id().await.unwrap(),
+                application_responsibility: "reply-test".to_string(),
+                operation_id: "escape-heavy-reply".to_string(),
+                payload_fingerprint: "e".repeat(64),
+            },
+        )
+        .await;
+        assert!(matches!(
+            escaped_reply,
+            Response::Error { ref code, ref message, .. }
+                if code == proto::ERROR_INCOMPATIBLE
+                    && message.contains("delivery frame")
+        ));
+        assert_eq!(
+            backend.delivery_retention_count().await.unwrap(),
+            reply_deliveries_before
+        );
+    }
+
+    #[tokio::test]
+    async fn escape_heavy_metadata_is_received_unchanged_when_delivery_frame_fits() {
+        let state = test_state("escape-heavy-metadata");
+        let store = store_key("escape-heavy-metadata");
+        registered_epoch(state.clone(), &store, "sender-session", "sender").await;
+        registered_epoch(state.clone(), &store, "recipient-session", "recipient").await;
+        let metadata = serde_json::json!({
+            "quotes": "\"".repeat(8_192),
+            "controls": "\u{0000}\u{0001}\n\r\t".repeat(2_048),
+        })
+        .to_string();
+        let worst_recipient = "\\\"\u{0001}".repeat(2_048);
+        let normalized_cc = vec!["short".to_string(), worst_recipient.clone()];
+        let mut near_limit = NewMessage {
+            from_addr: Some("sender".into()),
+            to_addr: "recipient".into(),
+            cc: Some(normalized_cc.join(",")),
+            kind: "note".into(),
+            attention: Attention::Background,
+            body: String::new(),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        };
+        let expected_empty = Response::Message {
+            id: i64::MAX,
+            thread_id: i64::MAX,
+            parent_id: None,
+            from_addr: Some("sender".into()),
+            to_addr: "recipient".into(),
+            delivered_to: worst_recipient,
+            primary_to: "recipient".into(),
+            cc: normalized_cc.clone(),
+            delivery_role: "unknown".into(),
+            kind: "note".into(),
+            attention: "background".into(),
+            requires_disposition: false,
+            requires_disposition_for_current_recipient: false,
+            subject: None,
+            body: String::new(),
+            metadata: None,
+            sent_at_ms: i64::MAX,
+            buffered_at_ms: i64::MAX,
+            delivery_id: Some(i64::MAX),
+            snapshot_version: Some(i64::MAX),
+            lease_epoch: Some(i64::MAX),
+        };
+        let empty_len = proto::json_line_frame_len(&expected_empty).unwrap();
+        near_limit.body = "x".repeat(proto::MAX_JSONL_FRAME_BYTES - empty_len);
+        let expected = Response::Message {
+            id: i64::MAX,
+            thread_id: i64::MAX,
+            parent_id: None,
+            from_addr: Some("sender".into()),
+            to_addr: "recipient".into(),
+            delivered_to: "\\\"\u{0001}".repeat(2_048),
+            primary_to: "recipient".into(),
+            cc: normalized_cc.clone(),
+            delivery_role: "unknown".into(),
+            kind: "note".into(),
+            attention: "background".into(),
+            requires_disposition: false,
+            requires_disposition_for_current_recipient: false,
+            subject: None,
+            body: near_limit.body.clone(),
+            metadata: None,
+            sent_at_ms: i64::MAX,
+            buffered_at_ms: i64::MAX,
+            delivery_id: Some(i64::MAX),
+            snapshot_version: Some(i64::MAX),
+            lease_epoch: Some(i64::MAX),
+        };
+        assert_eq!(
+            proto::json_line_frame_len(&expected).unwrap(),
+            proto::MAX_JSONL_FRAME_BYTES
+        );
+        assert!(
+            validate_message_delivery_frame_size(&near_limit, i64::MAX, &normalized_cc).is_ok()
+        );
+        near_limit.body.push('x');
+        assert!(
+            validate_message_delivery_frame_size(&near_limit, i64::MAX, &normalized_cc).is_err()
+        );
+
+        let send = request(
+            state.clone(),
+            Request::Send {
+                store_key: store.clone(),
+                session_id: "sender-session".to_string(),
+                from_addr: Some("sender".to_string()),
+                to_addr: "recipient".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: "background".to_string(),
+                requires_disposition: false,
+                subject: Some("\"quoted\"\nsubject".to_string()),
+                body: "\"body\"\nwith\tcontrols".to_string(),
+                metadata: Some(metadata.clone()),
+            },
+        )
+        .await;
+        assert!(matches!(send, Response::Sent { .. }));
+
+        let received = request(
+            state,
+            wait_req(&store, "recipient-session", "recipient", 1_000),
+        )
+        .await;
+        assert!(proto::json_line_frame_len(&received).unwrap() <= proto::MAX_JSONL_FRAME_BYTES);
+        assert!(matches!(
+            received,
+            Response::Message {
+                metadata: Some(received),
+                ..
+            } if received == metadata
         ));
     }
 
@@ -8374,11 +9461,29 @@ mod p3_tests {
     }
 
     #[tokio::test]
-    async fn wait_returns_small_error_for_oversized_historical_message_frame() {
-        let state = test_state("oversized-frame");
+    async fn oversized_historical_message_is_consumed_without_blocking_next_delivery() {
+        let seq = TEST_SEQ.fetch_add(1, Ordering::SeqCst);
+        let root = std::env::current_dir()
+            .unwrap()
+            .join("target")
+            .join("daemon-p3-tests")
+            .join(format!("oversized-frame-restart-{seq}"));
+        let state = test_state_at("oversized-frame", seq, root.clone());
         let store = store_key("oversized-frame");
         registered_epoch(state.clone(), &store, "s1", "addr:a").await;
         let backend = state.backend_for(&store).await.unwrap();
+        let prior_id = insert_test_message(&backend, "addr:a", None).await;
+        assert!(matches!(
+            request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await,
+            Response::Message { id, .. } if id == prior_id
+        ));
+        assert!(matches!(
+            request(state.clone(), ack_req(&store, "s1", "addr:a", prior_id)).await,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
         let oversized = "x".repeat(proto::MAX_JSONL_FRAME_BYTES + 1);
         let message_id = backend
             .insert_message(&NewMessage {
@@ -8397,25 +9502,182 @@ mod p3_tests {
             .await
             .unwrap()
             .id;
+        let following_id = backend
+            .insert_message(&NewMessage {
+                parent_id: None,
+                from_addr: Some("sender".to_string()),
+                to_addr: "addr:a".to_string(),
+                cc: None,
+                kind: "note".to_string(),
+                attention: Attention::Background,
+                requires_disposition: false,
+                subject: None,
+                body: "following".to_string(),
+                metadata: None,
+                sent_at_ms: now_ms(),
+            })
+            .await
+            .unwrap()
+            .id;
 
         let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
         match wait {
-            Response::Error { code, message, .. } => {
-                assert_eq!(code, proto::ERROR_INCOMPATIBLE);
-                assert!(message.contains(&message_id.to_string()));
-                assert!(message.contains("IPC frame"));
+            Response::DeliveryQuarantined {
+                message_id: quarantined_id,
+                ref recipient,
+                serialized_bytes,
+                max_bytes,
+                may_continue: true,
+            } => {
+                assert_eq!(quarantined_id, message_id);
+                assert_eq!(recipient, "addr:a");
+                assert!(serialized_bytes > max_bytes);
             }
             other => panic!("expected oversized-frame error, got {other:?}"),
         }
         let status = state.status().await;
-        assert_eq!(status.members[0].last_waiter_outcome, None);
-        assert_eq!(status.members[0].last_delivered_message_id, None);
-
-        let second_wait = request(state, wait_req(&store, "s1", "addr:a", 1_000)).await;
-        assert!(
-            matches!(second_wait, Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE),
-            "oversized message should fail the same way on retry, not be blocked as delivered"
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::DeliveryQuarantined)
         );
+        assert_eq!(status.members[0].last_waiter_exit_code, Some(6));
+        assert_eq!(status.members[0].last_delivered_message_id, Some(prior_id));
+        let dispositions = backend.dispositions_for(message_id).await.unwrap();
+        assert!(dispositions.iter().any(|disposition| {
+            disposition.recipient == "addr:a"
+                && disposition.state == Disposition::Rejected.as_str()
+                && disposition.note.as_deref().is_some_and(|note| {
+                    note.contains("serialized_bytes=") && note.contains("max_bytes=")
+                })
+                && disposition.by_principal.as_deref() == Some("daemon")
+        }));
+        assert!(matches!(
+            request(
+                state.clone(),
+                Request::Detach {
+                    store_key: store.clone(),
+                    session_id: "s1".to_string(),
+                    address: "addr:a".to_string(),
+                },
+            )
+            .await,
+            Response::Ack { .. }
+        ));
+        drop(backend);
+        drop(state);
+
+        let restarted = test_state_at("oversized-frame", seq + 1, root);
+        registered_epoch(restarted.clone(), &store, "s1", "addr:a").await;
+        let backend = restarted.backend_for(&store).await.unwrap();
+        let persisted_dispositions = backend.dispositions_for(message_id).await.unwrap();
+        assert!(persisted_dispositions.iter().any(|disposition| {
+            disposition.recipient == "addr:a"
+                && disposition.state == Disposition::Rejected.as_str()
+                && disposition.by_principal.as_deref() == Some("daemon")
+        }));
+        let second_wait = request(restarted, wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(
+            matches!(second_wait, Response::Message { id, .. } if id == following_id),
+            "the consumed poison row must not block the following delivery"
+        );
+        assert_eq!(
+            backend
+                .fetch_undelivered("addr:a")
+                .await
+                .unwrap()
+                .iter()
+                .map(|message| message.id)
+                .collect::<Vec<_>>(),
+            vec![following_id]
+        );
+    }
+
+    #[tokio::test]
+    async fn quarantine_response_is_capability_fenced() {
+        assert!(proto::daemon_capabilities()
+            .iter()
+            .any(|capability| capability == proto::CAP_DELIVERY_QUARANTINE_V1));
+        assert!(!proto::REQUIRED_CAPABILITIES.contains(&proto::CAP_DELIVERY_QUARANTINE_V1));
+        assert!(proto::client_hello("test")
+            .capabilities
+            .iter()
+            .any(|capability| capability == proto::CAP_DELIVERY_QUARANTINE_V1));
+        let daemon = crate::daemon::test_support::TestDaemon::new("quarantine-capability");
+        let store = daemon.store_key("quarantine-capability");
+        assert!(matches!(
+            daemon
+                .register(&store, "old-session", "old-recipient")
+                .await,
+            Response::Registered { .. }
+        ));
+        assert!(matches!(
+            daemon
+                .register(&store, "new-session", "new-recipient")
+                .await,
+            Response::Registered { .. }
+        ));
+        let backend = daemon.backend(&store).await.unwrap();
+        for recipient in ["old-recipient", "new-recipient"] {
+            backend
+                .insert_message(&NewMessage {
+                    from_addr: Some("sender".into()),
+                    to_addr: recipient.into(),
+                    kind: "note".into(),
+                    attention: Attention::Background,
+                    body: "x".repeat(proto::MAX_JSONL_FRAME_BYTES + 1),
+                    sent_at_ms: now_ms(),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+        }
+        let old_following = backend
+            .insert_message(&NewMessage {
+                from_addr: Some("sender".into()),
+                to_addr: "old-recipient".into(),
+                kind: "note".into(),
+                attention: Attention::Background,
+                body: "following".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .id;
+        let old = daemon
+            .request_without_delivery_quarantine(wait_req(
+                &store,
+                "old-session",
+                "old-recipient",
+                1_000,
+            ))
+            .await;
+        assert!(matches!(
+            old,
+            Response::Error { ref code, .. } if code == proto::ERROR_INCOMPATIBLE
+        ));
+        assert!(matches!(
+            daemon
+                .request_without_delivery_quarantine(wait_req(
+                    &store,
+                    "old-session",
+                    "old-recipient",
+                    1_000,
+                ))
+                .await,
+            Response::Message { id, .. } if id == old_following
+        ));
+        let new = daemon
+            .wait(&store, "new-session", "new-recipient", 1_000)
+            .await;
+        assert!(matches!(
+            new,
+            Response::DeliveryQuarantined {
+                ref recipient,
+                may_continue: true,
+                ..
+            } if recipient == "new-recipient"
+        ));
     }
 
     #[tokio::test]
@@ -8540,6 +9802,86 @@ mod p3_tests {
         )
         .await;
         assert!(matches!(rearm, Response::Timeout));
+    }
+
+    #[tokio::test]
+    async fn oversized_notification_only_cc_is_skipped_without_workflow_disposition() {
+        let state = test_state("oversized-cc-notification");
+        let store = store_key("oversized-cc-notification");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let backend = state.backend_for(&store).await.unwrap();
+        let waiter_state = state.clone();
+        let waiter_store = store.clone();
+        let waiter = tokio::spawn(async move {
+            request(
+                waiter_state,
+                Request::Wait {
+                    store_key: waiter_store,
+                    session_id: "s1".into(),
+                    address: "addr:a".into(),
+                    attention: None,
+                    min_attention: None,
+                    wake_on_cc: true,
+                    timeout_ms: Some(1_000),
+                    waiter_pid: Some(std::process::id()),
+                    waiter_start_time: crate::session_watch::capture_process_start_time(
+                        std::process::id(),
+                    ),
+                },
+            )
+            .await
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        let oversized_id = backend
+            .insert_message(&NewMessage {
+                from_addr: Some("sender".into()),
+                to_addr: "primary".into(),
+                cc: Some("addr:a".into()),
+                kind: "note".into(),
+                attention: Attention::Background,
+                body: "x".repeat(proto::MAX_JSONL_FRAME_BYTES + 1),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .id;
+        let following_id = backend
+            .insert_message(&NewMessage {
+                from_addr: Some("sender".into()),
+                to_addr: "primary".into(),
+                cc: Some("addr:a".into()),
+                kind: "note".into(),
+                attention: Attention::Background,
+                body: "following".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            })
+            .await
+            .unwrap()
+            .id;
+
+        let wait = waiter.await.unwrap();
+        match wait {
+            Response::Message {
+                id, delivery_role, ..
+            } => {
+                assert_eq!(id, following_id);
+                assert_eq!(delivery_role, "cc");
+            }
+            other => panic!("expected following CC notification, got {other:?}"),
+        }
+        assert!(backend
+            .dispositions_for(oversized_id)
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(state
+            .status()
+            .await
+            .recent_errors
+            .iter()
+            .any(|error| error.kind == "OversizedCcNotificationFrame"));
     }
 
     #[tokio::test]
@@ -9097,6 +10439,7 @@ mod p3_tests {
     fn waiter_outcome_serializes_as_stable_kebab_case() {
         let values = [
             (WaiterOutcome::Message, "message"),
+            (WaiterOutcome::DeliveryQuarantined, "delivery-quarantined"),
             (WaiterOutcome::IdleTimeout, "idle-timeout"),
             (WaiterOutcome::PresenceEnded, "presence-ended"),
             (WaiterOutcome::AbnormalExit, "abnormal-exit"),
@@ -9694,6 +11037,7 @@ mod p3_tests {
             Some(5_000),
             Some(std::process::id()),
             crate::session_watch::capture_process_start_time(std::process::id()),
+            true,
             Duration::from_millis(20),
         )
         .await;
@@ -10020,7 +11364,28 @@ pub mod test_support {
         }
 
         pub async fn request(&self, request: Request) -> Response {
-            handle_request(self.state.clone(), request).await.0
+            let hello = proto::client_hello("test");
+            handle_request_with_capabilities(
+                self.state.clone(),
+                request,
+                peer_supports_delivery_quarantine(&hello),
+            )
+            .await
+            .0
+        }
+
+        pub async fn request_without_delivery_quarantine(&self, request: Request) -> Response {
+            let mut hello = proto::client_hello("test");
+            hello
+                .capabilities
+                .retain(|capability| capability != proto::CAP_DELIVERY_QUARANTINE_V1);
+            handle_request_with_capabilities(
+                self.state.clone(),
+                request,
+                peer_supports_delivery_quarantine(&hello),
+            )
+            .await
+            .0
         }
 
         pub async fn request_with_action(&self, request: Request) -> (Response, TestClientAction) {
@@ -10076,6 +11441,7 @@ pub mod test_support {
                 Some(timeout_ms),
                 Some(std::process::id()),
                 crate::session_watch::capture_process_start_time(std::process::id()),
+                true,
                 idle_ttl,
             )
             .await

@@ -5,14 +5,444 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use telex::application_client::{
+    ApplicationClient, ApplicationClientConfig, ApplicationClientError, ApplicationResponsibility,
+    LogicalStoreId, OperationId, PayloadIdentity, RecoveryHandle,
+};
 use telex::backend::postgres::{make_tls, sanitize_ident, PgBackend};
 use telex::backend::Backend;
 use telex::daemon::test_support::{registered_epoch, send_request, TestDaemon};
 use telex::daemon_ipc::{self as proto, Request, Response, WatchPidSpec};
-use telex::model::{now_ms, Attention, DeliveryOutcome, NewMessage};
+use telex::model::{
+    now_ms, ApplicationMessageOperation, ApplicationOperationBegin, Attention, DeliveryOutcome,
+    Disposition, NewApplicationOperation, NewMessage,
+};
 use telex::profiles::{self, BackendProfile, ConfigFile};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[tokio::test]
+async fn application_client_schema_v3_operation_smoke() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) = pg_url_or_skip("application_client_schema_v3_operation_smoke") else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let schema = sanitize_ident(&format!(
+        "telex_app_client_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .unwrap();
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+    let backend = PgBackend::connect_with(cfg.clone(), Some(&schema))
+        .await
+        .unwrap();
+    backend.init_schema().await.unwrap();
+    let store_id = backend.logical_store_id().await.unwrap();
+    let operation = NewApplicationOperation {
+        logical_store_id: store_id,
+        application_responsibility: "postgres-smoke".into(),
+        operation_id: "operation-1".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: "fingerprint".into(),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    assert!(matches!(
+        backend
+            .begin_application_operation(&operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Replay(existing)
+            if existing.payload_fingerprint == operation.payload_fingerprint
+    ));
+    let mut mismatched_operation = operation.clone();
+    mismatched_operation.payload_fingerprint = "different-fingerprint".into();
+    assert!(matches!(
+        backend
+            .begin_application_operation(&mismatched_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::FingerprintMismatch(existing)
+            if existing.payload_fingerprint == operation.payload_fingerprint
+    ));
+    assert_eq!(
+        backend
+            .complete_application_operation(
+                &operation.logical_store_id,
+                &operation.application_responsibility,
+                &operation.operation_id,
+                "accepted",
+                Some("{}"),
+                None,
+            )
+            .await
+            .unwrap()
+            .state,
+        "accepted"
+    );
+    let parent = backend
+        .insert_message(&NewMessage {
+            from_addr: Some("postgres:target".into()),
+            to_addr: "postgres:sender".into(),
+            kind: "request".into(),
+            attention: Attention::Background,
+            body: "parent".into(),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let reply_operation = NewApplicationOperation {
+        logical_store_id: operation.logical_store_id.clone(),
+        application_responsibility: "postgres-smoke".into(),
+        operation_id: "reply-operation".into(),
+        operation_kind: "reply".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: format!("[{},[]]", parent.id),
+        payload_fingerprint: "reply-fingerprint".into(),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&reply_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    let metadata = r#"{"urn:test:opaque":{"value":"postgres"}}"#;
+    let reply = backend
+        .insert_application_message(
+            &NewMessage {
+                parent_id: Some(parent.id),
+                from_addr: Some("postgres:sender".into()),
+                to_addr: "postgres:target".into(),
+                kind: "reply".into(),
+                attention: Attention::Background,
+                body: "reply".into(),
+                metadata: Some(metadata.into()),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            },
+            &ApplicationMessageOperation {
+                logical_store_id: reply_operation.logical_store_id.clone(),
+                application_responsibility: reply_operation.application_responsibility.clone(),
+                operation_id: reply_operation.operation_id.clone(),
+                payload_fingerprint: reply_operation.payload_fingerprint.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.metadata.as_deref(), Some(metadata));
+    assert!(backend
+        .thread_messages(parent.thread_id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|message| message.id == reply.id && message.metadata.as_deref() == Some(metadata)));
+
+    let comparable_digest = "c".repeat(64);
+    let pending_operation = NewApplicationOperation {
+        logical_store_id: operation.logical_store_id.clone(),
+        application_responsibility: "postgres-public-client".into(),
+        operation_id: "public-reconcile".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: comparable_digest.clone(),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&pending_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    backend
+        .insert_application_message(
+            &NewMessage {
+                from_addr: Some("postgres:sender".into()),
+                to_addr: "postgres:target".into(),
+                kind: "note".into(),
+                attention: Attention::Background,
+                body: "public reconcile".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            },
+            &ApplicationMessageOperation {
+                logical_store_id: pending_operation.logical_store_id.clone(),
+                application_responsibility: pending_operation.application_responsibility.clone(),
+                operation_id: pending_operation.operation_id.clone(),
+                payload_fingerprint: comparable_digest.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let config = ConfigFile {
+        default: Some("pg-public-client".into()),
+        backends: BTreeMap::from([(
+            "pg-public-client".into(),
+            BackendProfile {
+                kind: "postgres".into(),
+                path: None,
+                url: Some(url.clone()),
+                auth: Some("password".into()),
+                password_env: None,
+                password_command: None,
+                schema: Some(schema.clone()),
+                entra_cred: None,
+                entra_scope: None,
+            },
+        )]),
+    };
+    let config_path = write_temp_config("application-client-public", &config);
+    let previous_config = std::env::var_os("TELEX_CONFIG");
+    std::env::set_var("TELEX_CONFIG", &config_path);
+    let client = ApplicationClient::connect(ApplicationClientConfig {
+        responsibility: ApplicationResponsibility("postgres-public-client".into()),
+        backend: Some("pg-public-client".into()),
+        db_override: None,
+    })
+    .await
+    .unwrap();
+    let noncomparable = RecoveryHandle {
+        logical_store_id: LogicalStoreId(pending_operation.logical_store_id.clone()),
+        responsibility: ApplicationResponsibility(
+            pending_operation.application_responsibility.clone(),
+        ),
+        operation_id: OperationId(pending_operation.operation_id.clone()),
+        payload_identity: PayloadIdentity {
+            algorithm: "sha256".into(),
+            digest: comparable_digest.clone(),
+            comparable: false,
+        },
+    };
+    assert!(matches!(
+        client.reconcile_operation(&noncomparable).await,
+        Err(ApplicationClientError::OperationMismatch { .. })
+    ));
+    assert_eq!(
+        backend
+            .application_operation(
+                &pending_operation.logical_store_id,
+                &pending_operation.application_responsibility,
+                &pending_operation.operation_id,
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        "pending"
+    );
+    let comparable = RecoveryHandle {
+        payload_identity: PayloadIdentity {
+            algorithm: "sha256".into(),
+            digest: comparable_digest,
+            comparable: true,
+        },
+        ..noncomparable
+    };
+    assert_eq!(
+        client
+            .reconcile_operation(&comparable)
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        "accepted"
+    );
+
+    let daemon = TestDaemon::new("pg-oversized-delivery-progress");
+    let store_key = profiles::store_key(config.backends.get("pg-public-client").unwrap(), None);
+    assert!(matches!(
+        daemon
+            .register(&store_key, "pg-receiver-session", "pg-frame-recipient")
+            .await,
+        Response::Registered { .. }
+    ));
+    let oversized_id = backend
+        .insert_message(&NewMessage {
+            from_addr: Some("pg-frame-sender".into()),
+            to_addr: "pg-frame-recipient".into(),
+            kind: "note".into(),
+            attention: Attention::Background,
+            body: "x".repeat(proto::MAX_JSONL_FRAME_BYTES + 1),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .id;
+    let following_id = backend
+        .insert_message(&NewMessage {
+            from_addr: Some("pg-frame-sender".into()),
+            to_addr: "pg-frame-recipient".into(),
+            kind: "note".into(),
+            attention: Attention::Background,
+            body: "following".into(),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .id;
+    assert!(matches!(
+        daemon
+            .wait(
+                &store_key,
+                "pg-receiver-session",
+                "pg-frame-recipient",
+                1_000,
+            )
+            .await,
+        Response::DeliveryQuarantined {
+            message_id,
+            ref recipient,
+            serialized_bytes,
+            max_bytes,
+            may_continue: true,
+        } if message_id == oversized_id
+            && recipient == "pg-frame-recipient"
+            && serialized_bytes > max_bytes
+    ));
+    assert!(backend
+        .dispositions_for(oversized_id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|disposition| {
+            disposition.recipient == "pg-frame-recipient"
+                && disposition.state == Disposition::Rejected.as_str()
+                && disposition.by_principal.as_deref() == Some("daemon")
+                && disposition.origin.as_deref() == Some("daemon-quarantine")
+                && disposition.note.as_deref().is_some_and(|note| {
+                    note.contains("serialized_bytes=") && note.contains("max_bytes=")
+                })
+        }));
+    let quarantine_deltas = backend.state_delta_page(0, 1_000).await.unwrap();
+    for kind in ["acknowledgment", "disposition"] {
+        assert!(quarantine_deltas.deltas.iter().any(|delta| {
+            delta.axis == kind
+                && delta
+                    .payload_json
+                    .contains("\"evidence\":\"daemon-quarantine\"")
+                && delta.payload_json.contains("\"by_principal\":\"daemon\"")
+        }));
+    }
+    assert!(matches!(
+        daemon
+            .request(Request::Detach {
+                store_key: store_key.clone(),
+                session_id: "pg-receiver-session".into(),
+                address: "pg-frame-recipient".into(),
+            })
+            .await,
+        Response::Ack { .. }
+    ));
+    let original_instance_id = daemon.instance_id().to_string();
+    drop(daemon);
+    let restarted = TestDaemon::new("pg-oversized-delivery-progress-restart");
+    assert_ne!(restarted.instance_id(), original_instance_id);
+    assert!(matches!(
+        restarted
+            .register(&store_key, "pg-receiver-session", "pg-frame-recipient")
+            .await,
+        Response::Registered { .. }
+    ));
+    let restarted_backend = restarted.backend(&store_key).await.unwrap();
+    assert!(restarted_backend
+        .dispositions_for(oversized_id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|disposition| {
+            disposition.recipient == "pg-frame-recipient"
+                && disposition.state == Disposition::Rejected.as_str()
+                && disposition.by_principal.as_deref() == Some("daemon")
+                && disposition.origin.as_deref() == Some("daemon-quarantine")
+        }));
+    assert!(matches!(
+        restarted
+            .wait(
+                &store_key,
+                "pg-receiver-session",
+                "pg-frame-recipient",
+                1_000,
+            )
+            .await,
+        Response::Message { id, .. } if id == following_id
+    ));
+
+    for (suffix, version) in [("v3_no_origin", 3), ("v2_upgrade", 2)] {
+        let repair_schema = sanitize_ident(&format!(
+            "tx_or_{}_{}_{}",
+            suffix,
+            std::process::id(),
+            now_ms()
+        ))
+        .unwrap();
+        admin_exec(
+            &cfg,
+            &format!(
+                "CREATE SCHEMA {repair_schema};
+                 CREATE TABLE {repair_schema}.dispositions (
+                    id bigserial PRIMARY KEY,
+                    message_id bigint NOT NULL,
+                    recipient text NOT NULL,
+                    state text NOT NULL,
+                    note text,
+                    by_principal text,
+                    at_ms bigint NOT NULL
+                 );
+                 CREATE TABLE {repair_schema}.telex_schema_version (
+                    singleton integer NOT NULL DEFAULT 1 UNIQUE,
+                    version bigint NOT NULL
+                 );
+                 INSERT INTO {repair_schema}.telex_schema_version(singleton, version)
+                 VALUES (1, {version});"
+            ),
+        )
+        .await
+        .unwrap();
+        let repaired = PgBackend::connect_with(cfg.clone(), Some(&repair_schema))
+            .await
+            .unwrap();
+        repaired.init_schema().await.unwrap();
+        repaired
+            .insert_disposition(99, "recipient", "handled", None, Some("application"))
+            .await
+            .unwrap();
+        assert_eq!(repaired.dispositions_for(99).await.unwrap()[0].origin, None);
+        drop(repaired);
+        admin_exec(
+            &cfg,
+            &format!("DROP SCHEMA IF EXISTS {repair_schema} CASCADE"),
+        )
+        .await
+        .unwrap();
+    }
+    restore_env("TELEX_CONFIG", previous_config);
+    drop(client);
+    drop(backend);
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+}
 
 fn pg_url_or_skip(test_name: &str) -> Option<String> {
     let require = std::env::var("TELEX_PG_REQUIRE")

@@ -3127,6 +3127,7 @@ mod tests {
             backend: "sqlite".to_string(),
             session_id: "s1".to_string(),
             address: address.to_string(),
+            capability: crate::daemon_ipc::StationCapability::Bidirectional,
             occupant: "tester".to_string(),
             host: "host".to_string(),
             waiters: live_waiters_count,
