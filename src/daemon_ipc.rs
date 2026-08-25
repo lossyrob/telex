@@ -181,6 +181,9 @@ pub enum Request {
         tags: Option<String>,
         #[serde(default, skip_serializing_if = "Vec::is_empty")]
         watch_pids: Vec<WatchPidSpec>,
+        /// Replace existing watch-pid liveness anchors during a push-preserving refresh.
+        #[serde(default, skip_serializing_if = "is_false")]
+        replace_watch_pids: bool,
         #[serde(default)]
         recovery: bool,
         /// Optional harness-neutral on-deliver handler argv. When present, the daemon
@@ -596,6 +599,9 @@ pub enum PushDeliveryHealth {
     /// Backlog exists but no push attempt is recorded yet (e.g. just after a daemon restart, before
     /// the next sweep). Not confidently attended and not deaf; resolves on the next sweep.
     Probing,
+    /// The harness is reachable but intentionally deferred delivery until its active turn becomes
+    /// idle. This is healthy push coverage, not a failed/unreachable bridge.
+    Deferred,
     /// The last accepted push's backstop has elapsed with no fresh accept and no failure yet — an
     /// earlier-than-deaf hint that a previously-live bridge may have gone away (e.g. session suspend).
     StaleAccepted,
@@ -1014,6 +1020,7 @@ mod tests {
             PushDeliveryHealth::NoBacklog,
             PushDeliveryHealth::Delivering,
             PushDeliveryHealth::Probing,
+            PushDeliveryHealth::Deferred,
             PushDeliveryHealth::StaleAccepted,
             PushDeliveryHealth::Failing,
         ] {
@@ -1055,7 +1062,7 @@ mod tests {
     }
 
     #[test]
-    fn register_replace_on_deliver_is_additive_and_defaults_false() {
+    fn register_replace_flags_are_additive_and_default_false() {
         let old_wire = serde_json::json!({
             "op": "register",
             "store_key": "sqlite:/tmp/test.db",
@@ -1068,6 +1075,7 @@ mod tests {
             request,
             Request::Register {
                 replace_on_deliver: false,
+                replace_watch_pids: false,
                 ..
             }
         ));
@@ -1078,13 +1086,15 @@ mod tests {
             "address": "addr:a",
             "session_id": "s1",
             "occupant": "tester",
-            "replace_on_deliver": true
+            "replace_on_deliver": true,
+            "replace_watch_pids": true
         });
         let request: Request = serde_json::from_value(new_wire.clone()).unwrap();
         assert!(matches!(
             request,
             Request::Register {
                 replace_on_deliver: true,
+                replace_watch_pids: true,
                 ..
             }
         ));
@@ -1092,6 +1102,11 @@ mod tests {
         assert_eq!(
             serde_json::to_value(request).unwrap()["replace_on_deliver"],
             new_wire["replace_on_deliver"]
+        );
+        assert_eq!(
+            serde_json::to_value(serde_json::from_value::<Request>(new_wire.clone()).unwrap())
+                .unwrap()["replace_watch_pids"],
+            new_wire["replace_watch_pids"]
         );
     }
 
