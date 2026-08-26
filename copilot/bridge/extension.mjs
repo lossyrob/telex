@@ -285,9 +285,15 @@ async function writeRegistry() {
   // make a live App bridge look absent during the brief partial-JSON window.
   await rename(registryTempPath, registryPath);
 }
-await writeRegistry();
+let registryWrite = Promise.resolve();
+function queueRegistryWrite() {
+  const next = registryWrite.catch(() => {}).then(writeRegistry);
+  registryWrite = next;
+  return next;
+}
+await queueRegistryWrite();
 const heartbeatTimer = setInterval(() => {
-  writeRegistry().catch(() => {});
+  queueRegistryWrite().catch(() => {});
 }, 15000);
 // Never let the heartbeat keep the process alive on its own.
 heartbeatTimer.unref?.();
@@ -300,6 +306,8 @@ const cleanup = async () => {
   try {
     clearInterval(heartbeatTimer);
   } catch {}
+  // Let a queued heartbeat finish before removing its temp or published registry.
+  await registryWrite.catch(() => {});
   await rm(registryTempPath, { force: true }).catch(() => {});
   try {
     server.close();
