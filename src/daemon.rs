@@ -5948,6 +5948,17 @@ mod p3_tests {
         false
     }
 
+    async fn wait_until_async(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if condition() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        condition()
+    }
+
     #[tokio::test]
     async fn on_deliver_fires_and_marks_pushed_on_success() {
         let state = test_state("on-deliver-fires");
@@ -6118,14 +6129,10 @@ mod p3_tests {
         );
         assert_eq!(state.on_deliver_cc_candidates(&store, &row).len(), 1);
         state.fire_on_deliver_on_commit(&store, &row);
-        let mut attempted = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, live, Instant::now()) {
-                attempted = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
+        let attempted = wait_until_async(Duration::from_secs(10), || {
+            state.on_deliver_should_skip(&member_key, live, Instant::now())
+        })
+        .await;
         assert!(attempted, "live CC should record an on-deliver attempt");
         assert!(
             wait_for_file(&descriptor_path, Duration::from_secs(3)),
@@ -7349,14 +7356,7 @@ mod p3_tests {
         assert!(matches!(drained, Response::Ack { .. }));
         // Async poll (yields to the runtime so the spawned sweep/child-process can progress; a
         // blocking wait would starve the current-thread executor).
-        let mut pushed = false;
-        for _ in 0..100 {
-            if marker.exists() {
-                pushed = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let pushed = wait_until_async(Duration::from_secs(10), || marker.exists()).await;
         assert!(
             pushed,
             "idle drain must re-push a still-unacked deferred message after the turn stops"
