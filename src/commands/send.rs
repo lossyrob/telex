@@ -135,6 +135,7 @@ async fn register_for_retry(store_key: &str, session_id: &str, address: &str) ->
             scope: None,
             tags: None,
             watch_pids: Vec::new(),
+            replace_watch_pids: false,
             recovery: true,
             on_deliver: None,
             replace_on_deliver: false,
