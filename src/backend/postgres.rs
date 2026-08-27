@@ -179,6 +179,12 @@ CREATE INDEX IF NOT EXISTS application_operations_cleanup_idx
     ON application_operations(
         logical_store_id, application_responsibility, completed_at_ms, updated_at_ms
     );
+CREATE TABLE IF NOT EXISTS application_operation_retention (
+    logical_store_id           text NOT NULL,
+    application_responsibility text NOT NULL,
+    generation                 bigint NOT NULL,
+    PRIMARY KEY(logical_store_id, application_responsibility)
+);
 CREATE TABLE IF NOT EXISTS application_operation_messages (
     logical_store_id           text NOT NULL,
     application_responsibility text NOT NULL,
@@ -2319,6 +2325,22 @@ impl Backend for PgBackend {
             .map(|r| map_application_operation(&r)))
     }
 
+    async fn application_operation_retention_generation(
+        &self,
+        scope: &ApplicationRecordScope,
+    ) -> Result<i64> {
+        let client = self.client().await?;
+        Ok(client
+            .query_opt(
+                "SELECT generation FROM application_operation_retention
+                 WHERE logical_store_id=$1 AND application_responsibility=$2",
+                &[&scope.logical_store_id, &scope.application_responsibility],
+            )
+            .await?
+            .map(|row| row.get("generation"))
+            .unwrap_or(0))
+    }
+
     async fn application_operation_message(
         &self,
         logical_store_id: &str,
@@ -2892,6 +2914,17 @@ impl Backend for PgBackend {
             .await?;
         }
         let operations_deleted = deleted_operation_ids.len() as i64;
+        if operations_deleted > 0 {
+            tx.execute(
+                "INSERT INTO application_operation_retention(
+                     logical_store_id, application_responsibility, generation
+                 ) VALUES ($1,$2,1)
+                 ON CONFLICT(logical_store_id, application_responsibility)
+                 DO UPDATE SET generation=application_operation_retention.generation+1",
+                &[&scope.logical_store_id, &scope.application_responsibility],
+            )
+            .await?;
+        }
         let compound_steps_deleted = tx
             .execute(
                 "WITH doomed AS (

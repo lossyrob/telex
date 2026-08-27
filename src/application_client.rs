@@ -295,6 +295,27 @@ pub struct RecoveryHandle {
     pub responsibility: ApplicationResponsibility,
     pub operation_id: OperationId,
     pub payload_identity: PayloadIdentity,
+    #[serde(default)]
+    pub retention_generation: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NotRecordedEvidence {
+    pub logical_store_id: LogicalStoreId,
+    pub responsibility: ApplicationResponsibility,
+    pub operation_id: OperationId,
+    pub payload_identity: PayloadIdentity,
+    pub retention_generation: i64,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OperationReconciliation {
+    Recorded(ApplicationOperationRecord),
+    NotRecorded(NotRecordedEvidence),
+    RetentionBoundaryCrossed {
+        staged_generation: Option<i64>,
+        current_generation: i64,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -937,6 +958,12 @@ impl ApplicationClient {
     pub async fn send(&self, request: SendRequest) -> Result<SendResult, ApplicationClientError> {
         self.require_sender(&request.sender)?;
         let fingerprint = payload_fingerprint(&request)?;
+        let recovery = self
+            .operation_reference(
+                request.operation_id.clone(),
+                PayloadIdentity::sha256(fingerprint.clone()),
+            )
+            .await?;
         let operation = NewApplicationOperation {
             logical_store_id: self.logical_store_id.0.clone(),
             application_responsibility: self.responsibility.0.clone(),
@@ -1035,20 +1062,14 @@ impl ApplicationClient {
                 }
                 return Err(ApplicationClientError::Indeterminate {
                     detail: format!("operation remains {}", existing.state),
-                    recovery: Box::new(self.recovery_handle(
-                        request.operation_id,
-                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
-                    )),
+                    recovery: Box::new(recovery.clone()),
                 });
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "needs-attach" => {}
             ApplicationOperationBegin::Replay(existing) => {
                 return Err(ApplicationClientError::Indeterminate {
                     detail: format!("operation remains {}", existing.state),
-                    recovery: Box::new(self.recovery_handle(
-                        request.operation_id,
-                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
-                    )),
+                    recovery: Box::new(recovery.clone()),
                 })
             }
             ApplicationOperationBegin::Started(_) => {}
@@ -1074,10 +1095,6 @@ impl ApplicationClient {
         let response = match self.request_staged(daemon_request, false).await {
             Ok(response) => response,
             Err(RequestFailure::WriteBoundaryUnknown(error)) => {
-                let recovery = self.recovery_handle(
-                    request.operation_id.clone(),
-                    PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
-                );
                 let _ = self
                     .backend
                     .complete_application_operation(
@@ -1142,7 +1159,7 @@ impl ApplicationClient {
                 Err(self
                     .finish_peer_failure(
                         &request.operation_id,
-                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                        &recovery,
                         &code,
                         needs_attach_reason,
                         error,
@@ -1156,6 +1173,12 @@ impl ApplicationClient {
     pub async fn reply(&self, request: ReplyRequest) -> Result<SendResult, ApplicationClientError> {
         self.require_sender(&request.sender)?;
         let fingerprint = reply_fingerprint(&request)?;
+        let recovery = self
+            .operation_reference(
+                request.operation_id.clone(),
+                PayloadIdentity::sha256(fingerprint.clone()),
+            )
+            .await?;
         let operation = NewApplicationOperation {
             logical_store_id: self.logical_store_id.0.clone(),
             application_responsibility: self.responsibility.0.clone(),
@@ -1254,20 +1277,14 @@ impl ApplicationClient {
                 }
                 return Err(ApplicationClientError::Indeterminate {
                     detail: format!("reply operation remains {}", existing.state),
-                    recovery: Box::new(self.recovery_handle(
-                        request.operation_id,
-                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
-                    )),
+                    recovery: Box::new(recovery.clone()),
                 });
             }
             ApplicationOperationBegin::Replay(existing) if existing.state == "needs-attach" => {}
             ApplicationOperationBegin::Replay(existing) => {
                 return Err(ApplicationClientError::Indeterminate {
                     detail: format!("reply operation remains {}", existing.state),
-                    recovery: Box::new(self.recovery_handle(
-                        request.operation_id,
-                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
-                    )),
+                    recovery: Box::new(recovery.clone()),
                 })
             }
             ApplicationOperationBegin::Started(_) => {}
@@ -1341,7 +1358,7 @@ impl ApplicationClient {
                 Err(self
                     .finish_peer_failure(
                         &request.operation_id,
-                        PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
+                        &recovery,
                         &code,
                         needs_attach_reason,
                         error,
@@ -1350,10 +1367,6 @@ impl ApplicationClient {
             }
             Ok(_) => Err(unexpected_response("reply")),
             Err(RequestFailure::WriteBoundaryUnknown(error)) => {
-                let recovery = self.recovery_handle(
-                    request.operation_id.clone(),
-                    PayloadIdentity::sha256(operation.payload_fingerprint.clone()),
-                );
                 let _ = self
                     .backend
                     .complete_application_operation(
@@ -1796,10 +1809,39 @@ impl ApplicationClient {
         )
     }
 
+    pub async fn operation_reference(
+        &self,
+        operation_id: OperationId,
+        payload_identity: PayloadIdentity,
+    ) -> Result<RecoveryHandle, ApplicationClientError> {
+        if operation_id.0.trim().is_empty() {
+            return Err(ApplicationClientError::InvalidRequest(
+                "operation id must not be empty".to_string(),
+            ));
+        }
+        if !payload_identity.comparable {
+            return Err(ApplicationClientError::InvalidRequest(
+                "operation reference requires comparable payload identity".to_string(),
+            ));
+        }
+        let retention_generation = self
+            .backend
+            .application_operation_retention_generation(&self.scope())
+            .await
+            .map_err(unavailable)?;
+        Ok(RecoveryHandle {
+            logical_store_id: self.logical_store_id.clone(),
+            responsibility: self.responsibility.clone(),
+            operation_id,
+            payload_identity,
+            retention_generation: Some(retention_generation),
+        })
+    }
+
     pub async fn reconcile_operation(
         &self,
         reference: &RecoveryHandle,
-    ) -> Result<Option<ApplicationOperationRecord>, ApplicationClientError> {
+    ) -> Result<OperationReconciliation, ApplicationClientError> {
         if reference.logical_store_id != self.logical_store_id
             || reference.responsibility != self.responsibility
         {
@@ -1808,8 +1850,30 @@ impl ApplicationClient {
                 current: self.logical_store_id.clone(),
             });
         }
-        self.reconcile_operation_current(&reference.operation_id, &reference.payload_identity)
+        if let Some(record) = self
+            .reconcile_operation_current(&reference.operation_id, &reference.payload_identity)
+            .await?
+        {
+            return Ok(OperationReconciliation::Recorded(record));
+        }
+        let current_generation = self
+            .backend
+            .application_operation_retention_generation(&self.scope())
             .await
+            .map_err(unavailable)?;
+        if reference.retention_generation == Some(current_generation) {
+            return Ok(OperationReconciliation::NotRecorded(NotRecordedEvidence {
+                logical_store_id: reference.logical_store_id.clone(),
+                responsibility: reference.responsibility.clone(),
+                operation_id: reference.operation_id.clone(),
+                payload_identity: reference.payload_identity.clone(),
+                retention_generation: current_generation,
+            }));
+        }
+        Ok(OperationReconciliation::RetentionBoundaryCrossed {
+            staged_generation: reference.retention_generation,
+            current_generation,
+        })
     }
 
     async fn reconcile_operation_current(
@@ -1893,9 +1957,20 @@ impl ApplicationClient {
         &self,
         reference: &RecoveryHandle,
     ) -> Result<ReceiptAxes, ApplicationClientError> {
-        let record = self.reconcile_operation(reference).await?.ok_or_else(|| {
-            ApplicationClientError::InvalidRequest("operation does not exist".to_string())
-        })?;
+        let record = match self.reconcile_operation(reference).await? {
+            OperationReconciliation::Recorded(record) => record,
+            OperationReconciliation::NotRecorded(_) => {
+                return Err(ApplicationClientError::InvalidRequest(
+                    "operation is authoritatively not recorded".to_string(),
+                ))
+            }
+            OperationReconciliation::RetentionBoundaryCrossed { .. } => {
+                return Err(ApplicationClientError::Indeterminate {
+                    detail: "operation evidence crossed a retention boundary".to_string(),
+                    recovery: Box::new(reference.clone()),
+                })
+            }
+        };
         match record.state.as_str() {
             "accepted" | "completed" | "duplicate" => {}
             "rejected" | "needs-attach" => {
@@ -2024,7 +2099,7 @@ impl ApplicationClient {
     async fn finish_peer_failure(
         &self,
         operation_id: &OperationId,
-        payload_identity: PayloadIdentity,
+        recovery: &RecoveryHandle,
         code: &str,
         needs_attach_reason: Option<NeedsAttachReason>,
         error: ApplicationClientError,
@@ -2060,7 +2135,6 @@ impl ApplicationClient {
                 Ok(error)
             }
             PeerFailureDisposition::Indeterminate => {
-                let recovery = self.recovery_handle(operation_id.clone(), payload_identity);
                 self.backend
                     .complete_application_operation(
                         &self.logical_store_id.0,
@@ -2068,13 +2142,13 @@ impl ApplicationClient {
                         &operation_id.0,
                         "indeterminate",
                         Some(&error_json),
-                        Some(&serde_json::to_string(&recovery).map_err(invalid)?),
+                        Some(&serde_json::to_string(recovery).map_err(invalid)?),
                     )
                     .await
                     .map_err(unavailable)?;
                 Ok(ApplicationClientError::Indeterminate {
                     detail: error.to_string(),
-                    recovery: Box::new(recovery),
+                    recovery: Box::new(recovery.clone()),
                 })
             }
         }
@@ -2318,19 +2392,6 @@ impl ApplicationClient {
                 reason: MembershipLossReason::NeedsAttach,
                 detail: "address is not attached by this application client".to_string(),
             })
-    }
-
-    fn recovery_handle(
-        &self,
-        operation_id: OperationId,
-        payload_identity: PayloadIdentity,
-    ) -> RecoveryHandle {
-        RecoveryHandle {
-            logical_store_id: self.logical_store_id.clone(),
-            responsibility: self.responsibility.clone(),
-            operation_id,
-            payload_identity,
-        }
     }
 
     fn clear_outstanding_ack(&self, handle: &AckHandle) {
@@ -3009,6 +3070,7 @@ mod tests {
                 responsibility: ApplicationResponsibility("sender-app".into()),
                 operation_id: OperationId("oversized-send".into()),
                 payload_identity: PayloadIdentity::sha256(fingerprint),
+                retention_generation: None,
             })
             .await
             .unwrap();
@@ -3049,6 +3111,7 @@ mod tests {
                 responsibility: ApplicationResponsibility("sender-app".into()),
                 operation_id: OperationId("oversized-send".into()),
                 payload_identity: PayloadIdentity::sha256("d".repeat(64)),
+                retention_generation: None,
             })
             .await
             .unwrap();
@@ -3345,6 +3408,7 @@ mod tests {
                 digest: payload_fingerprint.clone(),
                 comparable: false,
             },
+            retention_generation: None,
         };
         assert!(matches!(
             current_client
@@ -3387,6 +3451,7 @@ mod tests {
             responsibility: ApplicationResponsibility("watcher".into()),
             operation_id: OperationId("op-crash-window".into()),
             payload_identity: PayloadIdentity::sha256(payload_fingerprint.clone()),
+            retention_generation: None,
         };
         assert!(matches!(
             client.reconcile_operation(&mismatched_reference).await,
@@ -3402,6 +3467,7 @@ mod tests {
                 digest: payload_fingerprint.clone(),
                 comparable: false,
             },
+            retention_generation: None,
         };
         assert!(matches!(
             client.reconcile_operation(&noncomparable_reference).await,
@@ -3416,18 +3482,149 @@ mod tests {
                 .state,
             "pending"
         );
-        let reconciled = client
-            .reconcile_operation(&client.recovery_handle(
+        let reference = client
+            .operation_reference(
                 OperationId("op-crash-window".into()),
                 PayloadIdentity::sha256(payload_fingerprint),
-            ))
+            )
             .await
-            .unwrap()
             .unwrap();
+        let OperationReconciliation::Recorded(reconciled) =
+            client.reconcile_operation(&reference).await.unwrap()
+        else {
+            panic!("expected recorded operation");
+        };
         assert_eq!(reconciled.state, "accepted");
         let result: SendResult =
             serde_json::from_str(reconciled.result_json.as_deref().unwrap()).unwrap();
         assert_eq!(result.recipient, "target");
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn not_recorded_is_authoritative_only_within_retention_generation() {
+        let path = std::env::temp_dir()
+            .join(format!(
+                "telex-application-not-recorded-{}-{}.db",
+                std::process::id(),
+                now_ms()
+            ))
+            .to_string_lossy()
+            .into_owned();
+        let profile = crate::profiles::implicit_sqlite(Some(&path));
+        let backend = Arc::new(SqliteBackend::open(&path).unwrap());
+        backend.init_schema().await.unwrap();
+        let client = ApplicationClient {
+            responsibility: ApplicationResponsibility("watcher".into()),
+            runtime_id: RuntimeId::fresh().unwrap(),
+            logical_store_id: LogicalStoreId::persisted(backend.logical_store_id().await.unwrap()),
+            store_key: crate::profiles::store_key(&profile, Some(&path)),
+            profile,
+            backend: backend.clone(),
+            memberships: Mutex::new(BTreeMap::new()),
+            outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
+        };
+        let reference = client
+            .operation_reference(
+                OperationId("never-submitted".into()),
+                PayloadIdentity::sha256("a".repeat(64)),
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            client.reconcile_operation(&reference).await.unwrap(),
+            OperationReconciliation::NotRecorded(NotRecordedEvidence {
+                operation_id: OperationId(ref operation_id),
+                retention_generation: 0,
+                ..
+            }) if operation_id == "never-submitted"
+        ));
+
+        let other_terminal = NewApplicationOperation {
+            logical_store_id: client.logical_store_id.0.clone(),
+            application_responsibility: "other-app".into(),
+            operation_id: "other-cleanup-boundary".into(),
+            operation_kind: "send".into(),
+            sender: "other".into(),
+            recipients_json: "[]".into(),
+            payload_fingerprint: "c".repeat(64),
+            retry_budget: 0,
+            created_at_ms: 1,
+        };
+        backend
+            .begin_application_operation(&other_terminal)
+            .await
+            .unwrap();
+        backend
+            .complete_application_operation(
+                &other_terminal.logical_store_id,
+                &other_terminal.application_responsibility,
+                &other_terminal.operation_id,
+                "rejected",
+                Some("{}"),
+                None,
+            )
+            .await
+            .unwrap();
+        backend
+            .cleanup_application_records(
+                &ApplicationRecordScope {
+                    logical_store_id: other_terminal.logical_store_id.clone(),
+                    application_responsibility: other_terminal.application_responsibility.clone(),
+                },
+                RetentionPolicy {
+                    completed_before_ms: i64::MAX,
+                    max_delete: 1,
+                },
+            )
+            .await
+            .unwrap();
+        assert!(matches!(
+            client.reconcile_operation(&reference).await.unwrap(),
+            OperationReconciliation::NotRecorded(_)
+        ));
+
+        let terminal = NewApplicationOperation {
+            logical_store_id: client.logical_store_id.0.clone(),
+            application_responsibility: client.responsibility.0.clone(),
+            operation_id: "cleanup-boundary".into(),
+            operation_kind: "send".into(),
+            sender: "watcher".into(),
+            recipients_json: "[]".into(),
+            payload_fingerprint: "b".repeat(64),
+            retry_budget: 0,
+            created_at_ms: 1,
+        };
+        backend
+            .begin_application_operation(&terminal)
+            .await
+            .unwrap();
+        backend
+            .complete_application_operation(
+                &terminal.logical_store_id,
+                &terminal.application_responsibility,
+                &terminal.operation_id,
+                "rejected",
+                Some("{}"),
+                None,
+            )
+            .await
+            .unwrap();
+        client
+            .cleanup(RetentionPolicy {
+                completed_before_ms: i64::MAX,
+                max_delete: 1,
+            })
+            .await
+            .unwrap();
+        assert!(matches!(
+            client.reconcile_operation(&reference).await.unwrap(),
+            OperationReconciliation::RetentionBoundaryCrossed {
+                staged_generation: Some(0),
+                current_generation: 1,
+            }
+        ));
     }
 
     #[cfg(feature = "sqlite")]
@@ -3524,10 +3721,13 @@ mod tests {
             .await
             .unwrap();
         let peer_error = ApplicationClientError::Unavailable("peer internal".into());
-        let recovery = client.recovery_handle(
-            operation_id.clone(),
-            PayloadIdentity::sha256(payload_fingerprint),
-        );
+        let recovery = client
+            .operation_reference(
+                operation_id.clone(),
+                PayloadIdentity::sha256(payload_fingerprint),
+            )
+            .await
+            .unwrap();
         backend
             .complete_application_operation(
                 &logical_store_id.0,

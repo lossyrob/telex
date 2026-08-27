@@ -14,8 +14,8 @@ use telex::backend::Backend;
 use telex::daemon::test_support::{registered_epoch, send_request, TestDaemon};
 use telex::daemon_ipc::{self as proto, Request, Response, WatchPidSpec};
 use telex::model::{
-    now_ms, ApplicationMessageOperation, ApplicationOperationBegin, Attention, DeliveryOutcome,
-    Disposition, NewApplicationOperation, NewMessage,
+    now_ms, ApplicationMessageOperation, ApplicationOperationBegin, ApplicationRecordScope,
+    Attention, DeliveryOutcome, Disposition, NewApplicationOperation, NewMessage, RetentionPolicy,
 };
 use telex::profiles::{self, BackendProfile, ConfigFile};
 
@@ -220,6 +220,123 @@ async fn application_client_schema_v3_operation_smoke() {
     })
     .await
     .unwrap();
+    let missing_reference = client
+        .operation_reference(
+            OperationId("postgres-not-recorded".into()),
+            PayloadIdentity {
+                algorithm: "sha256".into(),
+                digest: "c".repeat(64),
+                comparable: true,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        client
+            .reconcile_operation(&missing_reference)
+            .await
+            .unwrap(),
+        telex::application_client::OperationReconciliation::NotRecorded(evidence)
+            if evidence.operation_id.0 == "postgres-not-recorded"
+                && evidence.logical_store_id == *client.logical_store_id()
+    ));
+    let other_cleanup_operation = NewApplicationOperation {
+        logical_store_id: pending_operation.logical_store_id.clone(),
+        application_responsibility: "postgres-other-client".into(),
+        operation_id: "postgres-other-cleanup-boundary".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:other".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: "e".repeat(64),
+        retry_budget: 0,
+        created_at_ms: 1,
+    };
+    backend
+        .begin_application_operation(&other_cleanup_operation)
+        .await
+        .unwrap();
+    backend
+        .complete_application_operation(
+            &other_cleanup_operation.logical_store_id,
+            &other_cleanup_operation.application_responsibility,
+            &other_cleanup_operation.operation_id,
+            "rejected",
+            Some("{}"),
+            None,
+        )
+        .await
+        .unwrap();
+    backend
+        .cleanup_application_records(
+            &ApplicationRecordScope {
+                logical_store_id: other_cleanup_operation.logical_store_id.clone(),
+                application_responsibility: other_cleanup_operation
+                    .application_responsibility
+                    .clone(),
+            },
+            RetentionPolicy {
+                completed_before_ms: i64::MAX,
+                max_delete: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        client
+            .reconcile_operation(&missing_reference)
+            .await
+            .unwrap(),
+        telex::application_client::OperationReconciliation::NotRecorded(_)
+    ));
+    let cleanup_operation = NewApplicationOperation {
+        logical_store_id: pending_operation.logical_store_id.clone(),
+        application_responsibility: pending_operation.application_responsibility.clone(),
+        operation_id: "postgres-cleanup-boundary".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: "d".repeat(64),
+        retry_budget: 0,
+        created_at_ms: 1,
+    };
+    backend
+        .begin_application_operation(&cleanup_operation)
+        .await
+        .unwrap();
+    backend
+        .complete_application_operation(
+            &cleanup_operation.logical_store_id,
+            &cleanup_operation.application_responsibility,
+            &cleanup_operation.operation_id,
+            "rejected",
+            Some("{}"),
+            None,
+        )
+        .await
+        .unwrap();
+    backend
+        .cleanup_application_records(
+            &ApplicationRecordScope {
+                logical_store_id: cleanup_operation.logical_store_id.clone(),
+                application_responsibility: cleanup_operation.application_responsibility.clone(),
+            },
+            RetentionPolicy {
+                completed_before_ms: i64::MAX,
+                max_delete: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        client
+            .reconcile_operation(&missing_reference)
+            .await
+            .unwrap(),
+        telex::application_client::OperationReconciliation::RetentionBoundaryCrossed {
+            staged_generation: Some(0),
+            current_generation: 1,
+        }
+    ));
     let noncomparable = RecoveryHandle {
         logical_store_id: LogicalStoreId(pending_operation.logical_store_id.clone()),
         responsibility: ApplicationResponsibility(
@@ -231,6 +348,7 @@ async fn application_client_schema_v3_operation_smoke() {
             digest: comparable_digest.clone(),
             comparable: false,
         },
+        retention_generation: None,
     };
     assert!(matches!(
         client.reconcile_operation(&noncomparable).await,
@@ -257,15 +375,12 @@ async fn application_client_schema_v3_operation_smoke() {
         },
         ..noncomparable
     };
-    assert_eq!(
-        client
-            .reconcile_operation(&comparable)
-            .await
-            .unwrap()
-            .unwrap()
-            .state,
-        "accepted"
-    );
+    let telex::application_client::OperationReconciliation::Recorded(reconciled) =
+        client.reconcile_operation(&comparable).await.unwrap()
+    else {
+        panic!("expected recorded operation");
+    };
+    assert_eq!(reconciled.state, "accepted");
 
     let daemon = TestDaemon::new("pg-oversized-delivery-progress");
     let store_key = profiles::store_key(config.backends.get("pg-public-client").unwrap(), None);

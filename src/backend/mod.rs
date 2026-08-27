@@ -366,6 +366,13 @@ pub trait Backend: Send + Sync {
         bail!("application_operation: not supported by this backend")
     }
 
+    async fn application_operation_retention_generation(
+        &self,
+        _scope: &ApplicationRecordScope,
+    ) -> Result<i64> {
+        bail!("application_operation_retention_generation: not supported by this backend")
+    }
+
     async fn application_operation_message(
         &self,
         _logical_store_id: &str,

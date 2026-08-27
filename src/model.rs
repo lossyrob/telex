@@ -383,7 +383,7 @@ pub struct NewApplicationOperation {
     pub created_at_ms: i64,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApplicationOperationRecord {
     pub logical_store_id: String,
     pub application_responsibility: String,

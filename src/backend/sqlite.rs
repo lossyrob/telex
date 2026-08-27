@@ -1071,6 +1071,12 @@ fn ensure_v3_invariants(c: &Connection) -> Result<()> {
              ON application_operations(
                 logical_store_id, application_responsibility, completed_at_ms, updated_at_ms
              );
+         CREATE TABLE IF NOT EXISTS application_operation_retention (
+             logical_store_id           TEXT NOT NULL,
+             application_responsibility TEXT NOT NULL,
+             generation                 INTEGER NOT NULL,
+             PRIMARY KEY(logical_store_id, application_responsibility)
+         );
          CREATE TABLE IF NOT EXISTS application_operation_messages (
              logical_store_id           TEXT NOT NULL,
              application_responsibility TEXT NOT NULL,
@@ -3269,6 +3275,24 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn application_operation_retention_generation(
+        &self,
+        scope: &ApplicationRecordScope,
+    ) -> Result<i64> {
+        let scope = scope.clone();
+        self.run(move |c| {
+            Ok(c.query_row(
+                "SELECT COALESCE((
+                     SELECT generation FROM application_operation_retention
+                     WHERE logical_store_id=?1 AND application_responsibility=?2
+                 ), 0)",
+                params![scope.logical_store_id, scope.application_responsibility],
+                |row| row.get(0),
+            )?)
+        })
+        .await
+    }
+
     async fn application_operation_message(
         &self,
         logical_store_id: &str,
@@ -3865,6 +3889,16 @@ impl Backend for SqliteBackend {
                     )?;
                 }
                 let operations_deleted = deleted_operation_ids.len() as i64;
+                if operations_deleted > 0 {
+                    c.execute(
+                        "INSERT INTO application_operation_retention(
+                             logical_store_id, application_responsibility, generation
+                         ) VALUES (?1,?2,1)
+                         ON CONFLICT(logical_store_id, application_responsibility)
+                         DO UPDATE SET generation=generation+1",
+                        params![scope.logical_store_id, scope.application_responsibility],
+                    )?;
+                }
                 let compound_steps_deleted = c.execute(
                     "DELETE FROM application_compound_steps
                      WHERE rowid IN (

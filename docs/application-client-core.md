@@ -57,8 +57,14 @@ versioned evidence and must not be interpreted as backend table layouts.
   evidence. Prior completion is adopted only for the same operation ID and a
   comparable matching payload digest.
 - `RecoveryHandle` stages operation ID, responsibility, and opaque logical-store
-  identity. Reconciliation with a handle from another store fails with
+  identity plus the durable operation-evidence retention generation. Create and
+  persist the full handle with `operation_reference` before the first send.
+  Reconciliation with a handle from another store fails with
   `StoreBindingMismatch`; store rebinding requires an explicit new operation.
+- `reconcile_operation` returns `OperationReconciliation::NotRecorded` only when
+  the exact store/responsibility/operation tuple is absent and no cleanup crossed
+  the handle's retention generation. A crossed or missing generation returns
+  `RetentionBoundaryCrossed`, which never authorizes retry.
 - Snapshot/delta reads use a persisted monotonic store version. A gap returns
   `ResyncRequired`; timestamps are not ordering fences.
 - Compound steps are declared durably with prerequisite edges. A terminal
@@ -88,7 +94,9 @@ backend evidence. Postgres exposes the configured connection user as
 - Use application `cleanup` with explicit age and row-count bounds. It deletes
   only terminal records owned by that responsibility and preserves in-flight
   work, messages, deliveries, dispositions, other apps, and the store-global
-  delta journal. Store administrators use `ApplicationStoreMaintenance` with an
+  delta journal. Deleting terminal operation evidence advances a durable,
+  responsibility-scoped retention generation so older absence checks fail
+  closed. Store administrators use `ApplicationStoreMaintenance` with an
   explicit version floor to prune global deltas.
 - A capability mismatch or missing delivery-row identity is a fail-closed version
   skew signal. Upgrade the daemon/client pair; do not fabricate an ack identity.
@@ -99,7 +107,9 @@ backend evidence. Postgres exposes the configured connection user as
 - `reconcile_operation` checks the durable operation-to-message mapping written
   in the same transaction as message acceptance. After a crash in the
   accepted-send/local-result window, it promotes a matching pending operation to
-  `accepted` before the application authors a replacement.
+  `accepted` before the application authors a replacement. If no record or
+  mapping exists and the persisted retention generation still matches, it
+  returns typed authoritative `NotRecorded` evidence.
 
 ## Required later conformance coverage
 
@@ -112,8 +122,9 @@ credentialed Postgres:
 3. atomic-or-compensable multi-address attach/reconcile/detach;
 4. send-only false-attendance prevention and bidirectional exact delivery ack;
 5. independent receipt/workflow axes and ack-after-ingest restart recovery;
-6. operation replay, fingerprint mismatch, accepted-send indeterminate windows,
-   and post-restart reconciliation;
+6. operation replay, fingerprint mismatch, authoritative exact-tuple
+   `NotRecorded`, retention-boundary invalidation, accepted-send indeterminate
+   windows, and post-restart reconciliation;
 7. unresolved/recent/thread filtering before bounds and store-scoped source
    resolution;
 8. monotonic delta ordering, gap detection, resync, and no-regression backfill;

@@ -3737,6 +3737,7 @@ async fn handle_request_with_capabilities(
                 scope,
                 tags,
                 watch_pids,
+                false,
                 recovery,
                 None,
                 false,

@@ -336,7 +336,9 @@ The result model MUST distinguish:
 - rejected before acceptance;
 - partial;
 - indeterminate within the accepted-send/local-commit duplicate window;
-- previously completed or duplicate operation.
+- previously completed or duplicate operation;
+- authoritative `not-recorded`; and
+- unavailable absence evidence after a retention boundary.
 
 A rejection proved to occur before durable acceptance MUST carry typed
 retryability: `transient`/retryable or `permanent`/non-retryable. Callers MUST
@@ -354,6 +356,22 @@ reconciliation before the application authors a replacement. It MUST preserve
 the original sender, recipient, payload identity, and retry budget during that
 reconciliation.
 
+Before the first send attempt, the application MUST persist the complete typed
+operation reference supplied by the client. That reference MUST bind the exact
+logical store, application responsibility, operation identity, comparable
+payload identity, and current operation-evidence retention generation.
+
+An authoritative `not-recorded` result MUST prove that no operation record,
+operation-to-message mapping, result, or receipt exists for that exact tuple and
+that the reference's retention generation still equals the store's current
+generation for the application responsibility. Because accepted message
+insertion and operation-to-message evidence are atomic, that proof also proves
+that durable acceptance did not occur for the exact operation. Cleanup that
+deletes any terminal operation evidence MUST advance the durable retention
+generation. A missing legacy generation or a generation mismatch MUST return a
+typed retention-boundary outcome, not `not-recorded`, and MUST NOT authorize
+retry or replacement.
+
 Pending or indeterminate reconciliation MUST use the operation identity together
 with the opaque logical-store identity staged when the operation began. A store
 binding mismatch remains blocked or indeterminate and MUST NOT authorize retry,
@@ -368,6 +386,11 @@ from another store MUST NOT be opened or treated as the source.
 The same opaque logical-store identity also fences retry-stable operation
 reconciliation under AC-C14; source or operation evidence from another store
 cannot be silently rebound.
+
+Authoritative `not-recorded` evidence is scoped further by application
+responsibility and operation identity. Absence observed for another
+responsibility, another store, or after the staged retention generation changed
+is not evidence about the requested operation.
 
 The logical store identity MUST NOT expose a raw path, credential, token, or
 connection string.
