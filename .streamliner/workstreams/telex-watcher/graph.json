@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "The minimal command-plus-policy Watcher v2 contract is merged through issue #133 / PR #135. The builder-owned dumb-watcher-contract-gate is next; examples and runtime remain blocked on their explicit gate and client dependencies.",
+  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. The optional example pack is next-ready but unlaunched; runtime remains planned and blocked on Application Client client-conformance.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-08-27T17:44:25Z",
+  "updatedAt": "2026-08-27T18:11:07Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -137,8 +137,8 @@
       "type": "gate",
       "title": "Minimal Watcher contract is dumb and useful",
       "summary": "Builder accepts that an agent can write or copy a script and register command, bounds, and route without mandatory manifests, pinning, kind allowlists, provider preflight, downtime declarations, or a prescribed test framework.",
-      "status": "planned",
-      "attention": "focus",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -220,8 +220,8 @@
       "type": "task",
       "title": "Minimal optional detector examples",
       "summary": "Ship small copyable GitHub, Azure DevOps, HTTP/JSON, file, and command examples with short guidance, extracting selected PR #131 foundations without creating a mandatory template framework.",
-      "status": "planned",
-      "attention": "watch",
+      "status": "ready",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],
@@ -302,7 +302,7 @@
       "id": "minimal-contract-accepted",
       "title": "Minimal Watcher authoring contract accepted",
       "summary": "The intended design supports command-plus-policy registration, agent-owned provider semantics, runtime-generated event identity, and optional hardening without a mandatory template framework.",
-      "status": "planned",
+      "status": "completed",
       "nodeIds": [
         "minimal-watcher-authoring-contract",
         "dumb-watcher-contract-gate"
