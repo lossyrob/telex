@@ -740,13 +740,16 @@ impl ApplicationClient {
         let mut results = BTreeMap::new();
         let mut compensation = Vec::new();
         for spec in specs {
+            let previous = self.memberships.lock().unwrap().get(&spec.address).cloned();
             let result = self.attach_one(spec, false).await;
             if let Ok(handle) = &result {
-                compensation.push(CompensationHandle {
-                    address: handle.address.clone(),
-                    runtime_id: self.runtime_id.clone(),
-                    action: CompensationAction::Detach,
-                });
+                if let Some(action) = attach_compensation(previous.as_ref(), spec) {
+                    compensation.push(CompensationHandle {
+                        address: handle.address.clone(),
+                        runtime_id: self.runtime_id.clone(),
+                        action,
+                    });
+                }
                 results.insert(
                     spec.address.clone(),
                     AddressLifecycleResult::Attached(handle.clone()),
@@ -1360,7 +1363,12 @@ impl ApplicationClient {
                 needs_attach_reason,
             } => {
                 let error = self
-                    .registration_error(&request.sender, &code, &message, needs_attach_reason)
+                    .registration_error(
+                        &request.sender,
+                        &code,
+                        &message,
+                        needs_attach_reason.clone(),
+                    )
                     .await;
                 Err(self
                     .finish_peer_failure(
@@ -1555,7 +1563,12 @@ impl ApplicationClient {
                 needs_attach_reason,
             }) => {
                 let error = self
-                    .registration_error(&request.sender, &code, &message, needs_attach_reason)
+                    .registration_error(
+                        &request.sender,
+                        &code,
+                        &message,
+                        needs_attach_reason.clone(),
+                    )
                     .await;
                 Err(self
                     .finish_peer_failure(
@@ -2134,6 +2147,7 @@ impl ApplicationClient {
         operation_id: &OperationId,
         staged_payload: &PayloadIdentity,
     ) -> Result<Option<ApplicationOperationRecord>, ApplicationClientError> {
+        let retention_generation = snapshot.retention_generation;
         let Some(record) = snapshot.operation else {
             return Ok(None);
         };
@@ -2170,19 +2184,28 @@ impl ApplicationClient {
                     payload_identity: PayloadIdentity::sha256(record.payload_fingerprint.clone()),
                     replayed: true,
                 };
-                return self
-                    .backend
-                    .complete_application_operation(
-                        &self.logical_store_id.0,
-                        &self.responsibility.0,
-                        &operation_id.0,
-                        "accepted",
-                        Some(&serde_json::to_string(&result).map_err(invalid)?),
-                        None,
-                    )
-                    .await
-                    .map(Some)
-                    .map_err(unavailable);
+                let recovery = RecoveryHandle {
+                    logical_store_id: self.logical_store_id.clone(),
+                    responsibility: self.responsibility.clone(),
+                    operation_id: operation_id.clone(),
+                    payload_identity: staged_payload.clone(),
+                    retention_generation: Some(retention_generation),
+                };
+                return classify_accepted_completion(
+                    self.backend
+                        .complete_application_operation(
+                            &self.logical_store_id.0,
+                            &self.responsibility.0,
+                            &operation_id.0,
+                            "accepted",
+                            Some(&serde_json::to_string(&result).map_err(invalid)?),
+                            None,
+                        )
+                        .await,
+                    &recovery,
+                    "operation reconciliation",
+                )
+                .map(Some);
             }
         }
         Ok(Some(record))
@@ -2543,7 +2566,29 @@ impl ApplicationClient {
                     })
                 });
                 let mut projected = health_projection(self, local, member);
-                if let Some(member) = member {
+                let membership_loss = status.as_ref().and_then(|status| {
+                    status.membership_losses.iter().find(|loss| {
+                        loss.session_id == self.runtime_id.0
+                            && loss.address == local.handle.address
+                            && loss.store_key == self.store_key
+                    })
+                });
+                if let Some(loss) = membership_loss {
+                    projected.registered = false;
+                    projected.sender_ready = false;
+                    projected.receive_ready = false;
+                    projected.stopped_or_unattended = true;
+                    projected
+                        .lifecycle
+                        .push(ApplicationLifecycleEvidence::MembershipLoss {
+                            reason: project_membership_loss(
+                                Some(loss.reason.clone()),
+                                crate::daemon_ipc::ERROR_NEEDS_ATTACH,
+                                &loss.detail,
+                            ),
+                            detail: loss.detail.clone(),
+                        });
+                } else if let Some(member) = member {
                     if member.owner_instance_id != local.handle.owner_instance_id
                         || member.lease_epoch != local.handle.lease_epoch
                     {
@@ -3032,20 +3077,31 @@ fn invalid_multi_address_outcome(error: ApplicationClientError) -> MultiAddressO
     }
 }
 
-fn classify_accepted_completion(
-    completion: anyhow::Result<ApplicationOperationRecord>,
+fn attach_compensation(
+    previous: Option<&LocalMembership>,
+    requested: &AddressSpec,
+) -> Option<CompensationAction> {
+    match previous {
+        None => Some(CompensationAction::Detach),
+        Some(previous) if previous.spec != *requested => {
+            Some(CompensationAction::Reattach(previous.spec.clone()))
+        }
+        Some(_) => None,
+    }
+}
+
+fn classify_accepted_completion<T>(
+    completion: anyhow::Result<T>,
     recovery: &RecoveryHandle,
     operation_kind: &str,
-) -> Result<(), ApplicationClientError> {
-    completion
-        .map(|_| ())
-        .map_err(|error| ApplicationClientError::Indeterminate {
-            detail: format!(
-                "{operation_kind} was durably accepted but local result persistence failed: {}",
-                redacted_diagnostic("storage", &error.to_string())
-            ),
-            recovery: Box::new(recovery.clone()),
-        })
+) -> Result<T, ApplicationClientError> {
+    completion.map_err(|error| ApplicationClientError::Indeterminate {
+        detail: format!(
+            "{operation_kind} was durably accepted but local result persistence failed: {}",
+            redacted_diagnostic("storage", &error.to_string())
+        ),
+        recovery: Box::new(recovery.clone()),
+    })
 }
 
 fn project_operation_record(
@@ -3195,12 +3251,18 @@ fn classify_peer_failure(
     code: &str,
     needs_attach_reason: Option<NeedsAttachReason>,
 ) -> PeerFailureDisposition {
-    if needs_attach_reason == Some(NeedsAttachReason::DeliberatelyDetached) {
+    if matches!(
+        needs_attach_reason.as_ref(),
+        Some(NeedsAttachReason::DeliberatelyDetached)
+    ) {
         return PeerFailureDisposition::Rejected;
     }
     if code == crate::daemon_ipc::ERROR_NEEDS_ATTACH
         || code == crate::daemon_ipc::ERROR_NOT_OWNER
-        || needs_attach_reason == Some(NeedsAttachReason::RestartLost)
+        || matches!(
+            needs_attach_reason.as_ref(),
+            Some(NeedsAttachReason::RestartLost | NeedsAttachReason::PredicateDeath)
+        )
     {
         return PeerFailureDisposition::NeedsAttach;
     }
@@ -3222,13 +3284,14 @@ fn classify_peer_failure(
 fn project_membership_loss(
     reason: Option<NeedsAttachReason>,
     code: &str,
-    message: &str,
+    _message: &str,
 ) -> MembershipLossReason {
     match reason {
         Some(NeedsAttachReason::RestartLost) => MembershipLossReason::DaemonRestart,
         Some(NeedsAttachReason::DeliberatelyDetached) => MembershipLossReason::DeliberateDetach,
-        Some(NeedsAttachReason::Unknown) => MembershipLossReason::Unknown {
-            raw_reason: Some(message.to_string()),
+        Some(NeedsAttachReason::PredicateDeath) => MembershipLossReason::PredicateDeath,
+        Some(NeedsAttachReason::Unknown(raw_reason)) => MembershipLossReason::Unknown {
+            raw_reason: Some(raw_reason),
         },
         None if code == crate::daemon_ipc::ERROR_NEEDS_ATTACH => MembershipLossReason::NeedsAttach,
         None => MembershipLossReason::Unknown {
@@ -4166,6 +4229,45 @@ mod tests {
     }
 
     #[test]
+    fn attach_compensation_preserves_preexisting_membership() {
+        let prior_spec = AddressSpec {
+            address: "attached".into(),
+            capability: ApplicationCapability::SendOnly,
+            description: Some("prior".into()),
+            scope: None,
+            tags: None,
+        };
+        let previous = LocalMembership {
+            handle: MembershipHandle {
+                logical_store_id: LogicalStoreId("store".into()),
+                responsibility: ApplicationResponsibility("application".into()),
+                runtime_id: RuntimeId("runtime".into()),
+                address: prior_spec.address.clone(),
+                capability: prior_spec.capability,
+                lease_epoch: 1,
+                owner_instance_id: "owner".into(),
+            },
+            spec: prior_spec.clone(),
+            recovering: false,
+            last_recovery_failure: None,
+        };
+
+        assert_eq!(attach_compensation(Some(&previous), &prior_spec), None);
+        let changed = AddressSpec {
+            description: Some("changed".into()),
+            ..prior_spec.clone()
+        };
+        assert_eq!(
+            attach_compensation(Some(&previous), &changed),
+            Some(CompensationAction::Reattach(prior_spec))
+        );
+        assert_eq!(
+            attach_compensation(None, &changed),
+            Some(CompensationAction::Detach)
+        );
+    }
+
+    #[test]
     fn payload_identity_marks_noncanonical_evidence_noncomparable() {
         assert!(PayloadIdentity::sha256("a".repeat(64)).comparable);
         assert!(!PayloadIdentity::sha256("legacy-opaque".into()).comparable);
@@ -4197,6 +4299,44 @@ mod tests {
                 "detached"
             ),
             MembershipLossReason::DeliberateDetach
+        );
+        assert_eq!(
+            project_membership_loss(
+                Some(NeedsAttachReason::PredicateDeath),
+                crate::daemon_ipc::ERROR_NEEDS_ATTACH,
+                "predicate"
+            ),
+            MembershipLossReason::PredicateDeath
+        );
+        assert_eq!(
+            project_membership_loss(
+                Some(NeedsAttachReason::Unknown("future_reason".into())),
+                crate::daemon_ipc::ERROR_NEEDS_ATTACH,
+                "fallback text"
+            ),
+            MembershipLossReason::Unknown {
+                raw_reason: Some("future_reason".into())
+            }
+        );
+    }
+
+    #[test]
+    fn unknown_wire_membership_reason_preserves_exact_token() {
+        let reason: NeedsAttachReason = serde_json::from_str("\"future_reason\"").unwrap();
+        assert_eq!(
+            reason,
+            NeedsAttachReason::Unknown("future_reason".to_string())
+        );
+        assert_eq!(serde_json::to_string(&reason).unwrap(), "\"future_reason\"");
+        assert_eq!(
+            project_membership_loss(
+                Some(reason),
+                crate::daemon_ipc::ERROR_NEEDS_ATTACH,
+                "fallback text"
+            ),
+            MembershipLossReason::Unknown {
+                raw_reason: Some("future_reason".to_string())
+            }
         );
     }
 
@@ -4302,7 +4442,10 @@ mod tests {
     #[test]
     fn unknown_wire_membership_reason_deserializes() {
         let reason: NeedsAttachReason = serde_json::from_str("\"future_reason\"").unwrap();
-        assert_eq!(reason, NeedsAttachReason::Unknown);
+        assert_eq!(
+            reason,
+            NeedsAttachReason::Unknown("future_reason".to_string())
+        );
     }
 
     #[cfg(feature = "sqlite")]

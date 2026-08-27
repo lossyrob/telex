@@ -817,6 +817,74 @@ exit 0
 }
 
 #[tokio::test]
+async fn postgres_application_detach_intent_round_trip() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_application_detach_intent_round_trip") else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let schema = sanitize_ident(&format!(
+        "telex_app_detach_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .unwrap();
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+    let backend = PgBackend::connect_with(cfg.clone(), Some(&schema))
+        .await
+        .unwrap();
+    backend.init_schema().await.unwrap();
+    let claimed = match backend
+        .claim_epoch_lease("postgres:detach", "owner", 15)
+        .await
+        .unwrap()
+    {
+        telex::model::EpochClaimResult::Claimed(claimed) => claimed,
+        other => panic!("expected claim, got {other:?}"),
+    };
+    assert!(backend
+        .release_epoch_lease_for_application_detach(
+            "postgres:detach",
+            "owner",
+            claimed.lease_epoch,
+            "postgres-application",
+            "runtime",
+            "bidirectional",
+            "ApplicationDetach",
+        )
+        .await
+        .unwrap());
+    let intent = backend
+        .application_detach_intent("postgres-application", "postgres:detach")
+        .await
+        .unwrap()
+        .expect("application detach intent");
+    assert_eq!(intent.runtime_id, "runtime");
+    assert_eq!(
+        backend
+            .application_detach_intents("postgres-application")
+            .await
+            .unwrap(),
+        vec![intent]
+    );
+    backend
+        .clear_application_detach_intent("postgres-application", "postgres:detach")
+        .await
+        .unwrap();
+    assert!(backend
+        .application_detach_intent("postgres-application", "postgres:detach")
+        .await
+        .unwrap()
+        .is_none());
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
 async fn postgres_concurrent_operation_duplicates_return_replay() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     let Some(url) = pg_url_or_skip("postgres_concurrent_operation_duplicates_return_replay") else {
@@ -924,6 +992,114 @@ async fn postgres_concurrent_operation_duplicates_return_replay() {
         .unwrap()
         .operation
         .is_some());
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn postgres_operation_replay_racing_cleanup_stays_typed() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_operation_replay_racing_cleanup_stays_typed") else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let schema = sanitize_ident(&format!(
+        "telex_app_replay_cleanup_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .unwrap();
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+    let replay_backend = Arc::new(
+        PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .unwrap(),
+    );
+    replay_backend.init_schema().await.unwrap();
+    let cleanup_backend = Arc::new(
+        PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .unwrap(),
+    );
+    let logical_store_id = replay_backend.logical_store_id().await.unwrap();
+    let scope = ApplicationRecordScope {
+        logical_store_id: logical_store_id.clone(),
+        application_responsibility: "postgres-race".into(),
+    };
+
+    for index in 0..32 {
+        let operation = NewApplicationOperation {
+            logical_store_id: logical_store_id.clone(),
+            application_responsibility: scope.application_responsibility.clone(),
+            operation_id: format!("cleanup-race-{index}"),
+            operation_kind: "send".into(),
+            sender: "postgres:sender".into(),
+            recipients_json: r#"["postgres:target"]"#.into(),
+            payload_fingerprint: "a".repeat(64),
+            retry_budget: 1,
+            created_at_ms: 1,
+        };
+        assert!(matches!(
+            replay_backend
+                .begin_application_operation(&operation)
+                .await
+                .unwrap(),
+            ApplicationOperationBegin::Started(_)
+        ));
+        replay_backend
+            .complete_application_operation(
+                &operation.logical_store_id,
+                &operation.application_responsibility,
+                &operation.operation_id,
+                "rejected",
+                Some("{}"),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let replay = {
+            let backend = replay_backend.clone();
+            let operation = operation.clone();
+            let barrier = barrier.clone();
+            tokio::spawn(async move {
+                barrier.wait().await;
+                backend.begin_application_operation(&operation).await
+            })
+        };
+        let cleanup = {
+            let backend = cleanup_backend.clone();
+            let scope = scope.clone();
+            let barrier = barrier.clone();
+            tokio::spawn(async move {
+                barrier.wait().await;
+                backend
+                    .cleanup_application_records(
+                        &scope,
+                        RetentionPolicy {
+                            completed_before_ms: i64::MAX,
+                            max_delete: 1,
+                        },
+                    )
+                    .await
+            })
+        };
+        barrier.wait().await;
+        let replay = replay
+            .await
+            .unwrap()
+            .expect("replay/cleanup race must remain typed");
+        cleanup.await.unwrap().unwrap();
+        assert!(matches!(
+            replay,
+            ApplicationOperationBegin::Replay(_) | ApplicationOperationBegin::Started(_)
+        ));
+    }
 
     admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
         .await

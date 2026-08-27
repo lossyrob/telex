@@ -106,6 +106,8 @@ where
     //     release_epoch_lease / reset_epoch_lease
     //     / mark_consumed_if_current_owner ...... epoch_leases_and_ack_fence
     //   record/clear/detach_tombstone .......... detach_tombstones
+    //   record/clear/application_detach_intent /
+    //     release_epoch_lease_for_application_detach ... application_detach_intents
     //   insert_disposition / dispositions_for ... dispositions, inbox_derivation
     //   export .................................. export_filters
     capabilities_and_signals(make_store().await).await;
@@ -117,6 +119,7 @@ where
     epoch_leases_and_ack_fence(make_store().await).await;
     epoch_concurrent_first_claim(make_store().await).await;
     detach_tombstones(make_store().await).await;
+    application_detach_intents(make_store().await).await;
     messages_threading(make_store().await).await;
     inbox_derivation(make_store().await).await;
     actionable_and_pending_counts(make_store().await).await;
@@ -226,6 +229,74 @@ async fn detach_tombstones(store: Store) {
         .await
         .unwrap()
         .is_none());
+}
+
+async fn application_detach_intents(store: Store) {
+    let b = store.connect().await;
+    let responsibility = "application";
+    let first_address = "application-detach:1";
+    let claimed = match b
+        .claim_epoch_lease(first_address, "owner-a", 15)
+        .await
+        .unwrap()
+    {
+        EpochClaimResult::Claimed(claimed) => claimed,
+        other => panic!("expected claim, got {other:?}"),
+    };
+    assert!(b
+        .release_epoch_lease_for_application_detach(
+            first_address,
+            "owner-a",
+            claimed.lease_epoch,
+            responsibility,
+            "runtime-a",
+            "send-only",
+            "ApplicationDetach",
+        )
+        .await
+        .unwrap());
+    let first = b
+        .application_detach_intent(responsibility, first_address)
+        .await
+        .unwrap()
+        .expect("application detach intent");
+    assert_eq!(first.runtime_id, "runtime-a");
+    assert_eq!(first.capability, "send-only");
+    assert_eq!(first.reason, "ApplicationDetach");
+
+    b.record_application_detach_intent(
+        responsibility,
+        "application-detach:2",
+        "runtime-b",
+        "bidirectional",
+        "CompensationDetach",
+    )
+    .await
+    .unwrap();
+    let intents = b.application_detach_intents(responsibility).await.unwrap();
+    assert_eq!(
+        intents
+            .iter()
+            .map(|intent| intent.address.as_str())
+            .collect::<Vec<_>>(),
+        vec!["application-detach:1", "application-detach:2"]
+    );
+
+    b.clear_application_detach_intent(responsibility, first_address)
+        .await
+        .unwrap();
+    assert!(b
+        .application_detach_intent(responsibility, first_address)
+        .await
+        .unwrap()
+        .is_none());
+    assert_eq!(
+        b.application_detach_intents(responsibility)
+            .await
+            .unwrap()
+            .len(),
+        1
+    );
 }
 
 async fn epoch_concurrent_first_claim(store: Store) {

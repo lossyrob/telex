@@ -2376,15 +2376,21 @@ impl Backend for PgBackend {
     ) -> Result<ApplicationOperationBegin> {
         let mut client = self.client().await?;
         let tx = client.transaction().await?;
-        let inserted = tx
-            .execute(
+        // The no-op conflict update returns and locks the existing tuple in this statement.
+        // `xmax` distinguishes the inserted tuple so only a true first attempt emits a delta.
+        let row = tx
+            .query_one(
                 "INSERT INTO application_operations(
-                 logical_store_id, application_responsibility, operation_id,
-                 operation_kind, sender, recipients_json, payload_fingerprint,
-                 retry_budget, state, created_at_ms, updated_at_ms
-             ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$9)
-             ON CONFLICT(logical_store_id, application_responsibility, operation_id)
-             DO NOTHING",
+                     logical_store_id, application_responsibility, operation_id,
+                     operation_kind, sender, recipients_json, payload_fingerprint,
+                     retry_budget, state, created_at_ms, updated_at_ms
+                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9,$9)
+                 ON CONFLICT(logical_store_id, application_responsibility, operation_id)
+                 DO UPDATE SET operation_id=application_operations.operation_id
+                 RETURNING logical_store_id, application_responsibility, operation_id,
+                           operation_kind, sender, recipients_json, payload_fingerprint,
+                           retry_budget, state, result_json, recovery_json, created_at_ms,
+                           updated_at_ms, completed_at_ms, (xmax = 0) AS inserted",
                 &[
                     &operation.logical_store_id,
                     &operation.application_responsibility,
@@ -2397,8 +2403,8 @@ impl Backend for PgBackend {
                     &operation.created_at_ms,
                 ],
             )
-            .await?
-            > 0;
+            .await?;
+        let inserted: bool = row.get("inserted");
         if inserted {
             let (entity_id, payload) = application_operation_state_delta(
                 &operation.logical_store_id,
@@ -2408,23 +2414,6 @@ impl Backend for PgBackend {
             );
             pg_tx_append_state_delta(&tx, "operation", &entity_id, &payload).await?;
         }
-        let row = tx
-            .query_one(
-                "SELECT logical_store_id, application_responsibility, operation_id,
-                        operation_kind, sender, recipients_json, payload_fingerprint,
-                        retry_budget, state, result_json, recovery_json, created_at_ms,
-                        updated_at_ms, completed_at_ms
-                 FROM application_operations
-                 WHERE logical_store_id=$1 AND application_responsibility=$2
-                   AND operation_id=$3
-                 FOR UPDATE",
-                &[
-                    &operation.logical_store_id,
-                    &operation.application_responsibility,
-                    &operation.operation_id,
-                ],
-            )
-            .await?;
         let existing = map_application_operation(&row);
         tx.commit().await?;
         if inserted {

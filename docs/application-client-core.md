@@ -30,12 +30,15 @@ versioned evidence and must not be interpreted as backend table layouts.
   within the caller's budget and preserves capability, sender, and liveness.
 - `attach`, `reconcile_many`, and `detach_many` return one aggregate result for
   an address set. A partial result identifies each completed and failed address
-  and supplies typed detach or reattach compensation actions.
+  and supplies typed compensation only for work performed by that call. A new
+  membership receives `Detach`; a changed pre-existing membership receives
+  `Reattach(previous_spec)`; an idempotent refresh receives no destructive
+  compensation.
 - Deliberate application detach is keyed by stable
   `ApplicationResponsibility` and address. The durable record retains the
   runtime ID and capability as audit evidence, so a replacement process cannot
   reverse the detach through bounded repair. A later explicit attach clears the
-  intent.
+  intent only after daemon membership commits successfully.
 - Receive results carry message ID, recipient, delivery-row ID, role, store ID,
   and an `AckHandle` bound to that exact delivery. Ack remains an explicit action
   after durable application ingest.
@@ -83,7 +86,8 @@ versioned evidence and must not be interpreted as backend table layouts.
 - If Telex returns `Sent` but durable result persistence fails, `send` and
   `reply` return `ApplicationClientError::Indeterminate` with the staged
   recovery handle. They never report that accepted-send/local-result window as
-  ordinary unavailability.
+  ordinary unavailability. The same rule applies when reconciliation discovers
+  durable message acceptance but cannot persist the promoted accepted result.
 - Snapshot/delta reads use a persisted monotonic store version. A gap returns
   `ResyncRequired`; timestamps are not ordering fences.
 - Compound steps are declared durably with prerequisite edges. A terminal
@@ -101,7 +105,9 @@ Operation reconciliation reads the operation row, message mapping, and
 responsibility-scoped retention generation in one SQLite transaction or
 Postgres repeatable-read snapshot. Concurrent Postgres first attempts use
 conflict-safe insertion, so one begins and an identical contender receives
-`Replay` rather than a uniqueness error.
+`Replay` rather than a uniqueness error. Postgres locks a pre-existing replay
+row in the same statement that returns it, so cleanup cannot remove the row
+between conflict detection and replay classification.
 
 Opening schema v3 repairs a missing disposition `origin` column without
 inferring quarantine origin for historical rows from principal or note prose.
@@ -132,7 +138,8 @@ backend evidence. Postgres exposes the configured connection user as
   evidence separate. Its typed lifecycle evidence includes membership loss,
   collision, reconciliation, pending compensation, and durable deliberate
   detach. Known restart, predicate-death, owner-demotion, and collision reasons
-  remain distinct; unknown future reasons retain their raw evidence.
+  remain distinct. Daemon status carries terminal predicate-loss evidence, and
+  unknown future `needs_attach_reason` values retain the exact raw wire token.
 - `reconcile_operation` checks the durable operation-to-message mapping written
   in the same transaction as message acceptance. After a crash in the
   accepted-send/local-result window, it promotes a matching pending operation to

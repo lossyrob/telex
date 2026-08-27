@@ -12,10 +12,10 @@ use crate::backend::{Backend, WaitFetchOptions};
 use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
     DeafStationStatus, DeliveryMode, EpochStatus, HandshakeError, HelloAck, IdleStationStatus,
-    LiveWaiterStatus, MemberStatus, NeedsAttachReason, PushDeliveryHealth, RecentErrorStatus,
-    Request, Response, RetentionStatus, SentReceipt, StationCapability, StationHealth, StoreStatus,
-    WaiterOutcome, WatchPidRole, WatchPidSpec, WatchPidStatus, ON_DELIVER_DEFERRED_EXIT,
-    ON_DELIVER_PERMANENT_EXIT,
+    LiveWaiterStatus, MemberStatus, MembershipLossStatus, NeedsAttachReason, PushDeliveryHealth,
+    RecentErrorStatus, Request, Response, RetentionStatus, SentReceipt, StationCapability,
+    StationHealth, StoreStatus, WaiterOutcome, WatchPidRole, WatchPidSpec, WatchPidStatus,
+    ON_DELIVER_DEFERRED_EXIT, ON_DELIVER_PERMANENT_EXIT,
 };
 use crate::model::{
     cc_recipients, delivery_role, now_ms, requires_disposition_for_recipient,
@@ -542,6 +542,7 @@ impl DaemonState {
             recent_errors: Vec::new(),
             epoch_by_address: Vec::new(),
             members: Vec::new(),
+            membership_losses: Vec::new(),
             live_waiters: Vec::new(),
             retention: Vec::new(),
             idle_stations: IdleStationStatus::default(),
@@ -753,6 +754,7 @@ impl DaemonState {
             recent_errors: self.recent_errors(),
             epoch_by_address,
             members,
+            membership_losses: self.membership_losses(),
             live_waiters,
             retention,
             idle_stations: IdleStationStatus {
@@ -1115,6 +1117,34 @@ impl DaemonState {
             .lock()
             .unwrap()
             .remove(&Self::session_key(store_key, session_id));
+    }
+
+    fn membership_losses(&self) -> Vec<MembershipLossStatus> {
+        self.ended_sessions
+            .lock()
+            .unwrap()
+            .iter()
+            .flat_map(|(session, ended)| {
+                let reason = match ended.reason.as_str() {
+                    "WatchPidDeath" => NeedsAttachReason::PredicateDeath,
+                    "SessionEnd" | "Detach" | "ApplicationDetach" => {
+                        NeedsAttachReason::DeliberatelyDetached
+                    }
+                    raw => NeedsAttachReason::Unknown(raw.to_string()),
+                };
+                ended
+                    .addresses
+                    .iter()
+                    .map(move |address| MembershipLossStatus {
+                        store_key: session.store_key.clone(),
+                        session_id: session.session_id.clone(),
+                        address: address.clone(),
+                        reason: reason.clone(),
+                        detail: ended.reason.clone(),
+                        at_ms: ended.at_ms,
+                    })
+            })
+            .collect()
     }
 
     fn rearm_idle_member_if_allowed(
@@ -4306,19 +4336,6 @@ async fn register_member(
             }
         }
     } else {
-        if let Some(responsibility) = application_responsibility.as_deref() {
-            if let Err(e) = backend
-                .clear_application_detach_intent(responsibility, &address)
-                .await
-            {
-                let _ = backend
-                    .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
-                    .await;
-                return proto::internal(format!(
-                    "registering {address}: failed to clear durable application detach intent for {responsibility}: {e:#}"
-                ));
-            }
-        }
         if let Err(e) = backend.clear_detach_tombstone(&session_id, &address).await {
             let _ = backend
                 .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
@@ -4393,7 +4410,23 @@ async fn register_member(
     state
         .delivery_admission_before_commit(DeliveryAdmissionKind::Register)
         .await;
-    state.insert_member(record);
+    state.insert_member(record.clone());
+    if !recovery {
+        if let Some(responsibility) = record.application_responsibility.as_deref() {
+            if let Err(e) = backend
+                .clear_application_detach_intent(responsibility, &address)
+                .await
+            {
+                state.remove_member_if_current(&record);
+                let _ = backend
+                    .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                    .await;
+                return proto::internal(format!(
+                    "registering {address}: failed to clear durable application detach intent for {responsibility}: {e:#}"
+                ));
+            }
+        }
+    }
     if let Some(member) = backlog {
         state.on_deliver_forget_member(&MemberKey {
             store_key: member.store_key.clone(),
@@ -8439,10 +8472,25 @@ mod p3_tests {
             .unwrap();
         assert_eq!(intent.runtime_id, "runtime-one");
 
-        assert!(matches!(
-            request(state, register("runtime-two", false)).await,
-            Response::Registered { .. }
-        ));
+        let control = Arc::new(DeliveryAdmissionTestControl::new());
+        *state.delivery_admission_control.lock().unwrap() = Some(control.clone());
+        let explicit_attach = register("runtime-two", false);
+        let attach_state = state.clone();
+        let attach = tokio::spawn(async move { request(attach_state, explicit_attach).await });
+        control
+            .wait_before_lock(DeliveryAdmissionKind::Register)
+            .await;
+        control.release_before_lock(DeliveryAdmissionKind::Register);
+        control
+            .wait_before_commit(DeliveryAdmissionKind::Register)
+            .await;
+        assert!(backend
+            .application_detach_intent(responsibility, address)
+            .await
+            .unwrap()
+            .is_some());
+        control.release_commit(DeliveryAdmissionKind::Register);
+        assert!(matches!(attach.await.unwrap(), Response::Registered { .. }));
         assert!(backend
             .application_detach_intent(responsibility, address)
             .await
@@ -11263,6 +11311,12 @@ mod p3_tests {
             .recent_errors
             .iter()
             .any(|e| e.kind == "WatchPidDeath"));
+        assert!(status.membership_losses.iter().any(|loss| {
+            loss.store_key == store
+                && loss.session_id == "s1"
+                && loss.address == "addr:a"
+                && loss.reason == NeedsAttachReason::PredicateDeath
+        }));
         let backend = state.backend_for(&store).await.unwrap();
         let lease = backend.get_lease("addr:a").await.unwrap().unwrap();
         assert_eq!(lease.owner_instance_id, None);

@@ -3,7 +3,7 @@
 //! rewriting the current resident-holder verbs.
 
 use crate::model::DeliveryOutcome;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
 use std::fmt;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
@@ -392,13 +392,46 @@ pub enum Request {
     Ping,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NeedsAttachReason {
     RestartLost,
     DeliberatelyDetached,
-    #[serde(other)]
-    Unknown,
+    PredicateDeath,
+    Unknown(String),
+}
+
+impl NeedsAttachReason {
+    fn as_wire_value(&self) -> &str {
+        match self {
+            Self::RestartLost => "restart_lost",
+            Self::DeliberatelyDetached => "deliberately_detached",
+            Self::PredicateDeath => "predicate_death",
+            Self::Unknown(raw) => raw,
+        }
+    }
+}
+
+impl Serialize for NeedsAttachReason {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_wire_value())
+    }
+}
+
+impl<'de> Deserialize<'de> for NeedsAttachReason {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(match String::deserialize(deserializer)?.as_str() {
+            "restart_lost" => Self::RestartLost,
+            "deliberately_detached" => Self::DeliberatelyDetached,
+            "predicate_death" => Self::PredicateDeath,
+            raw => Self::Unknown(raw.to_string()),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -535,6 +568,8 @@ pub struct DaemonStatus {
     #[serde(default)]
     pub members: Vec<MemberStatus>,
     #[serde(default)]
+    pub membership_losses: Vec<MembershipLossStatus>,
+    #[serde(default)]
     pub live_waiters: Vec<LiveWaiterStatus>,
     #[serde(default)]
     pub retention: Vec<RetentionStatus>,
@@ -548,6 +583,16 @@ pub struct DaemonStatus {
 pub struct StoreStatus {
     pub store_key: String,
     pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MembershipLossStatus {
+    pub store_key: String,
+    pub session_id: String,
+    pub address: String,
+    pub reason: NeedsAttachReason,
+    pub detail: String,
+    pub at_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
