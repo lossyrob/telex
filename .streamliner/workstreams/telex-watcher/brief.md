@@ -156,12 +156,23 @@ registration/request/result schemas, runtime-owned event identity, and ADR 0050
 as project design authority. The canonical integrated workstream design now
 lives in [`design/current-design.md`](design/current-design.md).
 
-The builder-owned `dumb-watcher-contract-gate` remains planned and is the next
-Watcher decision. Its acceptance is not implied by the contract merge.
-`minimal-example-pack` remains blocked on that gate. `watcher-runtime-core`
-remains blocked on both that gate and Application Client `client-conformance`,
-including promotion of authoritative exact-store/exact-operation
-`not-recorded`. There is no private-client or mandatory-template fallback.
+The builder accepted `dumb-watcher-contract-gate` as contract-usability
+acceptance, completing the `minimal-contract-accepted` checkpoint. The evidence
+was the ordinary authoring flow in merged `watcher.md`: command, cadence,
+timeout, backend, sender, and target are the only required registration fields;
+other generic fields have explicit defaults; and manifests, pinning, kind
+allowlists, provider preflight, downtime declarations, and template conformance
+are absent from v2 registration/runtime semantics. PR #135 had PAW `+1` review
+4825216100 and green CI; the focused design-steward follow-up in PR #141 had
+`+1` review 5044005481 and green CI.
+
+This acceptance is not production-runtime or five-minute operational proof.
+`minimal-example-pack` is next-ready but unlaunched. `watcher-runtime-core`
+remains planned and blocked specifically on Application Client
+`client-conformance`, including promotion of authoritative
+exact-store/exact-operation `not-recorded`. The completed internal gate remains
+as a historical dependency. There is no private-client or mandatory-template
+fallback, and `five-minute-custom-watch-gate` remains planned.
 
 ## Decisions
 
@@ -205,6 +216,13 @@ including promotion of authoritative exact-store/exact-operation
   `docs/design/watcher.md`, the three canonical v2 schemas, retained ADR 0046,
   and superseding ADR 0050 govern downstream runtime/example work. Intentional
   changes require normal design/decision updates.
+- **The builder accepted contract usability, not runtime operation:** the
+  shortest ordinary authoring path needs only the minimal command, cadence,
+  timeout, backend, sender, and target inputs plus explicit defaults, without
+  mandatory hardening ceremony.
+  `minimal-example-pack` may proceed, while `five-minute-custom-watch-gate`
+  still owns proof that a watch can be created, registered, left running, and
+  diagnosed in five minutes.
 - **The original contract is now a historical input, not current authoring
   direction:** provider-neutral trusted-local execution, fixed routing,
   structured results, receipt-gated state, diagnostics, and no workflow actions

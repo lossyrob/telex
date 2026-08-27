@@ -152,14 +152,18 @@ client.
 
 ## Acceptance and dependency boundaries
 
-Merging the v2 contract does not accept `dumb-watcher-contract-gate` or the
-`minimal-contract-accepted` checkpoint. The builder must still establish that
-the shortest authoring path is useful and free of mandatory framework ceremony.
+The operator accepted `dumb-watcher-contract-gate` as contract-usability
+acceptance: the minimal v2 design supports the intended short authoring path
+without mandatory framework ceremony. That acceptance completes the
+`minimal-contract-accepted` checkpoint. It does not prove a production runtime,
+an operational five-minute workflow, or any later gate.
 
-The minimal example pack remains blocked on that gate. Runtime work remains
-blocked on both that gate and the Application Client `client-conformance`
-export. No downstream node may infer launch readiness from the design promotion
-alone.
+`minimal-example-pack` is next-ready but has not been launched. Runtime work is
+no longer blocked on the contract-usability gate; `watcher-runtime-core` remains
+blocked specifically on the Application Client `client-conformance` export and
+the authoritative `not-recorded` gap described above. The later
+`five-minute-custom-watch-gate` still owns operational proof that an agent can
+create, register, leave running, and diagnose a custom watch in five minutes.
 
 ## Superseded assumptions
 
@@ -179,7 +183,7 @@ learning, not current product authority.
 - Whether an explicit v1 compatibility adapter is worth maintaining instead of
   documented re-registration.
 - Which bounded examples or hardening techniques from PR #131 should be
-  extracted after the minimal-authoring gate passes.
+  extracted by the now-ready but unlaunched minimal example work.
 - The exact Application Client promotion that adds authoritative
   `not-recorded` and corresponding conformance evidence without weakening
   AC-C14 or regenerating the historical convergence bundle.
