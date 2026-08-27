@@ -1,5 +1,31 @@
 # Telex Watcher — Reconciliation
 
+## 2026-08-27 minimal v2 contract adoption
+
+Issue #133 completed through
+[PR #135](https://github.com/lossyrob/telex/pull/135), merged from exact reviewed
+head `a9a832b940ac95b8eb51fe04b456902d0c74d251` as
+`b91e8301899351c0411d6e2e9ac5290af8a3cb4c`. The merge had an exact-head PAW
+`+1`, six successful checks, clean mergeability, and zero unresolved review
+threads. It promoted the minimal v2 Watcher contract, three v2 schemas, and ADR
+0050 into project design authority.
+
+The canonical integrated workstream design is now
+[`design/current-design.md`](design/current-design.md). The
+`minimal-watcher-authoring-contract` node is completed, but
+`dumb-watcher-contract-gate` and the `minimal-contract-accepted` checkpoint
+remain planned. The merge does not accept the builder gate.
+`minimal-example-pack` remains blocked on that gate, while
+`watcher-runtime-core` remains blocked on both the gate and Application Client
+`client-conformance`.
+
+One controlled shared-client gap remains explicit: Watcher requires
+authoritative exact-store/exact-operation `not-recorded` evidence and
+identity-checkable same-operation retry, while the current Application Client
+AC-C14 does not yet state the former. Application Client owns promotion and
+conformance proof. Watcher runtime must remain query-only/blocked under
+uncertainty and must not create a private fallback.
+
 ## What changed
 
 Wave 1 began as a narrow proof that trusted local detector scripts could run
@@ -276,8 +302,8 @@ leakage, not additional Application Client product scope.
 - Watcher authoring should optimize for the shortest useful loop before
   optional hardening: target authority — `docs/design/watcher.md`, a new
   superseding ADR, and v2 schemas.
-  - Disposition: promoted to `minimal-watcher-authoring-contract`, the next
-    ready design node.
+  - Disposition: completed through issue #133 and merged PR #135; the
+    builder-owned `dumb-watcher-contract-gate` is the next decision.
 - PR #131 implementation evidence: target authority — minimal examples and
   optional hardening recipes.
   - Disposition: preserved on the closed unmerged PR/branch. Extraction waits

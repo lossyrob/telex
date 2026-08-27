@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "Operator-approved redesign reset Watcher around minimal agent-authored scripts. Issue #127 / PR #131 are closed unmerged as superseded evidence; minimal-watcher-authoring-contract issue #133 is active with paired implementer/reviewer sessions.",
+  "summary": "The minimal command-plus-policy Watcher v2 contract is merged through issue #133 / PR #135. The builder-owned dumb-watcher-contract-gate is next; examples and runtime remain blocked on their explicit gate and client dependencies.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-30T17:40:00Z",
+  "updatedAt": "2026-08-27T17:44:25Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -22,6 +22,10 @@
     }
   ],
   "designRefs": [
+    {
+      "repoId": "telex",
+      "path": ".streamliner/workstreams/telex-watcher/design/current-design.md"
+    },
     {
       "repoId": "telex",
       "path": "docs/design/index.md"
@@ -112,9 +116,9 @@
       "id": "minimal-watcher-authoring-contract",
       "type": "research",
       "title": "Minimal Watcher authoring and registration contract",
-      "summary": "Reset the normative Watcher design around command-plus-policy registration, detector request/result v2, runtime-generated event sequence identity, optional hardening, and a narrowly superseding ADR while retaining provider-neutral trusted-local receipt-gated execution.",
-      "status": "in-progress",
-      "attention": "focus",
+      "summary": "Completed through issue #133 and PR #135, merged as b91e830: command-plus-policy registration, detector request/result v2, runtime-generated event sequence identity, optional hardening, and ADR 0050's narrow supersession of ADR 0046.",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
