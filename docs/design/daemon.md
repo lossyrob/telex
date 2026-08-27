@@ -339,7 +339,7 @@ Frozen Status fields:
   (`armed` / `recently_delivered` / `unattended` / `unattended_with_backlog` / `attended_push` /
   `idle`), `push_delivery` (push-delivery health for a registered on-deliver station, derived from
   the daemon's own push-attempt outcomes: `not_registered` / `no_backlog` / `delivering` /
-  `probing` / `stale_accepted` / `failing`), `push_suppressed_count` (on-deliver messages whose
+  `probing` / `deferred` / `stale_accepted` / `failing`), `push_suppressed_count` (on-deliver messages whose
   re-push is suppressed — dead-lettered as unpushable, or past the `ON_DELIVER_MAX_REPUSH` attempt
   cap — still durably queued and readable),
   thresholded deaf-station fields (`unattended_since_ms`, `unattended_for_ms`, `deaf_since_ms`,
@@ -364,7 +364,8 @@ Frozen Status fields:
   seeing the turn — `delivering` therefore attests bridge transport, not confirmed agent enqueue.
   An **accepted** push whose 300s backstop has elapsed with no fresh accept ->
   `stale_accepted` (an earlier-than-deaf hint that a previously-live bridge may have gone away, e.g.
-  a suspended session — still `attended_push`); backlog with no attempt yet (e.g. just after a
+  a suspended session — still `attended_push`); a bridge that explicitly defers while its root turn
+  is busy -> `deferred` (reachable and still `attended_push`); backlog with no attempt yet (e.g. just after a
   daemon restart, since the attempt map is an in-memory lifecycle fast-path) -> `probing` (still
   `attended_push`, not confidently attended and not deaf, resolved on the next sweep); **failing**
   pushes (bridge unreachable) -> `failing`, which sets the backlog timer and drives
@@ -554,7 +555,7 @@ station it intentionally dropped (for `Ack`, the message simply redelivers to a 
 | Request | Purpose | Privileged? |
 |---|---|---|
 | `Hello` | version + capability handshake | no |
-| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[], on_deliver?, on_deliver_wake_on_cc? }` | **explicit attach** — establishes the in-memory membership `(store_key, session_id) → address` and claims/renews the durable lease for the address. **Idempotent**: re-issuing it for an already-attended address is a refresh. A refresh with explicit `on_deliver` replaces the push handler and its liveness predicates; a refresh with `on_deliver = None` preserves any existing push handler and its liveness predicates. This is the **only** way membership is created; nothing implicit ever (re)creates it. The optional `on_deliver` argv registers an opt-in **push exec** ([§13.2](#132-on-deliver-push-opt-in-harness-neutral)); `on_deliver_wake_on_cc` opts that push exec into live CC observer traffic after a daemon-captured lower bound. | no (same-trust) |
+| `Register { store_key, address, session_id, occupant, description?, scope?, tags?, watch_pids[], replace_watch_pids?, on_deliver?, on_deliver_wake_on_cc? }` | **explicit attach** — establishes the in-memory membership `(store_key, session_id) → address` and claims/renews the durable lease for the address. **Idempotent**: re-issuing it for an already-attended address is a refresh. A refresh with explicit `on_deliver` replaces the push handler; an existing push station preserves its watch predicates unless `replace_watch_pids` explicitly replaces them. A refresh with `on_deliver = None` preserves any existing push handler. This is the **only** way membership is created; nothing implicit ever (re)creates it. The optional `on_deliver` argv registers an opt-in **push exec** ([§13.2](#132-on-deliver-push-opt-in-harness-neutral)); `on_deliver_wake_on_cc` opts that push exec into live CC observer traffic after a daemon-captured lower bound. | no (same-trust) |
 | `Detach { store_key, session_id, address }` | drop one station — removes the in-memory membership entry and releases the address's waiters. Non-privileged (same-user trust): like every unprivileged op it carries **no per-session proof**, so **any same-user process can drop any same-user station** — the accepted v1 same-user-trust tradeoff ([§7.3](#73-no-intra-user-isolation-in-v1-mr6)), **not** a per-session authorization guarantee; nothing is tombstoned (a later explicit `Register` re-attaches if wanted). | no |
 | `Wait { store_key, session_id, address, attention?, min_attention?, wake_on_cc?, timeout_ms?, waiter_pid?, waiter_start_time? }` | block for one delivery against the address. `min_attention` filters eligible messages by priority; `wake_on_cc` opts this wait into live CC observer wake after the daemon-captured lower bound; waiter pid/start-time are diagnostics/liveness inputs for the live waiter registry. If the exchange has no membership for `(store_key, session_id, address)`, returns **`NeedsAttach`** (the agent re-attaches then re-waits). Waiters are **detached** ([§9](#9-liveness-model)). | no |
 | `Send { store_key, session_id, to_addr, … }` / `Reply { store_key, session_id, message_id, … }` | enqueue a message into the durable buffer. If the exchange does not know the sending session/address, returns **`NeedsAttach`** (the agent re-attaches its own address, then retries) — `from` is never silently `None` ([§14.6](#146-from-resolution-and-re-attach)). | no |
@@ -571,6 +572,7 @@ Responses:
 | `HelloAck` | protocol/daemon version, `auth_policy_version`, `required_capabilities`, accepted |
 | `Registered` | `lease_epoch`, `owner_instance_id` (the attach succeeded; membership established) |
 | `Message` | `id, thread_id, parent_id, from_addr, to_addr, delivered_to, primary_to, cc, delivery_role, kind, attention, requires_disposition, requires_disposition_for_current_recipient, subject, body, sent_at_ms, buffered_at_ms, lease_epoch` |
+| `DeliveryQuarantined` | structured post-acceptance progress evidence for one historical delivery that cannot fit unchanged in the current frame: `message_id, recipient, serialized_bytes, max_bytes, may_continue`. The daemon first records durable exact-recipient quarantine evidence; clients re-arm receive when `may_continue` is true. |
 | `Keepalive` | `heartbeat_age_ms` |
 | `Timeout` | — (idle-timeout) |
 | `PresenceEnded` | the waiter-completion status the exchange writes when it reaps a blocked `Wait` (sessionEnd hook, loader-pid death, **or the idle-TTL backstop** — [§9](#9-liveness-model)/[§10](#10-reaping-and-the-idle-ttl-backstop)); non-destructive (the station survives and wakes on a new message) |
@@ -578,6 +580,10 @@ Responses:
 | `Ack` | generic success for `Register`/`Detach`/`Reset`/`Drain`; the **consume-`Ack`** carries the typed `DeliveryOutcome` (`Marked` / `AlreadyConsumed` / `AckNoOp` / `NotOwner`, [§11.3](#113-server-side-delivery-fence-mr1--at-least-once-preserving)) — a daemon that collapses the attended-but-never-delivered case to generic success fails tests 5/16 |
 | `StationStopped` | station teardown summary: `store_key`, `session_id`, `address`, `detached`, `waiters_before`, `waiters_after`, remaining `live_waiters`, optional `message`/`lease_epoch` |
 | `Error` | `{ code, message, … }` — incl. **`NeedsAttach`** (the exchange does not know this session/address — the agent must explicitly `Register` then retry; never an implicit rebuild), `NotOwner`, `Unauthorized`, `Incompatible`, `Ambiguous` |
+
+`delivery_quarantine_v1` is optional and advertised. The daemon emits
+`DeliveryQuarantined` only when the peer advertised it; older peers receive a
+decodable `Incompatible` error after the same durable quarantine action.
 
 The `Message` frame carries `lease_epoch` (the delivery-ownership fence —
 [§11](#11-lease-epoch-fence-the-spine)). Delivery is **at-least-once**: the daemon EMITs the
@@ -892,7 +898,10 @@ The singular `--session-pid` (issues #5/#17) generalizes to **typed predicates**
 flag surface is exposed **only where a real consumer/test exists**: for pull/non-bridge
 sessions, the populated predicate is the loader anchor. Bridge attach is intentionally
 process-unanchored: the Copilot adapter registers push delivery and does not populate
-daemon `watch_pids` from `COPILOT_LOADER_PID` or ambient `TELEX_SESSION_PID`.
+daemon `watch_pids` from `COPILOT_LOADER_PID` or ambient `TELEX_SESSION_PID`. Once a
+fresh bridge observes `sessionEnd(reason=complete)`, the adapter explicitly replaces
+the predicates with the bridge host PID: stable across extension reloads, but a
+negative teardown signal for a true App or one-shot CLI exit.
 
 ### 9.2 Loader-pid: the sufficient negative signal (OQ4)
 

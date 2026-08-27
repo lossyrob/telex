@@ -5,14 +5,606 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
+use telex::application_client::{
+    ApplicationClient, ApplicationClientConfig, ApplicationClientError, ApplicationResponsibility,
+    LogicalStoreId, OperationId, PayloadIdentity, RecordedOperationOutcome, RecoveryHandle,
+    SendRequest,
+};
 use telex::backend::postgres::{make_tls, sanitize_ident, PgBackend};
 use telex::backend::Backend;
 use telex::daemon::test_support::{registered_epoch, send_request, TestDaemon};
 use telex::daemon_ipc::{self as proto, Request, Response, WatchPidSpec};
-use telex::model::{now_ms, Attention, DeliveryOutcome, NewMessage};
+use telex::model::{
+    now_ms, ApplicationMessageOperation, ApplicationOperationBegin, ApplicationRecordScope,
+    Attention, DeliveryOutcome, Disposition, NewApplicationOperation, NewMessage, RetentionPolicy,
+};
 use telex::profiles::{self, BackendProfile, ConfigFile};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+#[tokio::test]
+async fn application_client_schema_v3_operation_smoke() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) = pg_url_or_skip("application_client_schema_v3_operation_smoke") else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let schema = sanitize_ident(&format!(
+        "telex_app_client_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .unwrap();
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+    let backend = PgBackend::connect_with(cfg.clone(), Some(&schema))
+        .await
+        .unwrap();
+    backend.init_schema().await.unwrap();
+    let store_id = backend.logical_store_id().await.unwrap();
+    let operation = NewApplicationOperation {
+        logical_store_id: store_id,
+        application_responsibility: "postgres-smoke".into(),
+        operation_id: "operation-1".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: "fingerprint".into(),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    assert!(matches!(
+        backend
+            .begin_application_operation(&operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Replay(existing)
+            if existing.payload_fingerprint == operation.payload_fingerprint
+    ));
+    let mut mismatched_operation = operation.clone();
+    mismatched_operation.payload_fingerprint = "different-fingerprint".into();
+    assert!(matches!(
+        backend
+            .begin_application_operation(&mismatched_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::FingerprintMismatch(existing)
+            if existing.payload_fingerprint == operation.payload_fingerprint
+    ));
+    assert_eq!(
+        backend
+            .complete_application_operation(
+                &operation.logical_store_id,
+                &operation.application_responsibility,
+                &operation.operation_id,
+                "accepted",
+                Some("{}"),
+                None,
+            )
+            .await
+            .unwrap()
+            .state,
+        "accepted"
+    );
+    let parent = backend
+        .insert_message(&NewMessage {
+            from_addr: Some("postgres:target".into()),
+            to_addr: "postgres:sender".into(),
+            kind: "request".into(),
+            attention: Attention::Background,
+            body: "parent".into(),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let reply_operation = NewApplicationOperation {
+        logical_store_id: operation.logical_store_id.clone(),
+        application_responsibility: "postgres-smoke".into(),
+        operation_id: "reply-operation".into(),
+        operation_kind: "reply".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: format!("[{},[]]", parent.id),
+        payload_fingerprint: "reply-fingerprint".into(),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&reply_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    let metadata = r#"{"urn:test:opaque":{"value":"postgres"}}"#;
+    let reply = backend
+        .insert_application_message(
+            &NewMessage {
+                parent_id: Some(parent.id),
+                from_addr: Some("postgres:sender".into()),
+                to_addr: "postgres:target".into(),
+                kind: "reply".into(),
+                attention: Attention::Background,
+                body: "reply".into(),
+                metadata: Some(metadata.into()),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            },
+            &ApplicationMessageOperation {
+                logical_store_id: reply_operation.logical_store_id.clone(),
+                application_responsibility: reply_operation.application_responsibility.clone(),
+                operation_id: reply_operation.operation_id.clone(),
+                payload_fingerprint: reply_operation.payload_fingerprint.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(reply.metadata.as_deref(), Some(metadata));
+    assert!(backend
+        .thread_messages(parent.thread_id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|message| message.id == reply.id && message.metadata.as_deref() == Some(metadata)));
+
+    let comparable_digest = "c".repeat(64);
+    let pending_operation = NewApplicationOperation {
+        logical_store_id: operation.logical_store_id.clone(),
+        application_responsibility: "postgres-public-client".into(),
+        operation_id: "public-reconcile".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: comparable_digest.clone(),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&pending_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    let other_responsibility_operation = NewApplicationOperation {
+        application_responsibility: "postgres-other-client".into(),
+        ..pending_operation.clone()
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&other_responsibility_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    let shared_operation_deltas: Vec<_> = backend
+        .state_deltas(0, 10_000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|delta| {
+            delta.axis == "operation"
+                && delta
+                    .payload_json
+                    .contains("\"operation_id\":\"public-reconcile\"")
+        })
+        .collect();
+    assert_eq!(shared_operation_deltas.len(), 2);
+    assert_ne!(
+        shared_operation_deltas[0].entity_id,
+        shared_operation_deltas[1].entity_id
+    );
+    assert!(shared_operation_deltas.iter().any(|delta| {
+        delta
+            .payload_json
+            .contains("\"application_responsibility\":\"postgres-public-client\"")
+    }));
+    assert!(shared_operation_deltas.iter().any(|delta| {
+        delta
+            .payload_json
+            .contains("\"application_responsibility\":\"postgres-other-client\"")
+    }));
+    backend
+        .insert_application_message(
+            &NewMessage {
+                from_addr: Some("postgres:sender".into()),
+                to_addr: "postgres:target".into(),
+                kind: "note".into(),
+                attention: Attention::Background,
+                body: "public reconcile".into(),
+                sent_at_ms: now_ms(),
+                ..Default::default()
+            },
+            &ApplicationMessageOperation {
+                logical_store_id: pending_operation.logical_store_id.clone(),
+                application_responsibility: pending_operation.application_responsibility.clone(),
+                operation_id: pending_operation.operation_id.clone(),
+                payload_fingerprint: comparable_digest.clone(),
+            },
+        )
+        .await
+        .unwrap();
+    let config = ConfigFile {
+        default: Some("pg-public-client".into()),
+        backends: BTreeMap::from([(
+            "pg-public-client".into(),
+            BackendProfile {
+                kind: "postgres".into(),
+                path: None,
+                url: Some(url.clone()),
+                auth: Some("password".into()),
+                password_env: None,
+                password_command: None,
+                schema: Some(schema.clone()),
+                entra_cred: None,
+                entra_scope: None,
+            },
+        )]),
+    };
+    let config_path = write_temp_config("application-client-public", &config);
+    let previous_config = std::env::var_os("TELEX_CONFIG");
+    std::env::set_var("TELEX_CONFIG", &config_path);
+    let client = ApplicationClient::connect(ApplicationClientConfig {
+        responsibility: ApplicationResponsibility("postgres-public-client".into()),
+        backend: Some("pg-public-client".into()),
+        db_override: None,
+    })
+    .await
+    .unwrap();
+    let missing_reference = client
+        .prepare_send(&SendRequest {
+            operation_id: OperationId("postgres-not-recorded".into()),
+            sender: "postgres:sender".into(),
+            to: "postgres:target".into(),
+            cc: Vec::new(),
+            kind: "note".into(),
+            attention: "background".into(),
+            requires_disposition: false,
+            subject: None,
+            body: "not submitted".into(),
+            metadata: None,
+            retry_budget: 0,
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        client
+            .reconcile_operation(&missing_reference)
+            .await
+            .unwrap(),
+        telex::application_client::OperationReconciliation::NotRecorded(evidence)
+            if evidence.operation_id.0 == "postgres-not-recorded"
+                && evidence.logical_store_id == *client.logical_store_id()
+    ));
+    let other_cleanup_operation = NewApplicationOperation {
+        logical_store_id: pending_operation.logical_store_id.clone(),
+        application_responsibility: "postgres-other-client".into(),
+        operation_id: "postgres-other-cleanup-boundary".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:other".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: "e".repeat(64),
+        retry_budget: 0,
+        created_at_ms: 1,
+    };
+    backend
+        .begin_application_operation(&other_cleanup_operation)
+        .await
+        .unwrap();
+    backend
+        .complete_application_operation(
+            &other_cleanup_operation.logical_store_id,
+            &other_cleanup_operation.application_responsibility,
+            &other_cleanup_operation.operation_id,
+            "rejected",
+            Some("{}"),
+            None,
+        )
+        .await
+        .unwrap();
+    backend
+        .cleanup_application_records(
+            &ApplicationRecordScope {
+                logical_store_id: other_cleanup_operation.logical_store_id.clone(),
+                application_responsibility: other_cleanup_operation
+                    .application_responsibility
+                    .clone(),
+            },
+            RetentionPolicy {
+                completed_before_ms: i64::MAX,
+                max_delete: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        client
+            .reconcile_operation(&missing_reference)
+            .await
+            .unwrap(),
+        telex::application_client::OperationReconciliation::NotRecorded(_)
+    ));
+    let cleanup_operation = NewApplicationOperation {
+        logical_store_id: pending_operation.logical_store_id.clone(),
+        application_responsibility: pending_operation.application_responsibility.clone(),
+        operation_id: "postgres-cleanup-boundary".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: "d".repeat(64),
+        retry_budget: 0,
+        created_at_ms: 1,
+    };
+    backend
+        .begin_application_operation(&cleanup_operation)
+        .await
+        .unwrap();
+    backend
+        .complete_application_operation(
+            &cleanup_operation.logical_store_id,
+            &cleanup_operation.application_responsibility,
+            &cleanup_operation.operation_id,
+            "rejected",
+            Some("{}"),
+            None,
+        )
+        .await
+        .unwrap();
+    backend
+        .cleanup_application_records(
+            &ApplicationRecordScope {
+                logical_store_id: cleanup_operation.logical_store_id.clone(),
+                application_responsibility: cleanup_operation.application_responsibility.clone(),
+            },
+            RetentionPolicy {
+                completed_before_ms: i64::MAX,
+                max_delete: 1,
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(
+        client
+            .reconcile_operation(&missing_reference)
+            .await
+            .unwrap(),
+        telex::application_client::OperationReconciliation::RetentionBoundaryCrossed {
+            staged_generation: Some(0),
+            current_generation: 1,
+        }
+    ));
+    let noncomparable = RecoveryHandle {
+        logical_store_id: LogicalStoreId(pending_operation.logical_store_id.clone()),
+        responsibility: ApplicationResponsibility(
+            pending_operation.application_responsibility.clone(),
+        ),
+        operation_id: OperationId(pending_operation.operation_id.clone()),
+        payload_identity: PayloadIdentity {
+            algorithm: "sha256".into(),
+            digest: comparable_digest.clone(),
+            comparable: false,
+        },
+        retention_generation: None,
+    };
+    assert!(matches!(
+        client.reconcile_operation(&noncomparable).await,
+        Err(ApplicationClientError::OperationMismatch { .. })
+    ));
+    assert_eq!(
+        backend
+            .application_operation(
+                &pending_operation.logical_store_id,
+                &pending_operation.application_responsibility,
+                &pending_operation.operation_id,
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .state,
+        "pending"
+    );
+    let comparable = RecoveryHandle {
+        payload_identity: PayloadIdentity {
+            algorithm: "sha256".into(),
+            digest: comparable_digest,
+            comparable: true,
+        },
+        ..noncomparable
+    };
+    let telex::application_client::OperationReconciliation::Recorded(reconciled) =
+        client.reconcile_operation(&comparable).await.unwrap()
+    else {
+        panic!("expected recorded operation");
+    };
+    assert!(matches!(
+        reconciled.outcome,
+        RecordedOperationOutcome::Accepted(_)
+    ));
+
+    let daemon = TestDaemon::new("pg-oversized-delivery-progress");
+    let store_key = profiles::store_key(config.backends.get("pg-public-client").unwrap(), None);
+    assert!(matches!(
+        daemon
+            .register(&store_key, "pg-receiver-session", "pg-frame-recipient")
+            .await,
+        Response::Registered { .. }
+    ));
+    let oversized_id = backend
+        .insert_message(&NewMessage {
+            from_addr: Some("pg-frame-sender".into()),
+            to_addr: "pg-frame-recipient".into(),
+            kind: "note".into(),
+            attention: Attention::Background,
+            body: "x".repeat(proto::MAX_JSONL_FRAME_BYTES + 1),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .id;
+    let following_id = backend
+        .insert_message(&NewMessage {
+            from_addr: Some("pg-frame-sender".into()),
+            to_addr: "pg-frame-recipient".into(),
+            kind: "note".into(),
+            attention: Attention::Background,
+            body: "following".into(),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap()
+        .id;
+    assert!(matches!(
+        daemon
+            .wait(
+                &store_key,
+                "pg-receiver-session",
+                "pg-frame-recipient",
+                1_000,
+            )
+            .await,
+        Response::DeliveryQuarantined {
+            message_id,
+            ref recipient,
+            serialized_bytes,
+            max_bytes,
+            may_continue: true,
+        } if message_id == oversized_id
+            && recipient == "pg-frame-recipient"
+            && serialized_bytes > max_bytes
+    ));
+    assert!(backend
+        .dispositions_for(oversized_id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|disposition| {
+            disposition.recipient == "pg-frame-recipient"
+                && disposition.state == Disposition::Rejected.as_str()
+                && disposition.by_principal.as_deref() == Some("daemon")
+                && disposition.origin.as_deref() == Some("daemon-quarantine")
+                && disposition.note.as_deref().is_some_and(|note| {
+                    note.contains("serialized_bytes=") && note.contains("max_bytes=")
+                })
+        }));
+    let quarantine_deltas = backend.state_delta_page(0, 1_000).await.unwrap();
+    for kind in ["acknowledgment", "disposition"] {
+        assert!(quarantine_deltas.deltas.iter().any(|delta| {
+            delta.axis == kind
+                && delta
+                    .payload_json
+                    .contains("\"evidence\":\"daemon-quarantine\"")
+                && delta.payload_json.contains("\"by_principal\":\"daemon\"")
+        }));
+    }
+    assert!(matches!(
+        daemon
+            .request(Request::Detach {
+                store_key: store_key.clone(),
+                session_id: "pg-receiver-session".into(),
+                address: "pg-frame-recipient".into(),
+            })
+            .await,
+        Response::Ack { .. }
+    ));
+    let original_instance_id = daemon.instance_id().to_string();
+    drop(daemon);
+    let restarted = TestDaemon::new("pg-oversized-delivery-progress-restart");
+    assert_ne!(restarted.instance_id(), original_instance_id);
+    assert!(matches!(
+        restarted
+            .register(&store_key, "pg-receiver-session", "pg-frame-recipient")
+            .await,
+        Response::Registered { .. }
+    ));
+    let restarted_backend = restarted.backend(&store_key).await.unwrap();
+    assert!(restarted_backend
+        .dispositions_for(oversized_id)
+        .await
+        .unwrap()
+        .iter()
+        .any(|disposition| {
+            disposition.recipient == "pg-frame-recipient"
+                && disposition.state == Disposition::Rejected.as_str()
+                && disposition.by_principal.as_deref() == Some("daemon")
+                && disposition.origin.as_deref() == Some("daemon-quarantine")
+        }));
+    assert!(matches!(
+        restarted
+            .wait(
+                &store_key,
+                "pg-receiver-session",
+                "pg-frame-recipient",
+                1_000,
+            )
+            .await,
+        Response::Message { id, .. } if id == following_id
+    ));
+
+    for (suffix, version) in [("v3_no_origin", 3), ("v2_upgrade", 2)] {
+        let repair_schema = sanitize_ident(&format!(
+            "tx_or_{}_{}_{}",
+            suffix,
+            std::process::id(),
+            now_ms()
+        ))
+        .unwrap();
+        admin_exec(
+            &cfg,
+            &format!(
+                "CREATE SCHEMA {repair_schema};
+                 CREATE TABLE {repair_schema}.dispositions (
+                    id bigserial PRIMARY KEY,
+                    message_id bigint NOT NULL,
+                    recipient text NOT NULL,
+                    state text NOT NULL,
+                    note text,
+                    by_principal text,
+                    at_ms bigint NOT NULL
+                 );
+                 CREATE TABLE {repair_schema}.telex_schema_version (
+                    singleton integer NOT NULL DEFAULT 1 UNIQUE,
+                    version bigint NOT NULL
+                 );
+                 INSERT INTO {repair_schema}.telex_schema_version(singleton, version)
+                 VALUES (1, {version});"
+            ),
+        )
+        .await
+        .unwrap();
+        let repaired = PgBackend::connect_with(cfg.clone(), Some(&repair_schema))
+            .await
+            .unwrap();
+        repaired.init_schema().await.unwrap();
+        repaired
+            .insert_disposition(99, "recipient", "handled", None, Some("application"))
+            .await
+            .unwrap();
+        assert_eq!(repaired.dispositions_for(99).await.unwrap()[0].origin, None);
+        drop(repaired);
+        admin_exec(
+            &cfg,
+            &format!("DROP SCHEMA IF EXISTS {repair_schema} CASCADE"),
+        )
+        .await
+        .unwrap();
+    }
+    restore_env("TELEX_CONFIG", previous_config);
+    drop(client);
+    drop(backend);
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+}
 
 fn pg_url_or_skip(test_name: &str) -> Option<String> {
     let require = std::env::var("TELEX_PG_REQUIRE")
@@ -222,6 +814,296 @@ exit 0
             root.to_string_lossy().to_string(),
         ]
     }
+}
+
+#[tokio::test]
+async fn postgres_application_detach_intent_round_trip() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_application_detach_intent_round_trip") else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let schema = sanitize_ident(&format!(
+        "telex_app_detach_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .unwrap();
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+    let backend = PgBackend::connect_with(cfg.clone(), Some(&schema))
+        .await
+        .unwrap();
+    backend.init_schema().await.unwrap();
+    let claimed = match backend
+        .claim_epoch_lease("postgres:detach", "owner", 15)
+        .await
+        .unwrap()
+    {
+        telex::model::EpochClaimResult::Claimed(claimed) => claimed,
+        other => panic!("expected claim, got {other:?}"),
+    };
+    assert!(backend
+        .release_epoch_lease_for_application_detach(
+            "postgres:detach",
+            "owner",
+            claimed.lease_epoch,
+            "postgres-application",
+            "runtime",
+            "bidirectional",
+            "ApplicationDetach",
+        )
+        .await
+        .unwrap());
+    let intent = backend
+        .application_detach_intent("postgres-application", "postgres:detach")
+        .await
+        .unwrap()
+        .expect("application detach intent");
+    assert_eq!(intent.runtime_id, "runtime");
+    assert_eq!(
+        backend
+            .application_detach_intents("postgres-application")
+            .await
+            .unwrap(),
+        vec![intent]
+    );
+    backend
+        .clear_application_detach_intent("postgres-application", "postgres:detach")
+        .await
+        .unwrap();
+    assert!(backend
+        .application_detach_intent("postgres-application", "postgres:detach")
+        .await
+        .unwrap()
+        .is_none());
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn postgres_concurrent_operation_duplicates_return_replay() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_concurrent_operation_duplicates_return_replay") else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let schema = sanitize_ident(&format!(
+        "telex_app_operation_race_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .unwrap();
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+    let first = Arc::new(
+        PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .unwrap(),
+    );
+    first.init_schema().await.unwrap();
+    let second = Arc::new(
+        PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .unwrap(),
+    );
+    let operation = Arc::new(NewApplicationOperation {
+        logical_store_id: first.logical_store_id().await.unwrap(),
+        application_responsibility: "postgres-race".into(),
+        operation_id: "same-operation".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: "a".repeat(64),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    });
+    let barrier = Arc::new(tokio::sync::Barrier::new(3));
+    let first_task = {
+        let backend = first.clone();
+        let operation = operation.clone();
+        let barrier = barrier.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            backend.begin_application_operation(&operation).await
+        })
+    };
+    let second_task = {
+        let backend = second.clone();
+        let operation = operation.clone();
+        let barrier = barrier.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            backend.begin_application_operation(&operation).await
+        })
+    };
+    barrier.wait().await;
+    let results = [first_task.await.unwrap(), second_task.await.unwrap()];
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(ApplicationOperationBegin::Started(_))))
+            .count(),
+        1
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(ApplicationOperationBegin::Replay(_))))
+            .count(),
+        1
+    );
+
+    let snapshot_operation = NewApplicationOperation {
+        operation_id: "snapshot-operation".into(),
+        ..operation.as_ref().clone()
+    };
+    let scope = ApplicationRecordScope {
+        logical_store_id: snapshot_operation.logical_store_id.clone(),
+        application_responsibility: snapshot_operation.application_responsibility.clone(),
+    };
+    let snapshot_barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let creator = {
+        let backend = first.clone();
+        let barrier = snapshot_barrier.clone();
+        let operation = snapshot_operation.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            backend.begin_application_operation(&operation).await
+        })
+    };
+    snapshot_barrier.wait().await;
+    let snapshot = second
+        .application_operation_snapshot(&scope, &snapshot_operation.operation_id)
+        .await
+        .unwrap();
+    assert!(creator.await.unwrap().is_ok());
+    assert_eq!(snapshot.retention_generation, 0);
+    if let Some(record) = snapshot.operation {
+        assert_eq!(record.operation_id, snapshot_operation.operation_id);
+    }
+    assert!(second
+        .application_operation_snapshot(&scope, &snapshot_operation.operation_id)
+        .await
+        .unwrap()
+        .operation
+        .is_some());
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+}
+
+#[tokio::test]
+async fn postgres_operation_replay_racing_cleanup_stays_typed() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_operation_replay_racing_cleanup_stays_typed") else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let schema = sanitize_ident(&format!(
+        "telex_app_replay_cleanup_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .unwrap();
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+    let replay_backend = Arc::new(
+        PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .unwrap(),
+    );
+    replay_backend.init_schema().await.unwrap();
+    let cleanup_backend = Arc::new(
+        PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .unwrap(),
+    );
+    let logical_store_id = replay_backend.logical_store_id().await.unwrap();
+    let scope = ApplicationRecordScope {
+        logical_store_id: logical_store_id.clone(),
+        application_responsibility: "postgres-race".into(),
+    };
+
+    for index in 0..32 {
+        let operation = NewApplicationOperation {
+            logical_store_id: logical_store_id.clone(),
+            application_responsibility: scope.application_responsibility.clone(),
+            operation_id: format!("cleanup-race-{index}"),
+            operation_kind: "send".into(),
+            sender: "postgres:sender".into(),
+            recipients_json: r#"["postgres:target"]"#.into(),
+            payload_fingerprint: "a".repeat(64),
+            retry_budget: 1,
+            created_at_ms: 1,
+        };
+        assert!(matches!(
+            replay_backend
+                .begin_application_operation(&operation)
+                .await
+                .unwrap(),
+            ApplicationOperationBegin::Started(_)
+        ));
+        replay_backend
+            .complete_application_operation(
+                &operation.logical_store_id,
+                &operation.application_responsibility,
+                &operation.operation_id,
+                "rejected",
+                Some("{}"),
+                None,
+            )
+            .await
+            .unwrap();
+
+        let barrier = Arc::new(tokio::sync::Barrier::new(3));
+        let replay = {
+            let backend = replay_backend.clone();
+            let operation = operation.clone();
+            let barrier = barrier.clone();
+            tokio::spawn(async move {
+                barrier.wait().await;
+                backend.begin_application_operation(&operation).await
+            })
+        };
+        let cleanup = {
+            let backend = cleanup_backend.clone();
+            let scope = scope.clone();
+            let barrier = barrier.clone();
+            tokio::spawn(async move {
+                barrier.wait().await;
+                backend
+                    .cleanup_application_records(
+                        &scope,
+                        RetentionPolicy {
+                            completed_before_ms: i64::MAX,
+                            max_delete: 1,
+                        },
+                    )
+                    .await
+            })
+        };
+        barrier.wait().await;
+        let replay = replay
+            .await
+            .unwrap()
+            .expect("replay/cleanup race must remain typed");
+        cleanup.await.unwrap().unwrap();
+        assert!(matches!(
+            replay,
+            ApplicationOperationBegin::Replay(_) | ApplicationOperationBegin::Started(_)
+        ));
+    }
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
 }
 
 async fn wait_for_file(path: &std::path::Path, timeout: Duration) -> bool {
@@ -556,6 +1438,7 @@ async fn postgres_on_deliver_wake_on_cc_pushes_live_cc_without_replay() {
         scope: None,
         tags: None,
         watch_pids: vec![WatchPidSpec::anchor(std::process::id())],
+        replace_watch_pids: false,
         recovery: false,
         on_deliver: Some(record_stdin_argv(&output)),
         replace_on_deliver: false,
@@ -673,6 +1556,7 @@ async fn postgres_on_deliver_failed_cc_retry_survives_later_accepted_cc() {
         scope: None,
         tags: None,
         watch_pids: vec![WatchPidSpec::anchor(std::process::id())],
+        replace_watch_pids: false,
         recovery: false,
         on_deliver: Some(fail_first_then_record_argv(&output_root)),
         replace_on_deliver: false,

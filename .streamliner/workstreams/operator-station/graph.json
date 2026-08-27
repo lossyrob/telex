@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (direct human-attended Telex endpoint)",
-  "summary": "Issue #134 is in progress through Streamliner run 419ba98f-6c1e-4829-8255-7e4de25a2a70. Implementer/reviewer are attended_push with --yolo, never-commit, gpt-5.6-sol, and claude-opus-5; station-app remains gated.",
+  "summary": "Direct Station reset PR #136 is review-approved at head 7c6603ecd081255d8af370668cf3ddddc8075b50 with green CI, clean mergeability, and zero unresolved threads. Merge is held on Application Client PR #132 ordering.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-30T21:18:30Z",
+  "updatedAt": "2026-08-27T19:19:13Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -75,6 +75,26 @@
       "dependsOn": []
     },
     {
+      "id": "operator-station-postgres-dogfood-evidence",
+      "type": "research",
+      "title": "Preserve Postgres dogfood and UI evidence",
+      "summary": "Completed non-gating evidence harvest from historical PR #143 at exact head 949b43e. The report preserves code-backed Postgres and UX lessons, records missing runtime proof, and does not promote spike mechanisms or advance production readiness.",
+      "status": "completed",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 146
+      },
+      "dependsOn": [
+        "operator-loop-spike"
+      ]
+    },
+    {
       "id": "viability-gate",
       "type": "gate",
       "title": "Human-attended Station interaction is worth productionizing",
@@ -126,6 +146,19 @@
       },
       "dependsOn": [
         "station-contract"
+      ],
+      "externalDependsOn": [
+        {
+          "id": "application-client-direct-station-rebaseline",
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "client-core"
+          },
+          "label": "Application Client direct-Station vocabulary and bundle re-baseline in PR #132",
+          "url": "https://github.com/lossyrob/telex/pull/132",
+          "status": "pending"
+        }
       ]
     },
     {

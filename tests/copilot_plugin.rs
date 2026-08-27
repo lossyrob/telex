@@ -109,6 +109,19 @@ fn hook_manifest_wires_session_end_and_agent_stop_adapters() {
 }
 
 #[test]
+fn bridge_registry_publishes_atomic_lifecycle_snapshots() {
+    let bridge = include_str!("../copilot/bridge/extension.mjs");
+    assert!(bridge.contains("lifecyclePid: process.ppid"));
+    assert!(bridge.contains("rename(registryTempPath, registryPath)"));
+    assert!(bridge.contains("queueRegistryWrite().catch(() => {})"));
+    assert!(bridge.contains("await registryWrite.catch(() => {})"));
+    assert!(
+        !bridge.contains("writeFile(\n    registryPath,"),
+        "heartbeat publication must not truncate the live registry in place"
+    );
+}
+
+#[test]
 fn drain_hook_launchers_keep_the_plugin_boundary_thin_and_actionable() {
     let hooks: Value =
         serde_json::from_str(include_str!("../copilot/plugin/hooks.json")).expect("hooks json");

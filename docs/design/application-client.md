@@ -43,9 +43,9 @@ The client owns:
   selected backend supplies it.
 
 The client does not own Watcher detector execution, scheduling, state
-transactions, or provider policy. It does not own Operator Station routing
-policy, mediation judgment, notification policy, human UI, or campaign
-vocabulary.
+transactions, or provider policy. It does not own application-specific
+presentation, human workflow selection, mediation judgment, notification
+policy, routing vocabulary, UI, or campaign vocabulary.
 
 ## Terms
 
@@ -161,6 +161,10 @@ Membership-loss projection MUST distinguish at least:
 - `owner-demoted`;
 - `unknown`.
 
+The taxonomy is extensible. Implementations MUST preserve every known reason
+without collapsing it into `unknown`, and MUST retain an explicit unknown or raw
+forward-compatible representation when a newer reason is not recognized.
+
 A collision result MUST expose the current owner identity and lease epoch when
 available, plus bounded retry, reset, or wait guidance. The client MUST NOT hide
 force takeover and MUST NOT silently replace another live application. If the
@@ -182,7 +186,8 @@ return typed membership loss rather than silently using no sender.
 A send-only membership:
 
 - MUST NOT advertise inbound application attendance;
-- MUST NOT expose receive or acknowledgment operations;
+- MUST NOT expose receive, acknowledgment, unresolved/history query, or inbound
+  backlog health evidence;
 - MUST NOT make a target address appear application-deliverable merely because
   a sender responsibility occupies it.
 
@@ -233,12 +238,35 @@ result and MUST NOT fabricate a consumed row.
 Receive MAY be projected as a stream, callback, or poll by a binding, but those
 shapes MUST preserve identical delivery and acknowledgment semantics.
 
+Message acceptance MUST verify that the actual recipient-specific serialized
+receive frame fits the supported transport limit before persisting the message
+or any delivery row. The check MUST include JSON escaping and generated delivery
+fields, MUST parse and deduplicate recipients once, and MUST enforce the
+protocol recipient-count limit before creating destination address records.
+If an older store already contains a row that cannot be represented without
+changing its body, subject, or metadata, the daemon MUST preserve those stored
+values, atomically record a terminal `rejected` disposition for the exact
+recipient delivery with daemon provenance and a bounded diagnostic note,
+consume that transport delivery, and return a typed receive-specific quarantine
+outcome containing recipient, message ID, serialized bytes, frame limit, and
+continue-receiving guidance. This outcome is post-acceptance and MUST NOT use
+the pre-acceptance rejection taxonomy. Sender receipt refresh and state deltas
+MUST expose a sticky structural daemon-quarantine origin that supported
+application disposition APIs cannot mint, and MUST NOT report application
+recipient consumption as accepted even after a later workflow disposition.
+The latest ordinary workflow disposition remains a separate axis. This legacy quarantine is an explicit
+progress exception: the unrepresentable delivery is not handed to the
+application, but it cannot permanently block later receivable deliveries, and
+the durable evidence remains auditable after restart. Notification-only CC
+copies MUST be skipped with an operator diagnostic rather than fabricating an
+obligation-bearing workflow disposition.
+
 ### AC-C10: Acknowledgment follows durable application ingest
 
 An application MUST acknowledge a delivery only after it has stored enough
 state to replay or resume the application action after restart. The client MUST
 make acknowledgment an explicit action; it MUST NOT infer acknowledgment from
-occupancy, rendering, notification submission, or transport output.
+occupancy, rendering, any application-side side effect, or transport output.
 
 The receive-health surface MUST keep at least these conditions distinguishable:
 
@@ -309,17 +337,61 @@ The result model MUST distinguish:
 - rejected before acceptance;
 - partial;
 - indeterminate within the accepted-send/local-commit duplicate window;
-- previously completed or duplicate operation.
+- previously completed or duplicate operation;
+- authoritative `not-recorded`; and
+- unavailable absence evidence after a retention boundary.
+
+A rejection proved to occur before durable acceptance MUST carry typed
+retryability: `transient`/retryable or `permanent`/non-retryable. Callers MUST
+NOT infer retry safety from free-form error text. Transport or peer failures
+whose acceptance boundary is not proved remain `indeterminate`.
+
+Duplicate or previously completed evidence is authoritative only when it proves
+the same stable operation identity and a comparable canonical payload identity
+for the attempted operation. Mismatched or non-comparable payload evidence MUST
+return a typed conflict and MUST NOT authorize replay success or adoption of the
+prior result.
 
 After restart, the client MUST support operation-result and receipt
 reconciliation before the application authors a replacement. It MUST preserve
 the original sender, recipient, payload identity, and retry budget during that
 reconciliation.
 
+Before the first send attempt, the application MUST persist the complete typed
+operation reference supplied by the client. That reference MUST bind the exact
+logical store, application responsibility, operation identity, comparable
+payload identity, and current operation-evidence retention generation.
+
+An authoritative `not-recorded` result MUST prove that no operation record,
+operation-to-message mapping, result, or receipt exists for that exact tuple and
+that the reference's retention generation still equals the store's current
+generation for the application responsibility. Because accepted message
+insertion and operation-to-message evidence are atomic, that proof also proves
+that durable acceptance did not occur for the exact operation. Cleanup that
+deletes any terminal operation evidence MUST advance the durable retention
+generation. A missing legacy generation or a generation mismatch MUST return a
+typed retention-boundary outcome, not `not-recorded`, and MUST NOT authorize
+retry or replacement.
+
+Pending or indeterminate reconciliation MUST use the operation identity together
+with the opaque logical-store identity staged when the operation began. A store
+binding mismatch remains blocked or indeterminate and MUST NOT authorize retry,
+acceptance, or result adoption. Rebinding to another store requires an explicit
+new or recovery operation.
+
 ### AC-C15: Source identity is store-scoped
 
 Source identity is `(logical store identity, message ID)`. A same-number message
 from another store MUST NOT be opened or treated as the source.
+
+The same opaque logical-store identity also fences retry-stable operation
+reconciliation under AC-C14; source or operation evidence from another store
+cannot be silently rebound.
+
+Authoritative `not-recorded` evidence is scoped further by application
+responsibility and operation identity. Absence observed for another
+responsibility, another store, or after the staged retention generation changed
+is not evidence about the requested operation.
 
 The logical store identity MUST NOT expose a raw path, credential, token, or
 connection string.
@@ -395,8 +467,9 @@ NOT regress workflow state.
 ### AC-C20: Compound operations preserve ordering and recovery evidence
 
 The client MUST provide general primitives for compound application workflows
-that may include reply, disposition, notification submission, and route-back.
-The client does not decide which steps a product requires.
+that may include metadata-bearing message authorship, reply, and exact-recipient
+workflow effects such as disposition. The client does not decide which steps a
+product requires.
 
 For a caller-declared sequence, the client MUST:
 
@@ -407,11 +480,10 @@ For a caller-declared sequence, the client MUST:
 - support a machine-readable outcome record before a caller performs a
   non-stale terminal closure that depends on that record.
 
-When a caller declares that reply or notification must precede terminal
+When a caller declares that one authored operation must precede terminal
 disposition, the disposition MUST NOT become terminal until the prerequisite
-operation is durably accepted. "No notice needed" is not a generic client
-success state; product policy must express and evidence any permitted
-disposition-only path.
+operation is durably accepted. Whether a workflow requires a reply, another
+message, or disposition alone remains caller policy.
 
 ## Product boundary and prohibited fallback seams
 
@@ -419,8 +491,8 @@ The following remain outside the shared client:
 
 - Watcher detector request/result schemas, scheduling, state transitions,
   allowed event kinds, provider templates, script policy, and runtime health;
-- Operator Station direct/assisted/quiet policy, human-obligation selection,
-  notification matrix, route policy, mediation vocabulary, and UI;
+- application-specific human-obligation selection, notification presentation,
+  mediation/routing vocabulary, and UI;
 - campaign-local kinds, addresses, and attention-routing policy.
 
 The following MUST NOT become a supported production fallback:
@@ -477,9 +549,11 @@ The accepted contract decomposes into these ordered work areas:
    - replace spike-private send/membership seams with the supported client;
    - preserve receipt-gated state and send-only readiness invariants.
 5. **Operator Station integration**
-   - replace subprocess/private seams with the supported client;
-   - preserve exact-delivery ack, unresolved/history recovery, source
-     resolution, and compound route-back ordering.
+   - consume the ordinary bidirectional client primitives without a
+     Station-private seam;
+   - preserve exact-delivery ack, opaque metadata-bearing reply, per-recipient
+     disposition, unresolved/history recovery, all AC-C15 source-resolution
+     states, and generic compound ordering when the caller declares a sequence.
 6. **Operational hardening**
    - validate principal provenance, observability, bounded storage, performance,
      packaging, upgrade, and failure recovery in supported environments.

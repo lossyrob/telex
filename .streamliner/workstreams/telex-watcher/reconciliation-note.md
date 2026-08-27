@@ -1,5 +1,52 @@
 # Telex Watcher — Reconciliation
 
+## 2026-08-27 minimal v2 contract and usability acceptance
+
+Issue #133 completed through
+[PR #135](https://github.com/lossyrob/telex/pull/135), merged from exact reviewed
+head `a9a832b940ac95b8eb51fe04b456902d0c74d251` as
+`b91e8301899351c0411d6e2e9ac5290af8a3cb4c`. The merge had an exact-head PAW
+`+1`, six successful checks, clean mergeability, and zero unresolved review
+threads. It promoted the minimal v2 Watcher contract, three v2 schemas, and ADR
+0050 into project design authority.
+
+The canonical integrated workstream design is now
+[`design/current-design.md`](design/current-design.md). The
+`minimal-watcher-authoring-contract` node is completed. The operator separately
+accepted `dumb-watcher-contract-gate` as contract-usability acceptance, so the
+`minimal-contract-accepted` checkpoint is completed. Issue
+[#144](https://github.com/lossyrob/telex/issues/144) and
+[`tasks/minimal-example-pack.md`](tasks/minimal-example-pack.md) now provide the
+fresh tracker and bounded task specification for `minimal-example-pack`. The
+node remains ready but unlaunched pending separate campaign authorization.
+`watcher-runtime-core` remains planned and blocked specifically on Application
+Client `client-conformance`; the completed internal gate remains in its graph
+dependencies as history.
+
+The builder decision used the ordinary authoring flow in merged `watcher.md`:
+write or copy a detector, optionally exercise it, register it, and inspect
+diagnostics if needed. Registration requires only command, cadence, timeout,
+backend, sender, and target, while other generic fields have explicit defaults.
+Mandatory manifests, pinning, kind allowlists, provider preflight, downtime
+declarations, and template conformance are absent from v2 registration/runtime
+semantics. PR #135 carried PAW `+1` review 4825216100 and green CI. The focused
+design-steward follow-up in PR #141 carried `+1` review 5044005481 and green CI.
+This accepts contract usability only: it is not production runtime or proof that
+a watch can be created, registered, left running, and diagnosed in five minutes.
+That operational proof remains owned by the planned
+`five-minute-custom-watch-gate`.
+
+The former AC-C14 semantic gap is closed. Application Client issue #12
+publication revision 3, body SHA-256
+`c5c694681a2f3dc2060146fe932c26b3644d1d0518f1406e30c798853c168956`,
+records product merge `4ecbe84e99e00ab0cea3bcf3619d539c222746af`.
+The merged core provides authoritative exact-store/exact-operation
+`NotRecorded`, identity-checkable retry of the exact same operation, and
+`RetentionBoundaryCrossed` when absence evidence has expired. Runtime remains
+blocked on first-binding and `client-conformance` proof across SQLite and
+Postgres. Uncertain Watcher sends remain reconciliation-first and query-only,
+with no private fallback.
+
 ## What changed
 
 Wave 1 began as a narrow proof that trusted local detector scripts could run
@@ -37,11 +84,10 @@ snapshots, and other orchestration evidence. The clean replacement retained only
 the six intended product-documentation paths and moved requirements traceability
 from the normative design set to `docs/notes/application-client/`.
 
-Issue #12 now publishes `application-client-ready`, but explicitly as a
-design-only checkpoint. This resolves the semantic convergence prerequisite and
-permits detailed node promotion; it does not provide the supported client core,
-binding, conformance, or consumer-integration export that production
-`watcher-runtime` needs.
+Issue #12 publishes `application-client-ready` as the historical design-only
+checkpoint. Publication revision 3 additionally records the supported Rust core
+without claiming a binding, conformance, consumer integration, or production
+readiness.
 
 The first template-library implementation then reached a technically
 merge-ready state in PR #131 after three substantive review repairs. Operator
@@ -122,10 +168,11 @@ PR #115 completed that domain contract. Runtime/template workers can rely on
 detector, state, lifecycle, trust, failure, provenance, health, or message
 semantics.
 
-The Application Client semantic export is available through issue #12 and clean
-PR #126. Production runtime still needs the explicit `client-conformance`
-export. The minimal authoring contract and optional examples do not require the
-implemented client and can proceed first.
+The Application Client semantic contract and supported Rust core are available
+through issue #12, PR #126, and PR #132. Production runtime still needs the
+first binding and explicit `client-conformance` export across SQLite and
+Postgres. The minimal authoring contract and optional examples do not require
+that runtime evidence and can proceed separately.
 
 PR #131 remains a source of optional examples and implementation learning:
 provider scripts, bounded process helpers, deterministic provider ordering,
@@ -232,8 +279,9 @@ leakage, not additional Application Client product scope.
 
 - Test-support helper binaries: promoted through #110 into the
   `watcher-runtime` packaging acceptance checklist.
-- PR-sentry merge-during-preflight: promoted to
-  `detector-template-library` bootstrap guidance and lifecycle tests.
+- PR-sentry merge-during-preflight: retained as optional learning for
+  `minimal-example-pack` guidance and tests, not as mandatory provider
+  preflight.
 
 ## Promotion candidates
 
@@ -246,8 +294,9 @@ leakage, not additional Application Client product scope.
   authority — issue #12 / future Application Client contract.
   - Disposition: Watcher-specific semantics landed in `docs/design/watcher.md`
     and ADR 0046; all 15 shared requirements are accepted by issue #12 and clean
-    PR #126. Production runtime integration remains deferred until the supported
-    Application Client implementation and conformance export exists.
+    PR #126. PR #132 implements the supported Rust core and closes the former
+    non-acceptance gap. Production runtime integration remains deferred until
+    first-binding and conformance evidence exists across both backends.
 - External-provider proof requires mutation authority as well as credentials:
   target authority — workstream-design lesson (`project`).
   - Disposition: deferred with rationale; apply to the next live-provider node
@@ -276,9 +325,13 @@ leakage, not additional Application Client product scope.
 - Watcher authoring should optimize for the shortest useful loop before
   optional hardening: target authority — `docs/design/watcher.md`, a new
   superseding ADR, and v2 schemas.
-  - Disposition: promoted to `minimal-watcher-authoring-contract`, the next
-    ready design node.
+  - Disposition: completed through issue #133 and merged PR #135; the builder
+    accepted contract usability after PAW review 4825216100 and focused
+    design-steward review 5044005481. Issue #144 and the bounded task
+    specification now provide the launch prerequisite for the ready but
+    unlaunched optional example pack; operational proof remains a later gate.
 - PR #131 implementation evidence: target authority — minimal examples and
   optional hardening recipes.
-  - Disposition: preserved on the closed unmerged PR/branch. Extraction waits
-    until the minimal contract gate passes.
+  - Disposition: preserved on the closed unmerged PR/branch. Extraction may
+    proceed only as learning through issue #144's ready but unlaunched minimal
+    example pack.

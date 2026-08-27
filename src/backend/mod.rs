@@ -12,6 +12,55 @@ pub mod postgres;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
+pub(crate) fn application_operation_state_delta(
+    logical_store_id: &str,
+    application_responsibility: &str,
+    operation_id: &str,
+    state: &str,
+) -> (String, String) {
+    (
+        format!(
+            "operation:{}",
+            serde_json::json!([logical_store_id, application_responsibility, operation_id])
+        ),
+        serde_json::json!({
+            "logical_store_id": logical_store_id,
+            "application_responsibility": application_responsibility,
+            "operation_id": operation_id,
+            "state": state,
+        })
+        .to_string(),
+    )
+}
+
+pub(crate) fn application_compound_state_delta(
+    logical_store_id: &str,
+    application_responsibility: &str,
+    operation_id: &str,
+    step_id: &str,
+    state: &str,
+) -> (String, String) {
+    (
+        format!(
+            "operation-step:{}",
+            serde_json::json!([
+                logical_store_id,
+                application_responsibility,
+                operation_id,
+                step_id
+            ])
+        ),
+        serde_json::json!({
+            "logical_store_id": logical_store_id,
+            "application_responsibility": application_responsibility,
+            "operation_id": operation_id,
+            "step_id": step_id,
+            "state": state,
+        })
+        .to_string(),
+    )
+}
+
 /// What a backend can do, so the core can adapt behavior honestly.
 #[derive(Clone, Copy, Debug)]
 pub struct Capabilities {
@@ -31,20 +80,30 @@ pub struct WaitFetchOptions {
 #[derive(Clone, Debug)]
 pub struct WaitCandidate {
     pub message: MessageRow,
+    pub delivery_id: Option<i64>,
+    pub snapshot_version: i64,
     pub notification_only: bool,
 }
 
 impl WaitCandidate {
-    pub fn primary(message: MessageRow) -> Self {
+    pub fn primary(message: MessageRow, delivery_id: Option<i64>, snapshot_version: i64) -> Self {
         Self {
             message,
+            delivery_id,
+            snapshot_version,
             notification_only: false,
         }
     }
 
-    pub fn cc_notification(message: MessageRow) -> Self {
+    pub fn cc_notification(
+        message: MessageRow,
+        delivery_id: Option<i64>,
+        snapshot_version: i64,
+    ) -> Self {
         Self {
             message,
+            delivery_id,
+            snapshot_version,
             notification_only: true,
         }
     }
@@ -59,6 +118,7 @@ pub trait Backend: Send + Sync {
     }
 
     async fn init_schema(&self) -> Result<()>;
+    async fn logical_store_id(&self) -> Result<String>;
 
     // ---- addresses / directory ----
     async fn ensure_address(
@@ -166,6 +226,20 @@ pub trait Backend: Send + Sync {
         bail!("mark_consumed_if_current_owner: not supported by this backend")
     }
 
+    /// Exact-delivery variant used by the supported Application Client. The
+    /// durable delivery row id, message id, recipient, owner, and epoch are
+    /// verified in one backend transaction.
+    async fn mark_delivery_consumed_if_current_owner(
+        &self,
+        _recipient: &str,
+        _owner_instance_id: &str,
+        _lease_epoch: i64,
+        _message_id: i64,
+        _delivery_id: i64,
+    ) -> Result<DeliveryOutcome> {
+        bail!("mark_delivery_consumed_if_current_owner: not supported by this backend")
+    }
+
     /// Read (and advance) the durable backend clock high-water mark.  On SQLite this is
     /// a persisted `clock_hwm` row that never moves backward across restarts or wall-clock
     /// skew.  Primarily useful for tests that need a stable time reference.
@@ -225,6 +299,67 @@ pub trait Backend: Send + Sync {
         Ok(None)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn release_epoch_lease_for_application_detach(
+        &self,
+        address: &str,
+        owner_instance_id: &str,
+        lease_epoch: i64,
+        application_responsibility: &str,
+        runtime_id: &str,
+        capability: &str,
+        reason: &str,
+    ) -> Result<bool> {
+        let released = self
+            .release_epoch_lease(address, owner_instance_id, lease_epoch)
+            .await?;
+        if released {
+            self.record_application_detach_intent(
+                application_responsibility,
+                address,
+                runtime_id,
+                capability,
+                reason,
+            )
+            .await?;
+        }
+        Ok(released)
+    }
+
+    async fn record_application_detach_intent(
+        &self,
+        _application_responsibility: &str,
+        _address: &str,
+        _runtime_id: &str,
+        _capability: &str,
+        _reason: &str,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn clear_application_detach_intent(
+        &self,
+        _application_responsibility: &str,
+        _address: &str,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn application_detach_intent(
+        &self,
+        _application_responsibility: &str,
+        _address: &str,
+    ) -> Result<Option<ApplicationDetachIntent>> {
+        Ok(None)
+    }
+
+    async fn application_detach_intents(
+        &self,
+        _application_responsibility: &str,
+    ) -> Result<Vec<ApplicationDetachIntent>> {
+        Ok(Vec::new())
+    }
+
     // ---- messages ----
     /// The greatest message id across all addresses (0 if empty). Used by read-only
     /// consumers (e.g. the console) to seed a bounded backfill cursor for the global feed.
@@ -256,7 +391,7 @@ pub trait Backend: Send + Sync {
             .fetch_undelivered(address)
             .await?
             .into_iter()
-            .map(WaitCandidate::primary)
+            .map(|message| WaitCandidate::primary(message, None, 0))
             .collect();
         if options.wake_on_cc {
             bail!("wake-on-cc wait candidates are not supported by this backend")
@@ -268,6 +403,13 @@ pub trait Backend: Send + Sync {
         Ok(false)
     }
     async fn insert_message(&self, m: &NewMessage) -> Result<MessageRow>;
+    async fn insert_application_message(
+        &self,
+        _message: &NewMessage,
+        _operation: &ApplicationMessageOperation,
+    ) -> Result<MessageRow> {
+        bail!("insert_application_message: not supported by this backend")
+    }
     async fn get_message(&self, id: i64) -> Result<Option<MessageRow>>;
     async fn thread_messages(&self, thread_id: i64) -> Result<Vec<MessageRow>>;
     async fn inbox(&self, address: &str, include_all: bool, limit: i64) -> Result<Vec<InboxItem>>;
@@ -287,10 +429,183 @@ pub trait Backend: Send + Sync {
         note: Option<&str>,
         by: Option<&str>,
     ) -> Result<DispositionRow>;
+    #[allow(clippy::too_many_arguments)]
+    async fn application_disposition_with_ack(
+        &self,
+        _recipient: &str,
+        _owner_instance_id: &str,
+        _lease_epoch: i64,
+        _message_id: i64,
+        _delivery_id: i64,
+        _state: &str,
+        _note: Option<&str>,
+        _by: Option<&str>,
+        _origin: Option<&str>,
+        _compound_step: Option<&CompoundDispositionStep>,
+    ) -> Result<(Option<DispositionRow>, DeliveryOutcome)> {
+        bail!("application_disposition_with_ack: not supported by this backend")
+    }
     async fn dispositions_for(&self, message_id: i64) -> Result<Vec<DispositionRow>>;
     /// Delivery records for a message (one per recipient that received it). Read side of
     /// `mark_delivered`; the source of truth for "was this delivered, when, to which holder."
     async fn deliveries_for(&self, message_id: i64) -> Result<Vec<DeliveryRow>>;
+
+    /// Return the exact per-recipient delivery row, if it exists.
+    async fn delivery_for_recipient(
+        &self,
+        _message_id: i64,
+        _recipient: &str,
+    ) -> Result<Option<DeliveryRow>> {
+        bail!("delivery_for_recipient: not supported by this backend")
+    }
+
+    // ---- supported Application Client durable state (schema v3) ----
+    async fn begin_application_operation(
+        &self,
+        _operation: &NewApplicationOperation,
+    ) -> Result<ApplicationOperationBegin> {
+        bail!("begin_application_operation: not supported by this backend")
+    }
+
+    async fn application_operation(
+        &self,
+        _logical_store_id: &str,
+        _application_responsibility: &str,
+        _operation_id: &str,
+    ) -> Result<Option<ApplicationOperationRecord>> {
+        bail!("application_operation: not supported by this backend")
+    }
+
+    async fn application_operation_retention_generation(
+        &self,
+        _scope: &ApplicationRecordScope,
+    ) -> Result<i64> {
+        bail!("application_operation_retention_generation: not supported by this backend")
+    }
+
+    async fn application_operation_message(
+        &self,
+        _logical_store_id: &str,
+        _application_responsibility: &str,
+        _operation_id: &str,
+    ) -> Result<Option<MessageRow>> {
+        bail!("application_operation_message: not supported by this backend")
+    }
+
+    async fn application_operation_snapshot(
+        &self,
+        _scope: &ApplicationRecordScope,
+        _operation_id: &str,
+    ) -> Result<ApplicationOperationSnapshot> {
+        bail!("application_operation_snapshot: not supported by this backend")
+    }
+
+    async fn complete_application_operation(
+        &self,
+        _logical_store_id: &str,
+        _application_responsibility: &str,
+        _operation_id: &str,
+        _state: &str,
+        _result_json: Option<&str>,
+        _recovery_json: Option<&str>,
+    ) -> Result<ApplicationOperationRecord> {
+        bail!("complete_application_operation: not supported by this backend")
+    }
+
+    async fn abandon_unmapped_application_operation(
+        &self,
+        _logical_store_id: &str,
+        _application_responsibility: &str,
+        _operation_id: &str,
+        _result_json: &str,
+    ) -> Result<Option<ApplicationOperationRecord>> {
+        bail!("abandon_unmapped_application_operation: not supported by this backend")
+    }
+
+    async fn declare_compound_steps(
+        &self,
+        _steps: &[NewCompoundStepRecord],
+    ) -> Result<Vec<CompoundStepRecord>> {
+        bail!("declare_compound_steps: not supported by this backend")
+    }
+
+    async fn compound_steps(
+        &self,
+        _logical_store_id: &str,
+        _application_responsibility: &str,
+        _operation_id: &str,
+    ) -> Result<Vec<CompoundStepRecord>> {
+        bail!("compound_steps: not supported by this backend")
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn complete_compound_step(
+        &self,
+        _logical_store_id: &str,
+        _application_responsibility: &str,
+        _operation_id: &str,
+        _step_id: &str,
+        _state: &str,
+        _outcome_json: Option<&str>,
+        _recovery_json: Option<&str>,
+    ) -> Result<CompoundStepRecord> {
+        bail!("complete_compound_step: not supported by this backend")
+    }
+
+    async fn append_state_delta(
+        &self,
+        _axis: &str,
+        _entity_id: &str,
+        _payload_json: &str,
+    ) -> Result<StateDeltaRecord> {
+        bail!("append_state_delta: not supported by this backend")
+    }
+
+    async fn current_state_version(&self) -> Result<i64> {
+        bail!("current_state_version: not supported by this backend")
+    }
+
+    async fn state_deltas(
+        &self,
+        _after_version: i64,
+        _limit: i64,
+    ) -> Result<Vec<StateDeltaRecord>> {
+        bail!("state_deltas: not supported by this backend")
+    }
+
+    async fn state_delta_page(
+        &self,
+        _after_version: i64,
+        _limit: i64,
+    ) -> Result<StateDeltaPageRecord> {
+        bail!("state_delta_page: not supported by this backend")
+    }
+
+    async fn history_page(&self, _query: &HistoryQuery) -> Result<Vec<HistoryRecord>> {
+        bail!("history_page: not supported by this backend")
+    }
+
+    async fn cleanup_application_records(
+        &self,
+        _scope: &ApplicationRecordScope,
+        _policy: RetentionPolicy,
+    ) -> Result<CleanupReport> {
+        bail!("cleanup_application_records: not supported by this backend")
+    }
+
+    async fn application_storage_stats(
+        &self,
+        _scope: &ApplicationRecordScope,
+    ) -> Result<ApplicationStorageStats> {
+        bail!("application_storage_stats: not supported by this backend")
+    }
+
+    async fn cleanup_state_deltas(
+        &self,
+        _policy: StoreDeltaRetentionPolicy,
+    ) -> Result<StoreDeltaCleanupReport> {
+        bail!("cleanup_state_deltas: not supported by this backend")
+    }
 
     /// Per-primary-recipient count of undelivered backlog, as `(to_addr, count)` pairs. A message
     /// counts when it has no *consumed* delivery row for its `to_addr` and its latest disposition

@@ -26,6 +26,37 @@ direct-station-contract-reset
 
 `station-app` also waits on Application Client `client-conformance`.
 
+## Historical PR #143 evidence
+
+Issue #146 completed a non-gating evidence harvest from PR #143 at exact head
+`949b43eefaea8c26c2f8e9b72587493d1fd68b40`. The durable
+[field report](docs/postgres-dogfood-evidence.md)
+maps every source commit and changed file, separates earlier observed SQLite
+evidence from exact-head code behavior and unproven inference, and records the
+missing Postgres runtime proof.
+
+The useful carry-forward criteria are local read state separate from protocol
+state, bounded responsive thread navigation, receipt-gated optimistic
+presentation with reconciliation, configurable evidence-bearing sound/toast
+policy, live receive before expensive backfill, and honest health. Generic
+store identity, receive, retryability, recovery, receipt, and principal seams
+route to Application Client as advisory evidence only.
+
+PR #143 remains historical, non-production evidence and will close unmerged
+only after the direct-main evidence reconciliation commit is verified. Frozen
+PR #147 will then close unmerged as superseded by that verified direct-main
+commit. Issue #146 comment `5444201410` contains false artifact SHA
+`d876612337459044299af5666312dc5b1bfb5f6e`; frozen PR #147's correct head is
+`d87661230ee7f739ea10b20b38ad3abe49b7df58`, and the local proposal head differs.
+The comment must be superseded or corrected only after the direct-main evidence
+commit is verified and explicit GitHub mutation is authorized.
+
+PR #143's mediation topology, experimental kinds, CLI parsing,
+stderr/exit-code classification, backend-profile hashing, synthetic health, and
+bounded 200-message recovery are not intended architecture. The evidence does
+not advance #134, PR #136, any Operator Station gate or implementation node, or
+Application Client conformance.
+
 The first #134 preparation-only run
 `cda96dff-f2b8-49cc-b258-350b901e29ff` validated the clean base, `never-commit`,
 local/untracked PAW state, no workflow commit, `--yolo`, and ADR 0051
@@ -41,6 +72,70 @@ Paired run `419ba98f-6c1e-4829-8255-7e4de25a2a70` then launched implementer
 `9b7f8a6c-79f1-4967-afad-37b8dfbad5df` and reviewer
 `e32f377b-49f6-4d23-a09c-96b107f32075`; both stations reached
 `attended_push`. Issue #134 is now in progress.
+
+The implementer opened design-only PR #136 at
+`59043ce5bf6b3fdd2bb7084777d15141929fbf41`. The diff is limited to the decision
+log, design index, and Operator Station contract; all six CI checks pass and the
+PR is mergeable. Review ownership remains with the paired reviewer, while the
+later direction gate remains builder-owned.
+
+Review 4824128333 found three blocking contract-completeness gaps: terminal or
+reassignment behavior for removed-address obligations, exhaustive Reply & Handle
+post-conditions, and a catch-all notification decision for non-primary delivery
+roles. Five non-blocking clarifications cover trust-model wording, computable
+backlog health, safe actions, Application Client carry-forward, and visible
+source-resolution states. All are issue-scoped repairs rather than boundary or
+shared-contract decisions.
+
+Campaign disposition assigned the stale direct/assisted/quiet, route-back,
+mode-transition, Operator integration/readiness, and crosswalk re-baseline to
+Application Client #129 / PR #132, with issue #12 retaining public contract
+authority. PR #136 records a carry-forward but does not edit shared-client files.
+Generic AC-C15 source-resolution states remain visible unless Application Client
+returns an explicit accepted narrowing; the cross-workstream review thread
+remains open until exact evidence is returned.
+
+The implementer resolved all Operator-local findings at
+`3e36028b6e3d84bcef647f38e43cfe1b2de035c8`. Orchestration reopened only
+discussion 3687008544 because its initial response named issue #12 without the
+required exact #129/PR #132 wording and bundle evidence. Seven threads remain
+resolved; one intentional cross-workstream gate remains open during paired
+re-review.
+
+Application Client returned the required evidence at PR #132 head
+`9f08628f10df132fb7b858380f3607760b7b2e48`. Operator-side verification
+reproduced manifest blob `b9861495527afe297e78f0546b0c54db8cd19b21`, 2423
+bytes, and SHA-256
+`9e648d2005f9b368b0de72c6097bdd7432365e7afab43004399c2c6bd0b68e8d`,
+and confirmed generic reply/compound/identity semantics plus all AC-C15 states.
+The evidence was posted to discussion 3687008544 and the final thread resolved.
+All eight threads are now closed; paired re-review remains.
+
+Campaign clarified that PR #132 remains candidate authority until it merges.
+The direct reset node now carries an explicit external dependency on Application
+Client `client-core` / PR #132 for final merge ordering. Issue #12 publication
+reconciliation remains campaign-owned after that merge.
+
+Second re-review 4824505655 found three blockers: restart resurrection of
+durably detached addresses, typed retryability evidence for Reply & Handle, and
+total pre-authoring behavior for all AC-C15 source states. Campaign confirmed
+PR #132 already provides
+`ApplicationClientError::RejectedBeforeAcceptance` and
+`RejectionRetryability::{Transient, Permanent}`; unknown evidence remains
+fail-closed/indeterminate. No new shared-client change is required. The worker
+owns the local detach, source-state, reassignment, and safe-action wording
+repairs.
+
+The implementer resolved the second review at
+`7c6603ecd081255d8af370668cf3ddddc8075b50`. All 13 accumulated review threads
+are resolved, all six CI checks pass, and the PR is mergeable. Final paired
+re-review is pending.
+
+Final review 4824865088 posted the verified automated +1 at the same head with
+zero Must/Should findings. PR #136 is technically ready but merge-order held:
+Application Client PR #132 remains open as the candidate authority, and issue
+#12 publication reconciliation follows its merge. Campaign owns sequencing;
+the builder direction gate remains a separate post-design decision.
 
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from

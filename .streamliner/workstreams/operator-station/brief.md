@@ -81,6 +81,11 @@ Historical confidence:
   human-attended feed, notification, durable reply path, provenance, restart,
   and delivery/ack health. Its mediated topology is evidence, not current
   product authority.
+- [#146](https://github.com/lossyrob/telex/issues/146) preserves PR #143 at
+  `949b43eefaea8c26c2f8e9b72587493d1fd68b40` as
+  [non-normative Postgres and UI/UX evidence](docs/postgres-dogfood-evidence.md).
+  It records code-backed lessons and missing runtime proof without advancing a
+  gate, product node, or Application Client dependency.
 - The builder passed the viability gate: a human-facing Telex inbox materially
   reduced terminal inspection and preserved useful reply context.
 - [#114](https://github.com/lossyrob/telex/issues/114) /
@@ -129,6 +134,84 @@ Active transition:
 - Both stations are `attended_push`; both sessions are live/working and
   graph-bound. Scope/ADR control messages are durably queued for their current
   turns.
+- The implementer opened
+  [PR #136](https://github.com/lossyrob/telex/pull/136) at
+  `59043ce5bf6b3fdd2bb7084777d15141929fbf41`.
+- The diff contains only `docs/design/DECISIONS.md`,
+  `docs/design/index.md`, and `docs/design/operator-station.md`. All six CI
+  checks pass and GitHub reports the PR mergeable.
+- Paired review is active. The builder-owned direction gate remains separate
+  and cannot be passed by the worker or reviewer.
+- [Review 4824128333](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824128333)
+  posted three blocking contract gaps and five additional clarifications. The
+  blockers require:
+  1. a closed state machine for detach/address removal with unresolved work;
+  2. exhaustive post-conditions for every declared Reply & Handle result; and
+  3. a default notification policy for all non-primary delivery roles.
+- These are node-scoped design-completeness repairs. They do not reopen the
+  direct product boundary, ADR 0051 allocation, or shared Application Client
+  ownership.
+- Campaign assigned the stale direct/assisted/quiet, route-back,
+  mode-transition, Operator integration/readiness, and requirements-crosswalk
+  re-baseline to Application Client
+  [#129](https://github.com/lossyrob/telex/issues/129) /
+  [PR #132](https://github.com/lossyrob/telex/pull/132), with issue
+  [#12](https://github.com/lossyrob/telex/issues/12) remaining the public
+  contract/checkpoint owner.
+- PR #136 must add a durable carry-forward reference but must not edit shared
+  Application Client files. It preserves generic AC-C15 source-resolution states
+  unless that owner returns an explicitly accepted narrowing. The cross-workstream
+  review thread stays open until #129 provides exact evidence.
+- The implementer pushed fixes at
+  `3e36028b6e3d84bcef647f38e43cfe1b2de035c8`; all six checks pass and the PR is
+  mergeable. Seven Operator-local review threads are resolved.
+- Discussion
+  [3687008544](https://github.com/lossyrob/telex/pull/136#discussion_r3687008544)
+  was reopened by workstream orchestration because its reply cited issue #12 but
+  did not yet provide the exact #129/PR #132 wording and bundle evidence required
+  by campaign. It is the only unresolved thread and remains an intentional
+  cross-workstream merge gate during re-review.
+- Application Client returned exact evidence at PR #132 head
+  `9f08628f10df132fb7b858380f3607760b7b2e48`. Operator review independently
+  verified the direct-Station wording, generic compound/reply/identity
+  preservation, all four AC-C15 states, green CI, mergeability, and bundle
+  manifest blob `b9861495527afe297e78f0546b0c54db8cd19b21` /
+  2423 bytes / SHA-256
+  `9e648d2005f9b368b0de72c6097bdd7432365e7afab43004399c2c6bd0b68e8d`.
+- The exact evidence was added to discussion 3687008544 and the thread was
+  resolved. All eight PR #136 threads are now resolved; paired re-review is the
+  remaining review step.
+- PR #132 is still candidate shared authority until merge. PR #136 final merge
+  readiness therefore depends on PR #132 merging at the verified evidence or on
+  an explicitly coordinated merge order. Issue #12 publication reconciliation
+  remains campaign-owned after #132 merge.
+- Second re-review
+  [4824505655](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824505655)
+  found three remaining blockers and two follow-ups:
+  - restart must exclude durably detached addresses;
+  - Reply & Handle must name shared typed retryability evidence and fail closed
+    on unclassified rejection;
+  - every AC-C15 non-authoritative state needs a pre-authoring refusal or
+    reconciliation-pending rule.
+- Campaign confirmed no new Application Client gap. PR #132 provides
+  `ApplicationClientError::RejectedBeforeAcceptance` and
+  `RejectionRetryability::{Transient, Permanent}`; unknown/unclassified
+  rejection is fail-closed/indeterminate and cannot auto-retry. The remaining
+  detach, AC-C15 authoring, reassignment, and safe-action wording is
+  Operator-local repair.
+- The implementer resolved the second review at
+  `7c6603ecd081255d8af370668cf3ddddc8075b50`. All five new threads and all
+  earlier threads are resolved; all six checks pass and GitHub reports the PR
+  mergeable. A fresh disposition-required final re-review request is with the
+  paired reviewer.
+- Final review
+  [4824865088](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824865088)
+  contains the verified automated +1 at that exact head with zero Must/Should
+  findings. All 13 threads are resolved.
+- PR #136 merge remains held because Application Client PR #132 is still open.
+  Campaign must authorize exact merge ordering; issue #12 publication
+  reconciliation follows PR #132 merge. The builder direction gate remains
+  separate from PR review and merge.
 - `station-app` remains planned and cannot launch until:
   1. `direct-station-direction-gate` passes; and
   2. Application Client `client-conformance` completes.
@@ -201,6 +284,11 @@ design decision.
 
 - Reply/disposition clarity remains a `station-app` UX concern, but direct
   operation no longer requires operator notification or route-back sequencing.
+- PR #143 suggests criteria for separate local read state, bounded responsive
+  thread navigation, receipt-gated optimistic presentation, configurable
+  evidence-bearing notifications, live receive before expensive backfill, and
+  honest health. Its mediated topology and private CLI mechanisms remain
+  non-authoritative.
 - Reviewer/implementer feedback from #128 is captured in
   `reconciliation-note.md`: settle product-boundary questions before launching
   policy/topology implementation nodes.
