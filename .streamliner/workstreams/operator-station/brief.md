@@ -15,10 +15,10 @@ The workstream preserves the original spike and mediated-loop implementation as
 evidence that a human-attended Telex surface is valuable. It no longer treats
 the operator-agent intermediary as product architecture.
 
-The next confidence transition is a design-only reset:
-`direct-station-contract-reset` rewrites the intended Station contract around
-direct address attendance and records ADR 0051. A builder direction gate then
-accepts the product boundary before implementation.
+The design-only `direct-station-contract-reset` completed through issue #134 and
+PR #136. It rewrote the intended Station contract around direct address
+attendance and recorded ADR 0051. The next confidence transition is the
+builder-owned direction gate, which remains unpassed.
 
 After the direction gate, `station-app` implements the desktop endpoint using
 the supported/conformant Application Client. A direct usability gate validates
@@ -39,9 +39,9 @@ or Operator Station.
   disposition, liveness, and backend semantics.
 - `telex:docs/design/application-client.md` - supported long-lived application
   lifecycle, receive/reply/disposition, identity, health, and recovery.
-- `telex:docs/design/operator-station.md` - current contract, to be reset by
-  issue #134.
-- `telex:docs/design/DECISIONS.md` - ADRs 0047/0048 and allocated ADR 0051.
+- `telex:docs/design/operator-station.md` - merged direct human-attended Station
+  contract from issue #134 and PR #136.
+- `telex:docs/design/DECISIONS.md` - ADRs 0047/0048 and landed ADR 0051.
 - `telex:docs/design/proposals/EXTENSIONS.md` - opaque extension boundary;
   message metadata does not become Telex semantic routing.
 - `telex:telex-console/README.md` - existing feed, address, thread, delivery,
@@ -95,9 +95,13 @@ Historical confidence:
 - Application Client contract convergence is complete through
   [#118](https://github.com/lossyrob/telex/issues/118) /
   [PR #126](https://github.com/lossyrob/telex/pull/126). The
-  `application-client-ready` gate is complete, client-core
-  [#129](https://github.com/lossyrob/telex/issues/129) is active, and
-  `station-app` waits on Application Client `client-conformance`.
+  `application-client-ready` gate and client-core
+  [#129](https://github.com/lossyrob/telex/issues/129) are complete. Product
+  merge `4ecbe84e99e00ab0cea3bcf3619d539c222746af`, Tier A artifact authority
+  `d3d64370b4481f10e1fa0b48ea026a9c060d15b1`, issue #12 revision 3, bundle
+  integrity repair `c67946ec494cdedb7defa638d953b831d76d6ec5`, and first-binding
+  reconciliation `8b8ecf39781c1281a30605745299fc0a44e91ead` all precede the Station
+  merge. `station-app` still waits on Application Client `client-conformance`.
 
 Superseded scope:
 
@@ -112,13 +116,41 @@ Superseded scope:
 - Metadata-bearing reply is not extracted from #130. Its generic requirement is
   handed to Application Client client-core/conformance.
 
-Active transition:
+Completed design transition:
 
 - Campaign authorization message `1292` approves the direct-Station reshape.
 - ADR allocation message `1304` reserves ADR 0051,
   `direct-station-product-boundary`.
 - [#134](https://github.com/lossyrob/telex/issues/134)
-  `direct-station-contract-reset` is in progress.
+  closed at `2026-08-27T22:23:13Z` after
+  [PR #136](https://github.com/lossyrob/telex/pull/136) merged.
+- PR #136's terminal reviewed head was
+  `f77be107f602cfd06495e591857b20ce199c8a4d`. It squash-merged at
+  `2026-08-27T22:23:12Z` as
+  `e071e3170c19ab1b8a753b502c67be2ee80688ec`, with parent
+  `8b8ecf39781c1281a30605745299fc0a44e91ead`.
+- The landed product scope is exactly `docs/design/DECISIONS.md`,
+  `docs/design/index.md`, and `docs/design/operator-station.md`, with an
+  aggregate +727/-1016 diff.
+- Full PAW baseline
+  [review 4824865088](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824865088)
+  remains evidence at `7c6603ecd081255d8af370668cf3ddddc8075b50`.
+- Terminal
+  [review 5046160297](https://github.com/lossyrob/telex/pull/136#pullrequestreview-5046160297)
+  is COMMENTED and non-pending at exact head
+  `f77be107f602cfd06495e591857b20ce199c8a4d`, with `PAW Review: +1`, zero
+  blockers, zero warnings, zero considerations, and no required actions.
+- All 13 review threads are resolved. Exact-head CI run
+  [33121329699](https://github.com/lossyrob/telex/actions/runs/33121329699)
+  completed 6/6 checks successfully.
+- Source branch `feature/direct-station-contract-reset` remains at
+  `f77be107f602cfd06495e591857b20ce199c8a4d`.
+- The builder-owned `direct-station-direction-gate` is next and unpassed.
+  `station-app` remains planned and unlaunched, and it also waits on Application
+  Client `client-conformance`. PR approval and merge do not infer gate passage.
+
+Historical execution:
+
 - Initial preparation run `cda96dff-f2b8-49cc-b258-350b901e29ff` caught stale
   model resolution before terminal launch. Streamliner repaired paw-init to
   resolve the live model catalog and reject mismatched WorkflowContext fields.
@@ -131,17 +163,14 @@ Active transition:
     `telex://lossyrob/telex/T-A:operator-impl-134`;
   - reviewer `e32f377b-49f6-4d23-a09c-96b107f32075` /
     `telex://lossyrob/telex/T-A:operator-review-134`.
-- Both stations are `attended_push`; both sessions are live/working and
-  graph-bound. Scope/ADR control messages are durably queued for their current
-  turns.
+- Both stations reached `attended_push` and were graph-bound. Scope and ADR
+  control messages were durably queued for their turns.
 - The implementer opened
   [PR #136](https://github.com/lossyrob/telex/pull/136) at
   `59043ce5bf6b3fdd2bb7084777d15141929fbf41`.
-- The diff contains only `docs/design/DECISIONS.md`,
-  `docs/design/index.md`, and `docs/design/operator-station.md`. All six CI
-  checks pass and GitHub reports the PR mergeable.
-- Paired review is active. The builder-owned direction gate remains separate
-  and cannot be passed by the worker or reviewer.
+- At that point, the diff contained only `docs/design/DECISIONS.md`,
+  `docs/design/index.md`, and `docs/design/operator-station.md`; all six CI
+  checks passed and GitHub reported the PR mergeable.
 - [Review 4824128333](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824128333)
   posted three blocking contract gaps and five additional clarifications. The
   blockers require:
@@ -158,19 +187,19 @@ Active transition:
   [PR #132](https://github.com/lossyrob/telex/pull/132), with issue
   [#12](https://github.com/lossyrob/telex/issues/12) remaining the public
   contract/checkpoint owner.
-- PR #136 must add a durable carry-forward reference but must not edit shared
+- PR #136 had to add a durable carry-forward reference without editing shared
   Application Client files. It preserves generic AC-C15 source-resolution states
-  unless that owner returns an explicitly accepted narrowing. The cross-workstream
-  review thread stays open until #129 provides exact evidence.
+  unless that owner returned an explicitly accepted narrowing. The
+  cross-workstream review thread stayed open until #129 provided exact evidence.
 - The implementer pushed fixes at
-  `3e36028b6e3d84bcef647f38e43cfe1b2de035c8`; all six checks pass and the PR is
-  mergeable. Seven Operator-local review threads are resolved.
+  `3e36028b6e3d84bcef647f38e43cfe1b2de035c8`; all six checks passed and the PR
+  was mergeable. Seven Operator-local review threads were resolved.
 - Discussion
   [3687008544](https://github.com/lossyrob/telex/pull/136#discussion_r3687008544)
   was reopened by workstream orchestration because its reply cited issue #12 but
   did not yet provide the exact #129/PR #132 wording and bundle evidence required
-  by campaign. It is the only unresolved thread and remains an intentional
-  cross-workstream merge gate during re-review.
+  by campaign. It was the only unresolved thread and remained an intentional
+  cross-workstream merge gate during that re-review.
 - Application Client returned exact evidence at PR #132 head
   `9f08628f10df132fb7b858380f3607760b7b2e48`. Operator review independently
   verified the direct-Station wording, generic compound/reply/identity
@@ -179,12 +208,11 @@ Active transition:
   2423 bytes / SHA-256
   `9e648d2005f9b368b0de72c6097bdd7432365e7afab43004399c2c6bd0b68e8d`.
 - The exact evidence was added to discussion 3687008544 and the thread was
-  resolved. All eight PR #136 threads are now resolved; paired re-review is the
-  remaining review step.
-- PR #132 is still candidate shared authority until merge. PR #136 final merge
-  readiness therefore depends on PR #132 merging at the verified evidence or on
-  an explicitly coordinated merge order. Issue #12 publication reconciliation
-  remains campaign-owned after #132 merge.
+  resolved. At that stage, all eight PR #136 threads were resolved and paired
+  re-review remained.
+- PR #132 was still candidate shared authority at that stage, so PR #136 final
+  merge readiness depended on PR #132 merging at the verified evidence or on an
+  explicitly coordinated merge order.
 - Second re-review
   [4824505655](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824505655)
   found three remaining blockers and two follow-ups:
@@ -201,20 +229,12 @@ Active transition:
   Operator-local repair.
 - The implementer resolved the second review at
   `7c6603ecd081255d8af370668cf3ddddc8075b50`. All five new threads and all
-  earlier threads are resolved; all six checks pass and GitHub reports the PR
-  mergeable. A fresh disposition-required final re-review request is with the
-  paired reviewer.
-- Final review
+  earlier threads were resolved; all six checks passed and GitHub reported the
+  PR mergeable.
+- Baseline final review
   [4824865088](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824865088)
-  contains the verified automated +1 at that exact head with zero Must/Should
-  findings. All 13 threads are resolved.
-- PR #136 merge remains held because Application Client PR #132 is still open.
-  Campaign must authorize exact merge ordering; issue #12 publication
-  reconciliation follows PR #132 merge. The builder direction gate remains
-  separate from PR review and merge.
-- `station-app` remains planned and cannot launch until:
-  1. `direct-station-direction-gate` passes; and
-  2. Application Client `client-conformance` completes.
+  contained the verified automated +1 at that exact head with zero Must/Should
+  findings.
 
 ## Decisions
 
@@ -240,8 +260,8 @@ Active transition:
   and conforms any supported implementation.
 - **Decision history is append-only:** ADR 0051 narrows/supersedes applicable
   portions of ADRs 0047/0048 without rewriting them.
-- **Design gate before implementation:** #134 must land and the builder must pass
-  `direct-station-direction-gate` before `station-app`.
+- **Design gate before implementation:** #134 and PR #136 have landed, but the
+  builder must still pass `direct-station-direction-gate` before `station-app`.
 - **Station uses the conformant client:** `station-app` depends on Application
   Client `client-conformance`, not only semantic acceptance or first binding.
 - **Node launches use Streamliner:** launch-preparations API, configured v2
@@ -266,7 +286,8 @@ Active transition:
 
 ### Exports
 
-- An accepted direct Station product contract and ADR 0051.
+- A merged direct Station product contract and ADR 0051, pending builder
+  acceptance at `direct-station-direction-gate`.
 - A separately installable human-attended desktop endpoint.
 - Direct agent-to-human durable messaging and reply UX.
 - Station-specific notification, provenance, health, recovery, and safety
