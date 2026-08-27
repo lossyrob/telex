@@ -4410,14 +4410,12 @@ async fn register_member(
     state
         .delivery_admission_before_commit(DeliveryAdmissionKind::Register)
         .await;
-    state.insert_member(record.clone());
     if !recovery {
         if let Some(responsibility) = record.application_responsibility.as_deref() {
             if let Err(e) = backend
                 .clear_application_detach_intent(responsibility, &address)
                 .await
             {
-                state.remove_member_if_current(&record);
                 let _ = backend
                     .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
                     .await;
@@ -4427,6 +4425,7 @@ async fn register_member(
             }
         }
     }
+    state.insert_member(record.clone());
     if let Some(member) = backlog {
         state.on_deliver_forget_member(&MemberKey {
             store_key: member.store_key.clone(),
@@ -8496,6 +8495,133 @@ mod p3_tests {
             .await
             .unwrap()
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn failing_detach_intent_clear_keeps_membership_unobservable() {
+        let state = test_state("application-failing-detach-intent-clear");
+        let store = store_key("application-failing-detach-intent-clear");
+        let address = "addr:failing-detach-intent-clear";
+        let responsibility = "stable-application";
+        let register = |session: &str, recovery: bool| Request::ApplicationRegister {
+            store_key: store.clone(),
+            address: address.to_string(),
+            session_id: session.to_string(),
+            application_responsibility: responsibility.to_string(),
+            occupant: responsibility.to_string(),
+            capability: StationCapability::Bidirectional,
+            description: None,
+            scope: None,
+            tags: None,
+            watch_pids: Vec::new(),
+            recovery,
+        };
+
+        assert!(matches!(
+            request(state.clone(), register("runtime-one", false)).await,
+            Response::Registered { .. }
+        ));
+        assert!(matches!(
+            request(
+                state.clone(),
+                Request::ApplicationDetach {
+                    store_key: store.clone(),
+                    session_id: "runtime-one".to_string(),
+                    application_responsibility: responsibility.to_string(),
+                    address: address.to_string(),
+                    capability: StationCapability::Bidirectional,
+                }
+            )
+            .await,
+            Response::Ack { .. }
+        ));
+
+        let db_path = store
+            .strip_prefix("sqlite:")
+            .expect("SQLite test store key");
+        rusqlite::Connection::open(db_path)
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER fail_application_detach_intent_clear
+                 BEFORE DELETE ON application_detach_intents
+                 BEGIN
+                     SELECT RAISE(FAIL, 'injected detach-intent clear failure');
+                 END;",
+            )
+            .unwrap();
+
+        let control = Arc::new(DeliveryAdmissionTestControl::new());
+        *state.delivery_admission_control.lock().unwrap() = Some(control.clone());
+        let attach_state = state.clone();
+        let attach_request = register("runtime-two", false);
+        let attach = tokio::spawn(async move { request(attach_state, attach_request).await });
+        control
+            .wait_before_lock(DeliveryAdmissionKind::Register)
+            .await;
+        control.release_before_lock(DeliveryAdmissionKind::Register);
+        control
+            .wait_before_commit(DeliveryAdmissionKind::Register)
+            .await;
+
+        assert!(state.get_member(&store, "runtime-two", address).is_none());
+        assert!(matches!(
+            request(
+                state.clone(),
+                Request::Send {
+                    store_key: store.clone(),
+                    session_id: "runtime-two".to_string(),
+                    from_addr: Some(address.to_string()),
+                    to_addr: "addr:destination".to_string(),
+                    cc: None,
+                    kind: "note".to_string(),
+                    attention: "background".to_string(),
+                    requires_disposition: false,
+                    subject: None,
+                    body: "must not send before detach intent clears".to_string(),
+                    metadata: None,
+                }
+            )
+            .await,
+            Response::Error { ref code, .. } if code == proto::ERROR_NEEDS_ATTACH
+        ));
+
+        let recovery_state = state.clone();
+        let recovery_request = register("runtime-two", true);
+        let mut recovery =
+            tokio::spawn(async move { request(recovery_state, recovery_request).await });
+        control
+            .wait_before_lock(DeliveryAdmissionKind::Register)
+            .await;
+        control.release_before_lock(DeliveryAdmissionKind::Register);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), &mut recovery)
+                .await
+                .is_err(),
+            "recovery register must remain serialized behind the pending attach"
+        );
+
+        control.release_commit(DeliveryAdmissionKind::Register);
+        assert!(matches!(
+            attach.await.unwrap(),
+            Response::Error { ref code, ref message, .. }
+                if code == proto::ERROR_INTERNAL
+                    && message.contains("injected detach-intent clear failure")
+        ));
+        assert!(matches!(
+            recovery.await.unwrap(),
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
+        ));
+        assert!(state.get_member(&store, "runtime-two", address).is_none());
+        let backend = state.backend_for(&store).await.unwrap();
+        assert!(backend
+            .application_detach_intent(responsibility, address)
+            .await
+            .unwrap()
+            .is_some());
     }
 
     #[tokio::test]
