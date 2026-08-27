@@ -3,17 +3,18 @@
 //! rewriting the current resident-holder verbs.
 
 use crate::model::DeliveryOutcome;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
 use std::fmt;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
 
 pub const PROTOCOL_MAJOR: u16 = 1;
-pub const PROTOCOL_MINOR: u16 = 4;
+pub const PROTOCOL_MINOR: u16 = 5;
 pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_MESSAGE_BODY_METADATA_BYTES: usize = MAX_JSONL_FRAME_BYTES - (64 * 1024);
+pub const MAX_MESSAGE_RECIPIENTS: usize = 256;
 
 pub const CAP_JSONL: &str = "jsonl_v1";
 pub const CAP_ADMIN_CAP: &str = "admin_cap_v1";
@@ -46,6 +47,8 @@ pub const ON_DELIVER_DEFERRED_EXIT: i32 = 4;
 /// check it to detect version skew (an older daemon maps exit 4 to a transient retry and ignores
 /// `DrainDeferred`, which is bounded and self-resolves on daemon restart).
 pub const CAP_ON_DELIVER_DEFERRED: &str = "on_deliver_deferred_v1";
+pub const CAP_APPLICATION_CLIENT_V1: &str = "application_client_v1";
+pub const CAP_DELIVERY_QUARANTINE_V1: &str = "delivery_quarantine_v1";
 
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
@@ -69,6 +72,8 @@ pub const ERROR_NEEDS_ATTACH: &str = "NeedsAttach";
 pub const ERROR_AMBIGUOUS: &str = "Ambiguous";
 pub const ERROR_UNSUPPORTED: &str = "Unsupported";
 pub const ERROR_NOT_OWNER: &str = "NotOwner";
+pub const ERROR_COLLISION: &str = "Collision";
+pub const ERROR_CAPABILITY_CONFLICT: &str = "CapabilityConflict";
 pub const REDACTED_SECRET: &str = "[redacted]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,6 +144,14 @@ pub struct CapabilityScope {
     pub scope: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum StationCapability {
+    SendOnly,
+    #[default]
+    Bidirectional,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
     pub protocol_version: ProtocolVersion,
@@ -159,6 +172,8 @@ pub struct HelloAck {
     pub auth_policy_version: u16,
     pub accepted: bool,
     pub required_capabilities: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -200,6 +215,31 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "is_false")]
         on_deliver_wake_on_cc: bool,
     },
+    ApplicationRegister {
+        store_key: String,
+        address: String,
+        session_id: String,
+        application_responsibility: String,
+        occupant: String,
+        capability: StationCapability,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        watch_pids: Vec<WatchPidSpec>,
+        #[serde(default)]
+        recovery: bool,
+    },
+    ApplicationDetach {
+        store_key: String,
+        session_id: String,
+        application_responsibility: String,
+        address: String,
+        capability: StationCapability,
+    },
     Detach {
         store_key: String,
         session_id: String,
@@ -235,6 +275,13 @@ pub enum Request {
         address: String,
         message_id: i64,
     },
+    ApplicationAck {
+        store_key: String,
+        session_id: String,
+        address: String,
+        message_id: i64,
+        delivery_id: i64,
+    },
     Send {
         store_key: String,
         session_id: String,
@@ -252,6 +299,26 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         metadata: Option<String>,
     },
+    ApplicationSend {
+        store_key: String,
+        session_id: String,
+        from_addr: String,
+        to_addr: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cc: Option<String>,
+        kind: String,
+        attention: String,
+        requires_disposition: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<String>,
+        body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<String>,
+        logical_store_id: String,
+        application_responsibility: String,
+        operation_id: String,
+        payload_fingerprint: String,
+    },
     Reply {
         store_key: String,
         session_id: String,
@@ -266,6 +333,26 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cc: Option<String>,
         body: String,
+    },
+    ApplicationReply {
+        store_key: String,
+        session_id: String,
+        from_addr: String,
+        message_id: i64,
+        kind: String,
+        attention: String,
+        requires_disposition: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cc: Option<String>,
+        body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<String>,
+        logical_store_id: String,
+        application_responsibility: String,
+        operation_id: String,
+        payload_fingerprint: String,
     },
     Status {
         #[serde(default)]
@@ -305,11 +392,46 @@ pub enum Request {
     Ping,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NeedsAttachReason {
     RestartLost,
     DeliberatelyDetached,
+    PredicateDeath,
+    Unknown(String),
+}
+
+impl NeedsAttachReason {
+    fn as_wire_value(&self) -> &str {
+        match self {
+            Self::RestartLost => "restart_lost",
+            Self::DeliberatelyDetached => "deliberately_detached",
+            Self::PredicateDeath => "predicate_death",
+            Self::Unknown(raw) => raw,
+        }
+    }
+}
+
+impl Serialize for NeedsAttachReason {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_wire_value())
+    }
+}
+
+impl<'de> Deserialize<'de> for NeedsAttachReason {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(match String::deserialize(deserializer)?.as_str() {
+            "restart_lost" => Self::RestartLost,
+            "deliberately_detached" => Self::DeliberatelyDetached,
+            "predicate_death" => Self::PredicateDeath,
+            raw => Self::Unknown(raw.to_string()),
+        })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -339,10 +461,23 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subject: Option<String>,
         body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<String>,
         sent_at_ms: i64,
         buffered_at_ms: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        delivery_id: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_version: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         lease_epoch: Option<i64>,
+    },
+    DeliveryQuarantined {
+        message_id: i64,
+        recipient: String,
+        serialized_bytes: usize,
+        max_bytes: usize,
+        may_continue: bool,
     },
     Sent {
         receipt: SentReceipt,
@@ -356,6 +491,8 @@ pub enum Response {
         protocol_version: ProtocolVersion,
         daemon_version: String,
         instance_id: String,
+        #[serde(default)]
+        capabilities: Vec<String>,
     },
     Ack {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -431,6 +568,8 @@ pub struct DaemonStatus {
     #[serde(default)]
     pub members: Vec<MemberStatus>,
     #[serde(default)]
+    pub membership_losses: Vec<MembershipLossStatus>,
+    #[serde(default)]
     pub live_waiters: Vec<LiveWaiterStatus>,
     #[serde(default)]
     pub retention: Vec<RetentionStatus>,
@@ -444,6 +583,16 @@ pub struct DaemonStatus {
 pub struct StoreStatus {
     pub store_key: String,
     pub kind: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MembershipLossStatus {
+    pub store_key: String,
+    pub session_id: String,
+    pub address: String,
+    pub reason: NeedsAttachReason,
+    pub detail: String,
+    pub at_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -461,6 +610,8 @@ pub struct MemberStatus {
     pub backend: String,
     pub session_id: String,
     pub address: String,
+    #[serde(default)]
+    pub capability: StationCapability,
     pub occupant: String,
     pub host: String,
     pub waiters: usize,
@@ -543,6 +694,7 @@ pub struct MemberStatus {
 #[serde(rename_all = "kebab-case")]
 pub enum WaiterOutcome {
     Message,
+    DeliveryQuarantined,
     IdleTimeout,
     PresenceEnded,
     AbnormalExit,
@@ -754,6 +906,8 @@ pub fn daemon_capabilities() -> Vec<String> {
     // Advertised-but-optional (issue #65): lets a client detect a daemon that understands the
     // deferred outcome + `DrainDeferred`, so version skew against an older daemon is diagnosable.
     caps.push(CAP_ON_DELIVER_DEFERRED.to_string());
+    caps.push(CAP_APPLICATION_CLIENT_V1.to_string());
+    caps.push(CAP_DELIVERY_QUARANTINE_V1.to_string());
     caps
 }
 
@@ -805,6 +959,7 @@ pub fn evaluate_hello(hello: &Hello) -> HelloAck {
         auth_policy_version: AUTH_POLICY_VERSION,
         accepted: reason.is_none(),
         required_capabilities: required,
+        capabilities,
         reason,
         capability_scopes: Vec::new(),
     }

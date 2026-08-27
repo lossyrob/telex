@@ -22,6 +22,9 @@ session env into generic telex session inputs, handles CLI and Copilot App
 Full documentation (install, concepts, guides, and the generated CLI reference)
 is at **<https://lossyrob.github.io/telex/>**.
 
+Long-lived non-agent applications use the supported Rust
+[`application_client`](docs/application-client-core.md) semantic core.
+
 ## Install
 
 **macOS / Linux:**

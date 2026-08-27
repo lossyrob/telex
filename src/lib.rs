@@ -1,5 +1,6 @@
 //! Telex: a CLI-first message fabric for AI agent sessions.
 
+pub mod application_client;
 pub mod backend;
 pub mod cli;
 pub mod commands;
