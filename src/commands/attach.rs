@@ -29,6 +29,7 @@ pub async fn run(ctx: &Ctx, args: AttachArgs) -> Result<i32> {
         scope: args.scope.clone(),
         tags: args.tags.clone(),
         watch_pids,
+        replace_watch_pids: false,
         recovery: false,
         on_deliver: args.on_deliver.clone(),
         replace_on_deliver: args.replace_on_deliver,

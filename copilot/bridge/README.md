@@ -9,7 +9,7 @@
 
 Describes the **load-on-bind push delivery** path in
 `docs/design/copilot-bridge-push.md` (issue #53). It lets the telex daemon push
-a message into a live Copilot CLI session as a real turn, with no agent-managed
+a message into a live Copilot CLI or Copilot App session as a real turn, with no agent-managed
 `telex wait` waiter and no `--ui-server` flag.
 
 ## Files
@@ -74,6 +74,13 @@ node .\push.mjs --latest --prompt "Write BRIDGE-PUSH-OK to .\peer-proof.txt" --d
 - **Runtime self-load works.** Dropping `extension.mjs` into the session
   extension dir and calling `extensions_reload` forks the bridge live, same
   turn; non-telex sessions never load it.
+- **The same session-scoped extension supports Copilot App.** A separate
+  App-only extension would duplicate the pipe, authentication, and turn-injection
+  protocol without adding lifecycle information. App compatibility instead lives
+  at the hook boundary: `sessionEnd(reason=complete)` preserves attendance while
+  this extension's heartbeat remains live, then binds daemon membership to the
+  extension host PID. The host remains stable across extension reloads and dies
+  on a true App or one-shot CLI exit.
 - **Push delivers as a queued turn**, non-interrupting (enqueue mode).
 - **A client-side push timeout does NOT imply non-delivery.** In an early run the
   push client timed out waiting for a response (a framing bug) yet the message

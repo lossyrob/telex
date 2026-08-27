@@ -1,4 +1,4 @@
-# Telex for Copilot CLI: push delivery
+# Telex for Copilot CLI and Copilot App: push delivery
 
 This is the Copilot-specific Telex workflow, printed by `telex copilot skill` so it
 always matches the installed binary. The plugin skill is only a bootstrap; **this
@@ -50,6 +50,14 @@ yours to make.
 
    `copilot resume` re-provisions the same push bridge registration that `copilot
    attach --copilot-bridge` creates; it also re-scans queued unacked backlog.
+
+   GitHub Copilot App reports `sessionEnd(reason=complete)` after each completed
+   turn even though the durable App session and its bridge remain live. Telex
+   preserves attendance while the bridge heartbeat is fresh and binds the station
+   to the bridge host process, avoiding a manual `copilot resume` after every
+   response. The host remains stable across extension reloads. When a one-shot CLI
+   run or the App session really exits, host-process death reaps attendance normally.
+   Terminal reasons and a missing or stale bridge retain immediate session-end behavior.
 
 2. **Load the bridge into the live session (one agent tool call).**
 

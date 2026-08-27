@@ -1543,7 +1543,7 @@ impl MemberRecord {
         // A registered on-deliver push station has no `telex wait` waiter by design, so waiter
         // presence cannot decide its health. Use the daemon's own push-delivery health instead: it
         // is only "deaf" (unattended-with-backlog) when pushes are actually FAILING (bridge
-        // unreachable). A delivering/probing/stale-accepted bridge is attended-via-push, never
+        // unreachable). A delivering/deferred/probing/stale-accepted bridge is attended-via-push, never
         // reported `unattended`. Folds in #64 and the persistent false-deaf of #66.
         if self.on_deliver.is_some() {
             return match push_delivery {
@@ -1557,6 +1557,12 @@ impl MemberRecord {
                     StationHealth::AttendedPush,
                     Some(format!(
                         "attended via push bridge (no waiter; expected in push mode); last push accepted but its backstop has elapsed with no fresh accept — bridge may have gone away (probing on next sweep); {inbound_actionable_count} awaiting disposition"
+                    )),
+                ),
+                PushDeliveryHealth::Deferred => (
+                    StationHealth::AttendedPush,
+                    Some(format!(
+                        "attended via push bridge (no waiter; expected in push mode); bridge reachable and delivery deferred until idle; {inbound_actionable_count} awaiting disposition"
                     )),
                 ),
                 PushDeliveryHealth::Probing => (
@@ -2715,11 +2721,12 @@ impl DaemonState {
         // Classify by the FRESHEST relevant attempt, not "any accept in the window": otherwise a
         // stale accept on message A (still inside its 300s backstop) would mask a fresh failure on
         // message B, reporting `delivering` while the bridge is actually unreachable and delaying
-        // deaf detection by up to a backstop. Ties on `last` are broken toward a failure
-        // (`!accepted` sorts high), so equal-timestamp completions never flip health nondeterministically
-        // from the unordered attempt map.
-        let freshest = relevant.max_by_key(|a| (a.last, !a.accepted));
+        // deaf detection by up to a backstop. Ties on `last` are broken toward a real failure:
+        // non-accepted sorts above accepted, then non-deferred sorts above a healthy busy deferral.
+        // Equal-timestamp completions therefore cannot flip health nondeterministically.
+        let freshest = relevant.max_by_key(|a| (a.last, !a.accepted, !a.deferred));
         match freshest {
+            Some(attempt) if attempt.deferred => PushDeliveryHealth::Deferred,
             Some(attempt) if attempt.accepted => {
                 if now.saturating_duration_since(attempt.last) < ON_DELIVER_ACCEPTED_BACKSTOP {
                     PushDeliveryHealth::Delivering
@@ -3683,6 +3690,7 @@ async fn handle_request_with_capabilities(
             scope,
             tags,
             watch_pids,
+            replace_watch_pids,
             recovery,
             on_deliver,
             replace_on_deliver,
@@ -3698,6 +3706,7 @@ async fn handle_request_with_capabilities(
                 scope,
                 tags,
                 watch_pids,
+                replace_watch_pids,
                 recovery,
                 on_deliver,
                 replace_on_deliver,
@@ -3947,6 +3956,7 @@ async fn register_member(
     scope: Option<String>,
     tags: Option<String>,
     watch_pids: Vec<WatchPidSpec>,
+    replace_watch_pids: bool,
     recovery: bool,
     on_deliver: Option<Vec<String>>,
     replace_on_deliver: bool,
@@ -4013,17 +4023,20 @@ async fn register_member(
                 }
                 let preserving_on_deliver =
                     !replace_on_deliver && on_deliver.is_none() && existing.on_deliver.is_some();
-                refreshed.watch_pids = if preserving_on_deliver {
+                let removing_push = replace_on_deliver && on_deliver.is_none();
+                let preserving_push_watch =
+                    !replace_watch_pids && existing.on_deliver.is_some() && !removing_push;
+                refreshed.watch_pids = if preserving_push_watch {
                     existing.watch_pids.clone()
                 } else {
                     watch_pids
                 };
                 refreshed.idle = false;
                 refreshed.idle_rearmable = false;
-                // Preserve an already-registered push handler and its liveness predicates when a
-                // generic recovery/refresh re-registers with `on_deliver = None` (e.g. a `telex
-                // wait` re-attach); only an explicit re-provision replaces them, so a pull
-                // re-attach cannot silently disarm or process-anchor the Copilot bridge.
+                // Preserve an already-registered push handler and, unless the refresh supplies an
+                // explicit watch process, its liveness predicates when `on_deliver = None`.
+                // Explicit bridge-lifetime refreshes may replace only the watch anchor without
+                // re-provisioning push; generic re-attaches cannot silently disarm the bridge.
                 refreshed.on_deliver = if replace_on_deliver {
                     on_deliver.clone()
                 } else {
@@ -5993,6 +6006,7 @@ mod p3_tests {
             scope: Some("scope:test".to_string()),
             tags: Some("p3".to_string()),
             watch_pids: vec![WatchPidSpec::anchor(42)],
+            replace_watch_pids: false,
             recovery: false,
             on_deliver: None,
             replace_on_deliver: false,
@@ -6441,6 +6455,17 @@ mod p3_tests {
         false
     }
 
+    async fn wait_until_async(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + timeout;
+        while Instant::now() < deadline {
+            if condition() {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        condition()
+    }
+
     #[tokio::test]
     async fn on_deliver_fires_and_marks_pushed_on_success() {
         let state = test_state("on-deliver-fires");
@@ -6611,14 +6636,10 @@ mod p3_tests {
         );
         assert_eq!(state.on_deliver_cc_candidates(&store, &row).len(), 1);
         state.fire_on_deliver_on_commit(&store, &row);
-        let mut attempted = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, live, Instant::now()) {
-                attempted = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
+        let attempted = wait_until_async(Duration::from_secs(10), || {
+            state.on_deliver_should_skip(&member_key, live, Instant::now())
+        })
+        .await;
         assert!(attempted, "live CC should record an on-deliver attempt");
         assert!(
             wait_for_file(&descriptor_path, Duration::from_secs(3)),
@@ -7174,6 +7195,12 @@ mod p3_tests {
             PushDeliveryHealth::Failing,
             "a same-timestamp accept and failure must resolve to Failing deterministically"
         );
+        state.on_deliver_record_attempt(&key, 3, t, false, true, false, None, false);
+        assert_eq!(
+            state.push_delivery_health(&key, 3, true, t + Duration::from_secs(1)),
+            PushDeliveryHealth::Failing,
+            "a same-timestamp real failure must win over a healthy busy deferral"
+        );
     }
 
     /// Push health ignores completed no-disposition/CC deliveries (accepted + skip_after_accept):
@@ -7594,6 +7621,11 @@ mod p3_tests {
             "a deferred push must not increment the degraded-status attempt counter"
         );
         assert_eq!(state.on_deliver_deferred_count(&member_key), 1);
+        assert_eq!(
+            state.push_delivery_health(&member_key, 1, true, now),
+            PushDeliveryHealth::Deferred,
+            "a busy deferral proves the bridge is reachable"
+        );
         // Held within the deferred backstop; eligible after it (bounded fallback if drain missed).
         assert!(state.on_deliver_should_skip(&member_key, 1, now + Duration::from_secs(5)));
         assert!(!state.on_deliver_should_skip(
@@ -7831,14 +7863,7 @@ mod p3_tests {
         assert!(matches!(drained, Response::Ack { .. }));
         // Async poll (yields to the runtime so the spawned sweep/child-process can progress; a
         // blocking wait would starve the current-thread executor).
-        let mut pushed = false;
-        for _ in 0..100 {
-            if marker.exists() {
-                pushed = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let pushed = wait_until_async(Duration::from_secs(10), || marker.exists()).await;
         assert!(
             pushed,
             "idle drain must re-push a still-unacked deferred message after the turn stops"
@@ -11589,6 +11614,7 @@ pub mod test_support {
             scope: Some("scope:test".to_string()),
             tags: Some("section17".to_string()),
             watch_pids,
+            replace_watch_pids: false,
             recovery: false,
             on_deliver: None,
             replace_on_deliver: false,
