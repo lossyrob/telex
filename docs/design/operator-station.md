@@ -368,18 +368,21 @@ result remains visible and is reconciled before retry.
 The authoring state and reply result model MUST distinguish:
 
 - accepted while the target is unoccupied and durably queued;
-- rejection before acceptance, plus retryability or permanent-unresolvability
-  only when named typed Application Client evidence supplies that subtype;
+- rejection before acceptance with typed `RejectionRetryability::Transient` or
+  `RejectionRetryability::Permanent` evidence;
 - pre-send non-authoritative source state;
 - post-send receipt identity mismatch;
 - already-terminal source obligation;
 - indeterminate acceptance.
 
-The supported Application Client currently guarantees rejection before
-acceptance, not retryable/permanent rejection subtyping. An unclassified
-rejection fails closed: preserve the operation identity and obligation, do not
-retry automatically, and surface the missing shared semantic tracked by
-[Issue #12](https://github.com/lossyrob/telex/issues/12).
+The supported Application Client classifies every proved pre-acceptance
+rejection as `RejectionRetryability::Transient` or
+`RejectionRetryability::Permanent`, as AC-C14 requires. `Permanent` includes
+typed non-retryable capability conflict, unsupported, incompatible,
+unauthorized, ambiguous, and permanently unresolvable target errors. If named
+typed retryability evidence is missing, Station fails closed: preserve the
+operation identity and obligation, do not retry automatically, and reconcile
+the operation evidence.
 
 The UI never presents durable acceptance or queueing as human or agent
 consumption. If reply delivery is rejected or indeterminate, the selected
@@ -419,9 +422,9 @@ Failure remains explicit:
 
 | Failure | Required state |
 |---|---|
-| Unclassified rejection before acceptance | Obligation remains open; preserve the operation identity, do not retry automatically or record `handled`, and expose the missing typed classification |
-| Typed retryable rejection before acceptance | Obligation remains open; preserve the operation identity and retry only from AC-C14 reconciliation evidence after the rejection condition changes |
-| Typed permanently unresolvable target | Obligation remains open; do not retry automatically or record `handled`; require target repair, an explicit new directed message, or a separate human disposition |
+| Missing or unclassified retryability evidence | Obligation remains open; preserve the operation identity, do not retry automatically or record `handled`, and expose the missing typed classification |
+| Typed transient pre-acceptance rejection | Obligation remains open; preserve the operation identity and retry only from AC-C14 reconciliation evidence after the rejection condition changes |
+| Typed permanent pre-acceptance rejection | Obligation remains open; preserve the operation identity, do not retry automatically or record `handled`, and require correction appropriate to the typed cause, an explicit new directed message, or a separate human disposition |
 | Pre-send source is `captured-only`, `mismatch`, or `unavailable` | Do not send or disposition; preserve the operation and obligation in reconciliation-pending state until authoritative resolution is restored |
 | Post-send receipt identity mismatch | Do not record `handled`; show expected and actual receipt identities, preserve the obligation, and reconcile the AC-C14 operation evidence before retry |
 | Source already terminal before send | Do not run `Reply & Handle`; offer an explicitly confirmed ordinary follow-up reply without changing the existing terminal state |
@@ -647,11 +650,13 @@ contract are historical and have no current Station producer or consumer.
 Generic Application Client compound primitives remain available to other
 applications without becoming Operator Station requirements.
 
-The negative assisted/quiet/mediation vocabulary in the Application Client
-product-boundary list is historical provenance. Its downstream Operator
-integration bullet that names route-back ordering must be re-baselined by the
-shared client owner; ADR 0051 and this document govern current Station
-requirements. This node does not edit or weaken generic AC-C20 semantics.
+The Application Client Station integration contract now specifies ordinary
+bidirectional primitives, exact-delivery acknowledgment, opaque
+metadata-bearing reply, per-recipient disposition, unresolved/history recovery,
+all AC-C15 source-resolution states, and generic caller-declared compound
+ordering. ADR 0051 and this document retain direct Station authority. AC-C20
+remains application-neutral and lets callers declare compound sequences without
+importing Station topology or policy.
 
 If implementation discovers that the accepted Application Client contract
 cannot express a required direct Station semantic, Station implementation is
@@ -728,8 +733,6 @@ auto-start, signing, diagnostics, and cleanup.
 | Item | Owner |
 |---|---|
 | Complete live CC acquisition, if required beyond bounded history | Application Client design/conformance decision |
-| Re-baseline stale Station product-boundary, readiness, integration, and route-back references in `application-client.md` | [Issue #12](https://github.com/lossyrob/telex/issues/12) / Application Client workstream |
-| Define named typed evidence for retryable versus permanently unresolvable rejection if Station needs that distinction | [Issue #12](https://github.com/lossyrob/telex/issues/12) / Application Client workstream |
 | Receive-health threshold values and latency tuning | `station-app` and operational hardening |
 | Optimistic display of an accepted reply | `station-app`; must preserve durable receipt and partial state |
 | Notification pressure limits and coalescing policy | Usability validation and operational hardening |
