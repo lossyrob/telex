@@ -1,7 +1,7 @@
 //! Shared owner-private filesystem and process-identity primitives.
 //!
 //! These were previously private inside `daemon::platform`. They are promoted here verbatim so a
-//! second authority-bearing consumer — the durable station-intent store (ADR 0051) — inherits the
+//! second authority-bearing consumer — the durable station-intent store (ADR 0052) — inherits the
 //! *same* fail-closed owner-private checks the daemon cap file and endpoint already rely on,
 //! rather than growing a parallel, weaker implementation. `daemon::platform` re-exports every
 //! promoted function, so daemon behavior is byte-for-byte unchanged.

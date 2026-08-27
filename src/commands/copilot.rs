@@ -447,7 +447,7 @@ fn rollback_bridge_binding(session_id: &str, address: &str, write: BridgeBinding
 }
 
 // ---------------------------------------------------------------------------------------------
-// Station intents (issue #106 / ADR 0051)
+// Station intents (issue #106 / ADR 0052)
 // ---------------------------------------------------------------------------------------------
 
 /// Register this harness's handler kind and producer credential root.
@@ -1359,7 +1359,7 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
 
     let registry_path = bridge_registry_path(&session)?;
 
-    // Epoch fence (issue #106 / ADR 0051 decision 8). Re-read the daemon capability file
+    // Epoch fence (issue #106 / ADR 0052 decision 8). Re-read the daemon capability file
     // immediately before injecting: if the daemon instance that registered this handler is gone and
     // a successor has rewritten the cap file, abort rather than inject into a session the successor
     // now owns. This is the crash-path window; the daemon-side epoch guard already stops the old
@@ -1593,7 +1593,7 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
         }
     };
 
-    // Turn-boundary station-intent maintenance (issue #106 / ADR 0051 decision 14d).
+    // Turn-boundary station-intent maintenance (issue #106 / ADR 0052 decision 14d).
     //
     // Two things happen here, both best effort and both fail-open:
     //   1. Any `pending` intent for this session is finalized to `live` now that the bridge is
@@ -1938,7 +1938,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     };
     let bridge_provisioned = on_deliver.is_some();
     // The durable record of *desired* state, written before `Register` and while still `Pending`
-    // (issue #106 / ADR 0051). A failure here fails the attach: silently proceeding would leave the
+    // (issue #106 / ADR 0052). A failure here fails the attach: silently proceeding would leave the
     // user with push that works now and no recovery after a daemon replacement, which is precisely
     // the state this feature exists to remove.
     let mut intent_write = None;
@@ -2730,7 +2730,7 @@ fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
         Some(session) => vec![session],
         None => discover_bridge_sessions()?,
     };
-    // Truth ordering (ADR 0051 decision 17): the station intent is authoritative for keep
+    // Truth ordering (ADR 0052 decision 17): the station intent is authoritative for keep
     // decisions; `.bindings.json` is a secondary hint that survives only as the extension teardown
     // ref-count. Drift between the two is *reported*, never silently repaired — a GC that quietly
     // reconciled them could delete the bridge a live intent still depends on.
@@ -4594,7 +4594,10 @@ mod tests {
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
             .expect("weaken registry permissions");
 
-        let error = capture_producer_identity(&session).unwrap_err().to_string();
+        let error = capture_producer_identity(&session)
+            .err()
+            .expect("insecure registry must be rejected")
+            .to_string();
         restore_env("COPILOT_HOME", prior_home);
         let _ = std::fs::remove_dir_all(&home);
         assert!(
@@ -4619,7 +4622,10 @@ mod tests {
         std::fs::rename(&path, &target).expect("move registry target");
         symlink(&target, &path).expect("replace registry with symlink");
 
-        let error = capture_producer_identity(&session).unwrap_err().to_string();
+        let error = capture_producer_identity(&session)
+            .err()
+            .expect("symlinked registry must be rejected")
+            .to_string();
         restore_env("COPILOT_HOME", prior_home);
         let _ = std::fs::remove_dir_all(&home);
         assert!(

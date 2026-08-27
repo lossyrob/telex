@@ -1078,7 +1078,7 @@ owner-only-enforcement primitive removes the need for the opt-out.
 ## 0023 — Minimal session/presence/delivery model: supersede the incarnation-currency machinery
 
 - **Date:** 2026-06-23
-- **Status:** Accepted (design); **amended by 0051** — a durable *station intent* records desired
+- **Status:** Accepted (design); **amended by 0052** — a durable *station intent* records desired
   push registration and lets a successor daemon restore it after verifying the producer is alive.
   The invariant this ADR set stands: membership is still never rebuilt from durable history, and an
   intent is desired state, not attendance.
@@ -2146,7 +2146,7 @@ decision does not create a product-private client seam. The issue #118
 snapshot; this Watcher decision does not regenerate its approval/provenance
 manifest.
 
-## 0051 — Durable station intent and daemon-owned reconciliation
+## 0052 — Durable station intent and daemon-owned reconciliation
 
 - **Date:** 2026-08-02
 - **Status:** Accepted (issue #106)

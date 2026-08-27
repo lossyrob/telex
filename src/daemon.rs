@@ -60,7 +60,7 @@ const DEFAULT_DEAF_WARN_MS: i64 = 2 * 60 * 1000;
 
 pub type Result<T> = std::result::Result<T, DaemonError>;
 
-/// Daemon-owned station-intent reconciliation (issue #106 / ADR 0051).
+/// Daemon-owned station-intent reconciliation (issue #106 / ADR 0052).
 ///
 /// Physically `src/daemon_reconcile.rs`. It is mounted as a child of `daemon` rather than as a
 /// sibling crate module because it manipulates member records, admission guards, and epoch leases —
@@ -366,7 +366,7 @@ pub struct DaemonState {
     draining: AtomicBool,
     on_deliver: OnDeliverState,
     /// Station-intent reconciliation state: the cached index, the per-scope single-flight guard,
-    /// and the trigger/report seam (issue #106 / ADR 0051).
+    /// and the trigger/report seam (issue #106 / ADR 0052).
     intents: reconcile::IntentRuntime,
 }
 
@@ -2130,7 +2130,7 @@ pub async fn serve() -> Result<()> {
     let state = Arc::new(new_state(paths)?);
     let (drain_tx, mut drain_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let heartbeat_task = tokio::spawn(heartbeat_loop(state.clone()));
-    // Startup scan (trigger (a) of ADR 0051). Spawned, never awaited: the daemon accepts
+    // Startup scan (trigger (a) of ADR 0052). Spawned, never awaited: the daemon accepts
     // connections immediately, so a large or corrupt intent scope cannot delay readiness.
     reconcile::spawn_startup_scan(state.clone());
 
@@ -4392,7 +4392,7 @@ async fn register_member(
         );
     }
 
-    // Anti-downgrade (issue #106 / ADR 0051 decision 10).
+    // Anti-downgrade (issue #106 / ADR 0052 decision 10).
     //
     // We are about to create a **new** member for this key. If a live push intent exists for it,
     // creating a pull-only member here would silently downgrade a station the user provisioned for
@@ -6958,7 +6958,7 @@ mod p3_tests {
     }
 
     // -----------------------------------------------------------------------------------------
-    // The arming-proof transaction (issue #106 / ADR 0051).
+    // The arming-proof transaction (issue #106 / ADR 0052).
     //
     // A push register that owes a durable armed proof commits that proof *before* the member, and
     // fails the whole registration when it cannot. These tests drive each way the proof can fail
@@ -13632,7 +13632,7 @@ mod platform {
     }
 
     // Owner-private filesystem and process-identity primitives live in `crate::platform_fs` so the
-    // daemon and the station-intent store share one hardened implementation (ADR 0051). These
+    // daemon and the station-intent store share one hardened implementation (ADR 0052). These
     // wrappers only adapt the shared error type; the daemon's cap-file, socket, and
     // peer-verification behavior is byte-for-byte unchanged.
     pub fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
@@ -13926,7 +13926,7 @@ mod platform {
     }
 
     // Owner-private filesystem and process-identity primitives live in `crate::platform_fs` so the
-    // daemon and the station-intent store share one hardened implementation (ADR 0051). These
+    // daemon and the station-intent store share one hardened implementation (ADR 0052). These
     // wrappers only adapt the shared error type; the daemon's cap-file, pipe, and
     // peer-verification behavior is byte-for-byte unchanged.
     pub fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {

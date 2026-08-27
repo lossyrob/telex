@@ -4251,7 +4251,7 @@ fn terminate_pid(_pid: u32) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Station-intent reconciliation, end to end against a real daemon process (issue #106 / ADR 0051).
+// Station-intent reconciliation, end to end against a real daemon process (issue #106 / ADR 0052).
 //
 // These are named with a `station_intent_` prefix so CI can run them on macOS alongside the
 // Copilot fallback E2E: the intent store, the owner-private credential rules, and the producer

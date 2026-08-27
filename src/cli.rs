@@ -885,7 +885,7 @@ impl Ctx {
 
 pub async fn run() -> i32 {
     let cli = Cli::parse();
-    // Composition root (ADR 0039 / ADR 0051). The harness layer registers its handler kind and its
+    // Composition root (ADR 0039 / ADR 0052). The harness layer registers its handler kind and its
     // producer credential root exactly once per process, *before* any command — including
     // `daemon serve` — runs. The daemon core therefore only ever learns "kind K and root R are
     // registered"; it never gains a Copilot symbol, path, or filename.

@@ -1936,7 +1936,7 @@ corresponding decision should be revisited.
   harness constraint (manifest cannot point outside the plugin dir **and** `exec` is rejected), a
   code-touching deviation is forced.
 
-## 18. Station intents and daemon-owned reconciliation (issue #106, ADR 0051)
+## 18. Station intents and daemon-owned reconciliation (issue #106, ADR 0052)
 
 A **station intent** is a host-local, owner-private, versioned record of the *desired* push
 registration for one `(store_key, session_id, address)` binding. It is not membership and not

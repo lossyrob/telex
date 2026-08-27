@@ -820,7 +820,7 @@ fn plugin_versions_track_the_crate_version() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Version axes (issue #106 / ADR 0051)
+// Version axes (issue #106 / ADR 0052)
 // ---------------------------------------------------------------------------------------------
 
 /// The four release axes this feature touches, checked against a **frozen previous-release

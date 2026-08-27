@@ -396,7 +396,7 @@ pub enum Request {
         #[serde(default)]
         proof: Option<String>,
     },
-    /// Explicit station-intent reconciliation (issue #106 / ADR 0051). Admin-proofed exactly like
+    /// Explicit station-intent reconciliation (issue #106 / ADR 0052). Admin-proofed exactly like
     /// `Drain`: reconciliation arms delivery and spawns push handler processes, so it must not be
     /// reachable from an unproofed request path. `scope` optionally narrows the pass to one store.
     ReconcileIntents {

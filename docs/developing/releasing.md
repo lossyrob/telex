@@ -117,7 +117,7 @@ fixture always records the previous release.
 ### Scheduled removals
 
 - **`.bindings.json`** (`~/.copilot/telex-bridge/<session>.bindings.json`) is retained only as the
-  extension teardown ref-count. Station intents (ADR 0051) are authoritative for recovery and for
+  extension teardown ref-count. Station intents (ADR 0052) are authoritative for recovery and for
   `telex copilot gc` keep decisions. Remove `.bindings.json` in the release **after** the one that
   ships station intents, once no supported binary still writes it.
 

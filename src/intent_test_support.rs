@@ -1,4 +1,4 @@
-//! Test harness for the station-intent path (issue #106 / ADR 0051).
+//! Test harness for the station-intent path (issue #106 / ADR 0052).
 //!
 //! Two things the existing process/core suites could not do are provided here:
 //!
