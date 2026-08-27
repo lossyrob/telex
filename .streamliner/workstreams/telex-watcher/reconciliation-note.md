@@ -14,10 +14,14 @@ The canonical integrated workstream design is now
 [`design/current-design.md`](design/current-design.md). The
 `minimal-watcher-authoring-contract` node is completed. The operator separately
 accepted `dumb-watcher-contract-gate` as contract-usability acceptance, so the
-`minimal-contract-accepted` checkpoint is completed. `minimal-example-pack` is
-next-ready but has not been launched. `watcher-runtime-core` remains planned and
-blocked specifically on Application Client `client-conformance`; the completed
-internal gate remains in its graph dependencies as history.
+`minimal-contract-accepted` checkpoint is completed. Issue
+[#144](https://github.com/lossyrob/telex/issues/144) and
+[`tasks/minimal-example-pack.md`](tasks/minimal-example-pack.md) now provide the
+fresh tracker and bounded task specification for `minimal-example-pack`. The
+node remains ready but unlaunched pending separate campaign authorization.
+`watcher-runtime-core` remains planned and blocked specifically on Application
+Client `client-conformance`; the completed internal gate remains in its graph
+dependencies as history.
 
 The builder decision used the ordinary authoring flow in merged `watcher.md`:
 write or copy a detector, optionally exercise it, register it, and inspect
@@ -271,8 +275,9 @@ leakage, not additional Application Client product scope.
 
 - Test-support helper binaries: promoted through #110 into the
   `watcher-runtime` packaging acceptance checklist.
-- PR-sentry merge-during-preflight: promoted to
-  `detector-template-library` bootstrap guidance and lifecycle tests.
+- PR-sentry merge-during-preflight: retained as optional learning for
+  `minimal-example-pack` guidance and tests, not as mandatory provider
+  preflight.
 
 ## Promotion candidates
 
@@ -317,9 +322,11 @@ leakage, not additional Application Client product scope.
   superseding ADR, and v2 schemas.
   - Disposition: completed through issue #133 and merged PR #135; the builder
     accepted contract usability after PAW review 4825216100 and focused
-    design-steward review 5044005481. The optional example pack is next-ready
-    but unlaunched; operational proof remains a later gate.
+    design-steward review 5044005481. Issue #144 and the bounded task
+    specification now provide the launch prerequisite for the ready but
+    unlaunched optional example pack; operational proof remains a later gate.
 - PR #131 implementation evidence: target authority — minimal examples and
   optional hardening recipes.
   - Disposition: preserved on the closed unmerged PR/branch. Extraction may
-    proceed through the now-ready but unlaunched minimal example pack.
+    proceed only as learning through issue #144's ready but unlaunched minimal
+    example pack.

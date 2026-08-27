@@ -39,8 +39,11 @@ Issue #134 and ADR 0051 own the reset. Telex Watcher's minimal v2
 authoring/registration reset completed through issue #133 and PR #135, merged as
 `b91e8301899351c0411d6e2e9ac5290af8a3cb4c`; its builder-owned
 `dumb-watcher-contract-gate` and `minimal-contract-accepted` checkpoint are
-complete. The optional example pack is next-ready but unlaunched, while runtime
-still waits on Application Client `client-conformance`.
+complete. Issue [#144](https://github.com/lossyrob/telex/issues/144) and its
+bounded task specification now provide the optional example pack's launch
+prerequisite. The node remains ready but unlaunched pending separate campaign
+authorization, while runtime still waits on Application Client
+`client-conformance`.
 Local Daemon release-confidence validation completed, but issue #106 exposed a
 daemon-replacement push-intent gap. Existing PR #138 is adopted as the
 in-progress repair ahead of the still-unaccepted hardening gate; its proposed
@@ -52,7 +55,7 @@ merged.
 | Workstream | Tracker | Outcome | Current first move |
 |---|---|---|---|
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | Issue #134 resets the contract under ADR 0051; mediation is external/non-normative; `station-app` waits on the direction gate and Application Client `client-conformance`. |
-| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Run the next-ready optional example pack when launched; runtime remains planned and waits on Application Client `client-conformance`. |
+| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on Application Client `client-conformance`. |
 | Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Contract convergence is merged; client core is active and Watcher runtime waits on `client-conformance`. |
 | Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | Adopt issue #106 / PR #138 as `station-intent-reconciliation`; integrate current `main`, resolve blocking review, and present isolated both-backend evidence before the hardening gate. |
 
@@ -140,8 +143,10 @@ After the shared semantic checkpoint:
 - Operator Station first resets the design around direct human attendance, then
   builds the desktop app after Application Client `client-conformance`.
 - Telex Watcher's minimal command-plus-policy contract and builder usability
-  gate are accepted. Optional examples are next-ready but unlaunched, while
-  runtime/CLI waits for Application Client `client-conformance`.
+  gate are accepted. Issue #144 and its task specification prepare the optional
+  examples, which remain ready but unlaunched pending separate campaign
+  authorization, while runtime/CLI waits for Application Client
+  `client-conformance`.
 
 Each retains its own usability and operational-hardening gates.
 
@@ -212,8 +217,8 @@ collapse into noise, and no session-bound polling task is required.
 1. Reconcile and repair adopted Local Daemon PR #138 for issue #106 without
    weakening explicit membership, fencing, or merged Copilot App lifecycle
    semantics; keep the hardening gate separate from merge.
-2. Launch `minimal-example-pack` only when authorized; it is next-ready after
-   contract-usability acceptance.
+2. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
+   after separate campaign authorization.
 3. Continue Application Client core/binding/conformance work and export
    `client-conformance` before Watcher runtime integration.
 4. Keep `watcher-runtime-core` planned until client conformance promotes

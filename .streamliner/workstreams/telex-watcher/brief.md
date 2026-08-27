@@ -167,9 +167,12 @@ are absent from v2 registration/runtime semantics. PR #135 had PAW `+1` review
 `+1` review 5044005481 and green CI.
 
 This acceptance is not production-runtime or five-minute operational proof.
-`minimal-example-pack` is next-ready but unlaunched. `watcher-runtime-core`
-remains planned and blocked specifically on Application Client
-`client-conformance`, including promotion of authoritative
+Issue [#144](https://github.com/lossyrob/telex/issues/144) and
+[`tasks/minimal-example-pack.md`](tasks/minimal-example-pack.md) now provide the
+fresh tracker and bounded task specification for `minimal-example-pack`. The
+node remains ready but unlaunched pending separate campaign authorization.
+`watcher-runtime-core` remains planned and blocked specifically on Application
+Client `client-conformance`, including promotion of authoritative
 exact-store/exact-operation `not-recorded`. The completed internal gate remains
 as a historical dependency. There is no private-client or mandatory-template
 fallback, and `five-minute-custom-watch-gate` remains planned.
