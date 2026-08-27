@@ -38,12 +38,16 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   and minimal v2 authoring/identity in
   [ADR 0050](DECISIONS.md#0050--watcher-v2-uses-minimal-command-registration-and-runtime-owned-event-identity).
 - **[operator-station.md](operator-station.md)** — the **normative Operator Station
-  application contract**: human-attended address semantics, direct and assisted
-  routing, operator-agent authority, source provenance, notification policy,
-  reply/disposition behavior, recovery, identity, safety, and the requirements
-  exported to the shared Application Client. Load-bearing boundaries:
-  [ADR 0047](DECISIONS.md#0047--operator-station-mediation-remains-application-logic-outside-telex-core)
-  and [ADR 0048](DECISIONS.md#0048--direct-and-assisted-routing-use-exclusive-ingress-attendance).
+  application contract**: direct human attendance of explicitly configured
+  addresses, durable ingest before acknowledgment, feed/history/thread behavior,
+  ordinary send and reply, exact-recipient disposition, local notifications,
+  provenance, health, restart/resync, inert rendering, safe links, and
+  evidence-preserving cleanup. Mediation is optional external application logic,
+  not a shipped Station topology. Load-bearing boundary:
+  [ADR 0051](DECISIONS.md#0051--operator-station-ships-a-direct-human-attended-endpoint-mediation-remains-external),
+  which narrows [ADR 0047](DECISIONS.md#0047--operator-station-mediation-remains-application-logic-outside-telex-core)
+  and supersedes the Station topology in
+  [ADR 0048](DECISIONS.md#0048--direct-and-assisted-routing-use-exclusive-ingress-attendance).
 - **[ARCHITECTURE.md](ARCHITECTURE.md)** — the **visual on-ramp** to the daemon design:
   mermaid diagrams (component map, pull **and push** message delivery, restart/re-attach,
   station liveness, the single-writer epoch fence, authorization) that teach the
@@ -75,8 +79,9 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
    applications.
 6. `watcher.md` — how a provider-neutral headless application executes trusted
    local detectors and commits state only after durable Telex acceptance.
-7. `operator-station.md` — how a human-facing Station and optional operator agent
-   compose Telex attendance, delivery, threading, and disposition semantics.
+7. `operator-station.md` — how a human-facing Station directly attends configured
+   addresses and composes Telex attendance, delivery, threading, reply, disposition,
+   notification, provenance, health, and recovery semantics.
 8. `copilot-bridge-push.md` — how push delivery layers a harness bridge on the daemon's
    on-deliver exec (read after `daemon.md` sec.13.2).
 9. `DECISIONS.md` — why each load-bearing choice was made.
