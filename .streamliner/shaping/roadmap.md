@@ -41,6 +41,11 @@ authoring/registration reset completed through issue #133 and PR #135, merged as
 `dumb-watcher-contract-gate` and `minimal-contract-accepted` checkpoint are
 complete. The optional example pack is next-ready but unlaunched, while runtime
 still waits on Application Client `client-conformance`.
+Local Daemon release-confidence validation completed, but issue #106 exposed a
+daemon-replacement push-intent gap. Existing PR #138 is adopted as the
+in-progress repair ahead of the still-unaccepted hardening gate; its proposed
+station-intent contract is not current authority until repaired, reviewed, and
+merged.
 
 ## Covering workstreams
 
@@ -49,6 +54,7 @@ still waits on Application Client `client-conformance`.
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | Issue #134 resets the contract under ADR 0051; mediation is external/non-normative; `station-app` waits on the direction gate and Application Client `client-conformance`. |
 | Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Run the next-ready optional example pack when launched; runtime remains planned and waits on Application Client `client-conformance`. |
 | Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Contract convergence is merged; client core is active and Watcher runtime waits on `client-conformance`. |
+| Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | Adopt issue #106 / PR #138 as `station-intent-reconciliation`; integrate current `main`, resolve blocking review, and present isolated both-backend evidence before the hardening gate. |
 
 ## Shared seam
 
@@ -203,12 +209,15 @@ collapse into noise, and no session-bound polling task is required.
 
 ## Current next actions
 
-1. Launch `minimal-example-pack` only when authorized; it is next-ready after
+1. Reconcile and repair adopted Local Daemon PR #138 for issue #106 without
+   weakening explicit membership, fencing, or merged Copilot App lifecycle
+   semantics; keep the hardening gate separate from merge.
+2. Launch `minimal-example-pack` only when authorized; it is next-ready after
    contract-usability acceptance.
-2. Continue Application Client core/binding/conformance work and export
+3. Continue Application Client core/binding/conformance work and export
    `client-conformance` before Watcher runtime integration.
-3. Keep `watcher-runtime-core` planned until client conformance promotes
+4. Keep `watcher-runtime-core` planned until client conformance promotes
    exact-store/exact-operation `not-recorded` and identity-checkable
    same-operation retry; recovery remains query-only under uncertainty.
-4. Keep `five-minute-custom-watch-gate` planned for later operational proof, and
+5. Keep `five-minute-custom-watch-gate` planned for later operational proof, and
    preserve the campaign integration exercise and no-private-client boundary.
