@@ -169,11 +169,12 @@ deliver. Any future restoration must remain subordinate to:
   successor-handoff behavior; and
 - the merged Copilot App bridge-host lifecycle semantics above.
 
-No station-intent manifest, reconciler, proposed ADR 0050 behavior, or
-successor restoration rule is current authority. Promotion requires an
+No station-intent manifest, reconciler, branch-local proposed ADR identifier, or
+successor restoration rule is current authority. Any future station-intent ADR
+must receive a conflict-free number when it is promoted. Promotion requires an
 integrated implementation and design change to pass review against the
-then-current daemon, IPC, upgrade, and Copilot bridge contracts and merge into the
-repository authority. Until then, daemon replacement continues to require
+then-current daemon, IPC, upgrade, and Copilot bridge contracts and merge into
+the repository authority. Until then, daemon replacement continues to require
 explicit re-attachment and may require explicit push re-provisioning.
 
 If promoted, the affected contracts are `MemberRecord` registration,

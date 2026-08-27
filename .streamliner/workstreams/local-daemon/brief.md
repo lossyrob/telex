@@ -20,12 +20,12 @@ SQLite-only spike is an internal step inside the daemon-core node, not the shipp
 boundary.
 
 Formation orders the work as confidence transitions expressed through the node DAG.
-**design-foundation** (a research node, written and spar-pressure-tested) locks the
+**design-foundation** (a research node, written and spar-pressure-tested) locked the
 hard contracts up front - the daemon-scoped capability/version-handshake IPC, the
-**server-side lease-epoch fence**, the **seen-dedup redesign**, minimal
-**stale-attendance**/takeover, **typed watch-pid**, the daemon **singleton identity**
-+ **lifecycle contract**, and daemon-native session RPCs - behind a builder
-**design-gate**. Then the **daemon core**
+**server-side lease-epoch fence**, the **seen-dedup redesign**, explicit membership
++ non-destructive liveness, negative-only watched-process evidence, the daemon
+**singleton identity** + **lifecycle contract**, and daemon-native session RPCs -
+behind a builder **design-gate**. Then the **daemon core**
 (the centerpiece: daemon process, durable buffer, one-shot verbs, server-side
 epoch-fenced delivery, the lifecycle contract, and a minimal upgrade floor) on
 SQLite, which with the **Copilot plugin** is the first slice that can unblock the
@@ -34,10 +34,11 @@ operator (reached when the plugin lands on SQLite). A distinct **fencing-proof**
 work. **Postgres parity** extends the core under that proof and adds the cross-machine
 reclaim (competing daemons); **seamless upgrade** (#6) lands
 **last**, after Postgres and the plugin, so the full upgrade platform never blocks
-the unblock. A **validation-loop hardening wave** then exercises the complete system -
-Tier 1/2 chaos + Entra-PG multi-host (parallel with an **AKS large-network spike**),
-then the **AKS scale rig + stress loop** last - and a **hardening gate** must pass
-before the final **closure gate** validates the real-world unblock and retires
+the unblock. The original large validation-harness and AKS-scale shape was later
+replaced by a practical **release-confidence-validation** node, which is complete.
+Issue #106 / PR #138 is the active hardening repair discovered after that
+validation; it must land before the builder **hardening gate** can be presented.
+The final **closure gate** still validates the real-world unblock and retires
 superseded mechanisms. Nodes are coarse and PAW-sized; the completeness split is
 justified by distinct expertise, independent validation, and parallelism.
 
@@ -74,13 +75,12 @@ The authoritative design layer (merged from `design-foundation`) lives under
   **fencing-proof** gate; the daemon **singleton identity** (user SID + config root +
   protocol-major) and **lifecycle contract** (spawn-lock, connect-or-spawn, readiness
   ACK, `wait` reconnect-on-EOF grace, exit codes, Status surface); the **daemon-scoped
-  capability + version-handshake IPC**; the liveness model (sessionEnd hook
-  healthy-path + a **typed** `--watch-pid` backstop, v1 floor loader anchor +
-  start-time; no idle-TTL teardown, but **stale-attendance/takeover** as a
-  load-bearing recovery path - last-confirmed + `occupied_stale` + takeover); the
-  Copilot CLI plugin (sessionEnd hook -> explicit **`Detach`** per daemon.md sec.14.2, not
-  PR #31's filesystem registry) and moving `telex skill` into a real plugin skill with
-  one shared source; the **minimal upgrade floor** (versioned shim + `daemon stop
+  capability + version-handshake IPC**; the ADR 0023 liveness model
+  (authoritative, non-destructive `sessionEnd`, negative-only watched-process
+  evidence with start-time, and a non-destructive idle backstop); explicit-only
+  membership removed only by explicit **`Detach`**; the Copilot CLI plugin as the
+  harness adapter and one shared source for `telex skill`; the **minimal upgrade
+  floor** (versioned shim + `daemon stop
   --drain` + next-call respawn + legacy/non-epoch cutover rule) in `daemon-core` with
   full seamless upgrade (#6) last; retiring superseded mechanisms (#3 relay, pid-watch
   as a per-session holder, the re-arm dance) and updating the docs **with**
@@ -89,12 +89,11 @@ The authoritative design layer (merged from `design-foundation`) lives under
   collapse-into-one-process theme and should reuse the stabilized Layer-1 IPC, but
   is a separate solve; response windows / TTL deadlines (#2); the `store_key` helper
   (#25).
-- **Deferred:** the **full** non-binary occupant status policy (attended/idle/free) -
-  the **minimal** stale-attendance signal (last-confirmed + `occupied_stale` +
-  takeover) is now in scope, but the full state machine and any idle policy stay
-  deferred and never drive teardown; the pid-reuse-immune fd-over-IPC backstop
-  (#28-flavored), awkward with a singleton daemon (a lighter pid+start-time guard IS
-  in scope); the daemon subsuming directory/occupancy reads (`address list`).
+- **Deferred:** a richer non-binary occupant status policy beyond the accepted
+  non-destructive liveness states; the pid-reuse-immune fd-over-IPC backstop
+  (#28-flavored), awkward with a singleton daemon (the accepted process evidence
+  uses PID + start-time); and the daemon subsuming directory/occupancy reads
+  (`address list`).
 
 ## Current State
 
@@ -141,9 +140,10 @@ reviewed, operator-authorized GitHub PR merged to `main`.
   `lease_epoch`/`owner_instance_id` rather than by timing. `design-foundation` owns
   the epoch lifecycle.
 - **Fencing-first sequencing (from spar):** lock the hard contracts (fencing,
-  stale-attendance, typed watch-pid, identity) in `design-foundation`; gate Postgres
-  on fencing proven under competing daemons; land seamless-upgrade last. Keeps both
-  backends + #6 in the deliverable while limiting blast radius.
+  explicit membership, non-destructive liveness, watched-process identity) in
+  `design-foundation`; gate Postgres on fencing proven under competing daemons;
+  land seamless-upgrade last. Keeps both backends + #6 in the deliverable while
+  limiting blast radius.
 - **Server-side epoch fence + a distinct `fencing-proof` gate (council):** lease-row
   fencing alone is insufficient - delivery emission is fenced server-side
   (`mark_delivered_if_current_owner`; no frame unless the daemon owns the epoch) and
@@ -154,36 +154,37 @@ reviewed, operator-authorized GitHub PR merged to `main`.
   + next-call respawn + a legacy-holder/non-epoch-lease cutover rule land in
   `daemon-core` (the first daemon-aware install hits the Windows binary-lock); full
   rollback/gc/UX stays last.
-- **Daemon-native session ownership (council):** the hook calls a daemon-native
-  `DeregisterSession`; the daemon's in-memory `session->addresses` map is the
-  authority, reshaping #23/#31 (reuse the hook plumbing, drop the filesystem
-  registry).
+- **Daemon-native session ownership (revised by ADR 0023):** the daemon's
+  in-memory `session->addresses` map is the authority. Reuse the hook plumbing as
+  a non-destructive liveness input; explicit detach, not sessionEnd, owns
+  membership removal.
 - **Docs/SKILL cutover with `daemon-core` (council):** keep the verb names; update
   `SKILL.md` + plugin docs when behavior changes, not at closure, so instructions
   never describe a dead holder/waiter model mid-workstream.
 
-## Open Questions
+## Resolved questions and superseded validation shape
 
-All eight design-foundation open questions are **resolved** as ADRs 0014-0024 (see
+All eight design-foundation questions are **resolved** as ADRs 0014-0024 (see
 `docs/design/DECISIONS.md` and `daemon.md`): epoch lifecycle (0015), session
-presence/reaping + crash durability (0017/0023), typed watch-pid + per-session PID
-(0017), legacy cutover (0020/0024), `Detach`/`Ack` removal proof (0019/0023), and the
-Status freeze line (0018). Remaining open items are deliberately deferred to execution:
+presence/reaping + crash durability (0017/0023), watched-process evidence (0017),
+legacy cutover (0020/0024), explicit membership and agent acknowledgement
+(0019/0023), and the Status freeze line (0018).
 
-- The validation-loop **invariant suite + observability hooks** are derived during
-  `validation-harness` against the implemented reality, not pre-specified.
-- The **AKS large-network approach** (orchestration, cost, oracle pipeline) is proven
-  in `aks-scale-spike`.
+The earlier `validation-harness`, Entra multi-host campaign, and AKS scale-rig
+concepts were superseded by the completed `release-confidence-validation` node
+(issue #78). The remaining execution question is bounded to issue #106 / PR #138:
+whether durable desired push registration can be restored across daemon
+replacement without weakening explicit membership, liveness proof, or epoch
+fencing.
 
 ## Imports and Exports
 
 ### Imports
 
-- **PR #31 / issue #23 (sessionEnd hook plumbing):** the hook wiring the plugin
-  reuses. Its filesystem `session_registry` is **not** the attendance authority
-  (council G) - the daemon owns `session_id->addresses` in memory and the hook calls
-  explicit `Detach` (ADR 0019/0023, daemon.md sec.14.2); the hook is a thin mapper. Provider: branch
-  `feature/copilot-session-end-plugin`. Available now.
+- **PR #31 / issue #23 (sessionEnd hook plumbing):** the plugin reuses the hook
+  wiring, but not its filesystem `session_registry` as attendance authority. The
+  daemon owns `session_id->addresses` in memory; under ADR 0023 the hook supplies
+  non-destructive liveness input while explicit detach owns membership removal.
 - **Decisions 0011/0013 durable delivery (`deliveries` table, `fetch_undelivered`):**
   reused as the daemon's durable buffer. Available in `main`.
 - **Harness env contract (consumed only by the plugin layer):**
