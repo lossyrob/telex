@@ -28,6 +28,14 @@ versioned evidence and must not be interpreted as backend table layouts.
   history queries, and inbound backlog health evidence.
 - Strict recovery reports typed membership loss. Bounded recovery retries only
   within the caller's budget and preserves capability, sender, and liveness.
+- `attach`, `reconcile_many`, and `detach_many` return one aggregate result for
+  an address set. A partial result identifies each completed and failed address
+  and supplies typed detach or reattach compensation actions.
+- Deliberate application detach is keyed by stable
+  `ApplicationResponsibility` and address. The durable record retains the
+  runtime ID and capability as audit evidence, so a replacement process cannot
+  reverse the detach through bounded repair. A later explicit attach clears the
+  intent.
 - Receive results carry message ID, recipient, delivery-row ID, role, store ID,
   and an `AckHandle` bound to that exact delivery. Ack remains an explicit action
   after durable application ingest.
@@ -58,14 +66,24 @@ versioned evidence and must not be interpreted as backend table layouts.
   evidence. Prior completion is adopted only for the same operation ID and a
   comparable matching payload digest.
 - `RecoveryHandle` stages operation ID, responsibility, and opaque logical-store
-  identity plus the durable operation-evidence retention generation. Create and
-  persist the full handle with `operation_reference` before the first send.
+  identity plus the durable operation-evidence retention generation. Call
+  `prepare_send` or `prepare_reply` with the complete request and persist the
+  returned handle before the first attempt. The client derives the same
+  canonical payload identity that `send` or `reply` uses.
   Reconciliation with a handle from another store fails with
   `StoreBindingMismatch`; store rebinding requires an explicit new operation.
 - `reconcile_operation` returns `OperationReconciliation::NotRecorded` only when
-  the exact store/responsibility/operation tuple is absent and no cleanup crossed
-  the handle's retention generation. A crossed or missing generation returns
-  `RetentionBoundaryCrossed`, which never authorizes retry.
+  one backend snapshot proves the operation, result, message mapping, and
+  receipt evidence absent for the exact tuple and confirms that no cleanup
+  crossed the handle's retention generation. A crossed or missing generation
+  returns `RetentionBoundaryCrossed`, which never authorizes retry.
+- Recorded reconciliation projects persistence into typed `Accepted`,
+  `Rejected`, `Partial`, `Indeterminate`, `Duplicate`, or `Pending` outcomes.
+  Consumers do not parse backend state strings or result/recovery JSON.
+- If Telex returns `Sent` but durable result persistence fails, `send` and
+  `reply` return `ApplicationClientError::Indeterminate` with the staged
+  recovery handle. They never report that accepted-send/local-result window as
+  ordinary unavailability.
 - Snapshot/delta reads use a persisted monotonic store version. A gap returns
   `ResyncRequired`; timestamps are not ordering fences.
 - Compound steps are declared durably with prerequisite edges. A terminal
@@ -74,9 +92,16 @@ versioned evidence and must not be interpreted as backend table layouts.
 ## Backend and schema behavior
 
 SQLite and Postgres implement the same backend trait operations. Schema version
-3 adds application operation records, compound-step records, state versions, and
-ordered deltas. Migration is additive and idempotent. A client refuses a store
-whose schema is newer than the library supports.
+3 adds application operation records, stable-responsibility detach intents,
+compound-step records, state versions, and ordered deltas. Migration is additive
+and idempotent. A client refuses a store whose schema is newer than the library
+supports.
+
+Operation reconciliation reads the operation row, message mapping, and
+responsibility-scoped retention generation in one SQLite transaction or
+Postgres repeatable-read snapshot. Concurrent Postgres first attempts use
+conflict-safe insertion, so one begins and an identical contender receives
+`Replay` rather than a uniqueness error.
 
 Opening schema v3 repairs a missing disposition `origin` column without
 inferring quarantine origin for historical rows from principal or note prose.
@@ -104,7 +129,10 @@ backend evidence. Postgres exposes the configured connection user as
 - Existing daemon `StationHealth` remains available for compatibility. New
   applications should use `ApplicationHealth`, which keeps sender readiness,
   receive readiness, backlog, ack-pending, recovering, degraded, and unattended
-  evidence separate.
+  evidence separate. Its typed lifecycle evidence includes membership loss,
+  collision, reconciliation, pending compensation, and durable deliberate
+  detach. Known restart, predicate-death, owner-demotion, and collision reasons
+  remain distinct; unknown future reasons retain their raw evidence.
 - `reconcile_operation` checks the durable operation-to-message mapping written
   in the same transaction as message acceptance. After a crash in the
   accepted-send/local-result window, it promotes a matching pending operation to

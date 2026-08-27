@@ -214,6 +214,16 @@ pub struct DetachTombstone {
     pub at_ms: i64,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ApplicationDetachIntent {
+    pub application_responsibility: String,
+    pub address: String,
+    pub runtime_id: String,
+    pub capability: String,
+    pub reason: String,
+    pub at_ms: i64,
+}
+
 /// A request to claim/refresh a lease on an address.
 #[derive(Clone, Debug, Default)]
 pub struct LeaseClaim {
@@ -399,6 +409,13 @@ pub struct ApplicationOperationRecord {
     pub created_at_ms: i64,
     pub updated_at_ms: i64,
     pub completed_at_ms: Option<i64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ApplicationOperationSnapshot {
+    pub operation: Option<ApplicationOperationRecord>,
+    pub message: Option<MessageRow>,
+    pub retention_generation: i64,
 }
 
 #[derive(Clone, Debug)]

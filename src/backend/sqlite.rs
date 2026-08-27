@@ -1080,6 +1080,15 @@ fn ensure_v3_invariants(c: &Connection) -> Result<()> {
              generation                 INTEGER NOT NULL,
              PRIMARY KEY(logical_store_id, application_responsibility)
          );
+         CREATE TABLE IF NOT EXISTS application_detach_intents (
+             application_responsibility TEXT NOT NULL,
+             address                    TEXT NOT NULL,
+             runtime_id                 TEXT NOT NULL,
+             capability                 TEXT NOT NULL,
+             reason                     TEXT NOT NULL,
+             at_ms                      INTEGER NOT NULL,
+             PRIMARY KEY(application_responsibility, address)
+         );
          CREATE TABLE IF NOT EXISTS application_operation_messages (
              logical_store_id           TEXT NOT NULL,
              application_responsibility TEXT NOT NULL,
@@ -2565,6 +2574,167 @@ impl Backend for SqliteBackend {
         .await
     }
 
+    async fn release_epoch_lease_for_application_detach(
+        &self,
+        address: &str,
+        owner_instance_id: &str,
+        lease_epoch: i64,
+        application_responsibility: &str,
+        runtime_id: &str,
+        capability: &str,
+        reason: &str,
+    ) -> Result<bool> {
+        let (addr, owner, responsibility, runtime, capability, reason) = (
+            address.to_owned(),
+            owner_instance_id.to_owned(),
+            application_responsibility.to_owned(),
+            runtime_id.to_owned(),
+            capability.to_owned(),
+            reason.to_owned(),
+        );
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let n = c.execute(
+                    "UPDATE leases
+                        SET owner_instance_id = NULL,
+                            daemon_fence_token = daemon_fence_token + 1
+                      WHERE address=?1 AND lease_epoch=?2 AND owner_instance_id=?3",
+                    params![addr, lease_epoch, owner],
+                )?;
+                if n > 0 {
+                    let at_ms = next_clock_hwm(c)?;
+                    c.execute(
+                        "INSERT INTO application_detach_intents(
+                             application_responsibility, address, runtime_id,
+                             capability, reason, at_ms
+                         ) VALUES (?1,?2,?3,?4,?5,?6)
+                         ON CONFLICT(application_responsibility, address) DO UPDATE SET
+                             runtime_id=excluded.runtime_id,
+                             capability=excluded.capability,
+                             reason=excluded.reason,
+                             at_ms=excluded.at_ms",
+                        params![responsibility, addr, runtime, capability, reason, at_ms],
+                    )?;
+                    persist_clock_hwm(c, at_ms)?;
+                }
+                Ok(n > 0)
+            })
+        })
+        .await
+    }
+
+    async fn record_application_detach_intent(
+        &self,
+        application_responsibility: &str,
+        address: &str,
+        runtime_id: &str,
+        capability: &str,
+        reason: &str,
+    ) -> Result<()> {
+        let (responsibility, address, runtime, capability, reason) = (
+            application_responsibility.to_owned(),
+            address.to_owned(),
+            runtime_id.to_owned(),
+            capability.to_owned(),
+            reason.to_owned(),
+        );
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let at_ms = advance_clock_hwm(c)?;
+                c.execute(
+                    "INSERT INTO application_detach_intents(
+                         application_responsibility, address, runtime_id,
+                         capability, reason, at_ms
+                     ) VALUES (?1,?2,?3,?4,?5,?6)
+                     ON CONFLICT(application_responsibility, address) DO UPDATE SET
+                         runtime_id=excluded.runtime_id,
+                         capability=excluded.capability,
+                         reason=excluded.reason,
+                         at_ms=excluded.at_ms",
+                    params![responsibility, address, runtime, capability, reason, at_ms],
+                )?;
+                Ok(())
+            })
+        })
+        .await
+    }
+
+    async fn clear_application_detach_intent(
+        &self,
+        application_responsibility: &str,
+        address: &str,
+    ) -> Result<()> {
+        let (responsibility, address) = (application_responsibility.to_owned(), address.to_owned());
+        self.run(move |c| {
+            c.execute(
+                "DELETE FROM application_detach_intents
+                 WHERE application_responsibility=?1 AND address=?2",
+                params![responsibility, address],
+            )?;
+            Ok(())
+        })
+        .await
+    }
+
+    async fn application_detach_intent(
+        &self,
+        application_responsibility: &str,
+        address: &str,
+    ) -> Result<Option<ApplicationDetachIntent>> {
+        let (responsibility, address) = (application_responsibility.to_owned(), address.to_owned());
+        self.run(move |c| {
+            Ok(c.query_row(
+                "SELECT application_responsibility, address, runtime_id,
+                        capability, reason, at_ms
+                 FROM application_detach_intents
+                 WHERE application_responsibility=?1 AND address=?2",
+                params![responsibility, address],
+                |row| {
+                    Ok(ApplicationDetachIntent {
+                        application_responsibility: row.get(0)?,
+                        address: row.get(1)?,
+                        runtime_id: row.get(2)?,
+                        capability: row.get(3)?,
+                        reason: row.get(4)?,
+                        at_ms: row.get(5)?,
+                    })
+                },
+            )
+            .optional()?)
+        })
+        .await
+    }
+
+    async fn application_detach_intents(
+        &self,
+        application_responsibility: &str,
+    ) -> Result<Vec<ApplicationDetachIntent>> {
+        let responsibility = application_responsibility.to_owned();
+        self.run(move |c| {
+            let mut statement = c.prepare(
+                "SELECT application_responsibility, address, runtime_id,
+                        capability, reason, at_ms
+                 FROM application_detach_intents
+                 WHERE application_responsibility=?1
+                 ORDER BY address",
+            )?;
+            let rows = statement
+                .query_map(params![responsibility], |row| {
+                    Ok(ApplicationDetachIntent {
+                        application_responsibility: row.get(0)?,
+                        address: row.get(1)?,
+                        runtime_id: row.get(2)?,
+                        capability: row.get(3)?,
+                        reason: row.get(4)?,
+                        at_ms: row.get(5)?,
+                    })
+                })?
+                .collect::<rusqlite::Result<Vec<_>>>()?;
+            Ok(rows)
+        })
+        .await
+    }
+
     // ---- messages ----------------------------------------------------
 
     async fn mark_delivered(
@@ -3311,6 +3481,85 @@ impl Backend for SqliteBackend {
                 map_message,
             )
             .optional()?)
+        })
+        .await
+    }
+
+    async fn application_operation_snapshot(
+        &self,
+        scope: &ApplicationRecordScope,
+        operation_id: &str,
+    ) -> Result<ApplicationOperationSnapshot> {
+        let scope = scope.clone();
+        let operation_id = operation_id.to_owned();
+        self.run(move |c| {
+            with_immediate_transaction(c, |c| {
+                let operation = c
+                    .query_row(
+                        "SELECT logical_store_id, application_responsibility, operation_id,
+                                operation_kind, sender, recipients_json, payload_fingerprint,
+                                retry_budget, state, result_json, recovery_json, created_at_ms,
+                                updated_at_ms, completed_at_ms
+                         FROM application_operations
+                         WHERE logical_store_id=?1 AND application_responsibility=?2
+                           AND operation_id=?3",
+                        params![
+                            scope.logical_store_id,
+                            scope.application_responsibility,
+                            operation_id
+                        ],
+                        map_application_operation,
+                    )
+                    .optional()?;
+                let message = c
+                    .query_row(
+                        &format!(
+                            "SELECT {MSG_COLS_M}
+                             FROM application_operation_messages aom
+                             JOIN messages m ON m.id=aom.message_id
+                             WHERE aom.logical_store_id=?1
+                               AND aom.application_responsibility=?2
+                               AND aom.operation_id=?3"
+                        ),
+                        params![
+                            scope.logical_store_id,
+                            scope.application_responsibility,
+                            operation_id
+                        ],
+                        map_message,
+                    )
+                    .optional()?;
+                let mapping_exists: bool = c.query_row(
+                    "SELECT EXISTS(
+                         SELECT 1 FROM application_operation_messages
+                         WHERE logical_store_id=?1
+                           AND application_responsibility=?2
+                           AND operation_id=?3
+                     )",
+                    params![
+                        scope.logical_store_id,
+                        scope.application_responsibility,
+                        operation_id
+                    ],
+                    |row| row.get(0),
+                )?;
+                if operation.is_none() && mapping_exists {
+                    bail!("operation mapping exists without an operation record");
+                }
+                let retention_generation = c.query_row(
+                    "SELECT COALESCE((
+                         SELECT generation FROM application_operation_retention
+                         WHERE logical_store_id=?1 AND application_responsibility=?2
+                     ), 0)",
+                    params![scope.logical_store_id, scope.application_responsibility],
+                    |row| row.get(0),
+                )?;
+                Ok(ApplicationOperationSnapshot {
+                    operation,
+                    message,
+                    retention_generation,
+                })
+            })
         })
         .await
     }

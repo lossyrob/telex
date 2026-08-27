@@ -464,6 +464,7 @@ struct MemberRecord {
     store_key: String,
     backend: String,
     session_id: String,
+    application_responsibility: Option<String>,
     occupant: String,
     host: String,
     waiters: usize,
@@ -3712,6 +3713,7 @@ async fn handle_request_with_capabilities(
                 replace_on_deliver,
                 on_deliver_wake_on_cc,
                 None,
+                None,
             )
             .await
         }
@@ -3719,6 +3721,7 @@ async fn handle_request_with_capabilities(
             store_key,
             address,
             session_id,
+            application_responsibility,
             occupant,
             capability,
             description,
@@ -3742,7 +3745,25 @@ async fn handle_request_with_capabilities(
                 None,
                 false,
                 false,
+                Some(application_responsibility),
                 Some(capability),
+            )
+            .await
+        }
+        Request::ApplicationDetach {
+            store_key,
+            session_id,
+            application_responsibility,
+            address,
+            capability,
+        } => {
+            detach_application_member(
+                state.clone(),
+                store_key,
+                session_id,
+                application_responsibility,
+                address,
+                capability,
             )
             .await
         }
@@ -3962,6 +3983,7 @@ async fn register_member(
     on_deliver: Option<Vec<String>>,
     replace_on_deliver: bool,
     on_deliver_wake_on_cc: bool,
+    application_responsibility: Option<String>,
     capability: Option<StationCapability>,
 ) -> Response {
     if state.is_draining() {
@@ -4142,6 +4164,28 @@ async fn register_member(
         Err(response) => return response,
     };
     if recovery {
+        if let Some(responsibility) = application_responsibility.as_deref() {
+            match backend
+                .application_detach_intent(responsibility, &address)
+                .await
+            {
+                Ok(Some(intent)) => {
+                    return proto::needs_attach_with_reason(
+                        format!(
+                            "application responsibility {responsibility} deliberately detached from {address} in {store_key} by runtime {} at {}; explicit attach required",
+                            intent.runtime_id, intent.at_ms
+                        ),
+                        NeedsAttachReason::DeliberatelyDetached,
+                    )
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    return proto::internal(format!(
+                        "checking application detach intent before recovery register {responsibility}/{address}: {e:#}"
+                    ))
+                }
+            }
+        }
         match backend.detach_tombstone(&session_id, &address).await {
             Ok(Some(tombstone)) => {
                 return proto::needs_attach_with_reason(
@@ -4202,6 +4246,42 @@ async fn register_member(
         );
     }
     if recovery {
+        if let Some(responsibility) = application_responsibility.as_deref() {
+            match backend
+                .application_detach_intent(responsibility, &address)
+                .await
+            {
+                Ok(Some(intent)) => {
+                    let _ = backend
+                        .release_epoch_lease(
+                            &address,
+                            &claimed.owner_instance_id,
+                            claimed.lease_epoch,
+                        )
+                        .await;
+                    return proto::needs_attach_with_reason(
+                        format!(
+                            "application responsibility {responsibility} deliberately detached from {address} in {store_key} by runtime {} at {}; explicit attach required",
+                            intent.runtime_id, intent.at_ms
+                        ),
+                        NeedsAttachReason::DeliberatelyDetached,
+                    );
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    let _ = backend
+                        .release_epoch_lease(
+                            &address,
+                            &claimed.owner_instance_id,
+                            claimed.lease_epoch,
+                        )
+                        .await;
+                    return proto::internal(format!(
+                        "checking application detach intent after recovery claim {responsibility}/{address}: {e:#}"
+                    ));
+                }
+            }
+        }
         match backend.detach_tombstone(&session_id, &address).await {
             Ok(Some(tombstone)) => {
                 let _ = backend
@@ -4225,19 +4305,34 @@ async fn register_member(
                 ));
             }
         }
-    } else if let Err(e) = backend.clear_detach_tombstone(&session_id, &address).await {
-        let _ = backend
-            .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
-            .await;
-        state.push_recent_error(
-            "DetachTombstone",
-            format!(
-                "failed to clear detach tombstone store={store_key} session={session_id} address={address}: {e:#}"
-            ),
-        );
-        return proto::internal(format!(
-            "registering {address}: failed to clear durable detach tombstone for session {session_id}: {e:#}"
-        ));
+    } else {
+        if let Some(responsibility) = application_responsibility.as_deref() {
+            if let Err(e) = backend
+                .clear_application_detach_intent(responsibility, &address)
+                .await
+            {
+                let _ = backend
+                    .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                    .await;
+                return proto::internal(format!(
+                    "registering {address}: failed to clear durable application detach intent for {responsibility}: {e:#}"
+                ));
+            }
+        }
+        if let Err(e) = backend.clear_detach_tombstone(&session_id, &address).await {
+            let _ = backend
+                .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                .await;
+            state.push_recent_error(
+                "DetachTombstone",
+                format!(
+                    "failed to clear detach tombstone store={store_key} session={session_id} address={address}: {e:#}"
+                ),
+            );
+            return proto::internal(format!(
+                "registering {address}: failed to clear durable detach tombstone for session {session_id}: {e:#}"
+            ));
+        }
     }
     let effective_on_deliver_wake_on_cc = on_deliver.is_some() && on_deliver_wake_on_cc;
     let on_deliver_cc_after_ms = match on_deliver_cc_lower_bound(
@@ -4261,6 +4356,7 @@ async fn register_member(
         store_key: store_key.clone(),
         backend: backend.kind().to_string(),
         session_id: session_id.clone(),
+        application_responsibility,
         occupant,
         host: crate::config::hostname(),
         waiters: 0,
@@ -4633,6 +4729,7 @@ async fn detach_member(
                 // re-attach's tombstone clear and recreate a stale tombstone for a freshly-live
                 // station, which `telex copilot push` would then refuse permanently.
             }
+
             Ok(false) => {
                 self_demote_member(
                     &state,
@@ -4684,6 +4781,100 @@ async fn detach_member(
                 "Detach recorded terminal tombstone store={store_key} session={session_id} address={address}: no active in-memory member"
             ),
         );
+        Response::Ack {
+            message: Some("not-attached".to_string()),
+            delivery_outcome: None,
+            address: Some(address),
+            message_id: None,
+            lease_epoch: None,
+        }
+    }
+}
+
+async fn detach_application_member(
+    state: Arc<DaemonState>,
+    store_key: String,
+    session_id: String,
+    application_responsibility: String,
+    address: String,
+    capability: StationCapability,
+) -> Response {
+    let backend = match state.backend_for(&store_key).await {
+        Ok(backend) => backend,
+        Err(response) => return response,
+    };
+    let capability_name = match capability {
+        StationCapability::SendOnly => "send-only",
+        StationCapability::Bidirectional => "bidirectional",
+    };
+    if let Some(member) = state.get_member(&store_key, &session_id, &address) {
+        if member.application_responsibility.as_deref() != Some(application_responsibility.as_str())
+        {
+            return proto::error_response(
+                proto::ERROR_NOT_OWNER,
+                format!(
+                    "session {session_id} does not own application responsibility {application_responsibility} at {address}"
+                ),
+            );
+        }
+        match backend
+            .release_epoch_lease_for_application_detach(
+                &address,
+                &member.owner_instance_id,
+                member.lease_epoch,
+                &application_responsibility,
+                &session_id,
+                capability_name,
+                "ApplicationDetach",
+            )
+            .await
+        {
+            Ok(true) => {
+                state.remove_member(&store_key, &session_id, &address);
+                state.record_definite_session_end(
+                    &store_key,
+                    &session_id,
+                    "ApplicationDetach",
+                    std::slice::from_ref(&member),
+                );
+                Response::Ack {
+                    message: Some("detached".to_string()),
+                    delivery_outcome: None,
+                    address: Some(address),
+                    message_id: None,
+                    lease_epoch: Some(member.lease_epoch),
+                }
+            }
+            Ok(false) => {
+                self_demote_member(
+                    &state,
+                    &member,
+                    "application detach release_epoch_lease returned 0 rows",
+                );
+                proto::error_response(
+                    proto::ERROR_NOT_OWNER,
+                    format!("session {session_id} no longer owns {address} in {store_key}"),
+                )
+            }
+            Err(e) => proto::internal(format!(
+                "detaching application responsibility {application_responsibility} from {address}: {e:#}"
+            )),
+        }
+    } else {
+        if let Err(e) = backend
+            .record_application_detach_intent(
+                &application_responsibility,
+                &address,
+                &session_id,
+                capability_name,
+                "ApplicationDetach",
+            )
+            .await
+        {
+            return proto::internal(format!(
+                "recording application detach intent for {application_responsibility}/{address}: {e:#}"
+            ));
+        }
         Response::Ack {
             message: Some("not-attached".to_string()),
             delivery_outcome: None,
@@ -8073,6 +8264,7 @@ mod p3_tests {
                 store_key: store.clone(),
                 address: address.to_string(),
                 session_id: "application-runtime".to_string(),
+                application_responsibility: "application".to_string(),
                 occupant: "application".to_string(),
                 capability: StationCapability::SendOnly,
                 description: None,
@@ -8167,6 +8359,7 @@ mod p3_tests {
             store_key: store.clone(),
             address: "addr:app".to_string(),
             session_id: "application-runtime".to_string(),
+            application_responsibility: "application".to_string(),
             occupant: "application".to_string(),
             capability,
             description: None,
@@ -8193,6 +8386,71 @@ mod p3_tests {
     }
 
     #[tokio::test]
+    async fn application_detach_blocks_replacement_runtime_bounded_repair() {
+        let state = test_state("application-stable-detach");
+        let store = store_key("application-stable-detach");
+        let address = "addr:stable-detach";
+        let responsibility = "stable-application";
+        let register = |session: &str, recovery: bool| Request::ApplicationRegister {
+            store_key: store.clone(),
+            address: address.to_string(),
+            session_id: session.to_string(),
+            application_responsibility: responsibility.to_string(),
+            occupant: responsibility.to_string(),
+            capability: StationCapability::Bidirectional,
+            description: None,
+            scope: None,
+            tags: None,
+            watch_pids: Vec::new(),
+            recovery,
+        };
+
+        assert!(matches!(
+            request(state.clone(), register("runtime-one", false)).await,
+            Response::Registered { .. }
+        ));
+        assert!(matches!(
+            request(
+                state.clone(),
+                Request::ApplicationDetach {
+                    store_key: store.clone(),
+                    session_id: "runtime-one".to_string(),
+                    application_responsibility: responsibility.to_string(),
+                    address: address.to_string(),
+                    capability: StationCapability::Bidirectional,
+                }
+            )
+            .await,
+            Response::Ack { .. }
+        ));
+        assert!(matches!(
+            request(state.clone(), register("runtime-two", true)).await,
+            Response::Error {
+                ref code,
+                needs_attach_reason: Some(NeedsAttachReason::DeliberatelyDetached),
+                ..
+            } if code == proto::ERROR_NEEDS_ATTACH
+        ));
+        let backend = state.backend_for(&store).await.unwrap();
+        let intent = backend
+            .application_detach_intent(responsibility, address)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(intent.runtime_id, "runtime-one");
+
+        assert!(matches!(
+            request(state, register("runtime-two", false)).await,
+            Response::Registered { .. }
+        ));
+        assert!(backend
+            .application_detach_intent(responsibility, address)
+            .await
+            .unwrap()
+            .is_none());
+    }
+
+    #[tokio::test]
     async fn application_reply_preserves_opaque_metadata_through_thread_and_receive() {
         let state = test_state("application-reply-metadata");
         let store = store_key("application-reply-metadata");
@@ -8207,6 +8465,7 @@ mod p3_tests {
                         store_key: store.clone(),
                         address: address.to_string(),
                         session_id: session.to_string(),
+                        application_responsibility: session.to_string(),
                         occupant: session.to_string(),
                         capability: StationCapability::Bidirectional,
                         description: None,
@@ -8333,6 +8592,7 @@ mod p3_tests {
                     store_key: store.clone(),
                     address: address.to_string(),
                     session_id: "application-runtime".to_string(),
+                    application_responsibility: "application".to_string(),
                     occupant: "application".to_string(),
                     capability: StationCapability::Bidirectional,
                     description: None,

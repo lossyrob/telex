@@ -299,6 +299,67 @@ pub trait Backend: Send + Sync {
         Ok(None)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    async fn release_epoch_lease_for_application_detach(
+        &self,
+        address: &str,
+        owner_instance_id: &str,
+        lease_epoch: i64,
+        application_responsibility: &str,
+        runtime_id: &str,
+        capability: &str,
+        reason: &str,
+    ) -> Result<bool> {
+        let released = self
+            .release_epoch_lease(address, owner_instance_id, lease_epoch)
+            .await?;
+        if released {
+            self.record_application_detach_intent(
+                application_responsibility,
+                address,
+                runtime_id,
+                capability,
+                reason,
+            )
+            .await?;
+        }
+        Ok(released)
+    }
+
+    async fn record_application_detach_intent(
+        &self,
+        _application_responsibility: &str,
+        _address: &str,
+        _runtime_id: &str,
+        _capability: &str,
+        _reason: &str,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn clear_application_detach_intent(
+        &self,
+        _application_responsibility: &str,
+        _address: &str,
+    ) -> Result<()> {
+        Ok(())
+    }
+
+    async fn application_detach_intent(
+        &self,
+        _application_responsibility: &str,
+        _address: &str,
+    ) -> Result<Option<ApplicationDetachIntent>> {
+        Ok(None)
+    }
+
+    async fn application_detach_intents(
+        &self,
+        _application_responsibility: &str,
+    ) -> Result<Vec<ApplicationDetachIntent>> {
+        Ok(Vec::new())
+    }
+
     // ---- messages ----
     /// The greatest message id across all addresses (0 if empty). Used by read-only
     /// consumers (e.g. the console) to seed a bounded backfill cursor for the global feed.
@@ -429,6 +490,14 @@ pub trait Backend: Send + Sync {
         _operation_id: &str,
     ) -> Result<Option<MessageRow>> {
         bail!("application_operation_message: not supported by this backend")
+    }
+
+    async fn application_operation_snapshot(
+        &self,
+        _scope: &ApplicationRecordScope,
+        _operation_id: &str,
+    ) -> Result<ApplicationOperationSnapshot> {
+        bail!("application_operation_snapshot: not supported by this backend")
     }
 
     async fn complete_application_operation(

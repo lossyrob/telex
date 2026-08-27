@@ -92,6 +92,59 @@ async fn operation_identity_replays_and_rejects_changed_payload() {
 }
 
 #[tokio::test]
+async fn sqlite_operation_snapshot_is_consistent_with_concurrent_creation() {
+    let path = db_path("operation-snapshot-race");
+    let backend = std::sync::Arc::new(SqliteBackend::open(&path).unwrap());
+    backend.init_schema().await.unwrap();
+    let operation = NewApplicationOperation {
+        logical_store_id: backend.logical_store_id().await.unwrap(),
+        application_responsibility: "watcher".into(),
+        operation_id: "concurrent-operation".into(),
+        operation_kind: "send".into(),
+        sender: "watcher:sender".into(),
+        recipients_json: r#"["target"]"#.into(),
+        payload_fingerprint: "a".repeat(64),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    };
+    let scope = ApplicationRecordScope {
+        logical_store_id: operation.logical_store_id.clone(),
+        application_responsibility: operation.application_responsibility.clone(),
+    };
+    let barrier = std::sync::Arc::new(tokio::sync::Barrier::new(2));
+    let creator_backend = backend.clone();
+    let creator_barrier = barrier.clone();
+    let creator_operation = operation.clone();
+    let creator = tokio::spawn(async move {
+        creator_barrier.wait().await;
+        creator_backend
+            .begin_application_operation(&creator_operation)
+            .await
+            .unwrap()
+    });
+    barrier.wait().await;
+    let snapshot = backend
+        .application_operation_snapshot(&scope, &operation.operation_id)
+        .await
+        .unwrap();
+    let created = creator.await.unwrap();
+    assert!(matches!(
+        created,
+        ApplicationOperationBegin::Started(_) | ApplicationOperationBegin::Replay(_)
+    ));
+    assert_eq!(snapshot.retention_generation, 0);
+    if let Some(record) = snapshot.operation {
+        assert_eq!(record.operation_id, operation.operation_id);
+    }
+    assert!(backend
+        .application_operation_snapshot(&scope, &operation.operation_id)
+        .await
+        .unwrap()
+        .operation
+        .is_some());
+}
+
+#[tokio::test]
 async fn operation_deltas_preserve_store_and_responsibility_identity() {
     let path = db_path("operation-delta-identity");
     let backend = SqliteBackend::open(&path).unwrap();

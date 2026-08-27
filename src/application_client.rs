@@ -9,11 +9,11 @@ use crate::daemon_ipc::{
     StationCapability as WireCapability,
 };
 use crate::model::{
-    now_ms, ApplicationOperationBegin, ApplicationOperationRecord, ApplicationRecordScope,
-    ApplicationStorageStats, CleanupReport, CompoundDispositionStep, CompoundStepRecord,
-    CompoundStepState, DeliveryOutcome, HistoryOrder, HistoryQuery, NewApplicationOperation,
-    NewCompoundStepRecord, RetentionPolicy, StateDeltaRecord, StoreDeltaCleanupReport,
-    StoreDeltaRetentionPolicy,
+    now_ms, ApplicationDetachIntent, ApplicationOperationBegin, ApplicationOperationRecord,
+    ApplicationOperationSnapshot, ApplicationRecordScope, ApplicationStorageStats, CleanupReport,
+    CompoundDispositionStep, CompoundStepRecord, CompoundStepState, DeliveryOutcome, HistoryOrder,
+    HistoryQuery, NewApplicationOperation, NewCompoundStepRecord, RetentionPolicy,
+    StateDeltaRecord, StoreDeltaCleanupReport, StoreDeltaRetentionPolicy,
 };
 use crate::profiles::BackendProfile;
 use serde::{Deserialize, Serialize};
@@ -272,12 +272,20 @@ pub struct MembershipHandle {
 pub struct CompensationHandle {
     pub address: String,
     pub runtime_id: RuntimeId,
-    pub action: String,
+    pub action: CompensationAction,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CompensationAction {
+    Detach,
+    Reattach(AddressSpec),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum AddressLifecycleResult {
     Attached(MembershipHandle),
+    Reconciled(MembershipHandle),
+    Detached(MembershipHandle),
     Failed(ApplicationClientError),
 }
 
@@ -309,8 +317,44 @@ pub struct NotRecordedEvidence {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum OperationTarget {
+    Send { to: String, cc: Vec<String> },
+    Reply { message_id: i64, cc: Vec<String> },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RecordedOperationOutcome {
+    Accepted(SendResult),
+    Rejected(ApplicationClientError),
+    Partial {
+        error: Option<ApplicationClientError>,
+        recovery: Option<RecoveryHandle>,
+    },
+    Indeterminate {
+        error: Option<ApplicationClientError>,
+        recovery: RecoveryHandle,
+    },
+    Duplicate(SendResult),
+    Pending {
+        recovery: RecoveryHandle,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordedOperation {
+    pub logical_store_id: LogicalStoreId,
+    pub responsibility: ApplicationResponsibility,
+    pub operation_id: OperationId,
+    pub sender: String,
+    pub target: OperationTarget,
+    pub payload_identity: PayloadIdentity,
+    pub retry_budget: u32,
+    pub outcome: RecordedOperationOutcome,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum OperationReconciliation {
-    Recorded(ApplicationOperationRecord),
+    Recorded(Box<RecordedOperation>),
     NotRecorded(NotRecordedEvidence),
     RetentionBoundaryCrossed {
         staged_generation: Option<i64>,
@@ -463,7 +507,34 @@ pub struct ApplicationHealth {
     pub degraded: bool,
     pub stopped_or_unattended: bool,
     pub principal: PrincipalProvenance,
+    pub lifecycle: Vec<ApplicationLifecycleEvidence>,
     pub evidence: Vec<String>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReconciliationEvidence {
+    InProgress,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ApplicationLifecycleEvidence {
+    MembershipLoss {
+        reason: MembershipLossReason,
+        detail: String,
+    },
+    Collision(CollisionEvidence),
+    CompensationPending(CompensationHandle),
+    DeliberateDetach {
+        runtime_id: RuntimeId,
+        reason: String,
+        at_ms: i64,
+    },
+    Reconciliation {
+        state: ReconciliationEvidence,
+        detail: Option<String>,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -529,6 +600,7 @@ pub struct CompoundDispositionRequest {
 #[derive(Clone, Debug)]
 struct LocalMembership {
     handle: MembershipHandle,
+    spec: AddressSpec,
     recovering: bool,
     last_recovery_failure: Option<String>,
 }
@@ -538,6 +610,12 @@ struct RecoveryAttempt {
     capability: ApplicationCapability,
     recovering: bool,
     last_failure: Option<String>,
+}
+
+#[derive(Clone, Debug)]
+struct LifecycleObservation {
+    capability: ApplicationCapability,
+    evidence: Vec<ApplicationLifecycleEvidence>,
 }
 
 enum RequestFailure {
@@ -561,6 +639,7 @@ pub struct ApplicationClient {
     memberships: Mutex<BTreeMap<String, LocalMembership>>,
     outstanding_acks: Mutex<BTreeSet<(i64, String, i64)>>,
     recovery_attempts: Mutex<BTreeMap<String, RecoveryAttempt>>,
+    lifecycle_observations: Mutex<BTreeMap<String, LifecycleObservation>>,
 }
 
 pub struct ApplicationStoreMaintenance {
@@ -622,6 +701,7 @@ impl ApplicationClient {
             memberships: Mutex::new(BTreeMap::new()),
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
+            lifecycle_observations: Mutex::new(BTreeMap::new()),
         })
     }
 
@@ -665,7 +745,7 @@ impl ApplicationClient {
                 compensation.push(CompensationHandle {
                     address: handle.address.clone(),
                     runtime_id: self.runtime_id.clone(),
-                    action: "detach".to_string(),
+                    action: CompensationAction::Detach,
                 });
                 results.insert(
                     spec.address.clone(),
@@ -675,18 +755,7 @@ impl ApplicationClient {
                 results.insert(spec.address.clone(), AddressLifecycleResult::Failed(error));
             }
         }
-        let ready = results
-            .values()
-            .all(|value| matches!(value, AddressLifecycleResult::Attached(_)));
-        if ready {
-            compensation.clear();
-        }
-        MultiAddressOutcome {
-            ready,
-            results,
-            compensation,
-            validation_error: None,
-        }
+        self.finish_multi_address_outcome(results, compensation)
     }
 
     pub async fn reconcile(
@@ -715,20 +784,23 @@ impl ApplicationClient {
                     && member.address == spec.address
                     && !member.idle
             }) {
+                self.record_reconciliation(spec, ReconciliationEvidence::Succeeded, None);
                 return Ok(current.handle);
             }
             if self
                 .backend
-                .detach_tombstone(&self.runtime_id.0, &spec.address)
+                .application_detach_intent(&self.responsibility.0, &spec.address)
                 .await
                 .map_err(unavailable)?
                 .is_some()
             {
-                return Err(ApplicationClientError::MembershipLost {
+                let error = ApplicationClientError::MembershipLost {
                     address: spec.address.clone(),
                     reason: MembershipLossReason::DeliberateDetach,
                     detail: "durable deliberate-detach intent blocks strict recovery".to_string(),
-                });
+                };
+                self.record_lifecycle_failure(spec, &error);
+                return Err(error);
             }
             if let Some(lease) = self
                 .backend
@@ -739,21 +811,25 @@ impl ApplicationClient {
                 if lease.owner_instance_id.as_deref()
                     != Some(current.handle.owner_instance_id.as_str())
                 {
-                    return Err(ApplicationClientError::Collision(CollisionEvidence {
+                    let error = ApplicationClientError::Collision(CollisionEvidence {
                         address: spec.address.clone(),
                         owner_instance_id: lease.owner_instance_id,
                         lease_epoch: lease.lease_epoch,
                         guidance:
                             "wait for the current owner or use an explicitly authorized reset"
                                 .to_string(),
-                    }));
+                    });
+                    self.record_lifecycle_failure(spec, &error);
+                    return Err(error);
                 }
             }
-            return Err(ApplicationClientError::MembershipLost {
+            let error = ApplicationClientError::MembershipLost {
                 address: spec.address.clone(),
                 reason: MembershipLossReason::NeedsAttach,
                 detail: "strict membership does not repair a lost attachment".to_string(),
-            });
+            };
+            self.record_lifecycle_failure(spec, &error);
+            return Err(error);
         }
         let retries = match policy {
             RecoveryPolicy::Strict => unreachable!(),
@@ -768,6 +844,7 @@ impl ApplicationClient {
                 last_failure: None,
             },
         );
+        self.record_reconciliation(spec, ReconciliationEvidence::InProgress, None);
         if let Some(existing) = self.memberships.lock().unwrap().get_mut(&spec.address) {
             existing.recovering = true;
             existing.last_recovery_failure = None;
@@ -776,6 +853,7 @@ impl ApplicationClient {
             match self.attach_one(spec, true).await {
                 Ok(handle) => {
                     self.recovery_attempts.lock().unwrap().remove(&spec.address);
+                    self.record_reconciliation(spec, ReconciliationEvidence::Succeeded, None);
                     return Ok(handle);
                 }
                 Err(
@@ -804,6 +882,7 @@ impl ApplicationClient {
                         recovery.recovering = false;
                         recovery.last_failure = Some(error.to_string());
                     }
+                    self.record_lifecycle_failure(spec, &error);
                     return Err(error);
                 }
             }
@@ -819,6 +898,7 @@ impl ApplicationClient {
             store_key: self.store_key.clone(),
             address: spec.address.clone(),
             session_id: self.runtime_id.0.clone(),
+            application_responsibility: self.responsibility.0.clone(),
             occupant: format!(
                 "{}:{}",
                 self.responsibility.0,
@@ -849,20 +929,29 @@ impl ApplicationClient {
                     spec.address.clone(),
                     LocalMembership {
                         handle: handle.clone(),
+                        spec: spec.clone(),
                         recovering: false,
                         last_recovery_failure: None,
                     },
                 );
                 self.recovery_attempts.lock().unwrap().remove(&spec.address);
+                self.lifecycle_observations
+                    .lock()
+                    .unwrap()
+                    .remove(&spec.address);
                 Ok(handle)
             }
             Response::Error {
                 code,
                 message,
                 needs_attach_reason,
-            } => Err(self
-                .registration_error(&spec.address, &code, &message, needs_attach_reason)
-                .await),
+            } => {
+                let error = self
+                    .registration_error(&spec.address, &code, &message, needs_attach_reason)
+                    .await;
+                self.record_lifecycle_failure(spec, &error);
+                Err(error)
+            }
             _ => Err(unexpected_response("register")),
         }
     }
@@ -928,12 +1017,15 @@ impl ApplicationClient {
     }
 
     pub async fn detach(&self, address: &str) -> Result<(), ApplicationClientError> {
+        let local = self.membership(address)?;
         match self
             .request(
-                Request::Detach {
+                Request::ApplicationDetach {
                     store_key: self.store_key.clone(),
                     session_id: self.runtime_id.0.clone(),
+                    application_responsibility: self.responsibility.0.clone(),
                     address: address.to_string(),
+                    capability: local.handle.capability.into(),
                 },
                 false,
             )
@@ -942,28 +1034,141 @@ impl ApplicationClient {
             Response::Ack { .. } => {
                 self.memberships.lock().unwrap().remove(address);
                 self.recovery_attempts.lock().unwrap().remove(address);
+                self.lifecycle_observations.lock().unwrap().insert(
+                    address.to_string(),
+                    LifecycleObservation {
+                        capability: local.handle.capability,
+                        evidence: vec![ApplicationLifecycleEvidence::DeliberateDetach {
+                            runtime_id: self.runtime_id.clone(),
+                            reason: "ApplicationDetach".to_string(),
+                            at_ms: now_ms(),
+                        }],
+                    },
+                );
                 Ok(())
             }
             Response::Error {
                 code,
                 message,
                 needs_attach_reason,
-            } => Err(self
-                .registration_error(address, &code, &message, needs_attach_reason)
-                .await),
+            } => {
+                let error = self
+                    .registration_error(address, &code, &message, needs_attach_reason)
+                    .await;
+                self.record_lifecycle_failure(&local.spec, &error);
+                Err(error)
+            }
             _ => Err(unexpected_response("detach")),
         }
+    }
+
+    pub async fn reconcile_many(
+        &self,
+        specs: &[AddressSpec],
+        policy: RecoveryPolicy,
+    ) -> MultiAddressOutcome {
+        if let Some(error) = validate_address_set(specs, "reconcile") {
+            return invalid_multi_address_outcome(error);
+        }
+        let mut results = BTreeMap::new();
+        let mut compensation = Vec::new();
+        for spec in specs {
+            let had_local_membership = self.memberships.lock().unwrap().contains_key(&spec.address);
+            match self.reconcile(spec, policy).await {
+                Ok(handle) => {
+                    if !had_local_membership {
+                        compensation.push(CompensationHandle {
+                            address: spec.address.clone(),
+                            runtime_id: self.runtime_id.clone(),
+                            action: CompensationAction::Detach,
+                        });
+                    }
+                    results.insert(
+                        spec.address.clone(),
+                        AddressLifecycleResult::Reconciled(handle),
+                    );
+                }
+                Err(error) => {
+                    results.insert(spec.address.clone(), AddressLifecycleResult::Failed(error));
+                }
+            }
+        }
+        self.finish_multi_address_outcome(results, compensation)
+    }
+
+    pub async fn detach_many(&self, addresses: &[String]) -> MultiAddressOutcome {
+        let specs: Vec<_> = addresses
+            .iter()
+            .map(|address| {
+                self.memberships
+                    .lock()
+                    .unwrap()
+                    .get(address)
+                    .map(|local| local.spec.clone())
+                    .unwrap_or_else(|| AddressSpec {
+                        address: address.clone(),
+                        capability: ApplicationCapability::Bidirectional,
+                        description: None,
+                        scope: None,
+                        tags: None,
+                    })
+            })
+            .collect();
+        if let Some(error) = validate_address_set(&specs, "detach") {
+            return invalid_multi_address_outcome(error);
+        }
+        let mut results = BTreeMap::new();
+        let mut compensation = Vec::new();
+        for spec in specs {
+            let previous = self.memberships.lock().unwrap().get(&spec.address).cloned();
+            match self.detach(&spec.address).await {
+                Ok(()) => {
+                    if let Some(previous) = previous {
+                        compensation.push(CompensationHandle {
+                            address: spec.address.clone(),
+                            runtime_id: self.runtime_id.clone(),
+                            action: CompensationAction::Reattach(previous.spec),
+                        });
+                        results.insert(
+                            spec.address.clone(),
+                            AddressLifecycleResult::Detached(previous.handle),
+                        );
+                    }
+                }
+                Err(error) => {
+                    results.insert(spec.address.clone(), AddressLifecycleResult::Failed(error));
+                }
+            }
+        }
+        self.finish_multi_address_outcome(results, compensation)
+    }
+
+    pub async fn prepare_send(
+        &self,
+        request: &SendRequest,
+    ) -> Result<RecoveryHandle, ApplicationClientError> {
+        self.operation_reference(
+            request.operation_id.clone(),
+            PayloadIdentity::sha256(payload_fingerprint(request)?),
+        )
+        .await
+    }
+
+    pub async fn prepare_reply(
+        &self,
+        request: &ReplyRequest,
+    ) -> Result<RecoveryHandle, ApplicationClientError> {
+        self.operation_reference(
+            request.operation_id.clone(),
+            PayloadIdentity::sha256(reply_fingerprint(request)?),
+        )
+        .await
     }
 
     pub async fn send(&self, request: SendRequest) -> Result<SendResult, ApplicationClientError> {
         self.require_sender(&request.sender)?;
         let fingerprint = payload_fingerprint(&request)?;
-        let recovery = self
-            .operation_reference(
-                request.operation_id.clone(),
-                PayloadIdentity::sha256(fingerprint.clone()),
-            )
-            .await?;
+        let recovery = self.prepare_send(&request).await?;
         let operation = NewApplicationOperation {
             logical_store_id: self.logical_store_id.0.clone(),
             application_responsibility: self.responsibility.0.clone(),
@@ -1135,7 +1340,8 @@ impl ApplicationClient {
                     replayed: false,
                 };
                 let result_json = serde_json::to_string(&result).map_err(invalid)?;
-                self.backend
+                let completion = self
+                    .backend
                     .complete_application_operation(
                         &self.logical_store_id.0,
                         &self.responsibility.0,
@@ -1144,8 +1350,8 @@ impl ApplicationClient {
                         Some(&result_json),
                         None,
                     )
-                    .await
-                    .map_err(unavailable)?;
+                    .await;
+                classify_accepted_completion(completion, &recovery, "send")?;
                 Ok(result)
             }
             Response::Error {
@@ -1173,12 +1379,7 @@ impl ApplicationClient {
     pub async fn reply(&self, request: ReplyRequest) -> Result<SendResult, ApplicationClientError> {
         self.require_sender(&request.sender)?;
         let fingerprint = reply_fingerprint(&request)?;
-        let recovery = self
-            .operation_reference(
-                request.operation_id.clone(),
-                PayloadIdentity::sha256(fingerprint.clone()),
-            )
-            .await?;
+        let recovery = self.prepare_reply(&request).await?;
         let operation = NewApplicationOperation {
             logical_store_id: self.logical_store_id.0.clone(),
             application_responsibility: self.responsibility.0.clone(),
@@ -1334,7 +1535,8 @@ impl ApplicationClient {
                     replayed: false,
                 };
                 let result_json = serde_json::to_string(&result).map_err(invalid)?;
-                self.backend
+                let completion = self
+                    .backend
                     .complete_application_operation(
                         &self.logical_store_id.0,
                         &self.responsibility.0,
@@ -1343,8 +1545,8 @@ impl ApplicationClient {
                         Some(&result_json),
                         None,
                     )
-                    .await
-                    .map_err(unavailable)?;
+                    .await;
+                classify_accepted_completion(completion, &recovery, "reply")?;
                 Ok(result)
             }
             Ok(Response::Error {
@@ -1498,11 +1700,17 @@ impl ApplicationClient {
                 "daemon did not provide exact delivery-row identity".to_string(),
             )),
             Response::Timeout => Ok(None),
-            Response::PresenceEnded => Err(ApplicationClientError::MembershipLost {
-                address: address.to_string(),
-                reason: MembershipLossReason::PredicateDeath,
-                detail: "receive presence ended".to_string(),
-            }),
+            Response::PresenceEnded => {
+                let error = ApplicationClientError::MembershipLost {
+                    address: address.to_string(),
+                    reason: MembershipLossReason::PredicateDeath,
+                    detail: "receive presence ended".to_string(),
+                };
+                if let Ok(local) = self.membership(address) {
+                    self.record_lifecycle_failure(&local.spec, &error);
+                }
+                Err(error)
+            }
             Response::DeliveryQuarantined {
                 message_id,
                 recipient,
@@ -1520,9 +1728,15 @@ impl ApplicationClient {
                 code,
                 message,
                 needs_attach_reason,
-            } => Err(self
-                .registration_error(address, &code, &message, needs_attach_reason)
-                .await),
+            } => {
+                let error = self
+                    .registration_error(address, &code, &message, needs_attach_reason)
+                    .await;
+                if let Ok(local) = self.membership(address) {
+                    self.record_lifecycle_failure(&local.spec, &error);
+                }
+                Err(error)
+            }
             _ => Err(unexpected_response("receive")),
         }
     }
@@ -1591,23 +1805,31 @@ impl ApplicationClient {
             Response::Ack {
                 delivery_outcome: Some(DeliveryOutcome::NotOwner),
                 ..
-            } => Err(ApplicationClientError::MembershipLost {
-                address: handle.delivery.recipient.clone(),
-                reason: MembershipLossReason::OwnerDemoted,
-                detail: "ack owner/epoch is stale".to_string(),
-            }),
+            } => {
+                let error = ApplicationClientError::MembershipLost {
+                    address: handle.delivery.recipient.clone(),
+                    reason: MembershipLossReason::OwnerDemoted,
+                    detail: "ack owner/epoch is stale".to_string(),
+                };
+                self.record_lifecycle_failure(&membership.spec, &error);
+                Err(error)
+            }
             Response::Error {
                 code,
                 message,
                 needs_attach_reason,
-            } => Err(self
-                .registration_error(
-                    &handle.delivery.recipient,
-                    &code,
-                    &message,
-                    needs_attach_reason,
-                )
-                .await),
+            } => {
+                let error = self
+                    .registration_error(
+                        &handle.delivery.recipient,
+                        &code,
+                        &message,
+                        needs_attach_reason,
+                    )
+                    .await;
+                self.record_lifecycle_failure(&membership.spec, &error);
+                Err(error)
+            }
             _ => Err(unexpected_response("acknowledge")),
         }
     }
@@ -1696,11 +1918,15 @@ impl ApplicationClient {
             .await
             .map_err(unavailable)?;
         match outcome {
-            DeliveryOutcome::NotOwner => Err(ApplicationClientError::MembershipLost {
-                address: delivery.recipient.clone(),
-                reason: MembershipLossReason::OwnerDemoted,
-                detail: "disposition owner/epoch is stale".to_string(),
-            }),
+            DeliveryOutcome::NotOwner => {
+                let error = ApplicationClientError::MembershipLost {
+                    address: delivery.recipient.clone(),
+                    reason: MembershipLossReason::OwnerDemoted,
+                    detail: "disposition owner/epoch is stale".to_string(),
+                };
+                self.record_lifecycle_failure(&recipient_membership.spec, &error);
+                Err(error)
+            }
             DeliveryOutcome::AckNoOp if !terminal => {
                 row.ok_or_else(|| ApplicationClientError::Protocol {
                     code: "missing-disposition-result".to_string(),
@@ -1814,7 +2040,7 @@ impl ApplicationClient {
         )
     }
 
-    pub async fn operation_reference(
+    async fn operation_reference(
         &self,
         operation_id: OperationId,
         payload_identity: PayloadIdentity,
@@ -1855,17 +2081,24 @@ impl ApplicationClient {
                 current: self.logical_store_id.clone(),
             });
         }
-        if let Some(record) = self
-            .reconcile_operation_current(&reference.operation_id, &reference.payload_identity)
-            .await?
-        {
-            return Ok(OperationReconciliation::Recorded(record));
-        }
-        let current_generation = self
+        let snapshot = self
             .backend
-            .application_operation_retention_generation(&self.scope())
+            .application_operation_snapshot(&self.scope(), &reference.operation_id.0)
             .await
             .map_err(unavailable)?;
+        if let Some(record) = self
+            .reconcile_operation_snapshot(
+                snapshot.clone(),
+                &reference.operation_id,
+                &reference.payload_identity,
+            )
+            .await?
+        {
+            return Ok(OperationReconciliation::Recorded(Box::new(
+                project_operation_record(record, reference)?,
+            )));
+        }
+        let current_generation = snapshot.retention_generation;
         if reference.retention_generation == Some(current_generation) {
             return Ok(OperationReconciliation::NotRecorded(NotRecordedEvidence {
                 logical_store_id: reference.logical_store_id.clone(),
@@ -1886,16 +2119,22 @@ impl ApplicationClient {
         operation_id: &OperationId,
         staged_payload: &PayloadIdentity,
     ) -> Result<Option<ApplicationOperationRecord>, ApplicationClientError> {
-        let record = self
+        let snapshot = self
             .backend
-            .application_operation(
-                &self.logical_store_id.0,
-                &self.responsibility.0,
-                &operation_id.0,
-            )
+            .application_operation_snapshot(&self.scope(), &operation_id.0)
             .await
             .map_err(unavailable)?;
-        let Some(record) = record else {
+        self.reconcile_operation_snapshot(snapshot, operation_id, staged_payload)
+            .await
+    }
+
+    async fn reconcile_operation_snapshot(
+        &self,
+        snapshot: ApplicationOperationSnapshot,
+        operation_id: &OperationId,
+        staged_payload: &PayloadIdentity,
+    ) -> Result<Option<ApplicationOperationRecord>, ApplicationClientError> {
+        let Some(record) = snapshot.operation else {
             return Ok(None);
         };
         let stored_payload = PayloadIdentity::sha256(record.payload_fingerprint.clone());
@@ -1913,16 +2152,7 @@ impl ApplicationClient {
             });
         }
         if matches!(record.state.as_str(), "pending" | "indeterminate") {
-            if let Some(message) = self
-                .backend
-                .application_operation_message(
-                    &self.logical_store_id.0,
-                    &self.responsibility.0,
-                    &operation_id.0,
-                )
-                .await
-                .map_err(unavailable)?
-            {
+            if let Some(message) = snapshot.message {
                 let result = SendResult {
                     logical_store_id: self.logical_store_id.clone(),
                     operation_id: operation_id.clone(),
@@ -1976,51 +2206,24 @@ impl ApplicationClient {
                 })
             }
         };
-        match record.state.as_str() {
-            "accepted" | "completed" | "duplicate" => {}
-            "rejected" | "needs-attach" => {
-                return Err(
-                    serde_json::from_str(record.result_json.as_deref().ok_or_else(|| {
-                        ApplicationClientError::Protocol {
-                            code: "terminal-operation-without-result".to_string(),
-                        }
-                    })?)
-                    .map_err(invalid)?,
-                );
-            }
-            "pending" | "indeterminate" => {
-                let recovery = record
-                    .recovery_json
-                    .as_deref()
-                    .map(serde_json::from_str)
-                    .transpose()
-                    .map_err(invalid)?
-                    .unwrap_or_else(|| reference.clone());
-                let detail = record
-                    .result_json
-                    .as_deref()
-                    .and_then(|json| serde_json::from_str::<ApplicationClientError>(json).ok())
-                    .map(|error| error.to_string())
-                    .unwrap_or_else(|| format!("operation is {}", record.state));
+        let result = match record.outcome {
+            RecordedOperationOutcome::Accepted(result)
+            | RecordedOperationOutcome::Duplicate(result) => result,
+            RecordedOperationOutcome::Rejected(error) => return Err(error),
+            RecordedOperationOutcome::Pending { recovery }
+            | RecordedOperationOutcome::Indeterminate { recovery, .. } => {
                 return Err(ApplicationClientError::Indeterminate {
-                    detail,
+                    detail: "operation remains indeterminate".to_string(),
                     recovery: Box::new(recovery),
-                });
+                })
             }
-            _ => {
-                return Err(ApplicationClientError::Protocol {
-                    code: "unknown-operation-state".to_string(),
-                });
+            RecordedOperationOutcome::Partial { recovery, .. } => {
+                return Err(ApplicationClientError::Indeterminate {
+                    detail: "operation is partially complete".to_string(),
+                    recovery: Box::new(recovery.unwrap_or_else(|| reference.clone())),
+                })
             }
-        }
-        let result: SendResult =
-            serde_json::from_str(record.result_json.as_deref().ok_or_else(|| {
-                ApplicationClientError::Indeterminate {
-                    detail: format!("operation is {}", record.state),
-                    recovery: Box::new(reference.clone()),
-                }
-            })?)
-            .map_err(invalid)?;
+        };
         let delivery = self
             .backend
             .delivery_for_recipient(result.message_id, &result.recipient)
@@ -2329,7 +2532,8 @@ impl ApplicationClient {
             Err(_) => None,
         };
         let memberships = self.memberships.lock().unwrap().clone();
-        let mut health: Vec<_> = memberships
+        let lifecycle = self.lifecycle_observations.lock().unwrap().clone();
+        let mut health: BTreeMap<_, _> = memberships
             .values()
             .map(|local| {
                 let member = status.as_ref().and_then(|status| {
@@ -2338,40 +2542,147 @@ impl ApplicationClient {
                             && member.address == local.handle.address
                     })
                 });
-                health_projection(self, local, member)
+                let mut projected = health_projection(self, local, member);
+                if let Some(member) = member {
+                    if member.owner_instance_id != local.handle.owner_instance_id
+                        || member.lease_epoch != local.handle.lease_epoch
+                    {
+                        projected
+                            .lifecycle
+                            .push(ApplicationLifecycleEvidence::MembershipLoss {
+                                reason: MembershipLossReason::OwnerDemoted,
+                                detail: "health observed a different durable owner or lease epoch"
+                                    .to_string(),
+                            });
+                    }
+                } else if let Some(other) = status.as_ref().and_then(|status| {
+                    status
+                        .members
+                        .iter()
+                        .find(|member| member.address == local.handle.address && !member.idle)
+                }) {
+                    projected
+                        .lifecycle
+                        .push(ApplicationLifecycleEvidence::Collision(CollisionEvidence {
+                            address: local.handle.address.clone(),
+                            owner_instance_id: Some(other.owner_instance_id.clone()),
+                            lease_epoch: Some(other.lease_epoch),
+                            guidance:
+                                "wait for the current owner or use an explicitly authorized reset"
+                                    .to_string(),
+                        }));
+                } else {
+                    projected
+                        .lifecycle
+                        .push(ApplicationLifecycleEvidence::MembershipLoss {
+                            reason: if status.is_some() {
+                                MembershipLossReason::DaemonRestart
+                            } else {
+                                MembershipLossReason::Unknown {
+                                    raw_reason: Some("daemon status unavailable".to_string()),
+                                }
+                            },
+                            detail: "runtime-local membership is absent from daemon status"
+                                .to_string(),
+                        });
+                }
+                if let Some(observation) = lifecycle.get(&local.handle.address) {
+                    projected.lifecycle.extend(observation.evidence.clone());
+                }
+                projected.degraded |= !projected.lifecycle.is_empty();
+                (local.handle.address.clone(), projected)
             })
             .collect();
         let recovery_attempts = self.recovery_attempts.lock().unwrap().clone();
         for (address, recovery) in recovery_attempts {
-            if memberships.contains_key(&address) {
+            if health.contains_key(&address) {
                 continue;
             }
-            health.push(ApplicationHealth {
-                logical_store_id: self.logical_store_id.clone(),
-                responsibility: self.responsibility.clone(),
-                runtime_id: self.runtime_id.clone(),
-                address,
-                capability: recovery.capability,
-                registered: false,
-                lease_epoch: None,
-                owner_instance_id: None,
-                pending_unconsumed: 0,
-                inbound_actionable: 0,
-                acknowledgment_pending: false,
-                outstanding_ack_count: 0,
-                liveness: Vec::new(),
-                sender_ready: false,
-                receive_ready: false,
-                attended_but_deaf: false,
-                recovering: recovery.recovering,
-                last_recovery_failure: recovery.last_failure,
-                degraded: true,
-                stopped_or_unattended: true,
-                principal: principal_provenance(&self.profile),
-                evidence: vec!["runtime-local recovery attempt; no durable membership".to_string()],
-            });
+            health.insert(
+                address.clone(),
+                ApplicationHealth {
+                    logical_store_id: self.logical_store_id.clone(),
+                    responsibility: self.responsibility.clone(),
+                    runtime_id: self.runtime_id.clone(),
+                    address: address.clone(),
+                    capability: recovery.capability,
+                    registered: false,
+                    lease_epoch: None,
+                    owner_instance_id: None,
+                    pending_unconsumed: 0,
+                    inbound_actionable: 0,
+                    acknowledgment_pending: false,
+                    outstanding_ack_count: 0,
+                    liveness: Vec::new(),
+                    sender_ready: false,
+                    receive_ready: false,
+                    attended_but_deaf: false,
+                    recovering: recovery.recovering,
+                    last_recovery_failure: recovery.last_failure.clone(),
+                    degraded: true,
+                    stopped_or_unattended: true,
+                    principal: principal_provenance(&self.profile),
+                    lifecycle: lifecycle
+                        .get(&address)
+                        .map(|observation| observation.evidence.clone())
+                        .unwrap_or_else(|| {
+                            vec![ApplicationLifecycleEvidence::Reconciliation {
+                                state: if recovery.recovering {
+                                    ReconciliationEvidence::InProgress
+                                } else {
+                                    ReconciliationEvidence::Failed
+                                },
+                                detail: recovery.last_failure.clone(),
+                            }]
+                        }),
+                    evidence: vec![
+                        "runtime-local recovery attempt; no durable membership".to_string()
+                    ],
+                },
+            );
         }
-        Ok(health)
+        for intent in self
+            .backend
+            .application_detach_intents(&self.responsibility.0)
+            .await
+            .map_err(unavailable)?
+        {
+            let mut projected = detached_health(self, intent);
+            if let Some(observation) = lifecycle.get(&projected.address) {
+                projected.lifecycle.extend(observation.evidence.clone());
+            }
+            health.insert(projected.address.clone(), projected);
+        }
+        for (address, observation) in lifecycle {
+            health
+                .entry(address.clone())
+                .or_insert_with(|| ApplicationHealth {
+                    logical_store_id: self.logical_store_id.clone(),
+                    responsibility: self.responsibility.clone(),
+                    runtime_id: self.runtime_id.clone(),
+                    address,
+                    capability: observation.capability,
+                    registered: false,
+                    lease_epoch: None,
+                    owner_instance_id: None,
+                    pending_unconsumed: 0,
+                    inbound_actionable: 0,
+                    acknowledgment_pending: false,
+                    outstanding_ack_count: 0,
+                    liveness: Vec::new(),
+                    sender_ready: false,
+                    receive_ready: false,
+                    attended_but_deaf: false,
+                    recovering: false,
+                    last_recovery_failure: None,
+                    degraded: true,
+                    stopped_or_unattended: true,
+                    principal: principal_provenance(&self.profile),
+                    lifecycle: observation.evidence,
+                    evidence: vec!["runtime-local lifecycle evidence".to_string()],
+                });
+        }
+        Ok(health.into_values().collect())
     }
 
     fn require_sender(&self, sender: &str) -> Result<MembershipHandle, ApplicationClientError> {
@@ -2405,6 +2716,89 @@ impl ApplicationClient {
             handle.delivery.recipient.clone(),
             handle.delivery.delivery_id,
         ));
+    }
+
+    fn record_reconciliation(
+        &self,
+        spec: &AddressSpec,
+        state: ReconciliationEvidence,
+        detail: Option<String>,
+    ) {
+        self.lifecycle_observations.lock().unwrap().insert(
+            spec.address.clone(),
+            LifecycleObservation {
+                capability: spec.capability,
+                evidence: vec![ApplicationLifecycleEvidence::Reconciliation { state, detail }],
+            },
+        );
+    }
+
+    fn record_lifecycle_failure(&self, spec: &AddressSpec, error: &ApplicationClientError) {
+        let evidence = match error {
+            ApplicationClientError::MembershipLost { reason, detail, .. } => {
+                ApplicationLifecycleEvidence::MembershipLoss {
+                    reason: reason.clone(),
+                    detail: detail.clone(),
+                }
+            }
+            ApplicationClientError::Collision(collision) => {
+                ApplicationLifecycleEvidence::Collision(collision.clone())
+            }
+            _ => ApplicationLifecycleEvidence::Reconciliation {
+                state: ReconciliationEvidence::Failed,
+                detail: Some(error.to_string()),
+            },
+        };
+        self.lifecycle_observations.lock().unwrap().insert(
+            spec.address.clone(),
+            LifecycleObservation {
+                capability: spec.capability,
+                evidence: vec![evidence],
+            },
+        );
+    }
+
+    fn finish_multi_address_outcome(
+        &self,
+        results: BTreeMap<String, AddressLifecycleResult>,
+        mut compensation: Vec<CompensationHandle>,
+    ) -> MultiAddressOutcome {
+        let ready = results
+            .values()
+            .all(|value| !matches!(value, AddressLifecycleResult::Failed(_)));
+        if ready {
+            compensation.clear();
+        } else {
+            let mut observations = self.lifecycle_observations.lock().unwrap();
+            for handle in &compensation {
+                let capability = match &handle.action {
+                    CompensationAction::Reattach(spec) => spec.capability,
+                    CompensationAction::Detach => self
+                        .memberships
+                        .lock()
+                        .unwrap()
+                        .get(&handle.address)
+                        .map(|local| local.handle.capability)
+                        .unwrap_or(ApplicationCapability::Bidirectional),
+                };
+                observations
+                    .entry(handle.address.clone())
+                    .or_insert_with(|| LifecycleObservation {
+                        capability,
+                        evidence: Vec::new(),
+                    })
+                    .evidence
+                    .push(ApplicationLifecycleEvidence::CompensationPending(
+                        handle.clone(),
+                    ));
+            }
+        }
+        MultiAddressOutcome {
+            ready,
+            results,
+            compensation,
+            validation_error: None,
+        }
     }
 
     fn scope(&self) -> ApplicationRecordScope {
@@ -2468,6 +2862,7 @@ impl ApplicationClient {
                 | Request::ApplicationAck { .. }
                 | Request::ApplicationSend { .. }
                 | Request::ApplicationReply { .. }
+                | Request::ApplicationDetach { .. }
         )
     }
 }
@@ -2569,8 +2964,186 @@ fn health_projection(
             })
             .unwrap_or(true),
         principal: principal_provenance(&client.profile),
+        lifecycle: Vec::new(),
         evidence,
     }
+}
+
+fn detached_health(
+    client: &ApplicationClient,
+    intent: ApplicationDetachIntent,
+) -> ApplicationHealth {
+    let capability = match intent.capability.as_str() {
+        "send-only" => ApplicationCapability::SendOnly,
+        _ => ApplicationCapability::Bidirectional,
+    };
+    ApplicationHealth {
+        logical_store_id: client.logical_store_id.clone(),
+        responsibility: client.responsibility.clone(),
+        runtime_id: client.runtime_id.clone(),
+        address: intent.address,
+        capability,
+        registered: false,
+        lease_epoch: None,
+        owner_instance_id: None,
+        pending_unconsumed: 0,
+        inbound_actionable: 0,
+        acknowledgment_pending: false,
+        outstanding_ack_count: 0,
+        liveness: Vec::new(),
+        sender_ready: false,
+        receive_ready: false,
+        attended_but_deaf: false,
+        recovering: false,
+        last_recovery_failure: None,
+        degraded: true,
+        stopped_or_unattended: true,
+        principal: principal_provenance(&client.profile),
+        lifecycle: vec![
+            ApplicationLifecycleEvidence::MembershipLoss {
+                reason: MembershipLossReason::DeliberateDetach,
+                detail: "durable deliberate-detach intent blocks automatic repair".to_string(),
+            },
+            ApplicationLifecycleEvidence::DeliberateDetach {
+                runtime_id: RuntimeId(intent.runtime_id),
+                reason: intent.reason,
+                at_ms: intent.at_ms,
+            },
+        ],
+        evidence: vec!["durable application detach intent".to_string()],
+    }
+}
+
+fn validate_address_set(specs: &[AddressSpec], operation: &str) -> Option<ApplicationClientError> {
+    let unique: BTreeSet<_> = specs.iter().map(|spec| spec.address.as_str()).collect();
+    (unique.len() != specs.len()).then(|| {
+        ApplicationClientError::InvalidRequest(format!(
+            "multi-address {operation} contains duplicate addresses"
+        ))
+    })
+}
+
+fn invalid_multi_address_outcome(error: ApplicationClientError) -> MultiAddressOutcome {
+    MultiAddressOutcome {
+        ready: false,
+        results: BTreeMap::new(),
+        compensation: Vec::new(),
+        validation_error: Some(error),
+    }
+}
+
+fn classify_accepted_completion(
+    completion: anyhow::Result<ApplicationOperationRecord>,
+    recovery: &RecoveryHandle,
+    operation_kind: &str,
+) -> Result<(), ApplicationClientError> {
+    completion
+        .map(|_| ())
+        .map_err(|error| ApplicationClientError::Indeterminate {
+            detail: format!(
+                "{operation_kind} was durably accepted but local result persistence failed: {}",
+                redacted_diagnostic("storage", &error.to_string())
+            ),
+            recovery: Box::new(recovery.clone()),
+        })
+}
+
+fn project_operation_record(
+    record: ApplicationOperationRecord,
+    reference: &RecoveryHandle,
+) -> Result<RecordedOperation, ApplicationClientError> {
+    let target = match record.operation_kind.as_str() {
+        "send" => {
+            let (to, cc) = serde_json::from_str::<(String, Vec<String>)>(&record.recipients_json)
+                .or_else(|_| {
+                    serde_json::from_str::<Vec<String>>(&record.recipients_json).and_then(
+                        |mut recipients| {
+                            if recipients.is_empty() {
+                                return Err(serde::de::Error::custom(
+                                    "send operation has no recipient",
+                                ));
+                            }
+                            Ok((recipients.remove(0), recipients))
+                        },
+                    )
+                })
+                .map_err(invalid)?;
+            OperationTarget::Send { to, cc }
+        }
+        "reply" => {
+            let (message_id, cc): (i64, Vec<String>) =
+                serde_json::from_str(&record.recipients_json).map_err(invalid)?;
+            OperationTarget::Reply { message_id, cc }
+        }
+        _ => {
+            return Err(ApplicationClientError::Protocol {
+                code: "unknown-operation-kind".to_string(),
+            })
+        }
+    };
+    let stored_recovery = record
+        .recovery_json
+        .as_deref()
+        .map(serde_json::from_str)
+        .transpose()
+        .map_err(invalid)?;
+    let result = || -> Result<SendResult, ApplicationClientError> {
+        serde_json::from_str(record.result_json.as_deref().ok_or_else(|| {
+            ApplicationClientError::Protocol {
+                code: "terminal-operation-without-result".to_string(),
+            }
+        })?)
+        .map_err(invalid)
+    };
+    let error = || -> Result<ApplicationClientError, ApplicationClientError> {
+        serde_json::from_str(record.result_json.as_deref().ok_or_else(|| {
+            ApplicationClientError::Protocol {
+                code: "terminal-operation-without-result".to_string(),
+            }
+        })?)
+        .map_err(invalid)
+    };
+    let outcome = match record.state.as_str() {
+        "accepted" | "completed" => RecordedOperationOutcome::Accepted(result()?),
+        "duplicate" => RecordedOperationOutcome::Duplicate(result()?),
+        "rejected" | "needs-attach" => RecordedOperationOutcome::Rejected(error()?),
+        "partial" => RecordedOperationOutcome::Partial {
+            error: record
+                .result_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(invalid)?,
+            recovery: stored_recovery,
+        },
+        "indeterminate" => RecordedOperationOutcome::Indeterminate {
+            error: record
+                .result_json
+                .as_deref()
+                .map(serde_json::from_str)
+                .transpose()
+                .map_err(invalid)?,
+            recovery: stored_recovery.unwrap_or_else(|| reference.clone()),
+        },
+        "pending" => RecordedOperationOutcome::Pending {
+            recovery: stored_recovery.unwrap_or_else(|| reference.clone()),
+        },
+        _ => {
+            return Err(ApplicationClientError::Protocol {
+                code: "unknown-operation-state".to_string(),
+            })
+        }
+    };
+    Ok(RecordedOperation {
+        logical_store_id: LogicalStoreId::persisted(record.logical_store_id),
+        responsibility: ApplicationResponsibility(record.application_responsibility),
+        operation_id: OperationId(record.operation_id),
+        sender: record.sender,
+        target,
+        payload_identity: PayloadIdentity::sha256(record.payload_fingerprint),
+        retry_budget: u32::try_from(record.retry_budget).map_err(invalid)?,
+        outcome,
+    })
 }
 
 fn principal_provenance(profile: &BackendProfile) -> PrincipalProvenance {
@@ -2887,6 +3460,53 @@ mod tests {
         }
     }
 
+    fn reply_request(operation: &str, body: &str) -> ReplyRequest {
+        ReplyRequest {
+            operation_id: OperationId(operation.to_string()),
+            sender: "app:sender".to_string(),
+            message_id: 42,
+            cc: vec!["observer:b".to_string(), "observer:a".to_string()],
+            kind: "reply".to_string(),
+            attention: "background".to_string(),
+            requires_disposition: false,
+            subject: Some("reply subject".to_string()),
+            body: body.to_string(),
+            metadata: Some("{\"reply\":true}".to_string()),
+            retry_budget: 2,
+        }
+    }
+
+    #[cfg(feature = "sqlite")]
+    async fn sqlite_client(
+        name: &str,
+        responsibility: &str,
+    ) -> (ApplicationClient, Arc<SqliteBackend>) {
+        let path = std::env::temp_dir()
+            .join(format!(
+                "telex-application-{name}-{}-{}.db",
+                std::process::id(),
+                now_ms()
+            ))
+            .to_string_lossy()
+            .into_owned();
+        let profile = crate::profiles::implicit_sqlite(Some(&path));
+        let backend = Arc::new(SqliteBackend::open(&path).unwrap());
+        backend.init_schema().await.unwrap();
+        let client = ApplicationClient {
+            responsibility: ApplicationResponsibility(responsibility.to_string()),
+            runtime_id: RuntimeId::fresh().unwrap(),
+            logical_store_id: LogicalStoreId::persisted(backend.logical_store_id().await.unwrap()),
+            store_key: crate::profiles::store_key(&profile, Some(&path)),
+            profile,
+            backend: backend.clone(),
+            memberships: Mutex::new(BTreeMap::new()),
+            outstanding_acks: Mutex::new(BTreeSet::new()),
+            recovery_attempts: Mutex::new(BTreeMap::new()),
+            lifecycle_observations: Mutex::new(BTreeMap::new()),
+        };
+        (client, backend)
+    }
+
     #[test]
     fn runtime_identity_is_fresh() {
         assert_ne!(RuntimeId::fresh().unwrap(), RuntimeId::fresh().unwrap());
@@ -2948,12 +3568,20 @@ mod tests {
                         lease_epoch,
                         owner_instance_id,
                     },
+                    spec: AddressSpec {
+                        address: "receiver".into(),
+                        capability: ApplicationCapability::Bidirectional,
+                        description: None,
+                        scope: None,
+                        tags: None,
+                    },
                     recovering: false,
                     last_recovery_failure: None,
                 },
             )])),
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
+            lifecycle_observations: Mutex::new(BTreeMap::new()),
         };
         let fingerprint = "d".repeat(64);
         let operation = NewApplicationOperation {
@@ -3073,6 +3701,7 @@ mod tests {
             memberships: Mutex::new(BTreeMap::new()),
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
+            lifecycle_observations: Mutex::new(BTreeMap::new()),
         };
         let axes = sender_client
             .refresh_receipt_axes(&RecoveryHandle {
@@ -3205,6 +3834,335 @@ mod tests {
             payload_fingerprint(&first).unwrap(),
             payload_fingerprint(&reordered).unwrap()
         );
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn request_based_prepare_methods_return_canonical_recovery_handles() {
+        let (client, _) = sqlite_client("prepare-handles", "application").await;
+        let send = send_request("prepared-send", "send body");
+        let reply = reply_request("prepared-reply", "reply body");
+
+        let send_handle = client.prepare_send(&send).await.unwrap();
+        let reply_handle = client.prepare_reply(&reply).await.unwrap();
+
+        assert_eq!(send_handle.operation_id, send.operation_id);
+        assert_eq!(
+            send_handle.payload_identity,
+            PayloadIdentity::sha256(payload_fingerprint(&send).unwrap())
+        );
+        assert_eq!(reply_handle.operation_id, reply.operation_id);
+        assert_eq!(
+            reply_handle.payload_identity,
+            PayloadIdentity::sha256(reply_fingerprint(&reply).unwrap())
+        );
+        assert_eq!(send_handle.retention_generation, Some(0));
+        assert_eq!(reply_handle.retention_generation, Some(0));
+        assert_ne!(
+            send_handle.payload_identity.digest,
+            reply_handle.payload_identity.digest
+        );
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn accepted_send_and_reply_completion_faults_are_indeterminate() {
+        let (client, _) = sqlite_client("accepted-completion-fault", "application").await;
+        let send_recovery = client
+            .prepare_send(&send_request("send-fault", "body"))
+            .await
+            .unwrap();
+        let reply_recovery = client
+            .prepare_reply(&reply_request("reply-fault", "body"))
+            .await
+            .unwrap();
+
+        for (kind, recovery) in [("send", send_recovery), ("reply", reply_recovery)] {
+            let fault: anyhow::Result<ApplicationOperationRecord> =
+                Err(anyhow::anyhow!("injected completion failure"));
+            match classify_accepted_completion(fault, &recovery, kind) {
+                Err(ApplicationClientError::Indeterminate {
+                    detail,
+                    recovery: actual,
+                }) => {
+                    assert!(detail.contains("durably accepted"));
+                    assert_eq!(*actual, recovery);
+                }
+                other => panic!("expected {kind} indeterminate result, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn persisted_operation_state_projects_to_typed_public_outcomes() {
+        let result = SendResult {
+            logical_store_id: LogicalStoreId::persisted("store-v1-test".into()),
+            operation_id: OperationId("operation".into()),
+            message_id: 7,
+            thread_id: 7,
+            sender: "app:sender".into(),
+            recipient: "app:recipient".into(),
+            axes: ReceiptAxes {
+                durable_acceptance: EvidenceState::Accepted,
+                occupied_at_acceptance: Some(true),
+                push_acceptance: EvidenceState::Unknown,
+                recipient_consumption: EvidenceState::Unknown,
+                workflow_disposition: EvidenceState::Unknown,
+            },
+            payload_identity: PayloadIdentity::sha256("a".repeat(64)),
+            replayed: false,
+        };
+        let recovery = RecoveryHandle {
+            logical_store_id: result.logical_store_id.clone(),
+            responsibility: ApplicationResponsibility("application".into()),
+            operation_id: result.operation_id.clone(),
+            payload_identity: result.payload_identity.clone(),
+            retention_generation: Some(0),
+        };
+        let base = ApplicationOperationRecord {
+            logical_store_id: result.logical_store_id.0.clone(),
+            application_responsibility: recovery.responsibility.0.clone(),
+            operation_id: result.operation_id.0.clone(),
+            operation_kind: "send".into(),
+            sender: result.sender.clone(),
+            recipients_json: serde_json::to_string(&(
+                result.recipient.clone(),
+                Vec::<String>::new(),
+            ))
+            .unwrap(),
+            payload_fingerprint: result.payload_identity.digest.clone(),
+            retry_budget: 1,
+            state: "accepted".into(),
+            result_json: Some(serde_json::to_string(&result).unwrap()),
+            recovery_json: None,
+            created_at_ms: 1,
+            updated_at_ms: 1,
+            completed_at_ms: Some(1),
+        };
+
+        assert!(matches!(
+            project_operation_record(base.clone(), &recovery)
+                .unwrap()
+                .outcome,
+            RecordedOperationOutcome::Accepted(_)
+        ));
+        assert!(matches!(
+            project_operation_record(
+                ApplicationOperationRecord {
+                    state: "duplicate".into(),
+                    ..base.clone()
+                },
+                &recovery
+            )
+            .unwrap()
+            .outcome,
+            RecordedOperationOutcome::Duplicate(_)
+        ));
+        let rejected = ApplicationClientError::RejectedBeforeAcceptance {
+            code: "Rejected".into(),
+            retryability: RejectionRetryability::Permanent,
+            detail: "rejected".into(),
+        };
+        assert!(matches!(
+            project_operation_record(
+                ApplicationOperationRecord {
+                    state: "rejected".into(),
+                    result_json: Some(serde_json::to_string(&rejected).unwrap()),
+                    ..base.clone()
+                },
+                &recovery
+            )
+            .unwrap()
+            .outcome,
+            RecordedOperationOutcome::Rejected(_)
+        ));
+        for state in ["partial", "indeterminate", "pending"] {
+            let projected = project_operation_record(
+                ApplicationOperationRecord {
+                    state: state.into(),
+                    result_json: (state != "pending")
+                        .then(|| serde_json::to_string(&rejected).unwrap()),
+                    recovery_json: Some(serde_json::to_string(&recovery).unwrap()),
+                    completed_at_ms: None,
+                    ..base.clone()
+                },
+                &recovery,
+            )
+            .unwrap();
+            assert!(matches!(
+                (state, projected.outcome),
+                ("partial", RecordedOperationOutcome::Partial { .. })
+                    | (
+                        "indeterminate",
+                        RecordedOperationOutcome::Indeterminate { .. }
+                    )
+                    | ("pending", RecordedOperationOutcome::Pending { .. })
+            ));
+        }
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn health_projects_typed_loss_collision_compensation_and_detach_evidence() {
+        let (client, backend) = sqlite_client("typed-health", "application").await;
+        let reasons = [
+            MembershipLossReason::DaemonRestart,
+            MembershipLossReason::PredicateDeath,
+            MembershipLossReason::OwnerDemoted,
+            MembershipLossReason::Unknown {
+                raw_reason: Some("future-loss".into()),
+            },
+        ];
+        for (index, reason) in reasons.into_iter().enumerate() {
+            client.lifecycle_observations.lock().unwrap().insert(
+                format!("lost:{index}"),
+                LifecycleObservation {
+                    capability: ApplicationCapability::Bidirectional,
+                    evidence: vec![ApplicationLifecycleEvidence::MembershipLoss {
+                        reason,
+                        detail: "typed loss".into(),
+                    }],
+                },
+            );
+        }
+        client.lifecycle_observations.lock().unwrap().insert(
+            "collision".into(),
+            LifecycleObservation {
+                capability: ApplicationCapability::SendOnly,
+                evidence: vec![ApplicationLifecycleEvidence::Collision(CollisionEvidence {
+                    address: "collision".into(),
+                    owner_instance_id: Some("owner".into()),
+                    lease_epoch: Some(4),
+                    guidance: "wait".into(),
+                })],
+            },
+        );
+        client.lifecycle_observations.lock().unwrap().insert(
+            "compensation".into(),
+            LifecycleObservation {
+                capability: ApplicationCapability::SendOnly,
+                evidence: vec![ApplicationLifecycleEvidence::CompensationPending(
+                    CompensationHandle {
+                        address: "compensation".into(),
+                        runtime_id: client.runtime_id.clone(),
+                        action: CompensationAction::Detach,
+                    },
+                )],
+            },
+        );
+        backend
+            .record_application_detach_intent(
+                "application",
+                "detached",
+                "prior-runtime",
+                "send-only",
+                "ApplicationDetach",
+            )
+            .await
+            .unwrap();
+
+        let health = client.health().await.unwrap();
+        let evidence: Vec<_> = health
+            .iter()
+            .flat_map(|record| record.lifecycle.iter())
+            .collect();
+        for reason in [
+            MembershipLossReason::DaemonRestart,
+            MembershipLossReason::PredicateDeath,
+            MembershipLossReason::OwnerDemoted,
+        ] {
+            assert!(evidence.iter().any(|item| matches!(
+                item,
+                ApplicationLifecycleEvidence::MembershipLoss { reason: actual, .. }
+                    if actual == &reason
+            )));
+        }
+        assert!(evidence.iter().any(|item| matches!(
+            item,
+            ApplicationLifecycleEvidence::MembershipLoss {
+                reason: MembershipLossReason::Unknown { raw_reason: Some(raw) },
+                ..
+            } if raw == "future-loss"
+        )));
+        assert!(evidence
+            .iter()
+            .any(|item| matches!(item, ApplicationLifecycleEvidence::Collision(_))));
+        assert!(evidence
+            .iter()
+            .any(|item| matches!(item, ApplicationLifecycleEvidence::CompensationPending(_))));
+        assert!(evidence.iter().any(|item| matches!(
+            item,
+            ApplicationLifecycleEvidence::DeliberateDetach {
+                runtime_id: RuntimeId(runtime),
+                ..
+            } if runtime == "prior-runtime"
+        )));
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn partial_multi_address_outcome_exposes_typed_compensation() {
+        let (client, _) = sqlite_client("multi-address-outcome", "application").await;
+        let handle = MembershipHandle {
+            logical_store_id: client.logical_store_id.clone(),
+            responsibility: client.responsibility.clone(),
+            runtime_id: client.runtime_id.clone(),
+            address: "attached".into(),
+            capability: ApplicationCapability::SendOnly,
+            lease_epoch: 1,
+            owner_instance_id: "owner".into(),
+        };
+        client.memberships.lock().unwrap().insert(
+            "attached".into(),
+            LocalMembership {
+                handle: handle.clone(),
+                spec: AddressSpec {
+                    address: "attached".into(),
+                    capability: ApplicationCapability::SendOnly,
+                    description: None,
+                    scope: None,
+                    tags: None,
+                },
+                recovering: false,
+                last_recovery_failure: None,
+            },
+        );
+        let outcome = client.finish_multi_address_outcome(
+            BTreeMap::from([
+                (
+                    "attached".into(),
+                    AddressLifecycleResult::Reconciled(handle),
+                ),
+                (
+                    "failed".into(),
+                    AddressLifecycleResult::Failed(ApplicationClientError::Unavailable(
+                        "injected".into(),
+                    )),
+                ),
+            ]),
+            vec![CompensationHandle {
+                address: "attached".into(),
+                runtime_id: client.runtime_id.clone(),
+                action: CompensationAction::Detach,
+            }],
+        );
+        assert!(!outcome.ready);
+        assert!(matches!(
+            outcome.compensation[0].action,
+            CompensationAction::Detach
+        ));
+        assert!(client
+            .lifecycle_observations
+            .lock()
+            .unwrap()
+            .get("attached")
+            .unwrap()
+            .evidence
+            .iter()
+            .any(|evidence| matches!(
+                evidence,
+                ApplicationLifecycleEvidence::CompensationPending(_)
+            )));
     }
 
     #[test]
@@ -3408,6 +4366,7 @@ mod tests {
             memberships: Mutex::new(BTreeMap::new()),
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
+            lifecycle_observations: Mutex::new(BTreeMap::new()),
         };
         let current_noncomparable = RecoveryHandle {
             logical_store_id: logical_store_id.clone(),
@@ -3455,6 +4414,7 @@ mod tests {
             memberships: Mutex::new(BTreeMap::new()),
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
+            lifecycle_observations: Mutex::new(BTreeMap::new()),
         };
         let mismatched_reference = RecoveryHandle {
             logical_store_id: LogicalStoreId::persisted("store-v1-other".into()),
@@ -3504,9 +4464,9 @@ mod tests {
         else {
             panic!("expected recorded operation");
         };
-        assert_eq!(reconciled.state, "accepted");
-        let result: SendResult =
-            serde_json::from_str(reconciled.result_json.as_deref().unwrap()).unwrap();
+        let RecordedOperationOutcome::Accepted(result) = reconciled.outcome else {
+            panic!("expected typed accepted outcome");
+        };
         assert_eq!(result.recipient, "target");
     }
 
@@ -3534,6 +4494,7 @@ mod tests {
             memberships: Mutex::new(BTreeMap::new()),
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
+            lifecycle_observations: Mutex::new(BTreeMap::new()),
         };
         let reference = client
             .operation_reference(
@@ -3662,6 +4623,7 @@ mod tests {
             memberships: Mutex::new(BTreeMap::new()),
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
+            lifecycle_observations: Mutex::new(BTreeMap::new()),
         };
         for index in 0..3 {
             backend
@@ -3713,6 +4675,7 @@ mod tests {
             memberships: Mutex::new(BTreeMap::new()),
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
+            lifecycle_observations: Mutex::new(BTreeMap::new()),
         };
         let operation_id = OperationId("indeterminate-peer-error".into());
         let payload_fingerprint = "b".repeat(64);
@@ -3798,6 +4761,34 @@ mod tests {
             .await;
         assert!(!duplicate.ready);
         assert!(duplicate.validation_error.is_some());
+        let reconcile_duplicate = client
+            .reconcile_many(
+                &[
+                    AddressSpec {
+                        address: "watcher:sender".into(),
+                        capability: ApplicationCapability::SendOnly,
+                        description: None,
+                        scope: None,
+                        tags: None,
+                    },
+                    AddressSpec {
+                        address: "watcher:sender".into(),
+                        capability: ApplicationCapability::SendOnly,
+                        description: None,
+                        scope: None,
+                        tags: None,
+                    },
+                ],
+                RecoveryPolicy::BoundedRepair { retries: 1 },
+            )
+            .await;
+        assert!(!reconcile_duplicate.ready);
+        assert!(reconcile_duplicate.validation_error.is_some());
+        let detach_duplicate = client
+            .detach_many(&["watcher:sender".into(), "watcher:sender".into()])
+            .await;
+        assert!(!detach_duplicate.ready);
+        assert!(detach_duplicate.validation_error.is_some());
         assert!(client.memberships.lock().unwrap().is_empty());
     }
 
@@ -3836,12 +4827,20 @@ mod tests {
                         lease_epoch: 1,
                         owner_instance_id: "owner".into(),
                     },
+                    spec: AddressSpec {
+                        address: "station:inbox".into(),
+                        capability: ApplicationCapability::Bidirectional,
+                        description: None,
+                        scope: None,
+                        tags: None,
+                    },
                     recovering: false,
                     last_recovery_failure: None,
                 },
             )])),
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
+            lifecycle_observations: Mutex::new(BTreeMap::new()),
         };
         assert!(client
             .history(None, false, None, None, None, 10)

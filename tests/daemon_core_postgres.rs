@@ -7,7 +7,8 @@ use std::time::{Duration, Instant};
 
 use telex::application_client::{
     ApplicationClient, ApplicationClientConfig, ApplicationClientError, ApplicationResponsibility,
-    LogicalStoreId, OperationId, PayloadIdentity, RecoveryHandle,
+    LogicalStoreId, OperationId, PayloadIdentity, RecordedOperationOutcome, RecoveryHandle,
+    SendRequest,
 };
 use telex::backend::postgres::{make_tls, sanitize_ident, PgBackend};
 use telex::backend::Backend;
@@ -259,14 +260,19 @@ async fn application_client_schema_v3_operation_smoke() {
     .await
     .unwrap();
     let missing_reference = client
-        .operation_reference(
-            OperationId("postgres-not-recorded".into()),
-            PayloadIdentity {
-                algorithm: "sha256".into(),
-                digest: "c".repeat(64),
-                comparable: true,
-            },
-        )
+        .prepare_send(&SendRequest {
+            operation_id: OperationId("postgres-not-recorded".into()),
+            sender: "postgres:sender".into(),
+            to: "postgres:target".into(),
+            cc: Vec::new(),
+            kind: "note".into(),
+            attention: "background".into(),
+            requires_disposition: false,
+            subject: None,
+            body: "not submitted".into(),
+            metadata: None,
+            retry_budget: 0,
+        })
         .await
         .unwrap();
     assert!(matches!(
@@ -418,7 +424,10 @@ async fn application_client_schema_v3_operation_smoke() {
     else {
         panic!("expected recorded operation");
     };
-    assert_eq!(reconciled.state, "accepted");
+    assert!(matches!(
+        reconciled.outcome,
+        RecordedOperationOutcome::Accepted(_)
+    ));
 
     let daemon = TestDaemon::new("pg-oversized-delivery-progress");
     let store_key = profiles::store_key(config.backends.get("pg-public-client").unwrap(), None);
@@ -805,6 +814,120 @@ exit 0
             root.to_string_lossy().to_string(),
         ]
     }
+}
+
+#[tokio::test]
+async fn postgres_concurrent_operation_duplicates_return_replay() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) = pg_url_or_skip("postgres_concurrent_operation_duplicates_return_replay") else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let schema = sanitize_ident(&format!(
+        "telex_app_operation_race_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .unwrap();
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
+    let first = Arc::new(
+        PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .unwrap(),
+    );
+    first.init_schema().await.unwrap();
+    let second = Arc::new(
+        PgBackend::connect_with(cfg.clone(), Some(&schema))
+            .await
+            .unwrap(),
+    );
+    let operation = Arc::new(NewApplicationOperation {
+        logical_store_id: first.logical_store_id().await.unwrap(),
+        application_responsibility: "postgres-race".into(),
+        operation_id: "same-operation".into(),
+        operation_kind: "send".into(),
+        sender: "postgres:sender".into(),
+        recipients_json: r#"["postgres:target"]"#.into(),
+        payload_fingerprint: "a".repeat(64),
+        retry_budget: 1,
+        created_at_ms: now_ms(),
+    });
+    let barrier = Arc::new(tokio::sync::Barrier::new(3));
+    let first_task = {
+        let backend = first.clone();
+        let operation = operation.clone();
+        let barrier = barrier.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            backend.begin_application_operation(&operation).await
+        })
+    };
+    let second_task = {
+        let backend = second.clone();
+        let operation = operation.clone();
+        let barrier = barrier.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            backend.begin_application_operation(&operation).await
+        })
+    };
+    barrier.wait().await;
+    let results = [first_task.await.unwrap(), second_task.await.unwrap()];
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(ApplicationOperationBegin::Started(_))))
+            .count(),
+        1
+    );
+    assert_eq!(
+        results
+            .iter()
+            .filter(|result| matches!(result, Ok(ApplicationOperationBegin::Replay(_))))
+            .count(),
+        1
+    );
+
+    let snapshot_operation = NewApplicationOperation {
+        operation_id: "snapshot-operation".into(),
+        ..operation.as_ref().clone()
+    };
+    let scope = ApplicationRecordScope {
+        logical_store_id: snapshot_operation.logical_store_id.clone(),
+        application_responsibility: snapshot_operation.application_responsibility.clone(),
+    };
+    let snapshot_barrier = Arc::new(tokio::sync::Barrier::new(2));
+    let creator = {
+        let backend = first.clone();
+        let barrier = snapshot_barrier.clone();
+        let operation = snapshot_operation.clone();
+        tokio::spawn(async move {
+            barrier.wait().await;
+            backend.begin_application_operation(&operation).await
+        })
+    };
+    snapshot_barrier.wait().await;
+    let snapshot = second
+        .application_operation_snapshot(&scope, &snapshot_operation.operation_id)
+        .await
+        .unwrap();
+    assert!(creator.await.unwrap().is_ok());
+    assert_eq!(snapshot.retention_generation, 0);
+    if let Some(record) = snapshot.operation {
+        assert_eq!(record.operation_id, snapshot_operation.operation_id);
+    }
+    assert!(second
+        .application_operation_snapshot(&scope, &snapshot_operation.operation_id)
+        .await
+        .unwrap()
+        .operation
+        .is_some());
+
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .unwrap();
 }
 
 async fn wait_for_file(path: &std::path::Path, timeout: Duration) -> bool {

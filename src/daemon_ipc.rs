@@ -219,6 +219,7 @@ pub enum Request {
         store_key: String,
         address: String,
         session_id: String,
+        application_responsibility: String,
         occupant: String,
         capability: StationCapability,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -231,6 +232,13 @@ pub enum Request {
         watch_pids: Vec<WatchPidSpec>,
         #[serde(default)]
         recovery: bool,
+    },
+    ApplicationDetach {
+        store_key: String,
+        session_id: String,
+        application_responsibility: String,
+        address: String,
+        capability: StationCapability,
     },
     Detach {
         store_key: String,
