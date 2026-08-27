@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. The optional example pack is next-ready but unlaunched; runtime remains planned and blocked on Application Client client-conformance.",
+  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. Issue #144 and its bounded task specification prepare the ready but unlaunched optional example pack; runtime remains planned and blocked on Application Client client-conformance.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-08-27T18:11:07Z",
+  "updatedAt": "2026-08-27T19:07:03Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -225,6 +225,12 @@
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 144
+      },
       "dependsOn": [
         "dumb-watcher-contract-gate"
       ]
