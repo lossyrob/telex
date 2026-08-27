@@ -26,6 +26,29 @@ direct-station-contract-reset
 
 `station-app` also waits on Application Client `client-conformance`.
 
+## Historical PR #143 evidence
+
+Issue #146 completed a non-gating evidence harvest from PR #143 at exact head
+`949b43eefaea8c26c2f8e9b72587493d1fd68b40`. The durable
+[field report](../../../docs/notes/operator-station/postgres-dogfood-evidence.md)
+maps every source commit and changed file, separates earlier observed SQLite
+evidence from exact-head code behavior and unproven inference, and records the
+missing Postgres runtime proof.
+
+The useful carry-forward criteria are local read state separate from protocol
+state, bounded responsive thread navigation, receipt-gated optimistic
+presentation with reconciliation, configurable evidence-bearing sound/toast
+policy, live receive before expensive backfill, and honest health. Generic
+store identity, receive, retryability, recovery, receipt, and principal seams
+route to Application Client as advisory evidence only.
+
+PR #143 remains historical, non-production evidence and will close unmerged
+after the artifact PR for #146 merges. Its mediation topology, experimental
+kinds, CLI parsing, stderr/exit-code classification, backend-profile hashing,
+synthetic health, and bounded 200-message recovery are not intended
+architecture. The evidence does not advance #134, PR #136, any Operator Station
+gate or implementation node, or Application Client conformance.
+
 The first #134 preparation-only run
 `cda96dff-f2b8-49cc-b258-350b901e29ff` validated the clean base, `never-commit`,
 local/untracked PAW state, no workflow commit, `--yolo`, and ADR 0051

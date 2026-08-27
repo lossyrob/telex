@@ -41,6 +41,10 @@ authoring/registration reset completed through issue #133 and PR #135, merged as
 `dumb-watcher-contract-gate` and `minimal-contract-accepted` checkpoint are
 complete. The optional example pack is next-ready but unlaunched, while runtime
 still waits on Application Client `client-conformance`.
+Operator Station issue #146 separately preserves
+[PR #143 Postgres and UI/UX lessons](../../docs/notes/operator-station/postgres-dogfood-evidence.md)
+as completed, non-gating evidence. The report does not promote spike mechanisms,
+change direct-Station authority, or advance any production node or dependency.
 Local Daemon release-confidence validation completed, but issue #106 exposed a
 daemon-replacement push-intent gap. Existing PR #138 is adopted as the
 in-progress repair ahead of the still-unaccepted hardening gate; its proposed

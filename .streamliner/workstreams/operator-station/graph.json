@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-31T02:12:00Z",
+  "updatedAt": "2026-08-27T19:19:13Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -73,6 +73,26 @@
         "number": 93
       },
       "dependsOn": []
+    },
+    {
+      "id": "operator-station-postgres-dogfood-evidence",
+      "type": "research",
+      "title": "Preserve Postgres dogfood and UI evidence",
+      "summary": "Completed non-gating evidence harvest from historical PR #143 at exact head 949b43e. The report preserves code-backed Postgres and UX lessons, records missing runtime proof, and does not promote spike mechanisms or advance production readiness.",
+      "status": "completed",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 146
+      },
+      "dependsOn": [
+        "operator-loop-spike"
+      ]
     },
     {
       "id": "viability-gate",
