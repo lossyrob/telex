@@ -14,7 +14,7 @@ pub const INSTALL_ROOT_ENV: &str = "TELEX_INSTALL_ROOT";
 pub const UNKNOWN_BUILD_ID: &str = "unknown";
 pub const BUILD_ID: &str = env!("TELEX_BUILD_ID");
 pub const SUPPORTED_SCHEMA_MIN: i64 = 2;
-pub const SUPPORTED_SCHEMA_MAX: i64 = 2;
+pub const SUPPORTED_SCHEMA_MAX: i64 = 3;
 #[cfg(feature = "sqlite")]
 const _: () = assert!(SUPPORTED_SCHEMA_MAX == crate::backend::sqlite::CURRENT_SCHEMA_VERSION);
 #[cfg(feature = "postgres")]

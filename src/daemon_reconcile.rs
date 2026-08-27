@@ -1340,9 +1340,11 @@ async fn register_member_reconciled(
 
     let record = MemberRecord {
         address: intent.address.clone(),
+        capability: crate::daemon_ipc::StationCapability::Bidirectional,
         store_key: intent.store_key.clone(),
         backend: backend.kind().to_string(),
         session_id: intent.session_id.clone(),
+        application_responsibility: None,
         occupant: intent.occupant.clone(),
         host: crate::config::hostname(),
         waiters: 0,

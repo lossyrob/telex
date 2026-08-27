@@ -3,11 +3,11 @@
   "id": "application-client",
   "projectKey": "telex",
   "title": "Telex Application Client (supported long-lived application integration)",
-  "summary": "The clean application-client-ready checkpoint is accepted in issue #12 publication revision 2. Supported client-core issue #129 is active with issue #124 folded into scope; first-binding and later nodes remain held on genuine dependencies.",
+  "summary": "The supported Application Client core merged through PR #132, closing issues #129 and #124. First-binding is ready but unlaunched; client-conformance and later gates remain held on their declared dependencies.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-07-29T15:22:20Z",
+  "updatedAt": "2026-08-27T21:04:30Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -108,9 +108,9 @@
       "id": "client-core",
       "type": "task",
       "title": "Supported Application Client core",
-      "summary": "Active as issue #129: implement AC-C01 through AC-C20 as one supported typed core over existing daemon and SQLite/Postgres backends. Fold in #124 by documenting an extensible typed membership-loss model, aligning W-05/AC-C05, regenerating manifest metadata, and preserving downstream conformance coverage.",
-      "status": "in-progress",
-      "attention": "focus",
+      "summary": "Completed through issues #129 and #124 and PR #132 at head 6fd3c1133948f0cefe83948947f2d85d2db0a298, merged as 4ecbe84e99e00ab0cea3bcf3619d539c222746af: one supported typed core implements AC-C01 through AC-C20 across SQLite and Postgres, including the extensible membership-loss model and regenerated bundle.",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -128,9 +128,9 @@
       "id": "first-binding",
       "type": "task",
       "title": "First supported language binding",
-      "summary": "Held until client-core issue #129 and folded issue #124 are merged, reconciled, and accepted. Then expose the supported core through the first binding required by Operator Station and SDK-hosted applications while preserving semantic parity and avoiding binding-specific forks.",
-      "status": "planned",
-      "attention": "watch",
+      "summary": "Ready but unlaunched after the supported core merge. The task shape still requires separate authorization; implementation must preserve semantic parity and avoid binding-specific forks.",
+      "status": "ready",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],

@@ -260,7 +260,10 @@ async fn wait_loop<C: WaitConnector>(
                     }
                 }
             }
-            Response::Message { .. } | Response::Timeout | Response::PresenceEnded => {
+            Response::Message { .. }
+            | Response::DeliveryQuarantined { .. }
+            | Response::Timeout
+            | Response::PresenceEnded => {
                 return Ok(WaitTerminal::Response(response));
             }
             Response::Error { code, message, .. } => return Err(anyhow!("{code}: {message}")),
@@ -410,6 +413,7 @@ struct WaitOutcome {
     outcome: &'static str,
     detail: Option<String>,
     message: Option<serde_json::Value>,
+    quarantine: Option<serde_json::Value>,
 }
 
 impl WaitOutcome {
@@ -419,6 +423,7 @@ impl WaitOutcome {
             outcome: "daemon-gone",
             detail: Some(detail),
             message: None,
+            quarantine: None,
         }
     }
 
@@ -428,6 +433,7 @@ impl WaitOutcome {
             outcome: "daemon-hung",
             detail: Some(detail),
             message: None,
+            quarantine: None,
         }
     }
 
@@ -437,6 +443,7 @@ impl WaitOutcome {
             outcome: "error",
             detail: Some(detail),
             message: None,
+            quarantine: None,
         }
     }
 
@@ -458,8 +465,11 @@ impl WaitOutcome {
                 requires_disposition_for_current_recipient,
                 subject,
                 body,
+                metadata,
                 sent_at_ms,
                 buffered_at_ms,
+                delivery_id,
+                snapshot_version,
                 lease_epoch,
             } => {
                 let waiter_exit_ms = now_ms();
@@ -479,8 +489,11 @@ impl WaitOutcome {
                     "requires_disposition_for_current_recipient": requires_disposition_for_current_recipient,
                     "subject": subject,
                     "body": body,
+                    "metadata": metadata,
                     "sent_at_ms": sent_at_ms,
                     "buffered_at_ms": buffered_at_ms,
+                    "delivery_id": delivery_id,
+                    "snapshot_version": snapshot_version,
                     "lease_epoch": lease_epoch,
                     "waiter_exit_ms": waiter_exit_ms,
                     "backend_ms": buffered_at_ms - sent_at_ms,
@@ -491,6 +504,7 @@ impl WaitOutcome {
                     outcome: "message",
                     detail: None,
                     message: Some(message),
+                    quarantine: None,
                 })
             }
             Response::Timeout => Ok(WaitOutcome {
@@ -498,12 +512,33 @@ impl WaitOutcome {
                 outcome: "idle-timeout",
                 detail: None,
                 message: None,
+                quarantine: None,
             }),
             Response::PresenceEnded => Ok(WaitOutcome {
                 exit_code: 5,
                 outcome: "presence-ended",
                 detail: None,
                 message: None,
+                quarantine: None,
+            }),
+            Response::DeliveryQuarantined {
+                message_id,
+                recipient,
+                serialized_bytes,
+                max_bytes,
+                may_continue,
+            } => Ok(WaitOutcome {
+                exit_code: 6,
+                outcome: "delivery-quarantined",
+                detail: None,
+                message: None,
+                quarantine: Some(serde_json::json!({
+                    "message_id": message_id,
+                    "recipient": recipient,
+                    "serialized_bytes": serialized_bytes,
+                    "max_bytes": max_bytes,
+                    "may_continue": may_continue,
+                })),
             }),
             other => Err(anyhow!("unexpected daemon wait response: {other:?}")),
         }
@@ -523,6 +558,11 @@ fn emit_outcome(outcome: WaitOutcome, out_dir: Option<&Path>, address: &str) -> 
                 )
             }
             "daemon-hung" => eprintln!("[wait] HUNG: {}", outcome.detail.as_deref().unwrap_or("")),
+            "delivery-quarantined" => {
+                if let Some(quarantine) = &outcome.quarantine {
+                    eprintln!("[wait] delivery-quarantined: {quarantine}");
+                }
+            }
             _ => {}
         },
     }
@@ -549,6 +589,7 @@ fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std
         "outcome": outcome.outcome,
         "exit_code": outcome.exit_code,
         "detail": outcome.detail,
+        "quarantine": outcome.quarantine,
         "address": address,
         "written_at_ms": now_ms(),
     });
@@ -570,7 +611,7 @@ fn write_wait_artifacts(dir: &Path, outcome: &WaitOutcome, address: &str) -> std
         let envelope_body =
             serde_json::to_string_pretty(&envelope).unwrap_or_else(|_| envelope.to_string());
         atomic_write(&dir.join("delivery.json"), envelope_body.as_bytes())?;
-    } else if message_path.exists() {
+    } else {
         // The out-dir may be reused across re-arms; drop any prior payload so a non-delivery
         // outcome can never leave a stale message.json that a naive reader might re-consume.
         let _ = std::fs::remove_file(&message_path);
@@ -801,8 +842,11 @@ mod tests {
             requires_disposition_for_current_recipient: false,
             subject: None,
             body: "hello".to_string(),
+            metadata: None,
             sent_at_ms: now_ms(),
             buffered_at_ms: now_ms(),
+            delivery_id: Some(1),
+            snapshot_version: Some(1),
             lease_epoch: Some(2),
         }
     }
@@ -1086,6 +1130,33 @@ mod tests {
                 .trim(),
             "2"
         );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn out_dir_quarantine_clears_stale_delivery_artifacts() {
+        let dir = artifact_dir("quarantine");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("message.json"), b"stale").unwrap();
+        std::fs::write(dir.join("delivery.json"), b"stale").unwrap();
+        let outcome = WaitOutcome::from_response(Response::DeliveryQuarantined {
+            message_id: 7,
+            recipient: "addr:a".into(),
+            serialized_bytes: 1_048_577,
+            max_bytes: 1_048_576,
+            may_continue: true,
+        })
+        .unwrap();
+        let code = emit_outcome(outcome, Some(dir.as_path()), "addr:a").unwrap();
+        assert_eq!(code, 6);
+        assert!(!dir.join("message.json").exists());
+        assert!(!dir.join("delivery.json").exists());
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("status.json")).unwrap())
+                .unwrap();
+        assert_eq!(status["outcome"], "delivery-quarantined");
+        assert_eq!(status["quarantine"]["message_id"], 7);
+        assert_eq!(status["quarantine"]["may_continue"], true);
         std::fs::remove_dir_all(&dir).ok();
     }
 

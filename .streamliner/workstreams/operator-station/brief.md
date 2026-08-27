@@ -81,6 +81,11 @@ Historical confidence:
   human-attended feed, notification, durable reply path, provenance, restart,
   and delivery/ack health. Its mediated topology is evidence, not current
   product authority.
+- [#146](https://github.com/lossyrob/telex/issues/146) preserves PR #143 at
+  `949b43eefaea8c26c2f8e9b72587493d1fd68b40` as
+  [non-normative Postgres and UI/UX evidence](docs/postgres-dogfood-evidence.md).
+  It records code-backed lessons and missing runtime proof without advancing a
+  gate, product node, or Application Client dependency.
 - The builder passed the viability gate: a human-facing Telex inbox materially
   reduced terminal inspection and preserved useful reply context.
 - [#114](https://github.com/lossyrob/telex/issues/114) /
@@ -279,6 +284,11 @@ design decision.
 
 - Reply/disposition clarity remains a `station-app` UX concern, but direct
   operation no longer requires operator notification or route-back sequencing.
+- PR #143 suggests criteria for separate local read state, bounded responsive
+  thread navigation, receipt-gated optimistic presentation, configurable
+  evidence-bearing notifications, live receive before expensive backfill, and
+  honest health. Its mediated topology and private CLI mechanisms remain
+  non-authoritative.
 - Reviewer/implementer feedback from #128 is captured in
   `reconciliation-note.md`: settle product-boundary questions before launching
   policy/topology implementation nodes.

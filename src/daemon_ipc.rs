@@ -3,7 +3,7 @@
 //! rewriting the current resident-holder verbs.
 
 use crate::model::DeliveryOutcome;
-use serde::{Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::BTreeSet;
 use std::fmt;
 use tokio::io::{AsyncBufRead, AsyncBufReadExt, AsyncWrite, AsyncWriteExt};
@@ -14,6 +14,7 @@ pub const DAEMON_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_MESSAGE_BODY_METADATA_BYTES: usize = MAX_JSONL_FRAME_BYTES - (64 * 1024);
+pub const MAX_MESSAGE_RECIPIENTS: usize = 256;
 
 pub const CAP_JSONL: &str = "jsonl_v1";
 pub const CAP_ADMIN_CAP: &str = "admin_cap_v1";
@@ -46,6 +47,8 @@ pub const ON_DELIVER_DEFERRED_EXIT: i32 = 4;
 /// check it to detect version skew (an older daemon maps exit 4 to a transient retry and ignores
 /// `DrainDeferred`, which is bounded and self-resolves on daemon restart).
 pub const CAP_ON_DELIVER_DEFERRED: &str = "on_deliver_deferred_v1";
+pub const CAP_APPLICATION_CLIENT_V1: &str = "application_client_v1";
+pub const CAP_DELIVERY_QUARANTINE_V1: &str = "delivery_quarantine_v1";
 
 /// Advertised (not required): the daemon owns durable station intents and reconciles them
 /// (`Request::ReconcileIntents`, intent rows in status, `IntentRecoveryState`). Advertised rather
@@ -76,6 +79,8 @@ pub const ERROR_NEEDS_ATTACH: &str = "NeedsAttach";
 pub const ERROR_AMBIGUOUS: &str = "Ambiguous";
 pub const ERROR_UNSUPPORTED: &str = "Unsupported";
 pub const ERROR_NOT_OWNER: &str = "NotOwner";
+pub const ERROR_COLLISION: &str = "Collision";
+pub const ERROR_CAPABILITY_CONFLICT: &str = "CapabilityConflict";
 pub const REDACTED_SECRET: &str = "[redacted]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -146,6 +151,14 @@ pub struct CapabilityScope {
     pub scope: Option<String>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum StationCapability {
+    SendOnly,
+    #[default]
+    Bidirectional,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Hello {
     pub protocol_version: ProtocolVersion,
@@ -166,6 +179,8 @@ pub struct HelloAck {
     pub auth_policy_version: u16,
     pub accepted: bool,
     pub required_capabilities: Vec<String>,
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -207,6 +222,31 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "is_false")]
         on_deliver_wake_on_cc: bool,
     },
+    ApplicationRegister {
+        store_key: String,
+        address: String,
+        session_id: String,
+        application_responsibility: String,
+        occupant: String,
+        capability: StationCapability,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        description: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        tags: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        watch_pids: Vec<WatchPidSpec>,
+        #[serde(default)]
+        recovery: bool,
+    },
+    ApplicationDetach {
+        store_key: String,
+        session_id: String,
+        application_responsibility: String,
+        address: String,
+        capability: StationCapability,
+    },
     Detach {
         store_key: String,
         session_id: String,
@@ -242,6 +282,13 @@ pub enum Request {
         address: String,
         message_id: i64,
     },
+    ApplicationAck {
+        store_key: String,
+        session_id: String,
+        address: String,
+        message_id: i64,
+        delivery_id: i64,
+    },
     Send {
         store_key: String,
         session_id: String,
@@ -259,6 +306,26 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         metadata: Option<String>,
     },
+    ApplicationSend {
+        store_key: String,
+        session_id: String,
+        from_addr: String,
+        to_addr: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cc: Option<String>,
+        kind: String,
+        attention: String,
+        requires_disposition: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<String>,
+        body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<String>,
+        logical_store_id: String,
+        application_responsibility: String,
+        operation_id: String,
+        payload_fingerprint: String,
+    },
     Reply {
         store_key: String,
         session_id: String,
@@ -273,6 +340,26 @@ pub enum Request {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cc: Option<String>,
         body: String,
+    },
+    ApplicationReply {
+        store_key: String,
+        session_id: String,
+        from_addr: String,
+        message_id: i64,
+        kind: String,
+        attention: String,
+        requires_disposition: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        subject: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        cc: Option<String>,
+        body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<String>,
+        logical_store_id: String,
+        application_responsibility: String,
+        operation_id: String,
+        payload_fingerprint: String,
     },
     Status {
         #[serde(default)]
@@ -321,8 +408,7 @@ pub enum Request {
     Ping,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NeedsAttachReason {
     RestartLost,
     DeliberatelyDetached,
@@ -333,10 +419,46 @@ pub enum NeedsAttachReason {
     /// A `live` push intent exists for this binding but could not be reconciled, so the daemon
     /// refused to create a *pull-only* member over it. This is the anti-downgrade signal.
     PushIntentUnrecoverable,
-    /// Forward-compat catch-all so an older client deserializing a newer daemon's error does not
-    /// fail on a reason it does not know.
-    #[serde(other)]
-    Unknown,
+    PredicateDeath,
+    Unknown(String),
+}
+
+impl NeedsAttachReason {
+    fn as_wire_value(&self) -> &str {
+        match self {
+            Self::RestartLost => "restart_lost",
+            Self::DeliberatelyDetached => "deliberately_detached",
+            Self::PushIntentPending => "push_intent_pending",
+            Self::PushIntentUnrecoverable => "push_intent_unrecoverable",
+            Self::PredicateDeath => "predicate_death",
+            Self::Unknown(raw) => raw,
+        }
+    }
+}
+
+impl Serialize for NeedsAttachReason {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_wire_value())
+    }
+}
+
+impl<'de> Deserialize<'de> for NeedsAttachReason {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(match String::deserialize(deserializer)?.as_str() {
+            "restart_lost" => Self::RestartLost,
+            "deliberately_detached" => Self::DeliberatelyDetached,
+            "push_intent_pending" => Self::PushIntentPending,
+            "push_intent_unrecoverable" => Self::PushIntentUnrecoverable,
+            "predicate_death" => Self::PredicateDeath,
+            raw => Self::Unknown(raw.to_string()),
+        })
+    }
 }
 
 /// Recovery state of a station intent, as projected by the daemon.
@@ -347,55 +469,27 @@ pub enum NeedsAttachReason {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IntentRecoveryState {
-    /// Written before `Register`, not yet finalized. Never reconciled.
     Pending,
-    /// Finalized and eligible for reconciliation.
     #[default]
     Live,
-    /// Reconciled into a live member during this daemon's lifetime.
     Restored,
-    /// The predecessor's epoch lease is simply not stale yet. A **waiting** state, not an error:
-    /// it retries at a fixed cadence, never enters the exponential ladder, and never counts toward
-    /// quarantine. This is what makes the published crash-recovery bound derivable.
     DeferredLease,
-    /// A live armed pull waiter owns the address. Pull-waiter precedence is preserved, so the
-    /// intent waits rather than forcing the conflict.
     DeferredPullWaiter,
-    /// The producer predates the probe verb, so its liveness is unprovable. Legacy, *not* failed:
-    /// the documented manual resume path keeps working and no turn is ever blocked.
     LegacyProducer,
-    /// The manifest or descriptor is structurally incompatible with this build.
     Incompatible,
-    /// The producer, credential, or store selector could not be resolved, so the intent cannot be
-    /// verified. Never "verified anyway".
     Unverifiable,
-    /// A security check failed (ownership, permissions, containment, reparse point).
     Insecure,
-    /// Too many consecutive genuine failures; retried on a slow cadence so one wedged intent can
-    /// never consume the pass budget.
     Quarantined,
-    /// A durable detach tombstone exists for this binding, so the station is deliberately gone.
-    /// Highest precedence of all: an explicitly detached station never auto-returns. Reserved for
-    /// a future projection that distinguishes the durable tombstone from the local revocation
-    /// below; this build reports both as `Revoked`, which is what is persisted.
     Tombstoned,
-    /// Explicitly revoked (detach, session end, fallback downgrade), or reconciled against a
-    /// durable detach tombstone. The only terminal state this build ever *persists*.
     Revoked,
-    /// Another owner holds the address and is not stale.
     OwnershipConflict,
-    /// Forward-compat catch-all. Never produced intentionally.
     #[serde(other)]
     Unknown,
 }
 
 impl IntentRecoveryState {
-    /// Precedence when several states apply at once, highest first. Encoded as a total order so
-    /// the projection is deterministic rather than dependent on evaluation order.
     pub fn precedence(self) -> u8 {
         match self {
-            // Plan decision 16 order: a durable tombstone outranks a local revocation, which
-            // outranks every diagnosable failure.
             IntentRecoveryState::Tombstoned => 13,
             IntentRecoveryState::Revoked => 12,
             IntentRecoveryState::Insecure => 11,
@@ -413,7 +507,6 @@ impl IntentRecoveryState {
         }
     }
 
-    /// The higher-precedence of two states.
     pub fn max(self, other: Self) -> Self {
         if other.precedence() > self.precedence() {
             other
@@ -422,8 +515,6 @@ impl IntentRecoveryState {
         }
     }
 
-    /// Whether this is a *waiting* state rather than an error, so status and the drain report can
-    /// project "waiting for the predecessor's lease to go stale" instead of "failing".
     pub fn is_waiting(self) -> bool {
         matches!(
             self,
@@ -433,7 +524,6 @@ impl IntentRecoveryState {
         )
     }
 
-    /// Whether the daemon considers this intent recoverable without operator action.
     pub fn is_recoverable(self) -> bool {
         matches!(
             self,
@@ -445,10 +535,6 @@ impl IntentRecoveryState {
     }
 }
 
-/// One intent row in the daemon status projection.
-///
-/// Carries evidence, not just a state name, matching the `*_since_ms` / `*_for_ms` / `*_count`
-/// idiom already used by `MemberStatus`. Never carries a secret, a raw argv, or a credential path.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IntentStatus {
     pub store_key: String,
@@ -460,9 +546,6 @@ pub struct IntentStatus {
     pub delivery_mode: DeliveryMode,
     #[serde(default)]
     pub wake_on_cc: bool,
-    /// Whether a `MemberRecord` currently exists for this binding. When it does, `StationHealth`
-    /// and `PushDeliveryHealth` stay authoritative and this row is supplementary; when it does
-    /// not, this row is the only projection of the binding.
     #[serde(default)]
     pub has_member: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -481,26 +564,15 @@ pub struct IntentStatus {
     pub next_attempt_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery_latency_ms: Option<i64>,
-    /// When the cached index this row was projected from was last refreshed, so a reader can tell
-    /// "no live intent" from "the index has not been refreshed since the last pass".
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub index_as_of_ms: Option<i64>,
 }
 
-/// Outcome counts for one reconciliation pass. Published on the trigger/report seam so callers
-/// (upgrade, rollback, tests) can await a pass rather than poll a clock.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReconcileReport {
-    /// Monotonically increasing pass sequence number.
     pub pass_seq: u64,
-    /// Whether this pass actually ran. A pass suppressed by drain or by single-flight contention
-    /// still publishes a report with a fresh `pass_seq` and all-zero counts, and a caller that
-    /// cannot tell that apart from "ran and found nothing" reports a completed verification for an
-    /// upgrade that restored nothing.
     #[serde(default = "ReconcileReport::default_ran")]
     pub ran: bool,
-    /// Why the pass did not run, when `ran` is false (`draining`, `single_flight`,
-    /// `scope_unavailable`, `scan_failed`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub skipped_reason: Option<String>,
     pub scanned: usize,
@@ -510,14 +582,10 @@ pub struct ReconcileReport {
     pub deferred_pull_waiter: usize,
     pub failed: usize,
     pub skipped: usize,
-    /// Intents in terminal/inert states (revoked, tombstoned, insecure, incompatible, legacy,
-    /// unverifiable, quarantined). Surfaced, never retried on the fast cadence.
     pub inert: usize,
-    /// Whether the scope holds more than the per-scope write cap. Reported, never acted on.
     pub over_cap: bool,
     pub observed_count: usize,
     pub duration_ms: u64,
-    /// True when the pass stopped on `RECONCILE_PASS_DEADLINE` rather than sweeping the scope.
     pub deadline_reached: bool,
     pub index_as_of_ms: i64,
 }
@@ -527,8 +595,6 @@ impl ReconcileReport {
         true
     }
 
-    /// A report for a pass that did not run, so a caller can retry rather than report success on
-    /// zero counts.
     pub fn skipped_pass(pass_seq: u64, reason: &str) -> Self {
         Self {
             pass_seq,
@@ -594,10 +660,23 @@ pub enum Response {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         subject: Option<String>,
         body: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<String>,
         sent_at_ms: i64,
         buffered_at_ms: i64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
+        delivery_id: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        snapshot_version: Option<i64>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         lease_epoch: Option<i64>,
+    },
+    DeliveryQuarantined {
+        message_id: i64,
+        recipient: String,
+        serialized_bytes: usize,
+        max_bytes: usize,
+        may_continue: bool,
     },
     Sent {
         receipt: SentReceipt,
@@ -615,6 +694,8 @@ pub enum Response {
         protocol_version: ProtocolVersion,
         daemon_version: String,
         instance_id: String,
+        #[serde(default)]
+        capabilities: Vec<String>,
     },
     Ack {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -699,6 +780,8 @@ pub struct DaemonStatus {
     #[serde(default)]
     pub members: Vec<MemberStatus>,
     #[serde(default)]
+    pub membership_losses: Vec<MembershipLossStatus>,
+    #[serde(default)]
     pub live_waiters: Vec<LiveWaiterStatus>,
     #[serde(default)]
     pub retention: Vec<RetentionStatus>,
@@ -725,6 +808,16 @@ pub struct StoreStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MembershipLossStatus {
+    pub store_key: String,
+    pub session_id: String,
+    pub address: String,
+    pub reason: NeedsAttachReason,
+    pub detail: String,
+    pub at_ms: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EpochStatus {
     pub store_key: String,
     pub address: String,
@@ -739,6 +832,8 @@ pub struct MemberStatus {
     pub backend: String,
     pub session_id: String,
     pub address: String,
+    #[serde(default)]
+    pub capability: StationCapability,
     pub occupant: String,
     pub host: String,
     pub waiters: usize,
@@ -821,6 +916,7 @@ pub struct MemberStatus {
 #[serde(rename_all = "kebab-case")]
 pub enum WaiterOutcome {
     Message,
+    DeliveryQuarantined,
     IdleTimeout,
     PresenceEnded,
     AbnormalExit,
@@ -1036,6 +1132,8 @@ pub fn daemon_capabilities() -> Vec<String> {
     // reconciliation. A client that would write an intent checks this (and the daemon minor)
     // rather than assuming a connected daemon will ever act on one.
     caps.push(CAP_STATION_INTENT.to_string());
+    caps.push(CAP_APPLICATION_CLIENT_V1.to_string());
+    caps.push(CAP_DELIVERY_QUARANTINE_V1.to_string());
     caps
 }
 
@@ -1087,6 +1185,7 @@ pub fn evaluate_hello(hello: &Hello) -> HelloAck {
         auth_policy_version: AUTH_POLICY_VERSION,
         accepted: reason.is_none(),
         required_capabilities: required,
+        capabilities,
         reason,
         capability_scopes: Vec::new(),
     }
