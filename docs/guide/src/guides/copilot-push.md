@@ -1,8 +1,8 @@
-# Copilot CLI push delivery
+# Copilot push delivery
 
-In GitHub Copilot CLI, telex delivers messages to the agent as **turns**. The
-agent does not run or re-arm a waiter. The full, version-matched Copilot workflow
-is printed by the installed binary:
+In GitHub Copilot CLI and Copilot App, telex delivers messages to the agent as
+**turns**. The agent does not run or re-arm a waiter. The full, version-matched
+Copilot workflow is printed by the installed binary:
 
 ```sh
 telex copilot skill
@@ -21,6 +21,11 @@ copilot plugin install telex@telex
 The plugin contributes session lifecycle hooks and provisions the push bridge. It
 maps `$COPILOT_AGENT_SESSION_ID` to the generic telex session id. In bridge mode,
 the extension heartbeat, not `$COPILOT_LOADER_PID`, is the push liveness signal.
+GitHub Copilot App emits `sessionEnd(reason=complete)` when each turn becomes idle;
+while the bridge heartbeat remains live, Telex keeps the station attended instead
+of requiring `copilot resume` after every response. Telex also binds attendance to
+the bridge host PID, which survives extension reloads but exits with a true App
+exit or one-shot CLI completion.
 
 ## Bind and provision the bridge
 
@@ -112,7 +117,9 @@ and dedupe primary deliveries by message id before preparing the next run.
 `telex --address <addr> status` reports `delivery_mode` separately from
 `station_health`: `push` is bridge delivery, `pull` is the Copilot fallback, and
 `conflict` is a version-skew/race tripwire. The daemon rejects simultaneous push
-and pull coverage.
+and pull coverage. A busy App turn can also report `push_delivery: deferred`;
+this means the bridge is reachable and will retry at turn-idle, not that the
+station is unattended.
 
 To return to push, stop the waiter before binding the bridge:
 

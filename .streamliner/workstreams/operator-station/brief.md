@@ -1,236 +1,284 @@
-# Operator Station (mediated human-attention loop)
+# Operator Station (direct human-attended Telex endpoint)
 
 ## Purpose
 
-Create an optional human-attended Telex station that lets agent sessions route
-meaningful attention to a developer without requiring repeated terminal
-inspection. Prove a mediated operating loop in which workers report to an
-operator agent, the operator agent filters and escalates through a desktop
-station, and the developer can reply through the same durable message fabric.
+Create an optional Windows-first desktop Station that attends one or more
+durable Telex addresses so agents can send meaningful operational messages
+directly to a human. The Station provides an actionable inbox, threads,
+notifications, ordinary replies, per-recipient dispositions, and trustworthy
+health/recovery without turning Telex into chat, workflow automation, or a
+semantic router.
 
 ## Approach
 
-The workstream starts with one deliberately narrow vertical spike rather than a
-production architecture. The spike must make the complete loop real on Windows:
-a worker messages a stable attention address, an operator agent attends that
-address and sends a distilled message to a desktop-attended operator address,
-the desktop surfaces the message, and a human reply reaches the operator agent
-and can be routed back to the worker. The spike may use current CLI or library
-surfaces and is not allowed to freeze the production client contract.
+The workstream preserves the original spike and mediated-loop implementation as
+evidence that a human-attended Telex surface is valuable. It no longer treats
+the operator-agent intermediary as product architecture.
 
-A builder viability gate follows the spike. The gate evaluates the loop through
-real multi-session use: whether it reduces tab polling, whether the filtering
-agent escalates the right amount, whether replies preserve enough context, and
-whether the experience is valuable enough to productionize. A failed gate may
-stop or reshape the workstream without carrying experimental integration choices
-forward.
+The next confidence transition is a design-only reset:
+`direct-station-contract-reset` rewrites the intended Station contract around
+direct address attendance and records ADR 0051. A builder direction gate then
+accepts the product boundary before implementation.
 
-If the gate passes, a contract node establishes the production boundary before
-implementation proceeds. The desktop app and reusable operator-agent role can
-then execute in parallel under that contract, followed by an end-to-end usability
-gate and an operational-hardening node covering Postgres, restart/offline
-behavior, notification pressure, provenance, packaging, and recovery.
+After the direction gate, `station-app` implements the desktop endpoint using
+the supported/conformant Application Client. A direct usability gate validates
+the human experience, followed by operational hardening for Postgres,
+restart/offline behavior, notification pressure, provenance, security,
+packaging, and cleanup.
 
-The richer rationale and early interaction model are preserved in
-[`docs/initial-shaping.md`](docs/initial-shaping.md).
+Mediation remains possible as an external user-developed convention over
+ordinary Telex messages. It is not shipped, interpreted, or required by Telex
+or Operator Station.
 
 ## Design References
 
-- `telex:docs/design/index.md` - entry point for Telex's intended-system design.
-- `telex:PRODUCT-THESIS.md` - durable responsibilities, store-and-forward
-  delivery, auditable records, and the boundary against general chat.
-- `telex:docs/design/daemon.md` - normative local-exchange and client/daemon
-  contract that a production Station should reuse.
-- `telex:docs/design/operator-station.md` - accepted production Station and
-  mediated-attention domain contract.
-- `telex:docs/design/DECISIONS.md` - ADR 0047 keeps mediation outside Telex
-  core; ADR 0048 defines exclusive direct/assisted ingress attendance.
-- `telex:docs/design/proposals/EXTENSIONS.md` - namespaced message kinds and
-  opaque metadata conventions for typed operator requests and source references.
-- `telex:docs/design/proposals/DISPATCH.md` - the reasoning-receptionist pattern
-  and the rule that judgment remains in agents rather than Telex core.
-- `telex:telex-console/README.md` - existing separate operator console and its
-  feed, address, thread, delivery, and disposition concepts.
+- `telex:docs/design/index.md` - Telex intended-system design entry point.
+- `telex:PRODUCT-THESIS.md` - durable responsibilities, store-and-forward,
+  auditability, and the non-chat boundary.
+- `telex:docs/design/daemon.md` - address attendance, delivery, acknowledgment,
+  disposition, liveness, and backend semantics.
+- `telex:docs/design/application-client.md` - supported long-lived application
+  lifecycle, receive/reply/disposition, identity, health, and recovery.
+- `telex:docs/design/operator-station.md` - current contract, to be reset by
+  issue #134.
+- `telex:docs/design/DECISIONS.md` - ADRs 0047/0048 and allocated ADR 0051.
+- `telex:docs/design/proposals/EXTENSIONS.md` - opaque extension boundary;
+  message metadata does not become Telex semantic routing.
+- `telex:telex-console/README.md` - existing feed, address, thread, delivery,
+  and disposition presentation concepts.
 
 ## Boundaries
 
-- **In scope:** a Windows-first optional desktop Station; one or more
-  human-attended operator addresses; Windows notifications; actionable feed and
-  thread reading; reply and disposition; a reusable operator-agent role that
-  filters, summarizes, resolves, and escalates worker messages; durable source
-  provenance; direct and assisted address-routing modes; local SQLite and
-  networked Postgres operation; restart/offline and noisy-workload validation.
-- **Out of scope:** general-purpose human chat; contacts, rooms, typing
-  indicators, reactions, or social presence; agent process supervision,
-  launching, killing, or restart management; Streamliner-specific workflow
-  semantics in Telex core; arbitrary command execution from message content;
-  replacing `telex-console`; making the desktop app mandatory for Telex use.
-- **Deferred:** multi-device fan-out for one operator address; macOS/Linux/mobile
-  clients; inline structured decision controls beyond ordinary replies;
-  cryptographically verified cross-principal sender identity; a general routing
-  or alias engine in Telex core; rich session-opening or terminal-control
-  integrations.
+- **In scope:** separately installable Windows desktop Station; explicitly
+  configured attended addresses; durable ingest-before-ack; actionable feed and
+  bounded history; thread reading; ordinary reply; exact-recipient disposition;
+  attention-aware local notifications; backend selection; source/principal
+  presentation; health and backlog; restart/resync; inert rendering; safe links;
+  local read state; evidence-preserving local cleanup; SQLite and credentialed
+  Postgres.
+- **Out of scope:** shipped operator-agent skill or policy; semantic filtering,
+  recommendation, aggregation, digest, route-back, or intermediary topology;
+  general chat, contacts, rooms, reactions, typing indicators, or social
+  presence; process/session supervision; arbitrary command execution; a generic
+  router/alias engine; replacing `telex-console`; making Station mandatory.
+- **Deferred:** multi-device fan-out; macOS/Linux/mobile clients; structured
+  decision widgets; cryptographic cross-principal identity beyond backend
+  provenance; rich session-opening or terminal-control integration.
+- **External convention:** users may build mediation agents with ordinary Telex
+  messages and opaque metadata, but Station and Telex do not ship or interpret
+  that convention.
 
 ## Current State
 
-The workstream is part of the
-**[Addressable Attention campaign #102](https://github.com/lossyrob/telex/issues/102)**
-documented in `.streamliner/shaping/roadmap.md`. It is formed under parent issue
-[#92](https://github.com/lossyrob/telex/issues/92). Wave 1's
-`operator-loop-spike` is complete: issue
-[#93](https://github.com/lossyrob/telex/issues/93) closed when
-[PR #104](https://github.com/lossyrob/telex/pull/104) merged at
-`fc2ec2cbf0d23ebdb6064564f64c62c89efe5508`.
+The workstream belongs to the
+[Addressable Attention campaign #102](https://github.com/lossyrob/telex/issues/102)
+and parent [#92](https://github.com/lossyrob/telex/issues/92).
 
-The merged spike under `spike/operator-station/` demonstrates the full
-worker -> operator agent -> Windows Station -> human reply -> operator agent ->
-worker loop with distinct raw and mediated threads, source provenance, honest
-wait/read/ingest/ack attendance, restart recovery, address-health visibility,
-and Windows Action Center publication. The evidence and temporary-integration
-findings are recorded in
-[`docs/notes/operator-loop-spike-report.md`](../../../docs/notes/operator-loop-spike-report.md).
-No project design change was accepted by the spike.
+Historical confidence:
 
-The builder has **passed the viability gate**. Guided dogfood demonstrated
-selective human escalation, routine resolution, evidence-seeking clarification,
-route-back, restart continuity, and Windows notification publication. The
-builder also requested that the campaign orchestrator serve `attention:rob`
-during normal workstream execution; the campaign-local mediation prompts are
-landed and the Station is running at `operator:rob` on the default local store.
+- [#93](https://github.com/lossyrob/telex/issues/93) /
+  [PR #104](https://github.com/lossyrob/telex/pull/104) proved a Windows
+  human-attended feed, notification, durable reply path, provenance, restart,
+  and delivery/ack health. Its mediated topology is evidence, not current
+  product authority.
+- The builder passed the viability gate: a human-facing Telex inbox materially
+  reduced terminal inspection and preserved useful reply context.
+- [#114](https://github.com/lossyrob/telex/issues/114) /
+  [PR #116](https://github.com/lossyrob/telex/pull/116) landed the first
+  production contract and ADRs 0047/0048. Direct Station findings remain input;
+  mediation-specific product requirements are being narrowed by ADR 0051.
+- Application Client contract convergence is complete through
+  [#118](https://github.com/lossyrob/telex/issues/118) /
+  [PR #126](https://github.com/lossyrob/telex/pull/126). The
+  `application-client-ready` gate is complete, client-core
+  [#129](https://github.com/lossyrob/telex/issues/129) is active, and
+  `station-app` waits on Application Client `client-conformance`.
 
-The `station-contract` node is complete: issue
-[#114](https://github.com/lossyrob/telex/issues/114) closed when
-[PR #116](https://github.com/lossyrob/telex/pull/116) merged at
-`0722051760bab569d3f947fd7b29f2dabe13ef77`. The accepted contract is
-[`docs/design/operator-station.md`](../../../docs/design/operator-station.md),
-with application-layer mediation in ADR 0047 and exclusive direct/assisted
-ingress attendance in ADR 0048.
+Superseded scope:
 
-The final Operator Station shared-client requirements are published on
-[#12](https://github.com/lossyrob/telex/issues/12) in
-[the corrected domain export](https://github.com/lossyrob/telex/issues/12#issuecomment-5042612298)
-and
-[the merged-source addendum](https://github.com/lossyrob/telex/issues/12#issuecomment-5044388908).
-They include per-recipient delivery identity, exact-recipient acknowledgment,
-ordered resync, retry-safe metadata-bearing operations, and machine-readable
-raw-thread outcomes for terminal assisted responses.
+- [#128](https://github.com/lossyrob/telex/issues/128) is closed
+  `NOT_PLANNED`.
+- [PR #130](https://github.com/lossyrob/telex/pull/130) is closed without
+  merge at `961e51e5a7d8da4a4867b2ae01efe75af47476b3`.
+- The implementation reached green CI and reviewer +1; closure is a product
+  direction decision, not an implementation-defect finding.
+- Branch, review history, and worktrees remain preserved pending cleanup
+  authorization.
+- Metadata-bearing reply is not extracted from #130. Its generic requirement is
+  handed to Application Client client-core/conformance.
 
-No Operator Station node is launch-ready now. `station-app` and
-`operator-broker` are planned under the accepted domain contract but both wait
-on the campaign-owned `application-client-ready` checkpoint.
+Active transition:
 
-Campaign orchestration has formed the
-[Application Client workstream #117](https://github.com/lossyrob/telex/issues/117)
-and launched
-[contract-convergence node #118](https://github.com/lossyrob/telex/issues/118).
-The Operator Station orchestrator will independently review the candidate
-contract bundle and crosswalk to ensure final AC-01 through AC-15 pressure is
-preserved. `application-client-ready` means semantic acceptance, not client
-implementation completion. After its gate lands, reconcile and promote the two
-production nodes for coordinated execution.
+- Campaign authorization message `1292` approves the direct-Station reshape.
+- ADR allocation message `1304` reserves ADR 0051,
+  `direct-station-product-boundary`.
+- [#134](https://github.com/lossyrob/telex/issues/134)
+  `direct-station-contract-reset` is in progress.
+- Initial preparation run `cda96dff-f2b8-49cc-b258-350b901e29ff` caught stale
+  model resolution before terminal launch. Streamliner repaired paw-init to
+  resolve the live model catalog and reject mismatched WorkflowContext fields.
+- Proven preparation run `c7d3f616-466d-4bb2-a3b4-16f1d975f025` validated
+  current base `53afb88`, `never-commit`, local/untracked `.paw`, no workflow
+  commit, `["--yolo"]`, `gpt-5.6-sol`, and
+  `general-reviewer:claude-opus-5`.
+- Paired launch run `419ba98f-6c1e-4829-8255-7e4de25a2a70` started:
+  - implementer `9b7f8a6c-79f1-4967-afad-37b8dfbad5df` /
+    `telex://lossyrob/telex/T-A:operator-impl-134`;
+  - reviewer `e32f377b-49f6-4d23-a09c-96b107f32075` /
+    `telex://lossyrob/telex/T-A:operator-review-134`.
+- Both stations are `attended_push`; both sessions are live/working and
+  graph-bound. Scope/ADR control messages are durably queued for their current
+  turns.
+- The implementer opened
+  [PR #136](https://github.com/lossyrob/telex/pull/136) at
+  `59043ce5bf6b3fdd2bb7084777d15141929fbf41`.
+- The diff contains only `docs/design/DECISIONS.md`,
+  `docs/design/index.md`, and `docs/design/operator-station.md`. All six CI
+  checks pass and GitHub reports the PR mergeable.
+- Paired review is active. The builder-owned direction gate remains separate
+  and cannot be passed by the worker or reviewer.
+- [Review 4824128333](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824128333)
+  posted three blocking contract gaps and five additional clarifications. The
+  blockers require:
+  1. a closed state machine for detach/address removal with unresolved work;
+  2. exhaustive post-conditions for every declared Reply & Handle result; and
+  3. a default notification policy for all non-primary delivery roles.
+- These are node-scoped design-completeness repairs. They do not reopen the
+  direct product boundary, ADR 0051 allocation, or shared Application Client
+  ownership.
+- Campaign assigned the stale direct/assisted/quiet, route-back,
+  mode-transition, Operator integration/readiness, and requirements-crosswalk
+  re-baseline to Application Client
+  [#129](https://github.com/lossyrob/telex/issues/129) /
+  [PR #132](https://github.com/lossyrob/telex/pull/132), with issue
+  [#12](https://github.com/lossyrob/telex/issues/12) remaining the public
+  contract/checkpoint owner.
+- PR #136 must add a durable carry-forward reference but must not edit shared
+  Application Client files. It preserves generic AC-C15 source-resolution states
+  unless that owner returns an explicitly accepted narrowing. The cross-workstream
+  review thread stays open until #129 provides exact evidence.
+- The implementer pushed fixes at
+  `3e36028b6e3d84bcef647f38e43cfe1b2de035c8`; all six checks pass and the PR is
+  mergeable. Seven Operator-local review threads are resolved.
+- Discussion
+  [3687008544](https://github.com/lossyrob/telex/pull/136#discussion_r3687008544)
+  was reopened by workstream orchestration because its reply cited issue #12 but
+  did not yet provide the exact #129/PR #132 wording and bundle evidence required
+  by campaign. It is the only unresolved thread and remains an intentional
+  cross-workstream merge gate during re-review.
+- Application Client returned exact evidence at PR #132 head
+  `9f08628f10df132fb7b858380f3607760b7b2e48`. Operator review independently
+  verified the direct-Station wording, generic compound/reply/identity
+  preservation, all four AC-C15 states, green CI, mergeability, and bundle
+  manifest blob `b9861495527afe297e78f0546b0c54db8cd19b21` /
+  2423 bytes / SHA-256
+  `9e648d2005f9b368b0de72c6097bdd7432365e7afab43004399c2c6bd0b68e8d`.
+- The exact evidence was added to discussion 3687008544 and the thread was
+  resolved. All eight PR #136 threads are now resolved; paired re-review is the
+  remaining review step.
+- PR #132 is still candidate shared authority until merge. PR #136 final merge
+  readiness therefore depends on PR #132 merging at the verified evidence or on
+  an explicitly coordinated merge order. Issue #12 publication reconciliation
+  remains campaign-owned after #132 merge.
+- Second re-review
+  [4824505655](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824505655)
+  found three remaining blockers and two follow-ups:
+  - restart must exclude durably detached addresses;
+  - Reply & Handle must name shared typed retryability evidence and fail closed
+    on unclassified rejection;
+  - every AC-C15 non-authoritative state needs a pre-authoring refusal or
+    reconciliation-pending rule.
+- Campaign confirmed no new Application Client gap. PR #132 provides
+  `ApplicationClientError::RejectedBeforeAcceptance` and
+  `RejectionRetryability::{Transient, Permanent}`; unknown/unclassified
+  rejection is fail-closed/indeterminate and cannot auto-retry. The remaining
+  detach, AC-C15 authoring, reassignment, and safe-action wording is
+  Operator-local repair.
+- The implementer resolved the second review at
+  `7c6603ecd081255d8af370668cf3ddddc8075b50`. All five new threads and all
+  earlier threads are resolved; all six checks pass and GitHub reports the PR
+  mergeable. A fresh disposition-required final re-review request is with the
+  paired reviewer.
+- Final review
+  [4824865088](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824865088)
+  contains the verified automated +1 at that exact head with zero Must/Should
+  findings. All 13 threads are resolved.
+- PR #136 merge remains held because Application Client PR #132 is still open.
+  Campaign must authorize exact merge ordering; issue #12 publication
+  reconciliation follows PR #132 merge. The builder direction gate remains
+  separate from PR review and merge.
+- `station-app` remains planned and cannot launch until:
+  1. `direct-station-direction-gate` passes; and
+  2. Application Client `client-conformance` completes.
 
 ## Decisions
 
-- **The spike is Wave 1, not an untracked side project:** the workstream preserves
-  its purpose, boundary, and gate while allowing one session and one PR to move
-  quickly.
-- **The operator agent owns filtering policy:** Telex carries, routes, records,
-  and dispositions messages but does not decide what deserves human attention.
-- **The desktop app is a station, not a new protocol actor:** it attends durable
-  responsibility addresses through existing Telex semantics.
-- **The app is a control surface, not a control plane:** it sends instructions
-  through messages but does not own session lifecycle or workflow execution.
-- **Raw provenance survives mediation:** summaries and escalations identify their
-  source messages and source addresses; the operator agent never impersonates a
-  worker.
-- **Windows is the first supported desktop target:** the existing Streamliner
-  Tauri shell is reference implementation material, not a runtime dependency.
-- **Experimental integration does not set production architecture:** the spike
-  may use CLI subprocesses or in-process library access; the post-gate contract
-  decides the supported daemon/client boundary.
-- **The Application Client is campaign-owned through #12:** Operator Station
-  contributes requirements but does not independently own the shared
-  non-agent-station client used by Telex Watcher.
-- **Direct and assisted operation are routing configurations:** workers use
-  stable responsibility addresses; which station attends an ingress address
-  determines whether traffic reaches the desktop directly or passes through an
-  operator agent.
-- **Merged spike mechanisms remain evidence, not accepted contracts:** the
-  subprocess courier, full-history export, path-scoped store fingerprint,
-  experimental namespace, and current UI semantics remain replaceable until the
-  viability gate and the campaign-owned #12 seam accept a production boundary.
-- **Viability is accepted:** the builder wants to productionize the mediated
-  attention loop. The next confidence transition is an accepted design
-  contract, not additional spike implementation.
-- **Campaign mediation is a dogfood convention:** campaign control remains on
-  typed control addresses; selected human-attention messages use
-  `attention:rob` and the Station at `operator:rob`. The current `attention.*`
-  kinds and `campaignAttention` metadata are replaceable inputs to #114, not
-  accepted Telex extension semantics.
-- **Production Station contract accepted:** direct and assisted are exclusive
-  ingress topologies; quiet is assisted policy; unresolved mediated work is
-  drained or durably handed off during topology changes.
-- **Reply/disposition contract accepted:** Reply & Handle and disposition-only
-  outcomes notify the operator durably before the human root becomes terminal,
-  and every non-stale terminal assisted outcome leaves a machine-readable raw
-  thread record.
-- **Production extension accepted:** `urn:telex:operator-station:v1` defines
-  escalation, human-response, digest, and routed-outcome metadata for the
-  Station/operator applications. Telex core still carries it opaquely.
-- **Shared client dependency remains external:** #12 owns AC-01 through AC-15
-  convergence and the `application-client-ready` checkpoint; this workstream
-  must not implement a competing client or start production application work
-  before that checkpoint.
+- **Direct Station is the product:** agents send ordinary Telex messages directly
+  to configured human-attended Station addresses.
+- **Telex remains semantically dumb:** core transports opaque messages and
+  lifecycle facts; it does not decide what deserves human attention.
+- **No first-party mediation product:** Telex and Station ship no operator-agent
+  skill, semantic filter, required intermediary addresses, or route-back
+  lifecycle.
+- **External mediation remains possible:** users may create optional conventions
+  outside the product; unknown metadata stays opaque and cannot override core
+  fields or Station behavior.
+- **The desktop is a Station, not a protocol actor:** it consumes existing Telex
+  and Application Client semantics.
+- **Reply is ordinary Telex reply:** direct human responses stay in the original
+  thread; no product route-back intermediary is required.
+- **Local notification policy is application behavior:** Station maps attention,
+  disposition requirement, configured address, and local OS posture without
+  changing transport semantics.
+- **PR #130 remains closed evidence:** no extraction or merge occurs now.
+- **Generic reply metadata belongs to Application Client:** client-core decides
+  and conforms any supported implementation.
+- **Decision history is append-only:** ADR 0051 narrows/supersedes applicable
+  portions of ADRs 0047/0048 without rewriting them.
+- **Design gate before implementation:** #134 must land and the builder must pass
+  `direct-station-direction-gate` before `station-app`.
+- **Station uses the conformant client:** `station-app` depends on Application
+  Client `client-conformance`, not only semantic acceptance or first binding.
+- **Node launches use Streamliner:** launch-preparations API, configured v2
+  defaults, fetched CLI args including `--yolo`, `never-commit`, dynamic
+  latest-family model resolution, and preparation validation.
 
 ## Open Questions
 
-- Will #118's candidate shared contract preserve all final Operator AC-01
-  through AC-15 semantics and receive consumer/campaign approval? Until
-  `application-client-ready-gate` completes, no production Operator Station
-  node is launchable.
+- None for workstream execution. The builder-owned direction gate remains the
+  authority for accepting or rejecting the #134 design output.
 
 ## Imports and Exports
 
 ### Imports
 
-- The local-daemon workstream's local-exchange lifecycle, durable delivery,
-  attention, reply, disposition, and Postgres behavior.
-- The accepted Operator Station design and ADR 0047/0048.
-- The campaign's `application-client-ready` checkpoint, owned through issue #12,
-  before production Station integration begins.
-- Existing Telex client/library and backend traits used only as experimental
-  seams until the shared Application Client contract is accepted.
-- Streamliner Desktop's Tauri tray/feed/notification patterns as reference code,
-  not as a package or service dependency.
-- `telex-console` feed, address, thread, and provenance presentation concepts.
+- Telex local-exchange delivery, acknowledgment, disposition, liveness, and
+  backend contracts.
+- Application Client `client-conformance` before desktop implementation.
+- Historical spike, dogfood, and contract evidence without mediated topology
+  authority.
+- Streamliner Desktop and `telex-console` as UI/reference material only.
 
 ### Exports
 
-- A demonstrated mediated human-attention loop under
-  `spike/operator-station/`, with evidence and requirements in
-  `docs/notes/operator-loop-spike-report.md`.
-- The accepted production Operator Station/operator-loop domain contract in
-  `docs/design/operator-station.md`.
-- ADR 0047 and ADR 0048.
-- The corrected Operator Station AC-01 through AC-15 requirements export and
-  merged-source addendum on issue #12.
-- A separately installable human Station that remains optional to Telex core.
-- A reusable operator-agent role and routing convention that other orchestration
-  systems can adopt without Telex-specific workflow logic.
-- Dogfooding evidence and operational requirements for future portfolio-level
-  attention surfaces.
+- An accepted direct Station product contract and ADR 0051.
+- A separately installable human-attended desktop endpoint.
+- Direct agent-to-human durable messaging and reply UX.
+- Station-specific notification, provenance, health, recovery, and safety
+  evidence.
+- Non-normative lessons for users who independently build mediation conventions.
+- Operational evidence for future portfolio-level attention surfaces.
 
 ## Closeout Observations
 
-Parking lot for bounded polish, notification tuning, message rendering, and
-operator-agent prompt improvements discovered during dogfooding. Anything that
-changes Telex semantics, identity guarantees, routing architecture, or session
-lifecycle belongs in its own node, candidate, or follow-on workstream. The
-merged spike's current carry-forward items remain in
-`docs/notes/operator-loop-spike-report.md` and `reconciliation-note.md`; none is
-promoted into a closeout batch before the viability gate.
+Parking lot for bounded desktop polish, notification tuning, message rendering,
+and safe-link improvements discovered during direct Station dogfood. Anything
+that changes Telex semantics, Application Client contracts, identity guarantees,
+or routing architecture must be promoted into its owning workstream or a new
+design decision.
 
-- **Contract completed in #114 — reply/disposition clarity:** The production
-  contract now defines explicit **Reply & Handle** ordering and durable
-  disposition-only operator notification. `station-app` still owns the final
-  UX implementation and usability validation.
+- Reply/disposition clarity remains a `station-app` UX concern, but direct
+  operation no longer requires operator notification or route-back sequencing.
+- Reviewer/implementer feedback from #128 is captured in
+  `reconciliation-note.md`: settle product-boundary questions before launching
+  policy/topology implementation nodes.

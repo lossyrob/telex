@@ -2,12 +2,12 @@
   "schemaVersion": 1,
   "id": "operator-station",
   "projectKey": "telex",
-  "title": "Operator Station (mediated human-attention loop)",
-  "summary": "The production Operator Station contract is merged. Station and operator-agent implementation remain planned and blocked on the campaign's shared #12 application-client-ready checkpoint.",
+  "title": "Operator Station (direct human-attended Telex endpoint)",
+  "summary": "Direct Station reset PR #136 is review-approved at head 7c6603ecd081255d8af370668cf3ddddc8075b50 with green CI, clean mergeability, and zero unresolved threads. Merge is held on Application Client PR #132 ordering.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-07-22T10:22:04Z",
+  "updatedAt": "2026-07-31T02:12:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -36,6 +36,10 @@
     },
     {
       "repoId": "telex",
+      "path": "docs/design/application-client.md"
+    },
+    {
+      "repoId": "telex",
       "path": "docs/design/operator-station.md"
     },
     {
@@ -48,10 +52,6 @@
     },
     {
       "repoId": "telex",
-      "path": "docs/design/proposals/DISPATCH.md"
-    },
-    {
-      "repoId": "telex",
       "path": "telex-console/README.md"
     }
   ],
@@ -60,7 +60,7 @@
       "id": "operator-loop-spike",
       "type": "research",
       "title": "Vertical spike: mediated human-attention loop",
-      "summary": "Build one deliberately narrow Windows experimental loop: a worker sends to a stable attention address; an operator agent filters and escalates to a desktop-attended address; the Station shows the message and accepts a reply; the operator agent routes the response back with source provenance intact. Temporary CLI/library integration is allowed and must be documented rather than treated as the production contract.",
+      "summary": "Historical evidence node: proved a Windows human-attended Station, durable notification/reply loop, provenance, restart, and delivery/ack health. Its operator-agent topology remains non-normative evidence.",
       "status": "completed",
       "attention": "focus",
       "repoIds": [
@@ -77,8 +77,8 @@
     {
       "id": "viability-gate",
       "type": "gate",
-      "title": "Mediated attention loop is worth productionizing",
-      "summary": "Builder dogfoods the spike with several real sessions during a focused work period and decides whether it materially reduces terminal tab polling, preserves enough context, routes replies naturally, and filters at the right level. The gate may pass, reshape the boundary, or stop the workstream; no production contract work proceeds before it.",
+      "title": "Human-attended Station interaction is worth productionizing",
+      "summary": "Completed builder gate: the desktop inbox/notification/reply experience proved valuable. The later product reset keeps that viability evidence while rejecting prescribed mediation as product scope.",
       "status": "completed",
       "attention": "focus",
       "repoIds": [
@@ -91,8 +91,8 @@
     {
       "id": "station-contract",
       "type": "research",
-      "title": "Production Station and operator-loop contract",
-      "summary": "Using spike evidence, establish and document the accepted product boundary: human-attended address semantics; source/provenance conventions; namespaced message kinds and metadata; notification policy; reply/disposition behavior; direct, assisted, and quiet routing modes; operator-agent recovery expectations; identity and safety limits. Contribute application-client requirements to shared issue #12 rather than owning a desktop-only client contract.",
+      "title": "Initial production Station and operator-loop contract",
+      "summary": "Historical completed contract in issue #114/PR #116. Its direct Station findings remain evidence; mediation/operator-agent requirements are subject to ADR 0051 and the direct Station contract reset.",
       "status": "completed",
       "attention": "focus",
       "repoIds": [
@@ -109,93 +109,112 @@
       ]
     },
     {
-      "id": "station-app",
-      "type": "task",
-      "title": "Production Windows Operator Station",
-      "summary": "Implement the separately installable Windows desktop Station under the accepted product contract and the campaign's shared #12 application-client-ready checkpoint: configured operator addresses, actionable feed and threads, notification policy, reply and disposition, direct/assisted operation, backend selection, provenance display, restart/backfill behavior, and safe links without arbitrary command execution. Sketch; detail at promotion after station-contract.",
-      "status": "planned",
-      "attention": "watch",
+      "id": "direct-station-contract-reset",
+      "type": "research",
+      "title": "Direct Station product contract reset",
+      "summary": "Rewrite the normative Operator Station design around direct human-attended address operation, add ADR 0051, narrow ADRs 0047/0048, preserve mediation only as external non-normative evidence, and produce an implementation-ready station-app handoff.",
+      "status": "in-progress",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 134
+      },
       "dependsOn": [
         "station-contract"
       ],
       "externalDependsOn": [
         {
-          "id": "application-client-ready",
+          "id": "application-client-direct-station-rebaseline",
           "target": {
             "projectKey": "telex",
             "workstreamId": "application-client",
-            "nodeId": "application-client-ready-gate"
+            "nodeId": "client-core"
           },
-          "label": "Shared Application Client checkpoint from issue #12",
-          "url": "https://github.com/lossyrob/telex/issues/117",
+          "label": "Application Client direct-Station vocabulary and bundle re-baseline in PR #132",
+          "url": "https://github.com/lossyrob/telex/pull/132",
           "status": "pending"
         }
       ]
     },
     {
-      "id": "operator-broker",
-      "type": "task",
-      "title": "Reusable operator-agent role and routing policy",
-      "summary": "Package and document a reusable operator-agent role that attends worker-facing ingress addresses, resolves or clarifies routine messages, aggregates and summarizes related traffic, escalates human obligations with source provenance and recommendations, receives human replies, routes outcomes back, and dispositions both raw and mediated messages. It remains a reference integrator rather than Telex core behavior. Sketch; detail at promotion after station-contract.",
-      "status": "planned",
-      "attention": "watch",
-      "repoIds": [
-        "telex"
-      ],
-      "dependsOn": [
-        "station-contract"
-      ],
-      "externalDependsOn": [
-        {
-          "id": "application-client-ready",
-          "target": {
-            "projectKey": "telex",
-            "workstreamId": "application-client",
-            "nodeId": "application-client-ready-gate"
-          },
-          "label": "Shared Application Client checkpoint from issue #12",
-          "url": "https://github.com/lossyrob/telex/issues/117",
-          "status": "pending"
-        }
-      ]
-    },
-    {
-      "id": "usable-loop-gate",
+      "id": "direct-station-direction-gate",
       "type": "gate",
-      "title": "Production Station and operator loop are usable",
-      "summary": "Builder validates the production app and operator role together through direct and assisted scenarios. The system must make source provenance legible, route replies predictably, avoid obvious notification overload, and remain optional to ordinary Telex use before hardening proceeds.",
+      "title": "Direct Station product direction accepted",
+      "summary": "Builder accepts the direct human-attended Station contract, ADR 0051 supersession boundary, external-only mediation disposition, Application Client dependency, and downstream implementation geometry before station-app starts.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
         "telex"
       ],
       "dependsOn": [
-        "station-app",
-        "operator-broker"
+        "direct-station-contract-reset"
       ]
     },
     {
-      "id": "operational-hardening",
+      "id": "station-app",
       "type": "task",
-      "title": "Postgres, recovery, notification, security, and packaging hardening",
-      "summary": "Harden the accepted loop through realistic use: networked Postgres and remote senders; Station and operator-agent restart/offline recovery; unoccupied and stale addresses; noisy workloads and digest/suppression behavior; duplicate delivery; delayed replies; sender/provenance presentation; safe link handling; install/upgrade/auto-start expectations; documentation and troubleshooting. Produce a concise validation report for closure. Sketch; detail after usable-loop-gate.",
+      "title": "Production Windows Operator Station",
+      "summary": "Implement the separately installable Windows desktop Station under the accepted direct contract: configured attended addresses, actionable feed and threads, local notifications, ordinary reply and exact-recipient disposition, backend selection, provenance, health, restart/backfill, inert rendering, safe links, and evidence-preserving cleanup.",
       "status": "planned",
       "attention": "watch",
       "repoIds": [
         "telex"
       ],
       "dependsOn": [
-        "usable-loop-gate"
+        "direct-station-direction-gate"
+      ],
+      "externalDependsOn": [
+        {
+          "id": "application-client-conformance",
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "client-conformance"
+          },
+          "label": "Supported/conformant Application Client implementation",
+          "url": "https://github.com/lossyrob/telex/issues/117",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "id": "direct-station-usability-gate",
+      "type": "gate",
+      "title": "Direct human-attended Station is usable",
+      "summary": "Builder validates direct agent-to-Station messaging, notification usefulness, thread/reply/disposition clarity, source identity, health, restart continuity, and optionality before operational hardening proceeds.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "station-app"
+      ]
+    },
+    {
+      "id": "operational-hardening",
+      "type": "task",
+      "title": "Postgres, recovery, notification, security, and packaging hardening",
+      "summary": "Harden the direct Station through credentialed Postgres and remote senders; restart/offline and unoccupied-address behavior; duplicate/delayed delivery; notification pressure and OS suppression; sender/provenance presentation; safe links; install/upgrade/auto-start/signing; diagnostics, cleanup, and troubleshooting.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "direct-station-usability-gate"
       ]
     },
     {
       "id": "closure-gate",
       "type": "gate",
-      "title": "Human-attention loop validated and workstream reconciled",
-      "summary": "Builder runs the hardened Station with several real local and remote sessions, confirms direct and mediated operation, validates recovery and notification posture, reviews the operational-hardening evidence, and accepts the exported Station/operator-loop contract. Reconciliation records lessons for future Streamliner portfolio-attention work.",
+      "title": "Direct Operator Station validated and workstream reconciled",
+      "summary": "Builder runs the hardened direct Station with real local and remote agents, confirms recovery and notification posture, reviews hardening evidence, dispositions closeout observations, and accepts the exported Station contract.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
@@ -209,8 +228,8 @@
   "checkpoints": [
     {
       "id": "viability-proven",
-      "title": "Mediated attention loop proven valuable",
-      "summary": "A real vertical loop exists and builder dogfooding has established that it is worth productionizing.",
+      "title": "Human-attended Station interaction proven valuable",
+      "summary": "Historical spike and dogfood proved that a desktop Telex inbox, notifications, and durable reply path are worth productionizing.",
       "status": "completed",
       "nodeIds": [
         "operator-loop-spike",
@@ -218,21 +237,29 @@
       ]
     },
     {
-      "id": "usable-station",
-      "title": "Production Station and operator role usable",
-      "summary": "The accepted contract, desktop Station, and reusable operator-agent role work together and have passed builder UX validation.",
+      "id": "direct-station-contract-ready",
+      "title": "Direct Station contract accepted",
+      "summary": "The normative direct-attendance contract and ADR 0051 are accepted, mediation is external-only, and station-app has a stable design/dependency handoff.",
       "status": "planned",
       "nodeIds": [
-        "station-contract",
+        "direct-station-contract-reset",
+        "direct-station-direction-gate"
+      ]
+    },
+    {
+      "id": "usable-station",
+      "title": "Direct Station usable",
+      "summary": "The supported desktop Station works through the conformant Application Client and has passed builder usability validation.",
+      "status": "planned",
+      "nodeIds": [
         "station-app",
-        "operator-broker",
-        "usable-loop-gate"
+        "direct-station-usability-gate"
       ]
     },
     {
       "id": "closure-ready",
       "title": "Operator Station operationally validated",
-      "summary": "The human-attention loop has survived Postgres, restart/offline, notification-pressure, provenance, safety, and packaging validation and is ready for closure.",
+      "summary": "The direct human-attended endpoint has survived Postgres, restart/offline, notification-pressure, provenance, safety, packaging, and cleanup validation.",
       "status": "planned",
       "nodeIds": [
         "operational-hardening",

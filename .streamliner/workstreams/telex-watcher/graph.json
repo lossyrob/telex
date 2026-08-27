@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "Production Watcher contract #110 is complete. Runtime/template nodes have resolvable pending dependencies on application-client/application-client-ready-gate; #117/#118 is paused pending explicit builder scope approval.",
+  "summary": "Operator-approved redesign reset Watcher around minimal agent-authored scripts. Issue #127 / PR #131 are closed unmerged as superseded evidence; minimal-watcher-authoring-contract issue #133 is active with paired implementer/reviewer sessions.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-22T14:29:55Z",
+  "updatedAt": "2026-07-30T17:40:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -109,98 +109,177 @@
       ]
     },
     {
-      "id": "watcher-runtime",
-      "type": "task",
-      "title": "Production Telex Watcher runtime and CLI",
-      "summary": "Implement the separately installable in-repo Watcher application under the accepted contract: supervised per-user lifecycle, durable registry and state, bounded scheduler and execution, application-client integration from #12, Telex event transaction, inspection/control CLI, diagnostics, and backend/profile support. Sketch; detail after watcher-contract and the campaign application-client checkpoint.",
-      "status": "planned",
-      "attention": "watch",
+      "id": "minimal-watcher-authoring-contract",
+      "type": "research",
+      "title": "Minimal Watcher authoring and registration contract",
+      "summary": "Reset the normative Watcher design around command-plus-policy registration, detector request/result v2, runtime-generated event sequence identity, optional hardening, and a narrowly superseding ADR while retaining provider-neutral trusted-local receipt-gated execution.",
+      "status": "in-progress",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 133
+      },
       "dependsOn": [
         "watcher-contract"
-      ],
-      "externalDependsOn": [
-        {
-          "id": "application-client-ready",
-          "target": {
-            "projectKey": "telex",
-            "workstreamId": "application-client",
-            "nodeId": "application-client-ready-gate"
-          },
-          "label": "Application Client semantic contract accepted (#117/#118)",
-          "url": "https://github.com/lossyrob/telex/issues/118"
-        }
       ]
     },
     {
-      "id": "detector-template-library",
-      "type": "task",
-      "title": "Agent-authored detector templates and skill guidance",
-      "summary": "Package editable, tested detector templates and agent guidance for GitHub PRs, Azure DevOps PRs, HTTP/JSON, and command/file conditions. Templates demonstrate protocol and safe state practice without moving provider semantics into the runtime. Sketch; detail after watcher-contract.",
-      "status": "planned",
-      "attention": "watch",
-      "repoIds": [
-        "telex"
-      ],
-      "dependsOn": [
-        "watcher-contract"
-      ],
-      "externalDependsOn": [
-        {
-          "id": "application-client-ready",
-          "target": {
-            "projectKey": "telex",
-            "workstreamId": "application-client",
-            "nodeId": "application-client-ready-gate"
-          },
-          "label": "Application Client semantic contract accepted (#117/#118)",
-          "url": "https://github.com/lossyrob/telex/issues/118"
-        }
-      ]
-    },
-    {
-      "id": "usable-watcher-gate",
+      "id": "dumb-watcher-contract-gate",
       "type": "gate",
-      "title": "Production Watcher and detector authoring are usable",
-      "summary": "Builder validates the production runtime and template workflow together: create or adapt detectors rapidly, operate several watches concurrently, inspect failures and provenance, and receive predictable Telex events without session background tasks.",
+      "title": "Minimal Watcher contract is dumb and useful",
+      "summary": "Builder accepts that an agent can write or copy a script and register command, bounds, and route without mandatory manifests, pinning, kind allowlists, provider preflight, downtime declarations, or a prescribed test framework.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
         "telex"
       ],
       "dependsOn": [
-        "watcher-runtime",
-        "detector-template-library"
+        "minimal-watcher-authoring-contract"
       ]
     },
     {
-      "id": "operational-hardening",
+      "id": "watcher-runtime-core",
       "type": "task",
-      "title": "Watcher reliability, security, packaging, and scale hardening",
-      "summary": "Exercise restart and upgrade, malformed/hung detectors, credential and log handling, rate limits, jitter/backoff, duplicate events, many concurrent watches, SQLite/Postgres targets, terminal lifecycle, script updates, daemon failures, and install/troubleshooting behavior. Produce validation evidence for closure. Sketch; detail after usable-watcher-gate.",
+      "title": "Minimal Watcher runtime core",
+      "summary": "Implement persistent registry and lifecycle, bounded scheduling/execution, v2 detector protocol, opaque state, runtime-generated event identity, fixed routing, receipt-gated commits, and attempt/health diagnostics under the accepted minimal contract.",
       "status": "planned",
       "attention": "watch",
       "repoIds": [
         "telex"
       ],
       "dependsOn": [
-        "usable-watcher-gate"
+        "dumb-watcher-contract-gate"
+      ],
+      "externalDependsOn": [
+        {
+          "id": "application-client-conformance",
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "client-conformance"
+          },
+          "label": "Supported Application Client core/binding conformance accepted",
+          "url": "https://github.com/lossyrob/telex/issues/117"
+        }
+      ]
+    },
+    {
+      "id": "watcher-cli-ux",
+      "type": "task",
+      "title": "Watcher CLI and diagnostics UX",
+      "summary": "Provide add/list/show/pause/resume/update/remove plus concise status, attempt, state, and failure inspection so agents can register quickly and repair watches after execution.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "watcher-runtime-core"
+      ]
+    },
+    {
+      "id": "v1-compatibility-adapter",
+      "type": "task",
+      "title": "Optional experimental v1 compatibility adapter",
+      "summary": "If still valuable, provide an explicit compatibility/import path for spike-era v1 registrations and detector results without constraining the v2 product surface.",
+      "status": "planned",
+      "attention": "parked",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "watcher-runtime-core"
+      ]
+    },
+    {
+      "id": "five-minute-custom-watch-gate",
+      "type": "gate",
+      "title": "A custom watch is operational in five minutes",
+      "summary": "Builder verifies a frontier agent can create a small customized watch in a few turns, register it without mandatory framework ceremony, leave it running after the session ends, and diagnose a failure from Watcher status and attempt/state surfaces.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "watcher-runtime-core",
+        "watcher-cli-ux"
+      ]
+    },
+    {
+      "id": "minimal-example-pack",
+      "type": "task",
+      "title": "Minimal optional detector examples",
+      "summary": "Ship small copyable GitHub, Azure DevOps, HTTP/JSON, file, and command examples with short guidance, extracting selected PR #131 foundations without creating a mandatory template framework.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "dumb-watcher-contract-gate"
+      ]
+    },
+    {
+      "id": "watcher-hardening-recipes",
+      "type": "task",
+      "title": "Optional Watcher hardening recipes",
+      "summary": "Document optional project choices for Git pinning, digest checks, kind allowlists, provider preflight, cursor/downtime design, fixtures, and deeper tests without making them ordinary registration requirements.",
+      "status": "planned",
+      "attention": "parked",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "minimal-example-pack"
+      ]
+    },
+    {
+      "id": "examples-accelerate-gate",
+      "type": "gate",
+      "title": "Examples accelerate rather than constrain",
+      "summary": "Builder verifies agents may use an example or ignore the pack and write a detector directly, and that examples reduce setup cycles without imposing a provider framework.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "minimal-example-pack"
+      ]
+    },
+    {
+      "id": "runtime-hardening",
+      "type": "task",
+      "title": "Watcher runtime reliability and packaging hardening",
+      "summary": "Exercise restart/crash, malformed or hung scripts, output caps, many watches, SQLite/Postgres routes, diagnostics retention, packaging, upgrade, and operational recovery after the minimal UX and examples are accepted.",
+      "status": "planned",
+      "attention": "watch",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "five-minute-custom-watch-gate",
+        "examples-accelerate-gate"
       ]
     },
     {
       "id": "closure-gate",
       "type": "gate",
       "title": "External watch loops reliably deliver Telex attention",
-      "summary": "Builder validates several real long-duration watches, including GitHub and Azure DevOps, confirms session queues remain free of background waiters, reviews hardening evidence, and accepts the Watcher/runtime/template exports and campaign integration with Operator Station.",
+      "summary": "Builder validates several real long-duration watches, confirms session queues remain free of background waiters, accepts the minimal authoring UX and diagnostics, reviews hardening evidence, and accepts campaign integration with Operator Station.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [
         "telex"
       ],
       "dependsOn": [
-        "operational-hardening"
+        "runtime-hardening"
       ]
     }
   ],
@@ -216,15 +295,26 @@
       ]
     },
     {
-      "id": "usable-watcher",
-      "title": "Production Watcher and detector templates usable",
-      "summary": "The accepted contract, application-client integration, runtime, and editable template workflow work together and have passed builder validation.",
+      "id": "minimal-contract-accepted",
+      "title": "Minimal Watcher authoring contract accepted",
+      "summary": "The intended design supports command-plus-policy registration, agent-owned provider semantics, runtime-generated event identity, and optional hardening without a mandatory template framework.",
       "status": "planned",
       "nodeIds": [
-        "watcher-contract",
-        "watcher-runtime",
-        "detector-template-library",
-        "usable-watcher-gate"
+        "minimal-watcher-authoring-contract",
+        "dumb-watcher-contract-gate"
+      ]
+    },
+    {
+      "id": "usable-watcher",
+      "title": "Minimal Watcher runtime, CLI, and examples usable",
+      "summary": "The supported client, minimal runtime/CLI, and optional examples let agents create, operate, and diagnose watches without session-owned polling or authoring ceremony.",
+      "status": "planned",
+      "nodeIds": [
+        "watcher-runtime-core",
+        "watcher-cli-ux",
+        "five-minute-custom-watch-gate",
+        "minimal-example-pack",
+        "examples-accelerate-gate"
       ]
     },
     {
@@ -233,7 +323,7 @@
       "summary": "Long-duration external observation and Telex event delivery have survived realistic reliability, security, packaging, and scale validation.",
       "status": "planned",
       "nodeIds": [
-        "operational-hardening",
+        "runtime-hardening",
         "closure-gate"
       ]
     }

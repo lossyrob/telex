@@ -9,13 +9,13 @@ zero-config) or Postgres (networked, with or without Microsoft Entra auth).
 One small binary, `telex`. Carries its own usage instructions for agents: run
 `telex skill`.
 
-The repository also ships a Copilot CLI plugin marketplace (`.github/plugin/`)
+The repository also ships a Copilot plugin marketplace (`.github/plugin/`)
 whose plugin lives under `copilot/plugin/` (`plugin.json` + `hooks.json` +
 bootstrap skill). All Copilot-specific content is nested under `copilot/`
 (`COPILOT.md`, the `bridge/` source, and `plugin/`), so the repository root stays
 harness-neutral with room for future sibling harness plugins. The plugin maps Copilot
-session env into generic telex session inputs, handles non-destructive
-`sessionEnd`, and guards turn-end re-arming.
+session env into generic telex session inputs, handles CLI and Copilot App
+`sessionEnd` semantics, and guards turn-end re-arming.
 
 ## Documentation
 
@@ -74,7 +74,7 @@ message peers. To hand an agent a specific assignment in one command:
 telex skill --address workstream:proj/node:issue-215
 ```
 
-In Copilot CLI, install/use the telex plugin and bind with push delivery so
+In Copilot CLI or Copilot App, install/use the telex plugin and bind with push delivery so
 messages arrive as turns (no waiter to run or re-arm):
 
 ```sh

@@ -25,12 +25,18 @@ repository-specific author/comment filtering. The builder passed the viability
 gate after scoped post-merge dogfood confirmed useful, low-noise PR supervision
 without a session-owned Loop task.
 
-The `watcher-contract` node landed the accepted production design in
-[PR #115](https://github.com/lossyrob/telex/pull/115). Production implementation
-consumes the shared Telex Application Client seam tracked in
-[#12](https://github.com/lossyrob/telex/issues/12), alongside the Operator Station
-workstream. The Watcher runtime and detector-template library can then advance
-under that accepted contract before operational hardening and closure.
+The `watcher-contract` node landed the first production design in
+[PR #115](https://github.com/lossyrob/telex/pull/115). Its provider-neutral,
+trusted-local, fixed-route, receipt-gated architecture remains a durable input,
+but operator dogfood later rejected its opinionated authoring and registration
+ceremony. The next confidence transition is therefore a minimal-authoring
+contract that supersedes the pinning, manifest, allowed-kind, preflight, and
+downtime requirements while preserving the core Watcher boundary.
+
+After that contract is accepted, runtime work consumes the supported Telex
+Application Client seam tracked in [#12](https://github.com/lossyrob/telex/issues/12).
+Minimal examples may proceed from the new contract without waiting for runtime
+implementation.
 
 The richer rationale and detector protocol sketch are preserved in
 [`docs/initial-shaping.md`](docs/initial-shaping.md).
@@ -55,12 +61,13 @@ The richer rationale and detector protocol sketch are preserved in
 ## Boundaries
 
 - **In scope:** a per-user headless Watcher process; trusted local detector
-  commands; persistent watch registration and opaque detector state; bounded
-  scheduling, timeout, concurrency, retry, backoff, and logs; fixed-target Telex
-  event emission; pause/resume/update/delete inspection surfaces; pinned and
-  development-friendly script lifecycle; GitHub and Azure DevOps detector
-  examples; restart recovery; local SQLite and networked Postgres operation;
-  production packaging and troubleshooting.
+  commands; minimal persistent registration and opaque detector state; bounded
+  scheduling, timeout, concurrency, retry, backoff, process cleanup, output, and
+  logs; fixed-target Telex event emission; receipt-gated state commit;
+  runtime-generated event sequence identity; pause/resume/update/delete and
+  attempt/state inspection surfaces; small optional examples; restart recovery;
+  local SQLite and networked Postgres operation; production packaging and
+  troubleshooting.
 - **Out of scope:** general cron or workflow automation; arbitrary post-trigger
   actions; interpreting provider semantics in the Watcher runtime; running
   scripts inside the Telex local exchange or Operator Station; remote
@@ -71,7 +78,8 @@ The richer rationale and detector protocol sketch are preserved in
   beyond same-user trusted-local execution; webhook/GitHub App ingestion;
   multi-host ownership and failover of one watch; a rich Watcher UI; remote
   administration; cross-principal authorization beyond the selected Telex
-  backend's trust model.
+  backend's trust model; optional pinning/digest guards, manifests, kind
+  allowlists, provider preflight, downtime budgets, and deep hardening recipes.
 
 ## Current State
 
@@ -100,15 +108,51 @@ The `watcher-contract` completed through
 Watcher shared-client requirements were dual-approved and published to
 [issue #12](https://github.com/lossyrob/telex/issues/12#issuecomment-5042702401).
 
-No Watcher implementation node is launch-ready yet. `watcher-runtime` and
-`detector-template-library` are planned with resolvable dependencies on
-`telex/application-client/application-client-ready-gate`. Application Client
-workstream [#117](https://github.com/lossyrob/telex/issues/117) and
-contract-convergence node [#118](https://github.com/lossyrob/telex/issues/118)
-exist but are paused pending explicit builder scope approval. They are not active
-work until campaign relays that decision. After authorization, campaign/#12 must
-disposition the requirements and complete the shared gate before either Watcher
-node can become ready. There is no spike-private fallback.
+Application Client contract convergence completed through
+[#118](https://github.com/lossyrob/telex/issues/118) and clean replacement
+[PR #126](https://github.com/lossyrob/telex/pull/126), merged at
+`62c2b23cc3d54877226f46df44d6036b7dffa380`. Polluted
+[PR #123](https://github.com/lossyrob/telex/pull/123) is closed unmerged at
+`8b388a3c65a5bf804d6b8d5b43334047fa92ceb2` and remains preserved only as
+protocol-forensics evidence; its old approval and merge-floor records are not
+authority.
+
+[Issue #12](https://github.com/lossyrob/telex/issues/12) now publishes
+`application-client-ready` as a design-only semantic checkpoint. It accepts all
+15 Watcher requirements and unlocks detailed downstream planning, but it does
+not mean a supported client core, first binding, conformance suite, or consumer
+integration exists. Its supporting traceability link still points at the
+pre-repair `docs/design/application-client-crosswalk.md`; Application Client
+orchestration owns updating that link to
+`docs/notes/application-client/requirements-crosswalk.md`. Non-blocking wording
+alignment remains tracked in
+[#124](https://github.com/lossyrob/telex/issues/124).
+
+The first detector-template implementation was promoted through
+[#127](https://github.com/lossyrob/telex/issues/127) and
+[PR #131](https://github.com/lossyrob/telex/pull/131). The implementation was
+technically reviewed and merge-ready, but operator product feedback rejected
+its mandatory template-framework boundary. Both tracker and PR were closed
+without merge on 2026-07-30 as superseded, not as an implementation-defect
+finding. The branch, reviews, repairs, fixtures, and conformance evidence remain
+preserved as examples and implementation learning.
+
+The approved direction is now a deliberately dumb Watcher: registration names
+an agent-authored command plus minimal execution and fixed-routing policy; the
+script owns provider semantics, event kind/content, provider cursor/replay, and
+optional hardening. Watcher owns generic lifecycle, bounds, diagnostics, opaque
+state, durable Telex delivery, receipt-gated commit, and runtime-generated event
+sequence identity.
+
+`minimal-watcher-authoring-contract` is active through
+[#133](https://github.com/lossyrob/telex/issues/133), with Streamliner-launched
+implementer and reviewer sessions attached at `watcher-impl-133` and
+`watcher-review-133`. It must revise `docs/design/watcher.md`, add v2
+registration/request/result schemas, and add a new ADR that narrowly supersedes
+ADR 0046's authoring/provenance details while reaffirming the core architecture.
+Runtime and example nodes remain planned until the new contract and its builder
+gate are accepted. Runtime additionally depends on Application Client
+`client-conformance`. There is no private-client or mandatory-template fallback.
 
 ## Decisions
 
@@ -151,18 +195,40 @@ node can become ready. There is no spike-private fallback.
 - **The production Watcher domain contract is accepted:** `docs/design/watcher.md`,
   its four canonical schemas, and ADR 0046 govern downstream runtime/template
   work. Intentional changes require normal design/decision updates.
+- **The original contract is now a historical input, not current authoring
+  direction:** provider-neutral trusted-local execution, fixed routing,
+  structured results, receipt-gated state, diagnostics, and no workflow actions
+  are retained. A new design node must supersede mandatory script pinning,
+  digests, manifests, event-kind allowlists, provider preflight, downtime
+  declarations, and template conformance as ordinary registration requirements.
+- **Watcher generates event identity:** runtime persists a per-watch committed
+  event sequence so retries retain one ID and later recurrences receive new IDs;
+  agent scripts do not implement distributed retry/occurrence identity.
+- **Examples are optional teaching material:** agents may copy an example or
+  write a script from scratch. Fixtures, tests, manifests, pinning, and provider
+  hardening remain user/project choices rather than product ceremony.
 - **There is no private Application Client fallback:** production Watcher nodes
   wait for #12/campaign convergence. CLI subprocess parsing, raw daemon IPC,
   `TELEX_WATCHER_INTERNAL_SEND_ONCE_V1`, and sender occupancy are not accepted
   production client seams.
+- **`application-client-ready` is design-only:** it permits detailed node
+  promotion under the accepted semantics but does not satisfy
+  `watcher-runtime`'s dependency on an implemented, conformant supported client.
+- **Node launches use the Streamliner launch broker:** future implementer and
+  reviewer sessions use the graph-configured Watcher v2 prompt profiles through
+  `POST /api/launch-preparations/runs`; no hand-written node terminal prompts or
+  direct terminal helper launches are permitted.
+- **Workers execute product missions, not workstream gates:** gate, approval,
+  reconciliation, and evidence state remains orchestration-owned and off product
+  PR branches unless a node explicitly names an artifact as a product
+  deliverable.
 
 ## Open Questions
 
-- Which of the 15 Watcher shared-client requirements will #12 accept, defer, or
-  reject, and which dispositions block runtime versus template promotion?
-- When `application-client-ready` exists, should `watcher-runtime` and
-  `detector-template-library` be promoted in parallel or staged around a shared
-  conformance harness?
+- Is an explicit v1 compatibility adapter worth carrying for the experimental
+  spike, or is documented re-registration sufficient?
+- Which bounded parts of PR #131 should be extracted later into the minimal
+  example pack or optional hardening recipes?
 
 ## Imports and Exports
 
@@ -172,15 +238,14 @@ node can become ready. There is no spike-private fallback.
   address routing, attention levels, metadata, and Postgres support.
 - Existing Loop skill detector logic and tests as domain examples, excluding its
   owner-bound worker and attached waiter runtime.
-- The `telex/application-client/application-client-ready-gate` export from
-  Application Client workstream #117 after contract convergence #118 and #12
-  dispositions.
+- The `telex/application-client/client-conformance` export from Application
+  Client workstream #117 before production runtime integration.
 
 ### Exports
 
 - A demonstrated generic detector protocol and reliable external watch loop.
-- GitHub and Azure DevOps detector templates suitable for rapid agent
-  customization.
+- Small optional GitHub, Azure DevOps, HTTP/JSON, file, and command examples
+  suitable for rapid agent customization without a mandatory framework.
 - A separately installable Telex Watcher application that can target any durable
   Telex address.
 - Normalized, provenance-rich watch event conventions consumable by agent
@@ -188,17 +253,17 @@ node can become ready. There is no spike-private fallback.
 - Operational evidence about application-client needs shared with issue #12 and
   the Operator Station campaign workstream.
 - The accepted production Watcher contract in `docs/design/watcher.md`, ADR 0046,
-  and canonical request/result/event-metadata/health schemas.
+  its superseding minimal-authoring ADR, and canonical v2
+  registration/request/result schemas.
 
 ## Closeout Observations
 
 - Test-support helper packaging is promoted into the accepted Watcher contract:
   `watcher-runtime` must prove the default production package excludes
   `fake_detector` and `fake_telex` while keeping the product crate top-level.
-- PAW PR-sentry bootstrap must run a terminal PR-state check immediately before
-  adding state/activity watches. A PR can merge during detector-bundle and
-  credential preflight; merged/closed state should skip registration rather than
-  leave stale watches or start a Loop fallback.
+- PR #131's provider ordering, bounded metadata, recurrence identity, and
+  cross-platform fixes remain candidates for optional examples or
+  library-maintainer tests, not ordinary registration requirements.
 
 Continue parking bounded detector-template, diagnostics, CLI, and polling-policy
 improvements here during dogfooding. Any expansion into general automation,

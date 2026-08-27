@@ -29,6 +29,35 @@ domain semantics into `docs/design/watcher.md`, four canonical schemas, and ADR
 Downstream implementation is now waiting on campaign acceptance of the shared
 Application Client rather than on unresolved Watcher-domain design.
 
+Application Client convergence subsequently completed through clean replacement
+PR #126 and merge `62c2b23cc3d54877226f46df44d6036b7dffa380`.
+The original PR #123 was closed unmerged and preserved for protocol forensics
+after its worker branch accumulated PAW plans, approval ledgers, source
+snapshots, and other orchestration evidence. The clean replacement retained only
+the six intended product-documentation paths and moved requirements traceability
+from the normative design set to `docs/notes/application-client/`.
+
+Issue #12 now publishes `application-client-ready`, but explicitly as a
+design-only checkpoint. This resolves the semantic convergence prerequisite and
+permits detailed node promotion; it does not provide the supported client core,
+binding, conformance, or consumer-integration export that production
+`watcher-runtime` needs.
+
+The first template-library implementation then reached a technically
+merge-ready state in PR #131 after three substantive review repairs. Operator
+use and document review exposed a more important product issue: the accepted
+contract and node geometry had converted optional agent hardening into mandatory
+Watcher ceremony. PR #131 and issue #127 were closed without merge as
+superseded, preserving their branch, reviews, and implementation evidence.
+
+The approved redesign makes Watcher a dumb persistent execution/delivery
+mechanism. Registration contains an agent-authored command, generic execution
+bounds, and fixed Telex routing. The script owns provider semantics and event
+content. Pinning, manifests, kind policies, provider preflight, downtime
+declarations, fixtures, and deep tests become optional user/project choices.
+Watcher retains opaque state, diagnostics, receipt-gated commit, and owns
+runtime-generated event sequence identity.
+
 Post-approval Watcher-sentry preflight also caught that PR #115 had merged before
 its state/activity watches were registered. No watches or Loop fallback were
 started, and the shared runtime remained reusable. Template guidance must make
@@ -49,6 +78,21 @@ terminal state the final check immediately before registration.
 - **Held:** The production contract remained design-only and did not promote CLI
   subprocess parsing, raw daemon IPC, the private send-once environment
   contract, or sender occupancy into a supported Application Client.
+- **Leaked:** The first Application Client implementation session treated
+  workstream gates, exact-byte approvals, evidence accounting, and workflow
+  recovery as worker-owned product-branch tasks. PR #123 was closed unmerged;
+  the replacement path restored the worker/orchestrator authority boundary.
+- **Held:** The Watcher consumer review caught the W-15 status-provenance gap,
+  and the repaired contract preserved the full send-only requirement set without
+  creating a Watcher-private seam.
+- **Leaked:** The production contract and template node made safety mechanisms
+  that can be useful in mature projects mandatory for ordinary agent-authored
+  watches. That boundary optimized a framework before proving the simplest
+  authoring experience.
+- **Held:** PR #131 did not leak provider semantics into the runtime and produced
+  reusable examples, ordering/size fixes, and review evidence. Closing it
+  unmerged is a product-direction reset, not a rejection of implementation
+  quality.
 
 ## Contracts and exports
 
@@ -76,8 +120,18 @@ campaign-owned Application Client checkpoint.
 PR #115 completed that domain contract. Runtime/template workers can rely on
 `docs/design/watcher.md`, ADR 0046, and the four schemas without reopening
 detector, state, lifecycle, trust, failure, provenance, health, or message
-semantics. They cannot launch until #12 dispositions produce
-`application-client-ready`.
+semantics.
+
+The Application Client semantic export is available through issue #12 and clean
+PR #126. Production runtime still needs the explicit `client-conformance`
+export. The minimal authoring contract and optional examples do not require the
+implemented client and can proceed first.
+
+PR #131 remains a source of optional examples and implementation learning:
+provider scripts, bounded process helpers, deterministic provider ordering,
+bounded metadata, recurrence regression tests, and cross-platform fixes. Its
+manifest schema, required digests, paired registrations, universal checklist,
+and large conformance suite are not accepted as mandatory product surface.
 
 ## Context fitness
 
@@ -95,6 +149,20 @@ resource rather than credentials alone.
 Parallel contract work added two useful controls: campaign-allocated ADR numbers
 prevented shared decision-log collisions, and a byte-exact dual-orchestrator
 draft gate kept the #12 export aligned with the final reviewed Watcher contract.
+
+The Application Client incident exposed a larger context failure: the worker
+prompt let workstream-stage mechanics become implementation scope and allowed
+off-branch evidence to enter a product PR. The campaign's updated v2 launch
+profiles and launch-broker protocol now make the node mission and authority
+boundary explicit. Future Watcher nodes must be launched through Streamliner
+rather than hand-written terminal prompts.
+
+The Watcher reset exposed a shaping failure rather than a worker failure. The
+node faithfully implemented the accepted design and issue, but those artifacts
+overfit hardening evidence and did not preserve the operator's desired
+"write a small script, register it, and move on" workflow. Future contract
+shaping must test the shortest user journey before promoting optional safety
+recipes into required schemas and gates.
 
 ## Attention allocation
 
@@ -118,6 +186,12 @@ unchanged prior state, and made actionable inbound backlog force
 `productionReady = false`. Those changes strengthened the domain contract
 without changing the already-approved shared-client requirements.
 
+During shared-contract convergence, Watcher attention was correctly spent on
+the W-15 status-provenance omission. Campaign/operator attention then shifted to
+the PR #123 protocol failure, froze the campaign, and authorized a clean
+product-only repair. That was recovery work caused by authority and context
+leakage, not additional Application Client product scope.
+
 ## Inspired vs. recovery interventions
 
 - **Inspired:** Real sender lifecycle evidence produced the stable-address /
@@ -139,6 +213,20 @@ without changing the already-approved shared-client requirements.
   duplicate evidence needed a pre-send fence, omitted event `nextState` needed a
   defined committed state, and send-only inbound backlog needed an explicit
   production-readiness consequence.
+- **Recovery:** PR #123 mixed worker implementation with workstream gates,
+  approval ledgers, exact-byte evidence, and workflow recovery. Closing it
+  unmerged and rebuilding PR #126 from current `main` restored a product-only
+  branch and preserved the polluted branch separately for forensics.
+- **Inspired:** The repaired consumer review made logical-store identity explicit
+  on Watcher status, receipt/result, and receive surfaces, closing W-15 without
+  expanding the shared client into Watcher policy.
+- **Inspired:** Operator feedback after the template framework became concrete
+  clarified that Watcher's value is persistent execution/delivery and repairable
+  diagnostics, not authoring governance.
+- **Recovery:** Issue #127 and PR #131 encoded mandatory manifests, provenance,
+  pinning, kind policy, downtime, preflight, and conformance because the prior
+  design treated mature-project hardening as the ordinary path. The workstream
+  now resets the contract before implementation continues.
 
 ## Closeout observation dispositions
 
@@ -157,9 +245,9 @@ without changing the already-approved shared-client requirements.
   strict recovery, receipt, and sender-only/bidirectional semantics: target
   authority — issue #12 / future Application Client contract.
   - Disposition: Watcher-specific semantics landed in `docs/design/watcher.md`
-    and ADR 0046; exact shared requirements are published in
-    [issue #12 comment](https://github.com/lossyrob/telex/issues/12#issuecomment-5042702401).
-    Campaign consolidation remains required before production implementation.
+    and ADR 0046; all 15 shared requirements are accepted by issue #12 and clean
+    PR #126. Production runtime integration remains deferred until the supported
+    Application Client implementation and conformance export exists.
 - External-provider proof requires mutation authority as well as credentials:
   target authority — workstream-design lesson (`project`).
   - Disposition: deferred with rationale; apply to the next live-provider node
@@ -172,6 +260,25 @@ without changing the already-approved shared-client requirements.
 - Shared Watcher supervision can replace a session-owned PR sentry loop for
   scoped PAW dogfood while a one-shot canonical checker remains authoritative:
   target authority — detector-template guidance and Watcher viability evidence.
-  - Disposition: accepted by the builder viability gate; #110 owns the production
-    contract, and the template node must check terminal state immediately before
-    watch registration so merge-during-preflight creates no stale supervisor.
+  - Disposition: accepted by the builder viability gate. PR preflight remains an
+    optional example or project hardening choice rather than mandatory ordinary
+    registration behavior.
+- Implementation workers must not own workstream gates, approval/evidence
+  ledgers, or workflow rewinds: target authority — workstream-design lesson
+  (`streamliner`).
+  - Disposition: landed in the campaign protocol update, the Streamliner
+    launch-preparation API requirement, and the configured Watcher implementer
+    and reviewer v2 profiles. Future Watcher launches adopt those surfaces.
+- A design-only semantic checkpoint is not an implemented consumer dependency:
+  target authority — Watcher graph dependency and Application Client export.
+  - Disposition: runtime now depends on Application Client
+    `client-conformance`; contract and example nodes do not.
+- Watcher authoring should optimize for the shortest useful loop before
+  optional hardening: target authority — `docs/design/watcher.md`, a new
+  superseding ADR, and v2 schemas.
+  - Disposition: promoted to `minimal-watcher-authoring-contract`, the next
+    ready design node.
+- PR #131 implementation evidence: target authority — minimal examples and
+  optional hardening recipes.
+  - Disposition: preserved on the closed unmerged PR/branch. Extraction waits
+    until the minimal contract gate passes.
