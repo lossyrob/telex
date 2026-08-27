@@ -52,6 +52,9 @@ The authoritative design layer (merged from `design-foundation`) lives under
 
 - `telex:docs/design/daemon.md` - the **normative daemon contract** the implementation
   nodes build against (17 sections + the sec.17 gating tests).
+- [`design/current-design.md`](design/current-design.md) - the canonical integrated
+  workstream design. It summarizes merged authority and keeps issue #106 / PR #138
+  explicitly behind a pending-promotion boundary.
 - `telex:docs/design/DESIGN.md` - the local-exchange architecture.
 - `telex:docs/design/DECISIONS.md` - the ADR log; **0014-0024** are this workstream's
   decisions (0023 = the minimal session/presence/delivery model; 0021 = the
@@ -95,21 +98,26 @@ The authoritative design layer (merged from `design-foundation`) lives under
 
 ## Current State
 
-**design-foundation is merged** (issue #34; PRs #35 + #37) after a 10-round
-`design-gate` review, so the **design-gate has passed**. The authoritative design now
-lives under `docs/design/` (`daemon.md` is the normative contract), relocated there by
-ADR 0021; the eight open questions are resolved as **ADRs 0014-0024**. The
-session/presence/delivery model was revised to a **minimal form** by **ADR 0023**
-(unique `session_id` + explicit-only membership via `Detach` + non-destructive presence
-+ agent-acked delivery), superseding the earlier "incarnation" machinery - so some
-council/spar specifics (e.g. a `DeregisterSession` RPC, `attendance_last_confirmed_at`)
-are realized differently; **`daemon.md` governs** where the shaping differs.
+The design foundation, daemon core, fencing proof, Postgres parity, Copilot plugin and
+push bridge, lifecycle hardening, versioned/release upgrade paths, public release, and
+release-confidence validation are merged and recorded complete. The normative design
+remains `docs/design/daemon.md`, with ADR 0023 governing explicit-only membership and
+non-destructive liveness; merged PR #139 additionally defines the Copilot App
+turn-idle and bridge-host lifecycle behavior.
 
-**`daemon-core` is the next ready node** - implement `docs/design/daemon.md` on SQLite
-(acceptance = its sec.17 gating tests). The graph also adds a **validation-loop
-hardening wave** (harness + Entra-PG multi-host + AKS scale) before closure. Workstream
-artifacts are edited in the dedicated `telex-streamliner` worktree (branch
-`streamliner`) that pushes to `main`, keeping the primary checkout clear.
+Dogfooding then exposed issue #106: daemon replacement can preserve durable messages
+while losing a still-live bridge's desired push registration. Existing PR #138 is the
+adopted `station-intent-reconciliation` repair. It remains in progress and pending
+design promotion: its historical exact head conflicts with current `main`, has a
+blocking PAW review with unresolved threads, and must preserve PR #139 semantics while
+repairing and revalidating both backends. The **hardening gate is not ready** until
+that repair is integrated, reviewed on its final exact head, merged, and presented
+with isolated restart/drain/upgrade and push-recovery evidence. The **closure gate**
+remains separate and planned.
+
+Workstream and design-steward branches are proposal/integration workspaces, not silent
+authority. Canonical design and orchestration changes become durable only through a
+reviewed, operator-authorized GitHub PR merged to `main`.
 
 ## Decisions
 
@@ -122,9 +130,10 @@ artifacts are edited in the dedicated `telex-streamliner` worktree (branch
 - **Local-spec-first tracking:** node specs live under `tasks/`; promote to GitHub
   issues at wave promotion. The umbrella issue #32 is the workstream's parent
   tracker.
-- **Design layer stays at the telex repo root** (`DESIGN.md`, `DECISIONS.md`,
-  `PRODUCT-THESIS.md`) rather than being restructured into `docs/design/`; ADRs
-  extend the existing numbered `DECISIONS.md` series.
+- **Project design authority lives under `docs/design/`:** `daemon.md` is normative,
+  `DESIGN.md` supplies architecture, and `DECISIONS.md` is the append-only ADR log.
+  The workstream's canonical integrated summary lives at
+  `design/current-design.md`; pending proposals are not project authority.
 - **Spar at arm's length:** critique informs the design but pivots are surfaced for
   builder confirmation, not auto-applied.
 - **Lease-epoch fencing is the spine (from spar):** daemon-down recovery, upgrade

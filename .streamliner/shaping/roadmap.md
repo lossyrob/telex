@@ -39,7 +39,11 @@ Issue #134 and ADR 0051 own the reset. Telex Watcher is undergoing an
 operator-approved contract reset:
 issue #127 / PR #131 were closed without merge because the mandatory template
 framework conflicted with the desired minimal agent-authoring experience.
-`minimal-watcher-authoring-contract` is the next ready Watcher node.
+`minimal-watcher-authoring-contract` is the next ready Watcher node. Local Daemon
+release-confidence validation completed, but issue #106 exposed a daemon-replacement
+push-intent gap. Existing PR #138 is adopted as the in-progress repair ahead of the
+still-unaccepted hardening gate; its proposed station-intent contract is not current
+authority until repaired, reviewed, and merged.
 
 ## Covering workstreams
 
@@ -48,6 +52,7 @@ framework conflicted with the desired minimal agent-authoring experience.
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | Issue #134 resets the contract under ADR 0051; mediation is external/non-normative; `station-app` waits on the direction gate and Application Client `client-conformance`. |
 | Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Reset authoring/registration design around a minimal v2 contract; preserve #127/#131 as superseded evidence. |
 | Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Contract convergence is merged; client core is active and Watcher runtime waits on `client-conformance`. |
+| Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | Adopt issue #106 / PR #138 as `station-intent-reconciliation`; integrate current `main`, resolve blocking review, and present isolated both-backend evidence before the hardening gate. |
 
 ## Shared seam
 
@@ -201,10 +206,13 @@ collapse into noise, and no session-bound polling task is required.
 
 ## Current next actions
 
-1. Accept the minimal Watcher authoring/registration v2 contract and its
+1. Reconcile and repair adopted Local Daemon PR #138 for issue #106 without
+   weakening explicit membership, fencing, or merged Copilot App lifecycle
+   semantics; keep the hardening gate separate from merge.
+2. Accept the minimal Watcher authoring/registration v2 contract and its
    superseding ADR before resuming runtime or example implementation.
-2. Continue Application Client core/binding/conformance work and export
+3. Continue Application Client core/binding/conformance work and export
    `client-conformance` before Watcher runtime integration.
-3. After the Watcher contract gate, run the minimal example pack in parallel
+4. After the Watcher contract gate, run the minimal example pack in parallel
    with runtime core where dependencies permit; keep hardening recipes optional.
-4. Preserve the campaign integration exercise and no-private-client boundary.
+5. Preserve the campaign integration exercise and no-private-client boundary.
