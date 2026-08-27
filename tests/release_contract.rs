@@ -881,6 +881,31 @@ fn station_intent_version_axes_match_the_frozen_previous_release_contract() {
         "copilot_bridge_protocol",
         telex::commands::copilot::COPILOT_BRIDGE_PROTOCOL as u64,
     );
+    let probe_protocol = read("copilot/bridge/probe-protocol.mjs");
+    let js_u32 = |name: &str| {
+        let pattern = format!("export const {name} = ");
+        let value = probe_protocol
+            .split(&pattern)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{name} not found in probe-protocol.mjs"))
+            .split(';')
+            .next()
+            .expect("constant terminator")
+            .trim();
+        value
+            .parse::<u32>()
+            .unwrap_or_else(|e| panic!("{name} must be a u32 literal, got {value:?}: {e}"))
+    };
+    assert_eq!(
+        js_u32("COPILOT_BRIDGE_PROTOCOL"),
+        telex::commands::copilot::COPILOT_BRIDGE_PROTOCOL,
+        "the Rust and JavaScript bridge protocol constants must be bumped together"
+    );
+    assert_eq!(
+        js_u32("BRIDGE_PROBE_MIN_PROTOCOL"),
+        telex::daemon_reconcile::BRIDGE_PROBE_MIN_PROTOCOL,
+        "the Rust and JavaScript minimum probe protocol constants must be bumped together"
+    );
     check_u64("protocol_minor", telex::daemon_ipc::PROTOCOL_MINOR as u64);
     check_u64(
         "station_intent_schema_version",

@@ -546,13 +546,17 @@ struct BridgeRegistryFull {
 /// able to either, so the intent must not be finalized at all.
 fn capture_producer_identity(session: &str) -> Result<(ProducerIdentity, String)> {
     let registry_path = bridge_registry_path(session)?;
-    let raw = std::fs::read_to_string(&registry_path).map_err(|e| {
+    let raw = crate::platform_fs::read_owner_only_file(
+        &registry_path,
+        crate::daemon_reconcile::CREDENTIAL_MAX_BYTES,
+    )
+    .map_err(|e| {
         anyhow!(
             "reading the bridge registry {}: {e}",
             registry_path.display()
         )
     })?;
-    let registry: BridgeRegistryFull = serde_json::from_str(&raw)
+    let registry: BridgeRegistryFull = serde_json::from_slice(&raw)
         .map_err(|e| anyhow!("parsing {}: {e}", registry_path.display()))?;
     if registry.session_id.as_deref() != Some(session) {
         return Err(anyhow!(
@@ -1119,20 +1123,21 @@ fn live_bridge_lifecycle_pid(session_id: &str) -> Option<u32> {
         Ok(path) => path,
         Err(_) => return None,
     };
-    let modified = match std::fs::metadata(&path).and_then(|m| m.modified()) {
-        Ok(modified) => modified,
+    let (raw, meta) = match crate::platform_fs::read_owner_only_file_with_meta(
+        &path,
+        crate::daemon_reconcile::CREDENTIAL_MAX_BYTES,
+    ) {
+        Ok(read) => read,
         Err(_) => return None,
     };
-    let heartbeat_fresh = match modified.elapsed() {
-        Ok(age) => age < BRIDGE_LIVENESS_WINDOW,
-        // Heartbeat timestamp in the future (clock skew) -> treat as fresh, not stale.
-        Err(_) => true,
-    };
+    let heartbeat_fresh = meta.modified_ms.is_some_and(|modified_ms| {
+        crate::model::now_ms().saturating_sub(modified_ms)
+            < BRIDGE_LIVENESS_WINDOW.as_millis() as i64
+    });
     if !heartbeat_fresh {
         return None;
     }
-    let registry: BridgeRegistry =
-        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    let registry: BridgeRegistry = serde_json::from_slice(&raw).ok()?;
     if registry
         .session_id
         .as_deref()
@@ -1384,9 +1389,12 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
         }
     }
 
-    let registry: BridgeRegistry = match std::fs::read_to_string(&registry_path)
-        .ok()
-        .and_then(|raw| serde_json::from_str(&raw).ok())
+    let registry: BridgeRegistry = match crate::platform_fs::read_owner_only_file(
+        &registry_path,
+        crate::daemon_reconcile::CREDENTIAL_MAX_BYTES,
+    )
+    .ok()
+    .and_then(|raw| serde_json::from_slice(&raw).ok())
     {
         Some(registry) => registry,
         None => {
@@ -4549,6 +4557,73 @@ mod tests {
             Some(value) => std::env::set_var(key, value),
             None => std::env::remove_var(key),
         }
+    }
+
+    #[cfg(unix)]
+    fn write_test_bridge_registry(home: &Path, session: &str) -> PathBuf {
+        let path = home.join("telex-bridge").join(format!("{session}.json"));
+        std::fs::create_dir_all(path.parent().unwrap()).expect("bridge root");
+        let registry = serde_json::json!({
+            "sessionId": session,
+            "pid": std::process::id(),
+            "secret": "s".repeat(64),
+            "protocol": COPILOT_BRIDGE_PROTOCOL,
+        });
+        crate::platform_fs::write_owner_only_file_atomic(
+            &path,
+            serde_json::to_vec(&registry).unwrap().as_slice(),
+        )
+        .expect("write bridge registry");
+        path
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn producer_identity_capture_rejects_a_broadly_readable_registry() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let session = format!("registry-mode-{}", std::process::id());
+        let home = std::env::temp_dir().join(&session);
+        let _ = std::fs::remove_dir_all(&home);
+        let prior_home = std::env::var_os("COPILOT_HOME");
+        std::env::set_var("COPILOT_HOME", &home);
+        let path = write_test_bridge_registry(&home, &session);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
+            .expect("weaken registry permissions");
+
+        let error = capture_producer_identity(&session).unwrap_err().to_string();
+        restore_env("COPILOT_HOME", prior_home);
+        let _ = std::fs::remove_dir_all(&home);
+        assert!(
+            error.contains("owner-private") || error.contains("permissions"),
+            "the authority-bearing read must fail closed, got: {error}"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn producer_identity_capture_rejects_a_registry_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let session = format!("registry-link-{}", std::process::id());
+        let home = std::env::temp_dir().join(&session);
+        let _ = std::fs::remove_dir_all(&home);
+        let prior_home = std::env::var_os("COPILOT_HOME");
+        std::env::set_var("COPILOT_HOME", &home);
+        let path = write_test_bridge_registry(&home, &session);
+        let target = home.join("outside.json");
+        std::fs::rename(&path, &target).expect("move registry target");
+        symlink(&target, &path).expect("replace registry with symlink");
+
+        let error = capture_producer_identity(&session).unwrap_err().to_string();
+        restore_env("COPILOT_HOME", prior_home);
+        let _ = std::fs::remove_dir_all(&home);
+        assert!(
+            error.contains("symlink") || error.contains("opening owner-only file"),
+            "the final-component symlink must be refused, got: {error}"
+        );
     }
 
     #[test]

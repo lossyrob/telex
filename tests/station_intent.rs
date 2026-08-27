@@ -17,7 +17,9 @@ use telex::intent_test_support::{
     live_intent, register_test_handler_kind, register_test_producer_root, write_credential_file,
     FakeProducer, ProducerBehavior,
 };
-use telex::station_intent::{StationIntentV1, STATION_INTENT_MAX_COUNT};
+use telex::station_intent::{
+    IntentEvidence, StationIntentV1, STATION_INTENT_MAX_COUNT, STATION_INTENT_PENDING_TTL,
+};
 
 /// One fully wired scenario: a daemon, a store, a fake producer, a registered credential root, and
 /// a `Live` intent the daemon can actually verify.
@@ -230,6 +232,178 @@ async fn station_intent_repeated_passes_are_idempotent_with_no_retry_storm() {
         entry.next_attempt_ms, None,
         "a healthy intent must not be scheduled into backoff"
     );
+}
+
+#[tokio::test]
+async fn station_intent_hung_producers_are_bounded_and_the_cursor_resumes() {
+    let scenario = Scenario::new("intent-hung-budget", ProducerBehavior::Hang).await;
+    let count = telex::daemon_reconcile::RECONCILE_MAX_CONCURRENCY * 4 + 2;
+    for index in 1..count {
+        let mut intent = scenario.intent.clone();
+        intent.address = format!("addr:hung-{index}");
+        scenario
+            .daemon
+            .intent_store()
+            .write_atomic(&intent)
+            .expect("seed another hung intent");
+    }
+
+    let started = std::time::Instant::now();
+    let first = scenario.daemon.reconcile_once().await;
+    assert!(
+        started.elapsed() <= telex::daemon_reconcile::RECONCILE_PASS_DEADLINE,
+        "a hung producer set must stay within the pass deadline"
+    );
+    assert!(
+        first.deadline_reached,
+        "the deadline must truncate the scope"
+    );
+    assert!(
+        first.scanned < count,
+        "the first pass must leave work for the cursor to resume"
+    );
+    let index = scenario.daemon.intent_index();
+    let attempted = index
+        .entries
+        .values()
+        .filter(|entry| entry.last_attempt_ms.is_some())
+        .collect::<Vec<_>>();
+    assert!(!attempted.is_empty());
+    assert!(
+        attempted
+            .iter()
+            .all(|entry| entry.failure_code.as_deref() == Some("probe_timeout")),
+        "each attempted hung producer must name the timeout that bounded it"
+    );
+
+    let second = scenario.daemon.reconcile_once().await;
+    assert!(
+        second.scanned > 0,
+        "the next pass must resume with intents the first deadline skipped"
+    );
+}
+
+#[tokio::test]
+async fn station_intent_skipped_pass_does_not_consume_wall_clock_gc() {
+    let scenario = Scenario::new("intent-gc-cadence", ProducerBehavior::Healthy).await;
+    let mut expired = scenario.intent.clone();
+    expired.address = "addr:expired-pending".to_string();
+    expired.state = IntentRecoveryState::Pending;
+    expired.created_at_ms =
+        telex::model::now_ms() - STATION_INTENT_PENDING_TTL.as_millis() as i64 - 1;
+    expired.updated_at_ms = expired.created_at_ms;
+    expired.armed = None;
+    expired.evidence = IntentEvidence::default();
+    let expired_id = expired.id();
+    scenario
+        .daemon
+        .intent_store()
+        .write_atomic(&expired)
+        .expect("seed expired pending intent");
+
+    scenario.daemon.set_draining_for_test(true);
+    let skipped = scenario.daemon.reconcile_once().await;
+    assert!(!skipped.ran);
+    assert!(
+        scenario.daemon.intent_store().load(&expired_id).is_ok(),
+        "a skipped pass must not run GC"
+    );
+
+    scenario.daemon.set_draining_for_test(false);
+    scenario.daemon.reconcile_once().await;
+    assert!(
+        scenario.daemon.intent_store().load(&expired_id).is_err(),
+        "the next runnable pass must perform the due wall-clock GC"
+    );
+    assert!(
+        scenario
+            .daemon
+            .intent_store()
+            .load(&scenario.intent.id())
+            .is_ok(),
+        "GC must retain the live intent"
+    );
+}
+
+#[tokio::test]
+async fn station_intent_failure_ladder_reaches_quarantine() {
+    let scenario = Scenario::new("intent-quarantine", ProducerBehavior::WrongNonce).await;
+    for attempt in 1..=telex::daemon_reconcile::RECONCILE_QUARANTINE_AFTER {
+        if attempt > 1 {
+            let store = scenario.daemon.intent_store();
+            let mut persisted = store.load(&scenario.intent.id()).expect("load evidence");
+            persisted.evidence.next_attempt_ms = None;
+            assert!(
+                store
+                    .write_cas(persisted.generation, &persisted)
+                    .expect("clear retry delay"),
+                "the test owns the manifest generation"
+            );
+            scenario.daemon.clear_intent_index();
+        }
+        let report = scenario.daemon.reconcile_once().await;
+        assert_eq!(report.failed, 1, "attempt {attempt} must fail");
+    }
+
+    let entry = scenario
+        .daemon
+        .intent_index()
+        .entries
+        .values()
+        .next()
+        .expect("quarantined index entry")
+        .clone();
+    assert_eq!(entry.state, IntentRecoveryState::Quarantined);
+    assert_eq!(
+        entry.consecutive_failures,
+        telex::daemon_reconcile::RECONCILE_QUARANTINE_AFTER
+    );
+    assert!(
+        entry
+            .next_attempt_ms
+            .is_some_and(|next| next > telex::model::now_ms()),
+        "quarantine must park the intent"
+    );
+}
+
+#[tokio::test]
+async fn station_intent_terminal_park_is_not_inherited_as_live_by_a_successor() {
+    let scenario = Scenario::new("intent-terminal-successor", ProducerBehavior::Healthy).await;
+    let mut legacy = scenario.intent.clone();
+    legacy.producer.protocol.max = telex::daemon_reconcile::BRIDGE_PROBE_MIN_PROTOCOL - 1;
+    legacy.producer.protocol.min = legacy.producer.protocol.max;
+    scenario.reseed(&legacy);
+
+    let first = scenario.daemon.reconcile_once().await;
+    assert_eq!(first.inert, 1);
+    let persisted = scenario
+        .daemon
+        .intent_store()
+        .load(&legacy.id())
+        .expect("reload terminal evidence");
+    assert_eq!(
+        persisted.evidence.failure_code.as_deref(),
+        Some("legacy_producer")
+    );
+    assert_eq!(
+        persisted.evidence.next_attempt_ms, None,
+        "process-scoped terminal parks must remain in-memory only"
+    );
+
+    scenario.daemon.clear_intent_index();
+    let successor = scenario.daemon.reconcile_once().await;
+    assert_eq!(
+        successor.inert, 1,
+        "a successor must classify the terminal intent instead of skipping it as healthy"
+    );
+    let row = scenario
+        .daemon
+        .intent_statuses()
+        .into_iter()
+        .find(|row| row.address == legacy.address)
+        .expect("terminal status row");
+    assert_eq!(row.state, IntentRecoveryState::LegacyProducer);
+    assert!(!row.state.is_recoverable());
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1201,6 +1375,15 @@ async fn station_intent_anti_downgrade_guard_works_before_the_first_reconcile_pa
         scenario.member_push_registered().await,
         "a pull-only Register before the first pass must still not downgrade a live push intent"
     );
+    let drain = scenario.daemon.drain_intent_report();
+    assert_eq!(
+        drain.recoverable, 1,
+        "the inline restore must update the cached projection before an immediate drain"
+    );
+    assert_eq!(
+        drain.degraded, 0,
+        "an inline success must clear stale failure projection"
+    );
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -1819,6 +2002,7 @@ async fn station_intent_the_daemon_stamps_the_armed_proof_when_it_arms_push() {
         scope: None,
         tags: None,
         watch_pids: Vec::new(),
+        replace_watch_pids: false,
         recovery: false,
         on_deliver,
         replace_on_deliver: true,

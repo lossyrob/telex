@@ -320,6 +320,7 @@ pub struct IntentRuntime {
     report_tx: tokio::sync::watch::Sender<ReconcileReport>,
     report_rx: tokio::sync::watch::Receiver<ReconcileReport>,
     pass_seq: AtomicU64,
+    last_gc_ms: std::sync::atomic::AtomicI64,
 }
 
 impl Default for IntentRuntime {
@@ -332,6 +333,7 @@ impl Default for IntentRuntime {
             report_tx,
             report_rx,
             pass_seq: AtomicU64::new(0),
+            last_gc_ms: std::sync::atomic::AtomicI64::new(0),
         }
     }
 }
@@ -1564,8 +1566,12 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
         return report;
     };
 
-    // Maintenance GC on its own slower cadence, inside the same bounded tick.
-    if pass_seq.is_multiple_of(RECONCILE_GC_EVERY_PASSES) {
+    // Maintenance GC is wall-clock scheduled. Skipped passes deliberately do not move this clock,
+    // so drain suppression or single-flight contention cannot consume a maintenance slot.
+    let now = now_ms();
+    let last_gc_ms = state.intents.last_gc_ms.load(Ordering::Relaxed);
+    if last_gc_ms == 0 || now.saturating_sub(last_gc_ms) >= RECONCILE_GC_INTERVAL.as_millis() as i64
+    {
         run_intent_gc(&state);
     }
 
@@ -1697,7 +1703,14 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
             entry.last_success_ms = intent.evidence.last_success_ms;
             entry.producer_verified_ms = intent.evidence.producer_verified_ms;
             entry.failure_code = intent.evidence.failure_code.clone();
-            if entry.consecutive_failures >= RECONCILE_QUARANTINE_AFTER {
+            if let Some(projected) = terminal_evidence_projection(&entry) {
+                // Older builds persisted a one-hour terminal park while leaving the manifest
+                // `Live`. Do not inherit that process-scoped delay: project it honestly and retry
+                // once in this successor so `apply_outcome` can rewrite the evidence without the
+                // stale park.
+                entry.state = projected;
+                entry.next_attempt_ms = None;
+            } else if entry.consecutive_failures >= RECONCILE_QUARANTINE_AFTER {
                 entry.state = IntentRecoveryState::Quarantined;
             }
         } else if generation_moved {
@@ -1969,6 +1982,13 @@ fn apply_outcome(
     // file rewrite per intent per tick, contradicted the "a healthy steady state costs no I/O at
     // all" optimization it sits beside, and — because GC ages an intent from `updated_at_ms` —
     // reset every orphan TTL on every attempt, so no live intent could ever expire.
+    let persisted_next_attempt_ms = if matches!(&outcome, IntentOutcome::Terminal { .. }) {
+        // A terminal outcome may be process- or lifecycle-scoped. Park it in this daemon's index,
+        // but never make a successor inherit the hour-long delay from a still-Live manifest.
+        None
+    } else {
+        entry.next_attempt_ms
+    };
     let evidence = IntentEvidence {
         last_attempt_ms: entry.last_attempt_ms,
         last_success_ms: entry.last_success_ms,
@@ -1976,7 +1996,7 @@ fn apply_outcome(
         consecutive_failures: entry.consecutive_failures,
         failure_code: entry.failure_code.clone(),
         producer_verified_ms: entry.producer_verified_ms,
-        next_attempt_ms: entry.next_attempt_ms,
+        next_attempt_ms: persisted_next_attempt_ms,
         recovery_latency_ms: entry.recovery_latency_ms,
     };
     if evidence_write_due(&intent.evidence, &evidence, now)
@@ -1995,6 +2015,58 @@ fn apply_outcome(
 
     state.index_upsert(key, entry);
     log_outcome_event(store, intent, &outcome, pass_seq);
+}
+
+/// Fold an inline anti-downgrade success into the cached projection without counting it as a
+/// scheduled pass attempt. The caller has already run the full reconcile operation and only needs
+/// status/drain consumers to observe the success immediately.
+pub(crate) fn apply_inline_success_projection(
+    state: &Arc<DaemonState>,
+    intent: &StationIntentV1,
+    outcome: &IntentOutcome,
+) {
+    if !outcome.is_success() {
+        return;
+    }
+    let now = now_ms();
+    let key = IntentKey::from_intent(intent);
+    let mut entry = state.index_entry(&key).unwrap_or_default();
+    entry.generation = intent.generation;
+    entry.wake_on_cc = intent.wake_on_cc;
+    entry.cc_watermark_ms = state
+        .get_member(&intent.store_key, &intent.session_id, &intent.address)
+        .and_then(|member| member.on_deliver_cc_after_ms)
+        .or(intent.cc_watermark_ms);
+    entry.state = outcome.projected_state();
+    entry.failure_code = None;
+    entry.consecutive_failures = 0;
+    entry.next_attempt_ms = None;
+    entry.last_success_ms = Some(now);
+    entry.first_seen_ms.get_or_insert(now);
+    if matches!(outcome, IntentOutcome::Restored) {
+        entry.recovery_latency_ms = entry.first_seen_ms.map(|first| now.saturating_sub(first));
+    }
+    state.index_upsert(key, entry);
+}
+
+/// Recover the runtime projection encoded by a terminal evidence row from an older daemon.
+///
+/// Genuine failures always increment `consecutive_failures`; terminal outcomes do not. That lets a
+/// successor distinguish a terminal park without expanding the persisted-state enum beyond
+/// `pending | live | revoked`.
+fn terminal_evidence_projection(entry: &IntentIndexEntry) -> Option<IntentRecoveryState> {
+    if entry.consecutive_failures != 0 {
+        return None;
+    }
+    let code = entry.failure_code.as_deref()?;
+    Some(match code {
+        "credential_insecure" | "credential_outside_root" => IntentRecoveryState::Insecure,
+        "handler_kind_unregistered" | "handler_argv_invalid" => IntentRecoveryState::Incompatible,
+        "legacy_producer" => IntentRecoveryState::LegacyProducer,
+        "address_attended" => IntentRecoveryState::OwnershipConflict,
+        "tombstoned" | "operator_reset" => IntentRecoveryState::Revoked,
+        _ => IntentRecoveryState::Unverifiable,
+    })
 }
 
 /// Whether the evidence block has changed enough to be worth an atomic manifest rewrite.
@@ -2123,9 +2195,9 @@ pub fn spawn_startup_scan(state: Arc<DaemonState>) {
     });
 }
 
-/// How many passes between maintenance GC runs. GC is O(scope) I/O, so it runs on a slower cadence
-/// than reconciliation itself: once a minute at the 5 s tick, plus once at startup.
-const RECONCILE_GC_EVERY_PASSES: u64 = 12;
+/// Wall-clock interval between maintenance GC runs. GC is O(scope) I/O, so it runs less often than
+/// reconciliation itself: once a minute, plus once at startup.
+pub const RECONCILE_GC_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Bounded intent GC: the only place an intent file is deleted, and the only mechanism that brings
 /// an over-cap scope back under the cap.
@@ -2133,6 +2205,7 @@ fn run_intent_gc(state: &Arc<DaemonState>) {
     let Some(store) = state.intent_store() else {
         return;
     };
+    state.intents.last_gc_ms.store(now_ms(), Ordering::Relaxed);
     let identity = local_identity().ok();
     match store.gc(
         now_ms(),

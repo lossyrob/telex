@@ -692,8 +692,7 @@ async fn verify_successor_reconcile(
     }
     let mut command = tokio::process::Command::new(successor_binary);
     command
-        .arg("--format")
-        .arg("json")
+        .arg("--json")
         .arg("daemon")
         .arg("reconcile")
         .arg("--timeout-ms")
@@ -703,9 +702,12 @@ async fn verify_successor_reconcile(
         .env(crate::install::LAUNCHER_GUARD_ENV, "1")
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null());
-    if let Ok(db) = ctx.cfg.db_override.as_deref().ok_or(()) {
+        .stderr(std::process::Stdio::piped());
+    if let Some(db) = ctx.cfg.db_override.as_deref() {
         command.arg("--db").arg(db);
+    }
+    if let Some(backend) = ctx.cfg.backend_selector.as_deref() {
+        command.arg("--backend").arg(backend);
     }
     let output = tokio::time::timeout(
         SUCCESSOR_RECONCILE_TIMEOUT + Duration::from_secs(10),
@@ -724,13 +726,45 @@ async fn verify_successor_reconcile(
             })
         }
     };
-    let parsed: serde_json::Value = match serde_json::from_slice(&output.stdout) {
+    successor_reconcile_result(
+        recoverable,
+        output.status.success(),
+        output.status.code(),
+        &output.stdout,
+        &output.stderr,
+        successor_binary,
+    )
+}
+
+fn successor_reconcile_result(
+    recoverable: u64,
+    success: bool,
+    exit_code: Option<i32>,
+    stdout: &[u8],
+    stderr: &[u8],
+    successor_binary: &Path,
+) -> serde_json::Value {
+    if !success {
+        let stderr = String::from_utf8_lossy(stderr);
+        return json!({
+            "attempted": true,
+            "recoverable_at_drain": recoverable,
+            "error": "the successor rejected `daemon reconcile`",
+            "exit_code": exit_code,
+            "stderr": stderr.trim().chars().take(512).collect::<String>(),
+            "min_daemon_minor": crate::daemon_reconcile::RECONCILE_MIN_DAEMON_MINOR,
+        });
+    }
+    let parsed: serde_json::Value = match serde_json::from_slice(stdout) {
         Ok(parsed) => parsed,
         Err(e) => {
+            let stderr = String::from_utf8_lossy(stderr);
             return json!({
                 "attempted": true,
                 "error": format!("successor reconcile output was not JSON ({e})"),
-            })
+                "exit_code": exit_code,
+                "stderr": stderr.trim().chars().take(512).collect::<String>(),
+            });
         }
     };
     if parsed
@@ -926,5 +960,51 @@ mod tests {
         current["version"]["build_id"] = serde_json::json!("candidate-build");
         let metadata = parse_source_metadata(&current).unwrap();
         assert_eq!(metadata.build_id, "candidate-build");
+    }
+
+    #[test]
+    fn successor_reconcile_reports_rejection_with_bounded_stderr() {
+        let stderr = format!("unsupported argument {}", "x".repeat(700));
+        let result = successor_reconcile_result(
+            2,
+            false,
+            Some(2),
+            b"",
+            stderr.as_bytes(),
+            Path::new("old-telex"),
+        );
+        assert_eq!(result["attempted"], true);
+        assert_eq!(result["recoverable_at_drain"], 2);
+        assert_eq!(result["exit_code"], 2);
+        assert_eq!(result["error"], "the successor rejected `daemon reconcile`");
+        assert!(
+            result["stderr"].as_str().unwrap().chars().count() <= 512,
+            "stderr must stay bounded in JSON and text output"
+        );
+        assert_eq!(
+            result["min_daemon_minor"],
+            crate::daemon_reconcile::RECONCILE_MIN_DAEMON_MINOR
+        );
+    }
+
+    #[test]
+    fn successor_reconcile_preserves_non_json_diagnostics() {
+        let result = successor_reconcile_result(
+            1,
+            true,
+            Some(0),
+            b"not json",
+            b"current successor could not open the intent scope",
+            Path::new("current-telex"),
+        );
+        assert_eq!(result["attempted"], true);
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .contains("output was not JSON"));
+        assert_eq!(
+            result["stderr"],
+            "current successor could not open the intent scope"
+        );
     }
 }

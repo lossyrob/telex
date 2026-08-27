@@ -364,9 +364,8 @@ const cleanup = async () => {
   try {
     clearInterval(heartbeatTimer);
   } catch {}
-  // Let a queued heartbeat finish before removing its temp or published registry.
+  // Let a queued heartbeat finish before removing the published registry.
   await registryWrite.catch(() => {});
-  await rm(registryTempPath, { force: true }).catch(() => {});
   try {
     server.close();
   } catch {}

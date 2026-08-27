@@ -4520,6 +4520,109 @@ fn station_intent_daemon_restart_restores_push_without_manual_resume() {
 }
 
 #[test]
+fn station_intent_upgrade_runs_the_selected_successor_and_restores_push() {
+    let env = ProcessEnv::new("station-intent-upgrade");
+    let session = "station-intent-upgrade-session";
+    let address = "addr:station-intent-upgrade";
+    let install_root = env.root.join("install");
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+
+    let mut attach = env.command_with_session(session);
+    configure_copilot_home(&mut attach, &copilot_runtime_home(&env));
+    attach.args([
+        "--json",
+        "--address",
+        address,
+        "attach",
+        "--session",
+        session,
+    ]);
+    run_command_with_capture(attach, &env.root, Duration::from_secs(10))
+        .assert_success("attach before successor upgrade");
+    let _seeded = runtime.block_on(seed_station_intent(
+        &env,
+        session,
+        address,
+        telex::intent_test_support::ProducerBehavior::Healthy,
+    ));
+    assert!(
+        wait_until_intent_observed(&env, session, address, Duration::from_secs(30)),
+        "the predecessor must observe the recoverable intent before drain"
+    );
+
+    let source = env.bin.to_string_lossy().into_owned();
+    let root_arg = install_root.to_string_lossy().into_owned();
+    let mut upgrade = env.command_with_session(session);
+    configure_copilot_home(&mut upgrade, &copilot_runtime_home(&env));
+    upgrade.env("TELEX_INSTALL_ROOT", &install_root).args([
+        "--json",
+        "upgrade",
+        "--from",
+        &source,
+        "--version",
+        "vtest-station-intent",
+        "--root",
+        &root_arg,
+    ]);
+    let upgraded = run_command_with_capture(upgrade, &env.root, Duration::from_secs(60));
+    upgraded.assert_success("upgrade with successor reconciliation");
+    let json = upgraded.json("upgrade with successor reconciliation");
+    assert_eq!(
+        json.pointer("/station_intent_reconcile/attempted")
+            .and_then(Value::as_bool),
+        Some(true),
+        "a recoverable drain must execute the selected successor: {json}"
+    );
+    let restored = json
+        .pointer("/station_intent_reconcile/restored")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let refreshed_no_op = json
+        .pointer("/station_intent_reconcile/refreshed_no_op")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    assert!(
+        restored + refreshed_no_op >= 1,
+        "the successor must reconcile the recoverable binding: {json}"
+    );
+    assert_eq!(
+        json.pointer("/station_intent_reconcile/successor_binary")
+            .and_then(Value::as_str),
+        json.pointer("/switch/current_binary")
+            .and_then(Value::as_str),
+        "verification must run the binary selected by the switch"
+    );
+
+    let successor = install_root
+        .join("versions")
+        .join("vtest-station-intent")
+        .join(format!("telex{}", std::env::consts::EXE_SUFFIX));
+    let mut status = Command::new(&successor);
+    env.configure_command(&mut status, session);
+    status.args(["--json", "--address", address, "status"]);
+    let status = run_command_with_capture(status, &env.root, Duration::from_secs(10));
+    status.assert_success("query restored push through the isolated successor");
+    assert_eq!(
+        status
+            .json("successor station status")
+            .get("push_registered")
+            .and_then(Value::as_bool),
+        Some(true),
+        "the selected successor must leave push delivery restored"
+    );
+
+    let mut stop = Command::new(&successor);
+    env.configure_command(&mut stop, session);
+    stop.env("TELEX_INSTALL_ROOT", &install_root)
+        .args(["--json", "daemon", "stop", "--drain"]);
+    run_command_with_capture(stop, &env.root, Duration::from_secs(10))
+        .assert_success("stop the isolated successor daemon");
+}
+
+#[test]
 fn station_intent_dead_producer_is_not_restored_after_restart() {
     let env = ProcessEnv::new("station-intent-dead");
     let session = "station-intent-dead-session";

@@ -4217,6 +4217,7 @@ async fn register_member(
             }
             reconcile::LiveIntentLookup::Live(intent) => {
                 let outcome = reconcile::reconcile_intent_locked(state.clone(), &intent).await;
+                reconcile::apply_inline_success_projection(&state, &intent, &outcome);
                 match outcome {
                     // Push was restored (or was already live): treat the incoming registration
                     // as a refresh of the now-push member rather than creating a pull-only one.
@@ -7074,17 +7075,6 @@ mod p3_tests {
 
     async fn wait_for_file(path: &std::path::Path) -> bool {
         wait_for(|| path.exists()).await
-    }
-
-    async fn wait_until_async(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            if condition() {
-                return true;
-            }
-            tokio::time::sleep(Duration::from_millis(25)).await;
-        }
-        condition()
     }
 
     #[tokio::test]
@@ -11228,6 +11218,10 @@ pub mod test_support {
             let mut index = self.state.intents.index_for_test().lock().unwrap();
             index.entries.clear();
             index.as_of_ms = crate::model::now_ms();
+        }
+
+        pub fn set_draining_for_test(&self, draining: bool) {
+            self.state.draining.store(draining, Ordering::SeqCst);
         }
 
         /// The intent-row projection the authenticated status surface exposes.

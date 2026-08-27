@@ -112,7 +112,10 @@ fn hook_manifest_wires_session_end_and_agent_stop_adapters() {
 fn bridge_registry_publishes_atomic_lifecycle_snapshots() {
     let bridge = include_str!("../copilot/bridge/extension.mjs");
     assert!(bridge.contains("lifecyclePid: process.ppid"));
-    assert!(bridge.contains("rename(registryTempPath, registryPath)"));
+    assert!(
+        bridge.contains("const tmpPath = `${registryPath}.${process.pid}.${registrySeq++}.tmp`")
+    );
+    assert!(bridge.contains("rename(tmpPath, registryPath)"));
     assert!(bridge.contains("queueRegistryWrite().catch(() => {})"));
     assert!(bridge.contains("await registryWrite.catch(() => {})"));
     assert!(

@@ -274,7 +274,9 @@ async fn stop_drain(ctx: &Ctx) -> Result<i32> {
                         }
                         if report.over_cap {
                             println!(
-                                "station intents  WARNING: {} entries exceed the per-scope write cap; run `telex copilot gc`",
+                                "station intents  WARNING: {} entries exceed the per-scope write cap; \
+                                 the daemon reclaims eligible entries automatically on its GC cadence and at startup; \
+                                 to make an entry eligible now, run `telex --address <station> copilot detach`",
                                 report.observed_count
                             );
                         }
