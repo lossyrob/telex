@@ -44,6 +44,10 @@ bounded task specification now provide the optional example pack's launch
 prerequisite. The node remains ready but unlaunched pending separate campaign
 authorization, while runtime still waits on Application Client
 `client-conformance`.
+Operator Station issue #146 separately preserves
+[PR #143 Postgres and UI/UX lessons](../workstreams/operator-station/docs/postgres-dogfood-evidence.md)
+as completed, non-gating evidence. The report does not promote spike mechanisms,
+change direct-Station authority, or advance any production node or dependency.
 Local Daemon release-confidence validation completed, but issue #106 exposed a
 daemon-replacement push-intent gap. Existing PR #138 is adopted as the
 in-progress repair ahead of the still-unaccepted hardening gate; its proposed
