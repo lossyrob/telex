@@ -32,7 +32,9 @@ producers, human recipients, and the shared programmatic client they consume.
 **State.** Both builder viability gates and both initial production
 domain-contract nodes completed. Application Client contract convergence is
 merged, the design-only `application-client-ready` checkpoint is published, and
-client-core implementation is active. Operator Station production work is
+Application Client core implementation is merged through PR #132. The
+`first-binding` node is ready but unlaunched; `client-conformance` and later
+gates remain planned. Operator Station production work is
 undergoing an operator-approved direct-Station contract reset after issue #128 /
 PR #130 were closed without merge as superseded prescribed-mediation scope.
 Issue #134 and ADR 0051 own the reset. Telex Watcher's minimal v2
@@ -60,7 +62,7 @@ merged.
 |---|---|---|---|
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | Issue #134 resets the contract under ADR 0051; mediation is external/non-normative; `station-app` waits on the direction gate and Application Client `client-conformance`. |
 | Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on Application Client `client-conformance`. |
-| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Contract convergence is merged; client core is active and Watcher runtime waits on `client-conformance`. |
+| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Client core is merged; `first-binding` is ready but unlaunched, and later conformance still blocks consumer runtime integration. |
 | Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | Adopt issue #106 / PR #138 as `station-intent-reconciliation`; integrate current `main`, resolve blocking review, and present isolated both-backend evidence before the hardening gate. |
 
 ## Shared seam
@@ -136,9 +138,10 @@ accepted contracts and spike/gate evidence into #12, records explicit
 dispositions, and accepts one semantic contract. Product nodes wait on the
 resulting `application-client-ready` checkpoint.
 
-Application Client convergence is complete and client-core implementation is
-active. Operator issue #134 now narrows the product contract without changing
-the generic Application Client ownership boundary.
+Application Client convergence and client-core implementation are complete.
+`first-binding` is ready but unlaunched; its implementation shape remains
+undecided. Operator issue #134 narrows the product contract without changing the
+generic Application Client ownership boundary.
 
 ### Stage 4 — Production applications under accepted contracts
 
@@ -223,8 +226,9 @@ collapse into noise, and no session-bound polling task is required.
    semantics; keep the hardening gate separate from merge.
 2. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
    after separate campaign authorization.
-3. Continue Application Client core/binding/conformance work and export
-   `client-conformance` before Watcher runtime integration.
+3. Keep Application Client `first-binding` ready but unlaunched until its task
+   shape is authorized, then complete binding and conformance before consumer
+   runtime integration.
 4. Keep `watcher-runtime-core` planned until client conformance promotes
    exact-store/exact-operation `not-recorded` and identity-checkable
    same-operation retry; recovery remains query-only under uncertainty.

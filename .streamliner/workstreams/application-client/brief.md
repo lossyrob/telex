@@ -108,16 +108,26 @@ manifest blob `25f27401100a89b1e90dba46b44973a3e3d43908`, and SHA-256
 `085deed89cef1741fb6967bbd9f5e87e4f9cf104917518a234006c35b0f62296`.
 The `application-client-ready` checkpoint and gate are complete.
 
-The supported `client-core` node is active as
-[#129](https://github.com/lossyrob/telex/issues/129). Issue
-[#124](https://github.com/lossyrob/telex/issues/124) is folded into that node as
-a bounded documentation/conformance obligation: choose and document the
-extensible typed membership-loss model, align W-05 with AC-C05, regenerate
-affected manifest metadata, and preserve explicit downstream conformance
-coverage. The configured v2 implementation and review companion were launched
-through the Streamliner broker. `first-binding` remains held until #129 and #124
-are complete and reconciled; later nodes remain held on their declared
-dependencies.
+The supported `client-core` node completed through
+[#129](https://github.com/lossyrob/telex/issues/129),
+[#124](https://github.com/lossyrob/telex/issues/124), and
+[PR #132](https://github.com/lossyrob/telex/pull/132). Exact reviewed head
+`6fd3c1133948f0cefe83948947f2d85d2db0a298` merged as
+`4ecbe84e99e00ab0cea3bcf3619d539c222746af` after
+[delta review 5045578247](https://github.com/lossyrob/telex/pull/132#pullrequestreview-5045578247),
+six successful checks, and zero unresolved review threads. Both issues closed
+as completed.
+
+The merged core implements AC-C01 through AC-C20 across SQLite and Postgres and
+retains one supported typed boundary without a product-private fallback. The
+regenerated `docs/design/application-client.bundle.json` is 2,423 bytes, Git
+blob `231cfd231d2a343b59d8538a08002087b0f17aa8`, and SHA-256
+`9dbc5cf90b917f602de8c2430438ed6f57d529893f8aaaa52f3996b51330252e`.
+
+`first-binding` is ready and focus-level but unlaunched. Its task shape remains
+unselected pending separate authorization. `client-conformance`, the consumer
+integration gate, operational hardening, and closure gate remain unchanged on
+their declared dependencies.
 
 ## Decisions
 
@@ -158,12 +168,12 @@ dependencies.
 - **Future node launches use the Streamliner launch broker:** the workstream's v2
   implementer/reviewer defaults are resolved and launched through
   `/api/launch-preparations/runs`, not hand-written terminal prompts.
-- **Core and binding remain sequential:** `client-core` implements the shared
-  typed semantic boundary first; `first-binding` is not promoted until the core
-  and folded #124 obligation are merged and reconciled.
-- **Issue #124 is part of client-core:** no separate node or session is created.
-  The core PR closes #124 and reports the resulting manifest identity for
-  orchestrator-owned issue #12 reconciliation.
+- **Core and binding remain sequential:** `client-core` completed first;
+  `first-binding` is ready but unlaunched, and its task shape still requires
+  separate authorization.
+- **Issue #124 completed within client-core:** PR #132 closed both #129 and #124
+  and reported the regenerated manifest identity. This factual reconciliation
+  does not mutate issue #12.
 
 ## Open Questions
 
@@ -198,8 +208,8 @@ dependencies.
 
 - Issue #12 publication revision 2 now reflects clean PR #126 authority; the
   `application-client-ready` checkpoint and gate are complete.
-- W-05 taxonomy wording in issue #124 is folded into promoted client-core issue
-  #129. The implementation PR must close #124 before `first-binding` promotion.
+- W-05 taxonomy wording from issue #124 completed within client-core issue #129
+  and merged through PR #132. `first-binding` is ready but remains unlaunched.
 - Polluted PR #123 and its dirty worktree are deferred with rationale for
   protocol forensics; cleanup requires explicit operator authorization.
 - The clean #118 implementation worktree is also deferred for cleanup until the
