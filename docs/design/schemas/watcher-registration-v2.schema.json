@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-registration-v2.schema.json",
+  "title": "Telex Watcher registration v2",
+  "$comment": "Opaque JSON values must be valid I-JSON and RFC 8785 canonicalizable. Runtime-enforced UTF-8 byte and product timing bounds supplement this schema.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "id",
+    "command",
+    "intervalSeconds",
+    "timeoutSeconds",
+    "backendProfile",
+    "sender",
+    "target"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "id": {
+      "$ref": "#/$defs/watchId"
+    },
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/executable"
+        }
+      ],
+      "items": {
+        "$ref": "#/$defs/argument"
+      }
+    },
+    "intervalSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "timeoutSeconds": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "backendProfile": {
+      "$ref": "#/$defs/nonControlString"
+    },
+    "sender": {
+      "$ref": "#/$defs/nonControlString"
+    },
+    "target": {
+      "$ref": "#/$defs/nonControlString"
+    },
+    "attention": {
+      "enum": [
+        "interrupt",
+        "next-checkpoint",
+        "background",
+        "fyi"
+      ],
+      "default": "next-checkpoint"
+    },
+    "requiresDisposition": {
+      "type": "boolean",
+      "default": true
+    },
+    "workingDirectory": {
+      "$comment": "When supplied, the runtime requires a canonical absolute local path. Cross-platform absolute-path validation is runtime-enforced.",
+      "$ref": "#/$defs/nonControlString"
+    },
+    "environmentAllowlist": {
+      "type": "array",
+      "uniqueItems": true,
+      "default": [],
+      "items": {
+        "type": "string",
+        "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+      }
+    },
+    "parameters": {
+      "default": {}
+    },
+    "initialState": {
+      "default": null
+    }
+  },
+  "$defs": {
+    "watchId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "executable": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000]+$"
+    },
+    "argument": {
+      "type": "string",
+      "pattern": "^[^\\u0000]*$"
+    },
+    "nonControlString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    }
+  }
+}

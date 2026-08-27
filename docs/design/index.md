@@ -29,10 +29,14 @@ node-worker-edited design layer (distinct from the root-level vision/direction d
   boundary: [ADR 0049](DECISIONS.md#0049--one-api-neutral-application-client-contract-governs-explicit-station-capabilities-and-forbids-private-fallbacks).
 - **[watcher.md](watcher.md)** — the **normative Telex Watcher application
   contract**: trusted local detector execution, versioned request/result schemas,
-  receipt-gated state and deduplication, watch lifecycle and health, script and
-  credential policy, sender identity, normalized events, and the requirements
-  exported to the shared Application Client. Load-bearing boundary:
-  [ADR 0046](DECISIONS.md#0046--watcher-runs-provider-neutral-trusted-local-detectors-with-receipt-gated-state).
+  minimal command-plus-policy registration, runtime-owned event sequence identity,
+  receipt-gated state and externally inspectable duplicates, watch lifecycle and
+  health, credential policy, normalized events, v1 migration posture, and the
+  requirements exported to the shared Application Client. Load-bearing
+  boundaries: retained provider-neutral architecture in
+  [ADR 0046](DECISIONS.md#0046--watcher-runs-provider-neutral-trusted-local-detectors-with-receipt-gated-state)
+  and minimal v2 authoring/identity in
+  [ADR 0050](DECISIONS.md#0050--watcher-v2-uses-minimal-command-registration-and-runtime-owned-event-identity).
 - **[operator-station.md](operator-station.md)** — the **normative Operator Station
   application contract**: human-attended address semantics, direct and assisted
   routing, operator-agent authority, source provenance, notification policy,
