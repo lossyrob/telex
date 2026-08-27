@@ -259,7 +259,7 @@ async fn perform_upgrade(
     } else {
         Some(install::switch_to(layout, &plan.tag)?)
     };
-    // Post-switch successor (ADR 0050 decision 14c): spawn the daemon this switch just installed
+    // Post-switch successor (ADR 0051 decision 14c): spawn the daemon this switch just installed
     // and wait, bounded, for a reconcile pass, so an idle attached session regains push without
     // the user running anything. Skipped when nothing was drained or nothing is recoverable.
     let reconcile = match &switched {
@@ -656,7 +656,7 @@ fn recoverable_intent_count(drain: &serde_json::Value) -> Option<u64> {
 /// Spawn the successor daemon the switch just installed and wait, bounded, for one reconcile pass.
 ///
 /// This is a deliberate, bounded extension of "only `attach` auto-spawns" (ADR 0028), recorded in
-/// ADR 0050: it is what makes the issue's motivating scenario — `telex upgrade` with an idle
+/// ADR 0051: it is what makes the issue's motivating scenario — `telex upgrade` with an idle
 /// Copilot session — recover without the user typing anything.
 ///
 /// It runs the pass by **invoking the newly selected binary**, not by calling

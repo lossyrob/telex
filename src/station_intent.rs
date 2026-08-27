@@ -1,4 +1,4 @@
-//! Durable, host-local, owner-private **station intent** records (ADR 0050).
+//! Durable, host-local, owner-private **station intent** records (ADR 0051).
 //!
 //! An intent is the *desired* push registration for one `(store_key, session_id, address)` binding.
 //! It is explicitly **not** membership and **not** attendance: in-memory `MemberRecord` plus the

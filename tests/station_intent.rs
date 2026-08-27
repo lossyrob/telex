@@ -1,4 +1,4 @@
-//! Station-intent reconciliation behavior (issue #106 / ADR 0050).
+//! Station-intent reconciliation behavior (issue #106 / ADR 0051).
 //!
 //! Covers the issue's test matrix at the daemon-core level: restoration, idempotence, the
 //! tombstone guarantee, CC-watermark preservation, ownership and pull-waiter precedence, the

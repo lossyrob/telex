@@ -8,7 +8,7 @@ pub mod config;
 pub mod credential;
 pub mod daemon;
 pub mod daemon_ipc;
-/// Daemon-owned station-intent reconciliation (ADR 0050). Physically `src/daemon_reconcile.rs`,
+/// Daemon-owned station-intent reconciliation (ADR 0051). Physically `src/daemon_reconcile.rs`,
 /// mounted inside `daemon` so it can use the daemon's private state without widening that surface
 /// to the whole crate, and re-exported here at the path the rest of the codebase refers to.
 pub use crate::daemon::reconcile as daemon_reconcile;
@@ -26,7 +26,7 @@ pub mod intent_test_support;
 pub mod ipc;
 pub mod model;
 pub mod output;
-/// Shared owner-private filesystem and process-identity primitives (see ADR 0025, ADR 0050).
+/// Shared owner-private filesystem and process-identity primitives (see ADR 0025, ADR 0051).
 pub mod platform_fs;
 pub mod profiles;
 // In-binary release upgrade (`telex upgrade` with no --from): discover a GitHub release,
@@ -37,7 +37,7 @@ pub mod release;
 // `daemon`.
 pub mod registry;
 pub mod session_watch;
-/// Durable, host-local, owner-private station-intent records (ADR 0050).
+/// Durable, host-local, owner-private station-intent records (ADR 0051).
 pub mod station_intent;
 
 #[cfg(not(any(feature = "sqlite", feature = "postgres")))]

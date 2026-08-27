@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "Operator-approved redesign reset Watcher around minimal agent-authored scripts. Issue #127 / PR #131 are closed unmerged as superseded evidence; minimal-watcher-authoring-contract issue #133 is active with paired implementer/reviewer sessions.",
+  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. The optional example pack is next-ready but unlaunched; runtime remains planned and blocked on Application Client client-conformance.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-07-30T17:40:00Z",
+  "updatedAt": "2026-08-27T18:11:07Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -22,6 +22,10 @@
     }
   ],
   "designRefs": [
+    {
+      "repoId": "telex",
+      "path": ".streamliner/workstreams/telex-watcher/design/current-design.md"
+    },
     {
       "repoId": "telex",
       "path": "docs/design/index.md"
@@ -112,9 +116,9 @@
       "id": "minimal-watcher-authoring-contract",
       "type": "research",
       "title": "Minimal Watcher authoring and registration contract",
-      "summary": "Reset the normative Watcher design around command-plus-policy registration, detector request/result v2, runtime-generated event sequence identity, optional hardening, and a narrowly superseding ADR while retaining provider-neutral trusted-local receipt-gated execution.",
-      "status": "in-progress",
-      "attention": "focus",
+      "summary": "Completed through issue #133 and PR #135, merged as b91e830: command-plus-policy registration, detector request/result v2, runtime-generated event sequence identity, optional hardening, and ADR 0050's narrow supersession of ADR 0046.",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -133,8 +137,8 @@
       "type": "gate",
       "title": "Minimal Watcher contract is dumb and useful",
       "summary": "Builder accepts that an agent can write or copy a script and register command, bounds, and route without mandatory manifests, pinning, kind allowlists, provider preflight, downtime declarations, or a prescribed test framework.",
-      "status": "planned",
-      "attention": "focus",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -216,8 +220,8 @@
       "type": "task",
       "title": "Minimal optional detector examples",
       "summary": "Ship small copyable GitHub, Azure DevOps, HTTP/JSON, file, and command examples with short guidance, extracting selected PR #131 foundations without creating a mandatory template framework.",
-      "status": "planned",
-      "attention": "watch",
+      "status": "ready",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],
@@ -298,7 +302,7 @@
       "id": "minimal-contract-accepted",
       "title": "Minimal Watcher authoring contract accepted",
       "summary": "The intended design supports command-plus-policy registration, agent-owned provider semantics, runtime-generated event identity, and optional hardening without a mandatory template framework.",
-      "status": "planned",
+      "status": "completed",
       "nodeIds": [
         "minimal-watcher-authoring-contract",
         "dumb-watcher-contract-gate"

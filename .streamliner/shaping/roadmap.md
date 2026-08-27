@@ -35,19 +35,26 @@ merged, the design-only `application-client-ready` checkpoint is published, and
 client-core implementation is active. Operator Station production work is
 undergoing an operator-approved direct-Station contract reset after issue #128 /
 PR #130 were closed without merge as superseded prescribed-mediation scope.
-Issue #134 and ADR 0051 own the reset. Telex Watcher is undergoing an
-operator-approved contract reset:
-issue #127 / PR #131 were closed without merge because the mandatory template
-framework conflicted with the desired minimal agent-authoring experience.
-`minimal-watcher-authoring-contract` is the next ready Watcher node.
+Issue #134 and ADR 0051 own the reset. Telex Watcher's minimal v2
+authoring/registration reset completed through issue #133 and PR #135, merged as
+`b91e8301899351c0411d6e2e9ac5290af8a3cb4c`; its builder-owned
+`dumb-watcher-contract-gate` and `minimal-contract-accepted` checkpoint are
+complete. The optional example pack is next-ready but unlaunched, while runtime
+still waits on Application Client `client-conformance`.
+Local Daemon release-confidence validation completed, but issue #106 exposed a
+daemon-replacement push-intent gap. Existing PR #138 is adopted as the
+in-progress repair ahead of the still-unaccepted hardening gate; its proposed
+station-intent contract is not current authority until repaired, reviewed, and
+merged.
 
 ## Covering workstreams
 
 | Workstream | Tracker | Outcome | Current first move |
 |---|---|---|---|
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | Issue #134 resets the contract under ADR 0051; mediation is external/non-normative; `station-app` waits on the direction gate and Application Client `client-conformance`. |
-| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Reset authoring/registration design around a minimal v2 contract; preserve #127/#131 as superseded evidence. |
+| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Run the next-ready optional example pack when launched; runtime remains planned and waits on Application Client `client-conformance`. |
 | Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Contract convergence is merged; client core is active and Watcher runtime waits on `client-conformance`. |
+| Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | Adopt issue #106 / PR #138 as `station-intent-reconciliation`; integrate current `main`, resolve blocking review, and present isolated both-backend evidence before the hardening gate. |
 
 ## Shared seam
 
@@ -132,8 +139,9 @@ After the shared semantic checkpoint:
 
 - Operator Station first resets the design around direct human attendance, then
   builds the desktop app after Application Client `client-conformance`.
-- Telex Watcher first resets the authoring contract to the minimal
-  command-plus-policy model, then builds runtime/CLI and small optional examples.
+- Telex Watcher's minimal command-plus-policy contract and builder usability
+  gate are accepted. Optional examples are next-ready but unlaunched, while
+  runtime/CLI waits for Application Client `client-conformance`.
 
 Each retains its own usability and operational-hardening gates.
 
@@ -201,10 +209,15 @@ collapse into noise, and no session-bound polling task is required.
 
 ## Current next actions
 
-1. Accept the minimal Watcher authoring/registration v2 contract and its
-   superseding ADR before resuming runtime or example implementation.
-2. Continue Application Client core/binding/conformance work and export
+1. Reconcile and repair adopted Local Daemon PR #138 for issue #106 without
+   weakening explicit membership, fencing, or merged Copilot App lifecycle
+   semantics; keep the hardening gate separate from merge.
+2. Launch `minimal-example-pack` only when authorized; it is next-ready after
+   contract-usability acceptance.
+3. Continue Application Client core/binding/conformance work and export
    `client-conformance` before Watcher runtime integration.
-3. After the Watcher contract gate, run the minimal example pack in parallel
-   with runtime core where dependencies permit; keep hardening recipes optional.
-4. Preserve the campaign integration exercise and no-private-client boundary.
+4. Keep `watcher-runtime-core` planned until client conformance promotes
+   exact-store/exact-operation `not-recorded` and identity-checkable
+   same-operation retry; recovery remains query-only under uncertainty.
+5. Keep `five-minute-custom-watch-gate` planned for later operational proof, and
+   preserve the campaign integration exercise and no-private-client boundary.

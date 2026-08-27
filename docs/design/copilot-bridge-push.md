@@ -397,7 +397,8 @@ A later node hardened the liveness and stop edges of this push path (see DECISIO
 - **A live push bridge reports live, not `unattended`/`deaf`.** Station health for a registered
   push station is derived from the daemon's own push-attempt outcomes (harness-neutral — the daemon
   never reads the bridge registry): a recent accepted push -> `attended_push` (structured
-  `push_delivery: delivering`), a backlog with no attempt yet (e.g. post-restart) -> `probing`, an
+  `push_delivery: delivering`), a busy bridge that explicitly delays an enqueue until turn-idle ->
+  `deferred`, a backlog with no attempt yet (e.g. post-restart) -> `probing`, an
   accepted push whose 300s backstop elapsed with no fresh accept -> `stale_accepted` (an
   earlier-than-deaf hint), and only actually-**failing** pushes -> `unattended_with_backlog`/`deaf`.
   A successful push is answerback that clears a stale deaf state. This fixes #64 (a live bridge was

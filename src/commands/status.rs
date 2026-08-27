@@ -107,7 +107,7 @@ pub async fn run(ctx: &Ctx) -> Result<i32> {
         info["foreign_members"] = serde_json::to_value(&foreign_members)?;
         info["live_waiters"] = serde_json::to_value(&live_waiters)?;
         info["also_active_on"] = serde_json::to_value(&also_active_on)?;
-        // Station-intent rows for this address (issue #106 / ADR 0050), including **intent-only**
+        // Station-intent rows for this address (issue #106 / ADR 0051), including **intent-only**
         // rows with no member — which is exactly the degraded state a daemon replacement leaves
         // behind and the one a member-only projection cannot show.
         let station_intents: Vec<_> = daemon_status

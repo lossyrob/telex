@@ -43,10 +43,14 @@ The richer rationale and detector protocol sketch are preserved in
 
 ## Design References
 
+- `telex:.streamliner/workstreams/telex-watcher/design/current-design.md` -
+  canonical integrated workstream design, boundaries, dependencies, and open
+  questions.
 - `telex:docs/design/index.md` - entry point for Telex's intended-system design.
 - `telex:docs/design/watcher.md` - normative production Watcher contract.
-- `telex:docs/design/DECISIONS.md` - ADR 0046 records the load-bearing
-  provider-neutral, trusted-local, receipt-gated architecture.
+- `telex:docs/design/DECISIONS.md` - ADR 0046 records the retained
+  provider-neutral, trusted-local, receipt-gated architecture; ADR 0050 records
+  the minimal v2 authoring and runtime-owned identity direction.
 - `telex:PRODUCT-THESIS.md` - durable responsibilities, store-and-forward
   delivery, and Telex's boundary against workflow execution.
 - `telex:docs/design/daemon.md` - local-exchange lifecycle and durable send
@@ -144,15 +148,31 @@ optional hardening. Watcher owns generic lifecycle, bounds, diagnostics, opaque
 state, durable Telex delivery, receipt-gated commit, and runtime-generated event
 sequence identity.
 
-`minimal-watcher-authoring-contract` is active through
-[#133](https://github.com/lossyrob/telex/issues/133), with Streamliner-launched
-implementer and reviewer sessions attached at `watcher-impl-133` and
-`watcher-review-133`. It must revise `docs/design/watcher.md`, add v2
-registration/request/result schemas, and add a new ADR that narrowly supersedes
-ADR 0046's authoring/provenance details while reaffirming the core architecture.
-Runtime and example nodes remain planned until the new contract and its builder
-gate are accepted. Runtime additionally depends on Application Client
-`client-conformance`. There is no private-client or mandatory-template fallback.
+`minimal-watcher-authoring-contract` completed through
+[#133](https://github.com/lossyrob/telex/issues/133) and
+[PR #135](https://github.com/lossyrob/telex/pull/135), merged as
+`b91e8301899351c0411d6e2e9ac5290af8a3cb4c`. The merge promoted the minimal v2
+registration/request/result schemas, runtime-owned event identity, and ADR 0050
+as project design authority. The canonical integrated workstream design now
+lives in [`design/current-design.md`](design/current-design.md).
+
+The builder accepted `dumb-watcher-contract-gate` as contract-usability
+acceptance, completing the `minimal-contract-accepted` checkpoint. The evidence
+was the ordinary authoring flow in merged `watcher.md`: command, cadence,
+timeout, backend, sender, and target are the only required registration fields;
+other generic fields have explicit defaults; and manifests, pinning, kind
+allowlists, provider preflight, downtime declarations, and template conformance
+are absent from v2 registration/runtime semantics. PR #135 had PAW `+1` review
+4825216100 and green CI; the focused design-steward follow-up in PR #141 had
+`+1` review 5044005481 and green CI.
+
+This acceptance is not production-runtime or five-minute operational proof.
+`minimal-example-pack` is next-ready but unlaunched. `watcher-runtime-core`
+remains planned and blocked specifically on Application Client
+`client-conformance`, including promotion of authoritative
+exact-store/exact-operation `not-recorded`. The completed internal gate remains
+as a historical dependency. There is no private-client or mandatory-template
+fallback, and `five-minute-custom-watch-gate` remains planned.
 
 ## Decisions
 
@@ -192,13 +212,21 @@ gate are accepted. Runtime additionally depends on Application Client
   shared Watcher runtime can replace a session-owned PR sentry loop for scoped
   supervision with timely, low-noise Telex delivery and clean watch lifecycle.
   Production semantics still require the contract and shared-client gates.
-- **The production Watcher domain contract is accepted:** `docs/design/watcher.md`,
-  its four canonical schemas, and ADR 0046 govern downstream runtime/template
-  work. Intentional changes require normal design/decision updates.
+- **The minimal v2 production Watcher contract is accepted:**
+  `docs/design/watcher.md`, the three canonical v2 schemas, retained ADR 0046,
+  and superseding ADR 0050 govern downstream runtime/example work. Intentional
+  changes require normal design/decision updates.
+- **The builder accepted contract usability, not runtime operation:** the
+  shortest ordinary authoring path needs only the minimal command, cadence,
+  timeout, backend, sender, and target inputs plus explicit defaults, without
+  mandatory hardening ceremony.
+  `minimal-example-pack` may proceed, while `five-minute-custom-watch-gate`
+  still owns proof that a watch can be created, registered, left running, and
+  diagnosed in five minutes.
 - **The original contract is now a historical input, not current authoring
   direction:** provider-neutral trusted-local execution, fixed routing,
   structured results, receipt-gated state, diagnostics, and no workflow actions
-  are retained. A new design node must supersede mandatory script pinning,
+  are retained. ADR 0050 supersedes mandatory script pinning,
   digests, manifests, event-kind allowlists, provider preflight, downtime
   declarations, and template conformance as ordinary registration requirements.
 - **Watcher generates event identity:** runtime persists a per-watch committed
@@ -211,6 +239,10 @@ gate are accepted. Runtime additionally depends on Application Client
   wait for #12/campaign convergence. CLI subprocess parsing, raw daemon IPC,
   `TELEX_WATCHER_INTERNAL_SEND_ONCE_V1`, and sender occupancy are not accepted
   production client seams.
+- **Authoritative non-acceptance remains shared-client work:** the Application
+  Client must promote exact-store/exact-operation `not-recorded` and prove
+  identity-checkable same-operation retry through `client-conformance`; uncertain
+  Watcher sends remain query-only and blocked until then.
 - **`application-client-ready` is design-only:** it permits detailed node
   promotion under the accepted semantics but does not satisfy
   `watcher-runtime`'s dependency on an implemented, conformant supported client.

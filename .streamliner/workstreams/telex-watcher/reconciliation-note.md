@@ -1,5 +1,44 @@
 # Telex Watcher — Reconciliation
 
+## 2026-08-27 minimal v2 contract and usability acceptance
+
+Issue #133 completed through
+[PR #135](https://github.com/lossyrob/telex/pull/135), merged from exact reviewed
+head `a9a832b940ac95b8eb51fe04b456902d0c74d251` as
+`b91e8301899351c0411d6e2e9ac5290af8a3cb4c`. The merge had an exact-head PAW
+`+1`, six successful checks, clean mergeability, and zero unresolved review
+threads. It promoted the minimal v2 Watcher contract, three v2 schemas, and ADR
+0050 into project design authority.
+
+The canonical integrated workstream design is now
+[`design/current-design.md`](design/current-design.md). The
+`minimal-watcher-authoring-contract` node is completed. The operator separately
+accepted `dumb-watcher-contract-gate` as contract-usability acceptance, so the
+`minimal-contract-accepted` checkpoint is completed. `minimal-example-pack` is
+next-ready but has not been launched. `watcher-runtime-core` remains planned and
+blocked specifically on Application Client `client-conformance`; the completed
+internal gate remains in its graph dependencies as history.
+
+The builder decision used the ordinary authoring flow in merged `watcher.md`:
+write or copy a detector, optionally exercise it, register it, and inspect
+diagnostics if needed. Registration requires only command, cadence, timeout,
+backend, sender, and target, while other generic fields have explicit defaults.
+Mandatory manifests, pinning, kind allowlists, provider preflight, downtime
+declarations, and template conformance are absent from v2 registration/runtime
+semantics. PR #135 carried PAW `+1` review 4825216100 and green CI. The focused
+design-steward follow-up in PR #141 carried `+1` review 5044005481 and green CI.
+This accepts contract usability only: it is not production runtime or proof that
+a watch can be created, registered, left running, and diagnosed in five minutes.
+That operational proof remains owned by the planned
+`five-minute-custom-watch-gate`.
+
+One controlled shared-client gap remains explicit: Watcher requires
+authoritative exact-store/exact-operation `not-recorded` evidence and
+identity-checkable same-operation retry, while the current Application Client
+AC-C14 does not yet state the former. Application Client owns promotion and
+conformance proof. Watcher runtime must remain query-only/blocked under
+uncertainty and must not create a private fallback.
+
 ## What changed
 
 Wave 1 began as a narrow proof that trusted local detector scripts could run
@@ -276,9 +315,11 @@ leakage, not additional Application Client product scope.
 - Watcher authoring should optimize for the shortest useful loop before
   optional hardening: target authority — `docs/design/watcher.md`, a new
   superseding ADR, and v2 schemas.
-  - Disposition: promoted to `minimal-watcher-authoring-contract`, the next
-    ready design node.
+  - Disposition: completed through issue #133 and merged PR #135; the builder
+    accepted contract usability after PAW review 4825216100 and focused
+    design-steward review 5044005481. The optional example pack is next-ready
+    but unlaunched; operational proof remains a later gate.
 - PR #131 implementation evidence: target authority — minimal examples and
   optional hardening recipes.
-  - Disposition: preserved on the closed unmerged PR/branch. Extraction waits
-    until the minimal contract gate passes.
+  - Disposition: preserved on the closed unmerged PR/branch. Extraction may
+    proceed through the now-ready but unlaunched minimal example pack.

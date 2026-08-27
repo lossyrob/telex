@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://telex.dev/schema/watcher-detector-request-v2.schema.json",
+  "title": "Telex Watcher detector request v2",
+  "$comment": "Opaque JSON values must be valid I-JSON and RFC 8785 canonicalizable. Duplicate object member names and values outside that subset are rejected before execution.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "attempt",
+    "watch",
+    "state"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": 2
+    },
+    "attempt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "now"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/nonControlString"
+        },
+        "now": {
+          "$ref": "#/$defs/utcTimestamp"
+        }
+      }
+    },
+    "watch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "activatedAt",
+        "lastSuccessAt",
+        "parameters"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/watchId"
+        },
+        "activatedAt": {
+          "$ref": "#/$defs/utcTimestamp"
+        },
+        "lastSuccessAt": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/utcTimestamp"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parameters": true
+      }
+    },
+    "state": true
+  },
+  "$defs": {
+    "utcTimestamp": {
+      "$comment": "Validators must assert the date-time format or perform an equivalent calendar-validity check in addition to this lexical UTC/precision pattern.",
+      "type": "string",
+      "format": "date-time",
+      "pattern": "^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\\.[0-9]{1,3})?Z$"
+    },
+    "watchId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "nonControlString": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000-\\u001f\\u007f]+$"
+    }
+  }
+}

@@ -447,7 +447,7 @@ fn rollback_bridge_binding(session_id: &str, address: &str, write: BridgeBinding
 }
 
 // ---------------------------------------------------------------------------------------------
-// Station intents (issue #106 / ADR 0050)
+// Station intents (issue #106 / ADR 0051)
 // ---------------------------------------------------------------------------------------------
 
 /// Register this harness's handler kind and producer credential root.
@@ -1061,6 +1061,10 @@ struct BridgeRegistry {
     #[serde(rename = "sessionId", default)]
     session_id: Option<String>,
     #[serde(default)]
+    pid: Option<u32>,
+    #[serde(rename = "lifecyclePid", default)]
+    lifecycle_pid: Option<u32>,
+    #[serde(default)]
     secret: Option<String>,
     #[serde(rename = "maxRequestBytes", default)]
     max_request_bytes: Option<usize>,
@@ -1110,20 +1114,43 @@ fn bridge_root_dir() -> Result<PathBuf> {
 /// and was written within `BRIDGE_LIVENESS_WINDOW`. `push_registered` on the daemon only means
 /// the on-deliver handler is registered; this is the "bridge loaded and reachable" signal, so a
 /// crashed / unloaded / hung bridge is detected even while daemon membership stays alive.
-fn bridge_is_live(session_id: &str) -> bool {
+fn live_bridge_lifecycle_pid(session_id: &str) -> Option<u32> {
     let path = match bridge_registry_path(session_id) {
         Ok(path) => path,
-        Err(_) => return false,
+        Err(_) => return None,
     };
     let modified = match std::fs::metadata(&path).and_then(|m| m.modified()) {
         Ok(modified) => modified,
-        Err(_) => return false,
+        Err(_) => return None,
     };
-    match modified.elapsed() {
+    let heartbeat_fresh = match modified.elapsed() {
         Ok(age) => age < BRIDGE_LIVENESS_WINDOW,
         // Heartbeat timestamp in the future (clock skew) -> treat as fresh, not stale.
         Err(_) => true,
+    };
+    if !heartbeat_fresh {
+        return None;
     }
+    let registry: BridgeRegistry =
+        serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()?;
+    if registry
+        .session_id
+        .as_deref()
+        .is_some_and(|sid| sid != session_id)
+    {
+        return None;
+    }
+    // A fresh heartbeat is the bridge's liveness answerback. Return its PID even if the process
+    // exits in the narrow interval after the write: Register captures process identity and the
+    // daemon's watch-pid reaper will then end attendance on its next heartbeat.
+    registry
+        .lifecycle_pid
+        .or(registry.pid)
+        .filter(|pid| *pid != 0)
+}
+
+fn bridge_is_live(session_id: &str) -> bool {
+    live_bridge_lifecycle_pid(session_id).is_some()
 }
 
 /// The per-session bridge endpoint, derived from the session id exactly as the bridge derives
@@ -1327,7 +1354,7 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
 
     let registry_path = bridge_registry_path(&session)?;
 
-    // Epoch fence (issue #106 / ADR 0050 decision 8). Re-read the daemon capability file
+    // Epoch fence (issue #106 / ADR 0051 decision 8). Re-read the daemon capability file
     // immediately before injecting: if the daemon instance that registered this handler is gone and
     // a successor has rewritten the cap file, abort rather than inject into a session the successor
     // now owns. This is the crash-path window; the daemon-side epoch guard already stops the old
@@ -1558,7 +1585,7 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
         }
     };
 
-    // Turn-boundary station-intent maintenance (issue #106 / ADR 0050 decision 14d).
+    // Turn-boundary station-intent maintenance (issue #106 / ADR 0051 decision 14d).
     //
     // Two things happen here, both best effort and both fail-open:
     //   1. Any `pending` intent for this session is finalized to `live` now that the bridge is
@@ -1903,7 +1930,7 @@ async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
     };
     let bridge_provisioned = on_deliver.is_some();
     // The durable record of *desired* state, written before `Register` and while still `Pending`
-    // (issue #106 / ADR 0050). A failure here fails the attach: silently proceeding would leave the
+    // (issue #106 / ADR 0051). A failure here fails the attach: silently proceeding would leave the
     // user with push that works now and no recovery after a daemon replacement, which is precisely
     // the state this feature exists to remove.
     let mut intent_write = None;
@@ -2327,18 +2354,10 @@ async fn register_fallback_member(
     let watch_pids = if let Some(pid) = manifest.loader_pid {
         vec![WatchPidSpec::anchor(pid)]
     } else {
-        existing
-            .map(|member| {
-                member
-                    .watch_pids
-                    .iter()
-                    .map(|watch| WatchPidSpec {
-                        pid: watch.pid,
-                        role: watch.role,
-                    })
-                    .collect()
-            })
-            .unwrap_or_default()
+        // This is an explicit push-to-pull transition. Existing predicates may point at the
+        // bridge host and must not survive bridge teardown; no loader signal is safer than a
+        // stale negative signal that can reap a live fallback waiter.
+        Vec::new()
     };
     let register = Request::Register {
         store_key: manifest.store_key.clone(),
@@ -2362,6 +2381,7 @@ async fn register_fallback_member(
             .clone()
             .or_else(|| existing.and_then(|member| member.tags.clone())),
         watch_pids,
+        replace_watch_pids: true,
         recovery: false,
         on_deliver: None,
         replace_on_deliver: true,
@@ -2392,6 +2412,53 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
             return Ok(0);
         }
     };
+
+    let reason = payload.as_deref().and_then(parse_session_end_reason);
+    let mut bridge_watch_failure = None;
+    // Copilot App emits sessionEnd(reason=complete) whenever a turn finishes and the durable App
+    // session becomes idle. One-shot CLI runs also use `complete`, so reason alone is insufficient.
+    // A live bridge proves the session can still receive turns; refresh every member with that
+    // exact bridge process as an anchor. App attendance remains live, while a true CLI/App teardown
+    // kills the bridge and the daemon's ordinary watch-pid reaper ends the session.
+    if reason.as_deref() == Some("complete") {
+        if let Some(lifecycle_pid) = live_bridge_lifecycle_pid(&session) {
+            match bind_session_to_bridge_lifecycle(ctx, &session, lifecycle_pid).await {
+                Ok(bound_members) if bound_members > 0 => {
+                    let detail = format!(
+                        "sessionEnd(reason=complete) received while bridge host pid {lifecycle_pid} is live; bound {bound_members} member(s) to bridge-host lifetime"
+                    );
+                    let event = HookLogEvent::session_end(
+                        "live_bridge_complete",
+                        Some(&session),
+                        Some(&detail),
+                    );
+                    write_hook_log_best_effort(&event);
+                    print_json(&serde_json::json!({
+                        "session_end": false,
+                        "session_active": true,
+                        "session_id": session,
+                        "reason": "complete",
+                        "bridge_lifecycle_pid": lifecycle_pid,
+                        "bound_members": bound_members,
+                        "outcome": "live_bridge_complete",
+                    }));
+                    return Ok(0);
+                }
+                Ok(_) => {
+                    bridge_watch_failure =
+                        Some("no active session members were available to bind".to_string());
+                }
+                Err(e) => {
+                    write_hook_log_best_effort(&HookLogEvent::session_end(
+                        "bridge_watch_failed",
+                        Some(&session),
+                        Some(&e),
+                    ));
+                    bridge_watch_failure = Some(e);
+                }
+            }
+        }
+    }
 
     let store_key = match ctx.store_key() {
         Ok(store_key) => store_key,
@@ -2450,6 +2517,7 @@ async fn session_end(ctx: &Ctx, args: CopilotSessionEndArgs) -> Result<i32> {
         "session_id": session,
         "stores": ended,
         "failures": failed,
+        "bridge_watch_failure": bridge_watch_failure,
         "outcome": outcome,
     }));
     Ok(0)
@@ -2654,7 +2722,7 @@ fn gc(ctx: &Ctx, args: CopilotGcArgs) -> Result<i32> {
         Some(session) => vec![session],
         None => discover_bridge_sessions()?,
     };
-    // Truth ordering (ADR 0050 decision 17): the station intent is authoritative for keep
+    // Truth ordering (ADR 0051 decision 17): the station intent is authoritative for keep
     // decisions; `.bindings.json` is a secondary hint that survives only as the extension teardown
     // ref-count. Drift between the two is *reported*, never silently repaired — a GC that quietly
     // reconciled them could delete the bridge a live intent still depends on.
@@ -2854,6 +2922,74 @@ fn parse_session_id(payload: &str) -> Option<String> {
         .or_else(|| json_string(&v, "session_id"))
         .or_else(|| v.get("data").and_then(|d| json_string(d, "sessionId")))
         .or_else(|| v.get("data").and_then(|d| json_string(d, "session_id")))
+}
+
+fn parse_session_end_reason(payload: &str) -> Option<String> {
+    let v: serde_json::Value = serde_json::from_str(payload).ok()?;
+    json_string(&v, "reason").or_else(|| v.get("data").and_then(|d| json_string(d, "reason")))
+}
+
+async fn bind_session_to_bridge_lifecycle(
+    ctx: &Ctx,
+    session: &str,
+    lifecycle_pid: u32,
+) -> std::result::Result<usize, String> {
+    let store_key = ctx.store_key().map_err(|e| e.to_string())?;
+    let (mut client, cap) = connect_existing_with_cap(&store_key).await?;
+    let status = daemon_status(&mut client, &store_key, &cap.admin_cap).await?;
+    let members = active_session_members(&status, &store_key, session);
+    let mut bound = 0usize;
+    for member in members {
+        let mut register_client = crate::daemon::connect_existing(&store_key)
+            .await
+            .map_err(|e| e.to_string())?;
+        let response = register_client
+            .request(&Request::Register {
+                store_key: member.store_key,
+                address: member.address,
+                session_id: member.session_id,
+                occupant: member.occupant,
+                description: member.description,
+                scope: member.scope,
+                tags: member.tags,
+                watch_pids: vec![WatchPidSpec::anchor(lifecycle_pid)],
+                replace_watch_pids: true,
+                recovery: false,
+                on_deliver: None,
+                replace_on_deliver: false,
+                on_deliver_wake_on_cc: false,
+            })
+            .await
+            .map_err(|e| e.to_string())?;
+        match response {
+            Response::Registered { .. } => bound += 1,
+            Response::Error { code, message, .. } => {
+                return Err(format!("{code}: {message}"));
+            }
+            other => {
+                return Err(format!(
+                    "unexpected bridge-watch refresh response: {other:?}"
+                ))
+            }
+        }
+    }
+    let (mut verify_client, cap) = connect_existing_with_cap(&store_key).await?;
+    let verified_status = daemon_status(&mut verify_client, &store_key, &cap.admin_cap).await?;
+    let verified = active_session_members(&verified_status, &store_key, session)
+        .iter()
+        .filter(|member| {
+            member
+                .watch_pids
+                .iter()
+                .any(|watch| watch.pid == lifecycle_pid)
+        })
+        .count();
+    if verified != bound {
+        return Err(format!(
+            "daemon accepted bridge-lifetime refresh for {bound} member(s) but reported the bridge PID on {verified}; restart/update the daemon before preserving sessionEnd"
+        ));
+    }
+    Ok(bound)
 }
 
 fn json_string(v: &serde_json::Value, key: &str) -> Option<String> {
@@ -4746,6 +4882,19 @@ mod tests {
             recovery_latency_ms: None,
             index_as_of_ms: None,
         }
+    }
+
+    #[test]
+    fn parse_session_end_reason_from_app_and_nested_payloads() {
+        assert_eq!(
+            parse_session_end_reason(r#"{"reason":"complete"}"#).as_deref(),
+            Some("complete")
+        );
+        assert_eq!(
+            parse_session_end_reason(r#"{"data":{"reason":"user_exit"}}"#).as_deref(),
+            Some("user_exit")
+        );
+        assert_eq!(parse_session_end_reason(r#"{"other":"x"}"#), None);
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Daemon-owned station-intent reconciliation (issue #106 / ADR 0050).
+//! Daemon-owned station-intent reconciliation (issue #106 / ADR 0051).
 //!
 //! Reconciliation is **its own daemon operation**, not a side effect of `Register`. That framing is
 //! what makes the safety properties statable:

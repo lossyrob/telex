@@ -3,11 +3,11 @@
   "id": "local-daemon",
   "projectKey": "telex",
   "title": "Local presence/transport daemon (eliminate the per-session holder)",
-  "summary": "Design foundation merged (the local-exchange model, ADRs 0014-0024 in docs/design/). Building the per-user local exchange (daemon) for SQLite + Postgres, the Copilot plugin (sessionEnd hook + skill), seamless upgrade, and a validation-loop hardening wave (chaos + Entra-PG multi-host + AKS scale), so idle long-lived sessions stay wakeable and stations stop going stale.",
+  "summary": "The local exchange, both backends, Copilot push bridge, upgrade path, and release-confidence validation are complete. Issue #106 / PR #138 is the active station-intent hardening repair required before the builder hardening gate: preserve desired push registration across daemon replacement without turning durable intent into membership or weakening fencing.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-07-08T22:25:00.000Z",
+  "updatedAt": "2026-08-27T17:45:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -297,6 +297,26 @@
       ]
     },
     {
+      "id": "station-intent-reconciliation",
+      "type": "task",
+      "title": "Durable station intent reconciliation after daemon replacement",
+      "summary": "Adopt issue #106 and existing PR #138 rather than replacing them. Reconcile the PR with current main without rewriting history, preserve merged PR #139 Copilot App lifecycle semantics, repair all blocking review findings, and prove bounded restart/drain/upgrade recovery on SQLite and Postgres with isolated test roots and the branch binary. Durable station intent describes desired push registration only; it never establishes membership, attendance, lease ownership, positive liveness, or permission to deliver. The proposed contract remains pending promotion until the integrated exact head is reviewed, green, and merged.",
+      "status": "in-progress",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 106
+      },
+      "dependsOn": [
+        "release-confidence-validation"
+      ]
+    },
+    {
       "id": "public-release",
       "type": "task",
       "title": "Public release readiness + first GitHub release",
@@ -343,14 +363,14 @@
       "id": "hardening-gate",
       "type": "gate",
       "title": "Hardening gate (validation report)",
-      "summary": "Demonstration gate: builder consumes the full validation report (Tier 1/2 chaos + Entra-PG multi-host + AKS scale) - scenario exercised, evidence, gaps found, repairs + reruns, remaining accepted risk - and judges whether the system has earned rollout confidence. Blocks closure-gate.",
-      "status": "ready",
+      "summary": "Demonstration gate: builder consumes the completed release-confidence report plus the merged station-intent repair evidence - isolated daemon restart/drain/upgrade and push recovery, both-backend coverage, gaps found, repairs and reruns, and remaining accepted risk - and judges whether the system has earned rollout confidence. A PR merge does not accept this gate. Blocks closure-gate.",
+      "status": "planned",
       "attention": "focus",
       "repoIds": [
         "telex"
       ],
       "dependsOn": [
-        "release-confidence-validation"
+        "station-intent-reconciliation"
       ]
     },
     {
@@ -413,7 +433,7 @@
     {
       "id": "complete",
       "title": "Full deliverable complete",
-      "summary": "The full seamless upgrade platform (#6) landed; both backends, the plugin, and upgrade are all in, pending closure validation.",
+      "summary": "This checkpoint completes only after the full seamless upgrade platform (#6), both backends, plugin, release path, and daemon-replacement station-intent repair have landed; builder hardening and closure validation remain separate.",
       "status": "planned",
       "nodeIds": [
         "seamless-upgrade",
@@ -421,7 +441,8 @@
         "bridge-idle-drain",
         "bridge-liveness-hardening",
         "public-release",
-        "release-upgrade"
+        "release-upgrade",
+        "station-intent-reconciliation"
       ]
     },
     {

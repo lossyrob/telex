@@ -345,7 +345,7 @@ fallback.
 
 Push delivery (sec. 9) is armed by an in-memory `MemberRecord`. That record does not survive a
 daemon replacement, so an upgrade, a graceful drain, or a crash silently converts a push-attended
-session into an unattended one. A **station intent** (ADR 0050) closes that gap without violating
+session into an unattended one. A **station intent** (ADR 0051) closes that gap without violating
 the never-rebuild-membership-from-history invariant.
 
 ```

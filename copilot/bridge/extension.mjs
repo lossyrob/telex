@@ -304,6 +304,7 @@ async function writeRegistry() {
         sessionId,
         endpoint,
         pid: process.pid,
+        lifecyclePid: process.ppid,
         secret,
         maxRequestBytes: MAX_REQUEST_BYTES,
         // Wire protocol this bridge speaks. `telex copilot attach/resume` records the range in the
@@ -341,13 +342,16 @@ async function writeRegistry() {
     await rm(tmpPath, { force: true }).catch(() => {});
     throw e;
   }
-  if (isPosix) {
-    await chmod(registryPath, 0o600).catch(() => {});
-  }
 }
-await writeRegistry();
+let registryWrite = Promise.resolve();
+function queueRegistryWrite() {
+  const next = registryWrite.catch(() => {}).then(writeRegistry);
+  registryWrite = next;
+  return next;
+}
+await queueRegistryWrite();
 const heartbeatTimer = setInterval(() => {
-  writeRegistry().catch(() => {});
+  queueRegistryWrite().catch(() => {});
 }, 15000);
 // Never let the heartbeat keep the process alive on its own.
 heartbeatTimer.unref?.();
@@ -360,6 +364,9 @@ const cleanup = async () => {
   try {
     clearInterval(heartbeatTimer);
   } catch {}
+  // Let a queued heartbeat finish before removing its temp or published registry.
+  await registryWrite.catch(() => {});
+  await rm(registryTempPath, { force: true }).catch(() => {});
   try {
     server.close();
   } catch {}

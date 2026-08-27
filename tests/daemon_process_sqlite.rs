@@ -2824,6 +2824,21 @@ fn real_process_copilot_fallback_cross_platform() {
         Some("cross-platform fallback test"),
         "fallback transition must inherit existing station metadata"
     );
+    assert_eq!(
+        pull_status
+            .pointer("/daemon_members/0/watch_pids")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(1),
+        "fallback must replace bridge-lifecycle watch anchors with the loader anchor"
+    );
+    assert_eq!(
+        pull_status
+            .pointer("/daemon_members/0/watch_pids/0/pid")
+            .and_then(Value::as_u64),
+        Some(u64::from(std::process::id())),
+        "fallback must bind pull attendance to the configured loader PID"
+    );
 
     env.attach(sender, sender_addr);
     let sent = env.run_with_session(
@@ -3275,7 +3290,7 @@ fn real_process_copilot_bridge_refresh_keeps_push_liveness_unanchored() {
 }
 
 #[test]
-fn real_process_copilot_session_end_preserves_bridge_state_until_detach() {
+fn real_process_copilot_app_turn_complete_keeps_live_bridge_attended_until_true_end() {
     let env = ProcessEnv::new("real-copilot-bridge-session-end");
     let session = format!("real-copilot-bridge-session-end-{}", std::process::id());
     let address = format!(
@@ -3307,12 +3322,15 @@ fn real_process_copilot_session_end_preserves_bridge_state_until_detach() {
     let extension = artifacts.bridge_dir.join("extension.mjs");
     let bindings = &artifacts.bindings;
     let registry = &artifacts.registry;
+    let simulated_bridge_pid = env.daemon_pid();
     wait_until_path_exists(&extension, Duration::from_secs(3));
     wait_until_path_exists(bindings, Duration::from_secs(3));
     std::fs::write(
         registry,
         serde_json::to_vec(&serde_json::json!({
             "sessionId": &session,
+            "pid": simulated_bridge_pid,
+            "lifecyclePid": simulated_bridge_pid,
             "secret": "process-test-secret",
             "maxRequestBytes": 1048576
         }))
@@ -3333,20 +3351,129 @@ fn real_process_copilot_session_end_preserves_bridge_state_until_detach() {
     )
     .expect("write turn guard state");
 
+    let complete_payload_path = env.root.join("session-end-complete.json");
+    std::fs::write(
+        &complete_payload_path,
+        serde_json::to_vec(&serde_json::json!({
+            "sessionId": &session,
+            "reason": "complete"
+        }))
+        .expect("complete payload json"),
+    )
+    .expect("write complete payload");
+    let mut complete_cmd = env.command_with_session("ignored");
+    configure_copilot_home(&mut complete_cmd, &env.home);
+    complete_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", &session)
+        .args(["--json", "copilot", "session-end"])
+        .stdin(Stdio::from(
+            std::fs::File::open(&complete_payload_path).expect("open complete payload"),
+        ));
+    let completed = run_command_with_capture(complete_cmd, &env.root, Duration::from_secs(8));
+    completed.assert_success("copilot App turn completion");
+    assert_eq!(
+        completed
+            .json("copilot App turn completion")
+            .get("outcome")
+            .and_then(Value::as_str),
+        Some("live_bridge_complete"),
+        "unexpected complete-hook output: stdout={} stderr={}",
+        completed.stdout,
+        completed.stderr
+    );
+    assert!(extension.exists(), "session-end must retain extension.mjs");
+    assert!(bindings.exists(), "session-end must retain bridge bindings");
+    assert!(registry.exists(), "session-end must retain bridge registry");
+    assert!(
+        guard_state.exists(),
+        "a non-terminal App turn boundary must retain transient turn-guard state"
+    );
+
+    let active_status = env.run_with_session(
+        &session,
+        ["--json", "station", "status", "--session", session.as_str()],
+        Duration::from_secs(5),
+    );
+    active_status.assert_success("station status after App turn completion");
+    let active_status_json = active_status.json("station status after App turn completion");
+    assert_eq!(
+        active_status_json["stations"][0]
+            .get("idle")
+            .and_then(Value::as_bool),
+        Some(false),
+        "App turn completion must preserve live bridge attendance: {active_status_json}"
+    );
+    assert_eq!(
+        active_status_json["stations"][0]
+            .get("watch_pids")
+            .and_then(Value::as_array)
+            .and_then(|pids| pids.first())
+            .and_then(|watch| watch.get("pid"))
+            .and_then(Value::as_u64),
+        Some(u64::from(simulated_bridge_pid)),
+        "completed sessions must bind attendance to the live bridge process: {active_status_json}"
+    );
+
+    let mut reattach_cmd = env.command_with_session("ignored");
+    configure_copilot_home(&mut reattach_cmd, &env.home);
+    reattach_cmd
+        .env_remove("TELEX_SESSION_ID")
+        .env("COPILOT_AGENT_SESSION_ID", &session)
+        .args([
+            "--json",
+            "--address",
+            address.as_str(),
+            "copilot",
+            "attach",
+            "--copilot-bridge",
+            "--description",
+            "reprovision without erasing bridge lifetime",
+        ]);
+    let reattached = run_command_with_capture(reattach_cmd, &env.root, Duration::from_secs(8));
+    reattached.assert_success("copilot reattach preserves bridge watch");
+    let reattached_status = env.run_with_session(
+        &session,
+        ["--json", "station", "status", "--session", session.as_str()],
+        Duration::from_secs(5),
+    );
+    reattached_status.assert_success("station status after copilot reattach");
+    let reattached_status_json = reattached_status.json("station status after copilot reattach");
+    assert_eq!(
+        reattached_status_json["stations"][0]
+            .get("watch_pids")
+            .and_then(Value::as_array)
+            .and_then(|pids| pids.first())
+            .and_then(|watch| watch.get("pid"))
+            .and_then(Value::as_u64),
+        Some(u64::from(simulated_bridge_pid)),
+        "push re-provision must preserve the bridge lifetime anchor: {reattached_status_json}"
+    );
+
+    let exit_payload_path = env.root.join("session-end-user-exit.json");
+    std::fs::write(
+        &exit_payload_path,
+        serde_json::to_vec(&serde_json::json!({
+            "sessionId": &session,
+            "reason": "user_exit"
+        }))
+        .expect("user-exit payload json"),
+    )
+    .expect("write user-exit payload");
     let mut end_cmd = env.command_with_session("ignored");
     configure_copilot_home(&mut end_cmd, &env.home);
     end_cmd
         .env_remove("TELEX_SESSION_ID")
         .env("COPILOT_AGENT_SESSION_ID", &session)
-        .args(["--json", "copilot", "session-end"]);
+        .args(["--json", "copilot", "session-end"])
+        .stdin(Stdio::from(
+            std::fs::File::open(&exit_payload_path).expect("open user-exit payload"),
+        ));
     let ended = run_command_with_capture(end_cmd, &env.root, Duration::from_secs(8));
-    ended.assert_success("copilot session-end preserves bridge state");
-    assert!(extension.exists(), "session-end must retain extension.mjs");
-    assert!(bindings.exists(), "session-end must retain bridge bindings");
-    assert!(registry.exists(), "session-end must retain bridge registry");
+    ended.assert_success("copilot true session end preserves bridge state");
     assert!(
         !guard_state.exists(),
-        "session-end still clears transient turn-guard state"
+        "a true session end still clears transient turn-guard state"
     );
 
     let ended_status = env.run_with_session(
@@ -3354,14 +3481,14 @@ fn real_process_copilot_session_end_preserves_bridge_state_until_detach() {
         ["--json", "station", "status", "--session", session.as_str()],
         Duration::from_secs(5),
     );
-    ended_status.assert_success("station status after session end");
-    let ended_status_json = ended_status.json("station status after session end");
+    ended_status.assert_success("station status after true session end");
+    let ended_status_json = ended_status.json("station status after true session end");
     assert_eq!(
+        Some(true),
         ended_status_json["stations"][0]
             .get("idle")
             .and_then(Value::as_bool),
-        Some(true),
-        "session-end should mark daemon membership idle: {ended_status_json}"
+        "a true session end should mark daemon membership idle: {ended_status_json}"
     );
 
     let mut resume_cmd = env.command_with_session("ignored");
@@ -3376,31 +3503,10 @@ fn real_process_copilot_session_end_preserves_bridge_state_until_detach() {
             "copilot",
             "resume",
             "--description",
-            "resume after preserved bridge startup discovery",
+            "resume after true session end",
         ]);
     let resumed = run_command_with_capture(resume_cmd, &env.root, Duration::from_secs(8));
-    resumed.assert_success("copilot resume after preserved bridge state");
-
-    let resumed_status = env.run_with_session(
-        &session,
-        ["--json", "station", "status", "--session", session.as_str()],
-        Duration::from_secs(5),
-    );
-    resumed_status.assert_success("station status after copilot resume");
-    let resumed_status_json = resumed_status.json("station status after copilot resume");
-    let resumed_station = &resumed_status_json["stations"][0];
-    assert_eq!(
-        resumed_station.get("idle").and_then(Value::as_bool),
-        Some(false),
-        "copilot resume should re-arm daemon attendance: {resumed_status_json}"
-    );
-    assert_eq!(
-        resumed_station
-            .get("push_registered")
-            .and_then(Value::as_bool),
-        Some(true),
-        "copilot resume should restore push registration: {resumed_status_json}"
-    );
+    resumed.assert_success("copilot resume before final detach");
 
     let mut detach_cmd = env.command_with_session("ignored");
     configure_copilot_home(&mut detach_cmd, &env.home);
@@ -4145,7 +4251,7 @@ fn terminate_pid(_pid: u32) {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Station-intent reconciliation, end to end against a real daemon process (issue #106 / ADR 0050).
+// Station-intent reconciliation, end to end against a real daemon process (issue #106 / ADR 0051).
 //
 // These are named with a `station_intent_` prefix so CI can run them on macOS alongside the
 // Copilot fallback E2E: the intent store, the owner-private credential rules, and the producer
