@@ -7,7 +7,10 @@ use async_trait::async_trait;
 use tokio::sync::{Mutex as AsyncMutex, MutexGuard};
 use tokio_postgres::{Row, Transaction};
 
-use super::{Backend, Capabilities, WaitCandidate, WaitFetchOptions};
+use super::{
+    application_compound_state_delta, application_operation_state_delta, Backend, Capabilities,
+    WaitCandidate, WaitFetchOptions,
+};
 use crate::model::*;
 
 pub const CURRENT_SCHEMA_VERSION: i64 = 3;
@@ -2090,21 +2093,14 @@ impl Backend for PgBackend {
                 if changed == 0 {
                     bail!("compound step does not exist");
                 }
-                pg_tx_append_state_delta(
-                    &tx,
-                    "compound",
-                    &format!(
-                        "operation:{}:step:{}",
-                        compound.operation_id, compound.step_id
-                    ),
-                    &serde_json::json!({
-                        "operation_id": compound.operation_id,
-                        "step_id": compound.step_id,
-                        "state": "accepted",
-                    })
-                    .to_string(),
-                )
-                .await?;
+                let (entity_id, payload) = application_compound_state_delta(
+                    &compound.logical_store_id,
+                    &compound.application_responsibility,
+                    &compound.operation_id,
+                    &compound.step_id,
+                    "accepted",
+                );
+                pg_tx_append_state_delta(&tx, "compound", &entity_id, &payload).await?;
             }
         }
         pg_tx_append_state_delta(
@@ -2268,16 +2264,13 @@ impl Backend for PgBackend {
             ],
         )
         .await?;
-        pg_tx_append_state_delta(
-            &tx,
-            "operation",
-            &format!("operation:{}", operation.operation_id),
-            &format!(
-                "{{\"operation_id\":{},\"state\":\"pending\"}}",
-                serde_json::to_string(&operation.operation_id)?
-            ),
-        )
-        .await?;
+        let (entity_id, payload) = application_operation_state_delta(
+            &operation.logical_store_id,
+            &operation.application_responsibility,
+            &operation.operation_id,
+            "pending",
+        );
+        pg_tx_append_state_delta(&tx, "operation", &entity_id, &payload).await?;
         let inserted = tx
             .query_one(
                 "SELECT logical_store_id, application_responsibility, operation_id,
@@ -2406,17 +2399,13 @@ impl Backend for PgBackend {
             )
             .await?
             .ok_or_else(|| anyhow!("application operation does not exist"))?;
-        pg_tx_append_state_delta(
-            &tx,
-            "operation",
-            &format!("operation:{operation_id}"),
-            &format!(
-                "{{\"operation_id\":{},\"state\":{}}}",
-                serde_json::to_string(operation_id)?,
-                serde_json::to_string(state)?
-            ),
-        )
-        .await?;
+        let (entity_id, payload) = application_operation_state_delta(
+            logical_store_id,
+            application_responsibility,
+            operation_id,
+            state,
+        );
+        pg_tx_append_state_delta(&tx, "operation", &entity_id, &payload).await?;
         let row = map_application_operation(&row);
         tx.commit().await?;
         Ok(row)
@@ -2527,17 +2516,14 @@ impl Backend for PgBackend {
                 ],
             )
             .await?;
-            pg_tx_append_state_delta(
-                &tx,
-                "compound",
-                &format!("operation:{}:step:{}", step.operation_id, step.step_id),
-                &format!(
-                    "{{\"operation_id\":{},\"step_id\":{},\"state\":\"pending\"}}",
-                    serde_json::to_string(&step.operation_id)?,
-                    serde_json::to_string(&step.step_id)?
-                ),
-            )
-            .await?;
+            let (entity_id, payload) = application_compound_state_delta(
+                &step.logical_store_id,
+                &step.application_responsibility,
+                &step.operation_id,
+                &step.step_id,
+                "pending",
+            );
+            pg_tx_append_state_delta(&tx, "compound", &entity_id, &payload).await?;
         }
         let first = &steps[0];
         let rows = tx
@@ -2671,18 +2657,14 @@ impl Backend for PgBackend {
             )
             .await?
             .ok_or_else(|| anyhow!("compound step does not exist"))?;
-        pg_tx_append_state_delta(
-            &tx,
-            "compound",
-            &format!("operation:{operation_id}:step:{step_id}"),
-            &format!(
-                "{{\"operation_id\":{},\"step_id\":{},\"state\":{}}}",
-                serde_json::to_string(operation_id)?,
-                serde_json::to_string(step_id)?,
-                serde_json::to_string(state.as_str())?
-            ),
-        )
-        .await?;
+        let (entity_id, payload) = application_compound_state_delta(
+            logical_store_id,
+            application_responsibility,
+            operation_id,
+            step_id,
+            state.as_str(),
+        );
+        pg_tx_append_state_delta(&tx, "compound", &entity_id, &payload).await?;
         let row = map_compound_step(&row);
         tx.commit().await?;
         Ok(row)

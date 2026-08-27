@@ -18,7 +18,10 @@ use rusqlite::{params, Connection, OptionalExtension};
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 
-use super::{Backend, Capabilities, WaitCandidate, WaitFetchOptions};
+use super::{
+    application_compound_state_delta, application_operation_state_delta, Backend, Capabilities,
+    WaitCandidate, WaitFetchOptions,
+};
 use crate::model::*;
 
 pub const CURRENT_SCHEMA_VERSION: i64 = 3;
@@ -3036,20 +3039,14 @@ impl Backend for SqliteBackend {
                         if changed == 0 {
                             bail!("compound step does not exist");
                         }
-                        append_state_delta_inner(
-                            c,
-                            "compound",
-                            &format!(
-                                "operation:{}:step:{}",
-                                compound.operation_id, compound.step_id
-                            ),
-                            &serde_json::json!({
-                                "operation_id": compound.operation_id,
-                                "step_id": compound.step_id,
-                                "state": "accepted",
-                            })
-                            .to_string(),
-                        )?;
+                        let (entity_id, payload) = application_compound_state_delta(
+                            &compound.logical_store_id,
+                            &compound.application_responsibility,
+                            &compound.operation_id,
+                            &compound.step_id,
+                            "accepted",
+                        );
+                        append_state_delta_inner(c, "compound", &entity_id, &payload)?;
                     }
                 }
                 append_state_delta_inner(
@@ -3217,15 +3214,13 @@ impl Backend for SqliteBackend {
                         operation.created_at_ms
                     ],
                 )?;
-                append_state_delta_inner(
-                    c,
-                    "operation",
-                    &format!("operation:{}", operation.operation_id),
-                    &format!(
-                        "{{\"operation_id\":{},\"state\":\"pending\"}}",
-                        serde_json::to_string(&operation.operation_id)?
-                    ),
-                )?;
+                let (entity_id, payload) = application_operation_state_delta(
+                    &operation.logical_store_id,
+                    &operation.application_responsibility,
+                    &operation.operation_id,
+                    "pending",
+                );
+                append_state_delta_inner(c, "operation", &entity_id, &payload)?;
                 let inserted = c.query_row(
                     "SELECT logical_store_id, application_responsibility, operation_id,
                             operation_kind, sender, recipients_json, payload_fingerprint,
@@ -3363,16 +3358,9 @@ impl Backend for SqliteBackend {
                     bail!("application operation does not exist");
                 }
                 persist_clock_hwm(c, now)?;
-                append_state_delta_inner(
-                    c,
-                    "operation",
-                    &format!("operation:{operation}"),
-                    &format!(
-                        "{{\"operation_id\":{},\"state\":{}}}",
-                        serde_json::to_string(&operation)?,
-                        serde_json::to_string(&state)?
-                    ),
-                )?;
+                let (entity_id, payload) =
+                    application_operation_state_delta(&store, &responsibility, &operation, &state);
+                append_state_delta_inner(c, "operation", &entity_id, &payload)?;
                 Ok(c.query_row(
                     "SELECT logical_store_id, application_responsibility, operation_id,
                             operation_kind, sender, recipients_json, payload_fingerprint,
@@ -3483,16 +3471,14 @@ impl Backend for SqliteBackend {
                             step.created_at_ms
                         ],
                     )?;
-                    append_state_delta_inner(
-                        c,
-                        "compound",
-                        &format!("operation:{}:step:{}", step.operation_id, step.step_id),
-                        &format!(
-                            "{{\"operation_id\":{},\"step_id\":{},\"state\":\"pending\"}}",
-                            serde_json::to_string(&step.operation_id)?,
-                            serde_json::to_string(&step.step_id)?
-                        ),
-                    )?;
+                    let (entity_id, payload) = application_compound_state_delta(
+                        &step.logical_store_id,
+                        &step.application_responsibility,
+                        &step.operation_id,
+                        &step.step_id,
+                        "pending",
+                    );
+                    append_state_delta_inner(c, "compound", &entity_id, &payload)?;
                 }
                 if steps.is_empty() {
                     return Ok(Vec::new());
@@ -3632,17 +3618,14 @@ impl Backend for SqliteBackend {
                     bail!("compound step does not exist");
                 }
                 persist_clock_hwm(c, now)?;
-                append_state_delta_inner(
-                    c,
-                    "compound",
-                    &format!("operation:{operation}:step:{step}"),
-                    &format!(
-                        "{{\"operation_id\":{},\"step_id\":{},\"state\":{}}}",
-                        serde_json::to_string(&operation)?,
-                        serde_json::to_string(&step)?,
-                        serde_json::to_string(&state)?
-                    ),
-                )?;
+                let (entity_id, payload) = application_compound_state_delta(
+                    &store,
+                    &responsibility,
+                    &operation,
+                    &step,
+                    &state,
+                );
+                append_state_delta_inner(c, "compound", &entity_id, &payload)?;
                 Ok(c.query_row(
                     "SELECT logical_store_id, application_responsibility, operation_id,
                             step_id, position, step_kind, prerequisites_json, declaration_json,

@@ -12,6 +12,55 @@ pub mod postgres;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
 
+pub(crate) fn application_operation_state_delta(
+    logical_store_id: &str,
+    application_responsibility: &str,
+    operation_id: &str,
+    state: &str,
+) -> (String, String) {
+    (
+        format!(
+            "operation:{}",
+            serde_json::json!([logical_store_id, application_responsibility, operation_id])
+        ),
+        serde_json::json!({
+            "logical_store_id": logical_store_id,
+            "application_responsibility": application_responsibility,
+            "operation_id": operation_id,
+            "state": state,
+        })
+        .to_string(),
+    )
+}
+
+pub(crate) fn application_compound_state_delta(
+    logical_store_id: &str,
+    application_responsibility: &str,
+    operation_id: &str,
+    step_id: &str,
+    state: &str,
+) -> (String, String) {
+    (
+        format!(
+            "operation-step:{}",
+            serde_json::json!([
+                logical_store_id,
+                application_responsibility,
+                operation_id,
+                step_id
+            ])
+        ),
+        serde_json::json!({
+            "logical_store_id": logical_store_id,
+            "application_responsibility": application_responsibility,
+            "operation_id": operation_id,
+            "step_id": step_id,
+            "state": state,
+        })
+        .to_string(),
+    )
+}
+
 /// What a backend can do, so the core can adapt behavior honestly.
 #[derive(Clone, Copy, Debug)]
 pub struct Capabilities {

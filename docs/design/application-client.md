@@ -186,7 +186,8 @@ return typed membership loss rather than silently using no sender.
 A send-only membership:
 
 - MUST NOT advertise inbound application attendance;
-- MUST NOT expose receive or acknowledgment operations;
+- MUST NOT expose receive, acknowledgment, unresolved/history query, or inbound
+  backlog health evidence;
 - MUST NOT make a target address appear application-deliverable merely because
   a sender responsibility occupies it.
 

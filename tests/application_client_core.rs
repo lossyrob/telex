@@ -92,6 +92,53 @@ async fn operation_identity_replays_and_rejects_changed_payload() {
 }
 
 #[tokio::test]
+async fn operation_deltas_preserve_store_and_responsibility_identity() {
+    let path = db_path("operation-delta-identity");
+    let backend = SqliteBackend::open(&path).unwrap();
+    backend.init_schema().await.unwrap();
+    for responsibility in ["watcher-a", "watcher-b"] {
+        backend
+            .begin_application_operation(&NewApplicationOperation {
+                logical_store_id: "store-v1-test".into(),
+                application_responsibility: responsibility.into(),
+                operation_id: "shared-operation".into(),
+                operation_kind: "send".into(),
+                sender: responsibility.into(),
+                recipients_json: r#"["target"]"#.into(),
+                payload_fingerprint: "fingerprint".into(),
+                retry_budget: 0,
+                created_at_ms: now_ms(),
+            })
+            .await
+            .unwrap();
+    }
+
+    let deltas: Vec<_> = backend
+        .state_deltas(0, 100)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|delta| delta.axis == "operation")
+        .collect();
+    assert_eq!(deltas.len(), 2);
+    assert_ne!(deltas[0].entity_id, deltas[1].entity_id);
+    let responsibilities: std::collections::BTreeSet<_> = deltas
+        .iter()
+        .map(|delta| {
+            serde_json::from_str::<serde_json::Value>(&delta.payload_json).unwrap()
+                ["application_responsibility"]
+                .as_str()
+                .unwrap()
+                .to_string()
+        })
+        .collect();
+    assert_eq!(
+        responsibilities,
+        std::collections::BTreeSet::from(["watcher-a".to_string(), "watcher-b".to_string()])
+    );
+}
+
+#[tokio::test]
 async fn exact_delivery_ack_is_bound_to_the_delivery_row() {
     let path = db_path("exact-ack");
     let backend = SqliteBackend::open(&path).unwrap();

@@ -24,7 +24,8 @@ versioned evidence and must not be interpreted as backend table layouts.
   therefore resolve to the same store identity. Public results never expose the
   internal SQLite path, Postgres target, credential, or store key.
 - Every membership declares `send-only` or `bidirectional`. Send-only membership
-  can author messages but is excluded from inbound occupancy, receive, and ack.
+  can author messages but is excluded from inbound occupancy, receive, ack,
+  history queries, and inbound backlog health evidence.
 - Strict recovery reports typed membership loss. Bounded recovery retries only
   within the caller's budget and preserves capability, sender, and liveness.
 - Receive results carry message ID, recipient, delivery-row ID, role, store ID,

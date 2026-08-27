@@ -173,6 +173,44 @@ async fn application_client_schema_v3_operation_smoke() {
             .unwrap(),
         ApplicationOperationBegin::Started(_)
     ));
+    let other_responsibility_operation = NewApplicationOperation {
+        application_responsibility: "postgres-other-client".into(),
+        ..pending_operation.clone()
+    };
+    assert!(matches!(
+        backend
+            .begin_application_operation(&other_responsibility_operation)
+            .await
+            .unwrap(),
+        ApplicationOperationBegin::Started(_)
+    ));
+    let shared_operation_deltas: Vec<_> = backend
+        .state_deltas(0, 10_000)
+        .await
+        .unwrap()
+        .into_iter()
+        .filter(|delta| {
+            delta.axis == "operation"
+                && delta
+                    .payload_json
+                    .contains("\"operation_id\":\"public-reconcile\"")
+        })
+        .collect();
+    assert_eq!(shared_operation_deltas.len(), 2);
+    assert_ne!(
+        shared_operation_deltas[0].entity_id,
+        shared_operation_deltas[1].entity_id
+    );
+    assert!(shared_operation_deltas.iter().any(|delta| {
+        delta
+            .payload_json
+            .contains("\"application_responsibility\":\"postgres-public-client\"")
+    }));
+    assert!(shared_operation_deltas.iter().any(|delta| {
+        delta
+            .payload_json
+            .contains("\"application_responsibility\":\"postgres-other-client\"")
+    }));
     backend
         .insert_application_message(
             &NewMessage {

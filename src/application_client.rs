@@ -1749,7 +1749,12 @@ impl ApplicationClient {
                 "history requires an exact recipient attached by this client".to_string(),
             )
         })?;
-        self.membership(&recipient)?;
+        let membership = self.membership(&recipient)?;
+        if membership.handle.capability != ApplicationCapability::Bidirectional {
+            return Err(ApplicationClientError::UnsupportedCapability(
+                "history requires bidirectional membership".to_string(),
+            ));
+        }
         if !(1..=1000).contains(&limit) {
             return Err(ApplicationClientError::InvalidRequest(
                 "history limit must be between 1 and 1000".to_string(),
@@ -2472,11 +2477,16 @@ fn health_projection(
     local: &LocalMembership,
     member: Option<&MemberStatus>,
 ) -> ApplicationHealth {
-    let evidence = member
-        .and_then(|member| member.health_detail.clone())
-        .map(|detail| detail.replace(&client.store_key, &client.logical_store_id.0))
-        .into_iter()
-        .collect();
+    let bidirectional = local.handle.capability == ApplicationCapability::Bidirectional;
+    let evidence = if bidirectional {
+        member
+            .and_then(|member| member.health_detail.clone())
+            .map(|detail| detail.replace(&client.store_key, &client.logical_store_id.0))
+            .into_iter()
+            .collect()
+    } else {
+        Vec::new()
+    };
     let pending = member
         .map(|member| member.pending_unconsumed_count)
         .unwrap_or_default();
@@ -2541,14 +2551,14 @@ fn health_projection(
             .unwrap_or_default(),
         sender_ready: registered && !member.map(|member| member.idle).unwrap_or(true),
         receive_ready,
-        attended_but_deaf: member.map(|member| member.deaf_warn).unwrap_or(false),
+        attended_but_deaf: bidirectional && member.map(|member| member.deaf_warn).unwrap_or(false),
         recovering: local.recovering,
         last_recovery_failure: local.last_recovery_failure.clone(),
-        degraded: actionable > 0
+        degraded: (bidirectional
+            && (actionable > 0 || member.map(|member| member.deaf_warn).unwrap_or(false)))
             || local.recovering
             || local.last_recovery_failure.is_some()
-            || member.map(|member| member.deaf_warn).unwrap_or(false)
-            || (local.handle.capability == ApplicationCapability::Bidirectional && !receive_ready),
+            || (bidirectional && !receive_ready),
         stopped_or_unattended: member
             .map(|member| {
                 member.idle
@@ -3845,7 +3855,7 @@ mod tests {
             .history(Some("station:inbox".into()), false, None, None, None, 0)
             .await
             .is_err());
-        let local = client
+        let mut local = client
             .memberships
             .lock()
             .unwrap()
@@ -3857,5 +3867,41 @@ mod tests {
         assert!(health.liveness.is_empty());
         assert!(!health.recovering);
         assert!(health.last_recovery_failure.is_none());
+
+        local.handle.capability = ApplicationCapability::SendOnly;
+        client
+            .memberships
+            .lock()
+            .unwrap()
+            .insert("station:inbox".into(), local.clone());
+        assert!(matches!(
+            client
+                .history(Some("station:inbox".into()), true, None, None, None, 10)
+                .await,
+            Err(ApplicationClientError::UnsupportedCapability(_))
+        ));
+        let member: MemberStatus = serde_json::from_value(serde_json::json!({
+            "store_key": "sqlite:test",
+            "backend": "sqlite",
+            "session_id": "runtime",
+            "address": "station:inbox",
+            "occupant": "runtime",
+            "host": "test",
+            "waiters": 0,
+            "pending_unconsumed_count": 3,
+            "inbound_actionable_count": 2,
+            "health_detail": "2 actionable inbound messages",
+            "deaf_warn": true,
+            "lease_epoch": 1,
+            "owner_instance_id": "owner",
+            "idle": false
+        }))
+        .unwrap();
+        let send_only_health = health_projection(&client, &local, Some(&member));
+        assert_eq!(send_only_health.pending_unconsumed, 0);
+        assert_eq!(send_only_health.inbound_actionable, 0);
+        assert!(!send_only_health.attended_but_deaf);
+        assert!(send_only_health.evidence.is_empty());
+        assert!(!send_only_health.degraded);
     }
 }
