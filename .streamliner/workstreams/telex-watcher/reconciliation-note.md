@@ -36,12 +36,16 @@ a watch can be created, registered, left running, and diagnosed in five minutes.
 That operational proof remains owned by the planned
 `five-minute-custom-watch-gate`.
 
-One controlled shared-client gap remains explicit: Watcher requires
-authoritative exact-store/exact-operation `not-recorded` evidence and
-identity-checkable same-operation retry, while the current Application Client
-AC-C14 does not yet state the former. Application Client owns promotion and
-conformance proof. Watcher runtime must remain query-only/blocked under
-uncertainty and must not create a private fallback.
+The former AC-C14 semantic gap is closed. Application Client issue #12
+publication revision 3, body SHA-256
+`c5c694681a2f3dc2060146fe932c26b3644d1d0518f1406e30c798853c168956`,
+records product merge `4ecbe84e99e00ab0cea3bcf3619d539c222746af`.
+The merged core provides authoritative exact-store/exact-operation
+`NotRecorded`, identity-checkable retry of the exact same operation, and
+`RetentionBoundaryCrossed` when absence evidence has expired. Runtime remains
+blocked on first-binding and `client-conformance` proof across SQLite and
+Postgres. Uncertain Watcher sends remain reconciliation-first and query-only,
+with no private fallback.
 
 ## What changed
 
@@ -80,11 +84,10 @@ snapshots, and other orchestration evidence. The clean replacement retained only
 the six intended product-documentation paths and moved requirements traceability
 from the normative design set to `docs/notes/application-client/`.
 
-Issue #12 now publishes `application-client-ready`, but explicitly as a
-design-only checkpoint. This resolves the semantic convergence prerequisite and
-permits detailed node promotion; it does not provide the supported client core,
-binding, conformance, or consumer-integration export that production
-`watcher-runtime` needs.
+Issue #12 publishes `application-client-ready` as the historical design-only
+checkpoint. Publication revision 3 additionally records the supported Rust core
+without claiming a binding, conformance, consumer integration, or production
+readiness.
 
 The first template-library implementation then reached a technically
 merge-ready state in PR #131 after three substantive review repairs. Operator
@@ -165,10 +168,11 @@ PR #115 completed that domain contract. Runtime/template workers can rely on
 detector, state, lifecycle, trust, failure, provenance, health, or message
 semantics.
 
-The Application Client semantic export is available through issue #12 and clean
-PR #126. Production runtime still needs the explicit `client-conformance`
-export. The minimal authoring contract and optional examples do not require the
-implemented client and can proceed first.
+The Application Client semantic contract and supported Rust core are available
+through issue #12, PR #126, and PR #132. Production runtime still needs the
+first binding and explicit `client-conformance` export across SQLite and
+Postgres. The minimal authoring contract and optional examples do not require
+that runtime evidence and can proceed separately.
 
 PR #131 remains a source of optional examples and implementation learning:
 provider scripts, bounded process helpers, deterministic provider ordering,
@@ -290,8 +294,9 @@ leakage, not additional Application Client product scope.
   authority — issue #12 / future Application Client contract.
   - Disposition: Watcher-specific semantics landed in `docs/design/watcher.md`
     and ADR 0046; all 15 shared requirements are accepted by issue #12 and clean
-    PR #126. Production runtime integration remains deferred until the supported
-    Application Client implementation and conformance export exists.
+    PR #126. PR #132 implements the supported Rust core and closes the former
+    non-acceptance gap. Production runtime integration remains deferred until
+    first-binding and conformance evidence exists across both backends.
 - External-provider proof requires mutation authority as well as credentials:
   target authority — workstream-design lesson (`project`).
   - Disposition: deferred with rationale; apply to the next live-provider node

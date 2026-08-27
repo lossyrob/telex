@@ -34,7 +34,9 @@ domain-contract nodes completed. Application Client contract convergence is
 merged, the design-only `application-client-ready` checkpoint is published, and
 Application Client core implementation is merged through PR #132. The
 `first-binding` node is ready but unlaunched; `client-conformance` and later
-gates remain planned. Operator Station production work is
+gates remain planned. Issue #12 publication revision 3 records authoritative
+operation non-acceptance semantics; Watcher runtime still waits on binding and
+cross-backend conformance proof. Operator Station production work is
 undergoing an operator-approved direct-Station contract reset after issue #128 /
 PR #130 were closed without merge as superseded prescribed-mediation scope.
 Issue #134 and ADR 0051 own the reset. Telex Watcher's minimal v2
@@ -229,8 +231,9 @@ collapse into noise, and no session-bound polling task is required.
 3. Keep Application Client `first-binding` ready but unlaunched until its task
    shape is authorized, then complete binding and conformance before consumer
    runtime integration.
-4. Keep `watcher-runtime-core` planned until client conformance promotes
-   exact-store/exact-operation `not-recorded` and identity-checkable
-   same-operation retry; recovery remains query-only under uncertainty.
+4. Keep `watcher-runtime-core` planned until first-binding and client conformance
+   prove merged exact-store/exact-operation `NotRecorded`, exact-same-operation
+   retry, and retention-boundary failure across both backends; recovery remains
+   reconciliation-first and query-only under uncertainty.
 5. Keep `five-minute-custom-watch-gate` planned for later operational proof, and
    preserve the campaign integration exercise and no-private-client boundary.

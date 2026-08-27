@@ -137,18 +137,19 @@ cursor, or script-provenance translation is implied.
 ## Application Client seam
 
 Production Watcher consumes the shared Application Client and has no private
-fallback. The client contract currently does not state the authoritative
-exact-store, exact-operation `not-recorded` result required to prove that a
-staged operation was not durably accepted. Watcher's contract also requires
-identity-checkable retry of the exact same operation after authoritative
-non-acceptance.
+fallback. Application Client issue #12 publication revision 3 and product merge
+`4ecbe84e99e00ab0cea3bcf3619d539c222746af` close the former AC-C14 semantic
+gap. The supported core now returns authoritative exact-store,
+exact-operation `NotRecorded`, permits only identity-checkable retry of the
+exact same operation after that result, and returns
+`RetentionBoundaryCrossed` when absence can no longer be proven. A retention
+boundary never authorizes retry.
 
-This is a controlled cross-workstream design gap. The Application Client owner
-must promote the missing semantic into its normative contract and prove it
-through `client-conformance`. Until then, Watcher recovery is query-only when
-acceptance is uncertain, and production runtime work remains blocked rather
-than parsing CLI output, using raw daemon IPC, or inventing a Watcher-private
-client.
+The semantic is merged, but Watcher runtime still requires the supported first
+binding and `client-conformance` proof across SQLite and Postgres. Until that
+evidence exists, Watcher recovery remains reconciliation-first and query-only
+when acceptance is uncertain. Production runtime stays blocked rather than
+parsing CLI output, using raw daemon IPC, or inventing a Watcher-private client.
 
 ## Acceptance and dependency boundaries
 
@@ -160,8 +161,8 @@ an operational five-minute workflow, or any later gate.
 
 `minimal-example-pack` is next-ready but has not been launched. Runtime work is
 no longer blocked on the contract-usability gate; `watcher-runtime-core` remains
-blocked specifically on the Application Client `client-conformance` export and
-the authoritative `not-recorded` gap described above. The later
+blocked on Application Client `first-binding` and `client-conformance` evidence
+for the merged non-acceptance semantics across both backends. The later
 `five-minute-custom-watch-gate` still owns operational proof that an agent can
 create, register, leave running, and diagnose a custom watch in five minutes.
 
@@ -184,6 +185,3 @@ learning, not current product authority.
   documented re-registration.
 - Which bounded examples or hardening techniques from PR #131 should be
   extracted by the now-ready but unlaunched minimal example work.
-- The exact Application Client promotion that adds authoritative
-  `not-recorded` and corresponding conformance evidence without weakening
-  AC-C14 or regenerating the historical convergence bundle.

@@ -121,16 +121,15 @@ Application Client contract convergence completed through
 protocol-forensics evidence; its old approval and merge-floor records are not
 authority.
 
-[Issue #12](https://github.com/lossyrob/telex/issues/12) now publishes
-`application-client-ready` as a design-only semantic checkpoint. It accepts all
-15 Watcher requirements and unlocks detailed downstream planning, but it does
-not mean a supported client core, first binding, conformance suite, or consumer
-integration exists. Its supporting traceability link still points at the
-pre-repair `docs/design/application-client-crosswalk.md`; Application Client
-orchestration owns updating that link to
-`docs/notes/application-client/requirements-crosswalk.md`. Non-blocking wording
-alignment remains tracked in
-[#124](https://github.com/lossyrob/telex/issues/124).
+[Issue #12](https://github.com/lossyrob/telex/issues/12) publication revision 3,
+body SHA-256
+`c5c694681a2f3dc2060146fe932c26b3644d1d0518f1406e30c798853c168956`,
+preserves `application-client-ready` as the historical design-only checkpoint
+and records the supported Rust core merged through
+[PR #132](https://github.com/lossyrob/telex/pull/132) as
+`4ecbe84e99e00ab0cea3bcf3619d539c222746af`. Issues #129 and #124 are complete.
+The publication does not provide a first binding, complete conformance, consumer
+integration, or production readiness.
 
 The first detector-template implementation was promoted through
 [#127](https://github.com/lossyrob/telex/issues/127) and
@@ -172,10 +171,13 @@ Issue [#144](https://github.com/lossyrob/telex/issues/144) and
 fresh tracker and bounded task specification for `minimal-example-pack`. The
 node remains ready but unlaunched pending separate campaign authorization.
 `watcher-runtime-core` remains planned and blocked specifically on Application
-Client `client-conformance`, including promotion of authoritative
-exact-store/exact-operation `not-recorded`. The completed internal gate remains
-as a historical dependency. There is no private-client or mandatory-template
-fallback, and `five-minute-custom-watch-gate` remains planned.
+Client `first-binding` and `client-conformance`. The merged core now provides
+authoritative exact-store/exact-operation `NotRecorded`, exact-same-operation
+retry after that result, and `RetentionBoundaryCrossed` when absence evidence is
+no longer available. Watcher still needs proof of those semantics across SQLite
+and Postgres. The completed internal gate remains a historical dependency.
+There is no private-client or mandatory-template fallback, and
+`five-minute-custom-watch-gate` remains planned.
 
 ## Decisions
 
@@ -242,10 +244,11 @@ fallback, and `five-minute-custom-watch-gate` remains planned.
   wait for #12/campaign convergence. CLI subprocess parsing, raw daemon IPC,
   `TELEX_WATCHER_INTERNAL_SEND_ONCE_V1`, and sender occupancy are not accepted
   production client seams.
-- **Authoritative non-acceptance remains shared-client work:** the Application
-  Client must promote exact-store/exact-operation `not-recorded` and prove
-  identity-checkable same-operation retry through `client-conformance`; uncertain
-  Watcher sends remain query-only and blocked until then.
+- **Authoritative non-acceptance is merged but not yet consumer-proven:** the
+  Application Client core provides exact-store/exact-operation `NotRecorded`,
+  exact-same-operation retry, and retention-boundary failure. Watcher still
+  requires first-binding and `client-conformance` evidence across both backends;
+  uncertain sends remain reconciliation-first and query-only until then.
 - **`application-client-ready` is design-only:** it permits detailed node
   promotion under the accepted semantics but does not satisfy
   `watcher-runtime`'s dependency on an implemented, conformant supported client.
