@@ -32,9 +32,15 @@ producers, human recipients, and the shared programmatic client they consume.
 **State.** Both builder viability gates and both initial production
 domain-contract nodes completed. Application Client contract convergence is
 merged, the design-only `application-client-ready` checkpoint is published, and
-Application Client core implementation is merged through PR #132. The
-`first-binding` node is ready but unlaunched; `client-conformance` and later
-gates remain planned. Issue #12 publication revision 3 records authoritative
+Application Client core implementation is merged through PR #132. The Rust-first
+`first-binding` in the root `telex` crate is selected, tracked by
+[#149](https://github.com/lossyrob/telex/issues/149), and ready but unlaunched
+pending reconciled authority and routine launch preparation.
+The existing operator decision authorizes routine launch only after the reviewed
+Tier B packet lands on `main` and preparation validates the exact main, tracker,
+task, and session inputs. Reconciliation itself does not launch.
+`client-conformance` and later gates remain planned. Issue #12 publication
+revision 3 records authoritative
 operation non-acceptance semantics; Watcher runtime still waits on binding and
 cross-backend conformance proof. Operator Station production work is
 undergoing an operator-approved direct-Station contract reset after issue #128 /
@@ -64,7 +70,7 @@ merged.
 |---|---|---|---|
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | Issue #134 resets the contract under ADR 0051; mediation is external/non-normative; `station-app` waits on the direction gate and Application Client `client-conformance`. |
 | Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on Application Client `client-conformance`. |
-| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Client core is merged; `first-binding` is ready but unlaunched, and later conformance still blocks consumer runtime integration. |
+| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Client core is merged; the Rust-first `first-binding` in the root `telex` crate is selected, tracked by #149, and ready but unlaunched pending reconciled authority and routine launch preparation. Later conformance still blocks consumer runtime integration. |
 | Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | Adopt issue #106 / PR #138 as `station-intent-reconciliation`; integrate current `main`, resolve blocking review, and present isolated both-backend evidence before the hardening gate. |
 
 ## Shared seam
@@ -141,9 +147,10 @@ dispositions, and accepts one semantic contract. Product nodes wait on the
 resulting `application-client-ready` checkpoint.
 
 Application Client convergence and client-core implementation are complete.
-`first-binding` is ready but unlaunched; its implementation shape remains
-undecided. Operator issue #134 narrows the product contract without changing the
-generic Application Client ownership boundary.
+The Rust-first `first-binding` in the root `telex` crate is selected, tracked by
+#149, and ready but unlaunched pending reconciled authority and routine launch
+preparation. Operator issue #134 narrows the product contract without changing
+the generic Application Client ownership boundary.
 
 ### Stage 4 — Production applications under accepted contracts
 
@@ -228,9 +235,10 @@ collapse into noise, and no session-bound polling task is required.
    semantics; keep the hardening gate separate from merge.
 2. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
    after separate campaign authorization.
-3. Keep Application Client `first-binding` ready but unlaunched until its task
-   shape is authorized, then complete binding and conformance before consumer
-   runtime integration.
+3. Keep the Rust-first Application Client `first-binding` in the root `telex`
+   crate, tracked by #149, ready but unlaunched until reconciled authority and
+   routine launch preparation are complete. Then complete binding and
+   conformance before consumer runtime integration.
 4. Keep `watcher-runtime-core` planned until first-binding and client conformance
    prove merged exact-store/exact-operation `NotRecorded`, exact-same-operation
    retry, and retention-boundary failure across both backends; recovery remains

@@ -124,10 +124,18 @@ regenerated `docs/design/application-client.bundle.json` is 2,423 bytes, Git
 blob `231cfd231d2a343b59d8538a08002087b0f17aa8`, and SHA-256
 `9dbc5cf90b917f602de8c2430438ed6f57d529893f8aaaa52f3996b51330252e`.
 
-`first-binding` is ready and focus-level but unlaunched. Its task shape remains
-unselected pending separate authorization. `client-conformance`, the consumer
-integration gate, operational hardening, and closure gate remain unchanged on
-their declared dependencies.
+`first-binding` is selected, tracked by
+[#149](https://github.com/lossyrob/telex/issues/149), ready, and focus-level but
+unlaunched. The operator selected a Rust-first binding in the root `telex`
+crate, preserving `telex::application_client`. The task must publish supported
+`default-features = false` consumer profiles and define compatibility, runtime,
+and cancellation behavior without widening the stable surface beyond
+contract-bearing Rust types. `client-conformance`, the consumer integration
+gate, operational hardening, and closure gate remain unchanged on their declared
+dependencies. Tracker creation alone does not authorize launch. The existing
+operator decision authorizes routine launch only after the reviewed Tier B
+packet lands on `main` and launch preparation validates the exact main, tracker,
+task, and session inputs. Reconciliation itself does not launch.
 
 ## Decisions
 
@@ -137,9 +145,8 @@ their declared dependencies.
 - **One semantic contract with explicit capabilities:** send-only and
   bidirectional applications share lifecycle, identity, receipt, recovery, and
   backend semantics while exposing only supported operations.
-- **Contract before bindings:** the first node is API-neutral. The old
-  TypeScript sketch on issue #12 is historical input until implementation work
-  selects supported surfaces.
+- **Contract before bindings:** the first node is API-neutral. The historical
+  TypeScript sketch on issue #12 remains evidence, not contract authority.
 - **Independent domain exports remain evidence:** convergence preserves their
   provenance and stronger product pressure instead of rewriting history.
 - **`application-client-ready` is a semantic checkpoint:** it unblocks detailed
@@ -169,19 +176,51 @@ their declared dependencies.
   implementer/reviewer defaults are resolved and launched through
   `/api/launch-preparations/runs`, not hand-written terminal prompts.
 - **Core and binding remain sequential:** `client-core` completed first;
-  `first-binding` is ready but unlaunched, and its task shape still requires
-  separate authorization.
+  `first-binding` is selected, tracked by #149, and ready but unlaunched. The
+  existing operator decision authorizes routine launch after the reviewed Tier B
+  packet lands on `main` and launch preparation validates the exact main,
+  tracker, task, and session inputs; no new operator decision is required.
+- **The first binding is Rust-first:** the supported binding remains in the root
+  `telex` crate at `telex::application_client`. It does not introduce a second
+  crate or a language-translation boundary.
+- **Application consumers opt out of package defaults:** supported consumers use
+  `default-features = false` with one documented backend profile: SQLite
+  (`sqlite`), Postgres (`postgres`), Postgres with Entra (`entra`, which includes
+  `postgres`), or dual backend (`sqlite` plus `postgres`, optionally with
+  `entra`). The `self-update` feature is not part of an application-consumer
+  profile.
+- **The caller owns the async runtime:** the Rust binding runs in a
+  caller-provided Tokio runtime and must not create a hidden runtime, daemon, or
+  sidecar. Exact ownership and API mechanics remain worker decisions.
+- **Cancellation preserves durable uncertainty:** cancellation never proves that
+  an operation was not accepted. Callers persist prepared `RecoveryHandle`
+  evidence and reconcile uncertain operations; cancelled receive work does not
+  acknowledge a delivery. Exact cancellation API shape remains a worker
+  decision.
+- **Only semantic Rust types stabilize:** compatibility commitments cover public
+  types and behavior that carry the accepted Application Client contract. They
+  do not promote backend records, daemon frames, CLI types, or consumer DTOs into
+  the supported surface. Version and deprecation mechanics remain worker
+  decisions within the root crate's compatibility contract.
+- **External boundaries remain deferred:** napi-rs/TypeScript, a separate client
+  crate, C ABI, public socket or sidecar protocols, and product DTOs require
+  later decisions. This deferral does not permit a private consumer fallback.
+- **Conformance remains a separate gate:** first-binding must preserve the full
+  AC-C01 through AC-C20 model. It does not complete cross-backend conformance,
+  consumer integration, packaging, upgrade readiness, or production hardening.
 - **Issue #124 completed within client-core:** PR #132 closed both #129 and #124
   and reported the regenerated manifest identity. This factual reconciliation
   does not mutate issue #12.
 
 ## Open Questions
 
-- Is TypeScript/napi-rs the first required binding for both Station and SDK use,
-  or should the first implementation expose Rust plus a narrower TypeScript
-  surface and defer other languages?
+- What concrete Rust API, ownership, feature-alias, deprecation, and cancellation
+  mechanics best satisfy the approved compatibility, runtime, and recovery
+  contracts?
 - Which conformance evidence is required before product integration PRs may
   merge, beyond the earlier semantic `application-client-ready` checkpoint?
+- Which external language or process boundary, if any, should follow Rust after
+  consumer architecture is authoritative?
 
 ## Imports and Exports
 
@@ -199,7 +238,7 @@ their declared dependencies.
 - Per-requirement dispositions in a durable, non-normative traceability note.
 - The `application-client-ready` checkpoint consumed by Operator Station and
   Telex Watcher.
-- A supported client core, first binding, and conformance evidence for later
+- A supported client core, Rust-first binding, and conformance evidence for later
   product integration.
 - Explicit migration guidance away from temporary CLI, raw-IPC, and spike
   integration seams.
@@ -209,7 +248,8 @@ their declared dependencies.
 - Issue #12 publication revision 2 now reflects clean PR #126 authority; the
   `application-client-ready` checkpoint and gate are complete.
 - W-05 taxonomy wording from issue #124 completed within client-core issue #129
-  and merged through PR #132. `first-binding` is ready but remains unlaunched.
+  and merged through PR #132. The Rust-first `first-binding` task is selected,
+  tracked by #149, and ready but remains unlaunched.
 - Polluted PR #123 and its dirty worktree are deferred with rationale for
   protocol forensics; cleanup requires explicit operator authorization.
 - The clean #118 implementation worktree is also deferred for cleanup until the
