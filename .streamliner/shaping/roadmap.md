@@ -35,18 +35,17 @@ merged, the design-only `application-client-ready` checkpoint is published, and
 client-core implementation is active. Operator Station production work is
 undergoing an operator-approved direct-Station contract reset after issue #128 /
 PR #130 were closed without merge as superseded prescribed-mediation scope.
-Issue #134 and ADR 0051 own the reset. Telex Watcher is undergoing an
-operator-approved contract reset:
-issue #127 / PR #131 were closed without merge because the mandatory template
-framework conflicted with the desired minimal agent-authoring experience.
-`minimal-watcher-authoring-contract` is the next ready Watcher node.
+Issue #134 and ADR 0051 own the reset. Telex Watcher's minimal v2
+authoring/registration reset completed through issue #133 and PR #135, merged as
+`b91e8301899351c0411d6e2e9ac5290af8a3cb4c`; its builder-owned
+`dumb-watcher-contract-gate` remains the next decision.
 
 ## Covering workstreams
 
 | Workstream | Tracker | Outcome | Current first move |
 |---|---|---|---|
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | Issue #134 resets the contract under ADR 0051; mediation is external/non-normative; `station-app` waits on the direction gate and Application Client `client-conformance`. |
-| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Reset authoring/registration design around a minimal v2 contract; preserve #127/#131 as superseded evidence. |
+| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Present the builder-owned minimal-contract gate; examples wait on that gate, and runtime additionally waits on Application Client `client-conformance`. |
 | Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Contract convergence is merged; client core is active and Watcher runtime waits on `client-conformance`. |
 
 ## Shared seam
@@ -132,8 +131,9 @@ After the shared semantic checkpoint:
 
 - Operator Station first resets the design around direct human attendance, then
   builds the desktop app after Application Client `client-conformance`.
-- Telex Watcher first resets the authoring contract to the minimal
-  command-plus-policy model, then builds runtime/CLI and small optional examples.
+- Telex Watcher's minimal command-plus-policy contract is merged. Its builder
+  gate precedes optional examples, while runtime/CLI also waits for Application
+  Client `client-conformance`.
 
 Each retains its own usability and operational-hardening gates.
 
@@ -201,10 +201,10 @@ collapse into noise, and no session-bound polling task is required.
 
 ## Current next actions
 
-1. Accept the minimal Watcher authoring/registration v2 contract and its
-   superseding ADR before resuming runtime or example implementation.
+1. Present the builder-owned `dumb-watcher-contract-gate`; do not infer its
+   acceptance from merged PR #135.
 2. Continue Application Client core/binding/conformance work and export
    `client-conformance` before Watcher runtime integration.
-3. After the Watcher contract gate, run the minimal example pack in parallel
-   with runtime core where dependencies permit; keep hardening recipes optional.
+3. After explicit Watcher contract-gate acceptance, run the minimal example pack;
+   start runtime core only after both the gate and client conformance are true.
 4. Preserve the campaign integration exercise and no-private-client boundary.
