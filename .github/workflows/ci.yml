@@ -103,6 +103,14 @@ jobs:
       - name: Build sqlite + self-update (lean self-updater combo)
         run: cargo build --no-default-features --features "sqlite,self-update"
 
+      - name: Check supported Application Client consumer profiles
+        run: |
+          cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features sqlite
+          cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features postgres
+          cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features entra
+          cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features "sqlite,postgres"
+          cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features "sqlite,entra"
+
       - name: Release-upgrade fallback error when self-update is compiled out
         # A build without `self-update` must reject `telex upgrade` (no --from) with an
         # actionable error AND a non-zero exit. Assert both, so a regression where the stub

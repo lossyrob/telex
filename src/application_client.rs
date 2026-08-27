@@ -1,7 +1,16 @@
-//! Supported semantic client for long-lived Telex applications.
+//! Supported Rust binding for long-lived Telex applications.
 //!
 //! This module is the public application boundary. Daemon frames, backend store
 //! keys, paths, connection strings, and backend-specific errors stay private.
+//! The root `telex` crate version governs Rust source compatibility; serialized
+//! Rust values are not a stable wire format or cross-language contract.
+//!
+//! All async methods run on the caller's Tokio runtime. The binding creates no
+//! runtime or sidecar. Callers that may cancel multi-address lifecycle work use
+//! [`LifecycleOperation`] so completed work, compensation, an uncertain in-flight
+//! address, and untouched addresses remain distinguishable. Receive cancellation
+//! never acknowledges a delivery. Retryable send and reply calls require a
+//! persisted [`RecoveryHandle`] prepared before the first attempt.
 
 use crate::backend::Backend;
 use crate::daemon_ipc::{
@@ -295,6 +304,28 @@ pub struct MultiAddressOutcome {
     pub results: BTreeMap<String, AddressLifecycleResult>,
     pub compensation: Vec<CompensationHandle>,
     pub validation_error: Option<ApplicationClientError>,
+    #[serde(default)]
+    pub cancellation: Option<LifecycleCancellationEvidence>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+/// The multi-address lifecycle action described by cancellation evidence.
+pub enum LifecycleOperationKind {
+    Attach,
+    Reconcile,
+    Detach,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// Typed evidence retained when a multi-address lifecycle operation is canceled.
+pub struct LifecycleCancellationEvidence {
+    /// The lifecycle action that was canceled.
+    pub operation: LifecycleOperationKind,
+    /// The address whose request was in flight and may have committed.
+    pub may_have_committed: Option<String>,
+    /// Addresses for which no request was started.
+    pub not_attempted: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -642,6 +673,32 @@ pub struct ApplicationClient {
     lifecycle_observations: Mutex<BTreeMap<String, LifecycleObservation>>,
 }
 
+#[derive(Clone, Copy)]
+enum LifecycleAction {
+    Attach,
+    Reconcile(RecoveryPolicy),
+    Detach,
+}
+
+/// Caller-owned progress for a cancellation-safe multi-address lifecycle action.
+///
+/// Drive the operation with [`Self::run`] or one [`Self::advance`] at a time.
+/// If the driving future is canceled, call [`Self::cancelled_outcome`] on the
+/// retained operation to recover completed results, compensation, and the exact
+/// uncertain/not-attempted partition.
+#[must_use = "drive the lifecycle operation or obtain its cancelled outcome"]
+pub struct LifecycleOperation<'a> {
+    client: &'a ApplicationClient,
+    action: LifecycleAction,
+    specs: Vec<AddressSpec>,
+    next_index: usize,
+    in_flight: Option<String>,
+    results: BTreeMap<String, AddressLifecycleResult>,
+    compensation: Vec<CompensationHandle>,
+    validation_error: Option<ApplicationClientError>,
+    finished: bool,
+}
+
 pub struct ApplicationStoreMaintenance {
     logical_store_id: LogicalStoreId,
     backend: Arc<dyn Backend>,
@@ -677,6 +734,170 @@ impl ApplicationStoreMaintenance {
             .cleanup_state_deltas(policy)
             .await
             .map_err(unavailable)
+    }
+}
+
+impl<'a> LifecycleOperation<'a> {
+    fn new(
+        client: &'a ApplicationClient,
+        action: LifecycleAction,
+        specs: Vec<AddressSpec>,
+    ) -> Self {
+        let operation = match action {
+            LifecycleAction::Attach => "attach",
+            LifecycleAction::Reconcile(_) => "reconcile",
+            LifecycleAction::Detach => "detach",
+        };
+        Self {
+            client,
+            action,
+            validation_error: validate_address_set(&specs, operation),
+            specs,
+            next_index: 0,
+            in_flight: None,
+            results: BTreeMap::new(),
+            compensation: Vec::new(),
+            finished: false,
+        }
+    }
+
+    /// Returns the lifecycle action performed by this operation.
+    pub fn kind(&self) -> LifecycleOperationKind {
+        match self.action {
+            LifecycleAction::Attach => LifecycleOperationKind::Attach,
+            LifecycleAction::Reconcile(_) => LifecycleOperationKind::Reconcile,
+            LifecycleAction::Detach => LifecycleOperationKind::Detach,
+        }
+    }
+
+    /// Advances one address and records its result before returning.
+    ///
+    /// `false` means validation failed or every address is complete.
+    pub async fn advance(&mut self) -> bool {
+        if self.finished || self.validation_error.is_some() || self.next_index >= self.specs.len() {
+            self.finished = true;
+            return false;
+        }
+
+        let spec = self.specs[self.next_index].clone();
+        let previous = self
+            .client
+            .memberships
+            .lock()
+            .unwrap()
+            .get(&spec.address)
+            .cloned();
+        self.in_flight = Some(spec.address.clone());
+
+        let result = match self.action {
+            LifecycleAction::Attach => self
+                .client
+                .attach_one(&spec, false)
+                .await
+                .map(AddressLifecycleResult::Attached),
+            LifecycleAction::Reconcile(policy) => self
+                .client
+                .reconcile(&spec, policy)
+                .await
+                .map(AddressLifecycleResult::Reconciled),
+            LifecycleAction::Detach => self.client.detach(&spec.address).await.map(|()| {
+                AddressLifecycleResult::Detached(
+                    previous
+                        .as_ref()
+                        .expect("detach succeeded without a local membership")
+                        .handle
+                        .clone(),
+                )
+            }),
+        };
+
+        self.record_completed(spec, previous, result);
+        true
+    }
+
+    fn record_completed(
+        &mut self,
+        spec: AddressSpec,
+        previous: Option<LocalMembership>,
+        result: Result<AddressLifecycleResult, ApplicationClientError>,
+    ) {
+        if result.is_ok() {
+            let action = match self.action {
+                LifecycleAction::Attach => attach_compensation(previous.as_ref(), &spec),
+                LifecycleAction::Reconcile(_) if previous.is_none() => {
+                    Some(CompensationAction::Detach)
+                }
+                LifecycleAction::Detach => Some(CompensationAction::Reattach(
+                    previous
+                        .as_ref()
+                        .expect("detach succeeded without a local membership")
+                        .spec
+                        .clone(),
+                )),
+                LifecycleAction::Reconcile(_) => None,
+            };
+            if let Some(action) = action {
+                self.compensation.push(CompensationHandle {
+                    address: spec.address.clone(),
+                    runtime_id: self.client.runtime_id.clone(),
+                    action,
+                });
+            }
+        }
+        self.in_flight = None;
+        self.next_index += 1;
+        self.results.insert(
+            spec.address,
+            result.unwrap_or_else(AddressLifecycleResult::Failed),
+        );
+        if self.next_index >= self.specs.len() {
+            self.finished = true;
+        }
+    }
+
+    /// Runs all remaining addresses and returns the complete outcome.
+    pub async fn run(&mut self) -> MultiAddressOutcome {
+        while self.advance().await {}
+        self.outcome(None)
+    }
+
+    /// Stops the operation and returns all evidence retained so far.
+    ///
+    /// An address whose request future was canceled is reported as
+    /// `may_have_committed`; the caller must reconcile it rather than retrying
+    /// based on an assumption of absence.
+    pub fn cancelled_outcome(mut self) -> MultiAddressOutcome {
+        if self.finished {
+            return self.outcome(None);
+        }
+        self.finished = true;
+        let not_attempted_start = self.next_index + usize::from(self.in_flight.is_some());
+        let cancellation = LifecycleCancellationEvidence {
+            operation: self.kind(),
+            may_have_committed: self.in_flight.take(),
+            not_attempted: self.specs[not_attempted_start..]
+                .iter()
+                .map(|spec| spec.address.clone())
+                .collect(),
+        };
+        self.outcome(Some(cancellation))
+    }
+
+    fn outcome(&self, cancellation: Option<LifecycleCancellationEvidence>) -> MultiAddressOutcome {
+        if let Some(error) = &self.validation_error {
+            return MultiAddressOutcome {
+                ready: false,
+                results: BTreeMap::new(),
+                compensation: Vec::new(),
+                validation_error: Some(error.clone()),
+                cancellation: None,
+            };
+        }
+        self.client.finish_multi_address_outcome(
+            self.results.clone(),
+            self.compensation.clone(),
+            cancellation,
+        )
     }
 }
 
@@ -717,48 +938,13 @@ impl ApplicationClient {
         &self.logical_store_id
     }
 
+    /// Prepares cancellation-safe multi-address attachment.
+    pub fn begin_attach(&self, specs: &[AddressSpec]) -> LifecycleOperation<'_> {
+        LifecycleOperation::new(self, LifecycleAction::Attach, specs.to_vec())
+    }
+
     pub async fn attach(&self, specs: &[AddressSpec]) -> MultiAddressOutcome {
-        let unique: BTreeSet<_> = specs.iter().map(|spec| spec.address.as_str()).collect();
-        if unique.len() != specs.len() {
-            return MultiAddressOutcome {
-                ready: false,
-                results: BTreeMap::new(),
-                compensation: Vec::new(),
-                validation_error: Some(ApplicationClientError::InvalidRequest(
-                    "multi-address attach contains duplicate addresses".to_string(),
-                )),
-            };
-        }
-        if specs.is_empty() {
-            return MultiAddressOutcome {
-                ready: true,
-                results: BTreeMap::new(),
-                compensation: Vec::new(),
-                validation_error: None,
-            };
-        }
-        let mut results = BTreeMap::new();
-        let mut compensation = Vec::new();
-        for spec in specs {
-            let previous = self.memberships.lock().unwrap().get(&spec.address).cloned();
-            let result = self.attach_one(spec, false).await;
-            if let Ok(handle) = &result {
-                if let Some(action) = attach_compensation(previous.as_ref(), spec) {
-                    compensation.push(CompensationHandle {
-                        address: handle.address.clone(),
-                        runtime_id: self.runtime_id.clone(),
-                        action,
-                    });
-                }
-                results.insert(
-                    spec.address.clone(),
-                    AddressLifecycleResult::Attached(handle.clone()),
-                );
-            } else if let Err(error) = result {
-                results.insert(spec.address.clone(), AddressLifecycleResult::Failed(error));
-            }
-        }
-        self.finish_multi_address_outcome(results, compensation)
+        self.begin_attach(specs).run().await
     }
 
     pub async fn reconcile(
@@ -1070,36 +1256,24 @@ impl ApplicationClient {
         specs: &[AddressSpec],
         policy: RecoveryPolicy,
     ) -> MultiAddressOutcome {
-        if let Some(error) = validate_address_set(specs, "reconcile") {
-            return invalid_multi_address_outcome(error);
-        }
-        let mut results = BTreeMap::new();
-        let mut compensation = Vec::new();
-        for spec in specs {
-            let had_local_membership = self.memberships.lock().unwrap().contains_key(&spec.address);
-            match self.reconcile(spec, policy).await {
-                Ok(handle) => {
-                    if !had_local_membership {
-                        compensation.push(CompensationHandle {
-                            address: spec.address.clone(),
-                            runtime_id: self.runtime_id.clone(),
-                            action: CompensationAction::Detach,
-                        });
-                    }
-                    results.insert(
-                        spec.address.clone(),
-                        AddressLifecycleResult::Reconciled(handle),
-                    );
-                }
-                Err(error) => {
-                    results.insert(spec.address.clone(), AddressLifecycleResult::Failed(error));
-                }
-            }
-        }
-        self.finish_multi_address_outcome(results, compensation)
+        self.begin_reconcile_many(specs, policy).run().await
+    }
+
+    /// Prepares cancellation-safe multi-address reconciliation.
+    pub fn begin_reconcile_many(
+        &self,
+        specs: &[AddressSpec],
+        policy: RecoveryPolicy,
+    ) -> LifecycleOperation<'_> {
+        LifecycleOperation::new(self, LifecycleAction::Reconcile(policy), specs.to_vec())
     }
 
     pub async fn detach_many(&self, addresses: &[String]) -> MultiAddressOutcome {
+        self.begin_detach_many(addresses).run().await
+    }
+
+    /// Prepares cancellation-safe multi-address detachment.
+    pub fn begin_detach_many(&self, addresses: &[String]) -> LifecycleOperation<'_> {
         let specs: Vec<_> = addresses
             .iter()
             .map(|address| {
@@ -1117,33 +1291,7 @@ impl ApplicationClient {
                     })
             })
             .collect();
-        if let Some(error) = validate_address_set(&specs, "detach") {
-            return invalid_multi_address_outcome(error);
-        }
-        let mut results = BTreeMap::new();
-        let mut compensation = Vec::new();
-        for spec in specs {
-            let previous = self.memberships.lock().unwrap().get(&spec.address).cloned();
-            match self.detach(&spec.address).await {
-                Ok(()) => {
-                    if let Some(previous) = previous {
-                        compensation.push(CompensationHandle {
-                            address: spec.address.clone(),
-                            runtime_id: self.runtime_id.clone(),
-                            action: CompensationAction::Reattach(previous.spec),
-                        });
-                        results.insert(
-                            spec.address.clone(),
-                            AddressLifecycleResult::Detached(previous.handle),
-                        );
-                    }
-                }
-                Err(error) => {
-                    results.insert(spec.address.clone(), AddressLifecycleResult::Failed(error));
-                }
-            }
-        }
-        self.finish_multi_address_outcome(results, compensation)
+        LifecycleOperation::new(self, LifecycleAction::Detach, specs)
     }
 
     pub async fn prepare_send(
@@ -2807,10 +2955,12 @@ impl ApplicationClient {
         &self,
         results: BTreeMap<String, AddressLifecycleResult>,
         mut compensation: Vec<CompensationHandle>,
+        cancellation: Option<LifecycleCancellationEvidence>,
     ) -> MultiAddressOutcome {
-        let ready = results
-            .values()
-            .all(|value| !matches!(value, AddressLifecycleResult::Failed(_)));
+        let ready = cancellation.is_none()
+            && results
+                .values()
+                .all(|value| !matches!(value, AddressLifecycleResult::Failed(_)));
         if ready {
             compensation.clear();
         } else {
@@ -2843,6 +2993,7 @@ impl ApplicationClient {
             results,
             compensation,
             validation_error: None,
+            cancellation,
         }
     }
 
@@ -3066,15 +3217,6 @@ fn validate_address_set(specs: &[AddressSpec], operation: &str) -> Option<Applic
             "multi-address {operation} contains duplicate addresses"
         ))
     })
-}
-
-fn invalid_multi_address_outcome(error: ApplicationClientError) -> MultiAddressOutcome {
-    MultiAddressOutcome {
-        ready: false,
-        results: BTreeMap::new(),
-        compensation: Vec::new(),
-        validation_error: Some(error),
-    }
 }
 
 fn attach_compensation(
@@ -3723,6 +3865,16 @@ mod tests {
             .await
             .unwrap();
 
+        let cancelled_receive = client.receive("receiver", None);
+        drop(cancelled_receive);
+        assert!(backend
+            .delivery_for_recipient(following.id, "receiver")
+            .await
+            .unwrap()
+            .unwrap()
+            .consumed_at_ms
+            .is_none());
+
         let quarantined = daemon
             .wait(&store_key, "receiver-session", "receiver", 1_000)
             .await;
@@ -3751,6 +3903,21 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(received.delivery.message_id, following.id);
+        assert!(backend
+            .delivery_for_recipient(following.id, "receiver")
+            .await
+            .unwrap()
+            .unwrap()
+            .consumed_at_ms
+            .is_none());
+        drop(received);
+        assert!(backend
+            .delivery_for_recipient(following.id, "receiver")
+            .await
+            .unwrap()
+            .unwrap()
+            .consumed_at_ms
+            .is_none());
 
         let reopened_backend = Arc::new(SqliteBackend::open(&path).unwrap());
         reopened_backend.init_schema().await.unwrap();
@@ -3901,7 +4068,7 @@ mod tests {
 
     #[cfg(feature = "sqlite")]
     #[tokio::test]
-    async fn request_based_prepare_methods_return_canonical_recovery_handles() {
+    async fn prepared_recovery_handles_round_trip_and_reconcile() {
         let (client, _) = sqlite_client("prepare-handles", "application").await;
         let send = send_request("prepared-send", "send body");
         let reply = reply_request("prepared-reply", "reply body");
@@ -3925,6 +4092,19 @@ mod tests {
             send_handle.payload_identity.digest,
             reply_handle.payload_identity.digest
         );
+
+        for handle in [&send_handle, &reply_handle] {
+            let encoded = serde_json::to_string(handle).unwrap();
+            let restored: RecoveryHandle = serde_json::from_str(&encoded).unwrap();
+            assert_eq!(&restored, handle);
+            match client.reconcile_operation(&restored).await.unwrap() {
+                OperationReconciliation::NotRecorded(evidence) => {
+                    assert_eq!(evidence.operation_id, handle.operation_id);
+                    assert_eq!(evidence.payload_identity, handle.payload_identity);
+                }
+                other => panic!("expected exact-operation not-recorded evidence, got {other:?}"),
+            }
+        }
     }
 
     #[cfg(feature = "sqlite")]
@@ -4208,6 +4388,7 @@ mod tests {
                 runtime_id: client.runtime_id.clone(),
                 action: CompensationAction::Detach,
             }],
+            None,
         );
         assert!(!outcome.ready);
         assert!(matches!(
@@ -4226,6 +4407,128 @@ mod tests {
                 evidence,
                 ApplicationLifecycleEvidence::CompensationPending(_)
             )));
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn lifecycle_cancellation_partitions_progress_for_every_operation_kind() {
+        let (client, _) = sqlite_client("lifecycle-cancellation", "application").await;
+        let specs = ["completed", "in-flight", "untouched"]
+            .into_iter()
+            .map(|address| AddressSpec {
+                address: address.into(),
+                capability: ApplicationCapability::SendOnly,
+                description: None,
+                scope: None,
+                tags: None,
+            })
+            .collect::<Vec<_>>();
+        let handle = MembershipHandle {
+            logical_store_id: client.logical_store_id.clone(),
+            responsibility: client.responsibility.clone(),
+            runtime_id: client.runtime_id.clone(),
+            address: "completed".into(),
+            capability: ApplicationCapability::SendOnly,
+            lease_epoch: 1,
+            owner_instance_id: "owner".into(),
+        };
+
+        for action in [
+            LifecycleAction::Attach,
+            LifecycleAction::Reconcile(RecoveryPolicy::BoundedRepair { retries: 1 }),
+            LifecycleAction::Detach,
+        ] {
+            let previous = (matches!(action, LifecycleAction::Detach)).then(|| LocalMembership {
+                handle: handle.clone(),
+                spec: specs[0].clone(),
+                recovering: false,
+                last_recovery_failure: None,
+            });
+            if let Some(previous) = &previous {
+                client
+                    .memberships
+                    .lock()
+                    .unwrap()
+                    .insert(previous.spec.address.clone(), previous.clone());
+            }
+            let addresses = specs
+                .iter()
+                .map(|spec| spec.address.clone())
+                .collect::<Vec<_>>();
+            let mut operation = match action {
+                LifecycleAction::Attach => client.begin_attach(&specs),
+                LifecycleAction::Reconcile(policy) => client.begin_reconcile_many(&specs, policy),
+                LifecycleAction::Detach => client.begin_detach_many(&addresses),
+            };
+            let result = match action {
+                LifecycleAction::Attach => AddressLifecycleResult::Attached(handle.clone()),
+                LifecycleAction::Reconcile(_) => AddressLifecycleResult::Reconciled(handle.clone()),
+                LifecycleAction::Detach => AddressLifecycleResult::Detached(handle.clone()),
+            };
+            operation.in_flight = Some("completed".into());
+            operation.record_completed(specs[0].clone(), previous, Ok(result));
+            operation.in_flight = Some("in-flight".into());
+
+            let outcome = operation.cancelled_outcome();
+            assert!(!outcome.ready);
+            assert_eq!(
+                outcome.results.keys().cloned().collect::<Vec<_>>(),
+                ["completed"]
+            );
+            assert_eq!(outcome.compensation.len(), 1);
+            assert_eq!(
+                outcome.compensation[0].action,
+                match action {
+                    LifecycleAction::Detach => {
+                        CompensationAction::Reattach(specs[0].clone())
+                    }
+                    LifecycleAction::Attach | LifecycleAction::Reconcile(_) => {
+                        CompensationAction::Detach
+                    }
+                }
+            );
+            assert_eq!(
+                outcome.cancellation,
+                Some(LifecycleCancellationEvidence {
+                    operation: match action {
+                        LifecycleAction::Attach => LifecycleOperationKind::Attach,
+                        LifecycleAction::Reconcile(_) => LifecycleOperationKind::Reconcile,
+                        LifecycleAction::Detach => LifecycleOperationKind::Detach,
+                    },
+                    may_have_committed: Some("in-flight".into()),
+                    not_attempted: vec!["untouched".into()],
+                })
+            );
+        }
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn lifecycle_cancellation_before_work_marks_every_address_not_attempted() {
+        let (client, _) = sqlite_client("lifecycle-cancellation-before-work", "application").await;
+        let specs = ["first", "second"]
+            .into_iter()
+            .map(|address| AddressSpec {
+                address: address.into(),
+                capability: ApplicationCapability::SendOnly,
+                description: None,
+                scope: None,
+                tags: None,
+            })
+            .collect::<Vec<_>>();
+
+        let outcome = client.begin_attach(&specs).cancelled_outcome();
+        assert!(!outcome.ready);
+        assert!(outcome.results.is_empty());
+        assert!(outcome.compensation.is_empty());
+        assert_eq!(
+            outcome.cancellation,
+            Some(LifecycleCancellationEvidence {
+                operation: LifecycleOperationKind::Attach,
+                may_have_committed: None,
+                not_attempted: vec!["first".into(), "second".into()],
+            })
+        );
     }
 
     #[test]
