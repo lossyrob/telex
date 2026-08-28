@@ -18,7 +18,8 @@ use telex::intent_test_support::{
     FakeProducer, ProducerBehavior,
 };
 use telex::station_intent::{
-    IntentEvidence, StationIntentV1, STATION_INTENT_MAX_COUNT, STATION_INTENT_PENDING_TTL,
+    IntentEvidence, ProducerIdentity, StationIntentV1, STATION_INTENT_MAX_COUNT,
+    STATION_INTENT_PENDING_TTL,
 };
 
 /// One fully wired scenario: a daemon, a store, a fake producer, a registered credential root, and
@@ -1863,6 +1864,150 @@ async fn station_intent_a_durable_transition_clears_a_ladder_the_old_descriptor_
         report.scanned, 1,
         "the transition must re-admit the binding to the fast cadence instead of leaving it \
          parked on a schedule its previous descriptor earned"
+    );
+}
+
+/// The same rule, one layer down and where it actually bit: the **durable** evidence block.
+///
+/// Clearing the in-memory ladder on a generation move only repairs the daemon that happened to
+/// observe the reload. The durable `consecutive_failures` / `failure_code` / `next_attempt_ms`
+/// are what a *successor* daemon seeds a brand-new index from on first sight, so the canonical
+/// sequence — bridge reloads, passes fail `producer_identity_mismatch`, the turn-boundary hook
+/// re-records the live identity, and *then* the daemon is replaced (an upgrade, a crash, the
+/// restart after a crash loop) — handed the successor a repaired binding still parked on the dead
+/// producer's schedule, up to a full quarantine hour. "Recovery is automatic" is only true if the
+/// ladder dies with the descriptor that earned it on disk as well as in memory.
+///
+/// The lifetime counters are the other half of the property. Zeroing the whole evidence block
+/// would pass the recovery assertion and destroy the audit trail that lets an operator tell a
+/// binding that has always been broken from one that was just repaired, so `attempts` and the
+/// historical timestamps are asserted to survive.
+#[tokio::test]
+async fn station_intent_an_identity_refresh_clears_the_durable_ladder_a_successor_seeds_from() {
+    let scenario = Scenario::new("intent-identity-ladder", ProducerBehavior::Healthy).await;
+    let live_producer = scenario.intent.producer.clone();
+    // The bridge reloaded: the record names a process that no longer exists, so every pass fails
+    // identity verification against a healthy producer that is right there.
+    let mut stale = scenario.intent.clone();
+    stale.producer.start_time = stale.producer.start_time.wrapping_add(1);
+    scenario.reseed(&stale);
+
+    // Two real failures, each in its own pass, so the ladder is a schedule rather than a single
+    // rounding error and `attempts` is unambiguously more than one.
+    for attempt in 1..=2 {
+        if attempt > 1 {
+            let store = scenario.daemon.intent_store();
+            let mut persisted = store.load(&scenario.intent.id()).expect("load evidence");
+            persisted.evidence.next_attempt_ms = None;
+            assert!(
+                store
+                    .write_cas(persisted.generation, &persisted)
+                    .expect("clear the retry delay"),
+                "the test owns the manifest generation"
+            );
+            scenario.daemon.clear_intent_index();
+        }
+        let report = scenario.daemon.reconcile_once().await;
+        assert_eq!(report.failed, 1, "attempt {attempt} must fail");
+    }
+    assert_eq!(
+        scenario.failure_code().as_deref(),
+        Some("producer_identity_mismatch")
+    );
+
+    let wedged = scenario
+        .daemon
+        .intent_store()
+        .load(&scenario.intent.id())
+        .expect("reload the wedged manifest");
+    assert!(
+        wedged.evidence.consecutive_failures >= 2,
+        "precondition: the durable ladder is what a successor would inherit"
+    );
+    assert!(
+        wedged
+            .evidence
+            .next_attempt_ms
+            .is_some_and(|next| next > telex::model::now_ms()),
+        "precondition: the durable schedule parks the binding into the future"
+    );
+    let attempts_before = wedged.evidence.attempts;
+    let last_attempt_before = wedged.evidence.last_attempt_ms;
+    assert!(
+        attempts_before >= 2,
+        "precondition: a lifetime history exists"
+    );
+
+    // Exactly the durable transition the turn-boundary finalize performs under the per-intent
+    // write lock — the production rule itself, not a re-implementation of it.
+    let identity = ProducerIdentity {
+        pid: live_producer.pid,
+        start_time: live_producer.start_time,
+        exe_path: live_producer.exe_path.clone(),
+        host_id: live_producer.host_id.clone(),
+        boot_id: live_producer.boot_id.clone(),
+        protocol: live_producer.protocol,
+    };
+    let refreshed = scenario
+        .daemon
+        .intent_store()
+        .update_locked(&scenario.intent.id(), |intent| {
+            intent.apply_producer_identity(&identity)
+        })
+        .expect("identity refresh")
+        .expect("a real identity change must be written");
+    assert_eq!(refreshed.evidence.consecutive_failures, 0);
+    assert_eq!(refreshed.evidence.failure_code, None);
+    assert_eq!(
+        refreshed.evidence.next_attempt_ms, None,
+        "the repaired record must not carry the dead descriptor's schedule on disk"
+    );
+    assert_eq!(
+        refreshed.evidence.attempts, attempts_before,
+        "lifetime counters are an audit trail, not a schedule"
+    );
+    assert_eq!(refreshed.evidence.last_attempt_ms, last_attempt_before);
+    assert_eq!(
+        refreshed.evidence.last_success_ms,
+        wedged.evidence.last_success_ms
+    );
+    assert_eq!(
+        refreshed.evidence.producer_verified_ms,
+        wedged.evidence.producer_verified_ms
+    );
+
+    // The daemon that observed the reload is now replaced. The successor's index is empty, so
+    // everything it decides comes from the durable block alone.
+    scenario.daemon.clear_intent_index();
+    let successor = scenario.daemon.reconcile_once().await;
+    assert_eq!(
+        successor.skipped, 0,
+        "a successor must not park a repaired binding on the previous descriptor's schedule"
+    );
+    assert_eq!(
+        successor.restored, 1,
+        "the repaired binding must be restored on the successor's very first pass"
+    );
+    let entry = scenario
+        .daemon
+        .intent_index()
+        .entries
+        .values()
+        .next()
+        .cloned()
+        .expect("a seeded index entry");
+    assert_eq!(entry.state, IntentRecoveryState::Restored);
+    assert_eq!(
+        entry.consecutive_failures, 0,
+        "the successor seeded a reset ladder"
+    );
+    assert!(
+        entry.attempts > attempts_before,
+        "the successor seeded the retained lifetime counter and kept counting from it"
+    );
+    assert!(
+        scenario.member_push_registered().await,
+        "push delivery must actually be armed again"
     );
 }
 

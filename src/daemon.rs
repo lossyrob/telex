@@ -15017,6 +15017,183 @@ mod platform {
     }
 }
 
+/// One authenticated line exchange with a **local** endpoint whose owner is already known.
+///
+/// This is the client half of the daemon's peer rule, factored out of the reconciler's producer
+/// probe so that every path that hands a secret to a local endpoint gets the same order of
+/// operations rather than a re-implementation of it:
+///
+/// 1. connect,
+/// 2. `platform::verify_server_peer` — same user, the recorded executable, and the recorded
+///    `(pid, start_time)` — **before a single byte is written**,
+/// 3. write exactly one request line,
+/// 4. read exactly one response line, hard-capped at a frame of `max_response_bytes` (newline
+///    included) — one byte more is refused rather than returned truncated.
+///
+/// The order is the property. A request that carries a credential is unrecoverable once written:
+/// endpoint names are predictable (they are derived from a session id), so anything that can bind
+/// the name first receives whatever the client sends before it ever inspects an answer. Proving
+/// the peer *after* the write, or inferring identity from the reply, protects nothing. A platform
+/// that cannot resolve the peer fails closed for the same reason.
+///
+/// Visibility is deliberately `pub(crate)`: this exposes the daemon's private `platform` peer
+/// primitives to the rest of the crate and nothing wider.
+pub(crate) mod verified_peer {
+    use super::*;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+    /// Windows named-pipe busy retry interval while a prior client holds the instance.
+    #[cfg(windows)]
+    const PIPE_BUSY_RETRY: Duration = Duration::from_millis(50);
+
+    /// The identity the endpoint's server process must prove before anything is sent to it.
+    #[derive(Debug, Clone, Copy)]
+    pub(crate) struct ExpectedPeer<'a> {
+        pub exe_path: &'a Path,
+        pub pid: u32,
+        pub start_time: u64,
+    }
+
+    /// What the exchange does, and the ceilings it is held to.
+    #[derive(Debug, Clone, Copy)]
+    pub(crate) struct LineExchange<'a> {
+        /// The request, without a trailing newline — the exchange frames it.
+        pub request_line: &'a str,
+        /// Hard ceiling on the answer, **newline included**: a frame of exactly this many bytes is
+        /// answered, one byte more is refused. The peer is authenticated but never *trusted*: an
+        /// unbounded read lets a buggy or hostile server stream until the timeout and hand an
+        /// arbitrarily large string to the caller.
+        pub max_response_bytes: u64,
+        pub connect_timeout: Duration,
+        pub exchange_timeout: Duration,
+    }
+
+    /// Why an exchange did not produce an answer. Split finely enough that every caller can keep
+    /// the failure classification it already published.
+    #[derive(Debug)]
+    pub(crate) enum ExchangeError {
+        /// The endpoint could not be reached at all.
+        Connect(DaemonError),
+        /// Connecting did not complete inside `connect_timeout`.
+        ConnectTimeout,
+        /// The peer is not the expected producer — **nothing was sent**.
+        PeerUnverified(DaemonError),
+        /// Transport failure during the exchange itself.
+        Io(std::io::Error),
+        /// The exchange did not complete inside `exchange_timeout`.
+        ExchangeTimeout,
+        /// The answer's frame exceeded `max_response_bytes`.
+        ResponseTooLarge,
+    }
+
+    impl std::fmt::Display for ExchangeError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                ExchangeError::Connect(e) => write!(f, "connecting to the endpoint: {e}"),
+                ExchangeError::ConnectTimeout => write!(f, "the endpoint did not accept in time"),
+                ExchangeError::PeerUnverified(e) => write!(
+                    f,
+                    "the process serving the endpoint is not the expected peer, so nothing was sent: {e}"
+                ),
+                ExchangeError::Io(e) => write!(f, "the endpoint exchange failed: {e}"),
+                ExchangeError::ExchangeTimeout => write!(f, "the endpoint did not answer in time"),
+                ExchangeError::ResponseTooLarge => {
+                    write!(f, "the endpoint's answer exceeded the response cap")
+                }
+            }
+        }
+    }
+
+    /// A local endpoint at `path`, in the transport this platform uses for one.
+    pub(crate) fn local_endpoint(path: &str) -> Endpoint {
+        #[cfg(windows)]
+        {
+            Endpoint::WindowsPipe(path.to_string())
+        }
+        #[cfg(unix)]
+        {
+            Endpoint::UnixSocket(PathBuf::from(path))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            unreachable!("no local endpoint transport on this platform")
+        }
+    }
+
+    /// Connect, retrying only the "another client holds the single pipe instance" condition, which
+    /// is transient by construction. Every other error returns immediately, so an absent endpoint
+    /// is still reported as absent rather than waited on.
+    async fn connect_when_free(endpoint: &Endpoint) -> Result<platform::ClientConn> {
+        loop {
+            match platform::connect(endpoint).await {
+                Ok(conn) => return Ok(conn),
+                #[cfg(windows)]
+                Err(DaemonError::Timeout(_)) => {
+                    tokio::time::sleep(PIPE_BUSY_RETRY).await;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// Connect to `endpoint`, prove the peer, then exchange one line. See the module docs for why
+    /// the order is the whole of the guarantee.
+    pub(crate) async fn exchange(
+        endpoint: &Endpoint,
+        peer: ExpectedPeer<'_>,
+        exchange: LineExchange<'_>,
+    ) -> std::result::Result<String, ExchangeError> {
+        let conn = match tokio::time::timeout(exchange.connect_timeout, connect_when_free(endpoint))
+            .await
+        {
+            Ok(Ok(conn)) => conn,
+            Ok(Err(e)) => return Err(ExchangeError::Connect(e)),
+            Err(_) => return Err(ExchangeError::ConnectTimeout),
+        };
+        // Same-user ownership, executable match, and pid+start-time identity, all in one call,
+        // before a single byte leaves this process.
+        if let Err(e) = platform::verify_server_peer(
+            &conn,
+            peer.exe_path,
+            Some(peer.pid),
+            Some(peer.start_time),
+        ) {
+            return Err(ExchangeError::PeerUnverified(e));
+        }
+
+        let (read_half, mut write_half) = tokio::io::split(conn);
+        // Read one byte *past* the cap rather than exactly up to it. `max_response_bytes` is the
+        // largest frame that is allowed through, newline included, so a reader limited to exactly
+        // the cap cannot tell "a legal frame that happens to be cap bytes" from "a frame that was
+        // cut off at the cap": both come back cap bytes long, and the only way to stay safe is to
+        // reject the legal one too. The extra byte makes the two distinguishable — an over-cap
+        // answer is the only thing that can produce more than `max_response_bytes` — so the
+        // boundary is exact: a `cap`-byte frame is answered, a `cap + 1`-byte one is refused, and
+        // nothing larger is ever buffered.
+        let read_budget = exchange.max_response_bytes.saturating_add(1);
+        let mut reader = BufReader::new(read_half.take(read_budget));
+        let request = exchange.request_line;
+        let io = async {
+            write_half.write_all(request.as_bytes()).await?;
+            write_half.write_all(b"\n").await?;
+            write_half.flush().await?;
+            let mut response = String::new();
+            reader.read_line(&mut response).await?;
+            Ok::<String, std::io::Error>(response)
+        };
+        let response = match tokio::time::timeout(exchange.exchange_timeout, io).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(e)) => return Err(ExchangeError::Io(e)),
+            Err(_) => return Err(ExchangeError::ExchangeTimeout),
+        };
+        if response.len() as u64 > exchange.max_response_bytes {
+            return Err(ExchangeError::ResponseTooLarge);
+        }
+        Ok(response)
+    }
+}
+
 fn same_canonical_path(a: &Path, b: &Path) -> bool {
     #[cfg(windows)]
     {

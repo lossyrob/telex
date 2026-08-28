@@ -360,6 +360,24 @@ impl CredentialDescriptorV1 {
     }
 }
 
+/// A producer identity **captured from a live producer right now**, as opposed to the one a
+/// record currently claims.
+///
+/// Deliberately a distinct type from [`ProducerDescriptorV1`]: a descriptor is durable state that
+/// also carries transport, endpoint, and credential pointers, while this is only the identity a
+/// finalize just proved. Keeping them apart is what lets the refresh rule below be stated — and
+/// tested — as "the recorded identity is replaced by this captured one", with no way to
+/// accidentally overwrite the parts of the descriptor a capture knows nothing about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProducerIdentity {
+    pub pid: u32,
+    pub start_time: u64,
+    pub exe_path: PathBuf,
+    pub host_id: String,
+    pub boot_id: String,
+    pub protocol: ProtocolRange,
+}
+
 /// Everything the daemon needs to reach and *prove* the producer, expressed generically. The
 /// daemon core never learns that the producer is Copilot; the descriptor kind is the boundary.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -379,6 +397,30 @@ pub struct ProducerDescriptorV1 {
 }
 
 impl ProducerDescriptorV1 {
+    /// Whether this descriptor already names the same *producer process* that `identity` describes.
+    ///
+    /// Only the fields that identify a process participate: pid and start time (the peer proof),
+    /// the executable (the peer proof), and host and boot (the locality gate — a record carried to
+    /// another machine, or across a reboot, does not describe a reachable process at all). A
+    /// refresh that changes any of them is describing a *different* producer, and the retry ladder
+    /// the old one earned no longer applies — see [`StationIntentV1::apply_producer_identity`].
+    ///
+    /// `protocol` is deliberately **excluded**. It is a negotiated capability the same live process
+    /// advertises, not part of who that process is: a bridge that starts announcing a wider range
+    /// (a telex upgrade that re-registers, a registry rewritten in place) is still the pid and
+    /// start time the daemon has been failing to reach. Treating that as a new producer would
+    /// forgive a ladder a still-current producer is actively earning, which is exactly the
+    /// forgiveness the "only on a real identity change" rule exists to withhold. The refresh still
+    /// *records* the new range, because `legacy_producer` classification must follow what the
+    /// producer currently advertises.
+    pub fn names_same_process(&self, identity: &ProducerIdentity) -> bool {
+        self.pid == identity.pid
+            && self.start_time == identity.start_time
+            && self.exe_path == identity.exe_path
+            && self.host_id == identity.host_id
+            && self.boot_id == identity.boot_id
+    }
+
     /// Structural validation.
     ///
     /// `require_identity` is false only for a `Pending` intent: attach writes the record *before*
@@ -459,6 +501,29 @@ pub struct IntentEvidence {
     pub next_attempt_ms: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub recovery_latency_ms: Option<i64>,
+}
+
+impl IntentEvidence {
+    /// Drop the retry schedule the *previous producer descriptor* earned, and nothing else.
+    ///
+    /// The split is the whole point, so it is stated field by field rather than by rebuilding the
+    /// struct from `Default`:
+    ///
+    /// * **Descriptor-specific** — `consecutive_failures`, `failure_code`, `next_attempt_ms`.
+    ///   These describe a producer process that no longer exists. `consecutive_failures` is what
+    ///   `RECONCILE_QUARANTINE_AFTER` reads, `next_attempt_ms` is what a successor daemon seeds its
+    ///   schedule from, and `failure_code` is what status reports as the current cause. Keeping any
+    ///   of them across a real identity change makes the repaired record serve a sentence the
+    ///   repair already ended — up to a full quarantine hour.
+    /// * **Lifetime and historical** — `attempts`, `last_attempt_ms`, `last_success_ms`,
+    ///   `producer_verified_ms`, `recovery_latency_ms`. These are the binding's audit trail, not a
+    ///   schedule. Zeroing them would make every reload look like a first attach and quietly
+    ///   destroy the evidence an operator uses to see a crash loop at all.
+    pub fn clear_descriptor_ladder(&mut self) {
+        self.consecutive_failures = 0;
+        self.failure_code = None;
+        self.next_attempt_ms = None;
+    }
 }
 
 /// Durable proof that a daemon accepted `Register` for this binding **and armed push delivery**.
@@ -883,6 +948,57 @@ impl StationIntentV1 {
     /// Whether this intent was written by this host and this boot.
     pub fn matches_local_identity(&self, host: &str, boot: &str) -> bool {
         self.producer.host_id == host && self.producer.boot_id == boot
+    }
+
+    /// Record a freshly captured producer identity, and — only when the *process* it names actually
+    /// changed — drop the durable retry ladder the previous descriptor earned. Returns whether the
+    /// record changed at all, which is what tells a `update_locked` caller there is a new
+    /// generation to write.
+    ///
+    /// This is the durable half of a rule the daemon already applies in memory. A reconcile pass
+    /// clears the in-memory ladder when the generation moves, so the daemon that observed the
+    /// reload recovers immediately. The durable evidence block was left carrying the old
+    /// descriptor's `consecutive_failures` / `failure_code` / `next_attempt_ms`, and that block is
+    /// exactly what a *successor* daemon seeds a brand-new index from on first sight. So the
+    /// canonical failure sequence — bridge reloads, passes fail `producer_identity_mismatch`, the
+    /// turn-boundary hook re-records the live identity, the daemon is then replaced (an upgrade, a
+    /// crash, the restart that follows a crash loop) — produced a successor that parked a
+    /// *repaired* binding on the dead producer's schedule, up to `RECONCILE_QUARANTINE_RETRY`. The
+    /// published recovery bounds are only true if the ladder dies with the descriptor that earned
+    /// it, in memory and on disk alike.
+    ///
+    /// Conditional on a real change on purpose: a re-finalize that re-records the *same* producer
+    /// (a resume with no reload in between, an idempotent retry of the same finalize) is not a
+    /// repair, and must not forgive a ladder a still-current producer is earning — that would let
+    /// a hook that runs every turn boundary hold a genuinely wedged binding at the fast cadence
+    /// forever.
+    ///
+    /// That is why the protocol range is written unconditionally but is **not** part of the
+    /// comparison (see [`ProducerDescriptorV1::names_same_process`]). The range is a capability the
+    /// live process advertises, so the record must always carry the current one — `legacy_producer`
+    /// classification depends on it — but a producer that merely re-announces a different range is
+    /// the same wedged process, and clearing its ladder would be exactly the forgiveness the
+    /// paragraph above withholds.
+    ///
+    /// Callers must invoke this **inside** the per-intent write lock, so the identity write and
+    /// the evidence reset land in the same durable generation and no reader can observe a record
+    /// carrying the new identity with the old descriptor's schedule.
+    pub fn apply_producer_identity(&mut self, identity: &ProducerIdentity) -> bool {
+        let process_changed = !self.producer.names_same_process(identity);
+        let protocol_changed = self.producer.protocol != identity.protocol;
+        if !process_changed && !protocol_changed {
+            return false;
+        }
+        self.producer.pid = identity.pid;
+        self.producer.start_time = identity.start_time;
+        self.producer.exe_path = identity.exe_path.clone();
+        self.producer.host_id = identity.host_id.clone();
+        self.producer.boot_id = identity.boot_id.clone();
+        self.producer.protocol = identity.protocol;
+        if process_changed {
+            self.evidence.clear_descriptor_ladder();
+        }
+        true
     }
 
     /// Whether a daemon has durably proven it armed push delivery for this binding.
@@ -2764,6 +2880,208 @@ mod tests {
         );
         assert!(IntentId::from_file_name("../evil.intent.json").is_none());
         assert!(IntentId::from_file_name("short.intent.json").is_none());
+    }
+
+    /// A wedged intent, mid-ladder: two consecutive failures, a parked next attempt, and a
+    /// lifetime history worth keeping.
+    fn wedged_intent() -> StationIntentV1 {
+        let mut intent = sample_intent("sqlite:/db", "sess", "addr");
+        intent.evidence = IntentEvidence {
+            attempts: 9,
+            consecutive_failures: 2,
+            failure_code: Some("producer_identity_mismatch".to_string()),
+            next_attempt_ms: Some(5_000),
+            last_attempt_ms: Some(4_000),
+            last_success_ms: Some(1_500),
+            producer_verified_ms: Some(1_500),
+            recovery_latency_ms: Some(500),
+        };
+        intent
+    }
+
+    fn identity_of(intent: &StationIntentV1) -> ProducerIdentity {
+        ProducerIdentity {
+            pid: intent.producer.pid,
+            start_time: intent.producer.start_time,
+            exe_path: intent.producer.exe_path.clone(),
+            host_id: intent.producer.host_id.clone(),
+            boot_id: intent.producer.boot_id.clone(),
+            protocol: intent.producer.protocol,
+        }
+    }
+
+    /// The retry ladder belongs to the *producer process that earned it*, so recording a genuinely
+    /// new process clears it — and re-recording the same one does not.
+    ///
+    /// Both halves matter. The clear is what stops a successor daemon from parking a repaired
+    /// binding on a dead producer's schedule (the durable evidence block is the only thing a fresh
+    /// index seeds from). The no-op is what stops a hook that runs at every turn boundary from
+    /// forgiving the ladder of a producer that is still the current one, which would hold a
+    /// genuinely wedged binding at the fast cadence forever.
+    #[test]
+    fn recording_a_new_producer_identity_clears_the_ladder_and_re_recording_the_same_one_does_not()
+    {
+        let before = wedged_intent();
+
+        let mut unchanged = before.clone();
+        assert!(
+            !unchanged.apply_producer_identity(&identity_of(&before)),
+            "re-recording the same identity is not a repair"
+        );
+        assert_eq!(
+            unchanged, before,
+            "an unchanged identity must leave the record byte-identical, ladder included"
+        );
+
+        let mut refreshed = before.clone();
+        let successor = ProducerIdentity {
+            pid: before.producer.pid + 1,
+            start_time: before.producer.start_time.wrapping_add(1),
+            exe_path: PathBuf::from("new-exe"),
+            host_id: "host-2".to_string(),
+            boot_id: "boot-2".to_string(),
+            protocol: ProtocolRange { min: 2, max: 3 },
+        };
+        assert!(refreshed.apply_producer_identity(&successor));
+
+        // Every descriptor field is the new producer's...
+        assert_eq!(refreshed.producer.pid, successor.pid);
+        assert_eq!(refreshed.producer.start_time, successor.start_time);
+        assert_eq!(refreshed.producer.exe_path, successor.exe_path);
+        assert_eq!(refreshed.producer.host_id, successor.host_id);
+        assert_eq!(refreshed.producer.boot_id, successor.boot_id);
+        assert_eq!(refreshed.producer.protocol, successor.protocol);
+        assert!(refreshed.producer.names_same_process(&successor));
+
+        // ...the descriptor-specific schedule is gone...
+        assert_eq!(refreshed.evidence.consecutive_failures, 0);
+        assert_eq!(refreshed.evidence.failure_code, None);
+        assert_eq!(refreshed.evidence.next_attempt_ms, None);
+
+        // ...and the lifetime counters and historical timestamps are untouched, because they
+        // describe the binding's whole history and are what operators read to tell a binding that
+        // has always been broken from one that just got repaired.
+        assert_eq!(refreshed.evidence.attempts, before.evidence.attempts);
+        assert_eq!(
+            refreshed.evidence.last_attempt_ms,
+            before.evidence.last_attempt_ms
+        );
+        assert_eq!(
+            refreshed.evidence.last_success_ms,
+            before.evidence.last_success_ms
+        );
+        assert_eq!(
+            refreshed.evidence.producer_verified_ms,
+            before.evidence.producer_verified_ms
+        );
+        assert_eq!(
+            refreshed.evidence.recovery_latency_ms,
+            before.evidence.recovery_latency_ms
+        );
+
+        // Nothing outside the producer descriptor and the ladder moved.
+        let mut expected = before.clone();
+        expected.producer = refreshed.producer.clone();
+        expected.evidence = refreshed.evidence.clone();
+        assert_eq!(refreshed, expected);
+    }
+
+    /// A protocol range the *same live process* re-announces is recorded, and the ladder survives.
+    ///
+    /// This is the boundary of the reset rule, and getting it wrong is a live wedge rather than a
+    /// cosmetic difference. The turn-boundary hook re-captures the registry on every turn, so if a
+    /// changed range counted as a new producer, a bridge that re-registers with a different
+    /// advertised range — a telex upgrade, a registry rewritten in place, a `protocol` field that
+    /// appears where it was previously absent — would reset `consecutive_failures` at every turn
+    /// boundary. The binding would then retry at the fast cadence forever and never reach
+    /// `RECONCILE_QUARANTINE_AFTER`, which is the backpressure that keeps a permanently broken
+    /// producer from probing on every pass.
+    ///
+    /// The range still has to be *written*: it is what classifies a producer `legacy_producer`, so
+    /// a stale range would keep restoring (or refusing to restore) on last turn's capability. So
+    /// both things are asserted together — the descriptor moves, the schedule does not — and the
+    /// return value is `true` because the caller must persist the new generation.
+    #[test]
+    fn a_protocol_only_refresh_is_recorded_without_forgiving_the_ladder() {
+        let before = wedged_intent();
+        let mut refreshed = before.clone();
+        let wider = ProducerIdentity {
+            protocol: ProtocolRange {
+                min: before.producer.protocol.min,
+                max: before.producer.protocol.max + 1,
+            },
+            ..identity_of(&before)
+        };
+        assert_ne!(before.producer.protocol, wider.protocol, "precondition");
+        assert!(
+            before.producer.names_same_process(&wider),
+            "a re-announced range does not make it a different process"
+        );
+
+        assert!(
+            refreshed.apply_producer_identity(&wider),
+            "the new range must be persisted, so the refresh reports a change"
+        );
+        assert_eq!(
+            refreshed.producer.protocol, wider.protocol,
+            "the record must carry what the producer currently advertises"
+        );
+        assert_eq!(
+            refreshed.evidence, before.evidence,
+            "a still-current producer keeps the ladder it is earning, in full"
+        );
+
+        // The protocol range is the only thing that moved anywhere in the record.
+        let mut expected = before.clone();
+        expected.producer.protocol = wider.protocol;
+        assert_eq!(refreshed, expected);
+    }
+
+    /// Any single *process* field is enough to make it a different producer — most importantly
+    /// `start_time`, which is the only thing that distinguishes a reloaded bridge from the dead one
+    /// whose pid it reused. The protocol range is the deliberate exception.
+    #[test]
+    fn each_identity_field_alone_marks_a_different_producer() {
+        let intent = wedged_intent();
+        let base = identity_of(&intent);
+        assert!(intent.producer.names_same_process(&base));
+
+        let variants = [
+            ProducerIdentity {
+                pid: base.pid + 1,
+                ..base.clone()
+            },
+            ProducerIdentity {
+                start_time: base.start_time.wrapping_add(1),
+                ..base.clone()
+            },
+            ProducerIdentity {
+                exe_path: PathBuf::from("other-exe"),
+                ..base.clone()
+            },
+            ProducerIdentity {
+                host_id: "other-host".to_string(),
+                ..base.clone()
+            },
+            ProducerIdentity {
+                boot_id: "other-boot".to_string(),
+                ..base.clone()
+            },
+        ];
+        for variant in variants {
+            assert!(
+                !intent.producer.names_same_process(&variant),
+                "{variant:?} must not be treated as the recorded producer"
+            );
+        }
+
+        assert!(
+            intent.producer.names_same_process(&ProducerIdentity {
+                protocol: ProtocolRange { min: 1, max: 9 },
+                ..base.clone()
+            }),
+            "a capability the same process advertises is not a change of producer"
+        );
     }
 
     #[test]

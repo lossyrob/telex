@@ -38,7 +38,6 @@ use crate::station_intent::{
 };
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
-use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
 
 /// A stamp that could not be performed, with the classification the register's admission rule
 /// reads and the operator-facing detail it reports.
@@ -1370,9 +1369,12 @@ fn producer_endpoint(intent: &StationIntentV1) -> Option<Endpoint> {
 
 /// Connect, prove the peer, then probe.
 ///
-/// The order is the point: `verify_server_peer` runs **before anything is sent**, so the secret
-/// only ever reaches a process that has already been proven to be the same user, the recorded
+/// The order is the point: peer verification runs **before anything is sent**, so the secret only
+/// ever reaches a process that has already been proven to be the same user, the recorded
 /// executable, and the recorded `(pid, start_time)`. Identity is never inferred from the answer.
+/// That order, the response cap, and the connect/exchange budgets all live in
+/// [`super::verified_peer`], which the producer-side finalize and push paths use too — the rule is
+/// implemented once and every caller that hands out a credential inherits it.
 async fn probe_producer(
     intent: &StationIntentV1,
     secret: &str,
@@ -1383,29 +1385,6 @@ async fn probe_producer(
             "producer_transport_unsupported",
         ));
     };
-    let conn = match tokio::time::timeout(BRIDGE_PROBE_TIMEOUT, platform::connect(&endpoint)).await
-    {
-        Ok(Ok(conn)) => conn,
-        Ok(Err(_)) => return Err(IntentOutcome::failed("producer_unreachable")),
-        Err(_) => return Err(IntentOutcome::failed("producer_connect_timeout")),
-    };
-    // Same-user ownership, executable match, and pid+start-time identity, all in one call, before
-    // a single byte leaves this process. A platform that cannot resolve the peer fails closed.
-    if platform::verify_server_peer(
-        &conn,
-        &intent.producer.exe_path,
-        Some(intent.producer.pid),
-        Some(intent.producer.start_time),
-    )
-    .is_err()
-    {
-        // Retryable, not terminal: the overwhelmingly common cause is a bridge *reload*
-        // (`extensions_reload`, `/clear`, an extension-host restart), which gives the producer a
-        // new pid and start time while the manifest still names the old pair. The turn-boundary
-        // hook refreshes the recorded identity from the live registry, so the ladder is what lets
-        // this heal on its own instead of parking the binding for the quarantine hour.
-        return Err(IntentOutcome::failed("producer_identity_mismatch"));
-    }
 
     let nonce = probe_nonce();
     let request = serde_json::json!({
@@ -1414,32 +1393,49 @@ async fn probe_producer(
         "protocol": BRIDGE_PROBE_MIN_PROTOCOL,
         "secret": secret,
     });
-    let mut line = serde_json::to_string(&request)
+    let line = serde_json::to_string(&request)
         .map_err(|_| IntentOutcome::failed("probe_encode_failed"))?;
-    line.push('\n');
 
-    let (read_half, mut write_half) = tokio::io::split(conn);
-    // Frame cap on the producer's answer, mirroring the daemon's own `MAX_JSONL_FRAME_BYTES`
-    // policy. This is the only place the daemon reads an external JSON line, and the producer is
-    // verified but never *trusted*: an unbounded `read_line` lets a buggy or hostile bridge
-    // stream until the probe timeout and hand an arbitrarily large string to the status
-    // projection, which then exceeds the IPC frame cap and fails every `telex status` call.
-    let mut reader = BufReader::new(read_half.take(PROBE_MAX_RESPONSE_BYTES));
-    let exchange = async {
-        write_half.write_all(line.as_bytes()).await?;
-        write_half.flush().await?;
-        let mut response = String::new();
-        reader.read_line(&mut response).await?;
-        Ok::<String, std::io::Error>(response)
-    };
-    let response = match tokio::time::timeout(BRIDGE_PROBE_TIMEOUT, exchange).await {
-        Ok(Ok(response)) => response,
-        Ok(Err(_)) => return Err(IntentOutcome::failed("probe_io_failed")),
-        Err(_) => return Err(IntentOutcome::failed("probe_timeout")),
-    };
-    if response.len() as u64 >= PROBE_MAX_RESPONSE_BYTES {
-        return Err(IntentOutcome::failed("probe_response_too_large"));
-    }
+    let response = verified_peer::exchange(
+        &endpoint,
+        verified_peer::ExpectedPeer {
+            exe_path: &intent.producer.exe_path,
+            pid: intent.producer.pid,
+            start_time: intent.producer.start_time,
+        },
+        verified_peer::LineExchange {
+            request_line: &line,
+            // Frame cap on the producer's answer, mirroring the daemon's own
+            // `MAX_JSONL_FRAME_BYTES` policy. This is the only place the daemon reads an external
+            // JSON line, and the producer is verified but never *trusted*: an unbounded read lets
+            // a buggy or hostile bridge stream until the probe timeout and hand an arbitrarily
+            // large string to the status projection, which then exceeds the IPC frame cap and
+            // fails every `telex status` call.
+            max_response_bytes: PROBE_MAX_RESPONSE_BYTES,
+            connect_timeout: BRIDGE_PROBE_TIMEOUT,
+            exchange_timeout: BRIDGE_PROBE_TIMEOUT,
+        },
+    )
+    .await
+    .map_err(|e| match e {
+        verified_peer::ExchangeError::Connect(_) => IntentOutcome::failed("producer_unreachable"),
+        verified_peer::ExchangeError::ConnectTimeout => {
+            IntentOutcome::failed("producer_connect_timeout")
+        }
+        // Retryable, not terminal: the overwhelmingly common cause is a bridge *reload*
+        // (`extensions_reload`, `/clear`, an extension-host restart), which gives the producer a
+        // new pid and start time while the manifest still names the old pair. The turn-boundary
+        // hook refreshes the recorded identity from the live registry, so the ladder is what lets
+        // this heal on its own instead of parking the binding for the quarantine hour.
+        verified_peer::ExchangeError::PeerUnverified(_) => {
+            IntentOutcome::failed("producer_identity_mismatch")
+        }
+        verified_peer::ExchangeError::Io(_) => IntentOutcome::failed("probe_io_failed"),
+        verified_peer::ExchangeError::ExchangeTimeout => IntentOutcome::failed("probe_timeout"),
+        verified_peer::ExchangeError::ResponseTooLarge => {
+            IntentOutcome::failed("probe_response_too_large")
+        }
+    })?;
     let parsed: serde_json::Value = serde_json::from_str(response.trim())
         .map_err(|_| IntentOutcome::failed("probe_malformed_response"))?;
     if parsed.get("ok").and_then(|v| v.as_bool()) != Some(true) {

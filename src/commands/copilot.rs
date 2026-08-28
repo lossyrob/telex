@@ -22,6 +22,7 @@ use crate::daemon_ipc::{
 };
 use crate::model::{now_ms, Attention};
 use crate::output::emit;
+use crate::station_intent::ProducerIdentity;
 
 const DEFAULT_TURN_GUARD_MAX_NUDGES: u32 = 3;
 const PUSH_BRIDGE_RECOVERY_GUIDANCE: &str = "The telex push bridge is not live. Run `extensions_reload` to load it. If `extensions_reload` is unavailable, enable Copilot Extensions under `/experimental`; then re-provision with `telex --address <station> copilot resume` and run `extensions_reload`. If Copilot Extensions cannot be enabled, use the supported pull fallback: run `telex --address <station> copilot fallback prepare` and launch its returned command; or detach with `telex --address <station> copilot detach`.";
@@ -39,9 +40,6 @@ const FALLBACK_WINDOWS_LAUNCHER_FILE: &str = "wait-once.ps1";
 /// Bridge round-trip budget. Kept below the daemon's ON_DELIVER_TIMEOUT (30s) so the daemon
 /// observes our nonzero exit (and retries) rather than killing the handler mid-request.
 const BRIDGE_PUSH_TIMEOUT: Duration = Duration::from_secs(20);
-/// Windows named-pipe busy retry interval while a prior client holds the single instance.
-#[cfg(windows)]
-const BRIDGE_PIPE_BUSY_RETRY: Duration = Duration::from_millis(50);
 /// Compiled-in default bridge frame cap, used only if the bridge registry does not advertise
 /// its own `maxRequestBytes`. Sized (8 MiB) to fit a max daemon message plus JSON-escaped prompt
 /// wrapping, so realistic large messages push as turns; the dead-letter path is a backstop for
@@ -515,16 +513,6 @@ fn ensure_reconcile_capability(status: &DaemonStatus) -> Result<()> {
     Ok(())
 }
 
-/// Everything captured from the live bridge at finalize time.
-struct ProducerIdentity {
-    pid: u32,
-    start_time: u64,
-    exe_path: PathBuf,
-    host_id: String,
-    boot_id: String,
-    protocol: crate::station_intent::ProtocolRange,
-}
-
 /// The bridge registry fields needed to build a producer descriptor.
 #[derive(Deserialize)]
 struct BridgeRegistryFull {
@@ -538,12 +526,31 @@ struct BridgeRegistryFull {
     protocol: Option<u32>,
 }
 
+/// The process identity of the live bridge, captured through the **shared** primitives.
+///
+/// Split out of [`capture_producer_identity`] because the two callers need different amounts of
+/// it and must not be coupled by the difference: a finalize additionally needs host and boot
+/// identity (which it records durably), while `push` needs only enough to *authenticate the peer
+/// it is about to hand a secret to*. Making push resolve a host id it never uses would let an
+/// unrelated failure in that primitive take down delivery on a session that is working.
+fn capture_producer_peer(pid: u32) -> Result<(u64, PathBuf)> {
+    let start_time = crate::session_watch::capture_process_start_time(pid)
+        .ok_or_else(|| anyhow!("could not capture the bridge process start time for pid {pid}"))?;
+    let exe_path = crate::platform_fs::process_exe_path(pid)
+        .map_err(|e| anyhow!("could not resolve the bridge executable for pid {pid}: {e}"))?;
+    Ok((start_time, exe_path))
+}
+
 /// Capture the producer's identity through the **shared** primitives, never a parallel
 /// implementation, and fail closed if any of them cannot resolve.
 ///
 /// This is what makes the daemon's later verification meaningful: if telex cannot pin down the
 /// producer's executable, pid+start-time, host, and boot right now, then the daemon will not be
 /// able to either, so the intent must not be finalized at all.
+///
+/// The captured value is a [`crate::station_intent::ProducerIdentity`], so this capture, the
+/// descriptor refresh that records it, and the peer authentication that proves a connected bridge
+/// really *is* it all read the same fields from the same struct.
 fn capture_producer_identity(session: &str) -> Result<(ProducerIdentity, String)> {
     let registry_path = bridge_registry_path(session)?;
     let raw = crate::platform_fs::read_owner_only_file(
@@ -575,10 +582,7 @@ fn capture_producer_identity(session: &str) -> Result<(ProducerIdentity, String)
     // as protocol 1 so the daemon classifies it `legacy_producer` — never restored, never wedged.
     let protocol = registry.protocol.unwrap_or(1);
 
-    let start_time = crate::session_watch::capture_process_start_time(pid)
-        .ok_or_else(|| anyhow!("could not capture the bridge process start time for pid {pid}"))?;
-    let exe_path = crate::platform_fs::process_exe_path(pid)
-        .map_err(|e| anyhow!("could not resolve the bridge executable for pid {pid}: {e}"))?;
+    let (start_time, exe_path) = capture_producer_peer(pid)?;
     let host_id = crate::platform_fs::host_id()
         .map_err(|e| anyhow!("could not resolve a stable host identity: {e}"))?;
     let boot_id = crate::platform_fs::boot_id()
@@ -702,7 +706,15 @@ fn build_pending_intent(
 /// Attach proves the producer answers *before* finalizing, so a `live` intent always means "this
 /// producer was verifiable at least once". Without this the daemon would be the first to discover
 /// an unusable producer, and it would discover it only after a restart.
-async fn probe_local_bridge(session: &str, secret: &str) -> Result<()> {
+///
+/// The probe carries the bridge secret, so it authenticates the connected peer against the
+/// identity just captured from the registry before it writes anything — the same rule, in the same
+/// order, as the daemon's own probe.
+async fn probe_local_bridge(
+    session: &str,
+    identity: &ProducerIdentity,
+    secret: &str,
+) -> Result<()> {
     let endpoint = bridge_endpoint_path(session)?;
     let nonce: String = {
         let mut bytes = [0u8; 16];
@@ -715,13 +727,19 @@ async fn probe_local_bridge(session: &str, secret: &str) -> Result<()> {
         "protocol": COPILOT_BRIDGE_PROTOCOL,
         "secret": secret,
     });
-    let line = format!("{request}\n");
-    let response = tokio::time::timeout(
+    let line = request.to_string();
+    let response = bridge_roundtrip(
+        &endpoint,
+        crate::daemon::verified_peer::ExpectedPeer {
+            exe_path: &identity.exe_path,
+            pid: identity.pid,
+            start_time: identity.start_time,
+        },
+        &line,
         crate::station_intent::BRIDGE_PROBE_TIMEOUT,
-        bridge_roundtrip(&endpoint, &line),
     )
     .await
-    .map_err(|_| anyhow!("the bridge did not answer a probe within the probe timeout"))??;
+    .map_err(|e| anyhow!("probing the local bridge: {e}"))?;
     let parsed: serde_json::Value = serde_json::from_str(response.trim())
         .map_err(|e| anyhow!("malformed probe response from the bridge: {e}"))?;
     if parsed.get("ok").and_then(|v| v.as_bool()) != Some(true) {
@@ -863,7 +881,7 @@ async fn finalize_intent(
     // Re-capture identity at finalize time rather than trusting what the pending write recorded:
     // the bridge may have reloaded between provisioning and arming.
     let (identity, secret) = capture_producer_identity(session)?;
-    probe_local_bridge(session, &secret).await?;
+    probe_local_bridge(session, &identity, &secret).await?;
 
     // Under the per-intent write lock: a turn-boundary finalize and a daemon reconcile pass are
     // genuinely concurrent writers, and the loser of an unserialized read-modify-write would
@@ -886,12 +904,14 @@ async fn finalize_intent(
                 refused = Some(admission);
                 return false;
             }
-            intent.producer.pid = identity.pid;
-            intent.producer.start_time = identity.start_time;
-            intent.producer.exe_path = identity.exe_path.clone();
-            intent.producer.host_id = identity.host_id.clone();
-            intent.producer.boot_id = identity.boot_id.clone();
-            intent.producer.protocol = identity.protocol;
+            // Records the captured identity (protocol range included, always) and — only when the
+            // producer *process* actually changed — atomically drops the durable retry ladder the
+            // previous descriptor earned, in the same locked write, so no successor daemon can ever
+            // seed a repaired record from the dead producer's schedule. A capability the same live
+            // process re-announces is recorded without forgiving a ladder it is still earning.
+            // Lifetime counters and historical timestamps are kept either way: they are the
+            // binding's audit trail, not a schedule.
+            intent.apply_producer_identity(&identity);
             // Address metadata the user may have changed on a later `copilot resume`: refreshed
             // here so a restore cannot revert a description/scope/tags/occupant edit to whatever
             // the *first* attach recorded. Only from a live member — a memberless identity refresh
@@ -1431,6 +1451,27 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
     // Derive the endpoint from the session id rather than trusting the registry's path, so a
     // tampered registry cannot redirect the push to an attacker-controlled endpoint.
     let endpoint = bridge_endpoint_path(&session)?;
+    // ...and prove the process actually serving that endpoint is the bridge the registry names,
+    // before the per-session secret below is written to it. Deriving the name is not by itself a
+    // guarantee: the name is predictable, so an endpoint squatter binds it and collects whatever
+    // arrives. Fail closed — a push that cannot authenticate its peer is a retryable transport
+    // failure, never a silent send.
+    let peer_pid = match registry.pid.filter(|pid| *pid != 0) {
+        Some(pid) => pid,
+        None => {
+            eprintln!(
+                "telex copilot push: the bridge registry for session {session} records no pid, so the endpoint's peer cannot be authenticated"
+            );
+            return Ok(2);
+        }
+    };
+    let (peer_start_time, peer_exe) = match capture_producer_peer(peer_pid) {
+        Ok(peer) => peer,
+        Err(e) => {
+            eprintln!("telex copilot push: could not capture the bridge process identity: {e}");
+            return Ok(2);
+        }
+    };
     // Preflight against the cap the bridge advertises (falling back to the compiled default), so
     // a message that fits the negotiated frame pushes and only a truly-oversized one dead-letters.
     let bridge_cap = registry
@@ -1462,18 +1503,31 @@ async fn push(ctx: &Ctx, args: CopilotPushArgs) -> Result<i32> {
         return Ok(PUSH_EXIT_PERMANENT);
     }
 
-    let response =
-        match tokio::time::timeout(BRIDGE_PUSH_TIMEOUT, bridge_roundtrip(&endpoint, &line)).await {
-            Ok(Ok(response)) => response,
-            Ok(Err(e)) => {
-                eprintln!("telex copilot push: bridge transport failed: {e}");
-                return Ok(2);
-            }
-            Err(_) => {
-                eprintln!("telex copilot push: bridge did not respond within budget");
-                return Ok(2);
-            }
-        };
+    let response = match tokio::time::timeout(
+        BRIDGE_PUSH_TIMEOUT,
+        bridge_roundtrip(
+            &endpoint,
+            crate::daemon::verified_peer::ExpectedPeer {
+                exe_path: &peer_exe,
+                pid: peer_pid,
+                start_time: peer_start_time,
+            },
+            &line,
+            BRIDGE_PUSH_TIMEOUT,
+        ),
+    )
+    .await
+    {
+        Ok(Ok(response)) => response,
+        Ok(Err(e)) => {
+            eprintln!("telex copilot push: bridge transport failed: {e}");
+            return Ok(2);
+        }
+        Err(_) => {
+            eprintln!("telex copilot push: bridge did not respond within budget");
+            return Ok(2);
+        }
+    };
 
     let parsed: BridgePushResponse = match serde_json::from_str(response.trim()) {
         Ok(parsed) => parsed,
@@ -1934,48 +1988,41 @@ async fn request_reconcile_best_effort(
     }
 }
 
-/// Connect to the in-session bridge endpoint, send one JSON request line, read one JSON
-/// response line. Windows named pipe path.
-#[cfg(windows)]
-async fn bridge_roundtrip(path: &str, request_line: &str) -> Result<String> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::windows::named_pipe::ClientOptions;
-    const ERROR_PIPE_BUSY: i32 = 231;
-
-    let mut client = loop {
-        match ClientOptions::new().open(path) {
-            Ok(client) => break client,
-            Err(e) if e.raw_os_error() == Some(ERROR_PIPE_BUSY) => {
-                tokio::time::sleep(BRIDGE_PIPE_BUSY_RETRY).await;
-            }
-            Err(e) => return Err(anyhow::anyhow!("opening bridge pipe {path}: {e}")),
-        }
-    };
-    client.write_all(request_line.as_bytes()).await?;
-    client.write_all(b"\n").await?;
-    client.flush().await?;
-    let mut reader = BufReader::new(client);
-    let mut response = String::new();
-    reader.read_line(&mut response).await?;
-    Ok(response)
-}
-
-/// POSIX unix domain socket path.
-#[cfg(unix)]
-async fn bridge_roundtrip(path: &str, request_line: &str) -> Result<String> {
-    use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
-    use tokio::net::UnixStream;
-
-    let mut client = UnixStream::connect(path)
-        .await
-        .map_err(|e| anyhow::anyhow!("connecting bridge socket {path}: {e}"))?;
-    client.write_all(request_line.as_bytes()).await?;
-    client.write_all(b"\n").await?;
-    client.flush().await?;
-    let mut reader = BufReader::new(client);
-    let mut response = String::new();
-    reader.read_line(&mut response).await?;
-    Ok(response)
+/// Connect to the in-session bridge endpoint, **prove the peer is the recorded producer**, then
+/// send one JSON request line and read one capped response line.
+///
+/// Every request this function carries holds the per-session bridge secret, so authentication is
+/// not optional and it cannot happen after the write: the endpoint name is derived from the
+/// session id and is therefore predictable, so anything that binds it first would receive the
+/// credential before this process ever looked at an answer. The shared
+/// `daemon::verified_peer::exchange` performs connect → verify → write → capped read in that
+/// order, using the same peer primitives the daemon's own producer probe uses, so a wrong peer
+/// receives zero credential bytes on both transports and a platform that cannot resolve a peer
+/// fails closed.
+///
+/// The identity is the one captured from the bridge registry (`ProducerIdentity`), which is also
+/// what the durable intent records and what the daemon later verifies — one captured identity,
+/// three consumers, no parallel notion of "the bridge".
+async fn bridge_roundtrip(
+    endpoint: &str,
+    peer: crate::daemon::verified_peer::ExpectedPeer<'_>,
+    request_line: &str,
+    budget: Duration,
+) -> Result<String> {
+    crate::daemon::verified_peer::exchange(
+        &crate::daemon::verified_peer::local_endpoint(endpoint),
+        peer,
+        crate::daemon::verified_peer::LineExchange {
+            request_line: request_line.trim_end_matches('\n'),
+            // The bridge is authenticated but never trusted: cap its answer exactly as the daemon
+            // caps a producer's probe answer.
+            max_response_bytes: crate::daemon_reconcile::PROBE_MAX_RESPONSE_BYTES,
+            connect_timeout: budget,
+            exchange_timeout: budget,
+        },
+    )
+    .await
+    .map_err(|e| anyhow!("{e}"))
 }
 
 async fn attach(ctx: &Ctx, args: CopilotAttachArgs) -> Result<i32> {
@@ -5662,5 +5709,431 @@ mod tests {
         )
         .expect("forced gc");
         assert!(!path.exists(), "forced gc removes corrupt bindings");
+    }
+
+    // ---------------------------------------------------------------------------------------
+    // Producer-side peer authentication (M5)
+    //
+    // Endpoint substitution is the threat these cover. Both bridge endpoint names are *derived*
+    // from the session id — `\\.\pipe\telex-bridge-<session>` and `<bridge root>/<session>.sock` —
+    // so they are predictable to anything running as this user. Deriving the name (rather than
+    // trusting the registry's) stops a tampered registry from redirecting a push, but it does
+    // nothing about a process that simply binds the derived name first. Every request the bridge
+    // path sends carries the per-session secret, so the only thing that can protect it is proving
+    // the peer *before* the write.
+    // ---------------------------------------------------------------------------------------
+
+    /// A stand-in endpoint that binds a name and records every byte a client sends it.
+    ///
+    /// It is the imposter in the substitution tests, and the honest bridge in the positive
+    /// control, so a single implementation answers "what did the endpoint actually receive".
+    struct EndpointRecorder {
+        endpoint: String,
+        received: std::sync::Arc<Mutex<Vec<u8>>>,
+        #[cfg(unix)]
+        socket_path: PathBuf,
+    }
+
+    impl EndpointRecorder {
+        fn received(&self) -> Vec<u8> {
+            self.received
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .clone()
+        }
+    }
+
+    #[cfg(unix)]
+    impl Drop for EndpointRecorder {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_file(&self.socket_path);
+        }
+    }
+
+    fn unique_endpoint_name(label: &str) -> String {
+        use std::sync::atomic::{AtomicU64, Ordering};
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        format!(
+            "telex-peer-{label}-{}-{}",
+            std::process::id(),
+            NEXT.fetch_add(1, Ordering::SeqCst)
+        )
+    }
+
+    /// Accept exactly one connection, record the request line (bounded by a short read budget so a
+    /// client that correctly sends *nothing* does not hang the test), then answer with `response`.
+    #[cfg(unix)]
+    async fn spawn_endpoint_recorder(label: &str, response: String) -> EndpointRecorder {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::UnixListener;
+
+        let socket_path =
+            std::env::temp_dir().join(format!("{}.sock", unique_endpoint_name(label)));
+        let _ = std::fs::remove_file(&socket_path);
+        let listener = UnixListener::bind(&socket_path).expect("bind recorder socket");
+        let received = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let sink = received.clone();
+        tokio::spawn(async move {
+            let Ok((stream, _)) = listener.accept().await else {
+                return;
+            };
+            let (read_half, mut write_half) = tokio::io::split(stream);
+            let mut reader = BufReader::new(read_half);
+            let mut line = String::new();
+            let _ =
+                tokio::time::timeout(Duration::from_millis(750), reader.read_line(&mut line)).await;
+            sink.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .extend_from_slice(line.as_bytes());
+            let _ = write_half.write_all(response.as_bytes()).await;
+            let _ = write_half.write_all(b"\n").await;
+            let _ = write_half.flush().await;
+        });
+        EndpointRecorder {
+            endpoint: socket_path.to_string_lossy().into_owned(),
+            received,
+            socket_path,
+        }
+    }
+
+    #[cfg(windows)]
+    async fn spawn_endpoint_recorder(label: &str, response: String) -> EndpointRecorder {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+        use tokio::net::windows::named_pipe::ServerOptions;
+
+        let endpoint = format!(r"\\.\pipe\{}", unique_endpoint_name(label));
+        let server = ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(&endpoint)
+            .expect("bind recorder pipe");
+        let received = std::sync::Arc::new(Mutex::new(Vec::new()));
+        let sink = received.clone();
+        tokio::spawn(async move {
+            if server.connect().await.is_err() {
+                return;
+            }
+            let (read_half, mut write_half) = tokio::io::split(server);
+            let mut reader = BufReader::new(read_half);
+            let mut line = String::new();
+            let _ =
+                tokio::time::timeout(Duration::from_millis(750), reader.read_line(&mut line)).await;
+            sink.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .extend_from_slice(line.as_bytes());
+            let _ = write_half.write_all(response.as_bytes()).await;
+            let _ = write_half.write_all(b"\n").await;
+            let _ = write_half.flush().await;
+        });
+        EndpointRecorder { endpoint, received }
+    }
+
+    /// This process's own identity, which is what a recorder running in this process presents to
+    /// the peer primitives.
+    fn own_identity() -> (u32, u64, PathBuf) {
+        let pid = std::process::id();
+        let start_time =
+            crate::session_watch::capture_process_start_time(pid).expect("own start time");
+        let exe = crate::platform_fs::process_exe_path(pid).expect("own exe path");
+        (pid, start_time, exe)
+    }
+
+    /// A long-lived, idle child process to stand in for "the producer the record names", while the
+    /// endpoint is served by this test process.
+    ///
+    /// A cheap system binary is enough and is the point: it gives a *genuinely different* pid,
+    /// start time, and executable, all resolved through the same primitives a finalize uses on a
+    /// real bridge. Modelling the wrong peer as a distinct OS process — rather than as this process
+    /// with one field perturbed — is what makes the assertion below say "the process that owns the
+    /// connected endpoint is not the producer" instead of merely "one recorded number differs".
+    struct ForeignProcess {
+        child: std::process::Child,
+        pid: u32,
+        start_time: u64,
+        exe: PathBuf,
+    }
+
+    /// The command to run as that child, or `None` on a platform with no obvious idle binary — in
+    /// which case the caller keeps the weaker in-process mismatch instead of failing.
+    fn idle_child_command() -> Option<std::process::Command> {
+        #[cfg(windows)]
+        {
+            // No arguments: `cmd.exe` reads its script from stdin, so a piped stdin that is never
+            // written keeps it alive and doing nothing until it is killed.
+            Some(std::process::Command::new("cmd.exe"))
+        }
+        #[cfg(unix)]
+        {
+            // `/bin/sh` rather than `sleep`, because POSIX guarantees the former at that exact
+            // path and several distributions do not ship the latter there. `read` with a piped,
+            // never-written stdin blocks until the child is killed.
+            let mut command = std::process::Command::new("/bin/sh");
+            command.arg("-c").arg("read ignored");
+            Some(command)
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            None
+        }
+    }
+
+    impl ForeignProcess {
+        fn spawn() -> Option<Self> {
+            use std::process::Stdio;
+            let mut child = idle_child_command()?
+                .stdin(Stdio::piped())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .ok()?;
+            let pid = child.id();
+            match crate::session_watch::capture_process_start_time(pid)
+                .zip(crate::platform_fs::process_exe_path(pid).ok())
+            {
+                Some((start_time, exe)) => Some(Self {
+                    child,
+                    pid,
+                    start_time,
+                    exe,
+                }),
+                None => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    None
+                }
+            }
+        }
+    }
+
+    impl Drop for ForeignProcess {
+        fn drop(&mut self) {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    const CREDENTIAL_CANARY: &str = "telex-test-canary-secret-do-not-send";
+
+    fn canary_request() -> String {
+        serde_json::json!({
+            "op": "probe",
+            "nonce": "0123456789abcdef",
+            "protocol": COPILOT_BRIDGE_PROTOCOL,
+            "secret": CREDENTIAL_CANARY,
+        })
+        .to_string()
+    }
+
+    /// Stand an endpoint up in *this* process, point the roundtrip at it while naming `peer` as the
+    /// expected producer, and prove the endpoint's owner was handed nothing at all.
+    async fn assert_substituted_endpoint_gets_nothing(
+        label: &str,
+        peer: crate::daemon::verified_peer::ExpectedPeer<'_>,
+    ) {
+        let recorder = spawn_endpoint_recorder(
+            label,
+            r#"{"ok":true,"nonce":"0123456789abcdef"}"#.to_string(),
+        )
+        .await;
+        let err = bridge_roundtrip(
+            &recorder.endpoint,
+            peer,
+            &canary_request(),
+            Duration::from_secs(2),
+        )
+        .await
+        .expect_err("an unprovable peer must never be handed the request");
+        assert!(
+            err.to_string().contains("not the expected peer"),
+            "the refusal must name the reason, got {err}"
+        );
+
+        // Give the recorder its full read budget before asking what it saw, so "nothing arrived"
+        // cannot pass merely because the assertion ran first.
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        let received = recorder.received();
+        assert!(
+            received.is_empty(),
+            "a peer that failed verification received {} bytes",
+            received.len()
+        );
+        assert!(
+            !String::from_utf8_lossy(&received).contains(CREDENTIAL_CANARY),
+            "the bridge secret reached an unverified peer"
+        );
+    }
+
+    /// Endpoint substitution: something other than the recorded producer is serving the derived
+    /// endpoint name. It must receive **zero bytes** — not a truncated request, not a handshake,
+    /// nothing — because the request carries the per-session bridge secret and a write is
+    /// unrecoverable.
+    ///
+    /// Two substitutions, because they fail for different reasons and only both together say the
+    /// check is the daemon's:
+    ///
+    /// * **A different process entirely.** The record names a real, live, same-user process (an
+    ///   idle child spawned here, its identity read through the same primitives a finalize reads a
+    ///   bridge's with) while a *different* process — this one — owns the endpoint. Nothing about
+    ///   the connected owner matches: not the pid, not the start time, not the executable. This is
+    ///   the shape of the actual hazard, an unrelated program squatting a predictable name, and it
+    ///   is what proves the endpoint's owner is compared against the expected producer rather than
+    ///   one recorded number being compared against another.
+    /// * **The same pid with a different start time.** Pid reuse, and the state a bridge reload
+    ///   leaves behind. A check that stopped at "same pid, same exe, same user" — which the process
+    ///   above would also fail — waves this one straight through.
+    ///
+    /// Runs on both transports: a unix socket peer credential lookup on Unix, and
+    /// `GetNamedPipeServerProcessId` on Windows. A platform with neither fails closed, which this
+    /// asserts as the same outcome rather than skipping.
+    #[tokio::test]
+    async fn a_bridge_roundtrip_sends_no_credential_bytes_to_a_peer_it_cannot_prove() {
+        let (pid, start_time, exe) = own_identity();
+
+        // A real second process, where the platform can give us one. Both supported targets can,
+        // so the strong case is *asserted* rather than silently skipped — a "distinct process"
+        // test that quietly degrades to no test at all is the failure mode worth guarding.
+        let foreign = ForeignProcess::spawn();
+        assert!(
+            foreign.is_some() || !cfg!(any(unix, windows)),
+            "a supported target must be able to stand up a distinct producer process"
+        );
+        if let Some(foreign) = foreign {
+            assert_ne!(
+                foreign.pid, pid,
+                "the stand-in producer must be a different process"
+            );
+            assert!(
+                !foreign
+                    .exe
+                    .to_string_lossy()
+                    .eq_ignore_ascii_case(&exe.to_string_lossy()),
+                "the stand-in producer must be a different executable, got {:?}",
+                foreign.exe
+            );
+            assert_substituted_endpoint_gets_nothing(
+                "imposter-foreign-process",
+                crate::daemon::verified_peer::ExpectedPeer {
+                    exe_path: &foreign.exe,
+                    pid: foreign.pid,
+                    start_time: foreign.start_time,
+                },
+            )
+            .await;
+        }
+
+        // Same user, same executable, same pid, different start time.
+        assert_substituted_endpoint_gets_nothing(
+            "imposter-reused-pid",
+            crate::daemon::verified_peer::ExpectedPeer {
+                exe_path: &exe,
+                pid,
+                start_time: start_time.wrapping_add(1),
+            },
+        )
+        .await;
+    }
+
+    /// The positive control for the test above plus the response cap's exact boundary, in one
+    /// sequence so the "zero bytes" assertion cannot pass because the harness never transmits at
+    /// all.
+    ///
+    /// The cap matters for the same reason it does on the daemon's probe: the peer is
+    /// authenticated but never *trusted*, so an answer is read under a hard ceiling
+    /// (`PROBE_MAX_RESPONSE_BYTES`, 16 KiB) rather than until the client's timeout. The boundary is
+    /// asserted from both sides on purpose. A cap is a promise in two directions — a frame *at* the
+    /// limit is legal and must be answered, one byte past it must be refused — and the natural
+    /// implementation mistake (limit the reader to exactly the cap, then reject anything that
+    /// reaches it) silently breaks the first half, rejecting a legal 16 KiB answer as hostile.
+    #[tokio::test]
+    async fn a_proven_peer_is_answered_and_the_response_cap_boundary_is_exact() {
+        // Targets with a native peer-credential facility: `SO_PEERCRED` / `LOCAL_PEERPID` on
+        // Unix, `GetNamedPipeServerProcessId` on Windows. Anywhere else the client half fails
+        // closed by design, so the control cannot succeed and there is nothing to cap.
+        let peer_facilities = cfg!(any(target_os = "linux", target_os = "macos", windows));
+        let (pid, start_time, exe) = own_identity();
+        let expected = crate::daemon::verified_peer::ExpectedPeer {
+            exe_path: &exe,
+            pid,
+            start_time,
+        };
+
+        let honest = spawn_endpoint_recorder(
+            "honest",
+            r#"{"ok":true,"nonce":"0123456789abcdef"}"#.to_string(),
+        )
+        .await;
+        let control = bridge_roundtrip(
+            &honest.endpoint,
+            expected,
+            &canary_request(),
+            Duration::from_secs(2),
+        )
+        .await;
+        if !peer_facilities {
+            let e = control.expect_err("no peer facility here means the path must fail closed");
+            assert!(e.to_string().contains("not the expected peer"), "{e}");
+            assert!(honest.received().is_empty());
+            return;
+        }
+        let response =
+            control.expect("a target with a native peer-credential facility must be answered");
+        assert!(response.contains("\"ok\":true"), "got {response:?}");
+        let received = String::from_utf8_lossy(&honest.received()).into_owned();
+        assert!(
+            received.contains(CREDENTIAL_CANARY),
+            "the proven peer must actually receive the request; got {received:?}"
+        );
+
+        // The recorder frames its answer with a trailing newline, so a body of `cap - 1` is a frame
+        // of exactly `cap`: the largest legal answer, which must come back whole.
+        let cap = crate::daemon_reconcile::PROBE_MAX_RESPONSE_BYTES as usize;
+        let at_cap = spawn_endpoint_recorder("at-cap", "x".repeat(cap - 1)).await;
+        let exact = bridge_roundtrip(
+            &at_cap.endpoint,
+            expected,
+            &canary_request(),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect("a frame of exactly the cap is legal and must be answered");
+        assert_eq!(
+            exact.len(),
+            cap,
+            "the whole frame must be returned, newline included"
+        );
+        assert!(
+            exact.ends_with('\n'),
+            "the frame must be newline-terminated"
+        );
+
+        // One byte more is refused outright rather than returned truncated: a truncated JSON line
+        // would be reported as a malformed answer, which is a different (and misleading) fault.
+        let over_cap = spawn_endpoint_recorder("over-cap", "x".repeat(cap)).await;
+        let err = bridge_roundtrip(
+            &over_cap.endpoint,
+            expected,
+            &canary_request(),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect_err("a frame one byte past the cap must be refused");
+        assert!(
+            err.to_string().contains("exceeded the response cap"),
+            "got {err}"
+        );
+
+        // And an answer that is simply enormous is refused on the same rule, without buffering it.
+        let flood = spawn_endpoint_recorder("flood", "x".repeat(cap + 1024)).await;
+        let err = bridge_roundtrip(
+            &flood.endpoint,
+            expected,
+            &canary_request(),
+            Duration::from_secs(5),
+        )
+        .await
+        .expect_err("an answer past the cap must be refused, not returned truncated");
+        assert!(
+            err.to_string().contains("exceeded the response cap"),
+            "got {err}"
+        );
     }
 }
