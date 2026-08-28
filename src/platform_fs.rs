@@ -497,6 +497,7 @@ pub fn boot_id_uncached() -> Result<String> {
 /// the production resolvers ([`boot_id`], [`boot_id_uncached`]) pass `None`, so there is no value
 /// of this type in existence on the production path and therefore no way for the barrier hook to
 /// be reached without a caller that first named — and had validated — a test namespace.
+#[cfg_attr(not(windows), allow(dead_code))]
 struct TestBootIdScope<'a> {
     namespace: &'a str,
     /// Invoked at most once, and only when the pre-lock read found the record missing or invalid:
