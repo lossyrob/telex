@@ -29,11 +29,17 @@ For example:
 
 ```toml
 [dependencies]
-telex = { git = "https://github.com/lossyrob/telex", default-features = false, features = ["sqlite"] }
+telex = { git = "https://github.com/lossyrob/telex", rev = "<full-commit-sha>", default-features = false, features = ["sqlite"] }
 ```
 
 None of these profiles enables `self-update`. A single-backend profile does not
 enable the other backend.
+
+No published Telex release contains this binding yet. Source consumers must
+replace the placeholder with the full commit ID of a reviewed revision. The
+compatibility promise applies to that pinned source revision and subsequent
+documented version transitions; an unpinned Git dependency follows a moving
+branch and is outside the promise.
 
 ## Compatibility boundary
 
@@ -70,7 +76,10 @@ Telex or the selected backend committed nothing:
   selection. After cancellation, `cancelled_outcome` preserves completed
   per-address results and compensation, identifies one in-flight address that
   may have committed, and lists addresses not attempted. Reconcile the uncertain
-  address before retrying. The direct `attach`, `reconcile_many`, and
+  address before retrying. An in-flight canceled reconciliation remains
+  `InProgress` in lifecycle health (and `recovering` for bounded repair) until a
+  later reconciliation establishes a terminal result. The direct `attach`,
+  `reconcile_many`, and
   `detach_many` methods are run-to-completion conveniences.
 - Canceling `receive` does not acknowledge a delivery. A returned
   `ReceivedDelivery` remains unacknowledged until the caller durably ingests it

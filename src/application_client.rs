@@ -697,6 +697,22 @@ pub struct LifecycleOperation<'a> {
     compensation: Vec<CompensationHandle>,
     validation_error: Option<ApplicationClientError>,
     finished: bool,
+    #[cfg(test)]
+    test_gate: Option<TestGate>,
+}
+
+#[cfg(test)]
+#[derive(Clone)]
+struct TestGate {
+    started: Arc<tokio::sync::Notify>,
+    release: Arc<tokio::sync::Notify>,
+}
+
+#[cfg(test)]
+fn receive_test_gates() -> &'static Mutex<BTreeMap<String, TestGate>> {
+    static GATES: std::sync::OnceLock<Mutex<BTreeMap<String, TestGate>>> =
+        std::sync::OnceLock::new();
+    GATES.get_or_init(|| Mutex::new(BTreeMap::new()))
 }
 
 pub struct ApplicationStoreMaintenance {
@@ -758,6 +774,8 @@ impl<'a> LifecycleOperation<'a> {
             results: BTreeMap::new(),
             compensation: Vec::new(),
             finished: false,
+            #[cfg(test)]
+            test_gate: None,
         }
     }
 
@@ -788,6 +806,11 @@ impl<'a> LifecycleOperation<'a> {
             .get(&spec.address)
             .cloned();
         self.in_flight = Some(spec.address.clone());
+        #[cfg(test)]
+        if let Some(gate) = &self.test_gate {
+            gate.started.notify_one();
+            gate.release.notified().await;
+        }
 
         let result = match self.action {
             LifecycleAction::Attach => self
@@ -824,8 +847,13 @@ impl<'a> LifecycleOperation<'a> {
         if result.is_ok() {
             let action = match self.action {
                 LifecycleAction::Attach => attach_compensation(previous.as_ref(), &spec),
-                LifecycleAction::Reconcile(_) if previous.is_none() => {
+                LifecycleAction::Reconcile(RecoveryPolicy::BoundedRepair { .. })
+                    if previous.is_none() =>
+                {
                     Some(CompensationAction::Detach)
+                }
+                LifecycleAction::Reconcile(RecoveryPolicy::BoundedRepair { .. }) => {
+                    attach_compensation(previous.as_ref(), &spec)
                 }
                 LifecycleAction::Detach => Some(CompensationAction::Reattach(
                     previous
@@ -834,7 +862,7 @@ impl<'a> LifecycleOperation<'a> {
                         .spec
                         .clone(),
                 )),
-                LifecycleAction::Reconcile(_) => None,
+                LifecycleAction::Reconcile(RecoveryPolicy::Strict) => None,
             };
             if let Some(action) = action {
                 self.compensation.push(CompensationHandle {
@@ -872,9 +900,38 @@ impl<'a> LifecycleOperation<'a> {
         }
         self.finished = true;
         let not_attempted_start = self.next_index + usize::from(self.in_flight.is_some());
+        let may_have_committed = self.in_flight.take();
+        if let Some(address) = &may_have_committed {
+            if let LifecycleAction::Reconcile(policy) = self.action {
+                let spec = &self.specs[self.next_index];
+                self.client.record_reconciliation(
+                    spec,
+                    ReconciliationEvidence::InProgress,
+                    Some(
+                        "reconcile was canceled without a terminal outcome; reconcile before retrying"
+                            .to_string(),
+                    ),
+                );
+                if matches!(policy, RecoveryPolicy::BoundedRepair { .. }) {
+                    self.client.recovery_attempts.lock().unwrap().insert(
+                        address.clone(),
+                        RecoveryAttempt {
+                            capability: spec.capability,
+                            recovering: true,
+                            last_failure: None,
+                        },
+                    );
+                    if let Some(existing) = self.client.memberships.lock().unwrap().get_mut(address)
+                    {
+                        existing.recovering = true;
+                        existing.last_recovery_failure = None;
+                    }
+                }
+            }
+        }
         let cancellation = LifecycleCancellationEvidence {
             operation: self.kind(),
-            may_have_committed: self.in_flight.take(),
+            may_have_committed,
             not_attempted: self.specs[not_attempted_start..]
                 .iter()
                 .map(|spec| spec.address.clone())
@@ -1772,6 +1829,19 @@ impl ApplicationClient {
         address: &str,
         timeout_ms: Option<u64>,
     ) -> Result<Option<ReceivedDelivery>, ApplicationClientError> {
+        #[cfg(test)]
+        let test_gate = {
+            receive_test_gates()
+                .lock()
+                .unwrap()
+                .get(&self.runtime_id.0)
+                .cloned()
+        };
+        #[cfg(test)]
+        if let Some(gate) = test_gate {
+            gate.started.notify_one();
+            gate.release.notified().await;
+        }
         let membership = self.membership(address)?;
         if membership.handle.capability != ApplicationCapability::Bidirectional {
             return Err(ApplicationClientError::UnsupportedCapability(
@@ -3865,8 +3935,28 @@ mod tests {
             .await
             .unwrap();
 
-        let cancelled_receive = client.receive("receiver", None);
-        drop(cancelled_receive);
+        let receive_gate = TestGate {
+            started: Arc::new(tokio::sync::Notify::new()),
+            release: Arc::new(tokio::sync::Notify::new()),
+        };
+        receive_test_gates()
+            .lock()
+            .unwrap()
+            .insert(client.runtime_id.0.clone(), receive_gate.clone());
+        {
+            let cancelled_receive = client.receive("receiver", None);
+            tokio::pin!(cancelled_receive);
+            tokio::select! {
+                _ = receive_gate.started.notified() => {}
+                result = &mut cancelled_receive => {
+                    panic!("receive completed before cancellation gate: {result:?}");
+                }
+            }
+        }
+        receive_test_gates()
+            .lock()
+            .unwrap()
+            .remove(&client.runtime_id.0);
         assert!(backend
             .delivery_for_recipient(following.id, "receiver")
             .await
@@ -4500,6 +4590,184 @@ mod tests {
                 })
             );
         }
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn reconcile_compensation_distinguishes_changed_idempotent_and_failed_work() {
+        let (client, _) = sqlite_client("reconcile-compensation", "application").await;
+        let previous_spec = AddressSpec {
+            address: "changed".into(),
+            capability: ApplicationCapability::SendOnly,
+            description: Some("before".into()),
+            scope: None,
+            tags: None,
+        };
+        let changed_spec = AddressSpec {
+            description: Some("after".into()),
+            ..previous_spec.clone()
+        };
+        let untouched_spec = AddressSpec {
+            address: "untouched".into(),
+            ..changed_spec.clone()
+        };
+        let previous = LocalMembership {
+            handle: MembershipHandle {
+                logical_store_id: client.logical_store_id.clone(),
+                responsibility: client.responsibility.clone(),
+                runtime_id: client.runtime_id.clone(),
+                address: previous_spec.address.clone(),
+                capability: previous_spec.capability,
+                lease_epoch: 1,
+                owner_instance_id: "owner".into(),
+            },
+            spec: previous_spec.clone(),
+            recovering: false,
+            last_recovery_failure: None,
+        };
+        client
+            .memberships
+            .lock()
+            .unwrap()
+            .insert(previous_spec.address.clone(), previous.clone());
+        let reconciled = MembershipHandle {
+            capability: changed_spec.capability,
+            ..previous.handle.clone()
+        };
+
+        let specs = [changed_spec.clone(), untouched_spec.clone()];
+        let mut changed =
+            client.begin_reconcile_many(&specs, RecoveryPolicy::BoundedRepair { retries: 1 });
+        changed.record_completed(
+            changed_spec.clone(),
+            Some(previous.clone()),
+            Ok(AddressLifecycleResult::Reconciled(reconciled.clone())),
+        );
+        let changed_outcome = changed.cancelled_outcome();
+        assert_eq!(
+            changed_outcome.compensation,
+            [CompensationHandle {
+                address: changed_spec.address.clone(),
+                runtime_id: client.runtime_id.clone(),
+                action: CompensationAction::Reattach(previous_spec.clone()),
+            }]
+        );
+        assert!(client
+            .lifecycle_observations
+            .lock()
+            .unwrap()
+            .get(&changed_spec.address)
+            .unwrap()
+            .evidence
+            .iter()
+            .any(|evidence| matches!(
+                evidence,
+                ApplicationLifecycleEvidence::CompensationPending(_)
+            )));
+
+        let mut idempotent = client.begin_reconcile_many(
+            &[previous_spec.clone(), untouched_spec.clone()],
+            RecoveryPolicy::BoundedRepair { retries: 1 },
+        );
+        idempotent.record_completed(
+            previous_spec.clone(),
+            Some(previous.clone()),
+            Ok(AddressLifecycleResult::Reconciled(previous.handle.clone())),
+        );
+        assert!(idempotent.cancelled_outcome().compensation.is_empty());
+
+        let mut strict = client.begin_reconcile_many(&specs, RecoveryPolicy::Strict);
+        strict.record_completed(
+            changed_spec.clone(),
+            Some(previous.clone()),
+            Ok(AddressLifecycleResult::Reconciled(reconciled)),
+        );
+        assert!(strict.cancelled_outcome().compensation.is_empty());
+
+        let mut failed =
+            client.begin_reconcile_many(&specs, RecoveryPolicy::BoundedRepair { retries: 1 });
+        failed.record_completed(
+            changed_spec.clone(),
+            Some(previous),
+            Err(ApplicationClientError::InvalidRequest(
+                "injected reconcile failure".into(),
+            )),
+        );
+        let failed_outcome = failed.cancelled_outcome();
+        assert!(matches!(
+            failed_outcome.results.get(&changed_spec.address),
+            Some(AddressLifecycleResult::Failed(
+                ApplicationClientError::InvalidRequest(_)
+            ))
+        ));
+        assert!(failed_outcome.compensation.is_empty());
+    }
+
+    #[cfg(feature = "sqlite")]
+    #[tokio::test]
+    async fn cancelling_polled_reconcile_run_retains_uncertainty_and_health() {
+        let (client, _) = sqlite_client("reconcile-midflight-cancellation", "application").await;
+        let specs = ["in-flight", "untouched"]
+            .into_iter()
+            .map(|address| AddressSpec {
+                address: address.into(),
+                capability: ApplicationCapability::SendOnly,
+                description: None,
+                scope: None,
+                tags: None,
+            })
+            .collect::<Vec<_>>();
+        let gate = TestGate {
+            started: Arc::new(tokio::sync::Notify::new()),
+            release: Arc::new(tokio::sync::Notify::new()),
+        };
+        let mut operation =
+            client.begin_reconcile_many(&specs, RecoveryPolicy::BoundedRepair { retries: 1 });
+        operation.test_gate = Some(gate.clone());
+
+        {
+            let run = operation.run();
+            tokio::pin!(run);
+            tokio::select! {
+                _ = gate.started.notified() => {}
+                outcome = &mut run => {
+                    panic!("lifecycle run completed before cancellation gate: {outcome:?}");
+                }
+            }
+        }
+
+        let outcome = operation.cancelled_outcome();
+        assert!(!outcome.ready);
+        assert_eq!(
+            outcome.cancellation,
+            Some(LifecycleCancellationEvidence {
+                operation: LifecycleOperationKind::Reconcile,
+                may_have_committed: Some("in-flight".into()),
+                not_attempted: vec!["untouched".into()],
+            })
+        );
+        let recovery = client
+            .recovery_attempts
+            .lock()
+            .unwrap()
+            .get("in-flight")
+            .cloned()
+            .unwrap();
+        assert!(recovery.recovering);
+        let health = client.health().await.unwrap();
+        let in_flight = health
+            .iter()
+            .find(|record| record.address == "in-flight")
+            .unwrap();
+        assert!(in_flight.recovering);
+        assert!(in_flight.degraded);
+        assert!(in_flight.lifecycle.iter().any(|evidence| matches!(
+            evidence,
+                ApplicationLifecycleEvidence::Reconciliation {
+                    state: ReconciliationEvidence::InProgress,
+                    detail: Some(detail),
+                } if detail.contains("canceled without a terminal outcome")
+        )));
     }
 
     #[cfg(feature = "sqlite")]

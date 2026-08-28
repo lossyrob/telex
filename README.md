@@ -27,11 +27,14 @@ Long-lived non-agent applications use the supported
 Disable package defaults and select a backend explicitly:
 
 ```toml
-telex = { git = "https://github.com/lossyrob/telex", default-features = false, features = ["sqlite"] }
+telex = { git = "https://github.com/lossyrob/telex", rev = "<full-commit-sha>", default-features = false, features = ["sqlite"] }
 ```
 
 Supported profiles are `sqlite`, `postgres`, `entra`, `sqlite,postgres`, and
 `sqlite,entra`; none implicitly enables `self-update`.
+No published Telex release contains this binding yet. Replace the placeholder
+with the full commit ID of a reviewed source revision; unpinned Git dependencies
+are outside the compatibility promise.
 
 ## Install
 
