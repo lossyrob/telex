@@ -278,6 +278,15 @@ required, not cosmetic: the daemon only accepts IPC from a client whose executab
 so a pass requested from the pre-switch process would either spawn the wrong binary or be refused.
 The successor summary distinguishes a pass that *ran and restored nothing* from one that never ran.
 
+The `station_intent_reconcile` object in `--json` output always names the binary it is about
+(`successor_binary`, `null` only for `--no-switch`), including when the step was skipped or the
+successor failed. A successor that ran but could not complete a pass exits non-zero *and* reports
+`{"reconciled": false, "error": ...}`; that structured reason is carried through verbatim (bounded)
+rather than replaced with a generic rejection. A successor CLI child that overruns the bound is
+killed and reaped before `upgrade`/`rollback` returns; a daemon it successfully spawned is a
+separate detached service governed by the normal daemon lifecycle. The result records `timed_out`,
+`terminated`, `reaped`, and the direct child's pid.
+
 ### Destructive testing
 
 Station intents are namespaced by a hash of your user identity, your **canonicalized config root**,
