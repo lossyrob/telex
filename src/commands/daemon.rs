@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 
 use crate::cli::{Ctx, DaemonCmd, DaemonReconcileArgs, DaemonResetArgs, DaemonSessionEndArgs};
+use crate::daemon::reconcile as telex_reconcile;
 use crate::daemon_ipc::{Request, Response, ERROR_NOT_RUNNING, ERROR_UNAUTHORIZED};
 use crate::identity::resolve_session_id;
 use crate::output::emit;
@@ -152,28 +153,49 @@ async fn status(ctx: &Ctx) -> Result<i32> {
 /// (drain suppression, single-flight contention). Both were previously indistinguishable from
 /// "ran and restored nothing", so `telex upgrade` could print a successful verification for a
 /// recovery that never started.
+///
+/// `--timeout-ms` is a ceiling on the whole retry loop, and every individual attempt is bounded
+/// too. Without the per-attempt bound the loop's own deadline was only consulted *between*
+/// attempts, so a daemon that accepted the connection and never answered held the command open
+/// forever — the one failure the timeout was there to cover.
 async fn reconcile(ctx: &Ctx, args: DaemonReconcileArgs) -> Result<i32> {
+    use std::time::{Duration, Instant};
     let store_key = ctx.store_key()?;
-    let deadline =
-        std::time::Instant::now() + std::time::Duration::from_millis(args.timeout_ms.max(1));
+    let deadline = Instant::now() + Duration::from_millis(args.timeout_ms.max(1));
     let mut last_error: Option<String> = None;
     let mut result: Option<crate::daemon_ipc::ReconcileReport> = None;
-    while std::time::Instant::now() < deadline {
-        match reconcile_attempt(&store_key, args.scope.clone()).await {
-            Ok(report) if report.ran => {
+    while Instant::now() < deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        let attempt = tokio::time::timeout(
+            remaining.min(telex_reconcile::RECONCILE_REQUEST_DEADLINE),
+            reconcile_attempt(&store_key, args.scope.clone()),
+        )
+        .await;
+        match attempt {
+            Ok(Ok(report)) if report.ran => {
                 result = Some(report);
                 break;
             }
-            Ok(report) => {
+            Ok(Ok(report)) => {
                 last_error = Some(format!(
                     "pass {} did not run ({})",
                     report.pass_seq,
                     report.skipped_reason.as_deref().unwrap_or("unknown")
                 ));
             }
-            Err(e) => last_error = Some(e),
+            Ok(Err(e)) => last_error = Some(e),
+            Err(_) => {
+                last_error = Some(format!(
+                    "the daemon did not answer a reconcile request within {} ms",
+                    telex_reconcile::RECONCILE_REQUEST_DEADLINE.as_millis()
+                ))
+            }
         }
-        tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        tokio::time::sleep(remaining.min(Duration::from_millis(250))).await;
     }
     let payload = match &result {
         Some(report) => serde_json::json!({

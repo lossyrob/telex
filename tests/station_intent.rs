@@ -850,7 +850,20 @@ async fn station_intent_over_budget_scope_is_bounded_complete_and_never_pruned()
     // The published ceiling: ceil(N / RECONCILE_MAX_CONCURRENCY) passes. Healthy passes drain a
     // full budget, so this converges far sooner; the loop bound is the guarantee, not the target.
     let ceiling = total.div_ceil(4);
-    while attempted < total && passes < ceiling {
+    // Coverage is counted per binding, not as a sum of per-pass `scanned`. Above the pass budget a
+    // scope's *discovery* is bounded too, so a pass sees a window rather than the whole scope and
+    // may legitimately re-attempt an entry the previous window ended on; a sum reaches `total`
+    // while the tail is still untouched. The property is that the round-robin cursor reaches every
+    // distinct intent within the ceiling, and that is what this drives to.
+    let distinct_attempted = |daemon: &TestDaemon| {
+        daemon
+            .intent_index()
+            .entries
+            .values()
+            .filter(|entry| entry.attempts > 0)
+            .count()
+    };
+    while distinct_attempted(&daemon) < total && passes < ceiling {
         let report = daemon.reconcile_once().await;
         assert!(report.over_cap, "an over-cap scope must report over_cap");
         assert_eq!(report.observed_count, total);
@@ -870,14 +883,9 @@ async fn station_intent_over_budget_scope_is_bounded_complete_and_never_pruned()
     // the same 64 intents are re-attempted every pass satisfies the sum while the tail starves.
     // The index is keyed per binding, so counting entries that were actually attempted is the
     // assertion the row is really about.
-    let distinct_attempted = daemon
-        .intent_index()
-        .entries
-        .values()
-        .filter(|entry| entry.attempts > 0)
-        .count();
     assert_eq!(
-        distinct_attempted, total,
+        distinct_attempted(&daemon),
+        total,
         "every distinct intent must be attempted, not the same 64 repeatedly"
     );
     assert_eq!(
@@ -1993,7 +2001,10 @@ async fn station_intent_the_daemon_stamps_the_armed_proof_when_it_arms_push() {
     pending.generation = 2;
     scenario.reseed(&pending);
 
-    let register = |on_deliver: Option<Vec<String>>| Request::Register {
+    // `replace_on_deliver` is passed explicitly rather than pinned to `true`: paired with
+    // `on_deliver: None` it is the *explicit push-to-pull downgrade*, which owns the matching intent
+    // withdrawal and would delete this pending fixture. An ordinary pull attach does not send it.
+    let register = |on_deliver: Option<Vec<String>>, replace_on_deliver: bool| Request::Register {
         store_key: scenario.store_key.clone(),
         address: scenario.intent.address.clone(),
         session_id: scenario.intent.session_id.clone(),
@@ -2005,13 +2016,13 @@ async fn station_intent_the_daemon_stamps_the_armed_proof_when_it_arms_push() {
         replace_watch_pids: false,
         recovery: false,
         on_deliver,
-        replace_on_deliver: true,
+        replace_on_deliver,
         on_deliver_wake_on_cc: false,
     };
 
     // A pull attach writes no intent and must earn no proof.
     assert!(matches!(
-        scenario.daemon.request(register(None)).await,
+        scenario.daemon.request(register(None, false)).await,
         Response::Registered { .. }
     ));
     assert!(
@@ -2026,7 +2037,10 @@ async fn station_intent_the_daemon_stamps_the_armed_proof_when_it_arms_push() {
 
     // Arming push does.
     assert!(matches!(
-        scenario.daemon.request(register(Some(Vec::new()))).await,
+        scenario
+            .daemon
+            .request(register(Some(Vec::new()), true))
+            .await,
         Response::Registered { .. }
     ));
     let armed = scenario
@@ -2171,4 +2185,1057 @@ async fn station_intent_a_reloaded_producer_is_retried_not_parked() {
         delay < 60_000,
         "a reloaded producer must not be parked on the quarantine cadence (got {delay} ms)"
     );
+}
+
+// ---------------------------------------------------------------------------------------------
+// M2: explicit withdrawal is one fallible, linearized operation
+//
+// Every test below is a path that previously tore down membership while leaving durable desired
+// state saying "restore push" — so the next reconcile pass, or the next daemon, brought the
+// station back.
+// ---------------------------------------------------------------------------------------------
+
+/// A reset with **no member at all** is the case the old member-derived withdrawal could not see:
+/// with nothing in `affected` it withdrew nothing, and the manifest — the only remaining record of
+/// the binding, and precisely what a pass restores from — survived untouched.
+#[tokio::test]
+async fn station_intent_reset_withdraws_a_binding_with_no_member() {
+    let scenario = Scenario::new("intent-reset-memberless", ProducerBehavior::Healthy).await;
+    scenario.daemon.reconcile_once().await;
+    assert!(scenario.member_push_registered().await);
+
+    // The shape a daemon restart leaves behind: durable manifest, no in-memory member.
+    scenario.daemon.forget_member(
+        &scenario.store_key,
+        &scenario.intent.session_id,
+        &scenario.intent.address,
+    );
+    assert!(!scenario.member_push_registered().await);
+
+    let reset = scenario
+        .daemon
+        .request(Request::Reset {
+            store_key: scenario.store_key.clone(),
+            address: scenario.intent.address.clone(),
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        })
+        .await;
+    assert!(matches!(reset, Response::Ack { .. }), "{reset:?}");
+
+    assert_eq!(
+        scenario
+            .daemon
+            .intent_store()
+            .load(&scenario.intent.id())
+            .expect("the manifest is still readable")
+            .state,
+        IntentRecoveryState::Revoked,
+        "a memberless reset must still withdraw the desired state"
+    );
+    let report = scenario.daemon.reconcile_once().await;
+    assert_eq!(
+        report.restored, 0,
+        "and the next pass must not bring the station back"
+    );
+    assert!(!scenario.member_push_registered().await);
+}
+
+/// A reset of a station that is **already idle** withdrew nothing either: marking an idle member
+/// idle changes no members, so the member-derived withdrawal set was empty.
+///
+/// The live manifest here models the state a re-attach (or a hand-edited/stale record) leaves: the
+/// operator resets again precisely because the station is still armed in durable desired state.
+#[tokio::test]
+async fn station_intent_reset_withdraws_an_already_idle_binding() {
+    let scenario = Scenario::new("intent-reset-idle", ProducerBehavior::Healthy).await;
+    scenario.daemon.reconcile_once().await;
+    assert!(scenario.member_push_registered().await);
+
+    let first = scenario
+        .daemon
+        .request(Request::Reset {
+            store_key: scenario.store_key.clone(),
+            address: scenario.intent.address.clone(),
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        })
+        .await;
+    assert!(matches!(first, Response::Ack { .. }), "{first:?}");
+    assert!(
+        scenario
+            .status()
+            .await
+            .members
+            .iter()
+            .any(|m| m.address == scenario.intent.address && m.idle),
+        "precondition: the member is idle before the second reset"
+    );
+
+    let mut relive = scenario.intent.clone();
+    relive.state = IntentRecoveryState::Live;
+    relive.generation = 42;
+    scenario.reseed(&relive);
+
+    let second = scenario
+        .daemon
+        .request(Request::Reset {
+            store_key: scenario.store_key.clone(),
+            address: scenario.intent.address.clone(),
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        })
+        .await;
+    assert!(matches!(second, Response::Ack { .. }), "{second:?}");
+
+    let stored = scenario
+        .daemon
+        .intent_store()
+        .load(&scenario.intent.id())
+        .expect("the manifest is still readable");
+    assert_eq!(
+        stored.state,
+        IntentRecoveryState::Revoked,
+        "an already-idle member must not make a reset a no-op for desired state"
+    );
+    assert!(stored.generation > 42, "the withdrawal moved the record");
+    assert_eq!(scenario.daemon.reconcile_once().await.restored, 0);
+}
+
+/// Withdrawing an unfinalized `pending` record **deletes** it rather than leaving an identity-less
+/// tombstone: its producer block is still the attach-time placeholder, so a `revoked` record here
+/// would occupy the binding for the seven-day terminal TTL and hand every re-attach in that window
+/// a finished lifecycle's clock.
+#[tokio::test]
+async fn station_intent_reset_deletes_an_unfinalized_pending_record() {
+    let scenario = Scenario::new("intent-reset-pending", ProducerBehavior::Healthy).await;
+    let mut pending = scenario.intent.clone();
+    pending.state = IntentRecoveryState::Pending;
+    pending.generation = 3;
+    scenario.reseed(&pending);
+
+    let reset = scenario
+        .daemon
+        .request(Request::Reset {
+            store_key: scenario.store_key.clone(),
+            address: scenario.intent.address.clone(),
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        })
+        .await;
+    assert!(matches!(reset, Response::Ack { .. }), "{reset:?}");
+    assert!(
+        scenario
+            .daemon
+            .intent_store()
+            .load(&scenario.intent.id())
+            .is_err(),
+        "an unfinalized attach is deleted by an explicit withdrawal, never tombstoned"
+    );
+    assert!(
+        scenario
+            .daemon
+            .intent_statuses()
+            .iter()
+            .all(|row| row.address != scenario.intent.address),
+        "and the index must not keep projecting a row for a manifest that no longer exists"
+    );
+}
+
+/// Session end takes the same route, and it enumerates the *scope* rather than the members it
+/// changed — so an unfinalized attach for an ended session is withdrawn too.
+#[tokio::test]
+async fn station_intent_session_end_deletes_an_unfinalized_pending_record() {
+    let scenario = Scenario::new("intent-end-pending", ProducerBehavior::Healthy).await;
+    let mut pending = scenario.intent.clone();
+    pending.state = IntentRecoveryState::Pending;
+    pending.generation = 5;
+    scenario.reseed(&pending);
+
+    let ended = scenario
+        .daemon
+        .request(Request::SessionEnd {
+            store_key: scenario.store_key.clone(),
+            session_id: scenario.intent.session_id.clone(),
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        })
+        .await;
+    assert!(matches!(ended, Response::Ack { .. }), "{ended:?}");
+    assert!(
+        scenario
+            .daemon
+            .intent_store()
+            .load(&scenario.intent.id())
+            .is_err(),
+        "an ended session leaves no claimable pending record behind"
+    );
+    assert_eq!(scenario.daemon.reconcile_once().await.restored, 0);
+}
+
+/// **Withdrawal beats a restoration already in flight.**
+///
+/// The restore chain is a long sequence of awaits, and only a *detach* leaves a durable tombstone
+/// the chain re-checks. A reset or a session end leaves none, so a pass that had already loaded the
+/// manifest went on to publish an armed push member the desired state no longer authorized — and
+/// only a later pass could notice.
+///
+/// This drives the guard-free inner routine with a manifest captured *before* the withdrawal, which
+/// is exactly the stale snapshot an in-flight pass holds.
+#[tokio::test]
+async fn station_intent_a_concurrent_withdrawal_beats_a_reconcile_in_flight() {
+    let scenario = Scenario::new("intent-withdraw-race", ProducerBehavior::Healthy).await;
+    let in_flight = scenario.intent.clone();
+
+    let reset = scenario
+        .daemon
+        .request(Request::Reset {
+            store_key: scenario.store_key.clone(),
+            address: scenario.intent.address.clone(),
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        })
+        .await;
+    assert!(matches!(reset, Response::Ack { .. }), "{reset:?}");
+
+    let outcome = scenario
+        .daemon
+        .reconcile_intent_under_admission_guard(&in_flight)
+        .await;
+    assert!(
+        outcome.contains("Revoked") && outcome.contains("withdrawn"),
+        "the member commit must be refused by the manifest re-check, not by luck: got {outcome}"
+    );
+    assert!(
+        !scenario.member_push_registered().await,
+        "the withdrawal must win over the restoration it raced"
+    );
+}
+
+/// The same race with a **deleted** record: a withdrawal of a `pending` binding leaves nothing at
+/// all, and an absent manifest is never read as consent to publish.
+#[tokio::test]
+async fn station_intent_a_reconcile_cannot_publish_from_a_record_that_was_deleted() {
+    let scenario = Scenario::new("intent-withdraw-deleted", ProducerBehavior::Healthy).await;
+    let in_flight = scenario.intent.clone();
+
+    scenario
+        .daemon
+        .intent_store()
+        .withdraw_binding(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+            9_000,
+        )
+        .expect("withdraw");
+    // Re-seed as pending and withdraw again, so the record is genuinely gone rather than revoked.
+    let mut pending = scenario.intent.clone();
+    pending.state = IntentRecoveryState::Pending;
+    scenario.reseed(&pending);
+    scenario
+        .daemon
+        .intent_store()
+        .withdraw_binding(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+            9_500,
+        )
+        .expect("withdraw pending");
+    assert!(scenario
+        .daemon
+        .intent_store()
+        .load(&scenario.intent.id())
+        .is_err());
+
+    let outcome = scenario
+        .daemon
+        .reconcile_intent_under_admission_guard(&in_flight)
+        .await;
+    assert!(
+        outcome.contains("Revoked") && outcome.contains("withdrawn"),
+        "an absent manifest is never read as consent to publish, got {outcome}"
+    );
+    assert!(!scenario.member_push_registered().await);
+}
+
+/// A **stale reconcile outcome** must not delete a record it knows nothing about.
+///
+/// The pass decides "tombstoned" against the generation it loaded; a re-attach can write a fresh
+/// `pending` record before the outcome is applied. Withdrawing unconditionally there would destroy
+/// an attach in progress — and, because `pending` withdrawal deletes, destroy it irrecoverably.
+#[tokio::test]
+async fn station_intent_a_stale_pass_cannot_delete_a_fresh_re_attach() {
+    let scenario = Scenario::new("intent-stale-vs-reattach", ProducerBehavior::Healthy).await;
+    let store = scenario.daemon.intent_store();
+
+    // A record the pass decided against, at a generation a re-attach then moves past.
+    let observed = store.load(&scenario.intent.id()).expect("load").generation;
+    let mut reattached = scenario.intent.clone();
+    reattached.state = IntentRecoveryState::Pending;
+    reattached.generation = observed + 7;
+    scenario.reseed(&reattached);
+
+    let superseded = store
+        .withdraw_binding_at_generation(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+            Some(observed),
+            10_000,
+        )
+        .expect("stale withdrawal");
+    assert_eq!(
+        superseded,
+        telex::station_intent::Withdrawal::Superseded {
+            generation: observed + 7
+        }
+    );
+    assert_eq!(
+        store
+            .load(&scenario.intent.id())
+            .expect("the fresh attach survives")
+            .state,
+        IntentRecoveryState::Pending,
+        "a stale pass must never delete the record a re-attach just wrote"
+    );
+}
+
+/// A withdrawal that cannot be *decided* fails the teardown rather than reporting success.
+///
+/// This is the whole point of making withdrawal fallible. An unsupported schema version is what a
+/// rollback leaves behind: it is never deleted and never clobbered, so the honest answer is "the
+/// desired state for this binding was not withdrawn" — and the operator has to see that, because a
+/// newer build reading that record will still restore push from it.
+#[tokio::test]
+async fn station_intent_a_reset_that_cannot_withdraw_reports_failure() {
+    let scenario = Scenario::new("intent-reset-unreadable", ProducerBehavior::Healthy).await;
+    let path = scenario
+        .daemon
+        .intent_store()
+        .path_for(&scenario.intent.id());
+    let raw = std::fs::read_to_string(&path).expect("read intent");
+    let mut document: serde_json::Value = serde_json::from_str(&raw).expect("parse intent");
+    document["schema_version"] = serde_json::json!(99);
+    let _ = std::fs::remove_file(&path);
+    telex::platform_fs::write_owner_only_file_atomic(
+        &path,
+        serde_json::to_vec(&document).expect("encode").as_slice(),
+    )
+    .expect("write skewed intent");
+
+    let reset = scenario
+        .daemon
+        .request(Request::Reset {
+            store_key: scenario.store_key.clone(),
+            address: scenario.intent.address.clone(),
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        })
+        .await;
+    match reset {
+        Response::Error { .. } => {}
+        other => panic!("a reset that could not withdraw must not report success: {other:?}"),
+    }
+    assert!(
+        path.exists(),
+        "and the manifest a rollback left behind is still there, untouched"
+    );
+}
+
+/// Withdrawal is idempotent across the paths that legitimately overlap: a detach, a reset, and a
+/// session end can all name one binding, and the second and third are successes.
+#[tokio::test]
+async fn station_intent_overlapping_teardowns_are_idempotent() {
+    let scenario = Scenario::new("intent-idempotent-teardown", ProducerBehavior::Healthy).await;
+    scenario.daemon.reconcile_once().await;
+
+    for request in [
+        Request::Detach {
+            store_key: scenario.store_key.clone(),
+            session_id: scenario.intent.session_id.clone(),
+            address: scenario.intent.address.clone(),
+        },
+        Request::Reset {
+            store_key: scenario.store_key.clone(),
+            address: scenario.intent.address.clone(),
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        },
+        Request::SessionEnd {
+            store_key: scenario.store_key.clone(),
+            session_id: scenario.intent.session_id.clone(),
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+        },
+    ] {
+        let response = scenario.daemon.request(request).await;
+        assert!(
+            matches!(response, Response::Ack { .. }),
+            "overlapping teardowns must all succeed: {response:?}"
+        );
+    }
+    assert_eq!(
+        scenario
+            .daemon
+            .intent_store()
+            .load(&scenario.intent.id())
+            .expect("the tombstone is still there")
+            .state,
+        IntentRecoveryState::Revoked
+    );
+    assert_eq!(scenario.daemon.reconcile_once().await.restored, 0);
+}
+
+// ---------------------------------------------------------------------------------------------
+// The published 4-second pass/admin bound
+// ---------------------------------------------------------------------------------------------
+//
+// The bound is one absolute number for the whole pass *and* for the admin request that awaits it.
+// What made it untrue was never the arithmetic in the ordinary case; it was the places where a
+// phase started a fresh clock of its own — a post-wave withdrawal waiting the full per-intent
+// admission timeout, an admin backstop set outside the pass deadline, and blocking filesystem
+// phases whose cooperative checks cannot bound the call that is currently blocked.
+
+/// The admin request answers inside the published bound even while the binding's admission guard
+/// is held by someone else — the case where the pass legitimately spends its whole wave budget.
+#[tokio::test]
+async fn station_intent_the_admin_request_answers_inside_the_published_pass_bound() {
+    use telex::daemon_reconcile::{RECONCILE_ADMIN_DEADLINE, RECONCILE_PASS_DEADLINE};
+
+    let scenario = Scenario::new("intent-admin-bound", ProducerBehavior::Healthy).await;
+    // A concurrent register/detach holds this guard across backend work, so the wave below waits
+    // on it and burns its per-intent timeout. That is the pass this bound has to survive.
+    let _held = scenario
+        .daemon
+        .hold_delivery_admission(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+        )
+        .await;
+
+    let started = std::time::Instant::now();
+    let response = scenario
+        .daemon
+        .request(Request::ReconcileIntents {
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+            scope: Some(scenario.store_key.clone()),
+        })
+        .await;
+    let elapsed = started.elapsed();
+
+    assert!(
+        matches!(response, Response::Reconciled { .. }),
+        "the admin surface must answer with a report, not hang: {response:?}"
+    );
+    assert_eq!(
+        RECONCILE_ADMIN_DEADLINE, RECONCILE_PASS_DEADLINE,
+        "the admin backstop is the pass bound made observable at the IPC surface, not a second, \
+         looser bound"
+    );
+    assert!(
+        elapsed <= RECONCILE_PASS_DEADLINE + Duration::from_millis(750),
+        "a contended pass answered in {elapsed:?}, past the published {RECONCILE_PASS_DEADLINE:?} \
+         bound (allowing for test-runner scheduling)"
+    );
+}
+
+/// A terminal outcome's withdrawal must be bounded by what is left of the pass, not by a fresh
+/// per-intent admission timeout.
+///
+/// Outcome application runs after a wave that may already have spent the whole budget. Starting a
+/// new three-second admission wait there is how a pass bounded at four seconds answered its admin
+/// caller at seven — and it is invisible in the ordinary case, because an uncontended guard is
+/// taken instantly.
+#[tokio::test]
+async fn station_intent_a_terminal_withdrawal_is_bounded_by_the_remaining_pass_deadline() {
+    use telex::daemon_reconcile::RECONCILE_PER_INTENT_TIMEOUT;
+
+    let scenario = Scenario::new("intent-withdraw-bound", ProducerBehavior::Healthy).await;
+    let _held = scenario
+        .daemon
+        .hold_delivery_admission(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+        )
+        .await;
+
+    // What `apply_outcome` passes when a wave has left the pass a few hundred milliseconds.
+    let remaining = Duration::from_millis(300);
+    let started = std::time::Instant::now();
+    let outcome = scenario
+        .daemon
+        .withdraw_within(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+            remaining,
+        )
+        .await;
+    let elapsed = started.elapsed();
+
+    assert!(
+        outcome.is_err(),
+        "a withdrawal that could not take the guard must say so rather than report a teardown \
+         that did not happen: {outcome:?}"
+    );
+    assert!(
+        elapsed < RECONCILE_PER_INTENT_TIMEOUT,
+        "the withdrawal waited {elapsed:?}, which is the fresh per-intent budget rather than what \
+         the pass had left ({remaining:?})"
+    );
+    assert!(
+        elapsed >= remaining,
+        "and it must actually use the budget it was given, not give up immediately: {elapsed:?}"
+    );
+    // The record is untouched, so the next pass re-derives the same decision.
+    assert!(scenario
+        .daemon
+        .intent_store()
+        .load(&scenario.intent.id())
+        .is_ok());
+}
+
+/// The whole pass, not just the request, stays inside the bound under the same contention — and
+/// still publishes an honest report.
+#[tokio::test]
+async fn station_intent_a_contended_pass_stays_inside_its_deadline() {
+    use telex::daemon_reconcile::RECONCILE_PASS_DEADLINE;
+
+    let scenario = Scenario::new("intent-pass-bound", ProducerBehavior::Healthy).await;
+    let _held = scenario
+        .daemon
+        .hold_delivery_admission(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+        )
+        .await;
+
+    let started = std::time::Instant::now();
+    let report = scenario.daemon.reconcile_once().await;
+    let elapsed = started.elapsed();
+
+    assert!(report.ran, "the pass ran; it was merely contended");
+    assert!(
+        elapsed <= RECONCILE_PASS_DEADLINE + Duration::from_millis(750),
+        "a contended pass took {elapsed:?}, past its own {RECONCILE_PASS_DEADLINE:?} deadline"
+    );
+    assert!(
+        report.duration_ms <= RECONCILE_PASS_DEADLINE.as_millis() as u64 + 750,
+        "the pass must also *report* a duration inside its bound: {}ms",
+        report.duration_ms
+    );
+    assert_eq!(
+        report.restored, 0,
+        "a guard this pass could not take is never a restoration"
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Deadline edge: what a pass is allowed to do after it has answered
+// ---------------------------------------------------------------------------------------------
+
+/// A pass handed a deadline that has already elapsed must publish **nothing** — and must still be
+/// publishing nothing once the runtime has had time to drain whatever it might have started.
+///
+/// This is the deterministic half of the deadline-edge property, and it is deterministic precisely
+/// because the deadline is an input rather than something a test has to race a wall clock into.
+/// Every phase is on the far side of its budget from the first instruction, so the pass has to take
+/// the "not enough reserve to start" branch everywhere at once: no cursor advance, no evidence
+/// rewrite, no event-log append, no member.
+///
+/// Before the correction each of those was a `spawn_blocking` whose *wait* was bounded and whose
+/// *work* was not, so a pass at its deadline still launched three filesystem writes and returned.
+/// They landed whenever the filesystem got to them, which for a request-originated pass is after the
+/// caller has already been answered — the caller could watch its own cursor move after being told
+/// the pass was truncated. The settle window below is what turns "did not publish yet" into "will
+/// not publish".
+#[tokio::test]
+async fn station_intent_a_pass_past_its_deadline_publishes_nothing_before_or_after_returning() {
+    let scenario = Scenario::new("intent-deadline-edge", ProducerBehavior::Healthy).await;
+    let cursor_before = scenario.daemon.scan_cursor_bytes();
+    let log_before = scenario.daemon.reconcile_event_log_bytes();
+    let members_before = scenario.daemon.member_keys();
+
+    let report = scenario
+        .daemon
+        .reconcile_once_until(std::time::Instant::now())
+        .await;
+
+    assert!(
+        report.deadline_reached || !report.ran,
+        "a pass with no budget must say so rather than report a clean pass: {report:?}"
+    );
+    assert_eq!(
+        report.restored, 0,
+        "a pass with no budget cannot have restored anything"
+    );
+
+    // Nothing published by the time it returned...
+    assert_eq!(scenario.daemon.member_keys(), members_before);
+    assert_eq!(scenario.daemon.scan_cursor_bytes(), cursor_before);
+    assert_eq!(scenario.daemon.reconcile_event_log_bytes(), log_before);
+
+    // ...and nothing published afterwards either. A write that was merely *unwaited-for* rather
+    // than *unstarted* would land in this window.
+    tokio::time::sleep(POST_RESPONSE_SETTLE).await;
+    assert_eq!(
+        scenario.daemon.member_keys(),
+        members_before,
+        "a member appeared after the pass had already returned"
+    );
+    assert_eq!(
+        scenario.daemon.scan_cursor_bytes(),
+        cursor_before,
+        "the round-robin cursor moved after the pass had already returned"
+    );
+    assert_eq!(
+        scenario.daemon.reconcile_event_log_bytes(),
+        log_before,
+        "an evidence-log append landed after the pass had already returned"
+    );
+}
+
+/// How long to wait before re-checking that nothing further was published.
+///
+/// Sized against the two things that could still be in flight — an abandoned `spawn_blocking` write
+/// and a wave task the pass no longer joins — so it is comfortably longer than either would take on
+/// a healthy filesystem. It cannot make the test flaky in the passing direction: a longer wait can
+/// only ever find *more* evidence of a late publication.
+const POST_RESPONSE_SETTLE: Duration = Duration::from_millis(750);
+
+/// The same property across the **real IPC surface**, at the deadline edge, with the round trip
+/// timed against the published bound.
+///
+/// The contention is the point. Holding the binding's admission guard makes the wave spend its whole
+/// `RECONCILE_PER_INTENT_TIMEOUT`, which is the case that used to expose two clocks pretending to be
+/// one bound: the handler spawned the pass and raced it with a `timeout` of the same length but a
+/// *different origin*, so it could answer `admin_deadline` while the pass was still mid-wave and the
+/// pass would then go on registering members, advancing cursors, and publishing a report belonging
+/// to a request that had already been answered. One request-originated deadline, handed to the pass
+/// and joined by the handler, is what makes the report the caller receives the pass's own and makes
+/// "it published nothing after answering" a statement about the transport rather than about
+/// `handle_request`.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn station_intent_the_ipc_reconcile_round_trip_publishes_nothing_after_it_answers() {
+    use telex::daemon_reconcile::{RECONCILE_MAX_CONCURRENCY, RECONCILE_PASS_DEADLINE};
+
+    let scenario = Scenario::new("intent-ipc-edge", ProducerBehavior::Healthy).await;
+    // A whole wave's worth of bindings, every one of them contended, plus one more that a second
+    // wave would have to pick up. The extra binding is the canary: it is exactly what a pass that
+    // kept running past the response would publish next.
+    let mut held = vec![
+        scenario
+            .daemon
+            .hold_delivery_admission(
+                &scenario.store_key,
+                &scenario.intent.session_id,
+                &scenario.intent.address,
+            )
+            .await,
+    ];
+    for index in 1..=RECONCILE_MAX_CONCURRENCY {
+        let mut intent = scenario.intent.clone();
+        intent.address = format!("addr:edge-{index}");
+        scenario.reseed(&intent);
+        if index < RECONCILE_MAX_CONCURRENCY {
+            held.push(
+                scenario
+                    .daemon
+                    .hold_delivery_admission(
+                        &scenario.store_key,
+                        &intent.session_id,
+                        &intent.address,
+                    )
+                    .await,
+            );
+        }
+    }
+
+    let _server = scenario.daemon.serve_ipc();
+    let mut client = scenario.daemon.connect_ipc(&scenario.store_key).await;
+
+    let started = std::time::Instant::now();
+    let response = client
+        .request(&Request::ReconcileIntents {
+            proof: Some(scenario.daemon.admin_cap().to_string()),
+            scope: Some(scenario.store_key.clone()),
+        })
+        .await
+        .expect("the reconcile request completed over the real IPC surface");
+    let round_trip = started.elapsed();
+
+    let Response::Reconciled { report } = response else {
+        panic!("the admin surface must answer with a report: {response:?}");
+    };
+    assert!(
+        report.ran,
+        "the caller must receive the pass's own report, not a placeholder standing in for a pass \
+         still running behind its back: {report:?}"
+    );
+    assert!(
+        round_trip <= RECONCILE_PASS_DEADLINE,
+        "a real IPC reconcile round trip took {round_trip:?}, past the published \
+         {RECONCILE_PASS_DEADLINE:?} bound"
+    );
+
+    let members_after = scenario.daemon.member_keys();
+    let cursor_after = scenario.daemon.scan_cursor_bytes();
+    let reports_after = scenario.daemon.reconcile_reports().borrow().pass_seq;
+
+    tokio::time::sleep(POST_RESPONSE_SETTLE).await;
+
+    assert_eq!(
+        scenario.daemon.member_keys(),
+        members_after,
+        "a member was published after the reconcile request had already been answered"
+    );
+    assert_eq!(
+        scenario.daemon.scan_cursor_bytes(),
+        cursor_after,
+        "the round-robin cursor moved after the reconcile request had already been answered"
+    );
+    assert_eq!(
+        scenario.daemon.reconcile_reports().borrow().pass_seq,
+        reports_after,
+        "a pass report was published after the reconcile request had already been answered"
+    );
+    drop(held);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Reverse-order teardown races: the reconciler wins the admission race, the teardown arrives second
+// ---------------------------------------------------------------------------------------------
+//
+// Every test in this section runs the interleaving that actually breaks. Before the correction,
+// reset, detach, session end, and the fallback downgrade all read membership and mutated lifecycle
+// state *outside* the per-binding delivery-admission guard and took it only for the durable
+// withdrawal. That is not a linearization: a pass holding admission could publish an armed push
+// member in the gap, and the teardown would then revoke the manifest while leaving behind exactly
+// the member the manifest had authorized -- live push coverage with no durable record saying it
+// should exist, and nothing left to withdraw it by.
+//
+// The publication is modelled rather than raced against a real pass, deliberately. A real pass
+// would have to be timed, and a timed test either flakes or stops testing the interleaving. Here
+// the guard *is* the synchronization, so the order is fixed by construction: the teardown cannot
+// proceed until the test drops the guard, and the member is published before it does.
+
+/// How long a teardown is given to prove it is *blocked* on admission.
+///
+/// Only a lower bound on "did not proceed", so it cannot become flaky by being slow. It stays well
+/// under the teardown deadline, or the operation would legitimately give up before the guard is
+/// released.
+const BLOCKED_OBSERVATION: Duration = Duration::from_millis(150);
+
+impl Scenario {
+    /// The durable desired state must be gone: either the record was deleted (a `pending` record is
+    /// withdrawn by deletion) or it is an explicit `Revoked` tombstone. Anything else is a record a
+    /// later pass is entitled to restore push from.
+    fn assert_intent_withdrawn(&self, what: &str) {
+        if let Ok(record) = self.daemon.intent_store().load(&self.intent.id()) {
+            assert_eq!(
+                record.state,
+                IntentRecoveryState::Revoked,
+                "{what} left durable desired state at {:?}, which the next pass restores from",
+                record.state
+            );
+        }
+    }
+
+    /// Nothing is left for a pass to restore. The end-to-end statement of the invariant: no armed
+    /// member, and no record that would produce one.
+    async fn assert_nothing_restorable(&self, what: &str) {
+        assert_eq!(
+            self.daemon.reconcile_once().await.restored,
+            0,
+            "{what} must leave nothing for the next pass to restore"
+        );
+        assert!(
+            !self.daemon.has_active_push_member(
+                &self.store_key,
+                &self.intent.session_id,
+                &self.intent.address
+            ),
+            "{what} left an active push member behind after a full pass"
+        );
+    }
+
+    /// Model the reconciler finishing a restore it was already admitted for.
+    async fn reconciler_publishes_push_member(&self) {
+        self.daemon
+            .publish_push_member_unadmitted(
+                &self.store_key,
+                &self.intent.session_id,
+                &self.intent.address,
+            )
+            .await;
+    }
+}
+
+/// `Reset` arriving second: the reconciler already holds admission and publishes an armed member
+/// while the reset waits for it.
+///
+/// The pre-correction reset marked members idle first and took the guard only to withdraw, so this
+/// member -- published after that marking -- stayed active and armed while the manifest that
+/// authorized it was revoked out from under it.
+#[tokio::test]
+async fn station_intent_a_reset_that_loses_the_admission_race_leaves_no_push_member() {
+    let scenario = Scenario::new("intent-reset-race", ProducerBehavior::Healthy).await;
+    let held = scenario
+        .daemon
+        .hold_delivery_admission(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+        )
+        .await;
+
+    let handle = scenario.daemon.handle();
+    let request = Request::Reset {
+        store_key: scenario.store_key.clone(),
+        address: scenario.intent.address.clone(),
+        proof: Some(scenario.daemon.admin_cap().to_string()),
+    };
+    let reset = tokio::spawn(async move { handle.request(request).await });
+
+    tokio::time::sleep(BLOCKED_OBSERVATION).await;
+    assert!(
+        !reset.is_finished(),
+        "the reset answered while the binding's admission guard was held by someone else; it \
+         cannot have serialized against the reconciler"
+    );
+
+    scenario.reconciler_publishes_push_member().await;
+    drop(held);
+
+    let response = reset.await.expect("reset task");
+    assert!(
+        matches!(response, Response::Ack { .. }),
+        "the reset must complete once it is admitted: {response:?}"
+    );
+    assert!(
+        !scenario.daemon.has_active_push_member(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address
+        ),
+        "the reset revoked the manifest but left the member the reconciler published still armed"
+    );
+    scenario.assert_intent_withdrawn("reset");
+    scenario.assert_nothing_restorable("reset").await;
+}
+
+/// `Detach` arriving second. Detach *removes* the member rather than idling it, so the assertion is
+/// stronger: no member record at all may survive.
+///
+/// Detach also has an ordering constraint the correction must not break -- the durable tombstone and
+/// lease release happen first, the local withdrawal second -- so this is equally the proof that
+/// holding admission across that backend work neither deadlocks nor reorders it.
+#[tokio::test]
+async fn station_intent_a_detach_that_loses_the_admission_race_removes_the_published_member() {
+    let scenario = Scenario::new("intent-detach-race", ProducerBehavior::Healthy).await;
+    let held = scenario
+        .daemon
+        .hold_delivery_admission(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+        )
+        .await;
+
+    let handle = scenario.daemon.handle();
+    let request = Request::Detach {
+        store_key: scenario.store_key.clone(),
+        session_id: scenario.intent.session_id.clone(),
+        address: scenario.intent.address.clone(),
+    };
+    let detach = tokio::spawn(async move { handle.request(request).await });
+
+    tokio::time::sleep(BLOCKED_OBSERVATION).await;
+    assert!(
+        !detach.is_finished(),
+        "the detach answered while the binding's admission guard was held; it read membership \
+         outside the guard"
+    );
+
+    scenario.reconciler_publishes_push_member().await;
+    drop(held);
+
+    let response = detach.await.expect("detach task");
+    assert!(
+        matches!(response, Response::Ack { .. }),
+        "the detach must complete once it is admitted: {response:?}"
+    );
+    assert!(
+        !scenario.daemon.has_member(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address
+        ),
+        "the detach removed the member it saw before admission and left the one published inside it"
+    );
+    scenario.assert_intent_withdrawn("detach");
+    scenario.assert_nothing_restorable("detach").await;
+}
+
+/// `SessionEnd` arriving second. An ended session must not be attended by anything, including a
+/// member published by a pass that was mid-restore when the session ended.
+#[tokio::test]
+async fn station_intent_a_session_end_that_loses_the_admission_race_leaves_no_push_member() {
+    let scenario = Scenario::new("intent-session-end-race", ProducerBehavior::Healthy).await;
+    let held = scenario
+        .daemon
+        .hold_delivery_admission(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+        )
+        .await;
+
+    let handle = scenario.daemon.handle();
+    let request = Request::SessionEnd {
+        store_key: scenario.store_key.clone(),
+        session_id: scenario.intent.session_id.clone(),
+        proof: Some(scenario.daemon.admin_cap().to_string()),
+    };
+    let session_end = tokio::spawn(async move { handle.request(request).await });
+
+    tokio::time::sleep(BLOCKED_OBSERVATION).await;
+    assert!(
+        !session_end.is_finished(),
+        "the session end answered while the binding's admission guard was held; its lifecycle \
+         mutation is not serialized against the reconciler"
+    );
+
+    scenario.reconciler_publishes_push_member().await;
+    drop(held);
+
+    let response = session_end.await.expect("session-end task");
+    assert!(
+        matches!(response, Response::Ack { .. }),
+        "the session end must complete once it is admitted: {response:?}"
+    );
+    assert!(
+        !scenario.daemon.has_active_push_member(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address
+        ),
+        "the ended session is still attended by an armed push member"
+    );
+    scenario.assert_intent_withdrawn("session end");
+    scenario.assert_nothing_restorable("session end").await;
+}
+
+/// The fallback push-to-pull downgrade arriving second.
+///
+/// The downgrade is `Register { on_deliver: None, replace_on_deliver: true }`, and the daemon now
+/// performs the intent withdrawal *inside* that transition. The CLI used to do it afterwards, from
+/// its own process, with the daemon's admission guard released in between -- which is this exact
+/// race, except that the restored push member then sat alongside the pull waiter the downgrade had
+/// just installed, delivering everything twice.
+#[tokio::test]
+async fn station_intent_a_fallback_downgrade_that_loses_the_admission_race_clears_push() {
+    let scenario = Scenario::new("intent-fallback-race", ProducerBehavior::Healthy).await;
+    let held = scenario
+        .daemon
+        .hold_delivery_admission(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address,
+        )
+        .await;
+
+    let handle = scenario.daemon.handle();
+    let request = fallback_downgrade_request(&scenario);
+    let downgrade = tokio::spawn(async move { handle.request(request).await });
+
+    tokio::time::sleep(BLOCKED_OBSERVATION).await;
+    assert!(
+        !downgrade.is_finished(),
+        "the downgrade answered while the binding's admission guard was held"
+    );
+
+    scenario.reconciler_publishes_push_member().await;
+    drop(held);
+
+    let response = downgrade.await.expect("downgrade task");
+    assert!(
+        matches!(response, Response::Registered { .. }),
+        "the downgrade must complete once it is admitted: {response:?}"
+    );
+    assert!(
+        !scenario.daemon.has_active_push_member(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address
+        ),
+        "the downgrade installed a pull member but left push armed on the same binding"
+    );
+    scenario.assert_intent_withdrawn("fallback downgrade");
+    scenario
+        .assert_nothing_restorable("fallback downgrade")
+        .await;
+}
+
+/// A downgrade whose intent cannot be withdrawn is refused rather than reporting a pull-only
+/// registration whose desired state still says "restore push".
+///
+/// The failure half of the combined transition. Without it the fallback would report success, tear
+/// down its bridge, and then be re-armed by the next pass from a record nobody could withdraw.
+#[tokio::test]
+async fn station_intent_a_fallback_downgrade_that_cannot_withdraw_is_refused() {
+    let scenario = Scenario::new("intent-fallback-refuse", ProducerBehavior::Healthy).await;
+    // The rollback shape: a record no build in this process can decide about, so it is never
+    // deleted and never clobbered.
+    let path = scenario
+        .daemon
+        .intent_store()
+        .path_for(&scenario.intent.id());
+    let raw = std::fs::read_to_string(&path).expect("read intent");
+    let mut document: serde_json::Value = serde_json::from_str(&raw).expect("parse intent");
+    document["schema_version"] = serde_json::json!(99);
+    let _ = std::fs::remove_file(&path);
+    telex::platform_fs::write_owner_only_file_atomic(
+        &path,
+        serde_json::to_vec(&document).expect("encode").as_slice(),
+    )
+    .expect("write skewed intent");
+
+    let response = scenario
+        .daemon
+        .request(fallback_downgrade_request(&scenario))
+        .await;
+    match response {
+        Response::Error { .. } => {}
+        other => panic!("a downgrade that could not withdraw must not report success: {other:?}"),
+    }
+    assert!(
+        path.exists(),
+        "and the record it could not decide about is untouched"
+    );
+    assert!(
+        !scenario.daemon.has_member(
+            &scenario.store_key,
+            &scenario.intent.session_id,
+            &scenario.intent.address
+        ),
+        "a refused downgrade must not publish the pull-only member either"
+    );
+}
+
+/// Exactly what `telex copilot fallback` sends: the explicit push-to-pull downgrade, which is the
+/// only request shape that clears an installed `on_deliver` and is therefore the one that owns the
+/// matching intent withdrawal.
+fn fallback_downgrade_request(scenario: &Scenario) -> Request {
+    Request::Register {
+        store_key: scenario.store_key.clone(),
+        address: scenario.intent.address.clone(),
+        session_id: scenario.intent.session_id.clone(),
+        occupant: "fallback".to_string(),
+        description: None,
+        scope: None,
+        tags: None,
+        watch_pids: Vec::new(),
+        replace_watch_pids: true,
+        recovery: false,
+        on_deliver: None,
+        replace_on_deliver: true,
+        on_deliver_wake_on_cc: false,
+    }
 }

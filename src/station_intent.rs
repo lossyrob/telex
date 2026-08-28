@@ -24,7 +24,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::daemon_ipc::IntentRecoveryState;
 use crate::platform_fs;
@@ -91,7 +91,17 @@ pub const PRODUCER_KIND_LOCAL_ENDPOINT_CHALLENGE_V1: &str = "local_endpoint_chal
 pub const CREDENTIAL_KIND_OWNER_PRIVATE_JSON_FIELD_V1: &str = "owner_private_json_field_v1";
 
 const INTENT_FILE_SUFFIX: &str = ".intent.json";
-const SCAN_CURSOR_FILE: &str = "scan-cursor.json";
+pub const SCAN_CURSOR_FILE: &str = "scan-cursor.json";
+/// Cursor key for a pass that is **not** filtered to one store. Never a valid `store_key`, so it
+/// can never collide with a scoped entry.
+const UNSCOPED_CURSOR_KEY: &str = "";
+/// How often a directory enumeration re-checks its deadline.
+///
+/// The first stride is always enumerated, so an already-expired deadline can never truncate an
+/// ordinary scope (which is capped far below a single stride's worth of real work) down to nothing
+/// — truncation is reserved for the pathological case this bound exists for: a directory on a
+/// wedged network mount where each `readdir` entry itself blocks.
+const ENUMERATION_DEADLINE_STRIDE: usize = 64;
 /// Per-intent write-lock file suffix, plus the bounded acquisition policy. The bound matters:
 /// the reconciler takes this lock inside `RECONCILE_PER_INTENT_TIMEOUT`, so waiting must never be
 /// open-ended, and a writer that died mid-update must not wedge the binding.
@@ -543,6 +553,114 @@ pub fn finalize_admission(
     }
 }
 
+/// What an explicit withdrawal did to one binding's durable record.
+///
+/// Every variant is a *decided* outcome. There is deliberately no "maybe" and no "best effort":
+/// a withdrawal that could not decide what it did is an error
+/// ([`IntentStore::withdraw_binding`] returns `Result`), because the whole point of the operation
+/// is that the caller has just torn something down and needs to know the desired state went with
+/// it. A silently-swallowed failure here is a station that auto-returns after the operator gave it
+/// up — the exact failure the durable record exists to prevent.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Withdrawal {
+    /// **Proven** absent: there is no record for this binding, so there is nothing to withdraw.
+    ///
+    /// Never inferred from an unreadable path. A record telex merely could not stat is an error,
+    /// not a "nothing to do" — and it is never turned into a fabricated `revoked` tombstone
+    /// either: a withdrawal has no producer identity of its own to write, so it can only ever
+    /// transition or delete a record that is already there.
+    NoRecord,
+    /// An unfinalized `pending` record at exactly the observed generation was deleted.
+    ///
+    /// Deleted rather than marked `revoked` because a `pending` record describes an attach that
+    /// never completed: its producer identity may still be the attach-time placeholder, so
+    /// persisting it as a `revoked` record would leave an identity-less tombstone occupying the
+    /// binding for the seven-day terminal TTL, and every re-attach in that window would inherit
+    /// the finished lifecycle's clock. The delete is conditional and lock-held like every other
+    /// deletion in this module.
+    DeletedPending { generation: u64 },
+    /// A durable record was transitioned to `revoked`, and now sits at this generation.
+    Revoked { generation: u64 },
+    /// The record was already `revoked`. Withdrawal is idempotent: a detach, a session end, and a
+    /// reset can all name the same binding, and the second one is a success, not a conflict.
+    AlreadyRevoked { generation: u64 },
+    /// The caller asked to withdraw one specific generation and the record has moved on.
+    ///
+    /// Only reachable through [`IntentStore::withdraw_binding_at_generation`], which the
+    /// reconciler uses: a pass that decided "this binding is tombstoned" against generation *N*
+    /// must not delete the `pending` record a re-attach wrote at *N+1* while the pass was in
+    /// flight.
+    Superseded { generation: u64 },
+}
+
+impl Withdrawal {
+    /// The generation this outcome describes, when there is a record it describes at all.
+    pub fn generation(&self) -> Option<u64> {
+        match self {
+            Withdrawal::NoRecord => None,
+            Withdrawal::DeletedPending { generation }
+            | Withdrawal::Revoked { generation }
+            | Withdrawal::AlreadyRevoked { generation }
+            | Withdrawal::Superseded { generation } => Some(*generation),
+        }
+    }
+
+    /// Whether durable state actually moved, so a caller can log (and count) a real teardown
+    /// without treating an idempotent repeat as one.
+    pub fn changed(&self) -> bool {
+        matches!(
+            self,
+            Withdrawal::DeletedPending { .. } | Withdrawal::Revoked { .. }
+        )
+    }
+
+    /// Whether the binding is now durably withdrawn — deleted, or `revoked`.
+    ///
+    /// `Superseded` is deliberately **not** withdrawn: a newer record exists and this call did not
+    /// decide anything about it.
+    pub fn is_withdrawn(&self) -> bool {
+        matches!(
+            self,
+            Withdrawal::NoRecord
+                | Withdrawal::DeletedPending { .. }
+                | Withdrawal::Revoked { .. }
+                | Withdrawal::AlreadyRevoked { .. }
+        )
+    }
+}
+
+/// One binding named by the scope, for callers that withdraw a *set* of bindings.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct IntentBinding {
+    pub store_key: String,
+    pub session_id: String,
+    pub address: String,
+}
+
+/// Which bindings the scope currently names, split by whether their identity is *proven*.
+///
+/// The split is a security rule, not a diagnostic. A binding in `bindings` came from a manifest
+/// that loaded — so its `(store_key, session_id, address)` was verified against the filename hash
+/// and the singleton scope, and deriving an id from it can only ever name the file it came from.
+/// A manifest that failed to load has no verified identity: the tuple in `unreadable` is read
+/// straight out of unvalidated bytes, so acting on it would let one manifest name — and withdraw —
+/// *another* binding's record. It is therefore only ever used to **refuse**: a caller withdrawing
+/// a session or an address treats an unreadable manifest that claims membership of the set as a
+/// failure of the whole operation rather than silently skipping it or acting on the claim.
+#[derive(Debug, Default)]
+pub struct BindingScan {
+    pub bindings: Vec<IntentBinding>,
+    pub unreadable: Vec<(IntentId, Option<IntentBinding>)>,
+    /// Whether the enumeration stopped at its deadline instead of reaching the end of the scope.
+    ///
+    /// A set-scoped teardown must **refuse** on this rather than act on the partial list: "these
+    /// are the bindings I managed to read before I ran out of time" is not the same statement as
+    /// "these are the bindings of this session/address", and withdrawing the first answer while
+    /// reporting the second is exactly the incomplete teardown that leaves a binding behind to
+    /// restore push for a station the operator gave up.
+    pub truncated: bool,
+}
+
 /// The record a mutating store call actually wrote, so a caller can roll back exactly what it
 /// created and nothing else.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -851,6 +969,14 @@ pub struct ScanPage {
     pub rejected: Vec<(IntentId, Rejection)>,
     pub observed_count: usize,
     pub over_cap: bool,
+    /// The pass ran out of deadline **during discovery**, so it did not see the whole scope.
+    ///
+    /// Reported rather than hidden because it changes what the other counters mean:
+    /// `observed_count` becomes a lower bound and `over_cap` becomes "at least this many were
+    /// seen", so a caller that publishes them must not overwrite a complete pass's numbers with a
+    /// truncated pass's. Discovery resumes from its own persisted position on the next pass, so
+    /// truncation delays coverage instead of losing it.
+    pub discovery_truncated: bool,
 }
 
 /// Why one manifest was rejected, and which binding it named when that could be established.
@@ -875,12 +1001,248 @@ pub struct GcReport {
     pub removed: Vec<IntentId>,
     pub kept: usize,
     pub reasons: Vec<(IntentId, String)>,
+    /// The sweep examined every entry in the scope before it returned.
+    ///
+    /// A deadline-truncated sweep is not a failure and not a full sweep either: `kept` and
+    /// `removed` then describe only the slice it reached, and the *next* sweep resumes from the
+    /// persisted GC position rather than restarting at the head. Callers use this to decide
+    /// whether a maintenance slot was actually consumed.
+    pub complete: bool,
 }
 
+/// An absolute stop time shared by every bounded step of one pass.
+///
+/// Absolute rather than per-step durations on purpose. A published "a pass finishes within N
+/// seconds" bound is only real if every step measures itself against the *same* instant: a chain of
+/// independent per-step timeouts bounds each step and nothing at all, which is exactly how an
+/// unbounded discovery or GC phase used to be able to push a 4-second pass past its own tick.
+///
+/// [`PassDeadline::unbounded`] is the escape hatch for callers that are genuinely not on the pass
+/// path (one-shot maintenance, fixtures); it never expires, so those callers keep the pre-deadline
+/// behavior exactly.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct PassDeadline(Option<Instant>);
+
+impl PassDeadline {
+    pub fn at(at: Instant) -> Self {
+        Self(Some(at))
+    }
+
+    pub fn unbounded() -> Self {
+        Self(None)
+    }
+
+    pub fn expired(&self) -> bool {
+        self.0.is_some_and(|at| Instant::now() >= at)
+    }
+
+    pub fn instant(&self) -> Option<Instant> {
+        self.0
+    }
+
+    pub fn remaining(&self) -> Option<Duration> {
+        self.0
+            .map(|at| at.saturating_duration_since(Instant::now()))
+    }
+
+    /// The earlier of two deadlines; an unbounded one never widens a bounded one.
+    pub fn earliest(self, other: PassDeadline) -> PassDeadline {
+        match (self.0, other.0) {
+            (Some(a), Some(b)) => PassDeadline(Some(a.min(b))),
+            (Some(a), None) => PassDeadline(Some(a)),
+            (None, other) => PassDeadline(other),
+        }
+    }
+}
+
+/// What an async caller got back from a blocking filesystem phase it ran behind a deadline.
+///
+/// The distinction is the whole point of [`run_blocking_within`]: a cooperative deadline check
+/// between two synchronous syscalls bounds a phase only if every individual syscall returns
+/// promptly, and that is exactly the assumption a hung network mount, a stalled anti-virus filter,
+/// or a slow `fsync` breaks. `Overran` is the answer that keeps the published bound true when it
+/// does.
+#[derive(Debug)]
+pub enum BoundedPhase<T> {
+    Completed(T),
+    /// The phase did not finish before the deadline, so the caller stopped **waiting** for it.
+    ///
+    /// It was not cancelled: blocking work is never interrupted mid-syscall, so a partially staged
+    /// atomic write always gets to finish its own rename rather than being torn in half. What is
+    /// abandoned is the *result* — the caller must publish nothing derived from this phase and must
+    /// report the pass as deadline-truncated.
+    Overran,
+}
+
+impl<T> BoundedPhase<T> {
+    pub fn completed(self) -> Option<T> {
+        match self {
+            Self::Completed(value) => Some(value),
+            Self::Overran => None,
+        }
+    }
+
+    pub fn overran(&self) -> bool {
+        matches!(self, Self::Overran)
+    }
+}
+
+/// Run one blocking filesystem phase on the blocking pool and stop waiting for it at `deadline`.
+///
+/// This is the execution boundary that turns the cooperative deadline checks inside
+/// [`IntentStore::list_ids_bounded`], [`IntentStore::scan_bounded`] and [`IntentStore::gc_bounded`]
+/// into a bound an *async* caller can actually rely on. Those checks sit between synchronous
+/// calls; they cannot bound the call that is currently blocked, and running them directly on a
+/// runtime worker meant a single slow `read_dir`, `read`, or atomic rename could push a 4-second
+/// pass — and the admin request awaiting it — arbitrarily past its deadline while also parking a
+/// runtime worker thread.
+///
+/// Both halves are load-bearing:
+///
+/// * The work is moved to the blocking pool, so an overrun stalls a pool thread rather than the
+///   reactor, and the async pass stays responsive enough to *return* on time.
+/// * The wait is bounded, and only the wait. The task keeps running to completion, which is what
+///   makes abandoning it safe: durable state is only ever advanced through an atomic write, and a
+///   background completion finishes that write instead of leaving a half-written manifest or
+///   cursor behind.
+///
+/// An unbounded deadline awaits normally, so off-pass callers keep the pre-deadline behavior
+/// exactly. A panicking phase is reported as `Overran` for the same reason a slow one is: there is
+/// no result, so the caller must treat the phase as having produced nothing.
+///
+/// `grace` is what a phase that checks the *same* deadline cooperatively needs in order to hand
+/// back the partial page it deliberately stopped building. Waiting exactly to the deadline would
+/// pre-empt that return every single time the phase actually used its budget, so a scope large
+/// enough to be interesting would be reported as overrun on every pass and never make visible
+/// progress. Phases whose inner work has no deadline check of its own — a cursor write, an
+/// evidence rewrite — pass [`Duration::ZERO`], because for them the deadline *is* the hard bound.
+/// Callers must size `grace` into the pass budget: the true worst case of this call is
+/// `deadline + grace`.
+pub async fn run_blocking_within<T, F>(
+    deadline: PassDeadline,
+    grace: Duration,
+    work: F,
+) -> BoundedPhase<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let handle = tokio::task::spawn_blocking(work);
+    match deadline.remaining() {
+        Some(remaining) => match tokio::time::timeout(remaining + grace, handle).await {
+            Ok(Ok(value)) => BoundedPhase::Completed(value),
+            Ok(Err(_)) | Err(_) => BoundedPhase::Overran,
+        },
+        None => match handle.await {
+            Ok(value) => BoundedPhase::Completed(value),
+            Err(_) => BoundedPhase::Overran,
+        },
+    }
+}
+
+/// Run one blocking filesystem phase, but only while `reserve` of the deadline is still intact.
+///
+/// [`run_blocking_within`] bounds when the **caller** returns; it does not bound when the work it
+/// started finishes. For a phase whose only effect is the value it hands back — a discovery page, a
+/// GC report — that distinction is harmless, because a caller that stopped waiting simply publishes
+/// nothing derived from it. For a phase that mutates *durable, pass-visible* state — the evidence
+/// block, the round-robin cursor — it is not: abandoning the wait leaves a write that can land after
+/// the pass has already answered its caller, so the pass can no longer make the statement a
+/// request-scoped caller needs, which is "nothing this pass was going to change had still not
+/// changed when I answered".
+///
+/// The fix is to not start it. A durable write is launched only while `reserve` of the deadline
+/// remains and is then joined inside that same deadline, so the ordinary near-deadline case degrades
+/// to [`BoundedPhase::Overran`] **without the phase having run at all** — the honest answer, since
+/// the pass then neither observed nor caused a change and reports itself deadline-truncated.
+///
+/// One residual case is not eliminable on any platform: a write that *was* started with the reserve
+/// intact and still has not returned by the deadline. It is reported as `Overran` and left to
+/// finish, never cancelled, because a staged atomic write torn in half is strictly worse than a late
+/// one. What bounds the blast radius is what such a write is allowed to be: a single-file atomic
+/// rewrite guarded by a generation CAS. It cannot register a member, cannot emit a report, and
+/// cannot resurrect a record a concurrent teardown has since moved on from.
+pub async fn run_blocking_reserved<T, F>(
+    deadline: PassDeadline,
+    reserve: Duration,
+    work: F,
+) -> BoundedPhase<T>
+where
+    F: FnOnce() -> T + Send + 'static,
+    T: Send + 'static,
+{
+    if deadline
+        .remaining()
+        .is_some_and(|remaining| remaining < reserve)
+    {
+        return BoundedPhase::Overran;
+    }
+    run_blocking_within(deadline, Duration::ZERO, work).await
+}
+
+/// How long a cooperatively bounded blocking phase is given to *return* after its own deadline.
+///
+/// It covers the tail of one already-started synchronous step plus the phase's own wrap-up (sorting
+/// a page, persisting the resume cursor). It is deliberately small and deliberately non-zero, and
+/// it is charged against the pass budget in `daemon_reconcile`'s constants rather than being
+/// silently absorbed.
+pub const RECONCILE_BLOCKING_GRACE: Duration = Duration::from_millis(200);
+
+/// The persisted scheduling hints for one scope directory.
+///
+/// Three distinct positions, because they answer three different questions and sharing one field
+/// between them is a starvation bug rather than a simplification:
+///
+/// * `scopes[k].position` — how far the *caller* got in sort order for cursor key `k`. Keyed by
+///   scope because a pass filtered to one store must not move (or be moved by) another store's
+///   round-robin position: with a single shared position, a scoped pass advanced past intents it
+///   never considered, and an unscoped pass then skipped them for a full cycle.
+/// * `scopes[k].discovery` — how far *discovery itself* got reading manifests, so a pass whose
+///   deadline expired mid-scope resumes reading where it stopped instead of re-reading the same
+///   head forever.
+/// * `gc_position` — the same idea for the GC sweep, which is scope-wide by nature (it is the only
+///   thing that deletes files, and it must eventually reach every one of them).
+///
+/// `position` at the top level is the **legacy** single global position written by builds that
+/// predate scope-correct cursoring. It is read as the seed for a scope that has no entry yet, and
+/// kept mirrored to the unscoped scope's position, so upgrade and rollback both keep a sane cursor.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct ScanCursor {
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     position: Option<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    scopes: BTreeMap<String, ScopeCursor>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    gc_position: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+struct ScopeCursor {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    position: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    discovery: Option<String>,
+}
+
+impl ScanCursor {
+    fn scope_key(scope: Option<&str>) -> &str {
+        scope.unwrap_or(UNSCOPED_CURSOR_KEY)
+    }
+
+    /// The cursor for one scope, migrating a legacy global position on first sight.
+    ///
+    /// Seeding a scope from the legacy position can only ever make a scope resume *later* in the
+    /// cycle than it otherwise would, and the cycle wraps, so migration delays an entry by at most
+    /// one sweep and can never strand one.
+    fn for_scope(&self, scope: Option<&str>) -> ScopeCursor {
+        match self.scopes.get(Self::scope_key(scope)) {
+            Some(cursor) => cursor.clone(),
+            None => ScopeCursor {
+                position: self.position.clone(),
+                discovery: None,
+            },
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -938,23 +1300,44 @@ impl IntentStore {
         self.root.join(id.file_name())
     }
 
-    /// Every intent id present in the scope, in filename order. Enumeration is unbounded (so
-    /// `observed_count` and `over_cap` are honest); *loading* is what the pass budget bounds.
+    /// Every intent id present in the scope, in filename order.
+    ///
+    /// Unbounded: only callers that are genuinely off the pass path may use this. Everything on a
+    /// bounded pass must use [`IntentStore::list_ids_bounded`], because a directory enumeration is
+    /// real I/O against a directory that may be on a hung network mount, and an unbounded
+    /// enumeration is enough on its own to push a bounded pass past its deadline.
     pub fn list_ids(&self) -> Result<Vec<IntentId>> {
+        self.list_ids_bounded(PassDeadline::unbounded())
+            .map(|(ids, _)| ids)
+    }
+
+    /// Every intent id the enumeration reached before `deadline`, plus whether it was truncated.
+    ///
+    /// Truncation is reported, never hidden: `observed_count` and `over_cap` are derived from this
+    /// list, and a caller that publishes them has to know it is looking at a lower bound rather
+    /// than the scope.
+    pub fn list_ids_bounded(&self, deadline: PassDeadline) -> Result<(Vec<IntentId>, bool)> {
         let entries = match std::fs::read_dir(&self.root) {
             Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok((Vec::new(), false)),
             Err(e) => return Err(IntentError::Io(format!("listing intent scope: {e}"))),
         };
         let mut ids = Vec::new();
+        let mut truncated = false;
+        let mut examined = 0usize;
         for entry in entries.flatten() {
+            examined += 1;
+            if examined.is_multiple_of(ENUMERATION_DEADLINE_STRIDE) && deadline.expired() {
+                truncated = true;
+                break;
+            }
             let name = entry.file_name().to_string_lossy().into_owned();
             if let Some(id) = IntentId::from_file_name(&name) {
                 ids.push(id);
             }
         }
         ids.sort();
-        Ok(ids)
+        Ok((ids, truncated))
     }
 
     /// Load and validate one intent, fail-closed on every security and schema rule.
@@ -1080,6 +1463,31 @@ impl IntentStore {
                 self.write_atomic(intent)?;
                 return Ok(true);
             }
+            return Ok(false);
+        }
+        let current = self.load(&id)?;
+        if current.generation != expected_generation {
+            return Ok(false);
+        }
+        self.write_atomic(intent)?;
+        Ok(true)
+    }
+
+    /// Compare-and-set that **requires the record to already exist** — with the per-intent write
+    /// lock already held by the caller.
+    ///
+    /// Distinct from [`IntentStore::write_cas_locked`], which *creates* when the path is absent and
+    /// `expected_generation == 0`. A withdrawal must never create: it has no producer identity of
+    /// its own, so a create there would mint an identity-less `revoked` record that nothing can
+    /// validate and GC would keep for the full terminal TTL. `Ok(false)` means "the record moved
+    /// or vanished"; the caller decides which, and refuses either way.
+    fn rewrite_if_unchanged_held(
+        &self,
+        expected_generation: u64,
+        intent: &StationIntentV1,
+    ) -> Result<bool> {
+        let id = intent.id();
+        if !path_present(&self.path_for(&id))? {
             return Ok(false);
         }
         let current = self.load(&id)?;
@@ -1302,30 +1710,246 @@ impl IntentStore {
         )))
     }
 
-    /// Mark exactly one binding's intent revoked. Never whole-session, never cross-store: the id
-    /// is derived from the full `(store_key, session_id, address)` tuple.
-    pub fn revoke(
+    /// **Withdraw** one binding's desired state: the single fallible, linearized operation behind
+    /// every explicit teardown — detach, session end, operator reset (including a memberless or
+    /// already-idle one), and the push→pull fallback downgrade.
+    ///
+    /// One operation rather than a handful of best-effort `revoke` wrappers, because withdrawal is
+    /// the *durable half* of a teardown the user already performed. A wrapper that swallowed its
+    /// error left the binding's desired state saying "restore push" while membership said the
+    /// station was given up, and the next reconcile pass — or the next daemon — dutifully brought
+    /// it back. So this returns `Result`: **callers propagate**.
+    ///
+    /// The rules, all decided under the per-intent write lock:
+    ///
+    /// * **`pending` → deleted**, at exactly the generation this call observed. A `pending` record
+    ///   describes an attach that never finalized; its producer block may still be the attach-time
+    ///   placeholder, so tombstoning it would leave an identity-less `revoked` record squatting on
+    ///   the binding for the seven-day terminal TTL. The delete is conditional and lock-held like
+    ///   every other deletion in this module: absence, a generation that moved, a state that is no
+    ///   longer `pending`, an unreadable manifest, and an unsupported schema version all **refuse**
+    ///   it.
+    /// * **anything else durable → `revoked`**, the transition an existing detach/session-end path
+    ///   already performed, under a generation compare-and-set so it cannot clobber a concurrent
+    ///   writer.
+    /// * **already `revoked` → success**, unchanged. Withdrawal is idempotent because a detach, a
+    ///   session end, and a reset can all legitimately name the same binding.
+    /// * **no record → success**, and *nothing is written*. A withdrawal carries no producer
+    ///   identity of its own, so it can never mint a `revoked` record: an identity-less tombstone
+    ///   would be a durable record nothing can validate, GC would keep it for a week, and it would
+    ///   shadow the binding in the meantime.
+    ///
+    /// "No record" is only ever a *proven* absence ([`platform_fs::path_present`]). A manifest that
+    /// could not be stat'd, read, parsed, or validated is an error — never a quiet success — for
+    /// the same reason the arming proof refuses one: absence is the answer that admits, so absence
+    /// is the answer that has to be proven.
+    ///
+    /// Wholly synchronous and self-contained: it acquires the per-intent lock, does its own I/O,
+    /// and releases it, so no caller can end up holding a filesystem lock across an unrelated
+    /// backend await.
+    pub fn withdraw_binding(
         &self,
         store_key: &str,
         session_id: &str,
         address: &str,
         now_ms: i64,
-    ) -> Result<bool> {
+    ) -> Result<Withdrawal> {
+        self.withdraw_binding_at_generation(store_key, session_id, address, None, now_ms)
+    }
+
+    /// The generation-conditional form, for a caller withdrawing on the strength of a decision it
+    /// made against one specific version of the record.
+    ///
+    /// The reconciler is the caller that needs it: a pass decides "this binding is durably
+    /// tombstoned" against generation *N*, and by the time it applies that outcome a re-attach may
+    /// have written a fresh `pending` record at *N+1*. Withdrawing unconditionally there would
+    /// delete a record the decision knew nothing about — the same stale-snapshot hazard every
+    /// deletion in this module is conditioned against. `expected_generation: None` means "whatever
+    /// is there now", which is what an explicit operator teardown means.
+    pub fn withdraw_binding_at_generation(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+        expected_generation: Option<u64>,
+        now_ms: i64,
+    ) -> Result<Withdrawal> {
         let id = IntentId::derive(store_key, session_id, address);
-        // `Ok(false)` is "there is nothing here to revoke", which every caller treats as success.
-        // A record that could not be stat'd has not been revoked, so it must not report that.
         if !path_present(&self.path_for(&id))? {
-            return Ok(false);
+            return Ok(Withdrawal::NoRecord);
         }
-        let updated = self.update_locked(&id, |intent| {
-            if intent.state == IntentRecoveryState::Revoked {
-                return false;
+        let _lock = self.lock_intent(&id)?;
+        self.withdraw_held(&id, expected_generation, now_ms)
+    }
+
+    /// The withdrawal itself, with the per-intent write lock already held.
+    ///
+    /// The observation and the write are one critical section on purpose: the generation this
+    /// deletes or transitions is exactly the generation it read, so there is no window in which a
+    /// concurrent finalize can promote the record between the two halves and lose its promotion —
+    /// or, worse, have this call delete it.
+    fn withdraw_held(
+        &self,
+        id: &IntentId,
+        expected_generation: Option<u64>,
+        now_ms: i64,
+    ) -> Result<Withdrawal> {
+        let observed = match self.load(id) {
+            Ok(observed) => observed,
+            Err(e) => {
+                // Only a *proven* absence is "nothing to withdraw". Unreadable bytes, a failed
+                // security check, and an unsupported schema version are refusals that propagate:
+                // a record telex cannot read is a record it must not delete, overwrite, or claim
+                // to have withdrawn. "Intents are never deleted by a rollback" depends on this —
+                // an unsupported schema version is exactly what a rollback leaves behind.
+                return if path_present(&self.path_for(id))? {
+                    Err(e)
+                } else {
+                    Ok(Withdrawal::NoRecord)
+                };
             }
-            intent.state = IntentRecoveryState::Revoked;
-            intent.updated_at_ms = now_ms;
-            true
-        })?;
-        Ok(updated.is_some())
+        };
+        let generation = observed.generation;
+        if expected_generation.is_some_and(|expected| expected != generation) {
+            return Ok(Withdrawal::Superseded { generation });
+        }
+        match observed.state {
+            IntentRecoveryState::Revoked => Ok(Withdrawal::AlreadyRevoked { generation }),
+            IntentRecoveryState::Pending => {
+                // Re-checked under the lock even though it was just read under the same lock: the
+                // lock is stale-tolerant by design (a writer that died mid-update must not wedge a
+                // binding forever), so "the record still says what I decided about" is proven at
+                // the unlink rather than assumed from the lock alone.
+                if self.remove_if_unchanged_held(id, generation, |current| {
+                    current.state == IntentRecoveryState::Pending
+                })? {
+                    Ok(Withdrawal::DeletedPending { generation })
+                } else {
+                    Err(IntentError::Io(format!(
+                        "station intent {id} changed under its own write lock; \
+                         refusing to delete a record this withdrawal no longer describes"
+                    )))
+                }
+            }
+            _ => {
+                let mut next = observed;
+                next.state = IntentRecoveryState::Revoked;
+                next.updated_at_ms = now_ms;
+                next.generation = generation.saturating_add(1);
+                if self.rewrite_if_unchanged_held(generation, &next)? {
+                    return Ok(Withdrawal::Revoked {
+                        generation: next.generation,
+                    });
+                }
+                // The record moved or vanished under the lock. A vanished one is genuinely
+                // withdrawn; anything else is an anomaly this call must not paper over.
+                if path_present(&self.path_for(id))? {
+                    Err(IntentError::Io(format!(
+                        "station intent {id} changed under its own write lock; \
+                         the withdrawal was refused rather than clobbering a newer record"
+                    )))
+                } else {
+                    Ok(Withdrawal::NoRecord)
+                }
+            }
+        }
+    }
+
+    /// Every binding the scope currently names, split by whether its identity is *proven*.
+    ///
+    /// Needed by the set-scoped withdrawals (a session end withdraws every binding of one session;
+    /// an operator reset withdraws every binding of one address, including ones with no member at
+    /// all). They cannot enumerate from membership — the whole point is that a memberless or
+    /// already-idle binding still has durable desired state — so they enumerate from the scope.
+    ///
+    /// Only a manifest that *loaded* contributes an actionable binding: `load` proves the tuple
+    /// against the filename hash and the singleton scope, so an id derived from it can only name
+    /// the file it came from. An unreadable manifest's self-declared identity is unvalidated and
+    /// is therefore never acted on — it is returned so the caller can **refuse** the set-scoped
+    /// operation rather than silently skipping a record it could not read.
+    pub fn bindings(&self) -> Result<BindingScan> {
+        self.bindings_bounded(PassDeadline::unbounded())
+    }
+
+    /// The same enumeration, stopped at `deadline` and reporting whether it was truncated.
+    ///
+    /// A set-scoped teardown is an operator-facing request with a bound of its own, and both halves
+    /// of this enumeration are real I/O against a directory that may be on a wedged network mount:
+    /// the `read_dir` itself, and one `read` per manifest. The unbounded form gave a session end or
+    /// a reset no way to stay inside its own deadline, so the cooperative check runs on the same
+    /// stride as `list_ids_bounded` — and truncation is *reported*, never hidden, because the
+    /// caller must refuse rather than act on a partial set (see [`BindingScan::truncated`]).
+    ///
+    /// Cooperative checks bound the loop, not the syscall that is currently blocked; an async
+    /// caller pairs this with [`run_blocking_within`] for the hard bound.
+    pub fn bindings_bounded(&self, deadline: PassDeadline) -> Result<BindingScan> {
+        let (ids, truncated) = self.list_ids_bounded(deadline)?;
+        let mut scan = BindingScan {
+            truncated,
+            ..BindingScan::default()
+        };
+        for (examined, id) in ids.iter().enumerate() {
+            if examined > 0
+                && examined.is_multiple_of(ENUMERATION_DEADLINE_STRIDE)
+                && deadline.expired()
+            {
+                scan.truncated = true;
+                break;
+            }
+            match self.load_projected(id) {
+                Ok(intent) => scan.bindings.push(IntentBinding {
+                    store_key: intent.store_key,
+                    session_id: intent.session_id,
+                    address: intent.address,
+                }),
+                Err(rejection) => {
+                    let claimed = rejection.identity.map(|identity| IntentBinding {
+                        store_key: identity.store_key,
+                        session_id: identity.session_id,
+                        address: identity.address,
+                    });
+                    scan.unreadable.push((id.clone(), claimed));
+                }
+            }
+        }
+        scan.bindings.sort();
+        Ok(scan)
+    }
+
+    /// Publish a member (or any other commit) **only while** the manifest still says exactly what
+    /// the caller reconciled: present, `live`, and at the generation the decision was made against.
+    ///
+    /// The restoration chain is a sequence of awaits — a credential read, a producer probe, a
+    /// backend `ensure_address`, an epoch claim, two tombstone checks — and an explicit withdrawal
+    /// can land anywhere inside it. Without this gate the pass finished its chain and installed an
+    /// armed push member from a manifest that had been revoked or deleted seconds earlier; the
+    /// member then outlived the desired state that authorized it, and only a *later* pass (which
+    /// would find the record inert) could notice.
+    ///
+    /// So the last step before publication re-reads under the per-intent write lock and runs the
+    /// commit inside it. Withdrawal takes the same lock, so the two are linearized: either the
+    /// withdrawal wins and this refuses to publish, or this wins and the withdrawal observes the
+    /// member it must tear down. `commit` is synchronous by construction — it installs an
+    /// in-memory record — so the filesystem lock is never held across an await.
+    ///
+    /// `Ok(None)` is "the record no longer authorizes this commit" (absent, revoked, deleted, or
+    /// moved to a newer generation). `Err` is "that could not be decided", which is a refusal too:
+    /// the caller releases whatever it claimed and retries on the ordinary ladder.
+    pub fn commit_if_live_generation<T>(
+        &self,
+        id: &IntentId,
+        expected_generation: u64,
+        commit: impl FnOnce() -> T,
+    ) -> Result<Option<T>> {
+        let _lock = self.lock_intent(id)?;
+        if !path_present(&self.path_for(id))? {
+            return Ok(None);
+        }
+        let current = self.load(id)?;
+        if current.generation != expected_generation || current.state != IntentRecoveryState::Live {
+            return Ok(None);
+        }
+        Ok(Some(commit()))
     }
 }
 
@@ -1342,28 +1966,6 @@ impl Drop for IntentWriteLock {
 }
 
 impl IntentStore {
-    /// Revoke every intent for a session in one store. Used by daemon-side session-end paths,
-    /// which are session-scoped by nature (`sessionEnd`, watch-pid death).
-    pub fn revoke_session(&self, store_key: &str, session_id: &str, now_ms: i64) -> Result<usize> {
-        let mut revoked = 0;
-        for id in self.list_ids()? {
-            let Ok(intent) = self.load(&id) else { continue };
-            if intent.store_key == store_key
-                && intent.session_id == session_id
-                && intent.state != IntentRecoveryState::Revoked
-                && self.revoke(
-                    &intent.store_key,
-                    &intent.session_id,
-                    &intent.address,
-                    now_ms,
-                )?
-            {
-                revoked += 1;
-            }
-        }
-        Ok(revoked)
-    }
-
     /// Delete one intent, but **only** while holding its write lock and only if the record on disk
     /// still matches what the caller decided about.
     ///
@@ -1393,6 +1995,26 @@ impl IntentStore {
         F: FnOnce(&StationIntentV1) -> bool,
     {
         let _lock = self.lock_intent(id)?;
+        self.remove_if_unchanged_held(id, expected_generation, still_deletable)
+    }
+
+    /// The conditional delete itself, with the per-intent write lock already held.
+    ///
+    /// Split out so a caller that has *already* taken the lock to observe the record — an explicit
+    /// withdrawal, which must delete exactly the `pending` generation it read — can delete inside
+    /// that same critical section. Re-entering [`IntentStore::lock_intent`] would instead block on
+    /// the caller's own lock file until the attempt budget ran out, and then either fail or (once
+    /// the staleness window elapsed) *steal* the caller's own lock, which is worse: the mutual
+    /// exclusion the whole path depends on would silently stop existing.
+    fn remove_if_unchanged_held<F>(
+        &self,
+        id: &IntentId,
+        expected_generation: u64,
+        still_deletable: F,
+    ) -> Result<bool>
+    where
+        F: FnOnce(&StationIntentV1) -> bool,
+    {
         let current = match self.load(id) {
             Ok(current) => current,
             // Already gone, or it became unreadable under us. Either way this caller's decision no
@@ -1443,16 +2065,44 @@ impl IntentStore {
 
     /// One bounded scan pass, resuming from the persisted round-robin cursor.
     ///
-    /// The cursor stores a *sort position*, not an index, so entries added or removed between
-    /// passes cannot starve another entry: the next pass resumes at the first position strictly
-    /// greater than the last one processed, and wraps at the end.
-    ///
-    /// This function **reads** the cursor and never advances it. Only the caller knows how far a
-    /// budget- or deadline-truncated pass actually got, and advancing past entries the pass never
-    /// attempted is exactly how a round-robin cursor silently starves the tail of a scope. See
-    /// [`IntentStore::advance_cursor`].
+    /// Unbounded and unscoped. Kept for callers that are not on a deadline (fixtures, one-shot
+    /// maintenance); everything on the reconcile path calls [`IntentStore::scan_bounded`].
     pub fn scan(&self, budget: usize) -> Result<ScanPage> {
-        let ids = self.list_ids()?;
+        self.scan_bounded(budget, None, PassDeadline::unbounded())
+    }
+
+    /// One bounded scan pass for `scope`, resuming from that scope's persisted cursors and
+    /// stopping at `deadline`.
+    ///
+    /// Three properties are load-bearing here:
+    ///
+    /// * **Scope filtering happens ahead of the page window and the budget.** A pass filtered to
+    ///   one store must spend its whole budget on that store; filtering after the window let a
+    ///   scope full of another store's intents consume every slot and produce an empty page for the
+    ///   store that actually asked, forever.
+    /// * **Discovery is deadline-bounded and resumable.** Reading every manifest in the scope is
+    ///   real I/O, so it is bounded like everything else — and because a bounded read that always
+    ///   restarts at the head would re-read the same prefix on every pass and never reach the tail,
+    ///   the position discovery stopped at is persisted per scope. At least one manifest is always
+    ///   read, so a pass whose deadline is already spent still makes forward progress rather than
+    ///   spinning.
+    /// * **The sort-position cursor is still only advanced by the caller.** This function reads it
+    ///   and never writes it: only the caller knows how far a budget- or deadline-truncated pass
+    ///   actually got, and advancing past entries the pass never attempted is exactly how a
+    ///   round-robin cursor silently starves the tail of a scope. See
+    ///   [`IntentStore::advance_cursor_in_scope`]. The *discovery* position is different in kind —
+    ///   it describes what this function itself did, so this function is the only thing that can
+    ///   record it.
+    ///
+    /// When discovery completes within the deadline (the ordinary case: a capped scope on a local
+    /// disk) the page is exactly what an unbounded scan would have produced.
+    pub fn scan_bounded(
+        &self,
+        budget: usize,
+        scope: Option<&str>,
+        deadline: PassDeadline,
+    ) -> Result<ScanPage> {
+        let (ids, enumeration_truncated) = self.list_ids_bounded(deadline)?;
         let observed_count = ids.len();
         // Same comparison the write cap uses (`>=`): at exactly the cap new ids already fail with
         // `CapExceeded`, so reporting `over_cap: false` there would leave the operator with a
@@ -1460,15 +2110,60 @@ impl IntentStore {
         let over_cap = observed_count >= STATION_INTENT_MAX_COUNT;
 
         let cursor = self.read_cursor()?;
+        let scope_cursor = cursor.for_scope(scope);
         let mut entries: Vec<(IntentSortKey, StationIntentV1)> = Vec::new();
         let mut rejected = Vec::new();
         let mut skipped = Vec::new();
 
-        for id in &ids {
-            match self.load_projected(id) {
-                Ok(intent) => entries.push((intent.sort_key(), intent)),
-                Err(rejection) => rejected.push((id.clone(), rejection)),
+        // Resume discovery at the first id strictly greater than the one it stopped at, wrapping
+        // like the sort cursor does.
+        let discovery_start = match scope_cursor.discovery.as_deref() {
+            Some(after) => ids
+                .iter()
+                .position(|id| id.as_str() > after)
+                .unwrap_or_default(),
+            None => 0,
+        };
+        let mut discovery_truncated = enumeration_truncated;
+        let mut discovery_position: Option<String> = None;
+        for offset in 0..ids.len() {
+            // Checked *after* the first read, never before it: a pass that arrives with its
+            // deadline already spent must still read one manifest and move discovery on, or a
+            // scope whose maintenance repeatedly overruns would never be discovered at all.
+            if offset > 0 && deadline.expired() {
+                discovery_truncated = true;
+                break;
             }
+            let id = &ids[(discovery_start + offset) % ids.len()];
+            discovery_position = Some(id.as_str().to_string());
+            match self.load_projected(id) {
+                Ok(intent) => {
+                    if scope.is_some_and(|filter| intent.store_key != filter) {
+                        continue;
+                    }
+                    entries.push((intent.sort_key(), intent));
+                }
+                Err(rejection) => {
+                    // A rejection that names another store is filtered like a loaded one. A
+                    // rejection whose identity could not be established belongs to every scope:
+                    // dropping it would make an unreadable manifest invisible to a scoped pass.
+                    if let Some(identity) = &rejection.identity {
+                        if scope.is_some_and(|filter| identity.store_key != filter) {
+                            continue;
+                        }
+                    }
+                    rejected.push((id.clone(), rejection));
+                }
+            }
+        }
+        // A sweep that reached the end of the scope starts the next one at the head.
+        let next_discovery = if discovery_truncated {
+            discovery_position
+        } else {
+            None
+        };
+        if next_discovery != scope_cursor.discovery {
+            self.write_scope_cursor(scope, |entry| entry.discovery = next_discovery.clone())?;
         }
         entries.sort_by(|a, b| a.0.cmp(&b.0));
 
@@ -1481,13 +2176,14 @@ impl IntentStore {
                 rejected,
                 observed_count,
                 over_cap,
+                discovery_truncated,
             });
         }
 
         let sort_positions: Vec<String> = entries.iter().map(|(k, _)| sort_position(k)).collect();
         // Resume at the first position strictly greater than the last processed one; wrap to the
         // start when the cursor sits at or past the maximum.
-        let start = match cursor.position.as_deref() {
+        let start = match scope_cursor.position.as_deref() {
             Some(position) => sort_positions
                 .iter()
                 .position(|candidate| candidate.as_str() > position)
@@ -1515,6 +2211,7 @@ impl IntentStore {
             rejected,
             observed_count,
             over_cap,
+            discovery_truncated,
         })
     }
 
@@ -1524,7 +2221,96 @@ impl IntentStore {
     /// it attempted none, the last it considered), so a truncated pass resumes where it stopped
     /// instead of skipping everything it loaded but never reached.
     pub fn advance_cursor(&self, position: &str) -> Result<()> {
-        self.write_cursor(position)
+        self.advance_cursor_in_scope(None, position)
+    }
+    /// The scoped form. A scoped pass moves only its own store's position, so it can neither skip
+    /// intents another scope never considered nor be skipped past by one.
+    pub fn advance_cursor_in_scope(&self, scope: Option<&str>, position: &str) -> Result<()> {
+        self.write_scope_cursor(scope, |entry| entry.position = Some(position.to_string()))
+    }
+
+    /// The four pass-path phases, each behind [`run_blocking_within`] or, for the two that mutate
+    /// durable pass-visible state, [`run_blocking_reserved`].
+    ///
+    /// These are the forms the reconcile pass uses, and the synchronous ones are reserved for
+    /// off-pass callers (fixtures, one-shot maintenance, the store's own tests). For the two
+    /// scanning phases the deadline is passed twice on purpose and means two different things:
+    /// *inside* the phase it is the cooperative stride check that decides where to stop and what to
+    /// persist as a resume position, and *outside* it is the instant the async caller stops waiting
+    /// for the phase at all. Without the outer half, one blocked syscall is enough to carry a
+    /// bounded pass past its own deadline; without [`RECONCILE_BLOCKING_GRACE`] between them, the
+    /// outer half would pre-empt every cooperative stop and no large scope would ever be scanned.
+    pub async fn scan_bounded_within(
+        &self,
+        budget: usize,
+        scope: Option<String>,
+        deadline: PassDeadline,
+    ) -> BoundedPhase<Result<ScanPage>> {
+        let store = self.clone();
+        run_blocking_within(deadline, RECONCILE_BLOCKING_GRACE, move || {
+            store.scan_bounded(budget, scope.as_deref(), deadline)
+        })
+        .await
+    }
+
+    pub async fn gc_bounded_within(
+        &self,
+        now_ms: i64,
+        local_host: Option<String>,
+        local_boot: Option<String>,
+        deadline: PassDeadline,
+    ) -> BoundedPhase<Result<GcReport>> {
+        let store = self.clone();
+        run_blocking_within(deadline, RECONCILE_BLOCKING_GRACE, move || {
+            store.gc_bounded(
+                now_ms,
+                local_host.as_deref(),
+                local_boot.as_deref(),
+                deadline,
+            )
+        })
+        .await
+    }
+
+    /// The round-robin cursor write, started only while `reserve` of the pass deadline is intact.
+    ///
+    /// No grace: `advance_cursor_in_scope` has no deadline of its own to stop at, so there is
+    /// nothing for a grace period to let it finish. The deadline here is purely the hard bound, and
+    /// the reserve is what keeps a cursor advance from being *launched* so close to the deadline
+    /// that it could only ever land after the pass has answered.
+    pub async fn advance_cursor_in_scope_reserved(
+        &self,
+        scope: Option<String>,
+        position: String,
+        deadline: PassDeadline,
+        reserve: Duration,
+    ) -> BoundedPhase<Result<()>> {
+        let store = self.clone();
+        run_blocking_reserved(deadline, reserve, move || {
+            store.advance_cursor_in_scope(scope.as_deref(), &position)
+        })
+        .await
+    }
+
+    /// The evidence write an outcome persists, behind the same boundary and the same reserve.
+    ///
+    /// A per-intent manifest rewrite is small, but it is still an atomic write (stage, fsync,
+    /// rename) on a path a pass reaches *after* its wave has already spent most of the budget, and
+    /// it runs once per attempted intent. Starting one with less than `reserve` left would be
+    /// starting work whose only possible completion is after the response, so it is not started;
+    /// the pass reports itself deadline-truncated and the next pass re-derives the same evidence.
+    pub async fn write_cas_reserved(
+        &self,
+        expected_generation: u64,
+        intent: StationIntentV1,
+        deadline: PassDeadline,
+        reserve: Duration,
+    ) -> BoundedPhase<Result<bool>> {
+        let store = self.clone();
+        run_blocking_reserved(deadline, reserve, move || {
+            store.write_cas(expected_generation, &intent)
+        })
+        .await
     }
 
     fn read_cursor(&self) -> Result<ScanCursor> {
@@ -1544,12 +2330,38 @@ impl IntentStore {
         }
     }
 
-    fn write_cursor(&self, position: &str) -> Result<()> {
+    /// Read-modify-write one scope's entry, preserving every other scope's and the GC position.
+    fn write_scope_cursor(
+        &self,
+        scope: Option<&str>,
+        update: impl FnOnce(&mut ScopeCursor),
+    ) -> Result<()> {
+        let mut cursor = self.read_cursor()?;
+        let key = ScanCursor::scope_key(scope).to_string();
+        let mut entry = cursor.for_scope(scope);
+        update(&mut entry);
+        // Mirror the unscoped position into the legacy field so a rollback to a build that only
+        // understands one global position still resumes somewhere sane instead of at the head.
+        if scope.is_none() {
+            cursor.position = entry.position.clone();
+        }
+        cursor.scopes.insert(key, entry);
+        self.write_cursor(&cursor)
+    }
+
+    fn write_gc_position(&self, position: Option<String>) -> Result<()> {
+        let mut cursor = self.read_cursor()?;
+        if cursor.gc_position == position {
+            return Ok(());
+        }
+        cursor.gc_position = position;
+        self.write_cursor(&cursor)
+    }
+
+    fn write_cursor(&self, cursor: &ScanCursor) -> Result<()> {
         let path = self.root.join(SCAN_CURSOR_FILE);
-        let bytes = serde_json::to_vec(&ScanCursor {
-            position: Some(position.to_string()),
-        })
-        .map_err(|e| IntentError::Json(format!("serializing scan cursor: {e}")))?;
+        let bytes = serde_json::to_vec(cursor)
+            .map_err(|e| IntentError::Json(format!("serializing scan cursor: {e}")))?;
         platform_fs::write_owner_only_file_atomic(&path, &bytes)?;
         Ok(())
     }
@@ -1602,8 +2414,51 @@ impl IntentStore {
         local_host: Option<&str>,
         local_boot: Option<&str>,
     ) -> Result<GcReport> {
+        self.gc_bounded(now_ms, local_host, local_boot, PassDeadline::unbounded())
+    }
+
+    /// The deadline-bounded form, and the one every scheduled sweep uses.
+    ///
+    /// GC is `O(scope)` file I/O — a `load` and, for a candidate, a lock acquisition and an unlink
+    /// each — so on the pass path it is bounded exactly like discovery is, against the same
+    /// absolute deadline. Two properties keep that from turning a bound into a leak:
+    ///
+    /// * The sweep **resumes** from the persisted GC position, so a scope larger than one budget is
+    ///   collected across several sweeps instead of having its head re-examined forever while its
+    ///   tail is never reached.
+    /// * At least one candidate is always examined, so a sweep that arrives with its deadline spent
+    ///   still advances.
+    ///
+    /// `GcReport::complete` says which happened. The debris sweep runs only on a complete pass:
+    /// it is a second full directory walk, and paying for it on a truncated sweep would spend the
+    /// budget that was supposed to make the sweep complete.
+    pub fn gc_bounded(
+        &self,
+        now_ms: i64,
+        local_host: Option<&str>,
+        local_boot: Option<&str>,
+        deadline: PassDeadline,
+    ) -> Result<GcReport> {
         let mut report = GcReport::default();
-        for id in self.list_ids()? {
+        let (ids, enumeration_truncated) = self.list_ids_bounded(deadline)?;
+        let resume_after = self.read_cursor()?.gc_position;
+        let start = match resume_after.as_deref() {
+            Some(after) => ids
+                .iter()
+                .position(|id| id.as_str() > after)
+                .unwrap_or_default(),
+            None => 0,
+        };
+        let mut truncated = enumeration_truncated;
+        let mut position: Option<String> = None;
+        for offset in 0..ids.len() {
+            // Checked after the first candidate, never before it: see `scan_bounded`.
+            if offset > 0 && deadline.expired() {
+                truncated = true;
+                break;
+            }
+            let id = ids[(start + offset) % ids.len()].clone();
+            position = Some(id.as_str().to_string());
             let intent = match self.load(&id) {
                 Ok(intent) => intent,
                 Err(IntentError::Io(_)) => {
@@ -1659,7 +2514,13 @@ impl IntentStore {
                 report.kept += 1;
             }
         }
-        self.sweep_write_debris(now_ms);
+        report.complete = !truncated;
+        // Best effort: a cursor we could not persist costs coverage latency, never correctness, and
+        // must not fail a sweep that already did its deletions.
+        let _ = self.write_gc_position(if report.complete { None } else { position });
+        if report.complete {
+            self.sweep_write_debris(now_ms);
+        }
         Ok(report)
     }
 
@@ -2023,6 +2884,262 @@ mod tests {
         assert_eq!(intent.producer.credential.clamped_max_age_ms(), 1);
     }
 
+    /// The full withdrawal matrix in one place, because each row is a distinct way the old
+    /// per-caller `revoke` wrappers got it wrong.
+    #[test]
+    fn withdrawal_deletes_pending_tombstones_live_and_is_idempotent() {
+        let run_dir = temp_run_dir("withdraw-matrix");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+
+        // A binding that provably has no record: success, and nothing is created. An
+        // identity-less `revoked` record would squat the binding for the terminal TTL.
+        assert_eq!(
+            store
+                .withdraw_binding("sqlite:/a", "sess", "never-attached", 1_000)
+                .expect("absent"),
+            Withdrawal::NoRecord
+        );
+        assert_eq!(
+            store.list_ids().expect("list").len(),
+            0,
+            "a withdrawal has no identity of its own and must never mint a record"
+        );
+
+        // `pending`: deleted, at exactly the generation observed.
+        let mut pending = sample_intent("sqlite:/a", "sess", "addr-pending");
+        pending.state = IntentRecoveryState::Pending;
+        let PendingWrite::Created { generation } = store.write_pending(&pending).expect("attach")
+        else {
+            panic!("a first attach must create");
+        };
+        assert_eq!(
+            store
+                .withdraw_binding("sqlite:/a", "sess", "addr-pending", 2_000)
+                .expect("withdraw pending"),
+            Withdrawal::DeletedPending { generation }
+        );
+        assert!(
+            store.load(&pending.id()).is_err(),
+            "an unfinalized attach is deleted, not tombstoned"
+        );
+
+        // `live`: tombstoned under a generation bump, and idempotent afterwards.
+        let live = sample_intent("sqlite:/a", "sess", "addr-live");
+        store.write_atomic(&live).expect("seed live");
+        let first = store
+            .withdraw_binding("sqlite:/a", "sess", "addr-live", 3_000)
+            .expect("withdraw live");
+        let Withdrawal::Revoked { generation } = first else {
+            panic!("a live record is tombstoned, got {first:?}");
+        };
+        let reloaded = store.load(&live.id()).expect("reload");
+        assert_eq!(reloaded.state, IntentRecoveryState::Revoked);
+        assert_eq!(reloaded.generation, generation);
+        assert_eq!(reloaded.updated_at_ms, 3_000, "the TTL clock moves with it");
+        assert_eq!(
+            store
+                .withdraw_binding("sqlite:/a", "sess", "addr-live", 4_000)
+                .expect("second withdrawal"),
+            Withdrawal::AlreadyRevoked { generation },
+            "a detach, a session end, and a reset may all name one binding"
+        );
+        assert_eq!(
+            store.load(&live.id()).expect("reload").updated_at_ms,
+            3_000,
+            "and the idempotent repeat must not push the terminal TTL out"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// A withdrawal decided against one generation must not act on another.
+    ///
+    /// The reconciler is the caller that needs this: a pass decides "tombstoned" against the
+    /// manifest it loaded, and a re-attach can write a fresh `pending` record before the outcome is
+    /// applied. Deleting *that* record would destroy an attach the decision knew nothing about.
+    #[test]
+    fn a_generation_conditional_withdrawal_never_touches_a_newer_record() {
+        let run_dir = temp_run_dir("withdraw-superseded");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let mut intent = sample_intent("sqlite:/a", "sess", "addr");
+        intent.state = IntentRecoveryState::Pending;
+        store.write_pending(&intent).expect("first attach");
+        let observed = store.load(&intent.id()).expect("load").generation;
+
+        // A re-attach moves the record on before the stale decision is applied.
+        store.write_pending(&intent).expect("re-attach");
+        let current = store.load(&intent.id()).expect("load").generation;
+        assert!(current > observed, "precondition: the record moved");
+
+        assert_eq!(
+            store
+                .withdraw_binding_at_generation("sqlite:/a", "sess", "addr", Some(observed), 5_000)
+                .expect("stale withdrawal"),
+            Withdrawal::Superseded {
+                generation: current
+            }
+        );
+        assert!(
+            store.load(&intent.id()).is_ok(),
+            "a stale reconcile outcome must not delete a fresh attach"
+        );
+
+        // The unconditional form — what an explicit operator teardown uses — still applies.
+        assert!(matches!(
+            store
+                .withdraw_binding("sqlite:/a", "sess", "addr", 6_000)
+                .expect("explicit withdrawal"),
+            Withdrawal::DeletedPending { .. }
+        ));
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// A record telex cannot read is a record it must not delete, overwrite, or claim to have
+    /// withdrawn. An unsupported schema version is exactly what a rollback leaves behind, and
+    /// "intents are never deleted by a rollback" is a documented guarantee — so a withdrawal that
+    /// meets one has to fail rather than fall through to a delete or a fabricated tombstone.
+    #[test]
+    fn withdrawal_refuses_an_unreadable_or_unsupported_record() {
+        let run_dir = temp_run_dir("withdraw-unreadable");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let intent = sample_intent("sqlite:/a", "sess", "addr");
+        store.write_atomic(&intent).expect("write");
+        let path = store.path_for(&intent.id());
+
+        let mut document: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).expect("read")).expect("parse");
+        document["schema_version"] = serde_json::json!(99);
+        let _ = std::fs::remove_file(&path);
+        platform_fs::write_owner_only_file_atomic(
+            &path,
+            serde_json::to_vec(&document).expect("encode").as_slice(),
+        )
+        .expect("write skewed");
+        assert!(
+            matches!(
+                store.withdraw_binding("sqlite:/a", "sess", "addr", 1_000),
+                Err(IntentError::UnsupportedSchema { .. })
+            ),
+            "a manifest from a newer build is never deleted or clobbered by a teardown"
+        );
+        assert!(path.exists(), "and it is still there");
+
+        let _ = std::fs::remove_file(&path);
+        std::fs::write(&path, b"not json at all").expect("corrupt");
+        assert!(
+            store
+                .withdraw_binding("sqlite:/a", "sess", "addr", 1_000)
+                .is_err(),
+            "an unreadable manifest must not be reported as withdrawn"
+        );
+        assert!(path.exists());
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// `commit_if_live_generation` is the gate that makes a withdrawal beat a restoration already
+    /// in flight. It must publish only for a present, `live`, unmoved record.
+    #[test]
+    fn a_member_commit_is_refused_once_the_manifest_stops_authorizing_it() {
+        let run_dir = temp_run_dir("commit-gate");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let intent = sample_intent("sqlite:/a", "sess", "addr");
+        store.write_atomic(&intent).expect("seed live");
+        let id = intent.id();
+        let generation = store.load(&id).expect("load").generation;
+
+        assert_eq!(
+            store
+                .commit_if_live_generation(&id, generation, || "published")
+                .expect("commit"),
+            Some("published"),
+            "a live, unmoved manifest authorizes the member it describes"
+        );
+        assert_eq!(
+            store
+                .commit_if_live_generation(&id, generation + 1, || "published")
+                .expect("commit"),
+            None,
+            "a decision made against another generation does not"
+        );
+
+        store
+            .withdraw_binding("sqlite:/a", "sess", "addr", 2_000)
+            .expect("withdraw");
+        assert_eq!(
+            store
+                .commit_if_live_generation(&id, generation, || "published")
+                .expect("commit"),
+            None,
+            "and a withdrawn binding never publishes a restored member"
+        );
+
+        // A binding whose record is gone entirely — what withdrawing a `pending` one leaves.
+        let absent = IntentId::derive("sqlite:/a", "sess", "never-attached");
+        assert_eq!(
+            store
+                .commit_if_live_generation(&absent, 1, || "published")
+                .expect("commit"),
+            None
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// Set-scoped withdrawal enumerates the scope, and an unreadable manifest that *claims* the
+    /// scope is reported rather than acted on.
+    ///
+    /// Acting on the claim would be a real vulnerability: the tuple in an unreadable manifest is
+    /// unvalidated, so honouring it would let one file name — and withdraw — another binding's
+    /// record. Silently skipping it would be the opposite failure: a teardown reporting success for
+    /// a record it could not read.
+    #[test]
+    fn binding_enumeration_separates_proven_identities_from_claimed_ones() {
+        let run_dir = temp_run_dir("bindings");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let a = sample_intent("sqlite:/a", "sess", "addr-1");
+        let b = sample_intent("sqlite:/a", "sess-other", "addr-2");
+        for intent in [&a, &b] {
+            store.write_atomic(intent).expect("write");
+        }
+        let corrupt = sample_intent("sqlite:/a", "sess", "addr-corrupt");
+        store.write_atomic(&corrupt).expect("write");
+        let corrupt_path = store.path_for(&corrupt.id());
+        let mut document: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&corrupt_path).expect("read"))
+                .expect("parse");
+        document["schema_version"] = serde_json::json!(99);
+        let _ = std::fs::remove_file(&corrupt_path);
+        platform_fs::write_owner_only_file_atomic(
+            &corrupt_path,
+            serde_json::to_vec(&document).expect("encode").as_slice(),
+        )
+        .expect("write skewed");
+
+        let scan = store.bindings().expect("enumerate");
+        assert_eq!(
+            scan.bindings,
+            vec![
+                IntentBinding {
+                    store_key: "sqlite:/a".to_string(),
+                    session_id: "sess".to_string(),
+                    address: "addr-1".to_string(),
+                },
+                IntentBinding {
+                    store_key: "sqlite:/a".to_string(),
+                    session_id: "sess-other".to_string(),
+                    address: "addr-2".to_string(),
+                },
+            ],
+            "only manifests that loaded contribute an actionable binding"
+        );
+        assert_eq!(scan.unreadable.len(), 1);
+        let (_, claimed) = &scan.unreadable[0];
+        assert_eq!(
+            claimed.as_ref().map(|binding| binding.address.as_str()),
+            Some("addr-corrupt"),
+            "the claimed identity is carried so a caller can refuse, never so it can act"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
     #[test]
     fn write_read_revoke_round_trip_is_exact_per_binding() {
         let run_dir = temp_run_dir("roundtrip");
@@ -2035,9 +3152,12 @@ mod tests {
         }
         assert_eq!(store.list_ids().expect("list").len(), 3);
 
-        assert!(store
-            .revoke("sqlite:/a", "sess", "addr-1", 2_000)
-            .expect("revoke"));
+        assert!(matches!(
+            store
+                .withdraw_binding("sqlite:/a", "sess", "addr-1", 2_000)
+                .expect("withdraw"),
+            Withdrawal::Revoked { .. }
+        ));
         assert_eq!(
             store.load(&a.id()).expect("load a").state,
             IntentRecoveryState::Revoked
@@ -2045,14 +3165,14 @@ mod tests {
         assert_eq!(
             store.load(&b.id()).expect("load b").state,
             IntentRecoveryState::Live,
-            "revoking one address must not touch a sibling address"
+            "withdrawing one address must not touch a sibling address"
         );
         assert_eq!(
             store.load(&c.id()).expect("load c").state,
             IntentRecoveryState::Live,
-            "revoking one store must not touch the same address in another store"
+            "withdrawing one store must not touch the same address in another store"
         );
-        // Revocation bumps the generation so a concurrent CAS write loses.
+        // Withdrawal bumps the generation so a concurrent CAS write loses.
         assert_eq!(store.load(&a.id()).expect("load a").generation, 2);
         let _ = std::fs::remove_dir_all(&run_dir);
     }
@@ -2160,6 +3280,378 @@ mod tests {
             store.list_ids().expect("list").len(),
             total,
             "scanning an over-cap scope must never delete an entry"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// A deadline that is already spent. Models the case the whole bound exists for — a pass that
+    /// reaches a phase with nothing left to spend on it — without a sleep, a fake clock, or a
+    /// filesystem that has to actually be slow.
+    fn spent_deadline() -> PassDeadline {
+        PassDeadline::at(Instant::now())
+    }
+
+    /// Mirrors the daemon's published per-pass scan bound. Kept local so the store keeps no
+    /// dependency on the reconciler's schedule.
+    const RECONCILE_SCAN_BOUND: Duration = Duration::from_secs(4);
+
+    /// The property the cooperative deadline checks cannot provide on their own.
+    ///
+    /// `scan_bounded`/`gc_bounded` check the clock *between* synchronous calls, so they bound a
+    /// phase only while every individual call returns promptly. A blocked `read_dir` or a stalled
+    /// atomic rename is exactly the case the bound exists for, and there the check never runs. The
+    /// execution boundary is what makes the async caller's bound real — and it must abandon only
+    /// the *wait*, because tearing a staged atomic write in half would be a durable-state bug
+    /// traded for a latency fix.
+    #[tokio::test]
+    async fn a_blocking_phase_that_overruns_is_abandoned_but_never_cancelled() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+
+        let finished = Arc::new(AtomicBool::new(false));
+        let flag = finished.clone();
+        let started = Instant::now();
+        let phase = run_blocking_within(
+            PassDeadline::at(Instant::now() + Duration::from_millis(50)),
+            Duration::ZERO,
+            move || {
+                std::thread::sleep(Duration::from_millis(600));
+                flag.store(true, Ordering::SeqCst);
+            },
+        )
+        .await;
+        let waited = started.elapsed();
+
+        assert!(
+            phase.overran(),
+            "a phase that outlives the deadline must report it rather than returning a result the \
+             caller would then publish"
+        );
+        assert!(
+            waited < Duration::from_millis(400),
+            "the caller must stop waiting at the deadline, not at the phase's own pace: waited \
+             {waited:?}"
+        );
+        assert!(
+            !finished.load(Ordering::SeqCst),
+            "the phase under test must still be running, or this asserts nothing about abandonment"
+        );
+
+        tokio::time::sleep(Duration::from_millis(900)).await;
+        assert!(
+            finished.load(Ordering::SeqCst),
+            "abandoning the wait must never cancel the work: a partially staged atomic write has \
+             to be allowed to finish its own rename"
+        );
+    }
+
+    /// The ordinary case must be untouched: a phase that finishes inside the deadline returns its
+    /// result exactly as the synchronous form would.
+    #[tokio::test]
+    async fn a_blocking_phase_inside_its_deadline_returns_its_result() {
+        let run_dir = temp_run_dir("boundedphase");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        store
+            .write_atomic(&sample_intent("sqlite:/a", "sess", "addr-00"))
+            .expect("seed");
+
+        let page = store
+            .scan_bounded_within(
+                64,
+                None,
+                PassDeadline::at(Instant::now() + RECONCILE_SCAN_BOUND),
+            )
+            .await
+            .completed()
+            .expect("a local-disk scan of one intent completes well inside the pass deadline")
+            .expect("scan");
+        assert_eq!(page.loaded.len(), 1);
+        assert!(!page.discovery_truncated);
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    /// The boundary must not pre-empt the very stop it asked for.
+    ///
+    /// `scan_bounded` checks the same deadline the caller waits on, so it deliberately stops *at*
+    /// it and then still has to sort its page and persist a resume position. Waiting to exactly the
+    /// deadline loses that race every time, which would turn every scope big enough to use its
+    /// budget into a permanently overrunning one: truncated pages are how such a scope makes
+    /// progress at all, so discarding them is starvation, not safety.
+    #[tokio::test]
+    async fn a_cooperatively_truncated_phase_still_returns_its_partial_page() {
+        let run_dir = temp_run_dir("gracepage");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        for i in 0..6 {
+            store
+                .write_atomic(&sample_intent("sqlite:/a", "sess", &format!("addr-{i:02}")))
+                .expect("seed");
+        }
+
+        // Already spent, so discovery stops after its mandatory first read — the worst case for
+        // the outer wait, which has only the grace period to work with.
+        let page = store
+            .scan_bounded_within(64, None, spent_deadline())
+            .await
+            .completed()
+            .expect("a cooperative stop must be returned to the caller, not abandoned")
+            .expect("scan");
+        assert!(
+            page.discovery_truncated,
+            "this asserts nothing unless discovery actually stopped short"
+        );
+        assert_eq!(
+            page.loaded.len(),
+            1,
+            "the mandatory first read is the progress a spent pass still owes the scope"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn discovery_stops_at_the_deadline_and_resumes_instead_of_re_reading_its_head() {
+        let run_dir = temp_run_dir("slowdiscovery");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let total = 6usize;
+        for i in 0..total {
+            store
+                .write_atomic(&sample_intent("sqlite:/a", "sess", &format!("addr-{i:02}")))
+                .expect("seed");
+        }
+
+        let mut seen = std::collections::BTreeSet::new();
+        for pass in 0..total {
+            let page = store
+                .scan_bounded(64, None, spent_deadline())
+                .expect("scan");
+            assert!(
+                page.discovery_truncated,
+                "pass {pass}: a truncated discovery must be reported, because it makes \
+                 observed_count a lower bound rather than the scope"
+            );
+            assert_eq!(
+                page.loaded.len(),
+                1,
+                "pass {pass}: one manifest is always read even with the deadline spent, or a scope \
+                 whose maintenance repeatedly overruns would never be discovered at all"
+            );
+            assert_eq!(
+                page.observed_count, total,
+                "pass {pass}: enumerating a scope this small is never truncated"
+            );
+            seen.insert(page.loaded[0].id());
+        }
+        assert_eq!(
+            seen.len(),
+            total,
+            "successive truncated passes must rotate through the whole scope; re-reading the head \
+             is how a bounded discovery turns into permanent starvation of the tail"
+        );
+
+        // A pass with time to spend behaves exactly as an unbounded one always did.
+        let full = store
+            .scan_bounded(64, None, PassDeadline::unbounded())
+            .expect("scan");
+        assert!(!full.discovery_truncated);
+        assert_eq!(full.loaded.len(), total);
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn gc_stops_at_the_deadline_reports_it_and_resumes_where_it_stopped() {
+        let run_dir = temp_run_dir("slowgc");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let total = 4usize;
+        for i in 0..total {
+            let mut pending = sample_intent("sqlite:/a", "sess", &format!("addr-{i:02}"));
+            pending.state = IntentRecoveryState::Pending;
+            store.write_atomic(&pending).expect("seed");
+        }
+        let past_ttl = 1_000 + STATION_INTENT_PENDING_TTL.as_millis() as i64 + 1;
+
+        for remaining in (1..total).rev() {
+            let report = store
+                .gc_bounded(past_ttl, None, None, spent_deadline())
+                .expect("bounded gc");
+            assert!(
+                !report.complete,
+                "a sweep that stopped at its deadline must say so: consuming the once-a-minute \
+                 maintenance slot with a partial sweep is indistinguishable from a leak"
+            );
+            assert_eq!(
+                report.removed.len(),
+                1,
+                "one candidate is always examined, so a spent budget still collects"
+            );
+            assert_eq!(store.list_ids().expect("list").len(), remaining);
+        }
+
+        // The last record is the whole of what is left, so the sweep that collects it reaches the
+        // end of the scope and is complete — which is what lets the maintenance clock advance.
+        let last = store
+            .gc_bounded(past_ttl, None, None, spent_deadline())
+            .expect("last gc");
+        assert!(last.complete);
+        assert_eq!(last.removed.len(), 1);
+        assert!(store.list_ids().expect("list").is_empty());
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn a_scoped_scan_spends_its_budget_on_its_own_store_not_on_unrelated_pages() {
+        // The regression this pins: the target store sorts *behind* a large block of another
+        // store's intents, so filtering after the page window produced a page the caller then
+        // discarded in full — for every pass, forever, because the shared cursor also advanced past
+        // entries the scoped pass never considered.
+        let run_dir = temp_run_dir("scopefilter");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let noise = "sqlite:/aaa-unrelated";
+        let target = "sqlite:/zzz-target";
+        for i in 0..100 {
+            store
+                .write_atomic(&sample_intent(noise, "sess", &format!("addr-{i:03}")))
+                .expect("seed noise");
+        }
+        for i in 0..3 {
+            store
+                .write_atomic(&sample_intent(target, "sess", &format!("addr-{i:03}")))
+                .expect("seed target");
+        }
+
+        let page = store
+            .scan_bounded(4, Some(target), PassDeadline::unbounded())
+            .expect("scoped scan");
+        assert_eq!(
+            page.loaded.len(),
+            3,
+            "every in-scope intent must fit in a budget of 4 regardless of how much unrelated \
+             state sorts ahead of it"
+        );
+        assert!(page.loaded.iter().all(|intent| intent.store_key == target));
+        assert_eq!(
+            page.observed_count, 103,
+            "observed_count and the cap warning describe the scope on disk, not the filter"
+        );
+
+        // An unscoped pass over the same scope is dominated by the unrelated store, which is
+        // exactly why the filter has to precede the budget.
+        let unscoped = store
+            .scan_bounded(4, None, PassDeadline::unbounded())
+            .expect("unscoped scan");
+        assert!(unscoped
+            .loaded
+            .iter()
+            .all(|intent| intent.store_key == noise));
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn scope_cursors_are_independent_and_a_legacy_global_cursor_still_migrates() {
+        let run_dir = temp_run_dir("scopecursor");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let a = "sqlite:/a";
+        let b = "sqlite:/b";
+        for i in 0..4 {
+            store
+                .write_atomic(&sample_intent(a, "sess", &format!("addr-{i:02}")))
+                .expect("seed a");
+            store
+                .write_atomic(&sample_intent(b, "sess", &format!("addr-{i:02}")))
+                .expect("seed b");
+        }
+
+        let page_a = store
+            .scan_bounded(4, Some(a), PassDeadline::unbounded())
+            .expect("scan a");
+        assert_eq!(page_a.loaded[0].address, "addr-00");
+        // A pass filtered to store `a` advances only store `a`'s position.
+        store
+            .advance_cursor_in_scope(Some(a), &page_a.loaded_positions[1])
+            .expect("advance a");
+
+        let next_a = store
+            .scan_bounded(4, Some(a), PassDeadline::unbounded())
+            .expect("scan a again");
+        assert_eq!(next_a.loaded[0].address, "addr-02");
+        let page_b = store
+            .scan_bounded(4, Some(b), PassDeadline::unbounded())
+            .expect("scan b");
+        assert_eq!(
+            page_b.loaded[0].address, "addr-00",
+            "store b must start at its own head: with one shared position, a scoped pass skipped \
+             intents another scope had never considered"
+        );
+
+        // A cursor file written by a build that predates scope-correct cursoring carries one
+        // global position. It must be honored as the seed for a scope that has no entry yet,
+        // rather than silently restarting every scope at its head.
+        let legacy = serde_json::json!({ "position": page_a.loaded_positions[2] });
+        platform_fs::write_owner_only_file_atomic(
+            &run_dir.join("intents").join("hash").join(SCAN_CURSOR_FILE),
+            &serde_json::to_vec(&legacy).expect("encode legacy cursor"),
+        )
+        .expect("write legacy cursor");
+        let migrated = store
+            .scan_bounded(4, Some(a), PassDeadline::unbounded())
+            .expect("scan a after migration");
+        assert_eq!(
+            migrated.loaded[0].address, "addr-03",
+            "a legacy global position must still be resumed from"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn an_over_cap_scope_honors_the_scan_deadline_and_still_deletes_nothing() {
+        let run_dir = temp_run_dir("overcapdeadline");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let total = STATION_INTENT_MAX_COUNT + 88;
+        for i in 0..total {
+            let intent = sample_intent("sqlite:/a", "sess", &format!("addr-{i:04}"));
+            let bytes = serde_json::to_vec_pretty(&intent).expect("encode");
+            platform_fs::write_owner_only_file_atomic(&store.path_for(&intent.id()), &bytes)
+                .expect("seed");
+        }
+
+        // A pass with time to spend still sees the whole scope and still reports it over cap.
+        let started = Instant::now();
+        let full = store
+            .scan_bounded(64, None, PassDeadline::at(started + RECONCILE_SCAN_BOUND))
+            .expect("full scan");
+        let full_elapsed = started.elapsed();
+        assert!(
+            full_elapsed < RECONCILE_SCAN_BOUND + Duration::from_secs(1),
+            "a bounded scan must not overrun its deadline, took {full_elapsed:?}"
+        );
+        if full.discovery_truncated {
+            assert!(full.observed_count <= total);
+        } else {
+            assert_eq!(full.observed_count, total);
+            assert!(full.over_cap);
+            assert_eq!(full.loaded.len(), 64);
+        }
+
+        // Loading 600 manifests is the phase that used to be unbounded: a pass paid for all of it
+        // before it started its first wave, so the published 4 s pass bound was not a bound at all
+        // on exactly the scopes it was published for.
+        let started = Instant::now();
+        let page = store
+            .scan_bounded(64, None, spent_deadline())
+            .expect("scan");
+        let elapsed = started.elapsed();
+        assert!(
+            elapsed < Duration::from_secs(2),
+            "a scan with no budget left must return promptly, took {elapsed:?}"
+        );
+        assert!(page.discovery_truncated);
+        assert_eq!(page.loaded.len(), 1);
+        assert!(
+            page.observed_count <= total,
+            "a truncated pass reports a lower bound on the scope size, never an inflated one"
+        );
+        assert_eq!(
+            store.list_ids().expect("list").len(),
+            total,
+            "a deadline is never a reason to delete an intent"
         );
         let _ = std::fs::remove_dir_all(&run_dir);
     }
@@ -2623,10 +4115,10 @@ mod tests {
 
     /// "Nothing here to revoke" is a success every caller believes.
     ///
-    /// `revoke` returning `Ok(false)` means the binding has no record, and the session-end and
-    /// detach paths treat that as "done". A record that could not be stat'd has not been revoked,
-    /// so reporting it that way retires a live intent in the daemon's bookkeeping while the durable
-    /// record keeps saying the station is armed.
+    /// `withdraw_binding` returning `NoRecord` means the binding provably has no record, and the
+    /// session-end and detach paths treat that as "done". A record that could not be stat'd has
+    /// not been withdrawn, so reporting it that way retires a live intent in the daemon's
+    /// bookkeeping while the durable record keeps saying the station is armed.
     #[test]
     fn an_unstatable_record_cannot_be_reported_as_nothing_to_revoke() {
         let run_dir = temp_run_dir("revoke-unstatable");
@@ -2636,22 +4128,28 @@ mod tests {
 
         let fault = platform_fs::stat_faults::Unstatable::new(store.path_for(&intent.id()));
         assert!(
-            store.revoke("sqlite:/a", "sess", "addr", 1_000).is_err(),
-            "an undecidable record must not report 'there was nothing to revoke'"
+            store
+                .withdraw_binding("sqlite:/a", "sess", "addr", 1_000)
+                .is_err(),
+            "an undecidable record must not report 'there was nothing to withdraw'"
         );
         drop(fault);
 
         assert!(
-            store
-                .revoke("sqlite:/a", "sess", "addr", 1_000)
-                .expect("revoke"),
-            "the readable record still revokes"
+            matches!(
+                store
+                    .withdraw_binding("sqlite:/a", "sess", "addr", 1_000)
+                    .expect("withdraw"),
+                Withdrawal::Revoked { .. }
+            ),
+            "the readable record still withdraws"
         );
-        assert!(
-            !store
-                .revoke("sqlite:/a", "sess", "never-attached", 1_000)
+        assert_eq!(
+            store
+                .withdraw_binding("sqlite:/a", "sess", "never-attached", 1_000)
                 .expect("absent"),
-            "and a binding that provably has no record is still an honest `false`"
+            Withdrawal::NoRecord,
+            "and a binding that provably has no record is still an honest `NoRecord`"
         );
         let _ = std::fs::remove_dir_all(&run_dir);
     }
@@ -2995,8 +4493,8 @@ mod tests {
         store.write_atomic(&revocable).expect("write live");
         let revoked_at_ms = armed_at_ms + ttl_ms;
         store
-            .revoke("sqlite:/a", "sess", "revoked-transition", revoked_at_ms)
-            .expect("revoke");
+            .withdraw_binding("sqlite:/a", "sess", "revoked-transition", revoked_at_ms)
+            .expect("withdraw");
         let report = store
             .gc(
                 revoked_at_ms + STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64 - 1_000,
@@ -3103,9 +4601,13 @@ mod tests {
         let _ = std::fs::remove_dir_all(&run_dir);
     }
 
-    /// Seed a binding whose *previous* pending lifecycle is over: attached, optionally armed by a
-    /// daemon, then explicitly revoked — the durable shape a detach, a fallback downgrade, an
+    /// Seed a binding whose *previous* lifecycle is over: attached, optionally armed by a daemon,
+    /// finalized, then explicitly withdrawn — the durable shape a detach, a fallback downgrade, an
     /// operator reset, or a session end leaves behind. Returns the revoked record.
+    ///
+    /// It finalizes before withdrawing because that is what leaves a *tombstone*: withdrawing an
+    /// unfinalized `pending` record deletes it instead (see [`IntentStore::withdraw_binding`]), and
+    /// a deleted record is not the shape these tests are about.
     fn seed_finished_lifecycle(
         store: &IntentStore,
         run_dir: &Path,
@@ -3131,8 +4633,14 @@ mod tests {
                 .expect("the old daemon arms the old lifecycle");
         }
         store
-            .revoke("sqlite:/a", "sess", address, revoked_at_ms)
-            .expect("revoke");
+            .update_locked(&original.id(), |current| {
+                current.state = IntentRecoveryState::Live;
+                true
+            })
+            .expect("the turn boundary finalizes the old lifecycle");
+        store
+            .withdraw_binding("sqlite:/a", "sess", address, revoked_at_ms)
+            .expect("withdraw");
         let revoked = store.load(&original.id()).expect("reload the tombstone");
         assert_eq!(revoked.state, IntentRecoveryState::Revoked);
         revoked

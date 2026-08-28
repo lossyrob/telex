@@ -933,6 +933,20 @@ impl DaemonState {
             .collect()
     }
 
+    /// Active members attending one address in one store, whatever session holds them.
+    ///
+    /// The member half of an operator reset's binding set; the other half is the durable scope,
+    /// because a station with no member at all still has desired state to withdraw.
+    fn address_members(&self, store_key: &str, address: &str) -> Vec<MemberRecord> {
+        self.members
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|m| m.store_key == store_key && m.address == address && !m.idle)
+            .cloned()
+            .collect()
+    }
+
     /// Active members for a session across ALL stores. The idle drain (issue #65) uses this instead
     /// of the store-scoped variant: the `agentStop` drain hook is static and resolves the client's
     /// ambient store, which differs from a session attached with a named `--backend`/`--db`. Since
@@ -974,92 +988,6 @@ impl DaemonState {
             Self::member_key(&record.store_key, &record.session_id, &record.address),
             record,
         );
-    }
-
-    fn mark_session_idle(
-        &self,
-        store_key: &str,
-        session_id: &str,
-        kind: &str,
-        reason: &str,
-        definite_end: bool,
-    ) -> Vec<MemberRecord> {
-        let mut affected = Vec::new();
-        {
-            let mut members = self.members.lock().unwrap();
-            for member in members
-                .values_mut()
-                .filter(|m| m.store_key == store_key && m.session_id == session_id && !m.idle)
-            {
-                let prior = member.clone();
-                member.idle = true;
-                member.idle_rearmable = false;
-                member.waiters = 0;
-                member.unattended_since_ms = Some(now_ms());
-                member.unattended_with_backlog_since_ms = None;
-                if prior.waiters > 0 {
-                    member.last_waiter_exit_at_ms = Some(now_ms());
-                    member.last_waiter_outcome = Some(WaiterOutcome::PresenceEnded);
-                    member.last_waiter_exit_code = Some(5);
-                    member.last_waiter_detail = Some(presence_ended_detail(kind));
-                }
-                affected.push(prior);
-            }
-        }
-        for member in &affected {
-            self.push_recent_error(
-                kind,
-                format!(
-                    "{kind}: marked idle store={} session={} address={} prior_occupant={} prior_waiters={}: {reason}",
-                    member.store_key, member.session_id, member.address, member.occupant, member.waiters
-                ),
-            );
-        }
-        if definite_end && !affected.is_empty() {
-            self.record_definite_session_end(store_key, session_id, kind, &affected);
-        }
-        affected
-    }
-
-    fn mark_address_idle(
-        &self,
-        store_key: &str,
-        address: &str,
-        kind: &str,
-        reason: &str,
-    ) -> Vec<MemberRecord> {
-        let mut affected = Vec::new();
-        {
-            let mut members = self.members.lock().unwrap();
-            for member in members
-                .values_mut()
-                .filter(|m| m.store_key == store_key && m.address == address && !m.idle)
-            {
-                let prior = member.clone();
-                member.idle = true;
-                member.idle_rearmable = false;
-                member.waiters = 0;
-                member.unattended_since_ms = Some(now_ms());
-                member.unattended_with_backlog_since_ms = None;
-                if prior.waiters > 0 {
-                    member.last_waiter_exit_at_ms = Some(now_ms());
-                    member.last_waiter_outcome = Some(WaiterOutcome::PresenceEnded);
-                    member.last_waiter_exit_code = Some(5);
-                    member.last_waiter_detail = Some(presence_ended_detail(kind));
-                }
-                affected.push(prior);
-            }
-        }
-        for member in &affected {
-            self.push_recent_error(
-                kind,
-                format!(
-                    "{kind}: marked idle store={} session={} address={} prior_occupant={} prior_waiters={}: {reason}",
-                    member.store_key, member.session_id, member.address, member.occupant, member.waiters
-                ),
-            );
-        }
-        affected
     }
 
     fn mark_member_idle(
@@ -3851,8 +3779,37 @@ async fn handle_request_with_capabilities(
             if let Err(response) = state.check_admin_cap(proof.as_deref()) {
                 return (response, ClientAction::Continue);
             }
-            Response::Reconciled {
-                report: reconcile::reconcile_once(state.clone(), scope).await,
+            // **One** deadline, originated here, shared with the pass.
+            //
+            // The previous shape was a spawned pass on its own four-second clock plus a
+            // four-second `timeout` on the handler. Equal lengths, different origins: the handler's
+            // clock started when the request arrived and the pass's when the task was scheduled, so
+            // the handler could answer `admin_deadline` while the pass was still mid-wave — and the
+            // pass then went on registering members, advancing cursors, and publishing a report
+            // that belonged to a request already answered. Handing the pass this instant instead
+            // makes "the pass is bounded" and "the request is bounded" the same statement, and
+            // `RECONCILE_RESPONSE_RESERVE` is the slack between the pass's last phase and this
+            // handler's answer.
+            //
+            // Spawned, then **joined** — not detached. Spawning is what keeps a client that hangs
+            // up mid-request from tearing a pass in half at an arbitrary await point; joining is
+            // what guarantees every member registration, cursor advance, and report the pass
+            // performs has already happened when this response is written.
+            let deadline = Instant::now() + reconcile::RECONCILE_PASS_WORK_BUDGET;
+            let pass = tokio::spawn(reconcile::reconcile_once_until(
+                state.clone(),
+                scope,
+                deadline,
+                reconcile::PassOrigin::Request,
+            ));
+            match pass.await {
+                Ok(report) => Response::Reconciled { report },
+                // A panicked pass has no report to give. `ran: false` is the existing protocol for
+                // "no result to report"; the CLI and the turn-boundary hook already retry on it
+                // rather than reading a zeroed report as a successful pass that restored nothing.
+                Err(_) => Response::Reconciled {
+                    report: reconcile::abandoned_pass_report(&state, "pass_aborted"),
+                },
             }
         }
         Request::Register {
@@ -4321,6 +4278,15 @@ async fn register_member(
                 state
                     .delivery_admission_before_commit(DeliveryAdmissionKind::Register)
                     .await;
+                // Explicit push→pull downgrade: withdraw the durable intent as part of this same
+                // admitted transition. See `withdraw_downgraded_intent`.
+                if removing_push {
+                    if let Err(response) =
+                        withdraw_downgraded_intent(&state, &store_key, &session_id, &address)
+                    {
+                        return response;
+                    }
+                }
                 // Commit the durable proof *before* the member, and before any other side effect
                 // this branch performs. On failure the pre-existing member is left exactly as it
                 // was: `existing` is still the installed record, its epoch lease is untouched, and
@@ -4746,6 +4712,18 @@ async fn register_member(
             return response;
         }
     }
+    // Explicit push→pull downgrade on a binding that had no in-memory member (the daemon-restart
+    // shape: the manifest survived, the member did not). Same combined transition, same guard, same
+    // rollback discipline as the armed proof above.
+    if record.on_deliver.is_none() && replace_on_deliver {
+        if let Err(response) = withdraw_downgraded_intent(&state, &store_key, &session_id, &address)
+        {
+            let _ = backend
+                .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                .await;
+            return response;
+        }
+    }
     if !recovery {
         state.clear_definite_session_end(&store_key, &session_id);
     }
@@ -4824,6 +4802,49 @@ fn commit_armed_proof(
         ),
         NeedsAttachReason::PushIntentUnrecoverable,
     ))
+}
+
+/// Withdraw the durable push intent for an explicit push→pull downgrade, or refuse the register.
+///
+/// `Register { on_deliver: None, replace_on_deliver: true }` is the one request shape that *means*
+/// "give up push for this binding" — it is the only thing that clears an installed `on_deliver`,
+/// and it is already exempt from the anti-downgrade guard for exactly that reason. The durable
+/// desired state has to go with it, and it has to go under the **same** admission guard that
+/// installs the pull-only member, because that is what makes the pair a single transition.
+///
+/// The fallback used to do this from the CLI, after the register returned. That is two transitions
+/// with a gap: the daemon released this binding's admission at the end of the register, a reconcile
+/// pass could take it and restore the push member from the still-live manifest, and the CLI's later
+/// withdrawal then revoked the manifest while leaving the restored member armed next to the pull
+/// waiter it was downgrading *to*. Doing it here closes the gap without a new protocol field —
+/// there is no request shape to add, because the downgrade already had one.
+///
+/// Fallible and refusing: reporting `Registered` for a downgrade whose desired state still says
+/// "restore push" hands back a member that the next pass is entitled to overwrite.
+fn withdraw_downgraded_intent(
+    state: &Arc<DaemonState>,
+    store_key: &str,
+    session_id: &str,
+    address: &str,
+) -> std::result::Result<(), Response> {
+    match state.withdraw_intent_admitted(store_key, session_id, address, None) {
+        Ok(_) => Ok(()),
+        Err(detail) => {
+            state.push_recent_error(
+                "StationIntent",
+                format!(
+                    "refused push-to-pull downgrade because the station intent could not be withdrawn store={store_key} session={session_id} address={address}: {detail}"
+                ),
+            );
+            Err(proto::incompatible_with_reason(
+                format!(
+                    "push for {address} was not downgraded to pull: its station-intent record could not be withdrawn ({detail}); \
+                     a reconcile pass would restore push over the pull waiter, so the downgrade is refused"
+                ),
+                NeedsAttachReason::PushIntentUnrecoverable,
+            ))
+        }
+    }
 }
 
 async fn on_deliver_cc_lower_bound(
@@ -4911,6 +4932,24 @@ async fn drain_deferred(
     }
 }
 
+/// End a session's membership: release each binding's durable lease, mark it idle, and withdraw its
+/// durable desired state — **each binding under its own admission guard, held across all three**.
+///
+/// Holding the guard across the whole per-binding transition is the correctness property, not an
+/// optimization. Before it, the member snapshot, the lease releases and the idle marking all ran
+/// outside the guard and only the withdrawal took it: a reconcile pass that held admission could
+/// publish an armed push member in between, and the session end would then revoke the manifest
+/// while leaving the member that manifest had authorized installed and delivering.
+///
+/// The binding set is the union of this session's live members and every binding the durable scope
+/// names for it, because either one alone misses a case: a member with no manifest (nothing to
+/// withdraw, but a member to end) and a manifest with no member (nothing to release, but the record
+/// that would bring the session back).
+///
+/// Bounded by one total [`TEARDOWN_DEADLINE`] rather than a fresh budget per binding, and every
+/// expiry is a failure of the whole request: an ended session whose desired state still says
+/// "restore push" is exactly the state the next pass resurrects it from, so a partial teardown is
+/// reported as a failed one.
 async fn end_session_members(
     state: Arc<DaemonState>,
     store_key: String,
@@ -4918,22 +4957,97 @@ async fn end_session_members(
     kind: &str,
     reason: &str,
 ) -> Response {
-    let active = state.session_members(&store_key, &session_id);
-    let release_error = release_definite_end_members(&state, &active, kind).await;
-    if let Some(response) = release_error {
-        return response;
+    let deadline = station_intent::PassDeadline::at(Instant::now() + reconcile::TEARDOWN_DEADLINE);
+    let durable = match state
+        .session_teardown_bindings(&store_key, &session_id, deadline)
+        .await
+    {
+        Ok(bindings) => bindings,
+        Err(e) => {
+            state.push_recent_error(kind, e.clone());
+            return proto::internal(format!(
+                "{kind} could not enumerate station intents for session {session_id} in {store_key}: {e}"
+            ));
+        }
+    };
+    let mut addresses: BTreeSet<String> = state
+        .session_members(&store_key, &session_id)
+        .into_iter()
+        .map(|member| member.address)
+        .collect();
+    addresses.extend(durable.into_iter().map(|binding| binding.address));
+
+    let mut affected = Vec::new();
+    for address in addresses {
+        let admission_budget = match teardown_budget(deadline) {
+            Ok(budget) => budget,
+            Err(e) => {
+                state.push_recent_error(kind, e.clone());
+                return proto::internal(format!(
+                    "{kind} could not complete the teardown of session {session_id} in {store_key}: {e}"
+                ));
+            }
+        };
+        let admit = match state
+            .admit_binding(&store_key, &session_id, &address, admission_budget)
+            .await
+        {
+            Ok(admit) => admit,
+            Err(e) => {
+                state.push_recent_error(kind, e.clone());
+                return proto::internal(format!(
+                    "{kind} could not complete the teardown of session {session_id} in {store_key}: {e}"
+                ));
+            }
+        };
+        // Re-read under the guard: the member this teardown must end is whatever is installed
+        // *now*, including one a reconcile pass published while this loop was waiting for
+        // admission. Acting on the pre-admission snapshot is what let a freshly restored member
+        // outlive the desired state that authorized it.
+        if let Some(member) = state.get_member(&store_key, &session_id, &address) {
+            if !member.idle {
+                if let Some(response) =
+                    release_definite_end_members(&state, std::slice::from_ref(&member), kind).await
+                {
+                    return response;
+                }
+            }
+            if let Some(prior) =
+                state.mark_member_idle(&store_key, &session_id, &address, kind, reason)
+            {
+                affected.push(prior);
+            }
+        }
+        // An ended session must never be re-attended by a stale intent. This is daemon-owned and
+        // harness-neutral: it covers `sessionEnd`, watch-pid death, and idle-TTL reaping alike,
+        // because intents are generic records the daemon owns rather than Copilot state.
+        //
+        // Fallible, and it fails the request. A swallowed error here left desired state saying
+        // "restore push" for a session that had ended, and the next reconcile pass — or the next
+        // daemon — brought it back; the caller would have seen an `Ack` and had no reason to retry.
+        if let Err(e) = state.withdraw_intent_admitted(&store_key, &session_id, &address, None) {
+            state.push_recent_error(kind, e.clone());
+            return proto::internal(format!(
+                "{kind} could not withdraw station intents for session {session_id} in {store_key}: {e}"
+            ));
+        }
+        // Still under the guard: nothing may have published a member here, and if anything did it
+        // is a member the withdrawn record no longer authorizes.
+        if let Some(stray) = state.mark_member_idle(&store_key, &session_id, &address, kind, reason)
+        {
+            affected.push(stray);
+        }
+        drop(admit);
     }
-    let affected = state.mark_session_idle(&store_key, &session_id, kind, reason, true);
+
     if affected.is_empty() {
         state.push_recent_error(
             kind,
             format!("{kind} no-op store={store_key} session={session_id}: no active members"),
         );
+    } else {
+        state.record_definite_session_end(&store_key, &session_id, kind, &affected);
     }
-    // An ended session must never be re-attended by a stale intent. This is daemon-owned and
-    // harness-neutral: it covers `sessionEnd`, watch-pid death, and idle-TTL reaping alike,
-    // because intents are generic records the daemon owns rather than Copilot state.
-    state.revoke_intents_for_session(&store_key, &session_id);
     Response::Ack {
         message: Some(presence_ended_detail(kind)),
         delivery_outcome: None,
@@ -4941,6 +5055,24 @@ async fn end_session_members(
         message_id: None,
         lease_epoch: None,
         drain_intents: None,
+    }
+}
+
+/// What is left of a teardown's one total deadline, or the explicit incomplete-teardown error.
+///
+/// Zero is refused rather than passed on: a zero-budget admission attempt is a teardown that
+/// reports an answer it never waited for.
+fn teardown_budget(
+    deadline: station_intent::PassDeadline,
+) -> std::result::Result<Duration, String> {
+    match deadline.remaining() {
+        Some(remaining) if remaining.is_zero() => Err(
+            "the teardown deadline expired before every binding was withdrawn; \
+             refusing to report a teardown that did not complete"
+                .to_string(),
+        ),
+        Some(remaining) => Ok(remaining),
+        None => Ok(reconcile::TEARDOWN_DEADLINE),
     }
 }
 
@@ -4995,6 +5127,24 @@ async fn release_definite_end_members(
     None
 }
 
+/// `Reset`: withdraw an address's attendance, in every session that holds it.
+///
+/// Each binding's idle marking and intent withdrawal run under **that binding's** admission guard,
+/// held across both. Marking idle outside the guard and withdrawing inside it is not a
+/// linearization: a reconcile pass holding admission could publish an armed push member between the
+/// two, so the reset revoked the manifest and left behind precisely the armed member the operator
+/// had just asked it to give up — with no durable marker anywhere saying so.
+///
+/// Scoped by *address*, not by the members this reset changed. Deriving the set from the affected
+/// members missed exactly the cases that need it most: a station whose member was already idle
+/// (marking it idle changes nothing, so nothing was withdrawn) and a station with no member at all,
+/// where the manifest is the only thing left and is precisely what the next pass would restore from.
+///
+/// Reset is a deliberate operator withdrawal of attendance, so the *desired* state has to be
+/// withdrawn with it. Without that the station intent stayed `live` and the next reconcile pass
+/// re-registered the member within a tick — silently undoing the one operator action that has no
+/// durable marker. Withdrawal is exact per binding and reversible with an explicit
+/// `telex --address <address> copilot resume`.
 async fn reset_station(state: Arc<DaemonState>, store_key: String, address: String) -> Response {
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
@@ -5008,16 +5158,78 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
             ))
         }
     };
-    let affected =
-        state.mark_address_idle(&store_key, &address, "Reset", "operator reset requested");
-    // Reset is a deliberate operator withdrawal of attendance, so the *desired* state has to be
-    // withdrawn with it. Without this the station intent stayed `live` and the next reconcile pass
-    // re-registered the member within a tick — silently undoing the one operator action that had
-    // no durable marker. Revocation is exact per binding and reversible with an explicit
-    // `telex --address <address> copilot resume`.
-    for member in &affected {
-        state.revoke_intent_for_binding(&member.store_key, &member.session_id, &member.address);
+    let deadline = station_intent::PassDeadline::at(Instant::now() + reconcile::TEARDOWN_DEADLINE);
+    let durable = match state
+        .address_teardown_bindings(&store_key, &address, deadline)
+        .await
+    {
+        Ok(bindings) => bindings,
+        Err(e) => {
+            state.push_recent_error("Reset", e.clone());
+            return proto::internal(format!(
+                "reset could not enumerate station intents for {address} in {store_key}: {e}"
+            ));
+        }
+    };
+    let mut sessions: BTreeSet<String> = state
+        .address_members(&store_key, &address)
+        .into_iter()
+        .map(|member| member.session_id)
+        .collect();
+    sessions.extend(durable.into_iter().map(|binding| binding.session_id));
+
+    let mut affected = Vec::new();
+    for session_id in sessions {
+        let admission_budget = match teardown_budget(deadline) {
+            Ok(budget) => budget,
+            Err(e) => {
+                state.push_recent_error("Reset", e.clone());
+                return proto::internal(format!(
+                    "reset could not complete the teardown of {address} in {store_key}: {e}"
+                ));
+            }
+        };
+        let admit = match state
+            .admit_binding(&store_key, &session_id, &address, admission_budget)
+            .await
+        {
+            Ok(admit) => admit,
+            Err(e) => {
+                state.push_recent_error("Reset", e.clone());
+                return proto::internal(format!(
+                    "reset could not complete the teardown of {address} in {store_key}: {e}"
+                ));
+            }
+        };
+        // Re-read under the guard, so a member a reconcile pass published while this loop waited
+        // for admission is idled by this reset rather than surviving it.
+        if let Some(prior) = state.mark_member_idle(
+            &store_key,
+            &session_id,
+            &address,
+            "Reset",
+            "operator reset requested",
+        ) {
+            affected.push(prior);
+        }
+        if let Err(e) = state.withdraw_intent_admitted(&store_key, &session_id, &address, None) {
+            state.push_recent_error("Reset", e.clone());
+            return proto::internal(format!(
+                "reset could not withdraw station intents for {address} in {store_key}: {e}"
+            ));
+        }
+        if let Some(stray) = state.mark_member_idle(
+            &store_key,
+            &session_id,
+            &address,
+            "Reset",
+            "operator reset requested",
+        ) {
+            affected.push(stray);
+        }
+        drop(admit);
     }
+
     if affected.is_empty() {
         state.push_recent_error(
             "Reset",
@@ -5132,6 +5344,33 @@ async fn detach_member(
     session_id: String,
     address: String,
 ) -> Response {
+    // Admission is taken *before* the member is read, and held across the whole detach: the
+    // backend release, the local member removal, and the intent withdrawal. Reading the member
+    // outside the guard and withdrawing inside it is not a linearization — a reconcile pass
+    // holding admission can publish an armed push member between the two, so the detach removed
+    // the member it saw, revoked the manifest, and left the *new* member installed and armed.
+    //
+    // Admission is an in-memory async lock, so spanning the backend awaits is safe (it is the
+    // outermost lock in the ordering and never held while acquiring another admission). What must
+    // not span a backend await is the per-intent *filesystem* lock, and it does not:
+    // `withdraw_intent_admitted` is a self-contained synchronous store operation.
+    let admit = match state
+        .admit_binding(
+            &store_key,
+            &session_id,
+            &address,
+            reconcile::TEARDOWN_DEADLINE,
+        )
+        .await
+    {
+        Ok(admit) => admit,
+        Err(e) => {
+            state.push_recent_error("Detach", e.clone());
+            return proto::internal(format!(
+                "detach could not take delivery admission for {address} in {store_key}: {e}"
+            ));
+        }
+    };
     let member = state.get_member(&store_key, &session_id, &address);
     if let Some(member) = member {
         let backend = match state.backend_for(&store_key).await {
@@ -5162,11 +5401,30 @@ async fn detach_member(
                 // re-attach's tombstone clear and recreate a stale tombstone for a freshly-live
                 // station, which `telex copilot push` would then refuse permanently.
                 //
-                // Intent revocation happens *after* the durable tombstone, deliberately: a crash
+                // Intent withdrawal happens *after* the durable tombstone, deliberately: a crash
                 // between the two leaves tombstone-wins, which the reconciler already honors, so
                 // the station still cannot auto-return. The reverse order could leave a live
                 // intent with no tombstone.
-                state.revoke_intent_for_binding(&store_key, &session_id, &address);
+                //
+                // The withdrawal itself is a self-contained synchronous store operation, and the
+                // admission guard taken at the top of this function is still held, so no
+                // filesystem lock is held across the backend awaits above or below it. It is
+                // fallible and it fails the detach: reporting "detached" while the desired state
+                // still says "restore push" is the exact shape of the bug this ordering exists to
+                // prevent — with a tombstone present the station would not return, but the
+                // operator would have no signal that the local record disagreed.
+                if let Err(e) =
+                    state.withdraw_intent_admitted(&store_key, &session_id, &address, None)
+                {
+                    state.push_recent_error("Detach", e.clone());
+                    return proto::internal(format!(
+                        "detached {address} durably but could not withdraw its station intent: {e}"
+                    ));
+                }
+                // Nothing can have published a member since admission was taken, but sweep anyway:
+                // this is the one place that can still prove the guard held, and removing an
+                // already-absent member is free.
+                state.remove_member(&store_key, &session_id, &address);
             }
 
             Ok(false) => {
@@ -5194,6 +5452,7 @@ async fn detach_member(
                 ));
             }
         }
+        drop(admit);
         Response::Ack {
             message: Some("detached".to_string()),
             delivery_outcome: None,
@@ -5221,8 +5480,21 @@ async fn detach_member(
                 "Detach recorded terminal tombstone store={store_key} session={session_id} address={address}: no active in-memory member"
             ),
         );
-        // Same ordering as the attached branch: durable tombstone first, local intent second.
-        state.revoke_intent_for_binding(&store_key, &session_id, &address);
+        // Same ordering as the attached branch: durable tombstone first, local intent second, both
+        // under the admission guard taken at the top.
+        //
+        // This is the branch that most needs to be fallible. "No in-memory member" is exactly the
+        // state a daemon restart leaves behind, so the manifest here is very often the *only*
+        // remaining record of the binding — and the only thing that could bring it back.
+        if let Err(e) = state.withdraw_intent_admitted(&store_key, &session_id, &address, None) {
+            state.push_recent_error("Detach", e.clone());
+            return proto::internal(format!(
+                "recorded a durable detach tombstone for {address} but could not withdraw its \
+                 station intent: {e}"
+            ));
+        }
+        state.remove_member(&store_key, &session_id, &address);
+        drop(admit);
         Response::Ack {
             message: Some("not-attached".to_string()),
             delivery_outcome: None,
@@ -7640,6 +7912,82 @@ mod p3_tests {
         let refused = commit_armed_proof(&state, &store, "s1", "addr:c", true)
             .expect_err("and certainly an owed one");
         assert_refused_for_unrecoverable_proof(&refused);
+    }
+
+    /// **Post-combination invariant.** Both durable commits inside `register_member` still happen
+    /// *before* the member is published, after the withdrawal work reordered the paths around them.
+    ///
+    /// The two orderings are the register-side counterpart of the withdrawal rules: the armed proof
+    /// must be durable before an armed member exists (or a crash leaves push delivery working with
+    /// no record that can recover it), and an Application Client's durable detach intent must be
+    /// cleared before its member exists (or the member is observable while durable state still says
+    /// the responsibility was detached). Both are structural — the failure they prevent is a crash
+    /// in a window, which no behavioral test can schedule — so they are asserted against the source
+    /// the same way the reconciler's tombstone-clearing claim is.
+    #[test]
+    fn register_member_commits_durable_state_before_it_publishes_the_member() {
+        let source = include_str!("daemon.rs");
+        let start = source
+            .find("async fn register_member(")
+            .expect("register_member must exist");
+        let body = &source[start..];
+        let end = body
+            .find("\nasync fn commit_armed_proof")
+            .or_else(|| body.find("\nfn commit_armed_proof"))
+            .unwrap_or(body.len());
+        let body = &body[..end];
+
+        let insert = body
+            .find("state.insert_member(record.clone());")
+            .expect("register_member must publish the member");
+        let proof = body
+            .find("commit_armed_proof(")
+            .expect("register_member must commit the armed proof");
+        let detach_intent = body
+            .find("clear_application_detach_intent(")
+            .expect("register_member must clear the application detach intent");
+
+        assert!(
+            proof < insert,
+            "the armed proof must be durable before an armed push member exists"
+        );
+        assert!(
+            detach_intent < insert,
+            "an Application Client's durable detach intent must be cleared before its member exists"
+        );
+    }
+
+    /// **Post-combination invariant.** Every explicit teardown routes through the one linearized
+    /// withdrawal operation, and none of them reaches a raw revoke.
+    ///
+    /// Asserted structurally because the failure it prevents is a *new* teardown path being added
+    /// later with its own best-effort revocation — exactly how the paths this work consolidated
+    /// drifted apart in the first place.
+    #[test]
+    fn no_teardown_path_bypasses_the_linearized_withdrawal() {
+        for (name, source) in [
+            ("daemon.rs", include_str!("daemon.rs")),
+            ("daemon_reconcile.rs", include_str!("daemon_reconcile.rs")),
+            ("commands/copilot.rs", include_str!("commands/copilot.rs")),
+        ] {
+            let production = match source.find("mod tests {") {
+                Some(index) => &source[..index],
+                None => source,
+            };
+            for (index, line) in production.lines().enumerate() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") || trimmed.starts_with("///") {
+                    continue;
+                }
+                assert!(
+                    !line.contains("revoke_intent_for_binding")
+                        && !line.contains("revoke_intents_for_session")
+                        && !line.contains(".revoke("),
+                    "{name}:{} reaches a raw revoke instead of withdraw_binding",
+                    index + 1
+                );
+            }
+        }
     }
 
     #[test]
@@ -12822,6 +13170,24 @@ pub mod test_support {
         _inner: platform::Listener,
     }
 
+    /// A live accept loop on a [`TestDaemon`]'s **real** IPC endpoint.
+    ///
+    /// `TestDaemon` normally short-circuits the transport and calls `handle_request` directly, which
+    /// is right for behavioral tests and wrong for the one property that is *about* the transport:
+    /// the published four-second `ReconcileIntents` bound is end-to-end, so the only way to check it
+    /// is to make a real client, over a real socket, against the real `handle_client` path — hello
+    /// frame, peer verification, request, response — and time it. Aborted on drop, so a test that
+    /// fails still tears its endpoint down.
+    pub struct TestIpcServer {
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for TestIpcServer {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum TestClientAction {
         Continue,
@@ -12919,6 +13285,50 @@ pub mod test_support {
         /// sleep, no polling.
         pub async fn reconcile_once(&self) -> crate::daemon_ipc::ReconcileReport {
             reconcile::reconcile_once(self.state.clone(), None).await
+        }
+
+        /// Drive one pass against a **caller-supplied absolute deadline**, exactly as the admin
+        /// request handler does.
+        ///
+        /// This is the seam a deadline-edge test needs: passing an instant that has already elapsed
+        /// puts every phase on the far side of its budget deterministically, with no sleep, no
+        /// filesystem fault injection, and no dependence on how fast the runner is.
+        pub async fn reconcile_once_until(
+            &self,
+            deadline: std::time::Instant,
+        ) -> crate::daemon_ipc::ReconcileReport {
+            reconcile::reconcile_once_until(
+                self.state.clone(),
+                None,
+                deadline,
+                reconcile::PassOrigin::Request,
+            )
+            .await
+        }
+
+        /// The bytes of this scope's reconcile event log, or `None` when nothing has been appended.
+        pub fn reconcile_event_log_bytes(&self) -> Option<Vec<u8>> {
+            std::fs::read(
+                self.intent_store()
+                    .root()
+                    .join(reconcile::RECONCILE_EVENT_LOG_FILE),
+            )
+            .ok()
+        }
+
+        /// Every `(store_key, session_id, address)` this daemon currently holds a member for.
+        ///
+        /// The membership table itself rather than a status projection: "no member was published
+        /// after the response" has to be checked against what the daemon actually holds, not against
+        /// a view that could filter one out.
+        pub fn member_keys(&self) -> Vec<String> {
+            self.state
+                .members
+                .lock()
+                .unwrap()
+                .keys()
+                .map(|key| format!("{key:?}"))
+                .collect()
         }
 
         /// Run the trigger half of the production `heartbeat_loop`: wake on a trigger pulse and
@@ -13033,6 +13443,142 @@ pub mod test_support {
             format!("{outcome:?}")
         }
 
+        /// Hold a binding's delivery-admission guard, exactly as a concurrent register, detach, or
+        /// reset does while it works.
+        ///
+        /// Returned owned so a test can keep it across awaits and observe what a *contended* guard
+        /// does to a bounded operation. Contention here is not exotic: the guard is the outermost
+        /// lock on the two writers of a station's membership, so every published bound on the
+        /// reconcile path has to hold while it is held by someone else.
+        pub async fn hold_delivery_admission(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+        ) -> tokio::sync::OwnedMutexGuard<()> {
+            self.state
+                .delivery_admission(
+                    store_key,
+                    session_id,
+                    address,
+                    DeliveryAdmissionKind::Register,
+                )
+                .await
+                .lock_owned()
+                .await
+        }
+
+        /// Withdraw one binding with an explicit admission budget, as `apply_outcome` does with
+        /// whatever is left of the pass deadline.
+        pub async fn withdraw_within(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+            admission_budget: Duration,
+        ) -> std::result::Result<String, String> {
+            self.state
+                .withdraw_intent_at_generation_within(
+                    store_key,
+                    session_id,
+                    address,
+                    None,
+                    admission_budget,
+                )
+                .await
+                .map(|outcome| format!("{outcome:?}"))
+        }
+
+        /// Publish an armed push member for a binding **without** taking its admission guard, as a
+        /// reconcile pass does at the end of a restore it is already admitted for.
+        ///
+        /// This is what makes the reverse-order race deterministic. A test holds the binding's
+        /// admission guard, starts a teardown (which must now block on that guard), and then calls
+        /// this — modelling the pass that publishes a member *after* the teardown began but
+        /// *before* it could act. A teardown that reads membership outside the guard leaves this
+        /// member installed; one that re-reads under the guard does not.
+        ///
+        /// It goes through the real backend (`ensure_address` + `claim_epoch_lease`) rather than
+        /// only inserting a record, so the published member has a genuine owner and epoch and a
+        /// detach's `release_epoch_lease_for_detach` sees an owner it can actually release.
+        pub async fn publish_push_member_unadmitted(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+        ) {
+            let backend = match self.state.backend_for(store_key).await {
+                Ok(backend) => backend,
+                Err(response) => panic!("test backend for {store_key}: {response:?}"),
+            };
+            backend
+                .ensure_address(address, None, None, None)
+                .await
+                .expect("ensure address for published push member");
+            let claimed = match backend
+                .claim_epoch_lease(address, &self.state.instance_id, liveness_window_secs())
+                .await
+                .expect("claim epoch lease for published push member")
+            {
+                EpochClaimResult::Claimed(claimed) => claimed,
+                other => panic!("expected a fresh epoch claim, got {other:?}"),
+            };
+            self.state.insert_member(MemberRecord {
+                address: address.to_string(),
+                capability: StationCapability::default(),
+                store_key: store_key.to_string(),
+                backend: backend.kind().to_string(),
+                session_id: session_id.to_string(),
+                application_responsibility: None,
+                occupant: "reconciler".to_string(),
+                host: crate::config::hostname(),
+                waiters: 0,
+                watch_pids: Vec::new(),
+                description: None,
+                scope: None,
+                tags: None,
+                lease_epoch: claimed.lease_epoch,
+                owner_instance_id: claimed.owner_instance_id,
+                idle: false,
+                idle_rearmable: false,
+                unattended_since_ms: Some(now_ms()),
+                unattended_with_backlog_since_ms: None,
+                last_waiter_exit_at_ms: None,
+                last_waiter_outcome: None,
+                last_waiter_exit_code: None,
+                last_waiter_detail: None,
+                last_waiter_pid: None,
+                last_delivered_message_id: None,
+                on_deliver: Some(vec!["cmd".to_string(), "--armed".to_string()]),
+                on_deliver_wake_on_cc: false,
+                on_deliver_cc_after_ms: None,
+            });
+        }
+
+        /// Whether an **active** (non-idle) push-armed member is installed for this binding.
+        ///
+        /// Idleness matters: `reset` and session end mark members idle rather than removing them,
+        /// and a member's `on_deliver` survives that. The question a teardown race asks is whether
+        /// live push coverage remains, which is "armed *and* not idle".
+        pub fn has_active_push_member(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+        ) -> bool {
+            self.state
+                .get_member(store_key, session_id, address)
+                .is_some_and(|member| !member.idle && member.on_deliver.is_some())
+        }
+
+        /// Whether any member record at all is installed for this binding.
+        pub fn has_member(&self, store_key: &str, session_id: &str, address: &str) -> bool {
+            self.state
+                .get_member(store_key, session_id, address)
+                .is_some()
+        }
+
+        /// The daemon's run/state paths.
         pub fn root(&self) -> &Path {
             &self.root
         }
@@ -13217,6 +13763,56 @@ pub mod test_support {
             TestDaemonHandle {
                 state: self.state.clone(),
             }
+        }
+
+        /// Start serving this daemon's real IPC endpoint. See [`TestIpcServer`].
+        pub fn serve_ipc(&self) -> TestIpcServer {
+            std::fs::create_dir_all(&self.state.paths.run_dir).expect("create test run dir");
+            let mut listener = platform::Listener::bind(&self.state.paths.endpoint)
+                .expect("bind the test daemon endpoint");
+            let state = self.state.clone();
+            let task = tokio::spawn(async move {
+                loop {
+                    let Ok(conn) = listener.accept().await else {
+                        return;
+                    };
+                    if listener.ready_for_next().is_err() {
+                        return;
+                    }
+                    let state = state.clone();
+                    tokio::spawn(async move {
+                        let _ = handle_client(conn, state).await;
+                    });
+                }
+            });
+            TestIpcServer { task }
+        }
+
+        /// Connect a real client to this daemon's endpoint through the production handshake.
+        ///
+        /// Requires [`TestDaemon::serve_ipc`] to be running.
+        pub async fn connect_ipc(&self, store_key: &str) -> DaemonClient {
+            let conn = platform::connect(&self.state.paths.endpoint)
+                .await
+                .expect("connect to the test daemon endpoint");
+            handshake_connected(conn, self.state.paths.clone(), store_key)
+                .await
+                .expect("handshake with the test daemon")
+        }
+
+        /// The bytes of this scope's round-robin cursor file, or `None` when no pass has written
+        /// one yet.
+        ///
+        /// Byte-exact rather than parsed on purpose: a test asserting "nothing was published after
+        /// the response" has to fail on *any* difference, including one a future field would hide
+        /// from a structural comparison.
+        pub fn scan_cursor_bytes(&self) -> Option<Vec<u8>> {
+            std::fs::read(
+                self.intent_store()
+                    .root()
+                    .join(crate::station_intent::SCAN_CURSOR_FILE),
+            )
+            .ok()
         }
 
         pub async fn status(&self) -> DaemonStatus {

@@ -32,8 +32,9 @@ use crate::daemon_ipc::{
 use crate::handler_kinds::{self, StoreSelector};
 use crate::platform_fs;
 use crate::station_intent::{
-    self, ArmedProofFailure, ArmedProofStamp, IntentEvidence, IntentId, IntentStore,
-    ProducerTransport, StationIntentV1, BRIDGE_PROBE_TIMEOUT, STATION_INTENT_MAX_COUNT,
+    self, ArmedProofFailure, ArmedProofStamp, BoundedPhase, IntentBinding, IntentEvidence,
+    IntentId, IntentStore, PassDeadline, ProducerTransport, StationIntentV1, Withdrawal,
+    BRIDGE_PROBE_TIMEOUT, RECONCILE_BLOCKING_GRACE, STATION_INTENT_MAX_COUNT,
 };
 use std::collections::BTreeSet;
 use std::sync::OnceLock;
@@ -50,6 +51,34 @@ pub(crate) struct ArmedProofRefusal {
     pub(crate) detail: String,
 }
 
+/// A held per-`MemberKey` delivery-admission guard.
+///
+/// Owned rather than borrowed so a teardown can hold it across the whole transition it is
+/// linearizing — a durable lease release, a member removal, and the withdrawal — instead of only
+/// across the last step of it.
+pub(crate) struct BindingAdmission {
+    _guard: tokio::sync::OwnedMutexGuard<()>,
+}
+
+/// Which bindings a set-scoped teardown is about.
+///
+/// A closed set rather than a predicate closure, because the enumeration it drives runs on the
+/// blocking pool behind a deadline and therefore has to be `'static` and `Send`.
+#[derive(Debug, Clone)]
+pub(crate) enum TeardownScope {
+    Session(String),
+    Address(String),
+}
+
+impl TeardownScope {
+    fn selects(&self, binding: &IntentBinding) -> bool {
+        match self {
+            TeardownScope::Session(session_id) => binding.session_id == *session_id,
+            TeardownScope::Address(address) => binding.address == *address,
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------------------------
 // Constants and published bounds
 // ---------------------------------------------------------------------------------------------
@@ -59,13 +88,131 @@ pub(crate) struct ArmedProofRefusal {
 /// test-enforced invariant against `ON_DELIVER_DEFERRED_BACKSTOP`.
 pub const RECONCILE_INTERVAL: Duration = HEARTBEAT_INTERVAL;
 
-/// Wall-clock ceiling for one pass. Strictly less than `RECONCILE_INTERVAL`, so a pass can never
-/// overrun the tick that started it and the single-flight guard never has to skip a tick in the
-/// normal case.
+/// Wall-clock ceiling for one pass **as observed by whoever asked for it**. Strictly less than
+/// `RECONCILE_INTERVAL`, so a pass can never overrun the tick that started it.
+///
+/// This is the published, end-to-end number, and it is the only one: the admin request bound and
+/// the client ceiling are the same value, enforced by *sharing a deadline* rather than by running a
+/// second clock beside the pass (see [`RECONCILE_RESPONSE_RESERVE`]).
+///
+/// Enforced as a **single absolute deadline** computed once at the top of the pass, against which
+/// every phase — GC, discovery, and each wave — measures itself. A chain of independent per-phase
+/// timeouts would bound each phase and nothing at all.
 pub const RECONCILE_PASS_DEADLINE: Duration = Duration::from_secs(4);
+
+/// The slice of the published bound reserved for *answering*, and therefore not available to the
+/// pass's own phases.
+///
+/// A pass that budgeted its work to the full four seconds published a bound it could only ever meet
+/// by accident: after the last phase returns there is still a task join, a report clone, a JSON
+/// encode, and a socket write between the pass and the caller. The reserve makes that tail
+/// explicit, so `RECONCILE_PASS_WORK_BUDGET + RECONCILE_RESPONSE_RESERVE = RECONCILE_PASS_DEADLINE`
+/// is the whole arithmetic of the published number.
+///
+/// It is also what lets the admin handler stop running a clock of its own. The previous shape —
+/// `tokio::spawn(pass)` plus a same-length `tokio::time::timeout` on the handler — had two clocks
+/// started at two different instants for the same four seconds, so the handler's could fire while
+/// the pass was still mid-wave. The caller got `ran: false` and the pass went on to register
+/// members, advance cursors, and publish a report *after* the answer it was not in. One deadline,
+/// originated by the request and passed into the pass, is what removes that window.
+pub const RECONCILE_RESPONSE_RESERVE: Duration = Duration::from_millis(200);
+
+/// What a pass's own phases actually get: the published bound minus the response reserve.
+///
+/// Every internal budget below is sized against *this*, not against `RECONCILE_PASS_DEADLINE`.
+pub const RECONCILE_PASS_WORK_BUDGET: Duration = Duration::from_millis(3_800);
+
+/// Minimum remaining budget for *starting* a durable pass-visible write (the evidence CAS, the
+/// round-robin cursor) and joining it.
+///
+/// Bounding only the wait is the right answer for a phase whose result the pass merely reports; it
+/// is the wrong answer for one that mutates state a caller can observe, because the write then
+/// lands after the response. So such a write is never launched below this reserve: it is reported
+/// as deadline-truncated having not run, and the next pass re-derives it. See
+/// [`station_intent::run_blocking_reserved`] for the one residual case this cannot remove.
+pub const RECONCILE_DURABLE_WRITE_RESERVE: Duration = Duration::from_millis(100);
+
+/// Minimum remaining budget for *starting* an evidence-log append and joining it.
+///
+/// Smaller than the durable-write reserve because the append is smaller and because skipping it is
+/// cheaper: the reconcile event log is diagnostics, never authority.
+pub const RECONCILE_EVENT_LOG_RESERVE: Duration = Duration::from_millis(25);
+
+/// Slice of the pass deadline that maintenance may consume before the first wave starts.
+///
+/// Sized so that `RECONCILE_MAINTENANCE_BUDGET + RECONCILE_BLOCKING_GRACE +
+/// RECONCILE_PER_INTENT_TIMEOUT + RECONCILE_SCHEDULING_RESERVE` still fits inside
+/// `RECONCILE_PASS_WORK_BUDGET`. That is what keeps the guaranteed-minimum-progress property true:
+/// even a pass whose maintenance runs right up to its budget still has room to start — and finish —
+/// a whole first wave *and* apply its outcomes inside the published bound. Both GC and discovery
+/// resume from their own persisted positions, so capping them delays coverage rather than losing
+/// it.
+///
+/// The grace term is in the sum because maintenance is the one phase whose *hard* bound is wider
+/// than its cooperative one: a truncated scan has to be allowed to hand back the partial page it
+/// stopped on, or a large scope would be discarded on every pass instead of advancing through it.
+pub const RECONCILE_MAINTENANCE_BUDGET: Duration = Duration::from_millis(300);
+
+/// Slice of the maintenance budget a due GC sweep may consume, leaving the rest for discovery.
+pub const RECONCILE_GC_BUDGET: Duration = Duration::from_millis(150);
 
 /// Whole per-intent budget: probe + local validation + backend claim.
 pub const RECONCILE_PER_INTENT_TIMEOUT: Duration = Duration::from_secs(3);
+
+/// One **total** internal deadline for a daemon-owned teardown (reset, session end).
+///
+/// Set-scoped teardowns used to be unbounded twice over: an unbounded synchronous scope scan, then
+/// a fresh `RECONCILE_PER_INTENT_TIMEOUT` admission wait per binding. A reset of an address with a
+/// dozen bindings could therefore sit on the request handler for well over half a minute, and a
+/// scope on a wedged mount could sit there forever — neither of which is a bound anything
+/// published. Each operation now computes this deadline once, at its top, and every phase inside it
+/// — enumeration, each per-binding admission, each withdrawal — measures itself against what is
+/// left. Expiry is an explicit **incomplete teardown** error, and no further state is published.
+///
+/// The same value as the per-intent budget: one contended binding is exactly the case an operator
+/// waits through today, and a teardown that touches several is no more entitled to the operator's
+/// patience than one that touches a single one.
+pub const TEARDOWN_DEADLINE: Duration = RECONCILE_PER_INTENT_TIMEOUT;
+
+/// The pass's own overhead, reserved rather than assumed to be free.
+///
+/// A pass is not just maintenance plus waves. Between and after them it spawns and joins wave
+/// tasks, takes the index lock, folds every outcome (`apply_outcome`: a live-member lookup, an
+/// evidence CAS write, and — for a terminal outcome — a linearized withdrawal that has to wait for
+/// the binding's admission guard), advances the round-robin cursor, and appends to the event log.
+/// Budgeting maintenance and waves to exactly the pass deadline left that work no time at all, so
+/// the arithmetic said a pass fit while every real pass overran by however long its bookkeeping
+/// took.
+///
+/// Reserving it has two consequences, both intended: a wave only starts when the reserve is still
+/// intact behind it, and every post-wave phase is itself bounded by the remaining pass deadline
+/// rather than by a fresh per-operation timeout.
+pub const RECONCILE_SCHEDULING_RESERVE: Duration = Duration::from_millis(250);
+
+/// Outer bound on the admin `ReconcileIntents` request, as observed by the daemon.
+///
+/// It is the **same** bound as the pass, and — since M3 — it is the same *deadline*, not merely the
+/// same duration. The handler computes one absolute instant when the request arrives, hands it to
+/// [`reconcile_once_until`], and awaits the pass against it. Two clocks of equal length started at
+/// two different instants are not one bound: the handler's `timeout` could fire while the pass it
+/// had spawned was still mid-wave, and the pass then went on registering members, advancing cursors,
+/// and publishing a report after the caller had already been told `ran: false`. Sharing the deadline
+/// removes the window rather than narrowing it.
+///
+/// The pass is spawned rather than polled inline so that a client that hangs up mid-request cannot
+/// tear a pass in half at an arbitrary await point; the handler still *joins* it, so nothing is
+/// detached behind an answered request.
+pub const RECONCILE_ADMIN_DEADLINE: Duration = RECONCILE_PASS_DEADLINE;
+
+/// Client-side ceiling for one `ReconcileIntents` round trip.
+///
+/// The same 4-second bound again, and callers additionally clamp it to whatever their own caller
+/// left them (`remaining.min(RECONCILE_REQUEST_DEADLINE)`), so a request never outlives the budget
+/// the operator actually gave the command. A client ceiling *wider* than the daemon's own bound
+/// published a number nobody was enforcing: the daemon always answers by its admin bound, so time
+/// spent waiting beyond it is time spent waiting for a connection that is already answering or
+/// already lost.
+pub const RECONCILE_REQUEST_DEADLINE: Duration = RECONCILE_PASS_DEADLINE;
 
 /// Upper bound on intents attempted per pass — an upper bound, not a guarantee the pass completes;
 /// the deadline may cut it short, and the round-robin cursor resumes where it stopped.
@@ -139,7 +286,7 @@ fn sanitize_failure_code(code: &str) -> String {
 }
 
 /// Rotating reconcile event log, reusing the hook-log idiom (single rotation, size cap).
-const RECONCILE_EVENT_LOG_FILE: &str = "reconcile-events.ndjson";
+pub const RECONCILE_EVENT_LOG_FILE: &str = "reconcile-events.ndjson";
 const RECONCILE_EVENT_LOG_ROTATE_BYTES: u64 = 1_048_576;
 
 /// Compile-time assertions for the invariants the published bounds are derived from. If any of
@@ -147,10 +294,35 @@ const RECONCILE_EVENT_LOG_ROTATE_BYTES: u64 = 1_048_576;
 /// here rather than only asserted in a test.
 const _: () = {
     assert!(RECONCILE_PASS_DEADLINE.as_millis() < RECONCILE_INTERVAL.as_millis());
-    assert!(RECONCILE_PER_INTENT_TIMEOUT.as_millis() <= RECONCILE_PASS_DEADLINE.as_millis());
+    // The published bound is the pass's own work budget plus the tail reserved for answering.
+    // Nothing else may be added to either side of it.
+    assert!(
+        RECONCILE_PASS_WORK_BUDGET.as_millis() + RECONCILE_RESPONSE_RESERVE.as_millis()
+            == RECONCILE_PASS_DEADLINE.as_millis()
+    );
+    assert!(RECONCILE_PER_INTENT_TIMEOUT.as_millis() <= RECONCILE_PASS_WORK_BUDGET.as_millis());
     assert!(BRIDGE_PROBE_TIMEOUT.as_millis() < RECONCILE_PER_INTENT_TIMEOUT.as_millis());
     assert!(RECONCILE_DEFERRED_LEASE_RETRY.as_millis() <= RECONCILE_INTERVAL.as_millis());
     assert!(RECONCILE_MAX_CONCURRENCY <= RECONCILE_PASS_BUDGET);
+    // Guaranteed minimum progress: maintenance, one whole wave, and the pass's own bookkeeping all
+    // fit inside the *work* budget. Drop the reserve from this sum and the arithmetic still "fits"
+    // while every real pass overruns by however long its scheduling and outcome application take.
+    assert!(
+        RECONCILE_MAINTENANCE_BUDGET.as_millis()
+            + RECONCILE_BLOCKING_GRACE.as_millis()
+            + RECONCILE_PER_INTENT_TIMEOUT.as_millis()
+            + RECONCILE_SCHEDULING_RESERVE.as_millis()
+            <= RECONCILE_PASS_WORK_BUDGET.as_millis()
+    );
+    assert!(RECONCILE_GC_BUDGET.as_millis() < RECONCILE_MAINTENANCE_BUDGET.as_millis());
+    // Both start-gates have to be payable out of the reserve the pass keeps for its own
+    // bookkeeping, or a pass that spent exactly its budget could never persist anything at all.
+    assert!(RECONCILE_DURABLE_WRITE_RESERVE.as_millis() < RECONCILE_SCHEDULING_RESERVE.as_millis());
+    assert!(RECONCILE_EVENT_LOG_RESERVE.as_millis() < RECONCILE_DURABLE_WRITE_RESERVE.as_millis());
+    // The published end-to-end bound is one number, so neither the admin backstop nor the client
+    // ceiling may sit outside it.
+    assert!(RECONCILE_ADMIN_DEADLINE.as_millis() <= RECONCILE_PASS_DEADLINE.as_millis());
+    assert!(RECONCILE_REQUEST_DEADLINE.as_millis() <= RECONCILE_PASS_DEADLINE.as_millis());
 };
 
 /// Graceful drain / upgrade recovery bound, in milliseconds, derived from the constants rather than
@@ -435,67 +607,267 @@ impl DaemonState {
             .map_err(|e| e.to_string())
     }
 
-    /// Revoke every intent for a session, in every store the daemon knows about. Used by the
-    /// daemon's own session-end paths (`sessionEnd`, watch-pid death, definite end), so an ended
-    /// session can never be re-attended by a stale intent.
-    pub(crate) fn revoke_intents_for_session(&self, store_key: &str, session_id: &str) {
-        let Some(store) = self.intent_store() else {
+    /// Publish an explicit withdrawal's outcome into the in-memory index, **generation-aware**.
+    ///
+    /// The index is a projection, not a source of truth, and a withdrawal races the reconcile pass
+    /// that maintains it. Publishing unconditionally let a withdrawal that deleted generation 4
+    /// stamp `revoked` over an entry a re-attach had already advanced to generation 5, so
+    /// `telex status` showed a live binding as revoked until the next pass corrected it.
+    ///
+    /// It also never *creates* an entry. A withdrawal has no identity to publish: an entry minted
+    /// here would be a `revoked` row for a binding with no manifest behind it — the projection
+    /// equivalent of the identity-less tombstone the store itself refuses to write.
+    fn index_publish_withdrawal(&self, key: IntentKey, outcome: Withdrawal) {
+        let Some(mut entry) = self.index_entry(&key) else {
             return;
         };
-        match store.revoke_session(store_key, session_id, now_ms()) {
-            Ok(0) => {}
-            Ok(count) => {
-                let mut index = self.intents.index.lock().unwrap();
-                index.as_of_ms = now_ms();
-                for (key, entry) in index.entries.iter_mut() {
-                    if key.store_key == store_key && key.session_id == session_id {
-                        entry.state = IntentRecoveryState::Revoked;
-                    }
+        match outcome {
+            // A newer record than the one this call decided about; the pass that wrote the entry
+            // knows more than this withdrawal does.
+            Withdrawal::NoRecord | Withdrawal::Superseded { .. } => {}
+            Withdrawal::DeletedPending { generation } => {
+                if entry.generation <= generation {
+                    self.index_remove(&key);
                 }
-                drop(index);
-                self.push_recent_error(
-                    "StationIntent",
-                    format!(
-                        "revoked {count} station intent(s) for ended session {session_id} in {store_key}"
-                    ),
-                );
             }
-            Err(e) => self.push_recent_error(
-                "StationIntent",
-                format!("revoking station intents for session {session_id}: {e}"),
-            ),
+            Withdrawal::Revoked { generation } | Withdrawal::AlreadyRevoked { generation } => {
+                if entry.generation <= generation {
+                    entry.state = IntentRecoveryState::Revoked;
+                    entry.generation = generation;
+                    self.index_upsert(key, entry);
+                }
+            }
         }
     }
 
-    /// Revoke exactly one binding's intent. Used by detach and by the fallback downgrade, where the
-    /// durable tombstone is written *first* so a crash between the two leaves tombstone-wins.
-    pub(crate) fn revoke_intent_for_binding(
+    /// Withdraw one binding's durable desired state under the **same per-station admission
+    /// ordering** a reconcile pass uses.
+    ///
+    /// The ordering is the point. Withdrawal and restoration are the two writers of a station's
+    /// membership, and they were previously serialized by nothing at all: a pass could be halfway
+    /// through its restore chain — credential read, producer probe, `ensure_address`, epoch claim —
+    /// when a detach revoked the record, and it would still go on to install the armed member the
+    /// revoked record no longer authorized. Taking the delivery-admission guard makes the two
+    /// mutually exclusive per binding, and the guard is the *outermost* lock, so the ordering is
+    /// uniformly admission guard → per-intent file lock everywhere.
+    ///
+    /// This is the **acquiring** form, for a caller whose whole teardown is this one withdrawal —
+    /// today only the reconcile pass applying a terminal outcome. A caller that also mutates
+    /// lifecycle or member state — a detach, a reset, a session end, a fallback downgrade — must
+    /// instead take [`DaemonState::admit_binding`] *before* that mutation and call
+    /// [`DaemonState::withdraw_intent_admitted`] inside it. Withdrawing under a guard the mutation
+    /// did not hold is not a linearization: the reconciler could publish an armed push member in
+    /// between, and the teardown would then revoke the manifest while leaving the member it
+    /// authorized installed.
+    ///
+    /// The admission budget is explicit rather than a fixed [`RECONCILE_PER_INTENT_TIMEOUT`]. That
+    /// constant is the right budget for a caller starting a fresh operation, and the wrong one for
+    /// the reconcile pass applying a terminal outcome: that caller is already inside an absolute
+    /// pass deadline it has mostly spent, and a fresh three-second admission wait there is added
+    /// *on top* of the wave — which is exactly how a pass bounded at four seconds answered an admin
+    /// request at seven. Such a caller passes what the pass has left, and treats exhaustion as a
+    /// deferral rather than as a teardown failure.
+    ///
+    /// Fallible on purpose — see [`IntentStore::withdraw_binding`]. Callers propagate.
+    pub(crate) async fn withdraw_intent_at_generation_within(
         &self,
         store_key: &str,
         session_id: &str,
         address: &str,
-    ) {
-        let Some(store) = self.intent_store() else {
-            return;
+        expected_generation: Option<u64>,
+        admission_budget: Duration,
+    ) -> std::result::Result<Withdrawal, String> {
+        let _admit = self
+            .admit_binding(store_key, session_id, address, admission_budget)
+            .await?;
+        self.withdraw_intent_admitted(store_key, session_id, address, expected_generation)
+    }
+
+    /// Acquire this binding's delivery-admission guard, bounded.
+    ///
+    /// The guard is the outermost lock in the daemon and it is **not reentrant**: never call this
+    /// from a context that already holds one (`register_member`, `reconcile_intent_locked`, or an
+    /// enclosing teardown). It is held across backend awaits by design — a register does, and so
+    /// does a detach, because "release the durable lease, then tear the member down, then withdraw"
+    /// is one transition and splitting it across the guard is what let a reconcile pass slip an
+    /// armed member into the middle of it.
+    ///
+    /// The bound is what keeps a wedged guard from turning into a request handler that never
+    /// returns; a set-scoped teardown passes what is left of its *one* total deadline rather than a
+    /// fresh per-binding budget.
+    pub(crate) async fn admit_binding(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+        budget: Duration,
+    ) -> std::result::Result<BindingAdmission, String> {
+        let admission = self
+            .delivery_admission(
+                store_key,
+                session_id,
+                address,
+                DeliveryAdmissionKind::Register,
+            )
+            .await;
+        let guard = tokio::time::timeout(budget, admission.lock_owned())
+            .await
+            .map_err(|_| {
+                format!(
+                    "timed out waiting to admit station intent {session_id}/{address}: \
+                     another delivery operation holds the admission guard"
+                )
+            })?;
+        Ok(BindingAdmission { _guard: guard })
+    }
+
+    /// The withdrawal itself, for a caller that **already holds** this binding's admission guard.
+    ///
+    /// Synchronous and self-contained: it acquires the per-intent file lock, does its own I/O, and
+    /// releases it, so a caller may hold the admission guard across backend awaits without ever
+    /// holding a filesystem lock across one.
+    pub(crate) fn withdraw_intent_admitted(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+        expected_generation: Option<u64>,
+    ) -> std::result::Result<Withdrawal, String> {
+        // Open-existing: a withdrawal must never bring a scope into existence. A host that never
+        // attached has nothing to withdraw, and an unreadable scope is a refusal, not an absence.
+        let Some(store) = self.intent_store_readonly()? else {
+            return Ok(Withdrawal::NoRecord);
         };
-        match store.revoke(store_key, session_id, address, now_ms()) {
-            Ok(true) => {
-                let key = IntentKey {
-                    store_key: store_key.to_string(),
-                    session_id: session_id.to_string(),
-                    address: address.to_string(),
-                };
-                if let Some(mut entry) = self.index_entry(&key) {
-                    entry.state = IntentRecoveryState::Revoked;
-                    self.index_upsert(key, entry);
-                }
+        let outcome = store
+            .withdraw_binding_at_generation(
+                store_key,
+                session_id,
+                address,
+                expected_generation,
+                now_ms(),
+            )
+            .map_err(|e| format!("withdrawing station intent {session_id}/{address}: {e}"))?;
+        self.index_publish_withdrawal(
+            IntentKey {
+                store_key: store_key.to_string(),
+                session_id: session_id.to_string(),
+                address: address.to_string(),
+            },
+            outcome,
+        );
+        Ok(outcome)
+    }
+
+    /// Every binding of one session that the durable scope names, enumerated inside `deadline`.
+    ///
+    /// Used by the daemon's own session-end paths (`sessionEnd`, watch-pid death, definite end), so
+    /// an ended session can never be re-attended by a stale intent. Enumerates from the *scope*,
+    /// not from membership: a binding whose member was already released still has durable desired
+    /// state, and it is precisely that record which would bring the ended session back.
+    pub(crate) async fn session_teardown_bindings(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        deadline: PassDeadline,
+    ) -> std::result::Result<Vec<IntentBinding>, String> {
+        self.teardown_bindings(
+            store_key,
+            TeardownScope::Session(session_id.to_string()),
+            deadline,
+        )
+        .await
+    }
+
+    /// Every binding of one address that the durable scope names, whatever session owns it.
+    ///
+    /// This is what an operator reset needs. Reset used to derive its withdrawal set from the
+    /// members it *changed*, which silently excluded the two cases that matter most: a station with
+    /// no member at all (the manifest is the only thing left, and the next pass restores it), and a
+    /// member that was already idle (marking it idle changes nothing, so nothing was withdrawn).
+    /// Enumerating the scope covers both.
+    pub(crate) async fn address_teardown_bindings(
+        &self,
+        store_key: &str,
+        address: &str,
+        deadline: PassDeadline,
+    ) -> std::result::Result<Vec<IntentBinding>, String> {
+        self.teardown_bindings(
+            store_key,
+            TeardownScope::Address(address.to_string()),
+            deadline,
+        )
+        .await
+    }
+
+    /// Enumerate a teardown's binding set, bounded, refusing every partial answer.
+    ///
+    /// Enumeration is separated from mutation because each binding is torn down under *its own*
+    /// admission guard, and holding one binding's guard while enumerating (or while tearing another
+    /// down) would invert the documented outermost-guard ordering.
+    ///
+    /// Three ways this refuses rather than returning a set:
+    ///
+    /// * The blocking scan overran the operation's deadline. It is run through
+    ///   [`station_intent::run_blocking_within`] rather than inline, because the cooperative checks
+    ///   inside the scan cannot bound the `read_dir` or the `read` that is currently blocked — and
+    ///   a scope on a wedged mount is exactly the case a teardown deadline exists for.
+    /// * The scan completed but was truncated by its own deadline. A partial list is not the set.
+    /// * A manifest that could not be read *claims* to belong to the set. It cannot be acted on —
+    ///   its identity is unvalidated, so honouring the claim would let one manifest redirect a
+    ///   withdrawal onto another binding's record — and it cannot be silently skipped either,
+    ///   because "I could not read the record you asked me to withdraw" is exactly the answer a
+    ///   teardown must not swallow.
+    ///
+    /// In all three the caller must publish no further state: an incomplete teardown is reported as
+    /// a failed one.
+    async fn teardown_bindings(
+        &self,
+        store_key: &str,
+        scope: TeardownScope,
+        deadline: PassDeadline,
+    ) -> std::result::Result<Vec<IntentBinding>, String> {
+        let Some(store) = self.intent_store_readonly()? else {
+            return Ok(Vec::new());
+        };
+        let scan = match station_intent::run_blocking_within(
+            deadline,
+            RECONCILE_BLOCKING_GRACE,
+            move || store.bindings_bounded(deadline),
+        )
+        .await
+        {
+            BoundedPhase::Completed(scan) => {
+                scan.map_err(|e| format!("enumerating station intents in {store_key}: {e}"))?
             }
-            Ok(false) => {}
-            Err(e) => self.push_recent_error(
-                "StationIntent",
-                format!("revoking station intent {session_id}/{address}: {e}"),
-            ),
+            BoundedPhase::Overran => {
+                return Err(format!(
+                    "timed out enumerating station intents in {store_key}; \
+                     refusing to report a teardown that did not complete"
+                ))
+            }
+        };
+        if scan.truncated {
+            return Err(format!(
+                "the station-intent scope for {store_key} could not be enumerated within the \
+                 teardown deadline; refusing to report a teardown that did not complete"
+            ));
         }
+        for (id, claimed) in &scan.unreadable {
+            let matches_scope = claimed
+                .as_ref()
+                .is_some_and(|binding| binding.store_key == store_key && scope.selects(binding));
+            if matches_scope {
+                return Err(format!(
+                    "station intent {id} is unreadable but names this scope; \
+                     refusing to report a withdrawal that did not happen"
+                ));
+            }
+        }
+        Ok(scan
+            .bindings
+            .into_iter()
+            .filter(|binding| binding.store_key == store_key && scope.selects(binding))
+            .collect())
     }
 
     /// Stamp the durable **armed proof** on a binding's intent record, as part of committing an
@@ -1215,8 +1587,15 @@ async fn register_member_reconciled(
                     refreshed.on_deliver_wake_on_cc = intent.wake_on_cc;
                     refreshed.on_deliver_cc_after_ms =
                         max_watermark(existing.on_deliver_cc_after_ms, intent.cc_watermark_ms);
-                    state.insert_member(refreshed);
-                    return IntentOutcome::Restored;
+                    return match commit_member_if_intent_live(state, intent, || {
+                        state.insert_member(refreshed)
+                    }) {
+                        Ok(true) => IntentOutcome::Restored,
+                        Ok(false) => {
+                            IntentOutcome::terminal(IntentRecoveryState::Revoked, "withdrawn")
+                        }
+                        Err(_) => IntentOutcome::failed("intent_recheck_failed"),
+                    };
                 }
                 let mut refreshed = existing.clone();
                 refreshed.on_deliver = Some(argv);
@@ -1228,7 +1607,15 @@ async fn register_member_reconciled(
                     max_watermark(existing.on_deliver_cc_after_ms, intent.cc_watermark_ms);
                 refreshed.idle = false;
                 refreshed.idle_rearmable = false;
-                state.insert_member(refreshed.clone());
+                let published = refreshed.clone();
+                match commit_member_if_intent_live(state, intent, || state.insert_member(published))
+                {
+                    Ok(true) => {}
+                    Ok(false) => {
+                        return IntentOutcome::terminal(IntentRecoveryState::Revoked, "withdrawn")
+                    }
+                    Err(_) => return IntentOutcome::failed("intent_recheck_failed"),
+                }
                 spawn_on_deliver_backlog(state.clone(), refreshed);
                 return IntentOutcome::Restored;
             }
@@ -1371,9 +1758,66 @@ async fn register_member_reconciled(
         on_deliver_cc_after_ms: intent.cc_watermark_ms,
     };
     state.check_session_id_reuse_tripwire(&record);
-    state.insert_member(record.clone());
+    let published = record.clone();
+    // The last gate before an armed push member exists: a withdrawal that landed anywhere in the
+    // chain above must beat this publication, and the lease claimed for it has to go back.
+    match commit_member_if_intent_live(state, intent, || state.insert_member(published)) {
+        Ok(true) => {}
+        Ok(false) => {
+            let _ = backend
+                .release_epoch_lease(
+                    &intent.address,
+                    &claimed_owner_instance_id,
+                    claimed_lease_epoch,
+                )
+                .await;
+            return IntentOutcome::terminal(IntentRecoveryState::Revoked, "withdrawn");
+        }
+        Err(_) => {
+            let _ = backend
+                .release_epoch_lease(
+                    &intent.address,
+                    &claimed_owner_instance_id,
+                    claimed_lease_epoch,
+                )
+                .await;
+            return IntentOutcome::failed("intent_recheck_failed");
+        }
+    }
     spawn_on_deliver_backlog(state.clone(), record);
     IntentOutcome::Restored
+}
+
+/// Publish a restored member **only while** the manifest that authorized it is still live at the
+/// generation this pass reconciled.
+///
+/// The restore chain between reading a manifest and installing a member is a long sequence of
+/// awaits — a credential read, a producer probe, `ensure_address`, an epoch claim, two tombstone
+/// queries — and an explicit withdrawal can land anywhere inside it. The tombstone checks catch a
+/// *detach*, because detach writes a durable backend tombstone; nothing caught an operator reset, a
+/// session end, or a fallback downgrade, none of which write one. The pass finished its chain and
+/// armed a push member the desired state no longer authorized, and only a later pass could notice.
+///
+/// Re-checking under the intent's own write lock — the same lock withdrawal takes — linearizes the
+/// two: either the withdrawal lands first and this refuses to publish, or this publishes first and
+/// the withdrawal sees the member it must tear down. The commit is synchronous (an in-memory
+/// insert), so the file lock is never held across an await.
+///
+/// `Ok(false)` is "the manifest no longer authorizes this member"; `Err` is "that could not be
+/// decided", which is a refusal too — an unreadable manifest must never be read as consent.
+fn commit_member_if_intent_live(
+    state: &Arc<DaemonState>,
+    intent: &StationIntentV1,
+    commit: impl FnOnce(),
+) -> std::result::Result<bool, String> {
+    let Some(store) = state.intent_store_readonly()? else {
+        // The scope vanished under the pass. Whatever authorized this member is gone with it.
+        return Ok(false);
+    };
+    store
+        .commit_if_live_generation(&intent.id(), intent.generation, commit)
+        .map(|committed| committed.is_some())
+        .map_err(|e| format!("re-checking station intent for {}: {e}", intent.address))
 }
 
 /// The later of a live member's CC watermark and the manifest's, treating `None` as "no bound".
@@ -1530,12 +1974,70 @@ pub async fn reconcile_intent_locked(
 // The acquiring entry point
 // ---------------------------------------------------------------------------------------------
 
-/// Run one bounded reconciliation pass.
+/// Run one bounded reconciliation pass on the pass's own budget.
+///
+/// The scheduled entry point (heartbeat tick, trigger pulse, startup scan), where nobody is waiting
+/// on a socket. Request-originated callers must use [`reconcile_once_until`] so the deadline the
+/// pass measures itself against is the *same instant* the caller is bounded by.
 ///
 /// Acquires the per-scope single-flight guard and the per-`MemberKey` admission guard for each
 /// intent. Never call this from a context that already holds an admission guard — use
 /// [`reconcile_intent_locked`] there.
 pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> ReconcileReport {
+    reconcile_once_until(
+        state,
+        scope,
+        Instant::now() + RECONCILE_PASS_WORK_BUDGET,
+        PassOrigin::Scheduled,
+    )
+    .await
+}
+
+/// Who asked for this pass, which is the only thing that differs between the two entry points.
+///
+/// It changes no budget and no phase; it exists so the event log can distinguish a pass a caller was
+/// blocked on from a scheduled one, and so the reason a pass was given a particular deadline is
+/// carried with the pass instead of inferred.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PassOrigin {
+    /// A heartbeat tick, a trigger pulse, or the startup scan.
+    Scheduled,
+    /// An admin `ReconcileIntents` request, whose caller is blocked on this pass and shares its
+    /// deadline.
+    Request,
+}
+
+impl PassOrigin {
+    fn as_str(self) -> &'static str {
+        match self {
+            PassOrigin::Scheduled => "scheduled",
+            PassOrigin::Request => "request",
+        }
+    }
+}
+
+/// Run one bounded reconciliation pass against a **caller-supplied absolute deadline**.
+///
+/// This is the shape the published four-second bound actually rests on. A request-originated pass
+/// takes `request_arrival + RECONCILE_PASS_WORK_BUDGET`, so the instant the pass stops starting work
+/// and the instant its caller must be answered by are derived from the same origin, and the reserve
+/// between them ([`RECONCILE_RESPONSE_RESERVE`]) is what pays for the join, the encode, and the
+/// socket write.
+///
+/// The property that buys is worth stating precisely, because it is the one the previous
+/// spawn-and-race shape could not state: **every member registration, cursor advance, evidence
+/// write, and report publication this pass performs happens before it returns.** Waves are joined,
+/// not detached; a wave is only admitted while a whole per-intent timeout plus the scheduling
+/// reserve still fits, and each intent inside it is individually timed out; post-wave work measures
+/// itself against `deadline`; and the two durable writes are only *started* while
+/// [`RECONCILE_DURABLE_WRITE_RESERVE`] remains. So a caller who receives this pass's report can say
+/// that nothing further from it is coming.
+pub async fn reconcile_once_until(
+    state: Arc<DaemonState>,
+    scope: Option<String>,
+    deadline: Instant,
+    origin: PassOrigin,
+) -> ReconcileReport {
     let pass_seq = state.intents.pass_seq.fetch_add(1, Ordering::SeqCst) + 1;
     let started = Instant::now();
     let mut report = ReconcileReport {
@@ -1568,20 +2070,59 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
         return report;
     };
 
+    // One absolute deadline for the whole pass, **originated by whoever asked for it**. Every
+    // bounded phase below measures itself against *this* instant rather than against its own
+    // elapsed time, which is what makes the published bound a property of the pass instead of a
+    // property of each phase in isolation — and, for a request-originated pass, a property the
+    // caller shares rather than one it races.
+    let pass_deadline = deadline;
+    // Maintenance (GC + discovery) is confined to the head of the pass so the reserve behind it is
+    // still large enough for a full first wave. Clamped to the pass deadline, because a caller may
+    // hand over less than a whole work budget (a client that clamped its own request to what its
+    // caller left it), and a maintenance window wider than the pass would be no window at all.
+    let maintenance_deadline =
+        PassDeadline::at((started + RECONCILE_MAINTENANCE_BUDGET).min(pass_deadline));
+
     // Maintenance GC is wall-clock scheduled. Skipped passes deliberately do not move this clock,
     // so drain suppression or single-flight contention cannot consume a maintenance slot.
     let now = now_ms();
     let last_gc_ms = state.intents.last_gc_ms.load(Ordering::Relaxed);
     if last_gc_ms == 0 || now.saturating_sub(last_gc_ms) >= RECONCILE_GC_INTERVAL.as_millis() as i64
     {
-        run_intent_gc(&state);
+        run_intent_gc(
+            &state,
+            PassDeadline::at(started + RECONCILE_GC_BUDGET).earliest(maintenance_deadline),
+            PassDeadline::at(pass_deadline),
+        )
+        .await;
     }
 
-    let page = match store.scan(RECONCILE_PASS_BUDGET) {
-        Ok(page) => page,
-        Err(e) => {
+    // Scope filtering happens inside the scan, ahead of the page window: a pass filtered to one
+    // store must spend its whole budget on that store, and its cursor must be that store's own.
+    //
+    // Run behind the blocking boundary, and awaited only until the maintenance deadline: discovery
+    // is `read_dir` plus one owner-checked read per manifest, and a pass that had to wait for a
+    // hung one had no bound at all no matter how many cooperative checks sat between the calls.
+    let scan = store
+        .scan_bounded_within(RECONCILE_PASS_BUDGET, scope.clone(), maintenance_deadline)
+        .await;
+    let page = match scan {
+        BoundedPhase::Completed(Ok(page)) => page,
+        BoundedPhase::Completed(Err(e)) => {
             state.push_recent_error("StationIntent", format!("scanning intent scope: {e}"));
             report = ReconcileReport::skipped_pass(pass_seq, "scan_failed");
+            publish(&state, &report);
+            return report;
+        }
+        BoundedPhase::Overran => {
+            // Discovery is still running and will still persist its own resume position, but this
+            // pass never saw the scope: it must publish nothing derived from it and must not go on
+            // to attempt a wave it has no page for. `ran: false` is the existing protocol for
+            // "no result to report", so an admin caller retries instead of reading an empty page
+            // as a scope with nothing in it.
+            report = ReconcileReport::skipped_pass(pass_seq, "discovery_deadline");
+            report.deadline_reached = true;
+            report.duration_ms = started.elapsed().as_millis() as u64;
             publish(&state, &report);
             return report;
         }
@@ -1589,11 +2130,24 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
     report.observed_count = page.observed_count;
     report.over_cap = page.over_cap;
     report.skipped = page.skipped.len();
+    if page.discovery_truncated {
+        // A truncated discovery saw a *prefix* of the scope, so its counts are lower bounds.
+        // Publishing them as-is would let one slow pass silently retract an over-cap warning (and
+        // shrink the observed count) for a scope nothing has reclaimed.
+        report.deadline_reached = true;
+    }
     {
         let mut index = state.intents.index.lock().unwrap();
-        index.observed_count = page.observed_count;
-        index.over_cap = page.over_cap;
+        if page.discovery_truncated {
+            index.observed_count = index.observed_count.max(page.observed_count);
+            index.over_cap = index.over_cap || page.over_cap;
+        } else {
+            index.observed_count = page.observed_count;
+            index.over_cap = page.over_cap;
+        }
         index.as_of_ms = now_ms();
+        report.observed_count = index.observed_count;
+        report.over_cap = index.over_cap;
     }
     if page.over_cap {
         state.push_recent_error(
@@ -1632,8 +2186,9 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
             }
             None => unidentifiable += 1,
         }
-        log_event(
+        log_event_within(
             &store,
+            PassDeadline::at(pass_deadline),
             serde_json::json!({
                 "event": "intent_rejected",
                 "pass_seq": pass_seq,
@@ -1642,7 +2197,8 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
                 "identified": rejection.identity.is_some(),
                 "detail": rejection.detail,
             }),
-        );
+        )
+        .await;
     }
     {
         let mut index = state.intents.index.lock().unwrap();
@@ -1668,15 +2224,6 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
     // pass attempts nothing at all, so the cursor still advances and the next pass moves on.
     let mut last_considered_position: Option<String> = None;
     for (intent, position) in page.loaded.into_iter().zip(page.loaded_positions) {
-        if let Some(filter) = scope.as_deref() {
-            // Below the scope filter, deliberately: the cursor is shared by every store, so
-            // advancing it past an out-of-scope intent would let a scoped pass skip intents it
-            // never considered for a full round — weakening exactly the guaranteed-progress
-            // property the queue-delay bound rests on.
-            if intent.store_key != filter {
-                continue;
-            }
-        }
         last_considered_position = Some(position.clone());
         let key = IntentKey::from_intent(&intent);
         // Seed the index from the manifest header for *every* record this pass loaded, including
@@ -1754,21 +2301,34 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
     }
 
     // Wave scheduling: waves of at most `RECONCILE_MAX_CONCURRENCY`, each intent bounded by
-    // `RECONCILE_PER_INTENT_TIMEOUT`, and no wave is ever started that could outlive the deadline.
-    // The first wave always runs, which is what guarantees a minimum of `RECONCILE_MAX_CONCURRENCY`
-    // intents of progress per pass even when every intent times out.
+    // `RECONCILE_PER_INTENT_TIMEOUT`, and no wave is ever started that could outlive the pass
+    // deadline — including the first.
+    //
+    // The first wave used to be exempt, on the reasoning that it is what guarantees a minimum of
+    // `RECONCILE_MAX_CONCURRENCY` intents of progress per pass. That exemption is what made the
+    // published bound untrue in the one case it mattered: when the phases *before* the first wave
+    // (GC, discovery) had already consumed the deadline, the exempt wave then added a further
+    // `RECONCILE_PER_INTENT_TIMEOUT` on top of it, so a pass could overrun its own tick and an
+    // admin request could sit behind the overrun. The minimum-progress property is preserved by
+    // budgeting maintenance instead: `RECONCILE_MAINTENANCE_BUDGET` leaves a reserve large enough
+    // for one whole wave, so the check below only bites when maintenance itself overran, and in
+    // that case the honest answer is a deadline-truncated pass whose cursors resume next tick.
     let mut cursor = 0usize;
     let mut last_attempted_position: Option<String> = None;
     while cursor < due.len() {
-        if cursor > 0 {
-            let remaining = RECONCILE_PASS_DEADLINE.checked_sub(started.elapsed());
-            match remaining {
-                Some(remaining) if remaining >= RECONCILE_PER_INTENT_TIMEOUT => {}
-                _ => {
-                    report.deadline_reached = true;
-                    report.skipped += due.len() - cursor;
-                    break;
-                }
+        // A wave may only start when the whole of it *plus* the bookkeeping that follows it still
+        // fits. Gating on the per-intent timeout alone reserved nothing for spawning and joining
+        // the wave, folding its outcomes (each of which may write evidence and, for a terminal one,
+        // wait on the binding's admission guard), advancing the cursor, and logging the pass — so a
+        // wave that started with exactly its own timeout left guaranteed an overrun.
+        let remaining = pass_deadline.checked_duration_since(Instant::now());
+        match remaining {
+            Some(remaining)
+                if remaining >= RECONCILE_PER_INTENT_TIMEOUT + RECONCILE_SCHEDULING_RESERVE => {}
+            _ => {
+                report.deadline_reached = true;
+                report.skipped += due.len() - cursor;
+                break;
             }
         }
         let wave: Vec<(String, StationIntentV1)> = due[cursor..]
@@ -1814,7 +2374,16 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
                 Ok((position, intent, outcome)) => {
                     report.scanned += 1;
                     last_attempted_position = Some(position);
-                    apply_outcome(&state, &store, &intent, outcome, &mut report, pass_seq);
+                    apply_outcome(
+                        &state,
+                        &store,
+                        &intent,
+                        outcome,
+                        &mut report,
+                        pass_seq,
+                        pass_deadline,
+                    )
+                    .await;
                 }
                 Err(_) => {
                     report.scanned += 1;
@@ -1828,12 +2397,30 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
     // the deadline resumes where it stopped rather than skipping everything it loaded. When nothing
     // was attempted (all inert or backed off) the cursor still moves past what was considered, so
     // the next pass makes progress instead of re-examining the same head forever.
+    //
+    // Behind the blocking boundary like every other filesystem phase, and — because the cursor is
+    // durable state a caller can observe — **started only while the durable-write reserve is still
+    // intact**. Bounding the wait alone was enough to keep the pass punctual and not enough to keep
+    // it honest: an abandoned cursor write launched at the deadline lands after the response, so a
+    // caller that had been told the pass was truncated could still watch its cursor move. Below the
+    // reserve the write is not attempted at all, the pass reports itself deadline-truncated, and the
+    // next pass re-derives the same position. Nothing is ever cancelled mid-write.
     if let Some(position) = last_attempted_position.or(last_considered_position) {
-        if let Err(e) = store.advance_cursor(&position) {
-            state.push_recent_error(
+        match store
+            .advance_cursor_in_scope_reserved(
+                scope.clone(),
+                position,
+                PassDeadline::at(pass_deadline),
+                RECONCILE_DURABLE_WRITE_RESERVE,
+            )
+            .await
+        {
+            BoundedPhase::Completed(Ok(())) => {}
+            BoundedPhase::Completed(Err(e)) => state.push_recent_error(
                 "StationIntent",
                 format!("persisting the reconcile scan cursor: {e}"),
-            );
+            ),
+            BoundedPhase::Overran => report.deadline_reached = true,
         }
     }
 
@@ -1843,11 +2430,13 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
         let mut index = state.intents.index.lock().unwrap();
         index.as_of_ms = report.index_as_of_ms;
     }
-    log_event(
+    log_event_within(
         &store,
+        PassDeadline::at(pass_deadline),
         serde_json::json!({
             "event": "reconcile_pass",
             "pass_seq": pass_seq,
+            "origin": origin.as_str(),
             "scanned": report.scanned,
             "restored": report.restored,
             "refreshed_no_op": report.refreshed_no_op,
@@ -1862,7 +2451,8 @@ pub async fn reconcile_once(state: Arc<DaemonState>, scope: Option<String>) -> R
             "deadline_reached": report.deadline_reached,
             "ran": report.ran,
         }),
-    );
+    )
+    .await;
     publish(&state, &report);
     report
 }
@@ -1871,14 +2461,32 @@ fn publish(state: &Arc<DaemonState>, report: &ReconcileReport) {
     let _ = state.intents.report_tx.send(report.clone());
 }
 
+/// The report an admin caller receives when its own outer bound fires before the pass answers.
+///
+/// Carries the current pass sequence so the caller can tell *which* pass it stopped waiting for,
+/// and `ran: false` so it is never mistaken for a pass that ran and restored nothing. The pass
+/// itself is still running and will publish its own report on the watch channel.
+pub fn abandoned_pass_report(state: &Arc<DaemonState>, reason: &str) -> ReconcileReport {
+    ReconcileReport::skipped_pass(state.intents.pass_seq.load(Ordering::SeqCst), reason)
+}
+
 /// Fold one outcome into the index, the durable evidence fields, and the pass report.
-fn apply_outcome(
+///
+/// `pass_deadline` is the pass's own absolute deadline, not a fresh per-operation budget. Outcome
+/// application runs *after* a wave has already spent most of the pass, and both of the things it
+/// can block on — the linearized withdrawal's admission guard and the evidence CAS write — used to
+/// start their own clocks at that point. A terminal outcome could therefore add a further
+/// `RECONCILE_PER_INTENT_TIMEOUT` of admission wait on top of a wave that had just consumed the
+/// whole budget, which is the same "a chain of per-phase timeouts bounds nothing" defect the
+/// absolute pass deadline exists to remove.
+async fn apply_outcome(
     state: &Arc<DaemonState>,
     store: &IntentStore,
     intent: &StationIntentV1,
     outcome: IntentOutcome,
     report: &mut ReconcileReport,
     pass_seq: u64,
+    pass_deadline: Instant,
 ) {
     let now = now_ms();
     let key = IntentKey::from_intent(intent);
@@ -1938,21 +2546,53 @@ fn apply_outcome(
             // cadence, and they do not advance the failure counter.
             entry.next_attempt_ms = Some(now + RECONCILE_QUARANTINE_RETRY.as_millis() as i64);
             if *projected == IntentRecoveryState::Revoked {
-                // A durable tombstone (or an operator reset) outranks the local manifest: revoke
-                // it so the next pass does not even attempt it. `revoke` bumps the generation, so
-                // the evidence write below is deliberately skipped — writing back the pre-revoke
-                // copy under the old generation would either fail the CAS or, worse, resurrect
-                // `Live`.
-                match store.revoke(&intent.store_key, &intent.session_id, &intent.address, now) {
-                    Ok(_) => {}
-                    Err(e) => state.push_recent_error(
-                        "StationIntent",
-                        format!("revoking intent for {}: {e}", intent.address),
-                    ),
+                // A durable tombstone (or an operator reset) outranks the local manifest: withdraw
+                // it so the next pass does not even attempt it.
+                //
+                // Generation-conditional, and through the same linearized withdrawal every
+                // explicit teardown uses. The pass decided "tombstoned" against the generation it
+                // loaded, and a re-attach may have written a fresh `pending` record since —
+                // withdrawing unconditionally would delete a record this decision knows nothing
+                // about. `Superseded` is therefore a correct, silent no-op: the newer record gets
+                // its own pass.
+                //
+                // Withdrawal bumps (or removes) the generation, so the evidence write below is
+                // deliberately skipped: writing back the pre-withdrawal copy under the old
+                // generation would either fail the CAS or, worse, resurrect `Live`.
+                //
+                // Bounded by what is left of the *pass*, never by a fresh admission timeout. A
+                // withdrawal that cannot take the guard in the time the pass has left is deferred
+                // to the next pass and reported as deadline-truncated: the record stays exactly as
+                // the pass found it, the terminal projection is still published to the index, and
+                // the next pass re-derives the same decision. Waiting instead is what turned a
+                // 4-second pass into a 7-second one.
+                let admission_budget = pass_deadline
+                    .checked_duration_since(Instant::now())
+                    .unwrap_or_default()
+                    .min(RECONCILE_PER_INTENT_TIMEOUT);
+                if admission_budget.is_zero() {
+                    report.deadline_reached = true;
+                } else {
+                    match state
+                        .withdraw_intent_at_generation_within(
+                            &intent.store_key,
+                            &intent.session_id,
+                            &intent.address,
+                            Some(intent.generation),
+                            admission_budget,
+                        )
+                        .await
+                    {
+                        Ok(_) => {}
+                        Err(e) => {
+                            report.deadline_reached |= Instant::now() >= pass_deadline;
+                            state.push_recent_error("StationIntent", e)
+                        }
+                    }
                 }
                 entry.next_attempt_ms = None;
                 state.index_upsert(key, entry);
-                log_outcome_event(store, intent, &outcome, pass_seq);
+                log_outcome_event(store, intent, &outcome, pass_seq, pass_deadline).await;
                 return;
             }
         }
@@ -2007,16 +2647,31 @@ fn apply_outcome(
         let mut updated = intent.clone();
         updated.evidence = evidence;
         updated.cc_watermark_ms = refreshed_watermark;
-        if let Err(e) = store.write_cas(intent.generation, &updated) {
-            state.push_recent_error(
+        match store
+            .write_cas_reserved(
+                intent.generation,
+                updated,
+                PassDeadline::at(pass_deadline),
+                RECONCILE_DURABLE_WRITE_RESERVE,
+            )
+            .await
+        {
+            BoundedPhase::Completed(Ok(_)) => {}
+            BoundedPhase::Completed(Err(e)) => state.push_recent_error(
                 "StationIntent",
                 format!("persisting intent evidence for {}: {e}", intent.address),
-            );
+            ),
+            // Either the write was never started (the durable-write reserve was already gone, so
+            // nothing can land after the response) or it was started with the reserve intact and
+            // has not returned yet. In both cases this pass publishes nothing derived from it and
+            // reports a truncated tail rather than a failure it cannot substantiate; the write
+            // itself is never cancelled, and its CAS is what protects a late one.
+            BoundedPhase::Overran => report.deadline_reached = true,
         }
     }
 
     state.index_upsert(key, entry);
-    log_outcome_event(store, intent, &outcome, pass_seq);
+    log_outcome_event(store, intent, &outcome, pass_seq, pass_deadline).await;
 }
 
 /// Fold an inline anti-downgrade success into the cached projection without counting it as a
@@ -2095,14 +2750,16 @@ fn evidence_write_due(current: &IntentEvidence, next: &IntentEvidence, now: i64)
     }
 }
 
-fn log_outcome_event(
+async fn log_outcome_event(
     store: &IntentStore,
     intent: &StationIntentV1,
     outcome: &IntentOutcome,
     pass_seq: u64,
+    pass_deadline: Instant,
 ) {
-    log_event(
+    log_event_within(
         store,
+        PassDeadline::at(pass_deadline),
         serde_json::json!({
             "event": "intent_outcome",
             "pass_seq": pass_seq,
@@ -2113,7 +2770,8 @@ fn log_outcome_event(
             "state": outcome.projected_state(),
             "failure_code": outcome.failure_code(),
         }),
-    );
+    )
+    .await;
 }
 
 /// Exponential backoff with +/- jitter, capped at `RECONCILE_BACKOFF_MAX`.
@@ -2145,11 +2803,39 @@ pub fn backoff_delay(consecutive_failures: u32) -> Duration {
 // Event log
 // ---------------------------------------------------------------------------------------------
 
-/// Append one NDJSON reconcile event, with a single rotation at the size cap.
+/// Append one NDJSON reconcile event, bounded by the pass deadline it was produced under.
 ///
-/// Best effort by design: diagnostics must never be able to fail a reconcile pass. No secret, no
-/// credential path, and no raw argv is ever written here.
-fn log_event(store: &IntentStore, mut event: serde_json::Value) {
+/// Diagnostics, never authority — and that is what makes the bound below the right trade. The
+/// append is three synchronous filesystem calls (a `metadata`, sometimes a `rename`, then an
+/// `open`+`write`) against a path that may live on a network share or behind a filter driver, and
+/// it used to run **inline on the pass's own task**. A pass that had just spent its whole budget
+/// therefore did its rejection, outcome, and final-summary logging with no bound at all, on the one
+/// task an admin caller was blocked on. "Best effort" described what happened to write *errors*, not
+/// to write *latency*.
+///
+/// Two changes make it best-effort in the sense that matters:
+///
+/// * The work runs on the blocking pool, so a wedged log file stalls a pool thread rather than the
+///   pass.
+/// * It is only **started** while [`RECONCILE_EVENT_LOG_RESERVE`] of the deadline remains, and it is
+///   joined inside that deadline.
+///
+/// **Evidence behavior, which is deliberate and load-bearing:** a pass that is at or past its
+/// deadline *skips* its event-log appends entirely — including its own `reconcile_pass` summary
+/// line. The log is therefore a record of what a pass had budget to narrate, not a complete audit of
+/// every pass. The authoritative record of a truncated pass is the report the caller receives
+/// (`deadline_reached`, or `ran: false` with a `skipped_reason`) and the durable evidence block on
+/// each manifest; neither is ever elided to make a deadline. Reading a missing `reconcile_pass` line
+/// as "no pass ran" is the one wrong inference, and it is why the summary line carries `origin` and
+/// `duration_ms`: a gap in `pass_seq` between two logged lines means the passes in between were too
+/// short of budget to write, not that they did not happen.
+///
+/// No secret, no credential path, and no raw argv is ever written here.
+async fn log_event_within(
+    store: &IntentStore,
+    deadline: PassDeadline,
+    mut event: serde_json::Value,
+) {
     if let Some(map) = event.as_object_mut() {
         map.insert("ts_ms".to_string(), serde_json::json!(now_ms()));
         // Defense in depth: if a future field ever carried a secret, redact it rather than log it.
@@ -2159,21 +2845,30 @@ fn log_event(store: &IntentStore, mut event: serde_json::Value) {
             }
         }
     }
-    let path = store.root().join(RECONCILE_EVENT_LOG_FILE);
-    if std::fs::metadata(&path).is_ok_and(|m| m.len() > RECONCILE_EVENT_LOG_ROTATE_BYTES) {
-        let rotated = store.root().join(format!("{RECONCILE_EVENT_LOG_FILE}.1"));
-        let _ = std::fs::remove_file(&rotated);
-        let _ = std::fs::rename(&path, &rotated);
-    }
     let Ok(mut line) = serde_json::to_string(&event) else {
         return;
     };
     line.push('\n');
+    let path = store.root().join(RECONCILE_EVENT_LOG_FILE);
+    let rotated = store.root().join(format!("{RECONCILE_EVENT_LOG_FILE}.1"));
+    let _: BoundedPhase<()> =
+        station_intent::run_blocking_reserved(deadline, RECONCILE_EVENT_LOG_RESERVE, move || {
+            append_event_line(&path, &rotated, &line)
+        })
+        .await;
+}
+
+/// The synchronous half of [`log_event_within`], run only on the blocking pool.
+fn append_event_line(path: &Path, rotated: &Path, line: &str) {
+    if std::fs::metadata(path).is_ok_and(|m| m.len() > RECONCILE_EVENT_LOG_ROTATE_BYTES) {
+        let _ = std::fs::remove_file(rotated);
+        let _ = std::fs::rename(path, rotated);
+    }
     use std::io::Write;
     if let Ok(mut file) = std::fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&path)
+        .open(path)
     {
         let _ = file.write_all(line.as_bytes());
     }
@@ -2192,7 +2887,11 @@ fn log_event(store: &IntentStore, mut event: serde_json::Value) {
 pub fn spawn_startup_scan(state: Arc<DaemonState>) {
     tokio::spawn(async move {
         // GC first so a scope full of crash leftovers does not consume the first pass budget.
-        run_intent_gc(&state);
+        // Bounded like every other sweep: it is off the accept path, but an unbounded startup GC
+        // still delays the first reconcile pass by however long the filesystem takes, and the
+        // sweep resumes from its persisted position on the maintenance cadence anyway.
+        let deadline = PassDeadline::at(Instant::now() + RECONCILE_PASS_WORK_BUDGET);
+        run_intent_gc(&state, deadline, deadline).await;
         reconcile_once(state, None).await;
     });
 }
@@ -2203,33 +2902,70 @@ pub const RECONCILE_GC_INTERVAL: Duration = Duration::from_secs(60);
 
 /// Bounded intent GC: the only place an intent file is deleted, and the only mechanism that brings
 /// an over-cap scope back under the cap.
-fn run_intent_gc(state: &Arc<DaemonState>) {
+///
+/// The maintenance clock is only advanced by a sweep that actually **completed**. A sweep truncated
+/// by its budget has examined a slice of the scope and persisted where it stopped, so letting it
+/// consume the once-a-minute slot would leave the rest of the scope uncollected for a minute per
+/// slice — on a scope large enough to truncate, that is indistinguishable from a leak. Re-running
+/// it on the next pass instead is bounded work (`RECONCILE_GC_BUDGET`) that resumes where it
+/// stopped.
+/// `deadline` bounds the sweep itself (the maintenance slice); `log_deadline` bounds the removal
+/// events it narrates afterwards. They are two different instants because a sweep that used its
+/// whole maintenance budget has still done real, durable work, and dropping the record of which
+/// files it deleted to save a maintenance millisecond is the wrong trade — the wider bound is the
+/// pass deadline, which is what the append must not outlive.
+async fn run_intent_gc(
+    state: &Arc<DaemonState>,
+    deadline: PassDeadline,
+    log_deadline: PassDeadline,
+) {
     let Some(store) = state.intent_store() else {
         return;
     };
-    state.intents.last_gc_ms.store(now_ms(), Ordering::Relaxed);
     let identity = local_identity().ok();
-    match store.gc(
-        now_ms(),
-        identity.map(|(host, _)| host.as_str()),
-        identity.map(|(_, boot)| boot.as_str()),
-    ) {
-        Ok(report) => {
+    // Behind the blocking boundary: a sweep is a directory walk plus a `load`, a lock
+    // acquisition, and an unlink per candidate, and the cooperative check between them cannot
+    // bound the one that is currently blocked.
+    let sweep = store
+        .gc_bounded_within(
+            now_ms(),
+            identity.as_ref().map(|(host, _)| host.to_string()),
+            identity.as_ref().map(|(_, boot)| boot.to_string()),
+            deadline,
+        )
+        .await;
+    match sweep {
+        BoundedPhase::Completed(Ok(report)) => {
+            if report.complete {
+                state.intents.last_gc_ms.store(now_ms(), Ordering::Relaxed);
+            }
             if !report.removed.is_empty() {
                 state.index_prune_removed(&report.removed);
                 for (id, reason) in &report.reasons {
-                    log_event(
+                    log_event_within(
                         &store,
+                        log_deadline,
                         serde_json::json!({
                             "event": "intent_gc_removed",
                             "intent_id": id.to_string(),
                             "reason": reason,
                         }),
-                    );
+                    )
+                    .await;
                 }
             }
         }
-        Err(e) => state.push_recent_error("StationIntent", format!("intent GC: {e}")),
+        BoundedPhase::Completed(Err(e)) => {
+            // A failed sweep still consumed its slot: retrying an erroring scope every tick
+            // would spend the maintenance budget on the same failure.
+            state.intents.last_gc_ms.store(now_ms(), Ordering::Relaxed);
+            state.push_recent_error("StationIntent", format!("intent GC: {e}"))
+        }
+        // The sweep is still running and will finish its own deletions and cursor write; this
+        // pass simply stops waiting. The maintenance clock is deliberately *not* advanced —
+        // an unobserved sweep must not consume the once-a-minute slot — and nothing is pruned
+        // from the index, because a report this pass never received cannot be published from.
+        BoundedPhase::Overran => {}
     }
 }
 
@@ -2268,8 +3004,16 @@ mod tests {
     fn pass_scheduling_constants_keep_the_published_bounds_true() {
         // A pass can never overrun the tick that started it.
         assert!(RECONCILE_PASS_DEADLINE < RECONCILE_INTERVAL);
-        // No wave is ever started that could outlive the deadline.
-        assert!(RECONCILE_PER_INTENT_TIMEOUT <= RECONCILE_PASS_DEADLINE);
+        // The published bound is the pass's work budget plus the tail reserved for answering, and
+        // nothing else. A pass that budgeted its phases to the whole four seconds published a
+        // number it could only meet by accident: the join, the encode, and the socket write all
+        // happen after the last phase returns.
+        assert_eq!(
+            RECONCILE_PASS_WORK_BUDGET + RECONCILE_RESPONSE_RESERVE,
+            RECONCILE_PASS_DEADLINE
+        );
+        // No wave is ever started that could outlive the budget the phases actually have.
+        assert!(RECONCILE_PER_INTENT_TIMEOUT <= RECONCILE_PASS_WORK_BUDGET);
         // The probe leaves room for local validation and the backend claim inside a per-intent
         // budget.
         assert!(BRIDGE_PROBE_TIMEOUT < RECONCILE_PER_INTENT_TIMEOUT);
@@ -2278,6 +3022,39 @@ mod tests {
         // Every pass makes at least `RECONCILE_MAX_CONCURRENCY` intents of progress, which is only
         // meaningful if a wave fits inside the budget.
         assert!(RECONCILE_MAX_CONCURRENCY <= RECONCILE_PASS_BUDGET.max(1));
+        // The first wave is no longer exempt from the deadline, so guaranteed minimum progress is
+        // now a property of the *maintenance* budget: whatever GC and discovery are allowed to
+        // consume must still leave a whole per-intent timeout inside the pass work budget — plus
+        // the pass's own scheduling and outcome-application overhead, which is reserved rather than
+        // assumed free.
+        assert!(
+            RECONCILE_MAINTENANCE_BUDGET
+                + RECONCILE_BLOCKING_GRACE
+                + RECONCILE_PER_INTENT_TIMEOUT
+                + RECONCILE_SCHEDULING_RESERVE
+                <= RECONCILE_PASS_WORK_BUDGET
+        );
+        // The gate a wave is admitted through is exactly that sum, so a pass whose maintenance ran
+        // right up to its budget — grace included, because a truncated scan is allowed to return
+        // late rather than be discarded — still starts a first wave. Without this the reserve would
+        // buy punctuality at the cost of the minimum-progress guarantee.
+        assert!(
+            RECONCILE_PASS_WORK_BUDGET - RECONCILE_MAINTENANCE_BUDGET - RECONCILE_BLOCKING_GRACE
+                >= RECONCILE_PER_INTENT_TIMEOUT + RECONCILE_SCHEDULING_RESERVE
+        );
+        // GC is one phase of maintenance, never the whole of it: discovery has to fit too.
+        assert!(RECONCILE_GC_BUDGET < RECONCILE_MAINTENANCE_BUDGET);
+        // The two start-gates are payable out of the reserve the pass keeps for its own
+        // bookkeeping. If a durable write cost more than the whole reserve, a pass that spent
+        // exactly its budget could never persist anything and the evidence block would stop
+        // advancing under load — the opposite of what the reserve is for.
+        assert!(RECONCILE_DURABLE_WRITE_RESERVE < RECONCILE_SCHEDULING_RESERVE);
+        assert!(RECONCILE_EVENT_LOG_RESERVE < RECONCILE_DURABLE_WRITE_RESERVE);
+        // One published end-to-end number, not three. The admin bound is now the *same deadline*
+        // rather than a second clock of the same length, and the client ceiling sits inside it.
+        assert!(RECONCILE_ADMIN_DEADLINE <= RECONCILE_PASS_DEADLINE);
+        assert!(RECONCILE_REQUEST_DEADLINE <= RECONCILE_ADMIN_DEADLINE);
+        assert_eq!(RECONCILE_PASS_DEADLINE, Duration::from_secs(4));
     }
 
     #[test]

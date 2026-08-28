@@ -2742,6 +2742,26 @@ fn real_process_copilot_fallback_cross_platform() {
     let push_attach = run_command_with_capture(push_attach, &env.root, Duration::from_secs(8));
     push_attach.assert_success("initial Copilot push attach");
 
+    // Read the scope now so the later "the fallback withdrew it" assertion is a real observation
+    // of a transition and not a vacuous claim about an intent that was never written.
+    let singleton_hash = env
+        .cap_json()
+        .get("singleton_hash")
+        .and_then(Value::as_str)
+        .expect("cap file records the singleton hash")
+        .to_string();
+    let intent_scope = telex::station_intent::IntentStore::open(&env.run_dir, &singleton_hash)
+        .expect("open the daemon intent scope");
+    let downgraded = telex::station_intent::IntentId::derive(
+        &station_intent_store_key(&env),
+        receiver,
+        receiver_addr,
+    );
+    assert!(
+        intent_scope.load(&downgraded).is_ok(),
+        "the push attach must record the desired state the fallback later withdraws"
+    );
+
     let prepared = prepare();
     assert_eq!(prepared.get("reused").and_then(Value::as_bool), Some(false));
     let run_dir = PathBuf::from(
@@ -2838,6 +2858,19 @@ fn real_process_copilot_fallback_cross_platform() {
             .and_then(Value::as_u64),
         Some(u64::from(std::process::id())),
         "fallback must bind pull attendance to the configured loader PID"
+    );
+
+    // The push→pull downgrade is a deliberate teardown of push coverage, so the durable desired
+    // state must go with it. It did not before: the fallback cleared the push registration and tore
+    // down the bridge while leaving a manifest saying "restore push", and the next reconcile pass
+    // re-registered the push member on top of this live pull waiter — two coverages for one
+    // station, which is the duplicate delivery the fallback's own pre-checks refuse.
+    //
+    // The attach here never reached its turn-boundary finalize, so the record is `pending` and an
+    // explicit withdrawal deletes it outright rather than leaving an identity-less tombstone.
+    assert!(
+        intent_scope.load(&downgraded).is_err(),
+        "the fallback downgrade must withdraw the station intent it disarmed"
     );
 
     env.attach(sender, sender_addr);
@@ -4516,6 +4549,48 @@ fn station_intent_daemon_restart_restores_push_without_manual_resume() {
     assert_ne!(
         reloaded.state,
         telex::daemon_ipc::IntentRecoveryState::Revoked
+    );
+
+    // The published pass bound, observed across the real IPC surface rather than in-process.
+    //
+    // The bound is end-to-end by construction — the admin handler hands the pass one
+    // request-originated deadline and joins it — so the only way to check the claim a caller
+    // actually experiences is to make a caller. Both halves matter: the daemon's own reported
+    // duration proves the pass bounded itself, and the wall clock proves the answer came back
+    // rather than the handler outliving it.
+    let mut reconcile = env.command_with_session(session);
+    configure_copilot_home(&mut reconcile, &copilot_runtime_home(&env));
+    reconcile.args([
+        "--json",
+        "daemon",
+        "reconcile",
+        "--timeout-ms",
+        &telex::daemon_reconcile::RECONCILE_REQUEST_DEADLINE
+            .as_millis()
+            .to_string(),
+    ]);
+    let started = std::time::Instant::now();
+    let reconciled = run_command_with_capture(reconcile, &env.root, Duration::from_secs(20));
+    let round_trip = started.elapsed();
+    reconciled.assert_success("daemon reconcile over IPC");
+    let reconciled = reconciled.json("daemon reconcile over IPC");
+    let duration_ms = reconciled
+        .pointer("/report/duration_ms")
+        .and_then(Value::as_u64)
+        .expect("a successful reconcile exits 0 only with a report, and every report is timed");
+    assert!(
+        duration_ms <= telex::daemon_reconcile::RECONCILE_PASS_DEADLINE.as_millis() as u64,
+        "the daemon reported a pass of {duration_ms} ms, past its own published deadline"
+    );
+    // Generous on the spawn side and strict on the bound: a debug-build client start dominates the
+    // measurement, so this catches a handler that never answers, not one that is merely slow to
+    // launch. The strict in-process form of this assertion — a real IPC round trip held to the
+    // 4-second bound with no process-spawn term — lives in `tests/station_intent.rs`.
+    assert!(
+        round_trip <= telex::daemon_reconcile::RECONCILE_REQUEST_DEADLINE + Duration::from_secs(10),
+        "a reconcile round trip took {round_trip:?}; the request is bounded at {:?} plus process \
+         spawn",
+        telex::daemon_reconcile::RECONCILE_REQUEST_DEADLINE
     );
 }
 

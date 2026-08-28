@@ -969,16 +969,20 @@ fn remove_intent_best_effort(ctx: &Ctx, session: &str, address: &str, expect_gen
     let _ = store.remove_if_unchanged(&id, expect_generation, rollback_removable);
 }
 
-/// Revoke a binding's intent. Used by every deliberate teardown: detach, fallback downgrade, GC,
-/// and last-binding removal. Exact per binding — never whole-session, never another store.
-fn revoke_intent_best_effort(ctx: &Ctx, session: &str, address: &str) {
-    let Ok(store_key) = ctx.store_key() else {
-        return;
-    };
-    let Ok(store) = intent_store() else {
-        return;
-    };
-    let _ = store.revoke(&store_key, session, address, now_ms());
+/// Withdraw a binding's durable desired state from the CLI side. Used by every deliberate
+/// teardown that runs in a CLI turn: detach, and the push→pull fallback downgrade.
+///
+/// Fallible — callers propagate. A best-effort version of this call was the CLI half of the same
+/// defect the daemon had: a detach or a fallback that could not withdraw still reported success,
+/// and the manifest it left behind said "restore push" for a station the user had just given up.
+/// Exact per binding: never whole-session, never another store.
+fn withdraw_intent(ctx: &Ctx, session: &str, address: &str) -> Result<()> {
+    let store_key = ctx.store_key()?;
+    let store = intent_store()?;
+    store
+        .withdraw_binding(&store_key, session, address, now_ms())
+        .with_context(|| format!("withdrawing the station intent for {session}/{address}"))?;
+    Ok(())
 }
 
 /// `telex copilot detach`: generic address detach plus bridge teardown when this was the
@@ -1001,15 +1005,25 @@ async fn detach(ctx: &Ctx, args: CopilotDetachArgs) -> Result<i32> {
         },
     )
     .await;
-    // A detach that could not reach the daemon still has to revoke locally. Before this, the `?`
+    // A detach that could not reach the daemon still has to withdraw locally. Before this, the `?`
     // propagated the error and skipped every local teardown step, so the `live` intent survived
     // with no durable tombstone and the next daemon start reconciled it — auto-returning a station
     // the user explicitly asked to detach.
     if let Some(address) = address.as_deref() {
-        // The daemon already revoked the intent as part of its detach (durable tombstone first),
-        // but this path also runs when no daemon is reachable, so revoke locally too. Revocation
+        // The daemon already withdrew the intent as part of its detach (durable tombstone first),
+        // but this path also runs when no daemon is reachable, so withdraw locally too. Withdrawal
         // is idempotent and exact per binding: never whole-session, never another store.
-        revoke_intent_best_effort(ctx, &session, address);
+        //
+        // A failure here fails the command. Withdrawing is the half of the detach that keeps the
+        // station from coming back on its own; reporting "detached" without it would tell the user
+        // the one thing that is not true.
+        if let Err(e) = withdraw_intent(ctx, &session, address) {
+            eprintln!(
+                "telex copilot detach: the station intent for {address} could not be withdrawn \
+                 ({e:#}). The station may auto-restore push: run this command again."
+            );
+            return Ok(1);
+        }
         if let Ok(true) = remove_bridge_binding(&session, address) {
             remove_bridge_extension(&session);
         }
@@ -1578,7 +1592,7 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
         }
     };
 
-    let (mut client, cap) = match connect_existing_with_cap(&store_key).await {
+    let (mut client, mut cap) = match connect_existing_with_cap(&store_key).await {
         Ok(connection) => connection,
         Err(e) => {
             write_hook_log_best_effort(&HookLogEvent::drain(
@@ -1601,9 +1615,47 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
     //      requiring the agent to run an extra command after `extensions_reload`.
     //   2. An explicit reconcile is requested on the already-connected daemon. It never spawns one;
     //      spawning is `attach`'s job (ADR 0028) and, for a successor, upgrade/rollback's.
+    //
+    // The two share one budget rather than each taking a fresh one: this is a hook on the turn
+    // boundary, and a slow finalize followed by a full-length reconcile wait is a stall the agent
+    // sees, so what the finalize spends is taken out of what the reconcile may wait.
+    let intent_maintenance_started = std::time::Instant::now();
     let intent_outcome =
         finalize_pending_intents_for_session(ctx, &store_key, &session, &cap.admin_cap).await;
-    let reconcile_outcome = request_reconcile_best_effort(&mut client, &cap.admin_cap).await;
+    let reconcile_outcome = request_reconcile_best_effort(
+        &mut client,
+        &cap.admin_cap,
+        crate::daemon_reconcile::RECONCILE_REQUEST_DEADLINE
+            .saturating_sub(intent_maintenance_started.elapsed()),
+    )
+    .await;
+    if reconcile_outcome.connection_spent {
+        // The reconcile response is still in flight on this stream, so the drain below must not be
+        // written to it: it would read the reconcile's frame as its own answer and report a drain
+        // outcome that describes a different request. Take a fresh connection instead — the drain
+        // is the part of this hook that has to happen.
+        match connect_existing_with_cap(&store_key).await {
+            Ok((fresh_client, fresh_cap)) => {
+                client = fresh_client;
+                cap = fresh_cap;
+            }
+            Err(e) => {
+                write_hook_log_best_effort(&HookLogEvent::drain(
+                    "daemon_unavailable",
+                    Some(&session),
+                    Some(&e),
+                ));
+                print_json(&serde_json::json!({
+                    "drain": false,
+                    "session_id": session,
+                    "outcome": "daemon_unavailable",
+                    "station_intents": intent_outcome,
+                    "reconcile": reconcile_outcome.detail,
+                }));
+                return Ok(0);
+            }
+        }
+    }
 
     let request = Request::DrainDeferred {
         store_key: store_key.clone(),
@@ -1660,7 +1712,7 @@ async fn drain(ctx: &Ctx, args: CopilotDrainArgs) -> Result<i32> {
         );
         map.insert(
             "reconcile".to_string(),
-            serde_json::json!(reconcile_outcome),
+            serde_json::json!(reconcile_outcome.detail),
         );
     }
     print_json(&outcome);
@@ -1792,35 +1844,93 @@ async fn finalize_pending_intents_for_session(
 /// spawns a daemon and never fails the attach: the drain report reads durable state too, so this is
 /// a latency fix rather than the correctness mechanism.
 async fn inform_daemon_of_finalize(store_key: &str) -> Option<String> {
+    let started = std::time::Instant::now();
     let (mut client, cap) = match connect_existing_with_cap(store_key).await {
         Ok(connected) => connected,
         Err(e) => return Some(e),
     };
-    let outcome = request_reconcile_best_effort(&mut client, &cap.admin_cap).await;
-    if outcome.starts_with("pass=") {
+    // Connect time counts against the same budget: this runs inside a producer-side finalize, and
+    // the published bound is on the whole round trip, not on the part of it after the handshake.
+    let outcome = request_reconcile_best_effort(
+        &mut client,
+        &cap.admin_cap,
+        crate::daemon_reconcile::RECONCILE_REQUEST_DEADLINE.saturating_sub(started.elapsed()),
+    )
+    .await;
+    if outcome.detail.starts_with("pass=") {
         return None;
     }
-    Some(outcome)
+    Some(outcome.detail)
+}
+
+/// The outcome of a best-effort reconcile request, plus whether the connection survived it.
+///
+/// The second half is the point. A request whose response never arrived leaves a *framed stream*
+/// with an answer still in flight: the next request written to it reads the previous request's
+/// response as its own. Reusing the stream after a timeout therefore does not merely risk a stale
+/// answer, it mis-attributes one — the drain that follows would read the reconcile's `Reconciled`
+/// frame and report an unexpected response, or worse, read an `Ack` meant for something else.
+struct ReconcileRequestOutcome {
+    detail: String,
+    /// The stream must not be reused: either the response never arrived, or framing broke.
+    connection_spent: bool,
+}
+
+impl ReconcileRequestOutcome {
+    /// A frame came back and was consumed, so the stream is still positioned on a boundary —
+    /// whatever the daemon said.
+    fn answered(response: &Response) -> Self {
+        let detail = match response {
+            Response::Reconciled { report } => format!(
+                "pass={} restored={} deferred_lease={} failed={}",
+                report.pass_seq, report.restored, report.deferred_lease, report.failed
+            ),
+            Response::Error { code, .. } => format!("error:{code}"),
+            _ => "unexpected_response".to_string(),
+        };
+        Self {
+            detail,
+            connection_spent: false,
+        }
+    }
+
+    fn transport_error() -> Self {
+        Self {
+            detail: "transport_error".to_string(),
+            connection_spent: true,
+        }
+    }
+
+    fn timed_out() -> Self {
+        Self {
+            detail: "timeout".to_string(),
+            connection_spent: true,
+        }
+    }
 }
 
 /// Ask an already-connected daemon to run a reconciliation pass. Never spawns a daemon.
+///
+/// `caller_budget` is what the calling operation has left, and the wait is the smaller of that and
+/// `RECONCILE_REQUEST_DEADLINE`. Both halves matter: the constant keeps a client from publishing a
+/// looser bound than the daemon enforces (the daemon answers a `ReconcileIntents` request within
+/// `RECONCILE_ADMIN_DEADLINE` whatever the pass does, so waiting past it buys nothing), and the
+/// caller's remaining time keeps a turn-boundary hook from spending a fresh full budget on a step
+/// that runs *after* it has already spent most of its own.
 async fn request_reconcile_best_effort(
     client: &mut crate::daemon::DaemonClient,
     admin_cap: &str,
-) -> String {
+    caller_budget: Duration,
+) -> ReconcileRequestOutcome {
     let request = Request::ReconcileIntents {
         proof: Some(admin_cap.to_string()),
         scope: None,
     };
-    match tokio::time::timeout(DRAIN_IPC_DEADLINE, client.request(&request)).await {
-        Ok(Ok(Response::Reconciled { report })) => format!(
-            "pass={} restored={} deferred_lease={} failed={}",
-            report.pass_seq, report.restored, report.deferred_lease, report.failed
-        ),
-        Ok(Ok(Response::Error { code, .. })) => format!("error:{code}"),
-        Ok(Ok(_)) => "unexpected_response".to_string(),
-        Ok(Err(_)) => "transport_error".to_string(),
-        Err(_) => "timeout".to_string(),
+    let deadline = caller_budget.min(crate::daemon_reconcile::RECONCILE_REQUEST_DEADLINE);
+    match tokio::time::timeout(deadline, client.request(&request)).await {
+        Ok(Ok(response)) => ReconcileRequestOutcome::answered(&response),
+        Ok(Err(_)) => ReconcileRequestOutcome::transport_error(),
+        Err(_) => ReconcileRequestOutcome::timed_out(),
     }
 }
 
@@ -2291,12 +2401,12 @@ async fn fallback_run_inner(ctx: &Ctx, manifest: &FallbackManifest, run_dir: &Pa
         ));
     }
 
-    if existing
-        .as_ref()
-        .is_none_or(|member| member.push_registered)
-    {
-        register_fallback_member(&run_ctx, manifest, existing.as_ref()).await?;
-    }
+    // Unconditional, even when the daemon already shows a pull-only member. The register is what
+    // performs the *withdrawal* of the durable push intent now (see `register_member`), so skipping
+    // it because the member already looks pull-only left exactly the dangerous case untouched: a
+    // live manifest whose member was downgraded by some earlier path, which the next reconcile pass
+    // restores on top of the fallback waiter.
+    register_fallback_member(&run_ctx, manifest, existing.as_ref()).await?;
 
     let status = daemon_status_snapshot(&store_key).await?;
     ensure_fallback_protocol(&status)?;
@@ -2321,6 +2431,18 @@ async fn fallback_run_inner(ctx: &Ctx, manifest: &FallbackManifest, run_dir: &Pa
             manifest.address
         ));
     }
+
+    // No local intent withdrawal here any more. The push→pull downgrade is a deliberate teardown of
+    // push coverage, so the durable desired state has to go with it — but doing that from the CLI
+    // was uncoordinated: the daemon holds this binding's delivery admission for the register, then
+    // releases it, and only afterwards did this process withdraw the manifest. A reconcile pass that
+    // took admission in that window restored the push member, and the later withdrawal revoked the
+    // manifest while leaving the restored member armed alongside the fallback waiter.
+    //
+    // `Register { on_deliver: None, replace_on_deliver: true }` — the explicit downgrade — now
+    // withdraws the intent inside the daemon, under the same admission guard that installs the
+    // pull-only member, so the two are one atomic transition. The `?` above already propagated any
+    // failure of that combined transition.
 
     match remove_bridge_binding(&manifest.session_id, &manifest.address) {
         Ok(true) => remove_bridge_extension(&manifest.session_id),
@@ -4078,6 +4200,54 @@ mod tests {
         }
     }
 
+    /// A timed-out or broken reconcile request poisons the stream; an answered one does not.
+    ///
+    /// The regression this pins: the drain hook reused the same connection after the reconcile
+    /// request timed out. A timeout does not cancel the daemon's work, it abandons a response that
+    /// is still in flight on a framed stream — so the *next* request written to that stream reads
+    /// the reconcile's frame as its own answer. The failure is silent and mis-attributed, which is
+    /// worse than the missing reconcile it was papering over.
+    #[test]
+    fn a_reconcile_that_never_answered_spends_the_connection_and_an_answered_one_does_not() {
+        let answered = ReconcileRequestOutcome::answered(&Response::Reconciled {
+            report: crate::daemon_ipc::ReconcileReport {
+                pass_seq: 7,
+                restored: 2,
+                ..Default::default()
+            },
+        });
+        assert!(!answered.connection_spent);
+        assert_in_order(&answered.detail, &["pass=7", "restored=2"]);
+
+        // A refusal is still a consumed frame: the stream is on a boundary and stays usable.
+        let refused = ReconcileRequestOutcome::answered(&Response::Error {
+            code: "unauthorized".to_string(),
+            message: "no proof".to_string(),
+            needs_attach_reason: None,
+        });
+        assert!(!refused.connection_spent);
+        assert_eq!(refused.detail, "error:unauthorized");
+
+        // An unexpected variant was still read off the wire, so framing is intact.
+        let unexpected = ReconcileRequestOutcome::answered(&Response::Registered {
+            lease_epoch: 1,
+            owner_instance_id: "other".to_string(),
+        });
+        assert!(!unexpected.connection_spent);
+        assert_eq!(unexpected.detail, "unexpected_response");
+
+        for spent in [
+            ReconcileRequestOutcome::timed_out(),
+            ReconcileRequestOutcome::transport_error(),
+        ] {
+            assert!(
+                spent.connection_spent,
+                "{} must force a reconnect before any further request",
+                spent.detail
+            );
+        }
+    }
+
     /// The turn-stop drain skips the daemon only for a registry that is **provably** not there.
     ///
     /// `exists()` reported "no bridge" for a registry it merely could not stat, so a session with
@@ -4830,14 +5000,17 @@ mod tests {
                 true
             })
             .expect("finalize");
-        assert!(store
-            .revoke(
-                &intent.store_key,
-                &intent.session_id,
-                &intent.address,
-                intent.updated_at_ms + 1,
-            )
-            .expect("detach"));
+        assert!(matches!(
+            store
+                .withdraw_binding(
+                    &intent.store_key,
+                    &intent.session_id,
+                    &intent.address,
+                    intent.updated_at_ms + 1,
+                )
+                .expect("detach"),
+            crate::station_intent::Withdrawal::Revoked { .. }
+        ));
         let written = store.write_pending(&intent).expect("re-attach");
         let crate::station_intent::PendingWrite::Created { generation } = written else {
             panic!("a re-attach over a tombstone must create, got {written:?}");

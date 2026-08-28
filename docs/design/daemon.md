@@ -1955,7 +1955,9 @@ daemon is running **and** this producer proves it is alive, restore this exact p
 - Filenames are hashed, so address and store strings never reach a filesystem path.
 - Bounds: 512 intents per scope (a write-time rule), 16 KiB per manifest (enforced on the open
   handle). A scope may legitimately hold *more* than the cap; that is reported as `over_cap` and is
-  never a reason to delete anything. Only GC deletes.
+  never a reason to delete anything. Deletion happens in exactly three places, all conditional and
+  lock-held: GC (sec. 18.2.2), the attach rollback, and an explicit withdrawal of an unfinalized
+  `pending` record (sec. 18.2.3).
 
 ### 18.2 States
 
@@ -2065,7 +2067,7 @@ The producer-side transition table (`station_intent::finalize_admission`) is:
 | `pending` | yes | either | **promote** to `live` |
 | `pending` | no | yes | **promote** to `live` |
 | `pending` | no | no | refused: not armed |
-| `revoked` / `tombstoned` | — | — | refused: a revocation is never undone by a finalize |
+| `revoked` / `tombstoned` | — | — | refused: a withdrawal is never undone by a finalize |
 | any runtime projection | — | — | refused: not a transition this build owns |
 
 Two properties fall out of that asymmetry, and both matter:
@@ -2080,7 +2082,9 @@ Two properties fall out of that asymmetry, and both matter:
   `push_registered` gated it on precisely the thing the repair was supposed to restore.
 
 The admission decision is re-made *inside* the per-intent write lock against the record as it
-actually is, so a detach, session end, or operator reset that lands mid-finalize always wins.
+actually is, so a detach, session end, or operator reset that lands mid-finalize always wins. That
+holds for a withdrawn `pending` record too: withdrawal deletes it under the same lock, so the
+finalize's locked reload fails rather than promoting a record that is no longer there.
 
 A durable state transition also **clears the failure ladder**. The ladder is earned by a producer
 descriptor, not by a binding, and a generation move means the descriptor was replaced; carrying the
@@ -2090,7 +2094,8 @@ move the generation, so they never clear anything.
 
 ### 18.2.2 Garbage collection
 
-GC is the only place an intent file is deleted, so every reason is state-scoped and TTL-governed:
+GC is one of the three places an intent file is deleted (the others are the attach rollback and an
+explicit `pending` withdrawal, sec. 18.2.3); every GC reason is state-scoped and TTL-governed:
 
 | Reason | Applies to | TTL |
 |---|---|---|
@@ -2159,15 +2164,110 @@ attempt-based clock is refreshed every few seconds forever, and both the credent
 the dead-producer orphan rule became unreachable for exactly the abandoned records they exist to
 collect.
 
-Every deletion is **conditional and lock-held**. GC classifies from a snapshot, then re-acquires the
-per-intent write lock, reloads, and re-checks both the generation and the reason before unlinking.
-Without that, a record a concurrent turn-boundary finalize had just promoted to `live`, or that a
-fresh attach had replaced at a new generation, was destroyed by a decision taken against the older
-copy. The attach-rollback path takes the same route, conditioned on the generation *it* wrote and on
-the record still being an unarmed `pending` one.
+Every deletion is **conditional and lock-held** — in GC, in the attach rollback, and in an explicit
+`pending` withdrawal alike. GC classifies from a snapshot, then re-acquires the per-intent write
+lock, reloads, and re-checks both the generation and the reason before unlinking. Without that, a
+record a concurrent turn-boundary finalize had just promoted to `live`, or that a fresh attach had
+replaced at a new generation, was destroyed by a decision taken against the older copy. The
+attach-rollback path takes the same route, conditioned on the generation *it* wrote and on the
+record still being an unarmed `pending` one; a withdrawal takes it conditioned on the generation it
+observed under that same lock and on the record still being `pending`.
 
-An unsupported schema version is never deleted: that is what a rollback leaves behind, and
-"intents are never deleted by a rollback" is a documented guarantee.
+An unsupported schema version is never deleted, by any of the three: that is what a rollback leaves
+behind, and "intents are never deleted by a rollback" is a documented guarantee. It is also never
+*written over*: an unreadable manifest — bad bytes, a failed security check, or a schema telex does
+not support — refuses every mutation, so a withdrawal reports failure rather than claiming a
+teardown it did not perform.
+
+### 18.2.3 Explicit withdrawal
+
+Withdrawal is the durable half of a teardown the user already performed, and it is **one fallible
+linearized operation** (`IntentStore::withdraw_binding`) rather than a per-caller wrapper. Every
+explicit teardown routes through it:
+
+| Path | Scope | Ordering note |
+|---|---|---|
+| `Detach` (member present) | one binding | admission taken first and held across the whole detach; withdrawal after the durable tombstone written inside the lease-release transaction |
+| `Detach` (no member) | one binding | admission taken first and held; withdrawal after `record_detach_tombstone` |
+| `telex copilot detach` (CLI) | one binding | after the daemon call, so it still runs when no daemon is reachable |
+| `SessionEnd` / watch-pid death / definite end | every binding of the session | per binding, under that binding's admission: lease release, idle marking, then withdrawal |
+| `Reset` | every binding of the **address**, in any session | after `reset_epoch_lease`; then per binding, under that binding's admission: idle marking, then withdrawal |
+| push→pull fallback (`telex copilot fallback run`) | one binding | inside the daemon's `Register { on_deliver: None, replace_on_deliver: true }`, under the same admission that installs the pull-only member |
+| reconcile projecting `revoked` | one binding, generation-conditional | inside `apply_outcome` |
+
+The fallback row is the one that is *not* a CLI operation. The downgrade used to withdraw the intent
+from the CLI process after the register returned, which is two transitions with the daemon's
+admission guard released in between; a reconcile pass that took the guard in that window restored
+push, and the later withdrawal revoked the manifest while leaving the restored member armed beside
+the pull waiter it was downgrading to. `Register { on_deliver: None, replace_on_deliver: true }` is
+already the only request shape that clears an installed `on_deliver` — the explicit-downgrade signal
+the anti-downgrade guard is exempted for — so it owns the withdrawal, and no new protocol field or
+request variant was added for it.
+
+The transition rules, all decided under the per-intent write lock:
+
+| Durable state | Result |
+|---|---|
+| `pending` | **deleted**, at exactly the generation this call observed |
+| `live` (or any other persisted state) | transitioned to `revoked` under a generation CAS |
+| `revoked` | success, unchanged — withdrawal is idempotent |
+| no record (**proven** absent) | success, and nothing is written |
+| unreadable, insecure, or an unsupported schema | **refused**, as an error |
+
+`pending` is deleted rather than tombstoned because it describes an attach that never finalized: its
+producer block may still be the attach-time placeholder, so persisting it as `revoked` would leave an
+identity-less tombstone occupying the binding for the seven-day terminal TTL, and every re-attach in
+that window would inherit a finished lifecycle's clock. Conversely a withdrawal **never creates** a
+record: it carries no producer identity of its own, so there is no such thing as an identity-less
+`revoked` record — and the in-memory index publication follows the same rule, updating an existing
+entry only when its generation has not moved past the withdrawal, and never minting one.
+
+Three properties make it safe against the reconciler:
+
+- **Same admission ordering, held across the whole teardown.** The per-`MemberKey`
+  delivery-admission guard — the same outermost, non-reentrant guard a reconcile pass takes around
+  `reconcile_intent_locked` — is acquired *before* a teardown touches lifecycle or member state and
+  held until after its withdrawal. Taking it only for the withdrawal is not a linearization: reset,
+  detach, and session end each mutate member state too, and a pass holding admission could publish
+  an armed push member between that mutation and the withdrawal, so the teardown revoked the
+  manifest and left the member it had authorized installed. Under the guard each path also
+  **re-reads** the member before acting, and sweeps again after withdrawing, so a member published
+  while it waited is torn down rather than inherited. The lock order is uniformly admission guard →
+  per-intent file lock; the guard may span backend awaits (a detach's tombstone and lease release
+  happen inside it), but the per-intent filesystem lock never does, because
+  `DaemonState::withdraw_intent_admitted` is synchronous and self-contained. Acquisition is bounded:
+  a single-binding teardown by `TEARDOWN_DEADLINE`, a set-scoped one by what is left of that same
+  *total* deadline, so a wedged guard surfaces as a failed teardown rather than a request handler
+  that never returns.
+- **Revalidation at member commit.** The restore chain is a long sequence of awaits, and a
+  withdrawal can land anywhere inside it. Before publishing a member the pass re-reads the manifest
+  under its write lock and requires it to be *present*, `live`, and at the generation it reconciled
+  (`IntentStore::commit_if_live_generation`); the commit itself runs inside that lock and is
+  synchronous, so no filesystem lock is ever held across a backend await. A refusal releases any
+  epoch lease the pass claimed and reports the binding `revoked`/`withdrawn`. Withdrawal therefore
+  beats both a finalize and a restored-member publication.
+- **Generation-conditional when the decision was.** The reconciler withdraws only the generation its
+  pass decided against, so a stale pass cannot delete the `pending` record a re-attach wrote while it
+  was in flight; and because a withdrawal deletes `pending` and moves `live` to `revoked` under the
+  same lock `finalize_admission` re-reads inside, a stale finalize cannot resurrect either.
+
+Failures propagate. Every routed path returns an error to its caller — an `Error` response from the
+daemon, a non-zero exit from the CLI — because "I tore down the member but could not withdraw the
+desired state" is precisely the state in which the next pass brings the station back. A set-scoped
+withdrawal (session end, reset) enumerates the *scope* rather than the members it changed, so a
+memberless or already-idle binding is still withdrawn, and it fails the whole operation if a
+manifest that claims to belong to the set cannot be read: an unvalidated identity is never acted on
+(it could name another binding's record) and never silently skipped either.
+
+A set-scoped teardown is bounded by **one total deadline** (`TEARDOWN_DEADLINE`), not by a fresh
+budget per binding. The enumeration runs through `IntentStore::bindings_bounded` on a
+`spawn_blocking` worker (`station_intent::run_blocking_within`), because the cooperative checks
+inside a directory scan cannot bound the `read_dir` or the `read` that is currently blocked — a scope
+on a wedged network mount is exactly the case the deadline exists for. Three things are refused
+rather than reported as a teardown: an enumeration that overran the deadline, an enumeration that
+completed but was **truncated** by it (a partial list is not the set), and a per-binding admission
+attempt with no budget left. In every case the operation returns an explicit incomplete-teardown
+error and publishes no further state — no idle marking, no `record_definite_session_end`, no `Ack`.
 
 ### 18.3 What restoration requires
 
@@ -2218,7 +2318,13 @@ In order, and all fail-closed:
 9. The member is not idle-and-not-re-armable. That combination is what `telex station reset`
    leaves, and it means "do not re-arm this automatically": the reconciler treats it as a
    revocation rather than restoring over the one deliberate operator action that has no durable
-   tombstone. `reset_station` revokes the affected intents directly for the same reason.
+   tombstone. `reset_station` withdraws every intent for the address for the same reason — scoped
+   by address rather than by the members it changed, so a memberless or already-idle station is
+   withdrawn too (sec. 18.2.3).
+10. The manifest is *still* present, `live`, and at the generation this pass reconciled, re-checked
+    under its own write lock at the moment the member is published. Everything above it is a
+    snapshot decision separated from the commit by a chain of awaits; this is the step that makes an
+    explicit withdrawal beat a restoration in flight.
 
 Restoration also never *lowers* a live member's CC watermark, and a successful outcome refreshes the
 durable watermark from the live member. The manifest value is a floor that keeps CC messages
@@ -2238,13 +2344,120 @@ loads is indexed; only the winner is attempted.
 | Constant | Value | Why |
 |---|---|---|
 | `RECONCILE_INTERVAL` | `HEARTBEAT_INTERVAL` (5 s) | one loop, not two |
-| `RECONCILE_PASS_DEADLINE` | 4 s | a pass can never overrun the tick that started it |
+| `RECONCILE_PASS_DEADLINE` | 4 s | the published end-to-end bound: a pass can never overrun the tick that started it |
+| `RECONCILE_RESPONSE_RESERVE` | 200 ms | serializing and writing the response, plus joining the pass task, happen *inside* the published bound |
+| `RECONCILE_PASS_WORK_BUDGET` | 3.8 s | `PASS_DEADLINE - RESPONSE_RESERVE`; every internal budget is sized against this, not against the bound |
+| `RECONCILE_MAINTENANCE_BUDGET` | 300 ms | GC + discovery share the head of the pass, leaving a full wave inside the work budget |
+| `RECONCILE_GC_BUDGET` | 150 ms | GC is one phase of maintenance, never the whole of it |
+| `RECONCILE_BLOCKING_GRACE` | 200 ms | a cooperatively truncated scan is allowed to hand back its partial page instead of being discarded |
 | `RECONCILE_PER_INTENT_TIMEOUT` | 3 s | probe + validation + claim |
+| `RECONCILE_SCHEDULING_RESERVE` | 250 ms | the pass's own wave scheduling, outcome application, cursor write, and logging |
+| `RECONCILE_DURABLE_WRITE_RESERVE` | 100 ms | a pass-visible durable write (evidence CAS, cursor advance) is **not started** unless this much budget remains |
+| `RECONCILE_EVENT_LOG_RESERVE` | 25 ms | an evidence-log append is narration; it is not started unless this much budget remains |
+| `RECONCILE_ADMIN_DEADLINE` | 4 s | outer bound on the admin `ReconcileIntents` request — the **same deadline instant** as the pass, not merely the same duration |
+| `RECONCILE_REQUEST_DEADLINE` | 4 s | client-side ceiling for one round trip, further clamped to whatever the caller has left |
 | `RECONCILE_PASS_BUDGET` | 64 | upper bound per pass, round-robin cursor across passes |
 | `RECONCILE_MAX_CONCURRENCY` | 4 | herd cap **and** guaranteed minimum progress per pass |
 | `RECONCILE_DEFERRED_LEASE_RETRY` | 5 s fixed | a not-yet-stale incumbent is *waiting*, not failing |
 | `RECONCILE_BACKOFF_INITIAL`/`_MAX` | 5 s / 5 min ±20 % | genuine failures only |
 | `RECONCILE_QUARANTINE_AFTER` | 10 consecutive failures → hourly | one wedged intent cannot eat the budget |
+| `TEARDOWN_DEADLINE` | `RECONCILE_PER_INTENT_TIMEOUT` (3 s) | **one total** budget for a whole explicit teardown — enumeration plus every per-binding admission — not a fresh budget per binding |
+
+The pass deadline is a **single absolute instant**, and for a request-originated pass it is computed
+from the moment the *request* arrived rather than from the moment the pass task happened to be
+scheduled; GC, discovery, and every wave — including the first — measure themselves against it. A
+chain of independent per-phase timeouts bounds each phase and nothing at all: an unbounded discovery
+of a large scope could exhaust the whole tick before the first wave started, and the first wave was
+exempt from the deadline on top of that. Guaranteed minimum progress is preserved by budgeting
+maintenance instead of exempting a wave: GC and discovery are confined to
+`RECONCILE_MAINTENANCE_BUDGET`, which leaves a whole `RECONCILE_PER_INTENT_TIMEOUT` behind them, and
+both resume from their own persisted positions, so a truncated phase delays coverage rather than
+losing it. A discovery that truncates sets `deadline_reached`; its `observed_count`/`over_cap` are
+lower bounds and are merged into the index rather than overwriting it, so one slow pass cannot
+retract an over-cap warning. A GC sweep advances the once-a-minute maintenance clock only when it
+**completed**.
+
+The budget is arithmetic, not aspiration:
+`MAINTENANCE + BLOCKING_GRACE + PER_INTENT + SCHEDULING_RESERVE <= PASS_WORK_BUDGET`, and
+`PASS_WORK_BUDGET + RESPONSE_RESERVE == PASS_DEADLINE`, both enforced as compile-time assertions.
+The work budget is separate from the bound because the bound is what the *caller* observes: a pass
+budgeted to exactly 4 s answers at 4 s plus however long the response takes to serialize and reach
+the socket, which is 4-seconds-ish rather than four seconds. The scheduling reserve is a different
+thing again: a pass is not just maintenance plus waves — between and after them it spawns and joins
+wave tasks, folds every outcome (a live-member lookup, an evidence CAS write, and for a terminal
+outcome a linearized withdrawal), advances the round-robin cursor, and appends to the event log.
+Budgeting maintenance and waves to *exactly* the deadline made the arithmetic say a pass fit while
+every real pass overran by however long its bookkeeping took. The reserve is also the gate a wave is
+admitted through, so a pass whose maintenance ran right up to its budget still starts — and
+finishes — a whole first wave inside the bound.
+
+**Every blocking filesystem phase on the pass path runs behind an execution boundary**
+(`run_blocking_within`): the work is moved to the blocking pool and the *wait* — never the work — is
+bounded by the pass deadline. Cooperative deadline checks sit *between* synchronous calls, so they
+bound a phase only while every individual call returns promptly; a hung network mount, a stalled
+filter driver, or a slow `fsync` is exactly the case the bound exists for, and there the check never
+runs. Abandoning only the wait is what makes this safe: a staged atomic write is never torn in half,
+it completes in the background, and the pass simply publishes nothing derived from a phase it
+stopped waiting for (reporting `deadline_reached`, or `ran: false` with
+`skipped_reason: "discovery_deadline"` when it was discovery). `RECONCILE_BLOCKING_GRACE` separates
+the cooperative deadline from the hard one for the two scanning phases, because a phase that
+deliberately stops *at* the deadline still has to hand back the page it stopped on — waiting to
+exactly the deadline would discard every truncated page and turn a large scope's normal progress
+into permanent starvation.
+
+Phases whose *side effect* is pass-visible get a stronger rule than "bound the wait":
+`run_blocking_reserved` **declines to start them at all** unless the named reserve is still intact.
+The evidence CAS write and the round-robin cursor advance take `RECONCILE_DURABLE_WRITE_RESERVE`, and
+the event-log append takes `RECONCILE_EVENT_LOG_RESERVE`. Bounding only the wait is right for a read
+— an abandoned scan publishes nothing — but wrong for a write, because an abandoned write still
+lands, and for a request-originated pass it lands after the caller has been answered. Refusing to
+start is the only way to make "nothing was published after the response" true rather than likely.
+The residual case cannot be closed on any platform: a write that *was* started with the full reserve
+intact and still has not returned by the deadline is reported as `BoundedPhase::Overran` and left to
+finish, because cancelling a staged atomic write mid-flight trades a late write for a torn one. Its
+blast radius is bounded by construction — a single-file atomic rewrite behind a generation CAS. It
+cannot register a member, cannot emit a report, and cannot resurrect a record a concurrent teardown
+has already moved past.
+
+Event logging is therefore **best-effort evidence, not a ledger**. A pass at or past its deadline
+skips its appends entirely, including its own `reconcile_pass` summary line, and skipping is
+preferred to narrating: a pass that spent its last milliseconds describing itself would be a pass
+that answered late. A gap in `pass_seq` between logged lines means those passes had no budget to
+narrate, not that they did not run. The authority for what happened is the `ReconcileReport` the
+caller receives (`ran` / `deadline_reached` / `skipped_reason`) and the durable per-manifest evidence
+block; the log is for reconstructing *why*. `origin` and `duration_ms` on the summary line are what
+make a gap interpretable after the fact.
+
+The admin bound is the pass bound made observable at the IPC surface, not a second, looser one —
+and, since M3, not even a second *clock*. A backstop at 6 s bounded the handler at 6 s, which is not
+the 4-second end-to-end bound this feature publishes; replacing it with a 4-second `timeout` around a
+spawned pass was worse in a subtler way, because the two clocks had equal durations but different
+origins. The handler's started when the request arrived and the pass's started when the task was
+scheduled, so the handler could answer `admin_deadline` with `ran: false` while the pass was still
+mid-wave — and that pass then went on registering members, advancing cursors, and publishing a report
+belonging to a request that had already been answered. The handler now computes one absolute deadline
+from the request, hands it to `reconcile_once_until`, and **joins** the pass rather than racing it.
+The pass is still spawned, so a client that hangs up mid-request cannot tear it in half at an
+arbitrary await point, but nothing is detached: every publication the pass performs happens-before
+the response is written. Clients clamp their own ceiling to
+`remaining.min(RECONCILE_REQUEST_DEADLINE)`, so a request never outlives the budget its caller
+actually had.
+
+Post-wave work is bounded by what is *left* of the same deadline, never by a fresh per-operation
+timeout. A terminal outcome's withdrawal has to wait for the binding's admission guard, and giving
+it a full `RECONCILE_PER_INTENT_TIMEOUT` after a wave that had already spent the budget is how a
+pass bounded at four seconds answered its caller at seven. It gets
+`min(remaining_pass_time, RECONCILE_PER_INTENT_TIMEOUT)` instead, and when nothing is left the
+withdrawal is deferred to the next pass with `deadline_reached` set — the record is untouched, so
+the next pass re-derives the same decision.
+
+The round-robin cursor is **per scope filter**, and the scope filter is applied inside the scan,
+ahead of the page window. A scoped pass that filtered after paging spent its budget on other stores'
+intents and then advanced a shared cursor past records it never considered; a store sorting behind a
+large block of unrelated intents could be starved indefinitely by passes that were nominally about
+it. The cursor file keeps one position per scope (plus a separate discovery position and a GC
+position, which are advanced by their own phases), and an older single-position file still migrates:
+its value seeds each scope the first time that scope is seen.
 
 The ladder is `5 s → 10 s → 20 s → … → 5 min`, and the **first** transient failure waits
 `RECONCILE_BACKOFF_INITIAL`, not twice it: `consecutive_failures` counts the failure being
@@ -2287,10 +2500,24 @@ that never started are not evidence of a completed verification.
   scheduling, and takes the per-`MemberKey` `delivery_admission` guard for each intent.
 - `reconcile_intent_locked(state, intent)` — **guard-free inner**. Assumes the caller already holds
   that guard.
+- `DaemonState::withdraw_intent_at_generation_within` — **acquiring**. For a caller whose whole
+  teardown is that one withdrawal, which today is only `apply_outcome`.
+- `DaemonState::admit_binding` + `DaemonState::withdraw_intent_admitted` — the **two-step** form
+  every explicit teardown uses. `admit_binding` takes the guard *before* the lifecycle or member
+  mutation, and `withdraw_intent_admitted` is the guard-free inner withdrawal run inside it, so the
+  mutation and the withdrawal are one admitted transition. `Detach`, `SessionEnd`, `Reset`, and the
+  `Register` push→pull downgrade all take this path; none of them already holds the guard when they
+  start, and none of them is called from inside the reconcile pass's guarded region.
+- `DaemonState::session_teardown_bindings` / `address_teardown_bindings` — **guard-free**, and
+  deliberately so: enumeration must not hold one binding's guard while another binding is torn down
+  under its own, which would invert the outermost-guard ordering.
 
 `register_member`'s anti-downgrade check may only call the locked variant: it already holds the
 admission guard, which is documented as outermost and non-reentrant, so calling the acquiring entry
-point there would self-deadlock the hottest register path.
+point there would self-deadlock the hottest register path. For the same reason the downgrade
+withdrawal inside `register_member` calls `withdraw_intent_admitted` directly rather than
+`admit_binding`. The rule is why `apply_outcome` — which runs *after* the guarded region of a pass —
+is the place the reconciler withdraws.
 
 ### 18.6 Tombstone guarantee
 
@@ -2298,7 +2525,11 @@ point there would self-deadlock the hottest register path.
 epoch claim and again after it, releasing the lease on a post-claim hit. It contains no call to
 `clear_detach_tombstone` at all — clearing is an explicit-attach-only operation — and a unit test
 asserts that structurally against the source. Detach ordering is durable tombstone first, local
-intent revocation second, so a crash between them leaves tombstone-wins.
+intent withdrawal second, so a crash between them leaves tombstone-wins.
+
+The tombstone covers detach only. A reset, a session end, and a fallback downgrade write no durable
+tombstone, so for those the manifest re-check at member commit (sec. 18.2.3) is what stops a
+restoration already in flight from publishing a member the desired state no longer authorizes.
 
 ### 18.7 Triggers
 
