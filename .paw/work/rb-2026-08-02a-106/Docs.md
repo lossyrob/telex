@@ -1104,3 +1104,69 @@ site, which is exactly what `Path::exists()` did — and the suite re-run. All t
   `--features postgres`, `--features entra`, default, `--features sqlite,self-update`
 - Compiled-out `telex upgrade` fail-closed check — exits 1 with the documented message
 - `mdbook build docs/guide`
+
+## Exact-scope repair after the full PAW review
+
+The full review of `c13bad6441e74771280770793e76a302aafc6388...f2bd68e7064eb9571bc29e38b08035405100503b`
+reported **5 Must and 7 Should** findings in pending review `5045956337`. This repair round addresses
+all 12 findings and merges `origin/main@c67946ec494cdedb7defa638d953b831d76d6ec5` without rebasing
+or rewriting history. That merge incorporates the accepted Copilot App lifecycle semantics from
+#139 and the canonical Local Daemon design from #140. The repair code head before this evidence
+update is `4f98341`; the final pushed head must include this document and is recorded in the PR body.
+
+The campaign reserved ADR 0051 for Operator Station and allocated **ADR 0052** to Local Daemon
+station intent. All 32 station-intent references across the 18 inventoried PR files now use 0052,
+including ADR 0023's amendment pointer and the ADR heading. Operator Station references under
+`.streamliner/**` remain 0051. No schema value, protocol value, runtime constant, or stored record
+changed during the renumbering.
+
+### Finding disposition
+
+| Finding | Resolution |
+|---|---|
+| M1 | Unix owner-private tests extract errors without requiring `ProducerIdentity: Debug`. |
+| M2 | Withdrawal is fallible and linearized with reconciliation. Pending records use exact-generation conditional deletion; live records transition to durable `Revoked`; reset, detach, fallback, and session end cannot race a restored member into existence. |
+| M3 | One request-originated deadline bounds discovery, GC, waves, outcome withdrawal, cursor/evidence writes, event logging, and the admin response to four seconds. Scope filtering and cursors are store-correct. |
+| M4 | A real producer-process identity change clears descriptor-specific durable failures while preserving lifetime counters; successor index reconstruction proves the reset survives restart. |
+| M5 | The connected bridge peer is authenticated before any credential bytes are written, and responses are capped at 16 KiB with the exact boundary accepted. |
+| S1 | Successor results retain structured nonzero output, name `successor_binary` on every branch, and kill/reap timed-out direct CLI children. |
+| S2 | Capacity guidance states that revoked records retain their slot until the seven-day terminal TTL and daemon GC; detach does not free capacity immediately. |
+| S3 | ADR 0052 provenance update completed for exactly 32 references in 18 files. |
+| S4 | Windows producer-root documentation now matches the implemented principal allowlist and makes no AppContainer support claim. |
+| S5 | Destructive process evidence covers hard-killed producer continuity and accepted-unacknowledged delivery, busy handoff, partial multi-store drain, and live-Postgres epoch fencing. |
+| S6 | This evidence record and the PR description are refreshed after code and main integration. |
+| S7 | Windows first boot-ID mint uses a global owner-only mutex; a barrier-driven 12-process cold start proves one persisted identity. |
+
+### Repair validation
+
+- `cargo build --workspace` passed.
+- `cargo fmt --all -- --check` passed.
+- `cargo clippy --all-features --workspace -- -D warnings` passed.
+- `node --test copilot/bridge/*.test.mjs` passed: 20 tests.
+- `cargo test --all-features --test station_intent` passed: 63 tests after M4/M5 and 62 at
+  the M2/M3 checkpoint.
+- The station-intent SQLite process selectors passed, including hard-kill continuity, busy
+  successor handoff, partial multi-store drain, fallback withdrawal, and four restart/upgrade
+  reconciliation cases.
+- `cargo test --all-features --test boot_identity` passed: 6 tests; the platform filesystem unit
+  selector passed 19 tests.
+- The live Postgres fencing test passed repeatedly against a disposable PostgreSQL 16 instance in
+  the implementation validation environment. The final local command skipped cleanly because
+  `TELEX_PG_URL` was not set.
+- `cargo test --workspace` reached **450 passed, 1 failed**. The failure is
+  `application_client::tests::attach_rejects_duplicates_and_defines_empty_as_noop`; the identical
+  diagnostic reproduces on untouched `main@c67946e`, so it is a current-main baseline failure rather
+  than a station-intent repair regression.
+
+The prior exact head had five green GitHub jobs and one Ubuntu compile failure. M1 fixes that compile
+error, but no exact-head CI result exists until this repair is pushed. Native Unix trust checks,
+macOS transport coverage, and authoritative Linux/Postgres CI therefore remain evidence gaps at
+handoff. A focused or delta review must cover `f2bd68e..final-head`, including the main merge,
+Application Client conflict resolution, M1-M5/S1-S7 repairs, and ADR 0052.
+
+### Decision boundary
+
+The requested next action is focused or delta re-review of the final clean pushed head, followed by
+exact-head CI observation. A review +1 would be technical evidence only. It would not authorize a
+merge, operate a builder gate, or start downstream work. Any head movement, reopened actionable
+finding, required-check failure, or loss of clean mergeability invalidates that evidence.
