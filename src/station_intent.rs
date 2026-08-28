@@ -26,7 +26,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{
     atomic::{AtomicBool, Ordering},
-    Arc,
+    Arc, OnceLock,
 };
 use std::time::{Duration, Instant};
 
@@ -1276,9 +1276,29 @@ where
     F: FnOnce(Arc<AtomicBool>) -> T + Send + 'static,
     T: Send + 'static,
 {
+    // Discovery and GC can block on a filesystem indefinitely. Permit at most one such phase for
+    // the process, so a wedged scope cannot consume Tokio's shared blocking capacity on every
+    // heartbeat and starve unrelated backend work.
+    static FILESYSTEM_PHASE_SLOT: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
+    let slot = FILESYSTEM_PHASE_SLOT
+        .get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1)))
+        .clone();
+    let permit = match deadline.remaining() {
+        Some(remaining) => match tokio::time::timeout(remaining, slot.acquire_owned()).await {
+            Ok(Ok(permit)) => permit,
+            Ok(Err(_)) | Err(_) => return BoundedPhase::Overran,
+        },
+        None => match slot.acquire_owned().await {
+            Ok(permit) => permit,
+            Err(_) => return BoundedPhase::Overran,
+        },
+    };
     let cancelled = Arc::new(AtomicBool::new(false));
     let worker_cancelled = cancelled.clone();
-    let handle = tokio::task::spawn_blocking(move || work(worker_cancelled));
+    let handle = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        work(worker_cancelled)
+    });
     match deadline.remaining() {
         Some(remaining) => match tokio::time::timeout(remaining + grace, handle).await {
             Ok(Ok(value)) => BoundedPhase::Completed(value),
