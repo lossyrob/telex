@@ -2150,7 +2150,8 @@ pub async fn reconcile_once_until(
             "StationIntent",
             format!(
                 "station-intent scope holds {} entries, over the {STATION_INTENT_MAX_COUNT} write cap; \
-                 nothing is deleted for being over cap - GC brings it back down",
+                 existing records remain updateable or withdrawable, but revocation does not free \
+                 capacity until the seven-day terminal TTL expires and daemon GC removes the record",
                 page.observed_count
             ),
         );

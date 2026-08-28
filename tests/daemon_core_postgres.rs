@@ -2107,3 +2107,963 @@ async fn postgres_station_intent_restore_is_single_writer() {
     let _ = std::fs::remove_dir_all(config_path.parent().unwrap());
     restore_env("TELEX_CONFIG", prior_config);
 }
+
+// ---------------------------------------------------------------------------------------------
+// Process-boundary fencing over a live Postgres store (issue #106 / ADR 0052).
+//
+// The in-process fencing tests above prove the daemon's own logic. This one proves the property
+// that actually protects a shared Postgres deployment: two *separate telex daemon processes*, each
+// with its own home, run dir, and IPC socket, that can only see each other through the database.
+// Neither can inspect the other's memory, so the fence has to hold on the durable lease epoch
+// alone.
+//
+// The ordering is the evidence. A consumer that only starts waiting *after* the fence proves
+// nothing: the CLI's documented self-heal would re-register it as a fresh, legitimate owner, and a
+// delivery to it would be correct. So the predecessor's delivery consumer is armed and *observed
+// armed by the daemon* before the successor attaches, and the message is sent only after the
+// successor has taken the epoch. What must never happen is that already-active stale consumer
+// receiving a delivery under an epoch it no longer owns.
+// ---------------------------------------------------------------------------------------------
+
+static PG_PROCESS_CAPTURE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(1);
+
+const PG_FENCE_ADDRESS: &str = "addr:pg-fence";
+const PG_FENCE_SENDER_ADDRESS: &str = "addr:pg-fence-sender";
+const PG_FENCE_PREDECESSOR: &str = "pg-fence-first";
+const PG_FENCE_SUCCESSOR: &str = "pg-fence-second";
+const PG_FENCE_SENDER: &str = "pg-fence-sender";
+
+/// Drops a test schema when the scope ends -- on success *and* on an assertion panic.
+///
+/// Cleanup that only runs on the happy path is not cleanup: a single failing assertion would
+/// otherwise leak a schema into a shared Postgres server for every later run to trip over.
+struct PgSchemaGuard {
+    cfg: tokio_postgres::Config,
+    schema: String,
+}
+
+impl PgSchemaGuard {
+    fn new(cfg: tokio_postgres::Config, schema: String) -> Self {
+        Self { cfg, schema }
+    }
+}
+
+impl Drop for PgSchemaGuard {
+    fn drop(&mut self) {
+        let cfg = self.cfg.clone();
+        let schema = self.schema.clone();
+        let sql = format!("DROP SCHEMA IF EXISTS {schema} CASCADE");
+        // Drop runs on the test thread, which is inside the `#[tokio::test]` runtime, and a nested
+        // `block_on` there panics. The cleanup therefore gets its own thread and its own runtime.
+        let joined = std::thread::spawn(move || {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|e| format!("building the schema cleanup runtime: {e}"))?;
+            runtime
+                .block_on(admin_exec(&cfg, &sql))
+                .map_err(|e| format!("{e:#}"))
+        })
+        .join();
+        let failure = match joined {
+            Ok(Ok(())) => None,
+            Ok(Err(detail)) => Some(detail),
+            Err(_) => Some("the schema cleanup thread panicked".to_string()),
+        };
+        let Some(detail) = failure else {
+            return;
+        };
+        // Never panic while already panicking: that aborts the process and buries the assertion
+        // that actually failed.
+        if std::thread::panicking() {
+            eprintln!("[daemon-postgres] leaked schema {}: {detail}", self.schema);
+        } else {
+            panic!("dropping schema {}: {detail}", self.schema);
+        }
+    }
+}
+
+/// Removes a directory tree when the scope ends, on success or on panic.
+struct PgTempTreeGuard {
+    root: PathBuf,
+}
+
+impl PgTempTreeGuard {
+    fn new(root: PathBuf) -> Self {
+        Self { root }
+    }
+}
+
+impl Drop for PgTempTreeGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+/// One isolated telex installation: its own home, run dir, state dir, and daemon.
+struct PgProcessEnv {
+    bin: PathBuf,
+    root: PathBuf,
+    home: PathBuf,
+    run_dir: PathBuf,
+    state_dir: PathBuf,
+    config: PathBuf,
+}
+
+struct PgCmdOutput {
+    code: Option<i32>,
+    stdout: String,
+    stderr: String,
+    timed_out: bool,
+}
+
+impl PgCmdOutput {
+    fn succeeded(&self) -> bool {
+        !self.timed_out && self.code == Some(0)
+    }
+
+    fn json(&self, context: &str) -> serde_json::Value {
+        serde_json::from_str(&self.stdout).unwrap_or_else(|e| {
+            panic!(
+                "{context}: stdout is not JSON ({e}): code={:?} timed_out={} stdout={} stderr={}",
+                self.code, self.timed_out, self.stdout, self.stderr
+            )
+        })
+    }
+}
+
+impl PgProcessEnv {
+    fn new(label: &str, config: &std::path::Path) -> Self {
+        let root = std::env::temp_dir().join(format!(
+            "telex-pg-process-{label}-{}-{}",
+            std::process::id(),
+            now_ms()
+        ));
+        let home = root.join("h");
+        let run_dir = root.join("r");
+        let state_dir = root.join("state");
+        // Owner-private via the product's own helper: the daemon refuses a home or run dir that
+        // anyone else could write, and these tests must not weaken that trust check to run.
+        telex::platform_fs::ensure_owner_private_dir(&home).expect("owner-private home");
+        telex::platform_fs::ensure_owner_private_dir(&run_dir).expect("owner-private run dir");
+        std::fs::create_dir_all(&state_dir).expect("create state dir");
+        let bin = option_env!("CARGO_BIN_EXE_telex")
+            .map(PathBuf::from)
+            .expect("the telex binary is built for integration tests");
+        Self {
+            bin,
+            root,
+            home,
+            run_dir,
+            state_dir,
+            config: config.to_path_buf(),
+        }
+    }
+
+    fn command(&self, session: &str) -> std::process::Command {
+        let mut cmd = std::process::Command::new(&self.bin);
+        cmd.env("TELEX_HOME", &self.home)
+            .env("TELEX_RUN_DIR", &self.run_dir)
+            .env("TELEX_CONFIG", &self.config)
+            .env("TELEX_SESSION_ID", session)
+            .env("TELEX_LIVENESS_WINDOW_SECS", "0")
+            .env_remove("TELEX_DB")
+            .env_remove("TELEX_BACKEND")
+            .env_remove("TELEX_ADDRESS")
+            .env_remove("TELEX_SESSION_PID")
+            .env_remove("TELEX_RECONNECT_GRACE_MS");
+        #[cfg(windows)]
+        cmd.env("LOCALAPPDATA", &self.state_dir);
+        #[cfg(not(windows))]
+        cmd.env("XDG_STATE_HOME", &self.state_dir);
+        cmd
+    }
+
+    /// Per-invocation capture paths. A background waiter runs concurrently with foreground
+    /// commands, so a single shared `last.stdout` would let one command's output overwrite
+    /// another's mid-test.
+    fn capture_paths(&self, label: &str) -> Option<(PathBuf, PathBuf)> {
+        let dir = self.root.join("cmd");
+        std::fs::create_dir_all(&dir).ok()?;
+        let id = PG_PROCESS_CAPTURE.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Some((
+            dir.join(format!("{label}-{id}.out")),
+            dir.join(format!("{label}-{id}.err")),
+        ))
+    }
+
+    /// Run a command without ever panicking, so teardown paths (which can run while a panic is
+    /// already unwinding) stay safe. `None` means the command could not be started at all.
+    fn try_run(&self, session: &str, args: &[&str], timeout: Duration) -> Option<PgCmdOutput> {
+        let (stdout_path, stderr_path) = self.capture_paths("cmd")?;
+        let mut cmd = self.command(session);
+        cmd.args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::from(
+                std::fs::File::create(&stdout_path).ok()?,
+            ))
+            .stderr(std::process::Stdio::from(
+                std::fs::File::create(&stderr_path).ok()?,
+            ));
+        let mut child = cmd.spawn().ok()?;
+        let deadline = Instant::now() + timeout;
+        let mut timed_out = false;
+        let code = loop {
+            match child.try_wait() {
+                Ok(Some(status)) => break status.code(),
+                Ok(None) if Instant::now() >= deadline => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    timed_out = true;
+                    break None;
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+                Err(_) => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return None;
+                }
+            }
+        };
+        Some(PgCmdOutput {
+            code,
+            stdout: read_capture_file(&stdout_path),
+            stderr: read_capture_file(&stderr_path),
+            timed_out,
+        })
+    }
+
+    fn run(&self, session: &str, args: &[&str], timeout: Duration) -> PgCmdOutput {
+        self.try_run(session, args, timeout)
+            .unwrap_or_else(|| panic!("could not run telex {args:?}"))
+    }
+
+    fn run_ok(&self, session: &str, args: &[&str], timeout: Duration) -> PgCmdOutput {
+        let out = self.run(session, args, timeout);
+        assert!(
+            out.succeeded(),
+            "telex {args:?} failed: code={:?} timed_out={} stdout={} stderr={}",
+            out.code,
+            out.timed_out,
+            out.stdout,
+            out.stderr
+        );
+        out
+    }
+
+    /// Attach `session` to `address` and return the lease epoch the daemon claimed for it. The
+    /// epoch comes from the registration response itself, so it is what this process was told it
+    /// owns rather than whatever the store happens to say later.
+    fn attach(&self, session: &str, address: &str) -> i64 {
+        let out = self.run_ok(
+            session,
+            &[
+                "--json",
+                "--address",
+                address,
+                "attach",
+                "--session",
+                session,
+                "--description",
+                "postgres process fencing",
+            ],
+            Duration::from_secs(30),
+        );
+        out.json("attach")
+            .get("lease_epoch")
+            .and_then(serde_json::Value::as_i64)
+            .expect("a successful attach reports the claimed lease epoch")
+    }
+
+    fn status(&self, session: &str, address: &str) -> serde_json::Value {
+        self.run_ok(
+            session,
+            &["--json", "--address", address, "status"],
+            Duration::from_secs(30),
+        )
+        .json("status")
+    }
+
+    fn try_status(&self, session: &str, address: &str) -> Option<serde_json::Value> {
+        let out = self.try_run(
+            session,
+            &["--json", "--address", address, "status"],
+            Duration::from_secs(30),
+        )?;
+        if !out.succeeded() {
+            return None;
+        }
+        serde_json::from_str(&out.stdout).ok()
+    }
+
+    fn durable_lease_epoch(&self, session: &str, address: &str) -> i64 {
+        self.status(session, address)
+            .pointer("/lease/lease_epoch")
+            .and_then(serde_json::Value::as_i64)
+            .expect("the durable lease carries an epoch")
+    }
+
+    /// Arm a `telex wait` in its own process and return while it is still blocked.
+    ///
+    /// `--reconnect-grace-ms 0` turns off the CLI's re-register self-heal *for this waiter only*.
+    /// That self-heal is legitimate behaviour -- it is exercised explicitly at the end of the test
+    /// -- but a fenced waiter that silently re-registers would climb back to the current epoch and
+    /// deliver, which makes "the stale consumer never got it" unfalsifiable.
+    fn spawn_wait(&self, session: &str, address: &str, timeout_ms: u64) -> PgBackgroundWait {
+        let out_dir = self.root.join(format!("wait-{session}"));
+        std::fs::create_dir_all(&out_dir).expect("create the waiter out-dir");
+        let (stdout_path, stderr_path) = self
+            .capture_paths(&format!("wait-{session}"))
+            .expect("waiter capture paths");
+        let timeout_arg = timeout_ms.to_string();
+        let out_dir_arg = out_dir
+            .to_str()
+            .expect("the waiter out-dir is valid UTF-8")
+            .to_string();
+        let mut cmd = self.command(session);
+        cmd.args([
+            "--json",
+            "--address",
+            address,
+            "wait",
+            "--session",
+            session,
+            "--timeout-ms",
+            &timeout_arg,
+            "--reconnect-grace-ms",
+            "0",
+            "--out-dir",
+            &out_dir_arg,
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::from(
+            std::fs::File::create(&stdout_path).expect("waiter stdout capture"),
+        ))
+        .stderr(std::process::Stdio::from(
+            std::fs::File::create(&stderr_path).expect("waiter stderr capture"),
+        ));
+        let child = cmd.spawn().expect("spawn the background waiter");
+        let pid = child.id();
+        PgBackgroundWait {
+            child,
+            pid,
+            out_dir,
+            stdout_path,
+            stderr_path,
+            finished: false,
+        }
+    }
+
+    /// Block until this daemon reports an armed, alive waiter for `session`/`address` owned by
+    /// `pid`, and return that waiter row.
+    ///
+    /// This is the readiness barrier that makes the ordering real rather than hopeful: the signal
+    /// is the daemon's own status, so nothing downstream depends on a sleep being long enough, and
+    /// the successor cannot attach before the predecessor's consumer is genuinely registered.
+    fn wait_until_live_waiter(
+        &self,
+        session: &str,
+        address: &str,
+        pid: u32,
+        timeout: Duration,
+    ) -> serde_json::Value {
+        let deadline = Instant::now() + timeout;
+        let mut last = serde_json::Value::Null;
+        loop {
+            if let Some(status) = self.try_status(session, address) {
+                let armed = status
+                    .get("live_waiters")
+                    .and_then(serde_json::Value::as_array)
+                    .and_then(|waiters| {
+                        waiters
+                            .iter()
+                            .find(|waiter| {
+                                waiter.get("pid").and_then(serde_json::Value::as_u64)
+                                    == Some(u64::from(pid))
+                                    && waiter.get("session_id").and_then(serde_json::Value::as_str)
+                                        == Some(session)
+                                    && waiter.get("alive").and_then(serde_json::Value::as_bool)
+                                        == Some(true)
+                            })
+                            .cloned()
+                    });
+                if let Some(waiter) = armed {
+                    return waiter;
+                }
+                last = status;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "the daemon never armed a live waiter for session={session} address={address} \
+                 pid={pid}; last status: {last}"
+            );
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// Poll this daemon's recent-error ring until it records a self-demotion for `address`.
+    ///
+    /// The stale waiter's exit code says it did not get the message; this says *why*: the daemon
+    /// itself found it no longer owned the epoch. Returns `None` if nothing was recorded in time.
+    fn wait_until_self_demoted(
+        &self,
+        address: &str,
+        timeout: Duration,
+    ) -> Option<serde_json::Value> {
+        let deadline = Instant::now() + timeout;
+        loop {
+            if let Some(out) = self.try_run(
+                "cleanup",
+                &["--json", "daemon", "status"],
+                Duration::from_secs(30),
+            ) {
+                if out.succeeded() {
+                    if let Ok(status) = serde_json::from_str::<serde_json::Value>(&out.stdout) {
+                        let demotion = status
+                            .get("recent_errors")
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|errors| {
+                                errors
+                                    .iter()
+                                    .find(|error| {
+                                        error.get("kind").and_then(serde_json::Value::as_str)
+                                            == Some("NotOwner")
+                                            && error
+                                                .get("message")
+                                                .and_then(serde_json::Value::as_str)
+                                                .is_some_and(|message| {
+                                                    message.contains("self-demoted")
+                                                        && message.contains(address)
+                                                })
+                                    })
+                                    .cloned()
+                            });
+                        if demotion.is_some() {
+                            return demotion;
+                        }
+                    }
+                }
+            }
+            if Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    }
+
+    /// The pid the daemon published in its capability file, so cleanup can fall back to killing the
+    /// process this env started -- by recorded pid, never by process name.
+    fn daemon_pid(&self) -> Option<u32> {
+        let cap = std::fs::read_dir(&self.run_dir)
+            .ok()?
+            .filter_map(Result::ok)
+            .map(|entry| entry.path())
+            .find(|path| {
+                path.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|name| name.starts_with("daemon-") && name.ends_with(".cap"))
+            })?;
+        let json: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(cap).ok()?).ok()?;
+        json.get("server_pid")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|pid| u32::try_from(pid).ok())
+    }
+
+    /// Whether this env's daemon is still serving. A *running* daemon answers `daemon status` with
+    /// its full status report, which has no `running` field at all; only the not-running fallback
+    /// carries `running: false`. Treating a missing field as "not running" would make teardown
+    /// give up before the daemon was actually gone.
+    fn daemon_is_running(&self) -> bool {
+        let Some(out) = self.try_run(
+            "cleanup",
+            &["--json", "daemon", "status"],
+            Duration::from_secs(30),
+        ) else {
+            return false;
+        };
+        if !out.succeeded() {
+            return false;
+        }
+        let Ok(status) = serde_json::from_str::<serde_json::Value>(&out.stdout) else {
+            return false;
+        };
+        status.get("running").and_then(serde_json::Value::as_bool) != Some(false)
+            && status.get("instance_id").is_some()
+    }
+
+    fn shutdown(&self) {
+        if !self.root.exists() {
+            return;
+        }
+        let pid = self.daemon_pid();
+        let _ = self.try_run(
+            "cleanup",
+            &["--json", "daemon", "stop", "--drain"],
+            Duration::from_secs(30),
+        );
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while self.daemon_is_running() {
+            if Instant::now() >= deadline {
+                // A test must never leave a daemon behind for the next one to find; the pid comes
+                // from this env's own cap file.
+                if let Some(pid) = pid {
+                    kill_pid(pid);
+                }
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        let _ = std::fs::remove_dir_all(&self.root);
+    }
+}
+
+impl Drop for PgProcessEnv {
+    fn drop(&mut self) {
+        self.shutdown();
+    }
+}
+
+/// A `telex wait` running in its own process, observable while it is still blocked.
+struct PgBackgroundWait {
+    child: std::process::Child,
+    pid: u32,
+    out_dir: PathBuf,
+    stdout_path: PathBuf,
+    stderr_path: PathBuf,
+    finished: bool,
+}
+
+impl PgBackgroundWait {
+    fn still_blocked(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
+    /// Block until the waiter exits and collect everything it observed: exit code, stdout, stderr,
+    /// and its `--out-dir` artifacts. `exit.code` is written last by the product, so its presence
+    /// means the artifact set is complete rather than half-written.
+    fn finish(&mut self, timeout: Duration) -> PgWaitObservation {
+        let deadline = Instant::now() + timeout;
+        let code = loop {
+            match self.child.try_wait() {
+                Ok(Some(status)) => break status.code(),
+                Ok(None) if Instant::now() >= deadline => {
+                    let _ = self.child.kill();
+                    let _ = self.child.wait();
+                    self.finished = true;
+                    panic!(
+                        "the fenced waiter (pid {}) never exited within {timeout:?}; it is still \
+                         blocked on a station it no longer owns",
+                        self.pid
+                    );
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+                Err(e) => {
+                    self.finished = true;
+                    panic!("polling the fenced waiter (pid {}): {e}", self.pid);
+                }
+            }
+        };
+        self.finished = true;
+        PgWaitObservation {
+            code,
+            stdout: read_capture_file(&self.stdout_path),
+            stderr: read_capture_file(&self.stderr_path),
+            status: read_json_file(&self.out_dir.join("status.json")),
+            message_artifact: self.out_dir.join("message.json"),
+            message: read_json_file(&self.out_dir.join("message.json")),
+            exit_code_artifact: std::fs::read_to_string(self.out_dir.join("exit.code"))
+                .ok()
+                .and_then(|text| text.trim().parse::<i32>().ok()),
+        }
+    }
+}
+
+impl Drop for PgBackgroundWait {
+    fn drop(&mut self) {
+        if !self.finished {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+/// Everything a finished background waiter left behind.
+struct PgWaitObservation {
+    code: Option<i32>,
+    stdout: String,
+    stderr: String,
+    status: Option<serde_json::Value>,
+    message_artifact: PathBuf,
+    message: Option<serde_json::Value>,
+    exit_code_artifact: Option<i32>,
+}
+
+impl PgWaitObservation {
+    fn outcome(&self) -> Option<String> {
+        self.status
+            .as_ref()
+            .and_then(|status| status.get("outcome"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    }
+
+    fn mentions(&self, needle: &str) -> bool {
+        self.stdout.contains(needle)
+            || self.stderr.contains(needle)
+            || self
+                .status
+                .as_ref()
+                .is_some_and(|status| status.to_string().contains(needle))
+            || self
+                .message
+                .as_ref()
+                .is_some_and(|message| message.to_string().contains(needle))
+    }
+
+    fn describe(&self) -> String {
+        format!(
+            "code={:?} outcome={:?} exit_code_artifact={:?} stdout={} stderr={}",
+            self.code,
+            self.outcome(),
+            self.exit_code_artifact,
+            self.stdout,
+            self.stderr
+        )
+    }
+}
+
+fn read_capture_file(path: &std::path::Path) -> String {
+    std::fs::read_to_string(path)
+        .unwrap_or_default()
+        .trim()
+        .to_string()
+}
+
+fn read_json_file(path: &std::path::Path) -> Option<serde_json::Value> {
+    serde_json::from_str(&std::fs::read_to_string(path).ok()?).ok()
+}
+
+#[cfg(unix)]
+fn kill_pid(pid: u32) {
+    if pid == std::process::id() {
+        eprintln!("[daemon-postgres] refusing to signal this process");
+        return;
+    }
+    unsafe {
+        libc::kill(pid as libc::pid_t, libc::SIGKILL);
+    }
+}
+
+#[cfg(windows)]
+fn kill_pid(pid: u32) {
+    use windows_sys::Win32::Foundation::CloseHandle;
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, PROCESS_TERMINATE};
+    if pid == std::process::id() {
+        eprintln!("[daemon-postgres] refusing to signal this process");
+        return;
+    }
+    unsafe {
+        let handle = OpenProcess(PROCESS_TERMINATE, 0, pid);
+        if handle != 0 {
+            TerminateProcess(handle, 1);
+            CloseHandle(handle);
+        }
+    }
+}
+
+#[tokio::test]
+async fn postgres_process_boundary_fences_an_already_active_predecessor_consumer() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(url) =
+        pg_url_or_skip("postgres_process_boundary_fences_an_already_active_predecessor_consumer")
+    else {
+        return;
+    };
+
+    let schema = sanitize_ident(&format!(
+        "telex_pg_fence_{}_{}",
+        std::process::id(),
+        now_ms()
+    ))
+    .expect("derived schema");
+    let cfg = pg_config(&url);
+    admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
+        .await
+        .expect("pre-test schema cleanup");
+    // From here on every exit path -- clean return, failed assertion, or panic inside a helper --
+    // drops the schema, removes the config tree, and stops both daemons, in reverse declaration
+    // order.
+    let _schema_guard = PgSchemaGuard::new(cfg.clone(), schema.clone());
+
+    let profile = BackendProfile {
+        kind: "postgres".to_string(),
+        path: None,
+        url: Some(url.clone()),
+        auth: Some("password".to_string()),
+        password_env: std::env::var("TELEX_PG_PASSWORD")
+            .ok()
+            .filter(|pw| !pw.is_empty())
+            .map(|_| "TELEX_PG_PASSWORD".to_string()),
+        password_command: None,
+        schema: Some(schema.clone()),
+        entra_cred: None,
+        entra_scope: None,
+    };
+    let mut backends = BTreeMap::new();
+    backends.insert("pg-fence".to_string(), profile);
+    let config_path = write_temp_config(
+        "fence",
+        &ConfigFile {
+            default: Some("pg-fence".to_string()),
+            backends,
+        },
+    );
+    let _config_guard = PgTempTreeGuard::new(
+        config_path
+            .parent()
+            .expect("the temp config lives in its own directory")
+            .to_path_buf(),
+    );
+
+    // Two independent installations: separate homes, separate run dirs, separate daemons. The only
+    // thing they share is the Postgres schema.
+    let predecessor = PgProcessEnv::new("predecessor", &config_path);
+    let successor = PgProcessEnv::new("successor", &config_path);
+    let body = "postgres fencing evidence";
+
+    let first_epoch = predecessor.attach(PG_FENCE_PREDECESSOR, PG_FENCE_ADDRESS);
+    predecessor.attach(PG_FENCE_SENDER, PG_FENCE_SENDER_ADDRESS);
+
+    // 1. Arm the predecessor's delivery consumer while it is still the undisputed owner, and do not
+    //    proceed until its own daemon reports the waiter armed and alive.
+    let mut stale = predecessor.spawn_wait(PG_FENCE_PREDECESSOR, PG_FENCE_ADDRESS, 120_000);
+    let armed = predecessor.wait_until_live_waiter(
+        PG_FENCE_PREDECESSOR,
+        PG_FENCE_ADDRESS,
+        stale.pid,
+        Duration::from_secs(60),
+    );
+    assert_eq!(
+        armed.get("address").and_then(serde_json::Value::as_str),
+        Some(PG_FENCE_ADDRESS),
+        "the armed waiter must belong to the fenced address: {armed}"
+    );
+
+    // 2. Only now does a second machine attach to the same address in the same Postgres store. The
+    //    consumer that is about to be fenced is already a live, registered delivery path.
+    let second_epoch = successor.attach(PG_FENCE_SUCCESSOR, PG_FENCE_ADDRESS);
+    assert!(
+        second_epoch > first_epoch,
+        "the successor must claim a strictly higher epoch across the process boundary: \
+         {first_epoch} -> {second_epoch}"
+    );
+    assert_eq!(
+        successor.durable_lease_epoch(PG_FENCE_SUCCESSOR, PG_FENCE_ADDRESS),
+        second_epoch,
+        "the durable lease must agree with the epoch the successor was handed"
+    );
+
+    // Recorded for the failure messages below. Either state is legitimate evidence: the
+    // predecessor's own 5s heartbeat may already have demoted the member. Neither may end in a
+    // delivery, so this is context, not an assertion.
+    let blocked_at_send = stale.still_blocked();
+
+    // 3. The message is sent after the fence, with the stale consumer already attached to it. The
+    //    send runs through the fenced daemon on purpose: it can still write to the store, it just
+    //    may not consume from an address it no longer owns.
+    predecessor.run_ok(
+        PG_FENCE_SENDER,
+        &[
+            "--json",
+            "--address",
+            PG_FENCE_SENDER_ADDRESS,
+            "send",
+            "--session",
+            PG_FENCE_SENDER,
+            "--from",
+            PG_FENCE_SENDER_ADDRESS,
+            "--to",
+            PG_FENCE_ADDRESS,
+            "--body",
+            body,
+        ],
+        Duration::from_secs(30),
+    );
+
+    // 4. The current epoch owner -- and only it -- delivers, under the epoch it actually holds.
+    let delivered = successor
+        .run_ok(
+            PG_FENCE_SUCCESSOR,
+            &[
+                "--json",
+                "--address",
+                PG_FENCE_ADDRESS,
+                "wait",
+                "--session",
+                PG_FENCE_SUCCESSOR,
+                "--timeout-ms",
+                "30000",
+            ],
+            Duration::from_secs(60),
+        )
+        .json("successor wait");
+    assert!(
+        delivered
+            .get("body")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|got| got.contains(body)),
+        "the owning process delivered the wrong message: {delivered}"
+    );
+    assert_eq!(
+        delivered
+            .get("lease_epoch")
+            .and_then(serde_json::Value::as_i64),
+        Some(second_epoch),
+        "delivery must be stamped with the epoch the delivering process owns: {delivered}"
+    );
+    let message_id = delivered
+        .get("id")
+        .and_then(serde_json::Value::as_i64)
+        .expect("delivered message id");
+
+    let acked = successor
+        .run_ok(
+            PG_FENCE_SUCCESSOR,
+            &[
+                "--json",
+                "--address",
+                PG_FENCE_ADDRESS,
+                "ack",
+                "--session",
+                PG_FENCE_SUCCESSOR,
+                "--id",
+                &message_id.to_string(),
+            ],
+            Duration::from_secs(30),
+        )
+        .json("ack");
+    assert_eq!(
+        acked
+            .get("delivery_outcome")
+            .and_then(serde_json::Value::as_str),
+        Some("marked"),
+        "the owning process must be the one that consumes the delivery: {acked}"
+    );
+
+    let after_ack = successor.run(
+        PG_FENCE_SUCCESSOR,
+        &[
+            "--json",
+            "--address",
+            PG_FENCE_ADDRESS,
+            "wait",
+            "--session",
+            PG_FENCE_SUCCESSOR,
+            "--timeout-ms",
+            "1000",
+        ],
+        Duration::from_secs(30),
+    );
+    assert_eq!(
+        after_ack.code,
+        Some(2),
+        "the acked message must not be delivered twice: stdout={} stderr={}",
+        after_ack.stdout,
+        after_ack.stderr
+    );
+
+    // 5. The whole point: the consumer that was already active when the fence landed must have
+    //    ended without ever receiving the message, under any epoch.
+    let observed = stale.finish(Duration::from_secs(60));
+    assert_ne!(
+        observed.code,
+        Some(0),
+        "the fenced consumer (blocked_at_send={blocked_at_send}) reported a delivery: {}",
+        observed.describe()
+    );
+    assert_ne!(
+        observed.outcome().as_deref(),
+        Some("message"),
+        "the fenced consumer recorded a delivery outcome: {}",
+        observed.describe()
+    );
+    assert_ne!(
+        observed.outcome().as_deref(),
+        Some("idle-timeout"),
+        "the fence, not the wait timeout, must be what ends a stale consumer: {}",
+        observed.describe()
+    );
+    assert!(
+        observed.message.is_none() && !observed.message_artifact.exists(),
+        "the fenced consumer wrote a delivery artifact at {}: {}",
+        observed.message_artifact.display(),
+        observed.describe()
+    );
+    assert!(
+        !observed.mentions(body),
+        "the fenced consumer leaked the message body: {}",
+        observed.describe()
+    );
+    assert_eq!(
+        observed.exit_code_artifact,
+        observed.code,
+        "the waiter's own artifacts must agree with the exit code it returned: {}",
+        observed.describe()
+    );
+    let demotion = predecessor
+        .wait_until_self_demoted(PG_FENCE_ADDRESS, Duration::from_secs(30))
+        .unwrap_or_else(|| {
+            panic!(
+                "the fenced daemon never recorded losing the epoch, so nothing proves the fence \
+                 is what stopped it: {}",
+                observed.describe()
+            )
+        });
+    assert!(
+        demotion
+            .get("message")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|message| message.contains(&format!("epoch={first_epoch}"))),
+        "the demotion must name the epoch the predecessor was fenced at: {demotion}"
+    );
+
+    // 6. Re-registering *is* the documented self-heal, and it legitimately takes the address back.
+    //    Even then the acked message stays consumed: the fence protects the delivery, not the
+    //    address.
+    let third_epoch = predecessor.attach(PG_FENCE_PREDECESSOR, PG_FENCE_ADDRESS);
+    assert!(
+        third_epoch > second_epoch,
+        "a re-registering predecessor must claim a fresh epoch: {second_epoch} -> {third_epoch}"
+    );
+    let after_reclaim = predecessor.run(
+        PG_FENCE_PREDECESSOR,
+        &[
+            "--json",
+            "--address",
+            PG_FENCE_ADDRESS,
+            "wait",
+            "--session",
+            PG_FENCE_PREDECESSOR,
+            "--timeout-ms",
+            "1500",
+        ],
+        Duration::from_secs(30),
+    );
+    assert_eq!(
+        after_reclaim.code,
+        Some(2),
+        "a message acked by one daemon process must never be delivered by the other, even after a \
+         legitimate re-register: stdout={} stderr={}",
+        after_reclaim.stdout,
+        after_reclaim.stderr
+    );
+    assert!(
+        !after_reclaim.stdout.contains(body),
+        "the reclaimed station leaked the acked message body: {}",
+        after_reclaim.stdout
+    );
+
+    successor.shutdown();
+    predecessor.shutdown();
+}

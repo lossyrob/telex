@@ -161,17 +161,15 @@ backend outage, a competing fresh owner, and a producer too old to answer the li
 
 ### Larger scopes
 
-A scope holding more than one pass budget gets a computable *queue delay* rather than a recovery
-bound. An intent waits at most
+A scope holding more than one pass budget has a queue delay, not a fixed recovery bound. Each pass
+still returns within four seconds and advances a scope-specific cursor, but bounded discovery,
+backoff, quarantine, and slow intents mean there is no truthful minimum progress count per pass.
+Use successive reconcile reports and `telex status` to observe progress rather than deriving a
+completion time from the scope size.
 
-```
-ceil(live_intents / 4) * 5 s
-```
-
-before it is attempted, where 4 is the guaranteed per-pass progress in the pathological case where
-every intent consumes its full timeout (a healthy pass drains up to 64). Its own recovery then
-completes within the applicable bound above. At the 512-intent per-scope cap that is ≤ 640 s in the
-pathological case and ≈ 40 s in the healthy case.
+At the 512-record write cap, existing records can still be updated or explicitly withdrawn. A live
+record withdrawn to `revoked` continues to occupy its slot for the seven-day terminal TTL; daemon
+GC frees it only after that TTL. Detach therefore does not free capacity immediately.
 
 ### Waiting is not failing
 

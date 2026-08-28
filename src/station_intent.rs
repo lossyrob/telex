@@ -147,7 +147,9 @@ impl std::fmt::Display for IntentError {
         match self {
             IntentError::CapExceeded { count, cap } => write!(
                 f,
-                "station-intent scope holds {count} intents, at or over the {cap} cap"
+                "station-intent scope holds {count} intents, at or over the {cap} cap; existing \
+                 records may still be updated or withdrawn, but revoking a live record does not \
+                 free a slot until its seven-day terminal TTL expires and daemon GC removes it"
             ),
             IntentError::TooLarge { bytes, cap } => {
                 write!(
@@ -3550,6 +3552,13 @@ mod tests {
             store.write_atomic(&overflow),
             Err(IntentError::CapExceeded { .. })
         ));
+        let guidance = store
+            .write_atomic(&overflow)
+            .expect_err("the cap must remain enforced")
+            .to_string();
+        assert!(guidance.contains("seven-day terminal TTL"), "{guidance}");
+        assert!(guidance.contains("daemon GC"), "{guidance}");
+        assert!(!guidance.contains("detach"), "{guidance}");
         assert_eq!(
             store.list_ids().expect("list").len(),
             STATION_INTENT_MAX_COUNT

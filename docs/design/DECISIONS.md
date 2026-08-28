@@ -2330,6 +2330,7 @@ and leaves pre-existing children with an empty DACL — unreadable even to the p
 them, which would break the bridge itself. The producer root is therefore **created** strictly (with
 the owner-only descriptor, when telex creates it) and **validated, never rewritten**, when it
 already exists: owner must be the current user and every ACE must name the current user, `SYSTEM`,
-local `Administrators`, the logon-session SID, or an AppContainer SID. The posture is unchanged — a
-broadly-ACLed root still fails closed — and per-file credential checks still apply independently, so
-containment in this directory is never the only thing being trusted.
+local `Administrators`, or the logon-session SID. AppContainer SIDs are not accepted for producer
+roots. The posture is unchanged — a broadly-ACLed root still fails closed — and per-file credential
+checks still apply independently, so containment in this directory is never the only thing being
+trusted.

@@ -4317,6 +4317,28 @@ async fn seed_station_intent(
     address: &str,
     behavior: telex::intent_test_support::ProducerBehavior,
 ) -> SeededIntent {
+    seed_station_intent_in_store(
+        env,
+        &station_intent_store_key(env),
+        session,
+        address,
+        behavior,
+    )
+    .await
+}
+
+/// Seed a `Live` intent for `session`/`address` naming an explicit `store_key`.
+///
+/// The intent scope is keyed by the daemon's run dir and singleton hash, not by the store, so one
+/// daemon's scope legitimately holds intents for several stores. Tests about multi-store behaviour
+/// need to say which store each record names, which the `env`-derived form cannot express.
+async fn seed_station_intent_in_store(
+    env: &ProcessEnv,
+    store_key: &str,
+    session: &str,
+    address: &str,
+    behavior: telex::intent_test_support::ProducerBehavior,
+) -> SeededIntent {
     use telex::intent_test_support::{
         live_intent, register_test_handler_kind, write_credential_file, FakeProducer,
     };
@@ -4347,7 +4369,7 @@ async fn seed_station_intent(
     let store = telex::station_intent::IntentStore::open(&env.run_dir, &singleton_hash)
         .expect("open the daemon intent scope");
     let intent = live_intent(
-        &station_intent_store_key(env),
+        store_key,
         session,
         address,
         &singleton_hash,
@@ -4821,5 +4843,857 @@ fn station_intent_push_helper_refuses_a_stale_daemon_instance_fence() {
         String::from_utf8_lossy(&output.stderr).contains("daemon instance changed"),
         "the refusal must name the cause: {}",
         String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Destructive process-boundary evidence (issue #106 / ADR 0052).
+//
+// Everything above proves the reconciler's decisions; these prove them against a real process
+// death. The producer here is a *separate process* this test owns by handle, so the kill is a
+// genuine SIGKILL/TerminateProcess against a pid the test spawned -- never a name-matched kill,
+// and never an in-process flag flip that only simulates a dead peer. Each test keeps its own
+// isolated `ProcessEnv` root, run dir, and store, so a crash in one can never reach another.
+// ---------------------------------------------------------------------------------------------
+
+/// Env var that turns this test binary into the out-of-process producer helper.
+const EXTERNAL_PRODUCER_SPEC_ENV: &str = "TELEX_TEST_EXTERNAL_PRODUCER_SPEC";
+
+/// A producer endpoint served by a separate process that this test owns by handle.
+///
+/// The pid is the child's own, taken from the spawn handle rather than looked up by name, and the
+/// start time and executable are the ones the child recorded about itself -- so the identity the
+/// intent names is exactly the process the daemon will peer-verify over the transport.
+struct ExternalProducer {
+    child: std::process::Child,
+    pid: u32,
+    endpoint_path: String,
+    start_time: u64,
+    exe_path: PathBuf,
+    reaped: bool,
+}
+
+impl ExternalProducer {
+    /// Kill the producer outright: no shutdown handshake, no socket/pipe cleanup, no chance to
+    /// answer one more probe. That is the whole point -- a Copilot session that is killed, panics,
+    /// or loses its extension host leaves exactly this behind.
+    fn hard_kill(&mut self) {
+        terminate_pid(self.pid);
+        let _ = self.child.wait();
+        self.reaped = true;
+    }
+}
+
+impl Drop for ExternalProducer {
+    fn drop(&mut self) {
+        if !self.reaped {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+}
+
+/// The out-of-process producer itself.
+///
+/// Under an ordinary `cargo test` run this is a no-op: it becomes a producer only when the parent
+/// re-execs this same test binary with `TELEX_TEST_EXTERNAL_PRODUCER_SPEC` pointing at a spec file.
+/// Re-exec is what buys a real second process without adding a fixture binary to the workspace.
+#[test]
+fn station_intent_external_producer_helper() {
+    let Some(spec_path) = std::env::var_os(EXTERNAL_PRODUCER_SPEC_ENV) else {
+        return;
+    };
+    let spec: Value = serde_json::from_str(
+        &std::fs::read_to_string(&spec_path).expect("read the external producer spec"),
+    )
+    .expect("the external producer spec is JSON");
+    let session = spec["session"]
+        .as_str()
+        .expect("spec names a session")
+        .to_string();
+    let secret = spec["secret"]
+        .as_str()
+        .expect("spec names a secret")
+        .to_string();
+    let root = PathBuf::from(spec["root"].as_str().expect("spec names a root"));
+    let ready = PathBuf::from(spec["ready"].as_str().expect("spec names a readiness path"));
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("external producer runtime");
+    runtime.block_on(async move {
+        let producer = telex::intent_test_support::FakeProducer::start(
+            &root,
+            &session,
+            &secret,
+            telex::intent_test_support::ProducerBehavior::Healthy,
+        )
+        .await;
+        let pid = std::process::id();
+        let announcement = serde_json::json!({
+            "endpoint_path": producer.endpoint_path(),
+            "pid": pid,
+            "start_time": telex::session_watch::capture_process_start_time(pid)
+                .expect("own start time"),
+            "exe_path": telex::platform_fs::process_exe_path(pid).expect("own exe path"),
+        });
+        // Published by rename so the parent can never read a half-written announcement, which is
+        // what lets the parent use file existence as a readiness barrier instead of a sleep.
+        let staging = ready.with_extension("staging");
+        std::fs::write(&staging, announcement.to_string()).expect("stage the announcement");
+        std::fs::rename(&staging, &ready).expect("publish the announcement");
+        // Serve until the parent kills this process. There is deliberately no clean exit path.
+        loop {
+            tokio::time::sleep(Duration::from_secs(3_600)).await;
+        }
+    });
+}
+
+/// Start the out-of-process producer and block until it has announced its endpoint and identity.
+fn spawn_external_producer(env: &ProcessEnv, session: &str, secret: &str) -> ExternalProducer {
+    let dir = env.root.join("external-producer");
+    std::fs::create_dir_all(&dir).expect("create the external producer dir");
+    let ready = dir.join(format!("{session}.ready.json"));
+    let spec_path = dir.join(format!("{session}.spec.json"));
+    let _ = std::fs::remove_file(&ready);
+    std::fs::write(
+        &spec_path,
+        serde_json::json!({
+            "session": session,
+            "secret": secret,
+            "root": dir,
+            "ready": ready,
+        })
+        .to_string(),
+    )
+    .expect("write the external producer spec");
+
+    let mut cmd = Command::new(std::env::current_exe().expect("this test binary"));
+    cmd.args([
+        "--exact",
+        "station_intent_external_producer_helper",
+        "--nocapture",
+        "--test-threads=1",
+    ])
+    .env(EXTERNAL_PRODUCER_SPEC_ENV, &spec_path)
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
+    let mut child = cmd.spawn().expect("spawn the out-of-process producer");
+    let pid = child.id();
+
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !ready.exists() {
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!(
+                "the out-of-process producer never announced itself at {}",
+                ready.display()
+            );
+        }
+        if matches!(child.try_wait(), Ok(Some(_))) {
+            panic!("the out-of-process producer exited before announcing itself");
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let announced: Value = serde_json::from_str(
+        &std::fs::read_to_string(&ready).expect("read the producer announcement"),
+    )
+    .expect("the producer announcement is JSON");
+    assert_eq!(
+        announced.get("pid").and_then(Value::as_u64),
+        Some(pid as u64),
+        "the producer must announce the pid this test spawned: {announced}"
+    );
+    ExternalProducer {
+        child,
+        pid,
+        endpoint_path: announced["endpoint_path"]
+            .as_str()
+            .expect("announced endpoint")
+            .to_string(),
+        start_time: announced["start_time"]
+            .as_u64()
+            .expect("announced start time"),
+        exe_path: PathBuf::from(announced["exe_path"].as_str().expect("announced exe path")),
+        reaped: false,
+    }
+}
+
+/// A seeded intent whose producer lives in another process.
+struct SeededExternalIntent {
+    intent: telex::station_intent::StationIntentV1,
+    store: telex::station_intent::IntentStore,
+}
+
+/// Seed a `Live` intent that names a real out-of-process producer.
+///
+/// `live_intent` still builds the record, so the host/boot binding, the credential descriptor
+/// rules, and the handler argv stay exactly what attach writes; only the producer *process*
+/// identity is replaced. That keeps the difference between this record and an ordinary seeded one
+/// visible in one place: the peer the daemon will verify is a process this test can kill.
+async fn seed_station_intent_for_external_producer(
+    env: &ProcessEnv,
+    session: &str,
+    address: &str,
+    producer: &ExternalProducer,
+    secret: &str,
+) -> SeededExternalIntent {
+    use telex::intent_test_support::{
+        live_intent, register_test_handler_kind, write_credential_file, FakeProducer,
+        ProducerBehavior,
+    };
+
+    register_test_handler_kind();
+    let singleton_hash = env
+        .cap_json()
+        .get("singleton_hash")
+        .and_then(Value::as_str)
+        .expect("cap file records the singleton hash")
+        .to_string();
+    let home = copilot_runtime_home(env);
+    let root = telex::platform_fs::ensure_owner_private_producer_root(&copilot_bridge_root(&home))
+        .expect("secure the bridge producer root");
+    telex::handler_kinds::register_producer_root(
+        telex::handler_kinds::COPILOT_BRIDGE_ROOT_ID,
+        root.clone(),
+    );
+    let credential = root.join(format!("{session}.json"));
+    write_credential_file(&credential, secret);
+
+    let placeholder = FakeProducer::start(&root, session, secret, ProducerBehavior::Healthy).await;
+    let mut intent = live_intent(
+        &station_intent_store_key(env),
+        session,
+        address,
+        &singleton_hash,
+        &placeholder,
+        telex::handler_kinds::COPILOT_BRIDGE_ROOT_ID,
+        &credential,
+    );
+    placeholder.kill();
+    intent.producer.endpoint_path = producer.endpoint_path.clone();
+    intent.producer.pid = producer.pid;
+    intent.producer.start_time = producer.start_time;
+    intent.producer.exe_path = producer.exe_path.clone();
+
+    let store = telex::station_intent::IntentStore::open(&env.run_dir, &singleton_hash)
+        .expect("open the daemon intent scope");
+    store
+        .write_atomic(&intent)
+        .expect("seed the external-producer station intent");
+    SeededExternalIntent { intent, store }
+}
+
+/// Drive one reconcile pass through the real admin IPC and return its report.
+///
+/// A pass on demand is what makes these tests deterministic without a sleep: the assertion is
+/// about the pass the test asked for, not about whichever tick happened to land.
+fn reconcile_report(env: &ProcessEnv, session: &str, scope: Option<&str>) -> Value {
+    let mut cmd = env.command_with_session(session);
+    configure_copilot_home(&mut cmd, &copilot_runtime_home(env));
+    cmd.args(["--json", "daemon", "reconcile", "--timeout-ms", "20000"]);
+    if let Some(scope) = scope {
+        cmd.args(["--scope", scope]);
+    }
+    let out = run_command_with_capture(cmd, &env.root, Duration::from_secs(40));
+    out.assert_success("daemon reconcile");
+    let json = out.json("daemon reconcile");
+    json.get("report")
+        .cloned()
+        .unwrap_or_else(|| panic!("a successful reconcile carries a report: {json}"))
+}
+
+fn report_count(report: &Value, field: &str) -> u64 {
+    report
+        .get(field)
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| panic!("reconcile report is missing {field}: {report}"))
+}
+
+fn send_message(env: &ProcessEnv, sender: &str, sender_addr: &str, to: &str, body: &str) -> Value {
+    let out = env.run_with_session(
+        sender,
+        [
+            "--json",
+            "--address",
+            sender_addr,
+            "send",
+            "--session",
+            sender,
+            "--from",
+            sender_addr,
+            "--to",
+            to,
+            "--body",
+            body,
+        ],
+        Duration::from_secs(8),
+    );
+    out.assert_success("send");
+    out.json("send")
+}
+
+fn ack_message(env: &ProcessEnv, session: &str, address: &str, id: i64) -> Value {
+    let out = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "ack",
+            "--session",
+            session,
+            "--id",
+            &id.to_string(),
+        ],
+        Duration::from_secs(8),
+    );
+    out.assert_success("ack");
+    out.json("ack")
+}
+
+fn station_status(env: &ProcessEnv, session: &str, address: &str) -> Value {
+    let out = env.run_with_session(
+        session,
+        ["--json", "--address", address, "status"],
+        Duration::from_secs(8),
+    );
+    out.assert_success("station status");
+    out.json("station status")
+}
+
+fn intent_rows(status: &Value) -> Vec<Value> {
+    status
+        .get("station_intents")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+}
+
+/// Poll status until the daemon has recorded a failure against the binding, and return its code.
+///
+/// This is the readiness barrier for "the daemon has now tried and failed", which a single
+/// on-demand pass cannot guarantee: a successor's own startup scan may already have attempted the
+/// binding and put it inside its retry window, so the next pass legitimately skips it.
+fn wait_until_intent_failure(
+    env: &ProcessEnv,
+    session: &str,
+    address: &str,
+    timeout: Duration,
+) -> Option<String> {
+    let deadline = Instant::now() + timeout;
+    loop {
+        let status = station_status(env, session, address);
+        if let Some(code) = intent_rows(&status)
+            .iter()
+            .find_map(|row| row.get("failure_code").and_then(Value::as_str))
+        {
+            return Some(code.to_string());
+        }
+        if Instant::now() >= deadline {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+#[test]
+fn station_intent_a_hard_killed_producer_process_loses_no_message_and_no_unacked_delivery() {
+    // The destructive case the whole reconciler exists for: the producer *process* dies without
+    // warning while the daemon is not even running to watch it happen. Nothing about the message
+    // fabric may soften -- an accepted message stays accepted, a delivered-but-unacked message
+    // stays redeliverable, and a station whose push path cannot be proved is refused rather than
+    // silently downgraded to pull.
+    let env = ProcessEnv::new("station-intent-crash");
+    let session = "station-intent-crash-session";
+    let address = "addr:station-intent-crash";
+    let sender = "station-intent-crash-sender";
+    let sender_addr = "addr:station-intent-crash-sender";
+    let before_body = "accepted and delivered before the producer crash";
+    let after_body = "accepted while the producer was dead";
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+
+    let mut attach = env.command_with_session(session);
+    configure_copilot_home(&mut attach, &copilot_runtime_home(&env));
+    attach.args([
+        "--json",
+        "--address",
+        address,
+        "attach",
+        "--session",
+        session,
+        "--description",
+        "station intent crash evidence",
+    ]);
+    run_command_with_capture(attach, &env.root, Duration::from_secs(10))
+        .assert_success("attach the station under test");
+    env.attach(sender, sender_addr);
+
+    // Accepted, delivered to a real pull waiter, and deliberately never acked.
+    send_message(&env, sender, sender_addr, address, before_body);
+    let delivered = wait_for_message(&env, session, address, before_body);
+    let before_id = message_id(&delivered);
+
+    // A real producer process, and an intent that names *that* process.
+    let secret = "c".repeat(64);
+    let mut producer = spawn_external_producer(&env, session, &secret);
+    let seeded = runtime.block_on(seed_station_intent_for_external_producer(
+        &env, session, address, &producer, &secret,
+    ));
+    assert!(
+        wait_until_intent_observed(&env, session, address, Duration::from_secs(30)),
+        "the running daemon must observe the seeded intent before the drain"
+    );
+
+    let mut stop = env.command_with_session(session);
+    configure_copilot_home(&mut stop, &copilot_runtime_home(&env));
+    stop.args(["--json", "daemon", "stop", "--drain"]);
+    let stop = run_command_with_capture(stop, &env.root, Duration::from_secs(10));
+    stop.assert_success("daemon stop --drain before the successor");
+    assert_eq!(
+        stop.json("daemon stop --drain")
+            .pointer("/station_intents/recoverable")
+            .and_then(Value::as_u64),
+        Some(1),
+        "the drain report must name the recoverable intent a successor is expected to restore"
+    );
+    assert!(env.wait_until_not_running(Duration::from_secs(5)));
+
+    // The successor proves the producer over the real transport, across the process boundary.
+    spawn_daemon_via_side_station(&env, "station-intent-crash-live");
+    assert!(
+        wait_until_push_restored(&env, session, address, Duration::from_secs(45)).is_some(),
+        "a live out-of-process producer must be verified and restored by the successor"
+    );
+
+    // Quiesce the daemon first so the crash is observed by a *startup scan*, with no in-flight
+    // push attempt racing it -- the shape a machine that loses a Copilot session then restarts
+    // telex actually produces.
+    env.stop_daemon_best_effort();
+    assert!(env.wait_until_not_running(Duration::from_secs(5)));
+    producer.hard_kill();
+
+    spawn_daemon_via_side_station(&env, "station-intent-crash-dead");
+    // The successor's own startup scan already attempts the binding, so the on-demand pass may
+    // legitimately find the record inside its retry window. What may never happen -- on that pass
+    // or any other -- is a restore against a process that no longer exists.
+    let report = reconcile_report(&env, session, Some(&station_intent_store_key(&env)));
+    assert_eq!(
+        report.get("ran").and_then(Value::as_bool),
+        Some(true),
+        "the pass under test must actually have run: {report}"
+    );
+    assert_eq!(
+        report_count(&report, "restored"),
+        0,
+        "a killed producer must never be restored: an unprovable producer is not a live one: {report}"
+    );
+    let failure = wait_until_intent_failure(&env, session, address, Duration::from_secs(30))
+        .expect("the crashed producer must be recorded as a failure against the intent");
+    assert_text_contains_any(
+        &failure,
+        &[
+            "producer_unreachable",
+            "producer_connect_timeout",
+            "producer_identity_mismatch",
+            "probe_io_failed",
+            "probe_timeout",
+        ],
+        "the failure must name the unreachable producer rather than a generic error",
+    );
+
+    // A message accepted while the producer is dead is still accepted and still durable.
+    let accepted = send_message(&env, sender, sender_addr, address, after_body);
+    assert_eq!(
+        accepted.get("occupied").and_then(Value::as_bool),
+        Some(false),
+        "a station whose producer died is not occupied: {accepted}"
+    );
+
+    let status = station_status(&env, session, address);
+    assert_ne!(
+        status.get("push_registered").and_then(Value::as_bool),
+        Some(true),
+        "push must never be reported as registered against a dead producer: {status}"
+    );
+    let rows = intent_rows(&status);
+    assert!(
+        !rows.is_empty(),
+        "the unrestored intent must stay visible in status: {status}"
+    );
+    assert!(
+        rows.iter()
+            .all(|row| row.get("has_member").and_then(Value::as_bool) == Some(false)),
+        "an unrestored intent row must report that it has no member: {status}"
+    );
+
+    // Fail closed: a pull-only attach must not silently inherit a station provisioned for push.
+    let refused = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "attach",
+            "--session",
+            session,
+        ],
+        Duration::from_secs(10),
+    );
+    refused.assert_failure("pull attach over an unrecoverable push intent");
+    assert_text_contains_any(
+        &format!("{} {}", refused.stdout, refused.stderr),
+        &["copilot detach", "copilot resume"],
+        "the refusal must name the documented recovery path",
+    );
+
+    // The documented recovery path, then every message the crash spanned, exactly once each.
+    let detached = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "copilot",
+            "detach",
+            "--session",
+            session,
+        ],
+        Duration::from_secs(10),
+    );
+    detached.assert_success("copilot detach after the producer crash");
+
+    env.attach(session, address);
+    let redelivered = wait_for_message(&env, session, address, before_body);
+    assert_eq!(
+        message_id(&redelivered),
+        before_id,
+        "the delivered-but-unacked message must be the same message, redelivered: {redelivered}"
+    );
+    assert_eq!(
+        ack_message(&env, session, address, before_id)
+            .get("delivery_outcome")
+            .and_then(Value::as_str),
+        Some("marked")
+    );
+    let after = wait_for_message(&env, session, address, after_body);
+    let after_id = message_id(&after);
+    assert_ne!(after_id, before_id);
+    assert_eq!(
+        ack_message(&env, session, address, after_id)
+            .get("delivery_outcome")
+            .and_then(Value::as_str),
+        Some("marked")
+    );
+    let drained = env.run_with_session(
+        session,
+        [
+            "--json",
+            "--address",
+            address,
+            "wait",
+            "--session",
+            session,
+            "--timeout-ms",
+            "250",
+            "--hang-ms",
+            "1000",
+        ],
+        Duration::from_secs(5),
+    );
+    assert_eq!(
+        drained.code,
+        Some(2),
+        "both messages were consumed exactly once; nothing may redeliver: stdout={} stderr={}",
+        drained.stdout,
+        drained.stderr
+    );
+
+    // The manifest itself survived the crash and the withdrawal: recovery never deletes evidence.
+    assert!(
+        seeded.store.load(&seeded.intent.id()).is_ok(),
+        "the durable manifest must survive a producer crash and an operator detach"
+    );
+}
+
+#[test]
+fn station_intent_a_busy_station_defers_the_successor_handoff_until_the_waiter_is_gone() {
+    // Pull-waiter precedence under a real process boundary: while a live `telex wait` process owns
+    // the station, the handoff must *wait* (a deferred outcome on a fixed cadence) rather than
+    // fail, back off, or force the conflict -- and it must complete on its own once the waiter is
+    // gone, with no manual resume. The waiter is killed outright rather than asked to stop, so the
+    // successor recovers from a crashed holder, not a cooperative one.
+    let env = ProcessEnv::new("station-intent-busy");
+    let session = "station-intent-busy-session";
+    let address = "addr:station-intent-busy";
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+
+    let mut attach = env.command_with_session(session);
+    configure_copilot_home(&mut attach, &copilot_runtime_home(&env));
+    attach.args([
+        "--json",
+        "--address",
+        address,
+        "attach",
+        "--session",
+        session,
+        "--description",
+        "station intent busy handoff",
+    ]);
+    run_command_with_capture(attach, &env.root, Duration::from_secs(10))
+        .assert_success("attach the station under test");
+
+    let seeded = runtime.block_on(seed_station_intent(
+        &env,
+        session,
+        address,
+        telex::intent_test_support::ProducerBehavior::Healthy,
+    ));
+
+    // A real blocking waiter, with `wait.pid` as the readiness barrier and the daemon's own
+    // `live_waiters` projection as the second: the pass under test must run while the station is
+    // demonstrably busy, and neither check is a sleep.
+    let out_dir = env.root.join("busy-wait");
+    let mut wait_cmd = env.command_with_session(session);
+    wait_cmd
+        .args([
+            "--json",
+            "--address",
+            address,
+            "wait",
+            "--session",
+            session,
+            "--timeout-ms",
+            "60000",
+            "--out-dir",
+            out_dir.to_str().expect("out dir is utf8"),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let waiter = wait_cmd.spawn().expect("spawn the busy waiter");
+    wait_until_path_exists(&out_dir.join("wait.pid"), Duration::from_secs(10));
+    let waiter_pid: u32 = std::fs::read_to_string(out_dir.join("wait.pid"))
+        .expect("wait.pid written")
+        .trim()
+        .parse()
+        .expect("wait.pid parses");
+    wait_until_daemon_lists_waiter(&env, waiter_pid, Duration::from_secs(10));
+
+    let busy = reconcile_report(&env, session, Some(&station_intent_store_key(&env)));
+    assert_eq!(
+        report_count(&busy, "deferred_pull_waiter"),
+        1,
+        "a live pull waiter must defer the handoff: {busy}"
+    );
+    assert_eq!(
+        report_count(&busy, "restored"),
+        0,
+        "a deferred handoff must not arm push behind a live waiter: {busy}"
+    );
+    assert_eq!(
+        report_count(&busy, "failed"),
+        0,
+        "a busy station is a waiting outcome, never a failure that earns a backoff ladder: {busy}"
+    );
+
+    let busy_status = station_status(&env, session, address);
+    assert_eq!(
+        busy_status.get("push_registered").and_then(Value::as_bool),
+        Some(false),
+        "push must not be armed while the station is busy with a pull waiter: {busy_status}"
+    );
+    assert!(
+        intent_rows(&busy_status)
+            .iter()
+            .any(|row| row.get("state").and_then(Value::as_str) == Some("deferred_pull_waiter")),
+        "status must surface the deferred handoff by name: {busy_status}"
+    );
+
+    // The busy holder dies without cleaning up.
+    terminate_pid(waiter_pid);
+    let (_, waiter_timed_out) = wait_status_with_timeout(waiter, Duration::from_secs(10));
+    assert!(!waiter_timed_out, "the killed waiter must be reaped");
+
+    // No manual resume anywhere: the handoff completes on the daemon's own cadence.
+    assert!(
+        wait_until_push_restored(&env, session, address, Duration::from_secs(45)).is_some(),
+        "the deferred handoff must complete once the station is free"
+    );
+    let restored_status = station_status(&env, session, address);
+    assert_eq!(
+        restored_status
+            .get("live_intent_missing_member")
+            .and_then(Value::as_bool),
+        Some(false),
+        "a completed handoff must not leave a live intent without a member: {restored_status}"
+    );
+    assert_ne!(
+        seeded
+            .store
+            .load(&seeded.intent.id())
+            .expect("the manifest survives a deferred handoff")
+            .state,
+        telex::daemon_ipc::IntentRecoveryState::Revoked,
+        "deferring a handoff must never consume the durable record"
+    );
+}
+
+#[test]
+fn station_intent_a_partial_multi_store_drain_reports_each_store_and_restores_only_the_provable_one(
+) {
+    // One daemon, two SQLite stores, one intent each: the recoverable one and one whose producer
+    // has died. The drain report must describe *both* -- a partial hand-off is the normal case, and
+    // reporting only the good half is what would let an operator upgrade into a silently dead
+    // station. The successor must then restore exactly the provable one and leave the other's
+    // durable record intact for the operator.
+    let env = ProcessEnv::new("station-intent-multi");
+    let live_session = "station-intent-multi-live-session";
+    let live_address = "addr:station-intent-multi-live";
+    let dead_session = "station-intent-multi-dead-session";
+    let dead_address = "addr:station-intent-multi-dead";
+    let second_db = env.root.join("db-second.sqlite");
+    let second_store_key = format!("sqlite:{}", second_db.display());
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("test runtime");
+
+    let mut first = env.command_with_session(live_session);
+    configure_copilot_home(&mut first, &copilot_runtime_home(&env));
+    first.args([
+        "--json",
+        "--address",
+        live_address,
+        "attach",
+        "--session",
+        live_session,
+    ]);
+    run_command_with_capture(first, &env.root, Duration::from_secs(10))
+        .assert_success("attach the station in the first store");
+
+    // The same daemon, a second store: only `TELEX_DB` differs, so the daemon opens a second
+    // backend under one intent scope.
+    let mut second = env.command_with_session(dead_session);
+    configure_copilot_home(&mut second, &copilot_runtime_home(&env));
+    second.env("TELEX_DB", &second_db).args([
+        "--json",
+        "--address",
+        dead_address,
+        "attach",
+        "--session",
+        dead_session,
+    ]);
+    run_command_with_capture(second, &env.root, Duration::from_secs(10))
+        .assert_success("attach the station in the second store");
+
+    let live = runtime.block_on(seed_station_intent(
+        &env,
+        live_session,
+        live_address,
+        telex::intent_test_support::ProducerBehavior::Healthy,
+    ));
+    let dead = runtime.block_on(seed_station_intent_in_store(
+        &env,
+        &second_store_key,
+        dead_session,
+        dead_address,
+        telex::intent_test_support::ProducerBehavior::Healthy,
+    ));
+    // The second store's producer dies, exactly as a closed session would leave it.
+    dead._producer.kill();
+
+    // One pass over the whole scope, so both stores are attempted and the split is observed rather
+    // than assumed.
+    let pass = reconcile_report(&env, live_session, None);
+    assert_eq!(
+        report_count(&pass, "restored"),
+        1,
+        "exactly the provable store may be restored: {pass}"
+    );
+    assert_eq!(
+        report_count(&pass, "failed"),
+        1,
+        "the store whose producer died must be attempted and recorded as failed: {pass}"
+    );
+
+    // A scoped pass must stay inside its own store: the dead binding is not re-attempted here.
+    let scoped = reconcile_report(&env, live_session, Some(&station_intent_store_key(&env)));
+    assert_eq!(
+        report_count(&scoped, "failed"),
+        0,
+        "a pass scoped to the healthy store must not touch the other store: {scoped}"
+    );
+
+    let mut stop = env.command_with_session(live_session);
+    configure_copilot_home(&mut stop, &copilot_runtime_home(&env));
+    stop.args(["--json", "daemon", "stop", "--drain"]);
+    let stop = run_command_with_capture(stop, &env.root, Duration::from_secs(15));
+    stop.assert_success("daemon stop --drain across two stores");
+    let drained = stop.json("daemon stop --drain across two stores");
+    assert_eq!(
+        drained
+            .pointer("/station_intents/recoverable")
+            .and_then(Value::as_u64),
+        Some(1),
+        "the drain report must name the store a successor can restore: {drained}"
+    );
+    assert_eq!(
+        drained
+            .pointer("/station_intents/degraded")
+            .and_then(Value::as_u64),
+        Some(1),
+        "and must name the store it cannot, rather than reporting only the good half: {drained}"
+    );
+    assert_eq!(
+        drained
+            .pointer("/station_intents/observed_count")
+            .and_then(Value::as_u64),
+        Some(2),
+        "both stores' intents are in one scope and both must be counted: {drained}"
+    );
+    assert!(env.wait_until_not_running(Duration::from_secs(5)));
+
+    spawn_daemon_via_side_station(&env, "station-intent-multi");
+    assert!(
+        wait_until_push_restored(&env, live_session, live_address, Duration::from_secs(45))
+            .is_some(),
+        "the successor must restore the store it can prove"
+    );
+
+    // The second store is queried through the same daemon by pointing the client at that store.
+    let dead_status = {
+        let mut cmd = env.command_with_session(dead_session);
+        cmd.env("TELEX_DB", &second_db)
+            .args(["--json", "--address", dead_address, "status"]);
+        let out = run_command_with_capture(cmd, &env.root, Duration::from_secs(10));
+        out.assert_success("second-store station status");
+        out.json("second-store station status")
+    };
+    assert_ne!(
+        dead_status.get("push_registered").and_then(Value::as_bool),
+        Some(true),
+        "a store whose producer died must not come back armed: {dead_status}"
+    );
+    assert!(
+        intent_rows(&dead_status)
+            .iter()
+            .all(|row| row.get("has_member").and_then(Value::as_bool) == Some(false)),
+        "the unrestored store's intent must report no member: {dead_status}"
+    );
+    assert!(
+        dead.store.load(&dead.intent.id()).is_ok(),
+        "a partial drain must leave the unrestored store's manifest intact for the operator"
+    );
+    assert!(
+        live.store.load(&live.intent.id()).is_ok(),
+        "and must leave the restored store's manifest intact too"
     );
 }
