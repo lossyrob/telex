@@ -4847,7 +4847,7 @@ fn station_intent_push_helper_refuses_a_stale_daemon_instance_fence() {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Destructive process-boundary evidence (issue #106 / ADR 0052).
+// Destructive process-boundary evidence for issue #106.
 //
 // Everything above proves the reconciler's decisions; these prove them against a real process
 // death. The producer here is a *separate process* this test owns by handle, so the kill is a
