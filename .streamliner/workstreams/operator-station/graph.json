@@ -157,7 +157,7 @@
           },
           "label": "Merged Application Client direct-Station vocabulary and bundle re-baseline from PR #132, followed by issue #12 revision 3, bundle integrity repair, and first-binding reconciliation",
           "url": "https://github.com/lossyrob/telex/pull/132",
-          "status": "completed"
+          "status": "satisfied"
         }
       ]
     },
