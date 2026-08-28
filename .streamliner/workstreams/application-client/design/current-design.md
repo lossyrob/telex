@@ -38,8 +38,10 @@ health, and backend semantics. Watcher and Operator Station consume the same
 semantic boundary without parsing CLI output, depending on private daemon IPC,
 or creating product-specific client forks.
 
-The merged Rust core is `telex::application_client`. It implements the shared
-semantic boundary but is not the first external language binding.
+The merged Rust core is `telex::application_client`. The first supported binding
+is the Rust library surface at that path in the root `telex` crate. This decision
+promotes the existing semantic boundary for Rust consumers; it does not create
+an external language, ABI, or process boundary.
 
 ## Responsibility boundary
 
@@ -156,22 +158,53 @@ durable.
 
 ## First-binding promotion boundary
 
-The core does not settle the first external binding. The next design must decide:
+The first supported binding is Rust-first in the root `telex` crate and preserves
+the import path `telex::application_client`. It reuses the merged core rather
+than adding a translation layer or second package boundary.
 
-- whether TypeScript/napi-rs serves both Operator Station and SDK-hosted
-  consumers or whether the first binding exposes a narrower surface;
-- package, public API, FFI, compatibility, and language-sequencing choices;
-- whether receive appears as a stream, callback, async iterable, poll, or another
-  host shape while preserving exact-delivery and acknowledgement semantics;
-- runtime-specific cancellation and interruption behavior; and
-- how the binding preserves typed errors, opaque identities and metadata,
-  prepared recovery handles, evidence axes, and versioned records without
-  weakening or stringifying them.
+Supported application consumers disable package defaults and select one of these
+profiles:
 
-The historical TypeScript `Station` sketch is evidence, not authority. A public
-raw socket or JSON-lines protocol also requires a separate compatibility and
-security decision. No first binding may add product-specific semantics or bypass
-the shared core.
+- SQLite: `default-features = false`, feature `sqlite`;
+- Postgres: `default-features = false`, feature `postgres`;
+- Postgres with Entra: `default-features = false`, feature `entra`, which
+  includes `postgres`; or
+- dual backend: `default-features = false`, features `sqlite` and `postgres`,
+  optionally adding `entra`.
+
+The `self-update` feature is not part of any application-consumer profile.
+Consumers that choose a single backend do not inherit the other backend or CLI
+release behavior.
+
+The root crate version governs Rust source compatibility. Public types and
+behavior that carry the accepted Application Client semantics are the supported
+surface. These include stable responsibility and runtime/store identities,
+capability, exact-delivery acknowledgement, recovery handles, typed errors, and
+the message, delivery, receipt, disposition, operation, compound-step, health,
+history, and delta records required by the normative contract. Backend records,
+daemon frames, CLI types, private helpers, and consumer DTOs are not promoted.
+Breaking changes to the supported surface require an explicit compatible-version
+transition and migration guidance; exact versioning and deprecation mechanics
+remain implementation choices. The Rust surface does not promise a stable C ABI,
+JSON wire protocol, or cross-language serialization contract.
+
+The binding executes in a caller-provided Tokio runtime. It does not create a
+hidden runtime, daemon, or sidecar. Cancellation is not evidence that a durable
+operation failed or was absent: callers persist a prepared `RecoveryHandle`
+before the first retryable attempt and reconcile an uncertain result. Cancelling
+receive work does not acknowledge a delivery. Lifecycle cancellation must retain
+typed partial and compensation evidence. The worker owns the concrete API and
+runtime mechanics inside these constraints.
+
+napi-rs/TypeScript, a separate client crate, C ABI, public socket or sidecar
+protocol, and consumer-specific DTOs remain deferred. The historical TypeScript
+`Station` sketch remains evidence, not authority. These deferrals do not permit
+CLI parsing, raw private daemon IPC, or a product-private client fallback.
+
+This promotion does not relax the semantic contract or complete conformance.
+`client-conformance` must still exercise the same accepted cases against the
+supported Rust surface and both backends before either consumer integration may
+claim support.
 
 ## Conformance boundary
 
@@ -212,9 +245,12 @@ workstreams validate the supported client without a private fallback.
 
 - **High confidence:** the shared semantic boundary, Rust core, identity model,
   explicit capability split, exact-delivery acknowledgement, typed operation
-  recovery, quarantine evidence, and backend-neutral contracts are merged
-  product authority.
-- **Unresolved:** first-binding language, packaging, host projection,
-  cancellation behavior, and public API shape.
+  recovery, quarantine evidence, backend-neutral contracts, and Rust-first
+  binding boundary are accepted authority.
+- **Unresolved implementation details:** concrete Rust API and ownership shape,
+  feature aliases, compatibility and deprecation mechanics, cancellation API,
+  test layout, and consumer host projection.
+- **Deferred design choices:** TypeScript/napi-rs, a separate crate, C ABI,
+  public socket or sidecar protocols, consumer DTOs, and later language order.
 - **Not yet proven:** the complete cross-backend conformance matrix, consumer
   integration, packaging, upgrade behavior, and operational hardening.

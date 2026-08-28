@@ -676,10 +676,93 @@ impl DaemonState {
         expected_generation: Option<u64>,
         admission_budget: Duration,
     ) -> std::result::Result<Withdrawal, String> {
+        self.withdraw_intent_at_generation_until(
+            store_key,
+            session_id,
+            address,
+            expected_generation,
+            PassDeadline::at(Instant::now() + admission_budget),
+        )
+        .await
+    }
+
+    /// The deadline-carrying form used by reconciliation after an intent has been admitted.
+    ///
+    /// Admission and the filesystem withdrawal share this one absolute deadline. In particular, a
+    /// pass that waited for admission must not begin a fresh synchronous withdrawal after its caller
+    /// has exhausted the pass budget.
+    pub(crate) async fn withdraw_intent_at_generation_until(
+        &self,
+        store_key: &str,
+        session_id: &str,
+        address: &str,
+        expected_generation: Option<u64>,
+        deadline: PassDeadline,
+    ) -> std::result::Result<Withdrawal, String> {
+        let admission_budget = deadline
+            .remaining()
+            .unwrap_or(RECONCILE_PER_INTENT_TIMEOUT)
+            .min(RECONCILE_PER_INTENT_TIMEOUT);
+        if admission_budget.is_zero() {
+            return Err(format!(
+                "timed out before admitting station intent {session_id}/{address}"
+            ));
+        }
         let _admit = self
             .admit_binding(store_key, session_id, address, admission_budget)
             .await?;
-        self.withdraw_intent_admitted(store_key, session_id, address, expected_generation)
+        if deadline.expired() {
+            return Err(format!(
+                "timed out after admitting station intent {session_id}/{address}"
+            ));
+        }
+        let Some(store) = self.intent_store_readonly()? else {
+            return Ok(Withdrawal::NoRecord);
+        };
+        let store_key = store_key.to_string();
+        let session_id = session_id.to_string();
+        let address = address.to_string();
+        let index_key = IntentKey {
+            store_key: store_key.clone(),
+            session_id: session_id.clone(),
+            address: address.clone(),
+        };
+        let withdrawal_store_key = store_key.clone();
+        let withdrawal_session_id = session_id.clone();
+        let withdrawal_address = address.clone();
+        let outcome = match station_intent::run_blocking_cancellable_within(
+            deadline,
+            Duration::ZERO,
+            move |cancelled| {
+                if cancelled.load(Ordering::Acquire) || deadline.expired() {
+                    return Err("withdrawal deadline expired before durable mutation".to_string());
+                }
+                store
+                    .withdraw_binding_at_generation(
+                        &withdrawal_store_key,
+                        &withdrawal_session_id,
+                        &withdrawal_address,
+                        expected_generation,
+                        now_ms(),
+                    )
+                    .map_err(|e| {
+                        format!(
+                            "withdrawing station intent {withdrawal_session_id}/{withdrawal_address}: {e}"
+                        )
+                    })
+            },
+        )
+        .await
+        {
+            BoundedPhase::Completed(outcome) => outcome?,
+            BoundedPhase::Overran => {
+                return Err(format!(
+                    "timed out withdrawing station intent {session_id}/{address}"
+                ))
+            }
+        };
+        self.index_publish_withdrawal(index_key, outcome);
+        Ok(outcome)
     }
 
     /// Acquire this binding's delivery-admission guard, bounded.
@@ -2563,28 +2646,20 @@ async fn apply_outcome(
                 // the pass found it, the terminal projection is still published to the index, and
                 // the next pass re-derives the same decision. Waiting instead is what turned a
                 // 4-second pass into a 7-second one.
-                let admission_budget = pass_deadline
-                    .checked_duration_since(Instant::now())
-                    .unwrap_or_default()
-                    .min(RECONCILE_PER_INTENT_TIMEOUT);
-                if admission_budget.is_zero() {
-                    report.deadline_reached = true;
-                } else {
-                    match state
-                        .withdraw_intent_at_generation_within(
-                            &intent.store_key,
-                            &intent.session_id,
-                            &intent.address,
-                            Some(intent.generation),
-                            admission_budget,
-                        )
-                        .await
-                    {
-                        Ok(_) => {}
-                        Err(e) => {
-                            report.deadline_reached |= Instant::now() >= pass_deadline;
-                            state.push_recent_error("StationIntent", e)
-                        }
+                match state
+                    .withdraw_intent_at_generation_until(
+                        &intent.store_key,
+                        &intent.session_id,
+                        &intent.address,
+                        Some(intent.generation),
+                        PassDeadline::at(pass_deadline),
+                    )
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => {
+                        report.deadline_reached |= Instant::now() >= pass_deadline;
+                        state.push_recent_error("StationIntent", e)
                     }
                 }
                 entry.next_attempt_ms = None;

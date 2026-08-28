@@ -3,11 +3,11 @@
   "id": "application-client",
   "projectKey": "telex",
   "title": "Telex Application Client (supported long-lived application integration)",
-  "summary": "The supported Application Client core merged through PR #132, closing issues #129 and #124. First-binding is ready but unlaunched; client-conformance and later gates remain held on their declared dependencies.",
+  "summary": "The supported Application Client core merged through PR #132, closing issues #129 and #124. Rust-first binding is selected, tracked by issue #149, ready, and unlaunched; client-conformance and later gates remain held on their declared dependencies.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-08-27T21:04:30Z",
+  "updatedAt": "2026-08-27T21:36:21Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -127,13 +127,19 @@
     {
       "id": "first-binding",
       "type": "task",
-      "title": "First supported language binding",
-      "summary": "Ready but unlaunched after the supported core merge. The task shape still requires separate authorization; implementation must preserve semantic parity and avoid binding-specific forks.",
+      "title": "First supported Rust binding",
+      "summary": "Selected, tracked by issue #149, ready, and unlaunched. Promote telex::application_client in the root telex crate as the first supported binding; document default-features=false backend profiles and compatibility, caller-owned Tokio runtime, and cancellation contracts; stabilize only contract-bearing Rust types; defer external bindings and preserve the full conformance gate. Task spec: .streamliner/workstreams/application-client/tasks/first-binding.md.",
       "status": "ready",
       "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 149
+      },
       "dependsOn": [
         "client-core"
       ]

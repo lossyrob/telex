@@ -12,8 +12,8 @@ Issue #128 and PR #130 were closed without merge after reaching green CI,
 resolved review feedback, and reviewer +1. The implementation is preserved as
 scope-analysis evidence; closure is not an implementation-defect finding.
 Campaign authorized a dedicated design reset and allocated ADR 0051,
-`direct-station-product-boundary`. Issue #134 is the replacement design-only
-node. The active graph now runs:
+`direct-station-product-boundary`. Issue #134 and PR #136 completed that
+replacement design-only node. The active graph now runs:
 
 ```text
 direct-station-contract-reset
@@ -25,6 +25,40 @@ direct-station-contract-reset
 ```
 
 `station-app` also waits on Application Client `client-conformance`.
+
+## Terminal issue #134 and PR #136 result
+
+Issue #134 closed at `2026-08-27T22:23:13Z` after PR #136 merged. The terminal
+reviewed head was `f77be107f602cfd06495e591857b20ce199c8a4d`; it squash-merged at
+`2026-08-27T22:23:12Z` as
+`e071e3170c19ab1b8a753b502c67be2ee80688ec`, with parent
+`8b8ecf39781c1281a30605745299fc0a44e91ead`. The product diff is exactly
+`docs/design/DECISIONS.md`, `docs/design/index.md`, and
+`docs/design/operator-station.md`, with an aggregate +727/-1016 change.
+
+Full PAW baseline
+[review 4824865088](https://github.com/lossyrob/telex/pull/136#pullrequestreview-4824865088)
+at `7c6603ecd081255d8af370668cf3ddddc8075b50` remains evidence. Terminal
+[review 5046160297](https://github.com/lossyrob/telex/pull/136#pullrequestreview-5046160297)
+is COMMENTED and non-pending at the exact terminal head, with `PAW Review: +1`,
+zero blockers, zero warnings, zero considerations, and no required actions. All
+13 review threads are resolved, and exact-head CI run
+[33121329699](https://github.com/lossyrob/telex/actions/runs/33121329699)
+completed 6/6 checks successfully. Source branch
+`feature/direct-station-contract-reset` remains at the terminal head.
+
+Application Client ordering cleared before the Station merge: product merge
+`4ecbe84e99e00ab0cea3bcf3619d539c222746af`, Tier A artifact authority
+`d3d64370b4481f10e1fa0b48ea026a9c060d15b1`, issue #12 revision 3 SHA-256
+`c5c694681a2f3dc2060146fe932c26b3644d1d0518f1406e30c798853c168956`,
+historical-bundle integrity repair
+`c67946ec494cdedb7defa638d953b831d76d6ec5`, and first-binding Tier A
+reconciliation `8b8ecf39781c1281a30605745299fc0a44e91ead` all precede
+`e071e3170c19ab1b8a753b502c67be2ee80688ec`.
+
+The builder-owned `direct-station-direction-gate` is next and unpassed.
+`station-app` remains planned and unlaunched, and it also waits on Application
+Client `client-conformance`. PR approval and merge do not infer gate passage.
 
 ## Historical PR #143 evidence
 
@@ -57,6 +91,8 @@ bounded 200-message recovery are not intended architecture. The evidence does
 not advance #134, PR #136, any Operator Station gate or implementation node, or
 Application Client conformance.
 
+## Historical issue #134 and PR #136 execution
+
 The first #134 preparation-only run
 `cda96dff-f2b8-49cc-b258-350b901e29ff` validated the clean base, `never-commit`,
 local/untracked PAW state, no workflow commit, `--yolo`, and ADR 0051
@@ -71,13 +107,13 @@ PAW state, `--yolo`, `gpt-5.6-sol`, and `general-reviewer:claude-opus-5`.
 Paired run `419ba98f-6c1e-4829-8255-7e4de25a2a70` then launched implementer
 `9b7f8a6c-79f1-4967-afad-37b8dfbad5df` and reviewer
 `e32f377b-49f6-4d23-a09c-96b107f32075`; both stations reached
-`attended_push`. Issue #134 is now in progress.
+`attended_push`. Issue #134 then entered active implementation.
 
 The implementer opened design-only PR #136 at
 `59043ce5bf6b3fdd2bb7084777d15141929fbf41`. The diff is limited to the decision
 log, design index, and Operator Station contract; all six CI checks pass and the
-PR is mergeable. Review ownership remains with the paired reviewer, while the
-later direction gate remains builder-owned.
+PR was mergeable. Review ownership remained with the paired reviewer, while the
+later direction gate remained builder-owned.
 
 Review 4824128333 found three blocking contract-completeness gaps: terminal or
 reassignment behavior for removed-address obligations, exhaustive Reply & Handle
@@ -92,14 +128,14 @@ mode-transition, Operator integration/readiness, and crosswalk re-baseline to
 Application Client #129 / PR #132, with issue #12 retaining public contract
 authority. PR #136 records a carry-forward but does not edit shared-client files.
 Generic AC-C15 source-resolution states remain visible unless Application Client
-returns an explicit accepted narrowing; the cross-workstream review thread
-remains open until exact evidence is returned.
+returned an explicit accepted narrowing; the cross-workstream review thread
+remained open until exact evidence was returned.
 
 The implementer resolved all Operator-local findings at
 `3e36028b6e3d84bcef647f38e43cfe1b2de035c8`. Orchestration reopened only
 discussion 3687008544 because its initial response named issue #12 without the
-required exact #129/PR #132 wording and bundle evidence. Seven threads remain
-resolved; one intentional cross-workstream gate remains open during paired
+required exact #129/PR #132 wording and bundle evidence. Seven threads remained
+resolved; one intentional cross-workstream gate remained open during paired
 re-review.
 
 Application Client returned the required evidence at PR #132 head
@@ -109,12 +145,12 @@ bytes, and SHA-256
 `9e648d2005f9b368b0de72c6097bdd7432365e7afab43004399c2c6bd0b68e8d`,
 and confirmed generic reply/compound/identity semantics plus all AC-C15 states.
 The evidence was posted to discussion 3687008544 and the final thread resolved.
-All eight threads are now closed; paired re-review remains.
+At that point, all eight threads were closed and paired re-review remained.
 
-Campaign clarified that PR #132 remains candidate authority until it merges.
+Campaign clarified that PR #132 remained candidate authority until it merged.
 The direct reset node now carries an explicit external dependency on Application
 Client `client-core` / PR #132 for final merge ordering. Issue #12 publication
-reconciliation remains campaign-owned after that merge.
+reconciliation remained campaign-owned after that merge.
 
 Second re-review 4824505655 found three blockers: restart resurrection of
 durably detached addresses, typed retryability evidence for Reply & Handle, and
@@ -123,19 +159,18 @@ PR #132 already provides
 `ApplicationClientError::RejectedBeforeAcceptance` and
 `RejectionRetryability::{Transient, Permanent}`; unknown evidence remains
 fail-closed/indeterminate. No new shared-client change is required. The worker
-owns the local detach, source-state, reassignment, and safe-action wording
+owned the local detach, source-state, reassignment, and safe-action wording
 repairs.
 
 The implementer resolved the second review at
 `7c6603ecd081255d8af370668cf3ddddc8075b50`. All 13 accumulated review threads
-are resolved, all six CI checks pass, and the PR is mergeable. Final paired
-re-review is pending.
+were resolved, all six CI checks passed, and the PR was mergeable.
 
-Final review 4824865088 posted the verified automated +1 at the same head with
-zero Must/Should findings. PR #136 is technically ready but merge-order held:
-Application Client PR #132 remains open as the candidate authority, and issue
-#12 publication reconciliation follows its merge. Campaign owns sequencing;
-the builder direction gate remains a separate post-design decision.
+Baseline final review 4824865088 posted the verified automated +1 at the same
+head with zero Must/Should findings. PR #136 was technically ready but remained
+merge-order held until Application Client authority and publication
+reconciliation landed. The builder direction gate remained a separate
+post-design decision.
 
 Wave 1 began as a deliberately temporary Windows vertical spike and merged as
 PR #104. The product loop held, but plan review changed the live Station from
@@ -271,9 +306,9 @@ merge-ready; merge authority remains outside the worker and reviewer sessions.
 
 ## Contracts and exports
 
-The next authoritative export is issue #134: a rewritten direct Station design
-and ADR 0051. ADRs 0047/0048 remain historical and are narrowed/superseded only
-through the new append-only decision.
+The authoritative export from issue #134 and PR #136 is the rewritten direct
+Station design and ADR 0051. ADRs 0047/0048 remain historical and are
+narrowed/superseded only through the append-only decision.
 
 PR #130, its branch, tests, and review record are preserved as evidence of a
 well-executed but superseded product boundary. No operator-agent package or
@@ -284,11 +319,13 @@ The durable exports are the experimental Station and assignment under
 `spike/operator-station/`, plus the evidence and Application Client requirements
 in `docs/notes/operator-loop-spike-report.md`.
 
-The accepted domain export is `docs/design/operator-station.md`, backed by ADR
-0047/0048. The subprocess courier, full-history export, store fingerprint,
-experimental namespace, current UI behavior, `attention.*` kinds, and
-`campaignAttention` metadata remain explicitly outside the production contract.
-Issue #12 remains the shared-client convergence authority.
+The merged domain export is `docs/design/operator-station.md`, backed by ADR
+0051's narrowing of ADRs 0047/0048. The subprocess courier, full-history export,
+store fingerprint, experimental namespace, current UI behavior, `attention.*`
+kinds, and `campaignAttention` metadata remain explicitly outside the
+production contract. Issue #12 remains the shared-client convergence authority.
+The builder direction gate has not yet accepted the merged design for
+implementation.
 
 ## Context fitness
 
@@ -333,7 +370,7 @@ off-branch unless the product explicitly requires it.
 
 Operator attention was applied too late on #128: after implementation, CI, and
 review had already earned technical confidence. The higher-leverage moment was
-the pre-promotion product-boundary decision. Issue #134 is therefore a
+the pre-promotion product-boundary decision. Issue #134 was therefore a
 focus-level design reset with explicit plan, contract, and final-diff review
 before the builder direction gate.
 
@@ -342,10 +379,10 @@ the domain-contract review, the exact #12 export review, and the
 workstream-owned artifact reconciliations. The paired reviewer remained the
 right owner for detailed lifecycle, provenance, recovery, and safety defects.
 
-Operator attention belongs at the `operator-broker` output review while
-campaign/operator authority resolves the clean issue #12 checkpoint and the
-proposed `station-app` dependency. The later usability gate still owns combined
-Station/broker acceptance.
+Operator attention now belongs at the builder-owned
+`direct-station-direction-gate`. `station-app` remains unlaunched and also waits
+on Application Client `client-conformance`; the later usability gate still owns
+direct Station acceptance.
 
 ## Inspired vs. recovery interventions
 
@@ -393,7 +430,8 @@ Station/broker acceptance.
 ## Closeout observation dispositions
 
 - Prescribed operator-agent package: superseded; #128/#130 closed without merge.
-- Direct Station contract: promoted to issue #134 and ADR 0051.
+- Direct Station contract: completed through issue #134, PR #136, and ADR 0051;
+  builder acceptance remains at the unpassed direction gate.
 - Generic metadata-bearing reply: deferred to Application Client
   client-core/conformance; no extraction from PR #130 now.
 - Preserved #128 branches/worktrees/review evidence: retained pending explicit
@@ -409,7 +447,8 @@ Other deferred items remain production-contract or hardening concerns owned by
 
 - Direct human-attended Station is the shipped product; mediation is external:
   target authority — design doc and decision record
-  - Disposition: promoted to issue #134 and allocated ADR 0051.
+  - Disposition: merged through issue #134, PR #136, and ADR 0051; builder
+    acceptance remains separate.
 - Require an explicit product-boundary floor before launching agent-policy or
   topology packages: target authority — workstream-design lesson (`streamliner`)
   - Disposition: landed in this reconciliation note and issue #134 inherited

@@ -24,6 +24,10 @@
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc,
+};
 use std::time::{Duration, Instant};
 
 use crate::daemon_ipc::IntentRecoveryState;
@@ -1258,6 +1262,39 @@ where
     }
 }
 
+/// Run blocking work with a cooperative cancellation signal for work that can mutate durable state.
+///
+/// On timeout the caller stops waiting and signals the worker before returning. The worker must
+/// check the signal immediately before every durable commit; this prevents a timed-out discovery
+/// or GC pass from advancing a cursor or deleting a manifest after its IPC response was sent.
+pub async fn run_blocking_cancellable_within<T, F>(
+    deadline: PassDeadline,
+    grace: Duration,
+    work: F,
+) -> BoundedPhase<T>
+where
+    F: FnOnce(Arc<AtomicBool>) -> T + Send + 'static,
+    T: Send + 'static,
+{
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let worker_cancelled = cancelled.clone();
+    let handle = tokio::task::spawn_blocking(move || work(worker_cancelled));
+    match deadline.remaining() {
+        Some(remaining) => match tokio::time::timeout(remaining + grace, handle).await {
+            Ok(Ok(value)) => BoundedPhase::Completed(value),
+            Ok(Err(_)) => BoundedPhase::Overran,
+            Err(_) => {
+                cancelled.store(true, Ordering::Release);
+                BoundedPhase::Overran
+            }
+        },
+        None => match handle.await {
+            Ok(value) => BoundedPhase::Completed(value),
+            Err(_) => BoundedPhase::Overran,
+        },
+    }
+}
+
 /// Run one blocking filesystem phase, but only while `reserve` of the deadline is still intact.
 ///
 /// [`run_blocking_within`] bounds when the **caller** returns; it does not bound when the work it
@@ -2224,6 +2261,16 @@ impl IntentStore {
         scope: Option<&str>,
         deadline: PassDeadline,
     ) -> Result<ScanPage> {
+        self.scan_bounded_cancellable(budget, scope, deadline, None)
+    }
+
+    fn scan_bounded_cancellable(
+        &self,
+        budget: usize,
+        scope: Option<&str>,
+        deadline: PassDeadline,
+        cancelled: Option<&AtomicBool>,
+    ) -> Result<ScanPage> {
         let (ids, enumeration_truncated) = self.list_ids_bounded(deadline)?;
         let observed_count = ids.len();
         // Same comparison the write cap uses (`>=`): at exactly the cap new ids already fail with
@@ -2284,7 +2331,9 @@ impl IntentStore {
         } else {
             None
         };
-        if next_discovery != scope_cursor.discovery {
+        if next_discovery != scope_cursor.discovery
+            && !cancelled.is_some_and(|cancelled| cancelled.load(Ordering::Acquire))
+        {
             self.write_scope_cursor(scope, |entry| entry.discovery = next_discovery.clone())?;
         }
         entries.sort_by(|a, b| a.0.cmp(&b.0));
@@ -2369,8 +2418,8 @@ impl IntentStore {
         deadline: PassDeadline,
     ) -> BoundedPhase<Result<ScanPage>> {
         let store = self.clone();
-        run_blocking_within(deadline, RECONCILE_BLOCKING_GRACE, move || {
-            store.scan_bounded(budget, scope.as_deref(), deadline)
+        run_blocking_cancellable_within(deadline, RECONCILE_BLOCKING_GRACE, move |cancelled| {
+            store.scan_bounded_cancellable(budget, scope.as_deref(), deadline, Some(&cancelled))
         })
         .await
     }
@@ -2383,12 +2432,13 @@ impl IntentStore {
         deadline: PassDeadline,
     ) -> BoundedPhase<Result<GcReport>> {
         let store = self.clone();
-        run_blocking_within(deadline, RECONCILE_BLOCKING_GRACE, move || {
-            store.gc_bounded(
+        run_blocking_cancellable_within(deadline, RECONCILE_BLOCKING_GRACE, move |cancelled| {
+            store.gc_bounded_cancellable(
                 now_ms,
                 local_host.as_deref(),
                 local_boot.as_deref(),
                 deadline,
+                Some(&cancelled),
             )
         })
         .await
@@ -2561,6 +2611,17 @@ impl IntentStore {
         local_boot: Option<&str>,
         deadline: PassDeadline,
     ) -> Result<GcReport> {
+        self.gc_bounded_cancellable(now_ms, local_host, local_boot, deadline, None)
+    }
+
+    fn gc_bounded_cancellable(
+        &self,
+        now_ms: i64,
+        local_host: Option<&str>,
+        local_boot: Option<&str>,
+        deadline: PassDeadline,
+        cancelled: Option<&AtomicBool>,
+    ) -> Result<GcReport> {
         let mut report = GcReport::default();
         let (ids, enumeration_truncated) = self.list_ids_bounded(deadline)?;
         let resume_after = self.read_cursor()?.gc_position;
@@ -2574,6 +2635,10 @@ impl IntentStore {
         let mut truncated = enumeration_truncated;
         let mut position: Option<String> = None;
         for offset in 0..ids.len() {
+            if cancelled.is_some_and(|cancelled| cancelled.load(Ordering::Acquire)) {
+                truncated = true;
+                break;
+            }
             // Checked after the first candidate, never before it: see `scan_bounded`.
             if offset > 0 && deadline.expired() {
                 truncated = true;
@@ -2639,7 +2704,9 @@ impl IntentStore {
         report.complete = !truncated;
         // Best effort: a cursor we could not persist costs coverage latency, never correctness, and
         // must not fail a sweep that already did its deletions.
-        let _ = self.write_gc_position(if report.complete { None } else { position });
+        if !cancelled.is_some_and(|cancelled| cancelled.load(Ordering::Acquire)) {
+            let _ = self.write_gc_position(if report.complete { None } else { position });
+        }
         if report.complete {
             self.sweep_write_debris(now_ms);
         }

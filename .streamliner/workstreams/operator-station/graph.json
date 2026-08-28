@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (direct human-attended Telex endpoint)",
-  "summary": "Direct Station reset PR #136 is review-approved at head 7c6603ecd081255d8af370668cf3ddddc8075b50 with green CI, clean mergeability, and zero unresolved threads. Merge is held on Application Client PR #132 ordering.",
+  "summary": "The direct human-attended Station contract reset completed through issue #134 and PR #136 at terminal head f77be107f602cfd06495e591857b20ce199c8a4d, merged as e071e3170c19ab1b8a753b502c67be2ee80688ec. The builder-owned direction gate remains planned and unpassed; station-app remains planned and also waits on Application Client client-conformance.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-08-27T19:19:13Z",
+  "updatedAt": "2026-08-27T22:23:13Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -132,8 +132,8 @@
       "id": "direct-station-contract-reset",
       "type": "research",
       "title": "Direct Station product contract reset",
-      "summary": "Rewrite the normative Operator Station design around direct human-attended address operation, add ADR 0051, narrow ADRs 0047/0048, preserve mediation only as external non-normative evidence, and produce an implementation-ready station-app handoff.",
-      "status": "in-progress",
+      "summary": "Completed through issue #134 and PR #136. Terminal reviewed head f77be107f602cfd06495e591857b20ce199c8a4d merged as e071e3170c19ab1b8a753b502c67be2ee80688ec, rewriting the normative design around direct human-attended address operation, adding ADR 0051, narrowing ADRs 0047/0048, preserving mediation only as external non-normative evidence, and producing the station-app handoff for the still-unpassed builder direction gate.",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -155,9 +155,9 @@
             "workstreamId": "application-client",
             "nodeId": "client-core"
           },
-          "label": "Application Client direct-Station vocabulary and bundle re-baseline in PR #132",
+          "label": "Merged Application Client direct-Station vocabulary and bundle re-baseline from PR #132, followed by issue #12 revision 3, bundle integrity repair, and first-binding reconciliation",
           "url": "https://github.com/lossyrob/telex/pull/132",
-          "status": "pending"
+          "status": "completed"
         }
       ]
     },

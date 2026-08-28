@@ -5146,18 +5146,6 @@ async fn release_definite_end_members(
 /// durable marker. Withdrawal is exact per binding and reversible with an explicit
 /// `telex --address <address> copilot resume`.
 async fn reset_station(state: Arc<DaemonState>, store_key: String, address: String) -> Response {
-    let backend = match state.backend_for(&store_key).await {
-        Ok(backend) => backend,
-        Err(response) => return response,
-    };
-    let durable_epoch = match backend.reset_epoch_lease(&address).await {
-        Ok(epoch) => epoch,
-        Err(e) => {
-            return proto::internal(format!(
-                "resetting durable epoch lease for {address} in {store_key}: {e:#}"
-            ))
-        }
-    };
     let deadline = station_intent::PassDeadline::at(Instant::now() + reconcile::TEARDOWN_DEADLINE);
     let durable = match state
         .address_teardown_bindings(&store_key, &address, deadline)
@@ -5230,6 +5218,23 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
         drop(admit);
     }
 
+    // Resetting the epoch is the durable fence. Do it only after every binding we could enumerate
+    // has been made non-deliverable under its own admission guard. If enumeration or withdrawal
+    // fails, leaving the existing epoch in place is safer than releasing it while a local member
+    // can still deliver.
+    let backend = match state.backend_for(&store_key).await {
+        Ok(backend) => backend,
+        Err(response) => return response,
+    };
+    let durable_epoch = match backend.reset_epoch_lease(&address).await {
+        Ok(epoch) => epoch,
+        Err(e) => {
+            return proto::internal(format!(
+                "resetting durable epoch lease for {address} in {store_key}: {e:#}"
+            ))
+        }
+    };
+
     if affected.is_empty() {
         state.push_recent_error(
             "Reset",
@@ -5241,7 +5246,7 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
         delivery_outcome: None,
         address: Some(address),
         message_id: None,
-        lease_epoch: affected.first().map(|m| m.lease_epoch).or(durable_epoch),
+        lease_epoch: durable_epoch.or_else(|| affected.first().map(|m| m.lease_epoch)),
         drain_intents: None,
     }
 }
@@ -5514,6 +5519,26 @@ async fn detach_application_member(
     address: String,
     capability: StationCapability,
 ) -> Response {
+    // Application detach and register must share the binding admission boundary. In particular,
+    // the durable detach intent must remain ordered with local-member publication: a registration
+    // that clears it cannot publish a member between this lookup and its removal.
+    let _admit = match state
+        .admit_binding(
+            &store_key,
+            &session_id,
+            &address,
+            reconcile::TEARDOWN_DEADLINE,
+        )
+        .await
+    {
+        Ok(admit) => admit,
+        Err(e) => {
+            state.push_recent_error("ApplicationDetach", e.clone());
+            return proto::internal(format!(
+                "application detach could not take delivery admission for {address} in {store_key}: {e}"
+            ));
+        }
+    };
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
         Err(response) => return response,
