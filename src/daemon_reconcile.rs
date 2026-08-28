@@ -668,6 +668,7 @@ impl DaemonState {
     /// deferral rather than as a teardown failure.
     ///
     /// Fallible on purpose — see [`IntentStore::withdraw_binding`]. Callers propagate.
+    #[cfg(feature = "sqlite")]
     pub(crate) async fn withdraw_intent_at_generation_within(
         &self,
         store_key: &str,
