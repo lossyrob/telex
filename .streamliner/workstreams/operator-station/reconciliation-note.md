@@ -56,9 +56,17 @@ historical-bundle integrity repair
 reconciliation `8b8ecf39781c1281a30605745299fc0a44e91ead` all precede
 `e071e3170c19ab1b8a753b502c67be2ee80688ec`.
 
-The builder-owned `direct-station-direction-gate` is next and unpassed.
-`station-app` remains planned and unlaunched, and it also waits on Application
-Client `client-conformance`. PR approval and merge do not infer gate passage.
+The builder accepted `direct-station-direction-gate` after the product merge.
+The decision accepts the direct human-attended product boundary, ADR 0051
+supersession, external-only mediation, shared-client dependency, and downstream
+geometry. It closes `direct-station-contract-ready` without launching or making
+`station-app` ready to write.
+
+`station-app` remains planned and unlaunched. Its current hold is Application
+Client `client-conformance`, which remains pending. After conformance completes,
+launch still requires separate preparation and authorization. The direct
+usability gate, operational hardening, closure gate, and downstream checkpoints
+remain planned.
 
 ## Historical PR #143 evidence
 
@@ -324,8 +332,8 @@ The merged domain export is `docs/design/operator-station.md`, backed by ADR
 store fingerprint, experimental namespace, current UI behavior, `attention.*`
 kinds, and `campaignAttention` metadata remain explicitly outside the
 production contract. Issue #12 remains the shared-client convergence authority.
-The builder direction gate has not yet accepted the merged design for
-implementation.
+The builder direction gate accepted the merged design and downstream geometry.
+That decision closes the design checkpoint without launching implementation.
 
 ## Context fitness
 
@@ -379,10 +387,10 @@ the domain-contract review, the exact #12 export review, and the
 workstream-owned artifact reconciliations. The paired reviewer remained the
 right owner for detailed lifecycle, provenance, recovery, and safety defects.
 
-Operator attention now belongs at the builder-owned
-`direct-station-direction-gate`. `station-app` remains unlaunched and also waits
-on Application Client `client-conformance`; the later usability gate still owns
-direct Station acceptance.
+The builder has applied the product-direction floor at
+`direct-station-direction-gate`. Operator attention next belongs at a separately
+prepared `station-app` launch after Application Client `client-conformance`.
+The later usability gate still owns direct Station usability acceptance.
 
 ## Inspired vs. recovery interventions
 
@@ -430,8 +438,8 @@ direct Station acceptance.
 ## Closeout observation dispositions
 
 - Prescribed operator-agent package: superseded; #128/#130 closed without merge.
-- Direct Station contract: completed through issue #134, PR #136, and ADR 0051;
-  builder acceptance remains at the unpassed direction gate.
+- Direct Station contract and direction: completed through issue #134, PR #136,
+  ADR 0051, and builder acceptance at `direct-station-direction-gate`.
 - Generic metadata-bearing reply: deferred to Application Client
   client-core/conformance; no extraction from PR #130 now.
 - Preserved #128 branches/worktrees/review evidence: retained pending explicit

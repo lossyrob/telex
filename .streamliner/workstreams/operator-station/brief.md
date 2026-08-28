@@ -17,12 +17,16 @@ the operator-agent intermediary as product architecture.
 
 The design-only `direct-station-contract-reset` completed through issue #134 and
 PR #136. It rewrote the intended Station contract around direct address
-attendance and recorded ADR 0051. The next confidence transition is the
-builder-owned direction gate, which remains unpassed.
+attendance and recorded ADR 0051. The builder then accepted the direct
+human-attended product boundary, ADR 0051 supersession, external-only mediation,
+shared-client dependency, and downstream geometry at
+`direct-station-direction-gate`.
 
-After the direction gate, `station-app` implements the desktop endpoint using
-the supported/conformant Application Client. A direct usability gate validates
-the human experience, followed by operational hardening for Postgres,
+Gate acceptance closes the design checkpoint but does not launch or make
+`station-app` ready to write. The current hold point is Application Client
+`client-conformance`. After conformance completes, a separately prepared and
+authorized `station-app` launch is still required. A later direct usability gate
+validates the human experience, followed by operational hardening for Postgres,
 restart/offline behavior, notification pressure, provenance, security,
 packaging, and cleanup.
 
@@ -145,9 +149,14 @@ Completed design transition:
   completed 6/6 checks successfully.
 - Source branch `feature/direct-station-contract-reset` remains at
   `f77be107f602cfd06495e591857b20ce199c8a4d`.
-- The builder-owned `direct-station-direction-gate` is next and unpassed.
-  `station-app` remains planned and unlaunched, and it also waits on Application
-  Client `client-conformance`. PR approval and merge do not infer gate passage.
+- The builder accepted the direct human-attended product boundary, ADR 0051
+  supersession, external-only mediation, shared-client dependency, and
+  downstream geometry at `direct-station-direction-gate`.
+- The accepted gate closes `direct-station-contract-ready` but does not launch
+  or make `station-app` ready to write. `station-app` remains planned and
+  unlaunched while Application Client `client-conformance` remains pending.
+  After conformance, launch still requires separate preparation and
+  authorization.
 
 Historical execution:
 
@@ -260,8 +269,9 @@ Historical execution:
   and conforms any supported implementation.
 - **Decision history is append-only:** ADR 0051 narrows/supersedes applicable
   portions of ADRs 0047/0048 without rewriting them.
-- **Design gate before implementation:** #134 and PR #136 have landed, but the
-  builder must still pass `direct-station-direction-gate` before `station-app`.
+- **Design direction accepted:** #134 and PR #136 landed, and the builder passed
+  `direct-station-direction-gate`, closing the design checkpoint without
+  launching `station-app`.
 - **Station uses the conformant client:** `station-app` depends on Application
   Client `client-conformance`, not only semantic acceptance or first binding.
 - **Node launches use Streamliner:** launch-preparations API, configured v2
@@ -270,8 +280,9 @@ Historical execution:
 
 ## Open Questions
 
-- None for workstream execution. The builder-owned direction gate remains the
-  authority for accepting or rejecting the #134 design output.
+- None for the accepted product direction. Application Client
+  `client-conformance` is the current hold; after it completes, `station-app`
+  still requires separate launch preparation and authorization.
 
 ## Imports and Exports
 
@@ -286,8 +297,8 @@ Historical execution:
 
 ### Exports
 
-- A merged direct Station product contract and ADR 0051, pending builder
-  acceptance at `direct-station-direction-gate`.
+- A merged direct Station product contract and ADR 0051, accepted by the builder
+  at `direct-station-direction-gate`.
 - A separately installable human-attended desktop endpoint.
 - Direct agent-to-human durable messaging and reply UX.
 - Station-specific notification, provenance, health, recovery, and safety

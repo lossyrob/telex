@@ -39,15 +39,18 @@ pending reconciled authority and routine launch preparation.
 The existing operator decision authorizes routine launch only after the reviewed
 Tier B packet lands on `main` and preparation validates the exact main, tracker,
 task, and session inputs. Reconciliation itself does not launch.
-`client-conformance` and later gates remain planned. Issue #12 publication
+`client-conformance` and later runtime/usability gates remain planned. Issue #12 publication
 revision 3 records authoritative
 operation non-acceptance semantics; Watcher runtime still waits on binding and
 cross-backend conformance proof. Operator Station's direct-Station contract reset
 completed through issue #134 and PR #136, merged as
-`e071e3170c19ab1b8a753b502c67be2ee80688ec`. The builder-owned
-`direct-station-direction-gate` is next and remains unpassed; `station-app`
-remains planned and also waits on Application Client `client-conformance`. PR
-approval and merge do not infer gate passage. Telex Watcher's minimal v2
+`e071e3170c19ab1b8a753b502c67be2ee80688ec`. The builder accepted the
+direct human-attended product boundary, ADR 0051 supersession, external-only
+mediation, shared-client dependency, and downstream geometry at
+`direct-station-direction-gate`. This closes the design checkpoint without
+launching `station-app`, which remains planned and waits on Application Client
+`client-conformance`. A separately prepared and authorized launch is still
+required after conformance. Telex Watcher's minimal v2
 authoring/registration reset completed through issue #133 and PR #135, merged as
 `b91e8301899351c0411d6e2e9ac5290af8a3cb4c`; its builder-owned
 `dumb-watcher-contract-gate` and `minimal-contract-accepted` checkpoint are
@@ -70,7 +73,7 @@ merged.
 
 | Workstream | Tracker | Outcome | Current first move |
 |---|---|---|---|
-| Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | Issue #134 and PR #136 completed the direct contract reset under ADR 0051. The builder-owned direction gate is next and unpassed; `station-app` remains unlaunched and also waits on Application Client `client-conformance`. |
+| Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | The builder accepted the direct contract and downstream geometry at `direct-station-direction-gate`, closing the design checkpoint. `station-app` remains planned and unlaunched while it waits on Application Client `client-conformance`; launch still requires separate preparation and authorization. |
 | Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on Application Client `client-conformance`. |
 | Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Client core is merged; the Rust-first `first-binding` in the root `telex` crate is selected, tracked by #149, and ready but unlaunched pending reconciled authority and routine launch preparation. Later conformance still blocks consumer runtime integration. |
 | Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | Adopt issue #106 / PR #138 as `station-intent-reconciliation`; integrate current `main`, resolve blocking review, and present isolated both-backend evidence before the hardening gate. |
@@ -160,8 +163,10 @@ boundary.
 After the shared semantic checkpoint:
 
 - Operator Station completed its design reset around direct human attendance.
-  The builder-owned direction gate remains unpassed, and the desktop app also
-  waits on Application Client `client-conformance`.
+  The builder accepted the direction gate and closed the design checkpoint.
+  The desktop app remains planned and unlaunched while it waits on Application
+  Client `client-conformance`; launch still requires separate preparation and
+  authorization.
 - Telex Watcher's minimal command-plus-policy contract and builder usability
   gate are accepted. Issue #144 and its task specification prepare the optional
   examples, which remain ready but unlaunched pending separate campaign
