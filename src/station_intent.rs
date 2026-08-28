@@ -1686,7 +1686,11 @@ impl IntentStore {
         }
         let id = intent.id();
         let _lock = self.lock_intent(&id)?;
-        let existing = self.load(&id).ok();
+        let existing = if path_present(&self.path_for(&id))? {
+            Some(self.load(&id)?)
+        } else {
+            None
+        };
         if let Some(existing) = existing.as_ref() {
             if existing.state == IntentRecoveryState::Live {
                 return Ok(PendingWrite::KeptExistingLive {
@@ -4606,6 +4610,34 @@ mod tests {
 
         // And it refuses to write anything that is not a pending record at all.
         assert!(store.write_pending(&live).is_err());
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn write_pending_never_overwrites_an_unreadable_or_unsupported_record() {
+        let run_dir = temp_run_dir("write-pending-fail-closed");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let mut pending = sample_intent("sqlite:/a", "sess", "addr");
+        pending.state = IntentRecoveryState::Pending;
+        let path = store.path_for(&pending.id());
+
+        for bytes in [
+            br#"{"schema_version":999,"store_key":"sqlite:/a","session_id":"sess","address":"addr"}"#
+                .to_vec(),
+            b"{not-json".to_vec(),
+        ] {
+            platform_fs::write_owner_only_file_atomic(&path, &bytes).expect("seed rejected record");
+            assert!(
+                store.write_pending(&pending).is_err(),
+                "an existing record that cannot be validated must fail closed"
+            );
+            assert_eq!(
+                std::fs::read(&path).expect("read rejected record"),
+                bytes,
+                "a failed attach must preserve the existing bytes exactly"
+            );
+        }
+
         let _ = std::fs::remove_dir_all(&run_dir);
     }
 

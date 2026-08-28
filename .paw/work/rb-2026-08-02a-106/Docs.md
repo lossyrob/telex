@@ -1164,6 +1164,10 @@ macOS transport coverage, and authoritative Linux/Postgres CI therefore remain e
 handoff. A focused or delta review must cover `f2bd68e..final-head`, including the main merge,
 Application Client conflict resolution, M1-M5/S1-S7 repairs, and ADR 0052.
 
+A final local review also found that `write_pending` collapsed every existing-record load error into
+"absent" and could overwrite malformed or unsupported-schema bytes. The attach path now distinguishes
+proven absence from a rejected existing record and preserves rejected bytes exactly.
+
 ### Decision boundary
 
 The requested next action is focused or delta re-review of the final clean pushed head, followed by
