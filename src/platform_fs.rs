@@ -466,7 +466,7 @@ pub fn host_id() -> Result<String> {
 pub fn boot_id() -> Result<String> {
     static CACHE: OnceLock<std::result::Result<String, String>> = OnceLock::new();
     match CACHE.get_or_init(|| {
-        imp::raw_boot_id()
+        imp::raw_boot_id(None)
             .map(|raw| hashed_identity("boot", &raw))
             .map_err(|e| e.to_string())
     }) {
@@ -487,7 +487,117 @@ pub fn boot_id() -> Result<String> {
 /// path on every call.
 #[doc(hidden)]
 pub fn boot_id_uncached() -> Result<String> {
-    imp::raw_boot_id().map(|raw| hashed_identity("boot", &raw))
+    imp::raw_boot_id(None).map(|raw| hashed_identity("boot", &raw))
+}
+
+/// The test-only scope handed to the platform resolver: an isolated storage namespace, and
+/// optionally an observation point inside the cold-start path to synchronize on.
+///
+/// Private, with private fields, and it appears in no public signature. That is the enforcement:
+/// the production resolvers ([`boot_id`], [`boot_id_uncached`]) pass `None`, so there is no value
+/// of this type in existence on the production path and therefore no way for the barrier hook to
+/// be reached without a caller that first named — and had validated — a test namespace.
+struct TestBootIdScope<'a> {
+    namespace: &'a str,
+    /// Invoked at most once, and only when the pre-lock read found the record missing or invalid:
+    /// after that observation, before the mint lock is acquired and the record re-checked. That is
+    /// the exact instant a lost-update race is decided, so a test that parks every participant here
+    /// makes the race happen by construction rather than by scheduling luck.
+    at_cold_start: Option<&'a dyn Fn()>,
+}
+
+/// [`boot_id_uncached`] resolved inside an isolated, test-only storage namespace.
+///
+/// `#[doc(hidden)]`: a test seam, not API, and deliberately **not** an environment variable. The
+/// production resolver reads exactly one location (`HKCU\Software\telex` on Windows, the kernel on
+/// Unix) and nothing a parent process sets can repoint it — that environment-independence is the
+/// whole reason the identity lives in the registry rather than under `%LOCALAPPDATA%`, because two
+/// processes that disagree turn every station intent into `foreign_host_or_boot`.
+///
+/// A cold-start test still has to be able to *delete* the record before racing several processes at
+/// it, and doing that to the real per-user record would knock over any daemon running on the
+/// developer's machine. So the namespace is passed explicitly by the caller: the library never
+/// reads it from the environment, and the concurrency test propagates its own variable to its own
+/// child test binaries.
+///
+/// `namespace` is validated (ASCII alphanumeric, `-`, `_`; 1..=48 bytes) so it can never escape the
+/// test container into the production key, and the result carries the same 32-character contract as
+/// [`boot_id`].
+#[doc(hidden)]
+pub fn boot_id_uncached_in_test_namespace(namespace: &str) -> Result<String> {
+    validate_test_boot_id_namespace(namespace)?;
+    imp::raw_boot_id(Some(TestBootIdScope {
+        namespace,
+        at_cold_start: None,
+    }))
+    .map(|raw| hashed_identity("boot", &raw))
+}
+
+/// [`boot_id_uncached_in_test_namespace`], with `at_cold_start` invoked at the instant the caller
+/// has observed a missing or invalid record and has not yet taken the mint lock.
+///
+/// `#[doc(hidden)]`: the determinism seam for the cross-process cold-start regression. Without it
+/// the test asserts on a race it merely *hopes* occurred — a launch barrier releases twelve
+/// processes together, but nothing stops the first one from finishing its whole mint before the
+/// twelfth has read the key, in which case the eleven others take the uncontended
+/// already-a-record path and a resolver with no serialization at all still passes. Parking every
+/// participant here and releasing them together makes "all twelve saw an empty record" a
+/// precondition of the assertion rather than a hope.
+///
+/// It cannot be reached from [`boot_id`] or [`boot_id_uncached`]: the hook travels only inside
+/// [`TestBootIdScope`], which the production resolvers never construct, and reaching it at all
+/// requires a validated test namespace, so the parked window can never be opened over the real
+/// per-user record.
+///
+/// On hosts whose boot identity comes from the kernel (Linux, macOS) there is no record and no
+/// mint, so the resolver has no such instant and the hook is never invoked. That is the parity
+/// statement, not an omission: there is no race to make deterministic there.
+#[doc(hidden)]
+pub fn boot_id_uncached_in_test_namespace_at_cold_start(
+    namespace: &str,
+    at_cold_start: &dyn Fn(),
+) -> Result<String> {
+    validate_test_boot_id_namespace(namespace)?;
+    imp::raw_boot_id(Some(TestBootIdScope {
+        namespace,
+        at_cold_start: Some(at_cold_start),
+    }))
+    .map(|raw| hashed_identity("boot", &raw))
+}
+
+/// Delete the persisted record of a test namespace, so the next resolution in it is a cold start.
+///
+/// `#[doc(hidden)]`: the other half of [`boot_id_uncached_in_test_namespace`]. It can only ever
+/// address the validated test container, never the production record. On platforms whose boot
+/// identity comes from the kernel (Linux, macOS) nothing is persisted, so this is a no-op — which
+/// is the parity statement: there is no mint to race there.
+///
+/// Deliberately per-namespace, with no "remove every test namespace" companion. A sweep is
+/// unscoped by definition, and `cargo test` runs test binaries — and developers run several
+/// checkouts — concurrently: one run's cleanup would delete a namespace another run was mid-race
+/// in, turning an unrelated suite red for reasons invisible in its own output. Each run owns
+/// exactly the namespace it named, and removes exactly that, including on panic.
+#[doc(hidden)]
+pub fn clear_test_boot_id_namespace(namespace: &str) -> Result<()> {
+    validate_test_boot_id_namespace(namespace)?;
+    imp::clear_boot_id_namespace(namespace)
+}
+
+fn validate_test_boot_id_namespace(namespace: &str) -> Result<()> {
+    let acceptable = (1..=48).contains(&namespace.len())
+        && namespace
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if !acceptable {
+        return Err(FsError::Unsupported {
+            capability: "boot session identity",
+            message: format!(
+                "{namespace:?} is not a usable boot-identity test namespace; it must be 1..=48 \
+                 bytes of ASCII alphanumerics, '-', or '_'"
+            ),
+        });
+    }
+    Ok(())
 }
 
 fn hashed_identity(domain: &str, raw: &str) -> String {
@@ -863,8 +973,12 @@ mod imp {
         })
     }
 
+    /// Linux takes the boot identity straight from the kernel, so there is nothing to mint, nothing
+    /// to persist, and therefore no first-writer race for a test scope to isolate or synchronize.
+    /// Every process on the host reads the same bytes; the parameter exists only so the
+    /// cross-platform seam has one shape.
     #[cfg(target_os = "linux")]
-    pub(super) fn raw_boot_id() -> Result<String> {
+    pub(super) fn raw_boot_id(_scope: Option<super::TestBootIdScope<'_>>) -> Result<String> {
         let raw = std::fs::read_to_string("/proc/sys/kernel/random/boot_id").map_err(|e| {
             FsError::Unsupported {
                 capability: "boot session identity",
@@ -881,8 +995,10 @@ mod imp {
         Ok(trimmed.to_string())
     }
 
+    /// macOS derives the identity from `kern.boottime`, which the kernel fixes at boot and every
+    /// process reads identically. Same as Linux: no mint, no persistence, no race.
     #[cfg(target_os = "macos")]
-    pub(super) fn raw_boot_id() -> Result<String> {
+    pub(super) fn raw_boot_id(_scope: Option<super::TestBootIdScope<'_>>) -> Result<String> {
         let mut boottime: libc::timeval = unsafe { std::mem::zeroed() };
         let mut size = std::mem::size_of::<libc::timeval>();
         let name = std::ffi::CString::new("kern.boottime").expect("static sysctl name");
@@ -905,11 +1021,17 @@ mod imp {
     }
 
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
-    pub(super) fn raw_boot_id() -> Result<String> {
+    pub(super) fn raw_boot_id(_scope: Option<super::TestBootIdScope<'_>>) -> Result<String> {
         Err(FsError::Unsupported {
             capability: "boot session identity",
             message: "boot identity is only wired for Linux and macOS".into(),
         })
+    }
+
+    /// Nothing is persisted on Unix — the identity is kernel state — so there is no test record to
+    /// remove and no cold start to arrange.
+    pub(super) fn clear_boot_id_namespace(_namespace: &str) -> Result<()> {
+        Ok(())
     }
 
     #[cfg(target_os = "macos")]
@@ -952,8 +1074,8 @@ mod imp {
     use std::path::{Component, Path, PathBuf, Prefix};
     use std::sync::OnceLock;
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, LocalFree, ERROR_ALREADY_EXISTS, HANDLE, INVALID_HANDLE_VALUE,
-        PSID,
+        CloseHandle, GetLastError, LocalFree, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, HANDLE,
+        INVALID_HANDLE_VALUE, PSID, WAIT_ABANDONED, WAIT_OBJECT_0, WAIT_TIMEOUT,
     };
     use windows_sys::Win32::Security::Authorization::{
         ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
@@ -974,12 +1096,13 @@ mod imp {
         FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
     use windows_sys::Win32::System::Registry::{
-        RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE, REG_SZ, RRF_RT_REG_SZ,
+        RegDeleteKeyExW, RegDeleteTreeW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER,
+        HKEY_LOCAL_MACHINE, REG_SZ, RRF_RT_REG_SZ,
     };
     use windows_sys::Win32::System::SystemInformation::GetTickCount64;
     use windows_sys::Win32::System::Threading::{
-        GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
-        PROCESS_QUERY_LIMITED_INFORMATION,
+        CreateMutexW, GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
+        ReleaseMutex, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
     pub(super) const FILE_ATTRIBUTE_REPARSE_POINT_BIT: u32 = FILE_ATTRIBUTE_REPARSE_POINT;
@@ -1828,7 +1951,7 @@ mod imp {
         Ok(text)
     }
 
-    pub(super) fn raw_boot_id() -> Result<String> {
+    pub(super) fn raw_boot_id(scope: Option<super::TestBootIdScope<'_>>) -> Result<String> {
         // Windows has no kernel-provided boot identifier, and the obvious derivation
         // (`SystemTime::now() - GetTickCount64()`) is **not stable within one boot**:
         // `GetTickCount64` advances in ~15.6 ms steps while the wall clock does not, so the
@@ -1845,26 +1968,46 @@ mod imp {
         // * monotonic uptime must not have gone backwards (a reboot resets it to ~0), and
         // * the derived boot instant must still match within `BOOT_INSTANT_TOLERANCE_MS`, which
         //   absorbs both the tick granularity and an ordinary NTP correction.
+        //
+        // Persisting is only half the answer, though: the **first** mint of a boot is a
+        // read-modify-write across processes, and an unserialized one loses. Cold start is exactly
+        // when several telex processes appear at once — a `telex copilot attach` that spawns the
+        // daemon, a watcher, a console — and with a plain read/mint/overwrite each of them sees an
+        // absent record, mints its own, and overwrites whatever the others wrote. The read-back
+        // does not save it: writer A can write and read back its own value *before* writer B
+        // overwrites the key, so A returns `A`, B returns `B`, and every process started after
+        // them returns `B`. A's station intent is then permanently `foreign_host_or_boot` — the
+        // precise failure the persisted record exists to prevent, reintroduced by the race.
+        //
+        // So the mint is serialized on a user-scoped named mutex and re-checked under it: the
+        // first writer of a boot wins, and everyone else adopts the record it left rather than
+        // minting a competing one. The uncontended path (a record already exists) never touches
+        // the lock. See `BootIdMintLock`.
         const BOOT_INSTANT_TOLERANCE_MS: i64 = 60_000;
 
-        let uptime_ms = unsafe { GetTickCount64() };
-        let now_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis() as u64)
-            .map_err(|_| FsError::Unsupported {
-                capability: "boot session identity",
-                message: "system clock is before the unix epoch".into(),
-            })?;
-        if uptime_ms == 0 || now_ms < uptime_ms {
-            return Err(FsError::Unsupported {
-                capability: "boot session identity",
-                message: "system uptime is unavailable".into(),
-            });
-        }
-        let boot_instant_ms = (now_ms - uptime_ms) as i64;
+        let namespace = scope.as_ref().map(|scope| scope.namespace);
+        let key = boot_id_key(namespace);
+
+        let sample_clock = || -> Result<(u64, i64)> {
+            let uptime_ms = unsafe { GetTickCount64() };
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .map_err(|_| FsError::Unsupported {
+                    capability: "boot session identity",
+                    message: "system clock is before the unix epoch".into(),
+                })?;
+            if uptime_ms == 0 || now_ms < uptime_ms {
+                return Err(FsError::Unsupported {
+                    capability: "boot session identity",
+                    message: "system uptime is unavailable".into(),
+                });
+            }
+            Ok((uptime_ms, (now_ms - uptime_ms) as i64))
+        };
 
         let read_valid = |uptime_ms: u64, boot_instant_ms: i64| -> Option<String> {
-            let record: BootIdRecord = serde_json::from_str(&read_boot_id_record()?).ok()?;
+            let record: BootIdRecord = serde_json::from_str(&read_boot_id_record(&key)?).ok()?;
             // Monotonic uptime, with the same tolerance as the instant check: a reboot resets
             // uptime to ~0 against a stored value of hours or days, so the slack costs nothing —
             // and without it two processes sampling `GetTickCount64` milliseconds apart disagree
@@ -1876,6 +2019,30 @@ mod imp {
                 (boot_instant_ms - record.boot_instant_ms).abs() <= BOOT_INSTANT_TOLERANCE_MS;
             (uptime_monotonic && same_instant && !record.id.is_empty()).then_some(record.id)
         };
+
+        let (uptime_ms, boot_instant_ms) = sample_clock()?;
+        if let Some(id) = read_valid(uptime_ms, boot_instant_ms) {
+            return Ok(id);
+        }
+
+        // No usable record: this process is a candidate first writer. Everything from here — the
+        // re-check, the mint, the write, the read-back — happens under the lock, so exactly one
+        // process per boot can reach the mint with the key still empty. A lock that cannot be
+        // taken is a hard failure, not a licence to race: see `BootIdMintLock`.
+        //
+        // The observation above is the instant a lost-update race is decided, so it is also where
+        // the cross-process regression test parks every participant before releasing them into the
+        // lock together. `at_cold_start` is `None` on every production path — it can only travel
+        // inside a `TestBootIdScope`, which `boot_id`/`boot_id_uncached` never construct.
+        if let Some(at_cold_start) = scope.as_ref().and_then(|scope| scope.at_cold_start) {
+            at_cold_start();
+        }
+
+        let _mint = BootIdMintLock::acquire(namespace)?;
+
+        // Re-sample rather than reuse the pre-lock reading: the wait is bounded but not
+        // instantaneous, and the record we are about to judge may have been written during it.
+        let (uptime_ms, boot_instant_ms) = sample_clock()?;
         if let Some(id) = read_valid(uptime_ms, boot_instant_ms) {
             return Ok(id);
         }
@@ -1896,9 +2063,11 @@ mod imp {
             message: format!("serializing the boot session id: {e}"),
         })?;
         // Fail **explicitly** when the record cannot be persisted or read back, rather than
-        // returning a per-process value. See `resolve_minted_boot_id`.
+        // returning a per-process value. See `resolve_minted_boot_id`. The read-back still matters
+        // under the lock: it is what proves the write actually landed in the key the next process
+        // will read.
         resolve_minted_boot_id(
-            write_boot_id_record(&encoded),
+            write_boot_id_record(&key, &encoded),
             read_valid(uptime_ms, boot_instant_ms),
         )
     }
@@ -1948,8 +2117,159 @@ mod imp {
     const BOOT_ID_KEY: &str = "Software\\telex";
     const BOOT_ID_VALUE: &str = "BootSessionId";
 
-    fn read_boot_id_record() -> Option<String> {
-        let key = wide_null(std::ffi::OsStr::new(BOOT_ID_KEY));
+    /// Container for the isolated namespaces the concurrency test resolves in. Production never
+    /// writes here, and a test namespace can never address `BOOT_ID_KEY` itself: the namespace is
+    /// validated to ASCII alphanumerics, `-`, and `_` before it reaches this function, so it can
+    /// contribute neither a `\` nor a `..` to the path.
+    const BOOT_ID_TEST_KEY: &str = "Software\\telex\\TestBootSessions";
+
+    fn boot_id_key(namespace: Option<&str>) -> String {
+        match namespace {
+            None => BOOT_ID_KEY.to_string(),
+            Some(namespace) => format!("{BOOT_ID_TEST_KEY}\\{namespace}"),
+        }
+    }
+
+    /// Serializes the **first** mint of a boot across processes of one user.
+    ///
+    /// A named mutex, not a registry convention, because the registry has no atomic
+    /// compare-and-set on a value: `RegSetKeyValueW` is an unconditional overwrite, so
+    /// read/mint/write is a lost-update race no ordering of those three calls can close.
+    ///
+    /// The lock has to cover exactly the set of processes that can write the record, and that set
+    /// is defined by `HKCU`: one per *user*, shared by every Terminal Services session that user is
+    /// logged into. So the name is `Global\` — the machine-wide object namespace — with the token
+    /// user's SID appended. Two users never contend (different SIDs, different `HKCU` hives, so
+    /// blocking each other would be pure interference), while the console session and a concurrent
+    /// RDP session of the *same* user do contend, which is correct: they share one `HKCU`, so
+    /// cold-starting together is exactly the lost update this exists to prevent. Elevated and
+    /// non-elevated processes of one user share the SID too, so a UAC split token also serializes.
+    ///
+    /// `Local\` — the per-session namespace — was the earlier scope and is wrong for this reason:
+    /// it is narrower than the resource it guards. Two logon sessions of one user would serialize
+    /// on two different objects while writing the same key.
+    ///
+    /// `Global\` costs nothing here. `SeCreateGlobalPrivilege` — which an ordinary interactive user
+    /// does not hold — gates only *section* (file-mapping) and *symbolic link* objects in that
+    /// namespace; events, semaphores and mutexes are exempt, so a standard non-elevated user in an
+    /// RDP session creates this mutex successfully. Should some hardened configuration refuse it
+    /// anyway, `CreateMutexW` fails and the mint fails with it — closed, not unserialized.
+    ///
+    /// The mutex is created with the same owner-only descriptor as every other object telex
+    /// creates, so it cannot be squatted: another user's process that guesses the name gets
+    /// `ERROR_ACCESS_DENIED` from `CreateMutexW`, and telex's own mint fails closed rather than
+    /// proceeding unserialized if someone squats the name first.
+    ///
+    /// Every failure here is fatal to the mint. The alternative — "the lock did not work, mint
+    /// anyway" — is precisely the unserialized write this exists to remove, and it produces an
+    /// identity guaranteed to disagree with the one another process persisted, which is terminal
+    /// for every station intent that carries it. An error naming the lock is strictly better.
+    ///
+    /// `WAIT_ABANDONED` counts as acquired: it means a previous holder died mid-mint, and the
+    /// caller re-reads and re-validates the record under the lock before doing anything with it,
+    /// so a partially finished mint is judged on its merits like any other stored record.
+    struct BootIdMintLock(Handle);
+
+    /// The mint lock's object name: machine-wide namespace, user-scoped identity, test namespace
+    /// suffix when there is one.
+    ///
+    /// Extracted so the scope is assertable — `the_mint_lock_is_global_and_user_scoped` pins both
+    /// halves, because either one silently narrowing (back to `Local\`, or dropping the SID)
+    /// reintroduces a lost-update window that no in-process test can observe.
+    fn mint_lock_name(namespace: Option<&str>) -> Result<String> {
+        let sid = current_user_sid()?;
+        Ok(match namespace {
+            None => format!("Global\\telex-boot-session-mint-{sid}"),
+            Some(namespace) => format!("Global\\telex-boot-session-mint-{sid}-{namespace}"),
+        })
+    }
+
+    impl BootIdMintLock {
+        /// How long to wait for another process's mint. A mint is a few registry calls, so this is
+        /// orders of magnitude more than it needs; it exists so a wedged holder surfaces as a named
+        /// error instead of hanging `telex copilot attach` forever.
+        const TIMEOUT_MS: u32 = 30_000;
+
+        fn acquire(namespace: Option<&str>) -> Result<Self> {
+            let name = mint_lock_name(namespace)?;
+            let sa = owner_only_security_attributes()?;
+            let wide = wide_null(OsStr::new(&name));
+            // `bInitialOwner = FALSE`: take ownership only through the wait below, so the
+            // created-vs-opened distinction never has to be interpreted.
+            let raw = unsafe { CreateMutexW(&sa.attrs, 0, wide.as_ptr()) };
+            if raw == 0 {
+                return Err(FsError::Unsupported {
+                    capability: "boot session identity",
+                    message: format!(
+                        "cannot open the boot session mint lock: {}",
+                        std::io::Error::last_os_error()
+                    ),
+                });
+            }
+            let handle = Handle(raw);
+            match unsafe { WaitForSingleObject(handle.0, Self::TIMEOUT_MS) } {
+                WAIT_OBJECT_0 | WAIT_ABANDONED => Ok(Self(handle)),
+                WAIT_TIMEOUT => Err(FsError::Unsupported {
+                    capability: "boot session identity",
+                    message: format!(
+                        "another process held the boot session mint lock for more than {} ms",
+                        Self::TIMEOUT_MS
+                    ),
+                }),
+                _ => Err(FsError::Unsupported {
+                    capability: "boot session identity",
+                    message: format!(
+                        "waiting for the boot session mint lock: {}",
+                        std::io::Error::last_os_error()
+                    ),
+                }),
+            }
+        }
+    }
+
+    impl Drop for BootIdMintLock {
+        fn drop(&mut self) {
+            unsafe {
+                ReleaseMutex(self.0 .0);
+            }
+        }
+    }
+
+    /// Remove a test namespace's persisted record so the next resolution in it is a cold start.
+    ///
+    /// Only reachable through `platform_fs::clear_test_boot_id_namespace`, which validates the
+    /// namespace, so this addresses a subkey of `BOOT_ID_TEST_KEY` and never the production record.
+    ///
+    /// Scoped to the one namespace, never the whole container: `cargo test` runs test binaries
+    /// concurrently and developers run several checkouts at once, so a container-wide sweep would
+    /// delete a namespace another run was mid-race in. The container key itself is removed
+    /// best-effort afterwards, which is safe precisely because `RegDeleteKeyExW` refuses a key that
+    /// still has subkeys — a concurrent run's namespace keeps it alive.
+    pub(super) fn clear_boot_id_namespace(namespace: &str) -> Result<()> {
+        let key = boot_id_key(Some(namespace));
+        debug_assert_ne!(key, BOOT_ID_KEY);
+        let wide = wide_null(OsStr::new(&key));
+        // `RegDeleteTreeW` clears the values and subkeys; the now-empty key itself is removed
+        // best-effort so a long-lived profile does not accumulate one per test run.
+        let rc = unsafe { RegDeleteTreeW(HKEY_CURRENT_USER, wide.as_ptr()) };
+        if rc != 0 && rc != ERROR_FILE_NOT_FOUND {
+            return Err(FsError::Unsupported {
+                capability: "boot session identity",
+                message: format!(
+                    "clearing the boot session test namespace failed with status {rc}"
+                ),
+            });
+        }
+        let container = wide_null(OsStr::new(BOOT_ID_TEST_KEY));
+        unsafe {
+            RegDeleteKeyExW(HKEY_CURRENT_USER, wide.as_ptr(), 0, 0);
+            RegDeleteKeyExW(HKEY_CURRENT_USER, container.as_ptr(), 0, 0);
+        }
+        Ok(())
+    }
+
+    fn read_boot_id_record(key: &str) -> Option<String> {
+        let key = wide_null(std::ffi::OsStr::new(key));
         let value = wide_null(std::ffi::OsStr::new(BOOT_ID_VALUE));
         let mut size: u32 = 0;
         let rc = unsafe {
@@ -1986,8 +2306,8 @@ mod imp {
         Some(String::from_utf16_lossy(&buf[..len]))
     }
 
-    fn write_boot_id_record(json: &str) -> Result<()> {
-        let key = wide_null(std::ffi::OsStr::new(BOOT_ID_KEY));
+    fn write_boot_id_record(key: &str, json: &str) -> Result<()> {
+        let key = wide_null(std::ffi::OsStr::new(key));
         let value = wide_null(std::ffi::OsStr::new(BOOT_ID_VALUE));
         let data = wide_null(std::ffi::OsStr::new(json));
         let bytes = (data.len() * 2) as u32;
@@ -2240,6 +2560,101 @@ mod imp {
             }
         }
 
+        /// The test container is a container: it can never resolve to the production record, and the
+        /// production record never gains a namespace suffix.
+        #[test]
+        fn a_test_namespace_is_contained_and_distinct_from_the_production_record() {
+            assert_eq!(boot_id_key(None), BOOT_ID_KEY);
+            let scoped = boot_id_key(Some("ns"));
+            assert_eq!(scoped, format!("{BOOT_ID_TEST_KEY}\\ns"));
+            assert_ne!(scoped, BOOT_ID_KEY);
+            assert!(
+                scoped.starts_with(&format!("{BOOT_ID_KEY}\\")),
+                "the container stays under the product's own key, got {scoped}"
+            );
+        }
+
+        /// The mint lock's scope: machine-wide namespace, per-user identity.
+        ///
+        /// Both halves matter and neither is observable from a passing functional test, because a
+        /// too-narrow lock only loses when two logon sessions of one user cold-start together.
+        /// `Global\` because the record it guards is `HKCU` — one hive per *user*, shared across
+        /// every Terminal Services session that user is signed into, so a `Local\` (per-session)
+        /// object is narrower than the resource. The SID because two users must **not** contend:
+        /// they have different hives, and blocking each other would be interference, not safety.
+        #[test]
+        fn the_mint_lock_is_global_and_user_scoped() {
+            let sid = current_user_sid().expect("the token user SID");
+            let production = mint_lock_name(None).expect("the production mint lock name");
+            assert!(
+                production.starts_with("Global\\"),
+                "the mint lock must live in the machine-wide namespace so two logon sessions of \
+                 one user serialize on the same object, got {production}"
+            );
+            assert!(
+                production.contains(&sid),
+                "the mint lock must be scoped to the token user, so users with different HKCU \
+                 hives never block each other, got {production}"
+            );
+
+            let scoped = mint_lock_name(Some("ns")).expect("a namespaced mint lock name");
+            assert!(scoped.starts_with("Global\\"), "got {scoped}");
+            assert!(scoped.contains(&sid), "got {scoped}");
+            assert_ne!(
+                scoped, production,
+                "a test namespace must never contend with the production mint"
+            );
+            assert!(scoped.ends_with("-ns"), "got {scoped}");
+        }
+
+        /// `Global\` is reachable without `SeCreateGlobalPrivilege`.
+        ///
+        /// The privilege — which an ordinary interactive user does not hold — gates *section* and
+        /// *symbolic link* objects in the global namespace, not mutexes. This asserts that on the
+        /// host actually running the suite, so the scope widening above cannot turn the mint into a
+        /// hard failure for exactly the non-elevated, RDP-session users it is meant to protect. A
+        /// failure here is the fail-closed path working as designed and reported as such.
+        #[test]
+        fn the_global_mint_lock_is_creatable_without_extra_privilege() {
+            let namespace = format!("unit-global-{}", std::process::id());
+            let held = BootIdMintLock::acquire(Some(&namespace)).unwrap_or_else(|e| {
+                panic!(
+                    "creating the Global\\ mint lock failed on this host ({e}); the boot identity \
+                     mint fails closed rather than racing, but every cold start on this host now \
+                     errors"
+                )
+            });
+            drop(held);
+        }
+
+        /// The mint lock actually excludes a second holder.
+        ///
+        /// Asserted across threads because a Windows mutex is owned by a *thread*: a second
+        /// acquisition on the same thread would be granted by recursion and prove nothing. This is
+        /// the in-process half of the guarantee; the cross-process half — several processes
+        /// cold-starting at once and resolving one identity — is
+        /// `tests/boot_identity.rs::a_concurrent_cold_start_resolves_exactly_one_boot_identity`.
+        #[test]
+        fn the_mint_lock_excludes_a_second_holder() {
+            let namespace = format!("unit-lock-{}", std::process::id());
+            let held = BootIdMintLock::acquire(Some(&namespace)).expect("first holder");
+            let (tx, rx) = std::sync::mpsc::channel();
+            let contender = std::thread::spawn(move || {
+                let _second = BootIdMintLock::acquire(Some(&namespace)).expect("second holder");
+                let _ = tx.send(());
+            });
+            assert!(
+                rx.recv_timeout(std::time::Duration::from_millis(250))
+                    .is_err(),
+                "a second holder was admitted while the mint lock was held, so two processes can \
+                 mint competing boot identities at once"
+            );
+            drop(held);
+            rx.recv_timeout(std::time::Duration::from_secs(30))
+                .expect("the contender must be admitted once the lock is released");
+            contender.join().expect("contender thread");
+        }
+
         /// A host where the per-boot record cannot be persisted, or cannot be read back, must
         /// produce an **explicit** failure rather than a per-process value.
         ///
@@ -2352,7 +2767,14 @@ mod imp {
         })
     }
 
-    pub(super) fn raw_boot_id() -> Result<String> {
+    pub(super) fn raw_boot_id(_scope: Option<super::TestBootIdScope<'_>>) -> Result<String> {
+        Err(FsError::Unsupported {
+            capability: "boot session identity",
+            message: "no boot identity implementation for this platform".into(),
+        })
+    }
+
+    pub(super) fn clear_boot_id_namespace(_namespace: &str) -> Result<()> {
         Err(FsError::Unsupported {
             capability: "boot session identity",
             message: "no boot identity implementation for this platform".into(),
