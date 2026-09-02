@@ -14457,7 +14457,8 @@ mod platform {
         SDDL_REVISION_1,
     };
     use windows_sys::Win32::Security::{
-        GetTokenInformation, TokenUser, SECURITY_ATTRIBUTES, TOKEN_QUERY, TOKEN_USER,
+        GetTokenInformation, TokenUser, SECURITY_ATTRIBUTES, TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
+        TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
@@ -14831,32 +14832,7 @@ mod platform {
     }
 
     fn sid_string_from_token(token: HANDLE) -> Result<String> {
-        let mut needed = 0u32;
-        unsafe {
-            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
-        }
-        if needed == 0 {
-            return Err(io_err(
-                "sizing token user information",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let mut buf = vec![0u8; needed as usize];
-        let ok = unsafe {
-            GetTokenInformation(
-                token,
-                TokenUser,
-                buf.as_mut_ptr() as *mut c_void,
-                needed,
-                &mut needed,
-            )
-        };
-        if ok == 0 {
-            return Err(io_err(
-                "reading token user information",
-                std::io::Error::last_os_error(),
-            ));
-        }
+        let buf = token_information(token, TokenUser, "reading token user information")?;
         let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
         let mut sid_ptr: *mut u16 = std::ptr::null_mut();
         let ok = unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_ptr) };
@@ -14871,6 +14847,43 @@ mod platform {
             LocalFree(sid_ptr as *mut c_void);
         }
         Ok(sid)
+    }
+
+    /// `GetTokenInformation` with storage aligned for every token structure read from it.
+    fn token_information(
+        token: HANDLE,
+        class: TOKEN_INFORMATION_CLASS,
+        action: &'static str,
+    ) -> Result<Vec<u64>> {
+        let mut needed = 0u32;
+        unsafe {
+            GetTokenInformation(token, class, std::ptr::null_mut(), 0, &mut needed);
+        }
+        if needed == 0 {
+            return Err(io_err(action, std::io::Error::last_os_error()));
+        }
+        // A byte vector does not guarantee the alignment required to dereference TOKEN_USER.
+        let mut buf = vec![0u64; needed as usize / std::mem::size_of::<u64>() + 1];
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                class,
+                buf.as_mut_ptr() as *mut c_void,
+                needed,
+                &mut needed,
+            )
+        };
+        if ok == 0 {
+            return Err(io_err(action, std::io::Error::last_os_error()));
+        }
+        Ok(buf)
+    }
+
+    #[cfg(test)]
+    pub(super) fn token_user_information_is_aligned() -> Result<bool> {
+        let token = current_process_token()?;
+        let buf = token_information(token.0, TokenUser, "reading token user information")?;
+        Ok((buf.as_ptr() as usize) % std::mem::align_of::<TOKEN_USER>() == 0)
     }
 
     struct OwnerOnlySecurityAttributes {
@@ -15382,6 +15395,15 @@ mod tests {
             &authenticated_users,
             &sid
         ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_peer_token_information_is_pointer_aligned() {
+        assert!(
+            platform::token_user_information_is_aligned().expect("read current token"),
+            "TOKEN_USER must never be dereferenced through byte-aligned storage"
+        );
     }
 
     #[tokio::test]
