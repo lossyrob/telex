@@ -2308,10 +2308,15 @@ The daemon owns reconciliation as its own operation, not as a `Register` side ef
    already in a blocking filesystem syscall may finish after that response. Its generation check and
    lock still prevent generation N from overwriting or deleting N+1.
 
-   Bounded enumeration reports truncation/degradation. Counts and over-cap results from such a pass
-   are lower bounds only; routine discovery and GC promise conditional eventual coverage, not a fair
-   stable-tail scan or exact capacity recovery. An offline complete scan on supported local storage
-   is the only path that may state exact counts or reclamation.
+   Bounded enumeration and incomplete GC report truncation/degradation. Counts and over-cap results
+   from such a pass are lower bounds only; routine discovery and GC promise conditional eventual
+   coverage, not a fair stable-tail scan, automatic complete GC, or exact capacity recovery.
+   `telex daemon recover-intents` is the offline path that may state exact counts: the operator must
+   stop normal intent writers, and the command refuses unless the daemon is stopped and an existing
+   scope is positively supported local storage. It completes enumeration before reporting inventory;
+   its `--gc` option completes that scan before reclamation and re-enumerates before reporting the
+   remaining exact count. Failure to establish that support floor is a refusal, never a partial
+   recovery claim.
 
 **Bounded ADR 0028 exception.** `upgrade` and `rollback` spawn the successor they just installed and
 wait, bounded, for one reconcile report. Without this, the issue's motivating scenario — `telex

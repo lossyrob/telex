@@ -1500,7 +1500,13 @@ impl IntentStore {
         let mut ids = Vec::new();
         let mut truncated = false;
         let mut examined = 0usize;
-        for entry in entries.flatten() {
+        for entry in entries {
+            let entry = entry.map_err(|e| {
+                IntentError::Io(format!(
+                    "reading intent scope entry {}: {e}",
+                    self.root.display()
+                ))
+            })?;
             examined += 1;
             if examined.is_multiple_of(ENUMERATION_DEADLINE_STRIDE) && deadline.expired() {
                 truncated = true;
@@ -2621,7 +2627,21 @@ impl IntentStore {
         local_boot: Option<&str>,
     ) -> Result<GcReport> {
         platform_fs::require_supported_local_filesystem(&self.root)?;
-        self.gc(now_ms, local_host, local_boot)
+        // Reclamation is destructive, so establish a complete enumeration before considering any
+        // candidate. `gc` is unbounded here only because this is the explicitly offline path.
+        let scan = self.scan_complete_local(0)?;
+        if scan.discovery_truncated {
+            return Err(IntentError::Io(
+                "offline station-intent enumeration was incomplete".to_string(),
+            ));
+        }
+        let report = self.gc(now_ms, local_host, local_boot)?;
+        if !report.complete {
+            return Err(IntentError::Io(
+                "offline station-intent GC was incomplete".to_string(),
+            ));
+        }
+        Ok(report)
     }
 
     /// The deadline-bounded form, and the one every scheduled sweep uses.
@@ -3675,7 +3695,7 @@ mod tests {
     }
 
     #[test]
-    fn over_cap_scope_is_reported_swept_completely_and_never_pruned() {
+    fn over_cap_scope_is_reported_by_offline_scan_and_never_pruned() {
         let run_dir = temp_run_dir("overcap");
         let store = IntentStore::open(&run_dir, "hash").expect("store");
         // Seed past the cap by writing directly, the way an older build or a manual copy would.
@@ -3692,7 +3712,9 @@ mod tests {
         let budget = 64;
         let passes = total.div_ceil(budget);
         for _ in 0..passes {
-            let page = store.scan(budget).expect("scan");
+            // Exact coverage is an offline, supported-local scan property. It is not a claim made
+            // by the automatic deadline-bounded reconciler.
+            let page = store.scan_complete_local(budget).expect("offline scan");
             assert!(page.over_cap, "an over-cap scope must report over_cap");
             assert_eq!(page.observed_count, total);
             // The store never advances the cursor itself: only the caller knows how far a pass
@@ -4803,10 +4825,12 @@ mod tests {
                 .write_atomic(&sample_intent("sqlite:/a", "sess", &format!("addr-{i}")))
                 .expect("seed intent");
         }
-        let page = store.scan_complete_local(8).expect("supported local scan");
+        // A complete enumeration is independent of the page budget: recovery can state the exact
+        // count before loading or reclaiming records.
+        let page = store.scan_complete_local(0).expect("supported local scan");
         assert!(!page.discovery_truncated);
         assert_eq!(page.observed_count, 3);
-        assert_eq!(page.loaded.len(), 3);
+        assert!(page.loaded.is_empty());
         let _ = std::fs::remove_dir_all(&run_dir);
     }
 

@@ -150,7 +150,8 @@ live and verifiable", and both are derived from the reconciler's constants rathe
 | Graceful drain or upgrade | **≤ 10 s** (one 5 s reconcile tick + a 1 s probe + a 2 s validation/claim allowance) |
 | Hard crash | **`liveness_window_secs()` + 10 s** (the crashed daemon never released its lease, so the successor waits for it to go stale) |
 
-Both bounds are **qualified**. They apply to an intent that is:
+Both bounds are **qualified**. They apply only when the automatic enumeration and required reads
+complete, and to an intent that is:
 
 - in a scope holding no more than **64** live intents (one pass budget), so it is attempted in the
   first pass after the trigger; and
@@ -168,10 +169,22 @@ Use successive reconcile reports and `telex status` to observe progress rather t
 completion time from the scope size.
 
 If a report is truncated or degraded, its count and over-cap indication are lower bounds, not an
-inventory or capacity-recovery promise. Automatic scans and GC eventually cover only supported,
-available local storage. Exact inventory or reclamation requires recovery tooling to stop normal
-writers and use the supported offline complete-scan API; do not infer completeness from bounded
-reports.
+inventory or capacity-recovery promise. Automatic scans and GC cover records only when their
+enumeration and read opportunities complete; they do not promise fair stable-tail progress, a
+complete automatic GC, or exact capacity recovery.
+
+For an exact inventory or eligible reclamation, use the explicitly offline path:
+
+```bash
+telex daemon stop --drain
+# Stop other telex/Copilot processes that can write station intents.
+telex --json daemon recover-intents       # exact inventory
+telex --json daemon recover-intents --gc  # exact inventory, eligible GC, exact remaining count
+```
+
+The command refuses rather than guessing if a daemon is still reachable, its stopped state cannot be
+established, the intent scope is absent, or the scope is not positively recognized as supported local
+storage. Do not infer completeness from bounded reports.
 
 At the 512-record write cap, existing records can still be updated or explicitly withdrawn. A live
 record withdrawn to `revoked` continues to occupy its slot for the seven-day terminal TTL; daemon

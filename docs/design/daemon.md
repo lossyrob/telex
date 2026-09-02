@@ -1963,9 +1963,14 @@ daemon is running **and** this producer proves it is alive, restore this exact p
   `LockFileEx` on fixed local Windows volumes). The file is never deleted, renamed, replaced, aged
   out, or stolen. An unprovable owner/privacy/local-filesystem/lock condition fails closed; a live
   hung holder yields bounded degradation. Kernel process-death cleanup releases a held lock.
-- A bounded scan reports `discovery_truncated`. When that is true, `observed_count` and `over_cap`
-  are lower bounds only, and automatic discovery and GC have only conditional eventual coverage.
-  Exact counts or reclaim claims require an offline complete scan on supported local storage.
+- A bounded scan reports `discovery_truncated`; an incomplete GC also degrades the enclosing pass.
+  In either case `observed_count` and `over_cap` are lower bounds only, and automatic discovery and
+  GC have only conditional eventual coverage. They make no stable-tail fairness, complete-GC, or
+  exact capacity-recovery claim. Exact counts or reclaim claims require the offline recovery command:
+  after stopping the daemon and every other intent writer, `telex daemon recover-intents` completes
+  an enumeration on supported local storage before reporting an exact inventory; `--gc` performs that
+  scan before reclamation and scans again before reporting the remaining exact count. It fails closed
+  if the daemon state, existing scope, or supported-local-storage floor cannot be established.
 
 ### 18.2 States
 
@@ -2365,7 +2370,7 @@ loads is indexed; only the winner is attempted.
 | `RECONCILE_ADMIN_DEADLINE` | 4 s | outer bound on the admin `ReconcileIntents` request — the **same deadline instant** as the pass, not merely the same duration |
 | `RECONCILE_REQUEST_DEADLINE` | 4 s | client-side ceiling for one round trip, further clamped to whatever the caller has left |
 | `RECONCILE_PASS_BUDGET` | 64 | upper bound per pass, round-robin cursor across passes |
-| `RECONCILE_MAX_CONCURRENCY` | 4 | herd cap **and** guaranteed minimum progress per pass |
+| `RECONCILE_MAX_CONCURRENCY` | 4 | herd cap after a discovery/read opportunity completes |
 | `RECONCILE_DEFERRED_LEASE_RETRY` | 5 s fixed | a not-yet-stale incumbent is *waiting*, not failing |
 | `RECONCILE_BACKOFF_INITIAL`/`_MAX` | 5 s / 5 min ±20 % | genuine failures only |
 | `RECONCILE_QUARANTINE_AFTER` | 10 consecutive failures → hourly | one wedged intent cannot eat the budget |
@@ -2376,14 +2381,14 @@ from the moment the *request* arrived rather than from the moment the pass task 
 scheduled; GC, discovery, and every wave — including the first — measure themselves against it. A
 chain of independent per-phase timeouts bounds each phase and nothing at all: an unbounded discovery
 of a large scope could exhaust the whole tick before the first wave started, and the first wave was
-exempt from the deadline on top of that. Guaranteed minimum progress is preserved by budgeting
+exempt from the deadline on top of that. Punctual completed passes are preserved by budgeting
 maintenance instead of exempting a wave: GC and discovery are confined to
-`RECONCILE_MAINTENANCE_BUDGET`, which leaves a whole `RECONCILE_PER_INTENT_TIMEOUT` behind them, and
-both resume from their own persisted positions, so a truncated phase delays coverage rather than
-losing it. A discovery that truncates sets `deadline_reached`; its `observed_count`/`over_cap` are
-lower bounds and are merged into the index rather than overwriting it, so one slow pass cannot
-retract an over-cap warning. A GC sweep advances the once-a-minute maintenance clock only when it
-**completed**.
+`RECONCILE_MAINTENANCE_BUDGET`, which leaves a whole `RECONCILE_PER_INTENT_TIMEOUT` behind them.
+Both resume from their own persisted positions only when their enumeration/read opportunities
+complete; a truncation delays coverage without promising stable-tail fairness. A discovery
+truncation or incomplete GC sets `deadline_reached`; its `observed_count`/`over_cap` are lower
+bounds and are merged into the index rather than overwriting it, so one slow pass cannot retract an
+over-cap warning. A GC sweep advances the once-a-minute maintenance clock only when it **completed**.
 
 The budget is arithmetic, not aspiration:
 `MAINTENANCE + BLOCKING_GRACE + PER_INTENT + SCHEDULING_RESERVE <= PASS_WORK_BUDGET`, and

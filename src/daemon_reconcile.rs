@@ -141,11 +141,10 @@ pub const RECONCILE_EVENT_LOG_RESERVE: Duration = Duration::from_millis(25);
 ///
 /// Sized so that `RECONCILE_MAINTENANCE_BUDGET + RECONCILE_BLOCKING_GRACE +
 /// RECONCILE_PER_INTENT_TIMEOUT + RECONCILE_SCHEDULING_RESERVE` still fits inside
-/// `RECONCILE_PASS_WORK_BUDGET`. That is what keeps the guaranteed-minimum-progress property true:
-/// even a pass whose maintenance runs right up to its budget still has room to start — and finish —
-/// a whole first wave *and* apply its outcomes inside the published bound. Both GC and discovery
-/// resume from their own persisted positions, so capping them delays coverage rather than losing
-/// it.
+/// `RECONCILE_PASS_WORK_BUDGET`. When discovery/read completes, even a pass whose maintenance runs
+/// right up to its budget has room to start and finish a whole first wave and apply its outcomes
+/// inside the published bound. Both GC and discovery resume from their persisted positions when
+/// opportunities complete; a truncated opportunity reports degradation, not guaranteed progress.
 ///
 /// The grace term is in the sum because maintenance is the one phase whose *hard* bound is wider
 /// than its cooperative one: a truncated scan has to be allowed to hand back the partial page it
@@ -303,9 +302,9 @@ const _: () = {
     assert!(BRIDGE_PROBE_TIMEOUT.as_millis() < RECONCILE_PER_INTENT_TIMEOUT.as_millis());
     assert!(RECONCILE_DEFERRED_LEASE_RETRY.as_millis() <= RECONCILE_INTERVAL.as_millis());
     assert!(RECONCILE_MAX_CONCURRENCY <= RECONCILE_PASS_BUDGET);
-    // Guaranteed minimum progress: maintenance, one whole wave, and the pass's own bookkeeping all
-    // fit inside the *work* budget. Drop the reserve from this sum and the arithmetic still "fits"
-    // while every real pass overruns by however long its scheduling and outcome application take.
+    // Once discovery/read has completed, maintenance, one whole wave, and bookkeeping all fit
+    // inside the work budget. This is capacity arithmetic, not a stable-tail fairness promise:
+    // an unavailable enumeration/read opportunity degrades the pass instead of forcing a wave.
     assert!(
         RECONCILE_MAINTENANCE_BUDGET.as_millis()
             + RECONCILE_BLOCKING_GRACE.as_millis()
@@ -340,14 +339,6 @@ pub fn graceful_recovery_bound_ms() -> u64 {
 /// the stale cutoff lands within one `RECONCILE_DEFERRED_LEASE_RETRY` of it. Same qualifications.
 pub fn crash_recovery_bound_ms() -> u64 {
     (liveness_window_secs().max(0) as u64) * 1000 + graceful_recovery_bound_ms()
-}
-
-/// Deterministic maximum queue delay for a scope larger than one pass budget. Not a recovery
-/// bound: a *ceiling* on how long an intent can wait to be attempted, using the guaranteed
-/// per-pass progress in the pathological case where every intent consumes its full timeout.
-pub fn max_queue_delay_ms(live_intents: usize) -> u64 {
-    let passes = live_intents.div_ceil(RECONCILE_MAX_CONCURRENCY.max(1));
-    passes as u64 * RECONCILE_INTERVAL.as_millis() as u64
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -2167,15 +2158,18 @@ pub async fn reconcile_once_until(
     // so drain suppression or single-flight contention cannot consume a maintenance slot.
     let now = now_ms();
     let last_gc_ms = state.intents.last_gc_ms.load(Ordering::Relaxed);
-    if last_gc_ms == 0 || now.saturating_sub(last_gc_ms) >= RECONCILE_GC_INTERVAL.as_millis() as i64
+    let gc_degraded = if last_gc_ms == 0
+        || now.saturating_sub(last_gc_ms) >= RECONCILE_GC_INTERVAL.as_millis() as i64
     {
         run_intent_gc(
             &state,
             PassDeadline::at(started + RECONCILE_GC_BUDGET).earliest(maintenance_deadline),
             PassDeadline::at(pass_deadline),
         )
-        .await;
-    }
+        .await
+    } else {
+        false
+    };
 
     // Scope filtering happens inside the scan, ahead of the page window: a pass filtered to one
     // store must spend its whole budget on that store, and its cursor must be that store's own.
@@ -2210,7 +2204,7 @@ pub async fn reconcile_once_until(
     report.observed_count = page.observed_count;
     report.over_cap = page.over_cap;
     report.skipped = page.skipped.len();
-    if page.discovery_truncated {
+    if page.discovery_truncated || gc_degraded {
         // A truncated discovery saw a *prefix* of the scope, so its counts are lower bounds.
         // Publishing them as-is would let one slow pass silently retract an over-cap warning (and
         // shrink the observed count) for a scope nothing has reclaimed.
@@ -2385,15 +2379,11 @@ pub async fn reconcile_once_until(
     // `RECONCILE_PER_INTENT_TIMEOUT`, and no wave is ever started that could outlive the pass
     // deadline — including the first.
     //
-    // The first wave used to be exempt, on the reasoning that it is what guarantees a minimum of
-    // `RECONCILE_MAX_CONCURRENCY` intents of progress per pass. That exemption is what made the
-    // published bound untrue in the one case it mattered: when the phases *before* the first wave
-    // (GC, discovery) had already consumed the deadline, the exempt wave then added a further
-    // `RECONCILE_PER_INTENT_TIMEOUT` on top of it, so a pass could overrun its own tick and an
-    // admin request could sit behind the overrun. The minimum-progress property is preserved by
-    // budgeting maintenance instead: `RECONCILE_MAINTENANCE_BUDGET` leaves a reserve large enough
-    // for one whole wave, so the check below only bites when maintenance itself overran, and in
-    // that case the honest answer is a deadline-truncated pass whose cursors resume next tick.
+    // The first wave used to be exempt to force a minimum number of attempts. That made the
+    // published bound untrue: GC or discovery could already have consumed the deadline, then the
+    // exempt wave added a further per-intent timeout. Budgeting maintenance leaves room for one
+    // whole wave after a completed discovery; when an opportunity overruns, the honest result is
+    // a degraded pass rather than an automatic fairness claim.
     let mut cursor = 0usize;
     let mut last_attempted_position: Option<String> = None;
     while cursor < due.len() {
@@ -2991,9 +2981,9 @@ async fn run_intent_gc(
     state: &Arc<DaemonState>,
     deadline: PassDeadline,
     log_deadline: PassDeadline,
-) {
+) -> bool {
     let Some(store) = state.intent_store() else {
-        return;
+        return true;
     };
     let identity = local_identity().ok();
     // Behind the blocking boundary: a sweep is a directory walk plus a `load`, a lock
@@ -3027,18 +3017,20 @@ async fn run_intent_gc(
                     .await;
                 }
             }
+            !report.complete
         }
         BoundedPhase::Completed(Err(e)) => {
             // A failed sweep still consumed its slot: retrying an erroring scope every tick
             // would spend the maintenance budget on the same failure.
             state.intents.last_gc_ms.store(now_ms(), Ordering::Relaxed);
-            state.push_recent_error("StationIntent", format!("intent GC: {e}"))
+            state.push_recent_error("StationIntent", format!("intent GC: {e}"));
+            true
         }
         // The sweep is still running and will finish its own deletions and cursor write; this
         // pass simply stops waiting. The maintenance clock is deliberately *not* advanced —
         // an unobserved sweep must not consume the once-a-minute slot — and nothing is pruned
         // from the index, because a report this pass never received cannot be published from.
-        BoundedPhase::Overran => {}
+        BoundedPhase::Overran => true,
     }
 }
 
@@ -3092,14 +3084,11 @@ mod tests {
         assert!(BRIDGE_PROBE_TIMEOUT < RECONCILE_PER_INTENT_TIMEOUT);
         // DeferredLease retries at most once per tick, with no exponential growth.
         assert_eq!(RECONCILE_DEFERRED_LEASE_RETRY, RECONCILE_INTERVAL);
-        // Every pass makes at least `RECONCILE_MAX_CONCURRENCY` intents of progress, which is only
-        // meaningful if a wave fits inside the budget.
+        // A completed discovery can yield a wave no larger than the concurrency cap.
         assert!(RECONCILE_MAX_CONCURRENCY <= RECONCILE_PASS_BUDGET.max(1));
-        // The first wave is no longer exempt from the deadline, so guaranteed minimum progress is
-        // now a property of the *maintenance* budget: whatever GC and discovery are allowed to
-        // consume must still leave a whole per-intent timeout inside the pass work budget — plus
-        // the pass's own scheduling and outcome-application overhead, which is reserved rather than
-        // assumed free.
+        // A completed discovery is not exempt from the deadline: the maintenance budget leaves a
+        // whole per-intent timeout plus scheduling/outcome overhead inside the work budget. A
+        // truncated discovery reports degradation rather than claiming automatic progress.
         assert!(
             RECONCILE_MAINTENANCE_BUDGET
                 + RECONCILE_BLOCKING_GRACE
@@ -3109,8 +3098,8 @@ mod tests {
         );
         // The gate a wave is admitted through is exactly that sum, so a pass whose maintenance ran
         // right up to its budget — grace included, because a truncated scan is allowed to return
-        // late rather than be discarded — still starts a first wave. Without this the reserve would
-        // buy punctuality at the cost of the minimum-progress guarantee.
+        // late rather than be discarded — can still start a first wave if discovery/read completed.
+        // Without this the reserve would buy punctuality at the cost of usable completed passes.
         assert!(
             RECONCILE_PASS_WORK_BUDGET - RECONCILE_MAINTENANCE_BUDGET - RECONCILE_BLOCKING_GRACE
                 >= RECONCILE_PER_INTENT_TIMEOUT + RECONCILE_SCHEDULING_RESERVE
@@ -3142,19 +3131,6 @@ mod tests {
         // than a literal.
         let expected = (liveness_window_secs() as u64) * 1000 + graceful_recovery_bound_ms();
         assert_eq!(crash_recovery_bound_ms(), expected);
-    }
-
-    #[test]
-    fn queue_delay_formula_matches_the_documented_shape() {
-        // ceil(N / P_min) passes at one pass per interval.
-        assert_eq!(max_queue_delay_ms(0), 0);
-        assert_eq!(max_queue_delay_ms(4), 5_000);
-        assert_eq!(max_queue_delay_ms(5), 10_000);
-        assert_eq!(
-            max_queue_delay_ms(STATION_INTENT_MAX_COUNT),
-            128 * 5_000,
-            "the 512-intent pathological ceiling published for large scopes"
-        );
     }
 
     #[test]

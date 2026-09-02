@@ -1,6 +1,9 @@
 use anyhow::{anyhow, Result};
 
-use crate::cli::{Ctx, DaemonCmd, DaemonReconcileArgs, DaemonResetArgs, DaemonSessionEndArgs};
+use crate::cli::{
+    Ctx, DaemonCmd, DaemonReconcileArgs, DaemonRecoverIntentsArgs, DaemonResetArgs,
+    DaemonSessionEndArgs,
+};
 use crate::daemon::reconcile as telex_reconcile;
 use crate::daemon_ipc::{Request, Response, ERROR_NOT_RUNNING, ERROR_UNAUTHORIZED};
 use crate::identity::resolve_session_id;
@@ -17,6 +20,7 @@ pub async fn run(ctx: &Ctx, cmd: DaemonCmd) -> Result<i32> {
         DaemonCmd::Reset(args) => reset(ctx, args).await,
         DaemonCmd::SessionEnd(args) => session_end(ctx, args).await,
         DaemonCmd::Reconcile(args) => reconcile(ctx, args).await,
+        DaemonCmd::RecoverIntents(args) => recover_intents(ctx, args).await,
         DaemonCmd::Stop(args) => {
             if !args.drain {
                 return Err(anyhow!("only `telex daemon stop --drain` is supported"));
@@ -24,6 +28,106 @@ pub async fn run(ctx: &Ctx, cmd: DaemonCmd) -> Result<i32> {
             stop_drain(ctx).await
         }
     }
+}
+
+/// Run the explicitly offline recovery path. This intentionally never starts a daemon: a bounded
+/// daemon pass can only publish lower bounds, while this command establishes the supported-local
+/// floor and requires the normal writer to be stopped before it can make exact claims.
+async fn recover_intents(ctx: &Ctx, args: DaemonRecoverIntentsArgs) -> Result<i32> {
+    let store_key = ctx.store_key()?;
+    match crate::daemon::connect_existing(&store_key).await {
+        Ok(_) => {
+            return Err(anyhow!(
+                "refusing offline station-intent recovery while the daemon is running; \
+                 stop it with `telex daemon stop --drain` and stop other intent writers first"
+            ))
+        }
+        Err(crate::daemon::DaemonError::NotRunning(_)) => {}
+        Err(error) => {
+            return Err(anyhow!(
+                "cannot establish that the daemon is stopped; refusing offline station-intent recovery: {error}"
+            ))
+        }
+    }
+
+    let paths = crate::daemon::DaemonPaths::current()?;
+    let store = crate::station_intent::IntentStore::open_existing(
+        &paths.run_dir,
+        &paths.singleton_hash,
+    )?
+    .ok_or_else(|| {
+        anyhow!(
+            "station-intent scope is absent; refusing offline recovery because supported local storage cannot be established"
+        )
+    })?;
+
+    // This is the proof behind every exact number below. It validates the local-storage floor and
+    // completes the enumeration before any optional reclamation begins.
+    let before = store.scan_complete_local(0)?;
+    if before.discovery_truncated {
+        return Err(anyhow!(
+            "offline station-intent enumeration was incomplete; refusing exact counts or reclamation"
+        ));
+    }
+
+    let reclaimed = if args.gc {
+        let host = crate::platform_fs::host_id().map_err(|error| {
+            anyhow!("cannot establish local host identity for recovery: {error}")
+        })?;
+        let boot = crate::platform_fs::boot_id().map_err(|error| {
+            anyhow!("cannot establish local boot identity for recovery: {error}")
+        })?;
+        let report = store.gc_complete_local(crate::model::now_ms(), Some(&host), Some(&boot))?;
+        if !report.complete {
+            return Err(anyhow!(
+                "offline station-intent GC was incomplete; refusing a reclamation claim"
+            ));
+        }
+        report.removed.len()
+    } else {
+        0
+    };
+
+    // GC is allowed to reclaim only after the complete scan above. Re-enumerate afterward so the
+    // remaining count is exact too, rather than subtracting a best-effort deletion count.
+    let after = if args.gc {
+        let page = store.scan_complete_local(0)?;
+        if page.discovery_truncated {
+            return Err(anyhow!(
+                "post-GC station-intent enumeration was incomplete; refusing an exact remaining count"
+            ));
+        }
+        Some(page.observed_count)
+    } else {
+        None
+    };
+    let payload = serde_json::json!({
+        "offline": true,
+        "complete_enumeration": true,
+        "observed_count": before.observed_count,
+        "over_cap": before.over_cap,
+        "gc_requested": args.gc,
+        "reclaimed": reclaimed,
+        "remaining_count": after,
+    });
+    emit(ctx.fmt, &payload, || {
+        println!(
+            "offline station-intent scan complete: {} entries{}",
+            before.observed_count,
+            if before.over_cap {
+                " (at or over write cap)"
+            } else {
+                ""
+            }
+        );
+        if args.gc {
+            println!(
+                "offline station-intent GC complete: reclaimed {reclaimed}, remaining {}",
+                after.expect("GC path sets remaining count")
+            );
+        }
+    });
+    Ok(0)
 }
 
 fn version(ctx: &Ctx) -> Result<i32> {

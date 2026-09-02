@@ -437,6 +437,8 @@ pub enum DaemonCmd {
     /// daemon only accepts IPC from a client whose executable matches its own, so the switch has
     /// to invoke the newly selected binary rather than request a pass from the old one.
     Reconcile(DaemonReconcileArgs),
+    /// Inspect or reclaim station intents offline on supported local storage.
+    RecoverIntents(DaemonRecoverIntentsArgs),
     /// Stop the daemon.
     Stop(DaemonStopArgs),
 }
@@ -449,6 +451,13 @@ pub struct DaemonReconcileArgs {
     /// Overall bound, including spawning and waiting out a draining predecessor.
     #[arg(long, default_value_t = 30_000)]
     pub timeout_ms: u64,
+}
+
+#[derive(Args)]
+pub struct DaemonRecoverIntentsArgs {
+    /// Reclaim only records that are eligible under the normal station-intent GC rules.
+    #[arg(long)]
+    pub gc: bool,
 }
 
 #[derive(Args)]
@@ -986,6 +995,14 @@ mod tests {
                 .unwrap()
                 .command,
             Command::Daemon(DaemonCmd::Stop(DaemonStopArgs { drain: true }))
+        ));
+        assert!(matches!(
+            Cli::try_parse_from(["telex", "daemon", "recover-intents", "--gc"])
+                .unwrap()
+                .command,
+            Command::Daemon(DaemonCmd::RecoverIntents(DaemonRecoverIntentsArgs {
+                gc: true
+            }))
         ));
     }
 

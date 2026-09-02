@@ -89,6 +89,16 @@ fixed local storage. Network shares, NFS/SMB, 9p, and filesystems whose advisory
 cannot be proven are intentionally refused. A busy live writer is bounded and reported; it is never
 stolen. Retry after that writer exits.
 
+## Station-intent capacity needs an exact inventory or reclamation
+
+An automatic reconcile report marked truncated or degraded is not an exact inventory: its count and
+over-cap indication are lower bounds. Do not retry it until it happens to look complete. Stop the
+daemon with `telex daemon stop --drain`, stop other intent writers, then run
+`telex --json daemon recover-intents` for an exact supported-local inventory. Add `--gc` only when
+you want eligible TTL-expired records reclaimed. The command refuses if it cannot establish the
+daemon-stopped and supported-local-storage floors; fix that condition rather than trusting a partial
+count.
+
 Messages are durable the whole time — read them with `telex inbox --address <addr>` — and the turn
 guard warns rather than blocking, so an unrestored intent never wedges a session.
 
