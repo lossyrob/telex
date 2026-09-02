@@ -3,11 +3,11 @@
 - **Workstream:** `local-daemon`
 - **Node:** `station-intent-transactional-authority`
 - **Type:** implementation
-- **Status:** planned; launch requires a GitHub tracker and separate authorization
+- **Status:** planned; launch requires separate authorization
 - **Attention:** focus
 - **Depends on:** completed `station-intent-reconciliation`
 - **Owner:** Local Daemon workstream orchestrator until an authorized implementer is assigned
-- **Tracker:** unassigned; create a Local Daemon GitHub issue before launch
+- **Tracker:** [lossyrob/telex#153](https://github.com/lossyrob/telex/issues/153)
 - **Parent workstream:** [lossyrob/telex#32](https://github.com/lossyrob/telex/issues/32)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 

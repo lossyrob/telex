@@ -39,7 +39,8 @@ replaced by a practical **release-confidence-validation** node, which is complet
 Issue #106 / PR #138 is the active hardening repair discovered after that
 validation. The operator accepted persistent OS-lock containment and a truthful
 degraded-enumeration contract for that PR. The mandatory downstream
-**station-intent-transactional-authority** node closes the accepted gap before
+**station-intent-transactional-authority** node
+([#153](https://github.com/lossyrob/telex/issues/153)) closes the accepted gap before
 the final **closure gate**, without blocking PR #138 or the builder
 **hardening gate**. Nodes are coarse and PAW-sized; the completeness split is
 justified by a transactional migration boundary and an independently useful,
@@ -121,7 +122,8 @@ restart/drain/upgrade and push-recovery evidence.
 
 Unconditional transactional generation authority, seekable fair discovery and
 garbage collection, exact counts, and exact over-cap recovery belong to the planned
-XL `station-intent-transactional-authority` node. That node follows PR #138 and
+XL `station-intent-transactional-authority` node
+([#153](https://github.com/lossyrob/telex/issues/153)). That node follows PR #138 and
 blocks the final **closure gate**, not PR #138 or the hardening gate.
 
 Workstream and design-steward branches are proposal/integration workspaces, not

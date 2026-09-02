@@ -326,6 +326,12 @@
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 153
+      },
       "dependsOn": [
         "station-intent-reconciliation"
       ]

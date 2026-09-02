@@ -36,9 +36,9 @@
       "sequencing": "PR #138 absorbs the accepted degraded contract first. The downstream transactional-authority node begins after station-intent-reconciliation and must complete before Local Daemon closure, but it does not block PR #138.",
       "recommendedDisposition": "Absorb the truthful degraded contract in PR #138 and route unconditional authority to a mandatory connected XL node.",
       "selectedDisposition": "Absorb observable truncation, lower-bound counts, conditional eventual coverage, and offline or supported-local-storage recovery into PR #138; route unconditional transactional generation authority, seekable fair discovery and GC, exact counts, and exact over-cap recovery to station-intent-transactional-authority.",
-      "target": "station-intent-reconciliation / PR #138 and downstream station-intent-transactional-authority",
-      "owner": "PR #138 implementer owns the degraded-contract slice; the Local Daemon workstream orchestrator owns XL node/issue materialization and terminal evidence",
-      "terminalPath": "PR #138 promotes and proves the narrowed contract on one reviewed and green exact head. The connected XL node then lands transactional generation authority, seekable fair maintenance, exact counts, migration and rollback safety, and exact over-cap recovery before the Local Daemon closure gate.",
+      "target": "station-intent-reconciliation / PR #138 and downstream station-intent-transactional-authority / issue #153",
+      "owner": "PR #138 implementer owns the degraded-contract slice; the Local Daemon workstream orchestrator owns issue #153 planning, implementation authorization, and terminal evidence until an authorized implementer is assigned",
+      "terminalPath": "PR #138 promotes and proves the narrowed contract on one reviewed and green exact head. Issue #153 then lands transactional generation authority, seekable fair maintenance, exact counts, migration and rollback safety, and exact over-cap recovery before the Local Daemon closure gate.",
       "status": "routed",
       "dispositionAuthority": "Operator Option A decision at 2026-09-02T14:34-04:00, relayed by the campaign orchestrator."
     },

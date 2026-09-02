@@ -296,7 +296,8 @@ maintenance opportunity. Recovery from persistent truncation is relocation to
 supported local storage or an offline complete scan.
 
 This degraded contract is an accepted temporary gap. The mandatory downstream
-`station-intent-transactional-authority` node must replace flat-file generation
+`station-intent-transactional-authority` node
+([issue #153](https://github.com/lossyrob/telex/issues/153)) must replace flat-file generation
 and root enumeration with transactional generation authority, seekable fair
 discovery and garbage collection, exact counts, and exact over-cap recovery.
 That node follows PR #138 and does not block PR #138, but it blocks Local
