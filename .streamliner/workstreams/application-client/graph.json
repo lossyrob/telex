@@ -3,11 +3,11 @@
   "id": "application-client",
   "projectKey": "telex",
   "title": "Telex Application Client (supported long-lived application integration)",
-  "summary": "The supported Application Client core merged through PR #132, closing issues #129 and #124. Rust-first binding is selected, tracked by issue #149, ready, and unlaunched; client-conformance and later gates remain held on their declared dependencies.",
+  "summary": "The supported Application Client core and Rust-first binding are complete. Issue #149 and PR #151 landed telex::application_client at reviewed head c03db454781164f47a20e997665fe1251e07bd15, merged as ddedfab57cc305a1e91a81d7e49e712bb36d32fd. Client-conformance is eligible for separate shaping but remains planned without a tracker or reviewed task spec; consumers and later gates remain blocked on declared dependencies.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-08-27T21:36:21Z",
+  "updatedAt": "2026-09-02T13:56:22Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -128,9 +128,9 @@
       "id": "first-binding",
       "type": "task",
       "title": "First supported Rust binding",
-      "summary": "Selected, tracked by issue #149, ready, and unlaunched. Promote telex::application_client in the root telex crate as the first supported binding; document default-features=false backend profiles and compatibility, caller-owned Tokio runtime, and cancellation contracts; stabilize only contract-bearing Rust types; defer external bindings and preserve the full conformance gate. Task spec: .streamliner/workstreams/application-client/tasks/first-binding.md.",
-      "status": "ready",
-      "attention": "focus",
+      "summary": "Completed through issue #149 and PR #151 at exact reviewed head c03db454781164f47a20e997665fe1251e07bd15, merged as ddedfab57cc305a1e91a81d7e49e712bb36d32fd. The root telex crate now exposes telex::application_client with supported defaults-disabled backend profiles, caller-owned Tokio, cancellation-safe lifecycle evidence, source compatibility guidance, and no external binding or private fallback.",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -148,9 +148,9 @@
       "id": "client-conformance",
       "type": "task",
       "title": "Application Client conformance and migration",
-      "summary": "Prove the supported core and binding against SQLite/Postgres, restart and membership loss, multi-address compensation, send-only/bidirectional capability, delivery-row identity, receipt-state separation, retry-safe operations, ordered resync, and migration away from temporary seams. Sketch; detail after implementation shape is known.",
+      "summary": "Next node eligible for separate task shaping and reviewed launch preparation. Prove the supported core and Rust binding against SQLite/Postgres, restart and membership loss, multi-address compensation, send-only/bidirectional capability, delivery-row identity, receipt-state separation, retry-safe operations, ordered resync, and migration away from temporary seams. Keep planned until a tracker and reviewed task spec exist.",
       "status": "planned",
-      "attention": "watch",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],

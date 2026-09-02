@@ -32,17 +32,17 @@ producers, human recipients, and the shared programmatic client they consume.
 **State.** Both builder viability gates and both initial production
 domain-contract nodes completed. Application Client contract convergence is
 merged, the design-only `application-client-ready` checkpoint is published, and
-Application Client core implementation is merged through PR #132. The Rust-first
-`first-binding` in the root `telex` crate is selected, tracked by
-[#149](https://github.com/lossyrob/telex/issues/149), and ready but unlaunched
-pending reconciled authority and routine launch preparation.
-The existing operator decision authorizes routine launch only after the reviewed
-Tier B packet lands on `main` and preparation validates the exact main, tracker,
-task, and session inputs. Reconciliation itself does not launch.
-`client-conformance` and later runtime/usability gates remain planned. Issue #12 publication
-revision 3 records authoritative
-operation non-acceptance semantics; Watcher runtime still waits on binding and
-cross-backend conformance proof. Operator Station's direct-Station contract reset
+Application Client core implementation is merged through PR #132. The first
+supported Rust binding completed through issue
+[#149](https://github.com/lossyrob/telex/issues/149) and PR #151 at exact reviewed
+head `c03db454781164f47a20e997665fe1251e07bd15`, merged as
+`ddedfab57cc305a1e91a81d7e49e712bb36d32fd`. Issue #12 publication revision 4
+records that binding publication. `client-conformance` is now the next
+Application Client node eligible for separate task shaping and reviewed launch
+preparation, but it remains planned until a tracker and reviewed task spec
+exist. Later runtime/usability gates remain planned. Watcher runtime and
+Operator Station remain blocked on completed conformance and the
+consumer-integration gate. Operator Station's direct-Station contract reset
 completed through issue #134 and PR #136, merged as
 `e071e3170c19ab1b8a753b502c67be2ee80688ec`. The builder accepted the
 direct human-attended product boundary, ADR 0051 supersession, external-only
@@ -75,7 +75,7 @@ merged.
 |---|---|---|---|
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | The builder accepted the direct contract and downstream geometry at `direct-station-direction-gate`, closing the design checkpoint. `station-app` remains planned and unlaunched while it waits on Application Client `client-conformance`; launch still requires separate preparation and authorization. |
 | Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on Application Client `client-conformance`. |
-| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Client core is merged; the Rust-first `first-binding` in the root `telex` crate is selected, tracked by #149, and ready but unlaunched pending reconciled authority and routine launch preparation. Later conformance still blocks consumer runtime integration. |
+| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Client core and the Rust-first binding are merged; `client-conformance` is eligible for separate shaping but remains planned without a tracker or reviewed task spec. Watcher and Operator Station remain blocked on conformance and the consumer-integration gate. |
 | Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | Adopt issue #106 / PR #138 as `station-intent-reconciliation`; integrate current `main`, resolve blocking review, and present isolated both-backend evidence before the hardening gate. |
 
 ## Shared seam
@@ -146,17 +146,18 @@ Both gates produce evidence for #12:
 
 Watcher contract node #110 and initial Operator contract node #114 completed in
 parallel, each exporting merged-source requirements without freezing a
-competing shared API. Application Client node #118 now consolidates both
-accepted contracts and spike/gate evidence into #12, records explicit
-dispositions, and accepts one semantic contract. Product nodes wait on the
-resulting `application-client-ready` checkpoint.
+competing shared API. Application Client node #118 consolidated both accepted
+contracts and spike/gate evidence into #12, recorded explicit dispositions, and
+accepted one semantic contract. The resulting `application-client-ready`
+checkpoint is complete.
 
-Application Client convergence and client-core implementation are complete.
-The Rust-first `first-binding` in the root `telex` crate is selected, tracked by
-#149, and ready but unlaunched pending reconciled authority and routine launch
-preparation. Operator issue #134 and PR #136 completed the direct product
-contract reset without changing the generic Application Client ownership
-boundary.
+Application Client convergence, client-core implementation, and the Rust-first
+binding are complete. Issue #149 and PR #151 landed the binding at
+`telex::application_client`; issue #12 publication revision 4 records the
+transition. `client-conformance` is eligible for separate shaping but remains
+planned until its tracker and reviewed task spec exist. Operator issue #134 and
+PR #136 completed the direct product contract reset without changing the generic
+Application Client ownership boundary.
 
 ### Stage 4 — Production applications under accepted contracts
 
@@ -201,7 +202,7 @@ collapse into noise, and no session-bound polling task is required.
 | Durable event delivery and agent wakeup | Existing Telex local exchange and bridges |
 | Optional filtering/aggregation conventions | External user-developed agents over ordinary Telex |
 | Direct human inbox, notifications, replies, and disposition | Operator Station |
-| Supported long-lived application integration | Shared issue #12 / future Application Client checkpoint |
+| Supported long-lived application integration | Shared issue #12 / completed Application Client core and Rust binding; conformance pending |
 | End-to-end external-event-to-human-to-agent loop | Campaign integration exercise |
 
 ## Seams and ownership
@@ -244,13 +245,14 @@ collapse into noise, and no session-bound polling task is required.
    semantics; keep the hardening gate separate from merge.
 2. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
    after separate campaign authorization.
-3. Keep the Rust-first Application Client `first-binding` in the root `telex`
-   crate, tracked by #149, ready but unlaunched until reconciled authority and
-   routine launch preparation are complete. Then complete binding and
-   conformance before consumer runtime integration.
-4. Keep `watcher-runtime-core` planned until first-binding and client conformance
-   prove merged exact-store/exact-operation `NotRecorded`, exact-same-operation
-   retry, and retention-boundary failure across both backends; recovery remains
-   reconciliation-first and query-only under uncertainty.
+3. Shape Application Client `client-conformance` as the next node, then create
+   and review its tracker and task spec before launch preparation. Keep it
+   planned until those artifacts exist, and keep both consumer runtimes blocked
+   through conformance and the consumer-integration gate.
+4. Keep `watcher-runtime-core` planned until `client-conformance` uses the
+   completed first binding to prove merged exact-store/exact-operation
+   `NotRecorded`, exact-same-operation retry, and retention-boundary failure
+   across both backends; recovery remains reconciliation-first and query-only
+   under uncertainty.
 5. Keep `five-minute-custom-watch-gate` planned for later operational proof, and
    preserve the campaign integration exercise and no-private-client boundary.

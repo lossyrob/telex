@@ -101,12 +101,10 @@ dirty forensic worktree must not be removed without explicit cleanup
 authorization.
 
 Issue [#12](https://github.com/lossyrob/telex/issues/12) remains the semantic
-contract owner. Publication revision 2 now points to clean PR #126 authority:
-the normative contract and ADR 0049 at merge `62c2b23`, non-normative
-traceability at `docs/notes/application-client/requirements-crosswalk.md`,
-manifest blob `25f27401100a89b1e90dba46b44973a3e3d43908`, and SHA-256
-`085deed89cef1741fb6967bbd9f5e87e4f9cf104917518a234006c35b0f62296`.
-The `application-client-ready` checkpoint and gate are complete.
+contract owner. Publication revision 4 preserves the revision 2
+`application-client-ready` checkpoint, records the revision 3 supported Rust
+core, and publishes the first supported Rust binding merged through PR #151.
+The `application-client-ready` checkpoint and gate remain complete.
 
 The supported `client-core` node completed through
 [#129](https://github.com/lossyrob/telex/issues/129),
@@ -124,18 +122,25 @@ regenerated `docs/design/application-client.bundle.json` is 2,423 bytes, Git
 blob `231cfd231d2a343b59d8538a08002087b0f17aa8`, and SHA-256
 `9dbc5cf90b917f602de8c2430438ed6f57d529893f8aaaa52f3996b51330252e`.
 
-`first-binding` is selected, tracked by
-[#149](https://github.com/lossyrob/telex/issues/149), ready, and focus-level but
-unlaunched. The operator selected a Rust-first binding in the root `telex`
-crate, preserving `telex::application_client`. The task must publish supported
-`default-features = false` consumer profiles and define compatibility, runtime,
-and cancellation behavior without widening the stable surface beyond
-contract-bearing Rust types. `client-conformance`, the consumer integration
-gate, operational hardening, and closure gate remain unchanged on their declared
-dependencies. Tracker creation alone does not authorize launch. The existing
-operator decision authorizes routine launch only after the reviewed Tier B
-packet lands on `main` and launch preparation validates the exact main, tracker,
-task, and session inputs. Reconciliation itself does not launch.
+The Rust-first `first-binding` completed through
+[#149](https://github.com/lossyrob/telex/issues/149) and
+[PR #151](https://github.com/lossyrob/telex/pull/151). Exact reviewed head
+`c03db454781164f47a20e997665fe1251e07bd15` merged as
+`ddedfab57cc305a1e91a81d7e49e712bb36d32fd`. Full PAW review
+[5052221269](https://github.com/lossyrob/telex/pull/151#pullrequestreview-5052221269)
+and delta review
+[5052369562](https://github.com/lossyrob/telex/pull/151#pullrequestreview-5052369562)
+covered the binding; all six exact-head checks succeeded and no review thread
+remained unresolved. The
+[field report](https://github.com/lossyrob/telex/issues/149#issuecomment-5454362721)
+records the implementation and validation evidence. Issue #149 closed as
+completed at `2026-09-02T13:56:22Z`.
+
+`client-conformance` is now the next node eligible for separate task shaping and
+reviewed launch preparation. It remains planned until a tracker and reviewed
+task spec exist. Watcher and Operator Station remain blocked on completed
+conformance and the consumer-integration gate. No checkpoint, later dependency,
+or gate advances with this reconciliation.
 
 ## Decisions
 
@@ -176,10 +181,8 @@ task, and session inputs. Reconciliation itself does not launch.
   implementer/reviewer defaults are resolved and launched through
   `/api/launch-preparations/runs`, not hand-written terminal prompts.
 - **Core and binding remain sequential:** `client-core` completed first;
-  `first-binding` is selected, tracked by #149, and ready but unlaunched. The
-  existing operator decision authorizes routine launch after the reviewed Tier B
-  packet lands on `main` and launch preparation validates the exact main,
-  tracker, task, and session inputs; no new operator decision is required.
+  `first-binding` then completed through issue #149 and PR #151. Conformance
+  remains a separate node and gate boundary.
 - **The first binding is Rust-first:** the supported binding remains in the root
   `telex` crate at `telex::application_client`. It does not introduce a second
   crate or a language-translation boundary.
@@ -190,18 +193,19 @@ task, and session inputs. Reconciliation itself does not launch.
   `entra`). The `self-update` feature is not part of an application-consumer
   profile.
 - **The caller owns the async runtime:** the Rust binding runs in a
-  caller-provided Tokio runtime and must not create a hidden runtime, daemon, or
-  sidecar. Exact ownership and API mechanics remain worker decisions.
+  caller-provided Tokio runtime and does not create a hidden runtime, daemon, or
+  sidecar. Lifecycle operation objects preserve completed, uncertain in-flight,
+  untouched, and compensation evidence across cancellation.
 - **Cancellation preserves durable uncertainty:** cancellation never proves that
   an operation was not accepted. Callers persist prepared `RecoveryHandle`
   evidence and reconcile uncertain operations; cancelled receive work does not
-  acknowledge a delivery. Exact cancellation API shape remains a worker
-  decision.
+  acknowledge a delivery.
 - **Only semantic Rust types stabilize:** compatibility commitments cover public
   types and behavior that carry the accepted Application Client contract. They
   do not promote backend records, daemon frames, CLI types, or consumer DTOs into
-  the supported surface. Version and deprecation mechanics remain worker
-  decisions within the root crate's compatibility contract.
+  the supported surface. Until a release contains the binding, supported source
+  consumption uses an exact full commit SHA; unpinned Git dependencies remain
+  outside the compatibility promise.
 - **External boundaries remain deferred:** napi-rs/TypeScript, a separate client
   crate, C ABI, public socket or sidecar protocols, and product DTOs require
   later decisions. This deferral does not permit a private consumer fallback.
@@ -214,9 +218,6 @@ task, and session inputs. Reconciliation itself does not launch.
 
 ## Open Questions
 
-- What concrete Rust API, ownership, feature-alias, deprecation, and cancellation
-  mechanics best satisfy the approved compatibility, runtime, and recovery
-  contracts?
 - Which conformance evidence is required before product integration PRs may
   merge, beyond the earlier semantic `application-client-ready` checkpoint?
 - Which external language or process boundary, if any, should follow Rust after
@@ -245,11 +246,12 @@ task, and session inputs. Reconciliation itself does not launch.
 
 ## Closeout Observations
 
-- Issue #12 publication revision 2 now reflects clean PR #126 authority; the
-  `application-client-ready` checkpoint and gate are complete.
+- Issue #12 publication revision 4 records the design checkpoint, supported Rust
+  core, and first supported Rust binding without claiming conformance.
 - W-05 taxonomy wording from issue #124 completed within client-core issue #129
-  and merged through PR #132. The Rust-first `first-binding` task is selected,
-  tracked by #149, and ready but remains unlaunched.
+  and merged through PR #132.
+- The Rust-first `first-binding` completed through issue #149 and PR #151.
+  `client-conformance` is eligible for separate shaping but remains planned.
 - Polluted PR #123 and its dirty worktree are deferred with rationale for
   protocol forensics; cleanup requires explicit operator authorization.
 - The clean #118 implementation worktree is also deferred for cleanup until the
