@@ -3358,9 +3358,9 @@ fn real_process_copilot_app_turn_complete_keeps_live_bridge_attended_until_true_
     let simulated_bridge_pid = env.daemon_pid();
     wait_until_path_exists(&extension, Duration::from_secs(3));
     wait_until_path_exists(bindings, Duration::from_secs(3));
-    std::fs::write(
+    telex::platform_fs::write_owner_only_file_atomic(
         registry,
-        serde_json::to_vec(&serde_json::json!({
+        &serde_json::to_vec(&serde_json::json!({
             "sessionId": &session,
             "pid": simulated_bridge_pid,
             "lifecyclePid": simulated_bridge_pid,
