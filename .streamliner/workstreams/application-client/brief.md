@@ -136,11 +136,21 @@ remained unresolved. The
 records the implementation and validation evidence. Issue #149 closed as
 completed at `2026-09-02T13:56:22Z`.
 
-`client-conformance` is now the next node eligible for separate task shaping and
-reviewed launch preparation. It remains planned until a tracker and reviewed
-task spec exist. Watcher and Operator Station remain blocked on completed
-conformance and the consumer-integration gate. No checkpoint, later dependency,
-or gate advances with this reconciliation.
+`client-conformance` is now tracked by
+[#152](https://github.com/lossyrob/telex/issues/152), fully specified, ready,
+and unlaunched. One node, tracker, and delivery PR must prove all ten conformance
+families through the public Rust surface across SQLite and credentialed
+Postgres. The same PR owns public-only Watcher send-only and Operator Station
+bidirectional fixtures, any missing shared-semantic repair, and guidance for
+replacing temporary consumer seams.
+
+`consumer-integration-gate` remains planned. After conformance review and
+required CI pass on one exact head, Watcher and Operator Station independently
+attest that same bundle against their merged contracts and confirm no private
+seam is required. Product implementation, usability, packaging, and operational
+evidence remain downstream. Watcher runtime and Station app retain direct
+conformance dependencies and also wait on the consumer gate. No checkpoint or
+gate advances with this shaping reconciliation.
 
 ## Decisions
 
@@ -212,14 +222,27 @@ or gate advances with this reconciliation.
 - **Conformance remains a separate gate:** first-binding must preserve the full
   AC-C01 through AC-C20 model. It does not complete cross-backend conformance,
   consumer integration, packaging, upgrade readiness, or production hardening.
+- **Conformance is one complete delivery bundle:** issue #152 owns all ten
+  semantic families, SQLite and credentialed-Postgres parity, public-only
+  send-only and bidirectional fixtures, missing shared-semantic repair, and
+  temporary-seam replacement guidance in one PR. Backend, test-family,
+  fixture, migration, and reviewability splits are not independent confidence
+  transitions.
+- **Consumer attestations are pre-integration gate evidence:** after
+  implementation review and required CI pass on one exact conformance head,
+  Watcher and Operator Station independently validate the supported public seam.
+  Their attestations do not implement either product or pass the gate by
+  themselves.
+- **Material discoveries receive durable disposition:** required conformance
+  work stays in issue #152; real prerequisites name their owning dependency and
+  exact resume condition; product-only work routes to its owning workstream.
+  No material item may remain untriaged at merge readiness.
 - **Issue #124 completed within client-core:** PR #132 closed both #129 and #124
   and reported the regenerated manifest identity. This factual reconciliation
   does not mutate issue #12.
 
 ## Open Questions
 
-- Which conformance evidence is required before product integration PRs may
-  merge, beyond the earlier semantic `application-client-ready` checkpoint?
 - Which external language or process boundary, if any, should follow Rust after
   consumer architecture is authoritative?
 
@@ -243,6 +266,8 @@ or gate advances with this reconciliation.
   product integration.
 - Explicit migration guidance away from temporary CLI, raw-IPC, and spike
   integration seams.
+- Exact-head public-seam attestations from Watcher and Operator Station for the
+  planned `consumer-integration-gate`.
 
 ## Closeout Observations
 
@@ -251,7 +276,8 @@ or gate advances with this reconciliation.
 - W-05 taxonomy wording from issue #124 completed within client-core issue #129
   and merged through PR #132.
 - The Rust-first `first-binding` completed through issue #149 and PR #151.
-  `client-conformance` is eligible for separate shaping but remains planned.
+  Issue #152 and its bundle-first task make `client-conformance` ready but
+  unlaunched; the consumer gate and `supported-client` remain planned.
 - Polluted PR #123 and its dirty worktree are deferred with rationale for
   protocol forensics; cleanup requires explicit operator authorization.
 - The clean #118 implementation worktree is also deferred for cleanup until the

@@ -1,26 +1,28 @@
 {
   "schemaVersion": 1,
   "workstreamId": "telex-watcher",
-  "updatedAt": "2026-09-02T14:21:42Z",
+  "updatedAt": "2026-09-02T14:27:00Z",
   "items": [
     {
       "id": "watcher-runtime-consumer-gate-graph-gap-v1",
       "sourceNodeId": "watcher-runtime-core",
       "requiredness": "required-before-future-runtime-launch",
-      "description": "Determine whether the Watcher orchestrator prompt, Watcher graph, or Application Client consumer-integration gate needs correction so future Watcher runtime launch has explicit, acyclic ordering.",
-      "disposition": "route-to-design-adjudication",
+      "description": "The Watcher prompt and campaign roadmap required Application Client consumer integration before future Watcher runtime launch, but the Watcher graph named only client-conformance.",
+      "disposition": "add-graph-dependency",
       "target": {
-        "id": "watcher-runtime-consumer-gate-adjudication-v1",
+        "id": "watcher-runtime-core",
         "owners": [
+          "Telex Watcher workstream orchestrator",
           "Telex Watcher design steward",
           "Application Client design steward",
           "Application Client workstream orchestrator"
         ]
       },
-      "status": "routed",
-      "decisionState": "unresolved",
-      "terminalPath": "Exactly one of prompt correction, graph dependency, or gate reshape.",
-      "dispositionAuthority": "Campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c.",
+      "status": "completed",
+      "decisionState": "accepted",
+      "rationale": "The gate is a pre-product exact-revision attestation over completed public conformance evidence. It does not require Watcher runtime implementation, so client-conformance -> consumer-integration-gate -> watcher-runtime-core is acyclic. Retaining both external edges preserves explicit conformance and gate blocker truth.",
+      "terminalPath": "Completed atomically when this disposition and watcher-runtime-core's external dependency on application-client/consumer-integration-gate land together in the combined client-conformance-shaping-152-v1 reconciliation packet.",
+      "dispositionAuthority": "Campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c accepted the joint Watcher, Application Client, and Operator Station adjudication watcher-runtime-consumer-gate-adjudication-v1.",
       "evidence": [
         {
           "source": "planning-prompt",
@@ -39,8 +41,26 @@
           "repositoryMain": "b17bec16a0ab37d73629627c27d22db74c11e136",
           "path": ".streamliner/shaping/roadmap.md",
           "details": "The roadmap keeps both consumer runtimes blocked through conformance and the consumer-integration gate, and keeps watcher-runtime-core planned until client-conformance proves the required cross-backend behavior."
+        },
+        {
+          "source": "joint-design-adjudication",
+          "repositoryMain": "e7db4e7e410b15de7bfdf8c8b93901908d8b864e",
+          "details": "Watcher, Application Client, and Operator Station authorities agreed that consumer-integration-gate is a pre-product exact-revision public-client consumability attestation after conformance. Watcher runtime implementation is not gate evidence."
+        },
+        {
+          "source": "application-client-conformance",
+          "url": "https://github.com/lossyrob/telex/issues/152",
+          "details": "Issue #152 owns one public-only cross-backend conformance bundle with Watcher-shaped send-only and Operator Station-shaped bidirectional probes. Both consumer authorities attest the same exact reviewed and green head before the gate is operated."
         }
-      ]
+      ],
+      "completionEvidence": {
+        "proposalParent": "17bf33a44285ae9bc2bef1432d76256db681c89c",
+        "graphPath": ".streamliner/workstreams/telex-watcher/graph.json",
+        "retainedDependency": "application-client/client-conformance",
+        "addedDependency": "application-client/consumer-integration-gate",
+        "acceptedOrder": "client-conformance -> consumer-integration-gate -> watcher-runtime-core",
+        "gateBoundary": "Public conformance evidence plus exact-revision consumer attestations; no Watcher runtime implementation."
+      }
     }
   ]
 }

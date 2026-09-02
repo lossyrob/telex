@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (direct human-attended Telex endpoint)",
-  "summary": "The builder accepted the merged direct human-attended Station boundary, ADR 0051 supersession, external-only mediation, shared-client dependency, and downstream geometry. The direction gate and design checkpoint are complete; station-app remains planned and unlaunched while Application Client client-conformance remains pending, after which launch still requires separate preparation and authorization.",
+  "summary": "The builder accepted the merged direct human-attended Station boundary, ADR 0051 supersession, external-only mediation, shared-client dependency, and downstream geometry. The direction gate and design checkpoint are complete; station-app remains planned and unlaunched while Application Client client-conformance and the pre-product consumer-integration gate remain pending, after which launch still requires separate preparation and authorization.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-08-28T12:56:19Z",
+  "updatedAt": "2026-09-02T14:28:35Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -198,6 +198,17 @@
           },
           "label": "Supported/conformant Application Client implementation",
           "url": "https://github.com/lossyrob/telex/issues/117",
+          "status": "pending"
+        },
+        {
+          "id": "application-client-consumer-integration-gate",
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "consumer-integration-gate"
+          },
+          "label": "Pre-product exact-revision consumer attestation of the completed Application Client conformance bundle",
+          "url": "https://github.com/lossyrob/telex/issues/152",
           "status": "pending"
         }
       ]

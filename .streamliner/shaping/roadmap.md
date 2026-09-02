@@ -37,28 +37,37 @@ supported Rust binding completed through issue
 [#149](https://github.com/lossyrob/telex/issues/149) and PR #151 at exact reviewed
 head `c03db454781164f47a20e997665fe1251e07bd15`, merged as
 `ddedfab57cc305a1e91a81d7e49e712bb36d32fd`. Issue #12 publication revision 4
-records that binding publication. `client-conformance` is now the next
-Application Client node eligible for separate task shaping and reviewed launch
-preparation, but it remains planned until a tracker and reviewed task spec
-exist. Later runtime/usability gates remain planned. Watcher runtime and
-Operator Station remain blocked on completed conformance and the
-consumer-integration gate. Operator Station's direct-Station contract reset
+records that binding publication. Application Client `client-conformance` is
+tracked by [#152](https://github.com/lossyrob/telex/issues/152), fully specified,
+ready, and unlaunched. One bundle must prove the ten accepted semantic families
+through the public Rust surface across SQLite and credentialed Postgres, provide
+public-only send-only and bidirectional consumer fixtures, and repair any
+missing shared semantic without splitting by backend or test family.
+`consumer-integration-gate` remains planned until the same reviewed and green
+conformance head receives independent Watcher and Operator Station
+consumability attestations. No product implementation evidence belongs in that
+gate. Watcher runtime and Operator Station retain direct conformance holds and
+also wait on the gate. Later runtime/usability gates remain planned. Operator
+Station's direct-Station contract reset
 completed through issue #134 and PR #136, merged as
 `e071e3170c19ab1b8a753b502c67be2ee80688ec`. The builder accepted the
 direct human-attended product boundary, ADR 0051 supersession, external-only
 mediation, shared-client dependency, and downstream geometry at
 `direct-station-direction-gate`. This closes the design checkpoint without
-launching `station-app`, which remains planned and waits on Application Client
-`client-conformance`. A separately prepared and authorized launch is still
-required after conformance. Telex Watcher's minimal v2
+launching `station-app`, which remains planned and waits directly on Application
+Client `client-conformance` and on `consumer-integration-gate`. A separately
+prepared and authorized launch is still required after both complete. Telex
+Watcher's minimal v2
 authoring/registration reset completed through issue #133 and PR #135, merged as
 `b91e8301899351c0411d6e2e9ac5290af8a3cb4c`; its builder-owned
 `dumb-watcher-contract-gate` and `minimal-contract-accepted` checkpoint are
 complete. Issue [#144](https://github.com/lossyrob/telex/issues/144) and its
 bounded task specification now provide the optional example pack's launch
 prerequisite. The node remains ready but unlaunched pending separate campaign
-authorization, while runtime still waits on Application Client
-`client-conformance`.
+authorization. Runtime remains planned and waits on completed Application
+Client `client-conformance` and the pre-integration
+`consumer-integration-gate`, which attests the exact public conformance revision
+without requiring Watcher runtime implementation.
 Operator Station issue #146 separately preserves
 [PR #143 Postgres and UI/UX lessons](../workstreams/operator-station/docs/postgres-dogfood-evidence.md)
 as completed, non-gating evidence. The report does not promote spike mechanisms,
@@ -73,9 +82,9 @@ merged.
 
 | Workstream | Tracker | Outcome | Current first move |
 |---|---|---|---|
-| Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | The builder accepted the direct contract and downstream geometry at `direct-station-direction-gate`, closing the design checkpoint. `station-app` remains planned and unlaunched while it waits on Application Client `client-conformance`; launch still requires separate preparation and authorization. |
-| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on Application Client `client-conformance`. |
-| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Client core and the Rust-first binding are merged; `client-conformance` is eligible for separate shaping but remains planned without a tracker or reviewed task spec. Watcher and Operator Station remain blocked on conformance and the consumer-integration gate. |
+| Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | The builder accepted the direct contract and downstream geometry at `direct-station-direction-gate`, closing the design checkpoint. `station-app` remains planned and unlaunched with direct `client-conformance` and `consumer-integration-gate` holds; launch still requires separate preparation and authorization. |
+| Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on completed Application Client `client-conformance` and the pre-integration `consumer-integration-gate` over the same exact public revision; the gate does not require Watcher runtime implementation. |
+| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Issue #152 and its bundle-first task make `client-conformance` ready but unlaunched. The consumer gate remains planned until both product authorities attest the same reviewed and green conformance head without product implementation evidence. |
 | Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | Adopt issue #106 / PR #138 as `station-intent-reconciliation`; integrate current `main`, resolve blocking review, and present isolated both-backend evidence before the hardening gate. |
 
 ## Shared seam
@@ -154,9 +163,13 @@ checkpoint is complete.
 Application Client convergence, client-core implementation, and the Rust-first
 binding are complete. Issue #149 and PR #151 landed the binding at
 `telex::application_client`; issue #12 publication revision 4 records the
-transition. `client-conformance` is eligible for separate shaping but remains
-planned until its tracker and reviewed task spec exist. Operator issue #134 and
-PR #136 completed the direct product contract reset without changing the generic
+transition. Issue #152 and its reviewed bundle-first task make
+`client-conformance` ready but unlaunched. The node must deliver all ten
+conformance families, public-only Watcher and Station fixtures, and
+temporary-seam replacement guidance in one PR. The planned
+`consumer-integration-gate` then requires independent exact-head attestations
+before product implementation continues. Operator issue #134 and PR #136
+completed the direct product contract reset without changing the generic
 Application Client ownership boundary.
 
 ### Stage 4 — Production applications under accepted contracts
@@ -166,13 +179,16 @@ After the shared semantic checkpoint:
 - Operator Station completed its design reset around direct human attendance.
   The builder accepted the direction gate and closed the design checkpoint.
   The desktop app remains planned and unlaunched while it waits on Application
-  Client `client-conformance`; launch still requires separate preparation and
-  authorization.
+  Client `client-conformance` and `consumer-integration-gate`; it retains the
+  direct conformance dependency, and launch still requires separate preparation
+  and authorization after both holds complete.
 - Telex Watcher's minimal command-plus-policy contract and builder usability
   gate are accepted. Issue #144 and its task specification prepare the optional
   examples, which remain ready but unlaunched pending separate campaign
-  authorization, while runtime/CLI waits for Application Client
-  `client-conformance`.
+  authorization. Runtime and CLI remain planned until Application Client
+  `client-conformance` completes and `consumer-integration-gate` accepts the
+  same exact public revision without a private seam. The gate requires no
+  Watcher runtime implementation.
 
 Each retains its own usability and operational-hardening gates.
 
@@ -245,14 +261,15 @@ collapse into noise, and no session-bound polling task is required.
    semantics; keep the hardening gate separate from merge.
 2. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
    after separate campaign authorization.
-3. Shape Application Client `client-conformance` as the next node, then create
-   and review its tracker and task spec before launch preparation. Keep it
-   planned until those artifacts exist, and keep both consumer runtimes blocked
-   through conformance and the consumer-integration gate.
+3. Prepare issue #152's ready but unlaunched `client-conformance` node for one
+   bundle-first implementation PR. Keep the consumer gate and `supported-client`
+   checkpoint planned; reconciliation does not launch the node.
 4. Keep `watcher-runtime-core` planned until `client-conformance` uses the
    completed first binding to prove merged exact-store/exact-operation
    `NotRecorded`, exact-same-operation retry, and retention-boundary failure
-   across both backends; recovery remains reconciliation-first and query-only
-   under uncertainty.
+   across both backends, and `consumer-integration-gate` accepts the same exact
+   public revision for Watcher without a private seam. The gate requires no
+   Watcher runtime implementation; recovery remains reconciliation-first and
+   query-only under uncertainty.
 5. Keep `five-minute-custom-watch-gate` planned for later operational proof, and
    preserve the campaign integration exercise and no-private-client boundary.

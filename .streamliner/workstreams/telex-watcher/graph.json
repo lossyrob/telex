@@ -3,11 +3,11 @@
   "id": "telex-watcher",
   "projectKey": "telex",
   "title": "Telex Watcher (external deterministic watch loops)",
-  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. Issue #144 and its bounded task specification prepare the ready but unlaunched optional example pack; runtime remains planned and blocked on Application Client client-conformance.",
+  "summary": "The builder accepted the minimal command-plus-policy Watcher v2 contract for usability. Issue #144 and its bounded task specification prepare the ready but unlaunched optional example pack; runtime remains planned and blocked on Application Client client-conformance and the subsequent consumer-integration gate.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-18T23:46:41Z",
-  "updatedAt": "2026-08-27T19:07:03Z",
+  "updatedAt": "2026-09-02T14:27:00Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -169,6 +169,16 @@
           },
           "label": "Supported Application Client core/binding conformance accepted",
           "url": "https://github.com/lossyrob/telex/issues/117"
+        },
+        {
+          "id": "application-client-consumer-integration-gate",
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "consumer-integration-gate"
+          },
+          "label": "Pre-product exact-revision Watcher and Operator Station attestations accept the public conformance bundle",
+          "url": "https://github.com/lossyrob/telex/issues/152"
         }
       ]
     },
