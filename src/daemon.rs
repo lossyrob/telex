@@ -15150,15 +15150,21 @@ pub(crate) mod verified_peer {
     /// is transient by construction. Every other error returns immediately, so an absent endpoint
     /// is still reported as absent rather than waited on.
     async fn connect_when_free(endpoint: &Endpoint) -> Result<platform::ClientConn> {
-        loop {
-            match platform::connect(endpoint).await {
-                Ok(conn) => return Ok(conn),
-                #[cfg(windows)]
-                Err(DaemonError::Timeout(_)) => {
-                    tokio::time::sleep(PIPE_BUSY_RETRY).await;
+        #[cfg(windows)]
+        {
+            loop {
+                match platform::connect(endpoint).await {
+                    Ok(conn) => return Ok(conn),
+                    Err(DaemonError::Timeout(_)) => {
+                        tokio::time::sleep(PIPE_BUSY_RETRY).await;
+                    }
+                    Err(e) => return Err(e),
                 }
-                Err(e) => return Err(e),
             }
+        }
+        #[cfg(not(windows))]
+        {
+            platform::connect(endpoint).await
         }
     }
 
