@@ -135,7 +135,13 @@
       "target": "lossyrob/telex#120",
       "owner": "local-daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
       "terminalPath": "Post a concise factual supersession note naming merged PRs #122 and #139, close PR #120 unmerged, verify terminal CLOSED state, and mark this discovery completed.",
-      "status": "routed",
+      "status": "completed",
+      "completionEvidence": {
+        "prState": "CLOSED",
+        "prHead": "e028dd8e49faae1ee040c7af3c80add73e57ef59",
+        "closedAt": "2026-09-02T14:25:00Z",
+        "supersessionComment": "https://github.com/lossyrob/telex/pull/120#issuecomment-5511099793"
+      },
       "dispositionAuthority": "app-existing-campaign-adoption-protocol-v1.md at planning commit 50dfd62 and campaign protocol-follow-through."
     }
   ]
