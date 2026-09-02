@@ -933,10 +933,7 @@ mod imp {
             return Ok(());
         }
         let error = std::io::Error::last_os_error();
-        if matches!(
-            error.raw_os_error(),
-            Some(libc::EWOULDBLOCK) | Some(libc::EAGAIN)
-        ) {
+        if matches!(error.raw_os_error(), Some(libc::EWOULDBLOCK)) {
             return Err(io_err(
                 "acquiring owner-private advisory lock",
                 std::io::Error::from(std::io::ErrorKind::WouldBlock),
