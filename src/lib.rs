@@ -1,4 +1,8 @@
 //! Telex: a CLI-first message fabric for AI agent sessions.
+//!
+//! Long-lived Rust applications use [`application_client`] as the supported
+//! programmatic binding. Application consumers should disable package defaults
+//! and select their SQLite, Postgres, or Entra backend features explicitly.
 
 pub mod application_client;
 pub mod backend;

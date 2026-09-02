@@ -133,17 +133,19 @@ a source, or become an undeclared Station dependency.
 
 ## Dependency and gate boundary
 
-Merged product design does not pass the builder-owned
-`direct-station-direction-gate`. The gate must accept the direct product
-boundary, ADR 0051 supersession, external-only mediation, shared-client
-dependency, and downstream work geometry before implementation starts.
+The builder passed `direct-station-direction-gate`, accepting the direct
+human-attended product boundary, ADR 0051 supersession, external-only mediation,
+shared-client dependency, and downstream work geometry. This closes
+`direct-station-contract-ready`; it authorizes the product direction without
+launching implementation.
 
-`station-app` is unlaunched. It waits for both the direction gate and Application
-Client `client-conformance`. The conformance dependency must prove the shared
-lifecycle, exact-delivery acknowledgement, history, reply, disposition,
-retryability, source, health, backend, resynchronization, compound-operation,
-and cleanup semantics against the supported client. A merged contract or first
-binding alone does not satisfy that dependency.
+`station-app` remains planned and unlaunched. Its current hold is Application
+Client `client-conformance`, which must prove the shared lifecycle,
+exact-delivery acknowledgement, history, reply, disposition, retryability,
+source, health, backend, resynchronization, compound-operation, and cleanup
+semantics against the supported client. A merged contract or first binding
+alone does not satisfy that dependency. After conformance completes,
+`station-app` still requires separate launch preparation and authorization.
 
 The later direct usability gate remains separate from the direction gate. It
 must validate direct send, notification usefulness, thread/reply/disposition
@@ -192,8 +194,10 @@ decision process.
   Telex messaging and reply, exact-delivery acknowledgement after durable
   ingest, exact-recipient disposition, local notification policy, provenance,
   health, recovery, safety, and external-only mediation are merged authority.
-- **Blocked before implementation:** the builder direction gate and Application
-  Client `client-conformance`.
+- **Direction accepted:** the builder passed `direct-station-direction-gate` and
+  closed the design checkpoint without launching `station-app`.
+- **Current hold:** Application Client `client-conformance`; completion does not
+  itself launch `station-app`.
 - **Not yet proven:** production Station integration, direct usability,
   credentialed Postgres operation, notification pressure, restart/offline
   behavior, packaging, update, signing, auto-start, and cleanup.

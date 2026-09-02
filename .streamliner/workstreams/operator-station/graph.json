@@ -3,11 +3,11 @@
   "id": "operator-station",
   "projectKey": "telex",
   "title": "Operator Station (direct human-attended Telex endpoint)",
-  "summary": "The direct human-attended Station contract reset completed through issue #134 and PR #136 at terminal head f77be107f602cfd06495e591857b20ce199c8a4d, merged as e071e3170c19ab1b8a753b502c67be2ee80688ec. The builder-owned direction gate remains planned and unpassed; station-app remains planned and also waits on Application Client client-conformance.",
+  "summary": "The builder accepted the merged direct human-attended Station boundary, ADR 0051 supersession, external-only mediation, shared-client dependency, and downstream geometry. The direction gate and design checkpoint are complete; station-app remains planned and unlaunched while Application Client client-conformance and the pre-product consumer-integration gate remain pending, after which launch still requires separate preparation and authorization.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-10T21:33:25Z",
-  "updatedAt": "2026-08-27T22:23:13Z",
+  "updatedAt": "2026-09-02T14:28:35Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -132,7 +132,7 @@
       "id": "direct-station-contract-reset",
       "type": "research",
       "title": "Direct Station product contract reset",
-      "summary": "Completed through issue #134 and PR #136. Terminal reviewed head f77be107f602cfd06495e591857b20ce199c8a4d merged as e071e3170c19ab1b8a753b502c67be2ee80688ec, rewriting the normative design around direct human-attended address operation, adding ADR 0051, narrowing ADRs 0047/0048, preserving mediation only as external non-normative evidence, and producing the station-app handoff for the still-unpassed builder direction gate.",
+      "summary": "Completed through issue #134 and PR #136. Terminal reviewed head f77be107f602cfd06495e591857b20ce199c8a4d merged as e071e3170c19ab1b8a753b502c67be2ee80688ec, rewriting the normative design around direct human-attended address operation, adding ADR 0051, narrowing ADRs 0047/0048, preserving mediation only as external non-normative evidence, and producing the station-app handoff accepted at the builder direction gate.",
       "status": "completed",
       "attention": "focus",
       "repoIds": [
@@ -157,7 +157,7 @@
           },
           "label": "Merged Application Client direct-Station vocabulary and bundle re-baseline from PR #132, followed by issue #12 revision 3, bundle integrity repair, and first-binding reconciliation",
           "url": "https://github.com/lossyrob/telex/pull/132",
-          "status": "completed"
+          "status": "satisfied"
         }
       ]
     },
@@ -165,8 +165,8 @@
       "id": "direct-station-direction-gate",
       "type": "gate",
       "title": "Direct Station product direction accepted",
-      "summary": "Builder accepts the direct human-attended Station contract, ADR 0051 supersession boundary, external-only mediation disposition, Application Client dependency, and downstream implementation geometry before station-app starts.",
-      "status": "planned",
+      "summary": "Builder accepted the direct human-attended Station contract, ADR 0051 supersession boundary, external-only mediation disposition, Application Client dependency, and downstream implementation geometry. This closes the design checkpoint without launching station-app.",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -198,6 +198,17 @@
           },
           "label": "Supported/conformant Application Client implementation",
           "url": "https://github.com/lossyrob/telex/issues/117",
+          "status": "pending"
+        },
+        {
+          "id": "application-client-consumer-integration-gate",
+          "target": {
+            "projectKey": "telex",
+            "workstreamId": "application-client",
+            "nodeId": "consumer-integration-gate"
+          },
+          "label": "Pre-product exact-revision consumer attestation of the completed Application Client conformance bundle",
+          "url": "https://github.com/lossyrob/telex/issues/152",
           "status": "pending"
         }
       ]
@@ -260,7 +271,7 @@
       "id": "direct-station-contract-ready",
       "title": "Direct Station contract accepted",
       "summary": "The normative direct-attendance contract and ADR 0051 are accepted, mediation is external-only, and station-app has a stable design/dependency handoff.",
-      "status": "planned",
+      "status": "completed",
       "nodeIds": [
         "direct-station-contract-reset",
         "direct-station-direction-gate"

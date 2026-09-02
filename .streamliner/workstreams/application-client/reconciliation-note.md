@@ -16,9 +16,38 @@ across SQLite and Postgres without a Watcher- or Station-private seam. The
 regenerated `docs/design/application-client.bundle.json` is 2,423 bytes, Git
 blob `231cfd231d2a343b59d8538a08002087b0f17aa8`, and SHA-256
 `9dbc5cf90b917f602de8c2430438ed6f57d529893f8aaaa52f3996b51330252e`.
-`first-binding` is ready and focus-level but unlaunched; its task shape remains
-unselected. `client-conformance` and every later node and gate retain their
-existing status and dependencies.
+
+The first supported Rust binding completed through issue #149 and PR #151.
+Exact reviewed head `c03db454781164f47a20e997665fe1251e07bd15`
+merged as `ddedfab57cc305a1e91a81d7e49e712bb36d32fd`; issue #149
+closed as completed at `2026-09-02T13:56:22Z`. Full PAW review
+[5052221269](https://github.com/lossyrob/telex/pull/151#pullrequestreview-5052221269),
+delta review
+[5052369562](https://github.com/lossyrob/telex/pull/151#pullrequestreview-5052369562),
+all six exact-head checks, zero unresolved review threads, and
+[field report 5454362721](https://github.com/lossyrob/telex/issues/149#issuecomment-5454362721)
+provide the completion evidence. Issue #12 publication revision 4 records the
+binding.
+
+Issue [#152](https://github.com/lossyrob/telex/issues/152) and its bundle-first
+task now make `client-conformance` ready but unlaunched. One node and delivery
+PR own the ten accepted conformance families across isolated SQLite and
+credentialed Postgres, public-only Watcher send-only and Station bidirectional
+fixtures, missing shared-semantic repair, and temporary-seam replacement
+guidance. The issue body is ASCII and has SHA-256
+`D37C020B141801A106B7089EC61748C9810AEC6049EFE58C80227C576FA66AD0`.
+
+The accepted joint consumer-gate adjudication defines
+`consumer-integration-gate` as a pre-product-integration exact-head
+consumability attestation. After implementation review and required CI pass on
+one conformance head, Watcher and Operator Station independently validate that
+same public bundle against their merged contracts. Product implementation
+evidence does not belong in the gate. Both consumer nodes retain direct
+conformance dependencies and also wait on the gate, producing the acyclic order
+`client-conformance -> consumer-integration-gate -> watcher-runtime-core` and
+`client-conformance -> consumer-integration-gate -> station-app`. The gate,
+`supported-client`, and every later checkpoint remain planned. Reconciliation
+does not launch the node or pass the gate.
 
 Formation expected one contract-convergence node to establish the shared semantic
 boundary, publish `application-client-ready`, and unblock later implementation.
@@ -55,6 +84,10 @@ revision 2 points to clean PR #126 authority, the non-normative requirements
 traceability location, manifest blob
 `25f27401100a89b1e90dba46b44973a3e3d43908`, and SHA-256
 `085deed89cef1741fb6967bbd9f5e87e4f9cf104917518a234006c35b0f62296`.
+
+Issue #12 publication revision 4 preserves that checkpoint history and records
+the supported Rust core and first supported Rust binding. It does not claim
+completed conformance or authorize consumer integration.
 
 Issue #124 completed within client-core issue #129 rather than becoming a
 separate node. PR #132 documented the extensible typed membership-loss model,
@@ -99,6 +132,13 @@ downstream node geometry.
   publication revision 2; `application-client-ready-gate` completed.
 - W-05 taxonomy wording: issue #124 completed within client-core issue #129; no
   separate node or session was created.
+- First supported Rust binding: issue #149 completed through PR #151 and is
+  published in issue #12 revision 4.
+- Client conformance: issue #152 and its reviewed task make the node ready but
+  unlaunched as one complete backend-parity and consumer-fixture bundle.
+- Consumer integration: the gate remains planned and requires independent
+  Watcher and Station attestations on the same reviewed and green conformance
+  head; product implementation evidence remains downstream.
 - Polluted PR #123 forensic branch/worktree: deferred with rationale until explicit
   operator cleanup authorization.
 - Clean #118 worktree/branch cleanup: deferred with rationale until explicit

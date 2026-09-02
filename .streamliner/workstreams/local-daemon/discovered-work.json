@@ -1,0 +1,158 @@
+{
+  "schemaVersion": 1,
+  "workstream": "local-daemon",
+  "items": [
+    {
+      "id": "local-daemon-pr138-m3-late-commit-lock-steal",
+      "sourceNode": "station-intent-reconciliation",
+      "source": "lossyrob/telex#106 and lossyrob/telex#138",
+      "evidence": {
+        "prHead": "1f5b398e36b8d02942999ed1a66db3c69ccb4878",
+        "details": "INTENT_LOCK_STALE is 10 seconds; lock ownership can be removed and reacquired by age while an uncancellable rename or unlink already inside a syscall may finish after the four-second response bound. The implementation uses a generation check before path unlink or rewrite, but that check cannot fence a late path mutation after the lock path is stolen."
+      },
+      "description": "Resolve whether stale-generation local filesystem work can delete or replace newer station-intent state after the response deadline.",
+      "affectedOutcome": "Stale-generation work must never delete or replace newer station-intent state while bounded responses permit one already-entered late filesystem commit.",
+      "requiredness": "Required for current PR correctness.",
+      "sequencing": "Absorb into the existing issue #106 / PR #138 implementation before final exact-head review; retain the same node, branch, and PR.",
+      "recommendedDisposition": "Absorb persistent owner-private OS advisory locking into PR #138.",
+      "selectedDisposition": "Absorb persistent owner-private OS advisory locking into PR #138: Unix flock and Windows LockFileEx, no age takeover or lock-path deletion, bounded acquisition, process-death release, and fail-closed unsupported semantics.",
+      "target": "station-intent-reconciliation / issue #106 / PR #138",
+      "owner": "PR #138 implementer under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "PR #138 removes age-stealable lock ownership, proves stale generation N cannot delete or replace N+1 on supported Windows and Unix local filesystems, and completes exact-head implementation review, required CI, and design inspection.",
+      "status": "absorbed",
+      "dispositionAuthority": "Operator Option A decision at 2026-09-02T14:34-04:00, relayed by the campaign orchestrator."
+    },
+    {
+      "id": "local-daemon-pr138-m5-enumeration-liveness",
+      "sourceNode": "station-intent-reconciliation",
+      "source": "lossyrob/telex#106 and lossyrob/telex#138",
+      "evidence": {
+        "prHeadLineage": "c1a2afb652947a4630bd28392840f83680519f25 through 1f5b398e36b8d02942999ed1a66db3c69ccb4878",
+        "details": "Each bounded read_dir scan restarts at the root head, while persisted cursors operate only within that invocation's discovered prefix. A stable over-cap prefix can therefore prevent eventual discovery and GC of tail entries."
+      },
+      "description": "Choose a scope-correct eventual discovery and GC fairness contract that remains compatible with the four-second response bound.",
+      "affectedOutcome": "PR #138 must provide accepted eventual discovery, GC coverage, and over-cap recovery for the original station-intent outcome unless the operator explicitly accepts a narrowed degraded-mode contract.",
+      "requiredness": "Required for the original node outcome.",
+      "sequencing": "PR #138 absorbs the accepted degraded contract first. The downstream transactional-authority node begins after station-intent-reconciliation and must complete before Local Daemon closure, but it does not block PR #138.",
+      "recommendedDisposition": "Absorb the truthful degraded contract in PR #138 and route unconditional authority to a mandatory connected XL node.",
+      "selectedDisposition": "Absorb observable truncation, lower-bound counts, conditional eventual coverage, and offline or supported-local-storage recovery into PR #138; route unconditional transactional generation authority, seekable fair discovery and GC, exact counts, and exact over-cap recovery to station-intent-transactional-authority.",
+      "target": "station-intent-reconciliation / PR #138 and downstream station-intent-transactional-authority / issue #153",
+      "owner": "PR #138 implementer owns the degraded-contract slice; the Local Daemon workstream orchestrator owns issue #153 planning, implementation authorization, and terminal evidence until an authorized implementer is assigned",
+      "terminalPath": "PR #138 promotes and proves the narrowed contract on one reviewed and green exact head. Issue #153 then lands transactional generation authority, seekable fair maintenance, exact counts, migration and rollback safety, and exact over-cap recovery before the Local Daemon closure gate.",
+      "status": "routed",
+      "dispositionAuthority": "Operator Option A decision at 2026-09-02T14:34-04:00, relayed by the campaign orchestrator."
+    },
+    {
+      "id": "local-daemon-pr138-pending-review-slot",
+      "sourceNode": "station-intent-reconciliation",
+      "source": "lossyrob/telex#138",
+      "evidence": {
+        "reviewId": 5045956337,
+        "reviewState": "PENDING",
+        "reviewCommit": "f2bd68e7064eb9571bc29e38b08035405100503b",
+        "currentPrHead": "1f5b398e36b8d02942999ed1a66db3c69ccb4878",
+        "details": "The lossyrob review slot contains an unsubmitted PAW review for an older head, so it cannot serve as final exact-head review evidence and obstructs a fresh review in the same provider slot."
+      },
+      "description": "Retire the stale pending provider review without submitting its obsolete body, while preserving its historical evidence for the next exact-head review.",
+      "affectedOutcome": "PR #138 needs an unobstructed final exact-head implementation review after the complete bundle is implemented.",
+      "requiredness": "Required before final review can complete.",
+      "sequencing": "Preserve untouched during the M3/M5 freeze; dispose it immediately before the authorized final exact-head implementation review.",
+      "selectedDisposition": "Absorb as PR #138 review hygiene.",
+      "target": "station-intent-reconciliation / PR #138",
+      "owner": "local-daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+      "terminalPath": "Preserve the draft body as review history, remove the stale pending review without submitting it, and obtain final implementation review on the complete exact head.",
+      "status": "absorbed",
+      "dispositionAuthority": "Planning protocol 50dfd62 and campaign protocol-follow-through."
+    },
+    {
+      "id": "local-daemon-pr138-exact-head-ci-failures",
+      "sourceNode": "station-intent-reconciliation",
+      "source": "lossyrob/telex#138 and Actions run 33145237801",
+      "evidence": {
+        "prHead": "1f5b398e36b8d02942999ed1a66db3c69ccb4878",
+        "run": "https://github.com/lossyrob/telex/actions/runs/33145237801",
+        "failedJobs": [
+          "Build and test (ubuntu-latest), job 98764670779: Test failed",
+          "Feature combinations build, job 98764670897: Build postgres-only failed"
+        ],
+        "passedJobs": [
+          "Build and test (windows-latest)",
+          "Copilot fallback E2E (macos-latest)",
+          "Copilot fallback E2E (windows-latest)",
+          "Live Postgres parity tests"
+        ]
+      },
+      "description": "Repair the deterministic exact-head CI failures and rerun required checks after the complete M3/M5 implementation bundle is pushed.",
+      "affectedOutcome": "PR #138 cannot complete review, design inspection, or merge readiness without required exact-head CI.",
+      "requiredness": "Required for current PR correctness and validation.",
+      "sequencing": "Retain the current local compile checkpoint; after the design decision authorizes implementation, complete all same-PR repairs, push one coherent head, and run required CI on that head.",
+      "selectedDisposition": "Absorb in PR #138.",
+      "target": "station-intent-reconciliation / PR #138",
+      "owner": "sole writer session 8e856315-9ff3-4b45-851d-0cce4284b8b8 under local-daemon orchestrator authorization",
+      "terminalPath": "Required CI passes on the same exact head that receives final implementation review and design inspection.",
+      "status": "absorbed",
+      "dispositionAuthority": "Original node acceptance, CI evidence, and planning protocol 50dfd62."
+    },
+    {
+      "id": "local-daemon-pr120-supersession-closure",
+      "sourceNode": null,
+      "source": "lossyrob/telex#119 and lossyrob/telex#120",
+      "evidence": {
+        "stalePr": {
+          "number": 120,
+          "state": "OPEN",
+          "mergeStateStatus": "DIRTY",
+          "head": "e028dd8e49faae1ee040c7af3c80add73e57ef59"
+        },
+        "completedIssue": {
+          "number": 119,
+          "state": "CLOSED",
+          "closedAt": "2026-07-24T04:18:20Z"
+        },
+        "supersedingMerges": [
+          "PR #122 merged as c1cc63049c9c53346bd97571bc1bbd66e7bcefbe and directly delivered issue #119",
+          "PR #139 merged as ec0e8ef6e94effb08d180e783fdf9260676aa335 and later established Copilot App push lifecycle behavior"
+        ],
+        "authority": "app-existing-campaign-adoption-protocol-v1.md at planning commit 50dfd62 states PR #120 is repository hygiene, not active campaign work."
+      },
+      "description": "Close obsolete PR #120 unmerged with an exact supersession explanation instead of adopting it as campaign implementation.",
+      "affectedOutcome": "Repository hygiene and unambiguous ownership of already-delivered issue #119.",
+      "requiredness": "Important repository hygiene outside active campaign node work.",
+      "sequencing": "Independent of PR #138 implementation; close only after verifying the live PR and superseding merges remain unchanged.",
+      "selectedDisposition": "Route to factual supersession closure; do not create or assign a campaign node.",
+      "target": "lossyrob/telex#120",
+      "owner": "local-daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+      "terminalPath": "Post a concise factual supersession note naming merged PRs #122 and #139, close PR #120 unmerged, verify terminal CLOSED state, and mark this discovery completed.",
+      "status": "completed",
+      "completionEvidence": {
+        "prState": "CLOSED",
+        "prHead": "e028dd8e49faae1ee040c7af3c80add73e57ef59",
+        "closedAt": "2026-09-02T14:25:00Z",
+        "supersessionComment": "https://github.com/lossyrob/telex/pull/120#issuecomment-5511099793"
+      },
+      "dispositionAuthority": "app-existing-campaign-adoption-protocol-v1.md at planning commit 50dfd62 and campaign protocol-follow-through."
+    },
+    {
+      "id": "application-client-daemon-bootstrap-trust-v1",
+      "sourceNode": null,
+      "source": "lossyrob/telex#152 and campaign/operator decision at main 251e85602a5ecf9fbe58fe26494a9cbda90e57d2",
+      "crossReference": "Application Client discovery application-client-daemon-bootstrap-gap-v1",
+      "evidence": {
+        "main": "251e85602a5ecf9fbe58fe26494a9cbda90e57d2",
+        "details": "ApplicationClient attach reaches unparameterized daemon::connect_or_spawn. Peer authentication and spawn both derive their expected executable from the consumer process current_exe, so an external supported library client cannot start a Telex daemon or authenticate a prestarted root Telex daemon through the public lifecycle.",
+        "operatorDecision": "Issue #152 must add production InstalledCurrent selection from an explicitly trusted install root. Local Daemon owns the trust, selector coordination, peer-authentication, spawn, singleton, and readiness-publication invariants."
+      },
+      "description": "Provide the Local Daemon trust and admission contract for Application Client production InstalledCurrent daemon bootstrap.",
+      "affectedOutcome": "Supported external Application Client consumers can use the Telex daemon lifecycle without implementing daemon serve, private IPC, a direct backend, or an application-specific daemon.",
+      "requiredness": "Required for issue #152 public consumer conformance under the explicit operator decision.",
+      "sequencing": "Land the reviewed Local Daemon and Application Client Tier B authority packet before issue #152 product writes, then implement the complete contract in the same issue #152 PR.",
+      "disposition": "Route to Application Client client-conformance / issue #152 and require Local Daemon trust/spawn review on the same exact implementation head.",
+      "decisionState": "accepted",
+      "target": "application-client/client-conformance / issue #152",
+      "owner": "Application Client issue #152 implementer, with Local Daemon trust/spawn authority owned by the Local Daemon steward and orchestrator",
+      "terminalPath": "Complete production InstalledCurrent selection, selector-lock and selection-token admission, exact-image prestarted reuse, and fail-closed upgrade/rollback behavior; promote matching product design and guidance; prove Windows and Linux plus SQLite and Postgres behavior; then obtain exact-head implementation review, required CI, consumer attestations, and design inspection.",
+      "status": "routed",
+      "dispositionAuthority": "Campaign/operator decision for application-client-daemon-bootstrap-gap-v1. This work is independent of PR #138 and does not alter the M3/M5 station-intent dispositions recorded above."
+    }
+  ]
+}

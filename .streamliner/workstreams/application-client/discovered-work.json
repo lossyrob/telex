@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "workstreamId": "application-client",
+  "updatedAt": "2026-09-02T16:24:08Z",
+  "items": [
+    {
+      "id": "application-client-daemon-bootstrap-gap-v1",
+      "sourceNodeId": "client-conformance",
+      "source": "Issue #152 worker discovery, joint Application Client and Local Daemon adjudication, and operator decision",
+      "evidence": {
+        "issue": "https://github.com/lossyrob/telex/issues/152",
+        "repositoryMain": "251e85602a5ecf9fbe58fe26494a9cbda90e57d2",
+        "applicationClientPath": "src/application_client.rs",
+        "daemonPath": "src/daemon.rs",
+        "details": "The public client delegated attach and bounded repair to connect-or-spawn, which derived both the spawn command and expected server image from the consumer executable. External Watcher and Station binaries therefore could not start or authenticate the shared Telex daemon through only the supported client."
+      },
+      "description": "Provide production installed-current daemon selection from an explicitly trusted root, with one immutable manifest-validated target shared by spawn and pre-Hello authentication under Local Daemon selector admission.",
+      "affectedOutcome": "Issue #152 must prove executable public consumer runtime behavior; compile-only fixtures cannot establish consumer consumability.",
+      "requiredness": "Required in the current client-conformance PR.",
+      "sequencing": "Direct-main task and both current-design authorities land before the frozen issue #152 worker resumes. Product implementation, design promotion, review, CI, cross-platform and cross-backend proof, consumer attestations, and design inspection then remain in the same PR.",
+      "disposition": "Absorb the Application Client public bootstrap policy, typed failures, runtime fixtures, and product-design promotion in client-conformance; consume Local Daemon trust item application-client-daemon-bootstrap-trust-v1 without duplicating its lock, token, admission, or readiness-publication ownership.",
+      "target": {
+        "workstreamId": "application-client",
+        "nodeId": "client-conformance",
+        "issue": 152,
+        "owner": "Application Client workstream orchestrator",
+        "crossWorkstreamDiscovery": {
+          "workstreamId": "local-daemon",
+          "id": "application-client-daemon-bootstrap-trust-v1",
+          "owner": "Local Daemon workstream orchestrator"
+        }
+      },
+      "owner": "Application Client workstream orchestrator with Local Daemon trust authority",
+      "terminalPath": "Complete InstalledCurrent implementation and product-design promotion in issue #152, prove the exact head on Windows and Linux against SQLite and credentialed Postgres with public Watcher and Station fixtures, then pass final implementation review, required CI, consumer attestations, and exact-head design inspection.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Operator decision from campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c after joint Application Client and Local Daemon adjudication."
+    },
+    {
+      "id": "client-conformance-consumer-attestation",
+      "sourceNodeId": "client-conformance",
+      "source": "lossyrob/telex#152 and accepted joint consumer-gate adjudication",
+      "evidence": {
+        "issue": "https://github.com/lossyrob/telex/issues/152",
+        "issueBodySha256": "D37C020B141801A106B7089EC61748C9810AEC6049EFE58C80227C576FA66AD0",
+        "repositoryMain": "17bf33a44285ae9bc2bef1432d76256db681c89c",
+        "details": "The consumer gate is pre-product-integration exact-head attestation over the complete conformance bundle. It requires public-only send-only and bidirectional fixtures plus independent Watcher and Station validation on the same reviewed and green head; it does not require product implementation evidence."
+      },
+      "description": "Deliver executable consumer-shaped public fixtures and obtain independent exact-head Watcher and Operator Station attestations without splitting conformance or duplicating either product.",
+      "affectedOutcome": "Issue #152 completes one public cross-backend conformance bundle and supplies truthful evidence for consumer-integration-gate.",
+      "requiredness": "Required for the current conformance outcome and later consumer-integration gate.",
+      "sequencing": "Fixtures and missing shared-semantic repairs stay in the issue #152 PR. Consumer attestations follow implementation review and required CI on the same head; gate operation follows the conformance merge.",
+      "disposition": "Absorb executable fixtures and missing shared semantics in client-conformance; route independent exact-head attestations to consumer-integration-gate.",
+      "target": {
+        "workstreamId": "application-client",
+        "nodeIds": [
+          "client-conformance",
+          "consumer-integration-gate"
+        ],
+        "issue": 152,
+        "owners": [
+          "Application Client workstream orchestrator",
+          "Telex Watcher authority",
+          "Operator Station authority"
+        ]
+      },
+      "owner": "Application Client workstream orchestrator with Watcher and Operator Station consumer authorities",
+      "terminalPath": "The complete issue #152 PR merges after exact-head review, required CI, both consumer attestations, and design inspection; the gate later passes through separate reconciliation using that same-head evidence.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Joint consumer-gate adjudication accepted by campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c."
+    },
+    {
+      "id": "watcher-runtime-consumer-gate-graph-gap-v1",
+      "sourceNodeId": "client-conformance",
+      "source": "Telex Watcher graph and accepted watcher-runtime-consumer-gate-adjudication-v1",
+      "evidence": {
+        "repositoryMain": "17bf33a44285ae9bc2bef1432d76256db681c89c",
+        "path": ".streamliner/workstreams/telex-watcher/graph.json",
+        "details": "The combined packet retains watcher-runtime-core's direct client-conformance dependency and adds consumer-integration-gate as a second external dependency."
+      },
+      "description": "Make the Watcher runtime graph express the accepted pre-integration consumer-gate hold without changing the gate or removing direct conformance truth.",
+      "affectedOutcome": "watcher-runtime-core must remain blocked until both client-conformance and consumer-integration-gate complete.",
+      "requiredness": "Required before future Watcher runtime launch.",
+      "sequencing": "The combined packet reconciles the Watcher graph before watcher-runtime-core becomes ready or launches.",
+      "disposition": "Route to Telex Watcher graph ownership; retain the direct conformance dependency and add consumer-integration-gate as a second external dependency.",
+      "target": {
+        "workstreamId": "telex-watcher",
+        "nodeId": "watcher-runtime-core",
+        "path": ".streamliner/workstreams/telex-watcher/graph.json",
+        "owner": "Telex Watcher workstream orchestrator"
+      },
+      "owner": "Telex Watcher workstream orchestrator",
+      "terminalPath": "Completed through the combined packet's atomic Watcher graph and discovery-ledger reconciliation.",
+      "status": "completed",
+      "completionEvidence": {
+        "combinedPacket": "client-conformance-shaping-152-v1",
+        "graphPath": ".streamliner/workstreams/telex-watcher/graph.json",
+        "ledgerPath": ".streamliner/workstreams/telex-watcher/discovered-work.json",
+        "details": "The combined packet lands the retained direct client-conformance dependency, the added consumer-integration-gate dependency, and the owning Watcher ledger disposition atomically."
+      },
+      "decisionState": "accepted",
+      "dispositionAuthority": "Joint adjudication watcher-runtime-consumer-gate-adjudication-v1 and campaign acceptance; issue #152 records the same order."
+    },
+    {
+      "id": "station-app-consumer-gate-graph-gap-v1",
+      "sourceNodeId": "client-conformance",
+      "source": "Operator Station graph and accepted joint consumer-gate adjudication",
+      "evidence": {
+        "repositoryMain": "17bf33a44285ae9bc2bef1432d76256db681c89c",
+        "path": ".streamliner/workstreams/operator-station/graph.json",
+        "details": "The combined packet retains station-app's direct client-conformance dependency and adds consumer-integration-gate as a second external dependency."
+      },
+      "description": "Make the Station app graph express the accepted pre-integration consumer-gate hold without duplicating the combined consumer-attestation item.",
+      "affectedOutcome": "station-app must remain blocked until both client-conformance and consumer-integration-gate complete.",
+      "requiredness": "Required before future Operator Station implementation launch.",
+      "sequencing": "The combined packet reconciles the Operator Station graph before station-app becomes ready or launches.",
+      "disposition": "Route to Operator Station graph ownership; retain the direct conformance dependency and add consumer-integration-gate as a second external dependency.",
+      "target": {
+        "workstreamId": "operator-station",
+        "nodeId": "station-app",
+        "path": ".streamliner/workstreams/operator-station/graph.json",
+        "owner": "Operator Station workstream orchestrator"
+      },
+      "owner": "Operator Station workstream orchestrator",
+      "terminalPath": "Completed through the combined packet's atomic Operator Station graph and discovery-ledger reconciliation.",
+      "status": "completed",
+      "completionEvidence": {
+        "combinedPacket": "client-conformance-shaping-152-v1",
+        "graphPath": ".streamliner/workstreams/operator-station/graph.json",
+        "ledgerPath": ".streamliner/workstreams/operator-station/discovered-work.json",
+        "details": "The combined packet lands the retained direct client-conformance dependency, the added consumer-integration-gate dependency, and the owning Operator Station ledger disposition atomically."
+      },
+      "decisionState": "accepted",
+      "dispositionAuthority": "Joint consumer-gate adjudication, Operator Station evidence, campaign acceptance, and issue #152."
+    }
+  ]
+}

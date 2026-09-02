@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "workstreamId": "operator-station",
+  "updatedAt": "2026-09-02T14:49:45Z",
+  "items": [
+    {
+      "id": "station-app-consumer-gate-graph-gap-v1",
+      "sourceNodeId": "station-app",
+      "requiredness": "required-before-future-station-launch",
+      "description": "Represent the Application Client consumer-integration gate explicitly in Station launch geometry.",
+      "affectedOutcome": "station-app may launch only after client-conformance completes and the consumer-integration gate accepts public conformance evidence without a Station-private integration seam.",
+      "sequencing": "Application Client client-conformance completes first; consumer-authority attestation then permits the consumer-integration gate to be satisfied before separately authorized station-app work begins.",
+      "disposition": "add-graph-dependency",
+      "target": {
+        "projectKey": "telex",
+        "workstreamId": "operator-station",
+        "nodeId": "station-app",
+        "graphEdgeId": "application-client-consumer-integration-gate"
+      },
+      "owner": "Operator Station workstream orchestrator 002c5122-fc0d-403c-8f87-625d87385d44",
+      "relatedDiscovery": {
+        "id": "client-conformance-consumer-attestation",
+        "workstreamId": "application-client",
+        "relationship": "owns the future exact-bundle Station attestation; this completed Station item owns only the graph correction"
+      },
+      "rationale": "The consumer-integration gate is pre-product validation. The acyclic order is client-conformance, consumer-integration-gate, then station-app. Requiring Station implementation evidence at the gate would make station-app depend on a gate that depends on station-app.",
+      "status": "completed",
+      "decisionState": "accepted",
+      "terminalPath": "Land the retained direct client-conformance edge and the new consumer-integration-gate edge for station-app atomically in combined packet client-conformance-shaping-152-v1.",
+      "completionEvidence": {
+        "packetId": "client-conformance-shaping-152-v1",
+        "repositoryBase": "17bf33a44285ae9bc2bef1432d76256db681c89c",
+        "path": ".streamliner/workstreams/operator-station/graph.json",
+        "retainedGraphEdgeId": "application-client-conformance",
+        "addedGraphEdgeId": "application-client-consumer-integration-gate",
+        "details": "The combined packet retains the pending direct conformance edge and atomically adds the pending pre-product consumer-integration-gate edge. Gate satisfaction requires public conformance evidence and consumer-authority attestation, not Station implementation evidence."
+      },
+      "dispositionAuthority": "Addressable Attention campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c accepted the joint steward classification on 2026-09-02 under planning protocol 50dfd62f665c411d8d61cfc5aabc15e9e5e823b4.",
+      "evidence": [
+        {
+          "source": "operator-station-graph",
+          "repositoryMain": "17bf33a44285ae9bc2bef1432d76256db681c89c",
+          "path": ".streamliner/workstreams/operator-station/graph.json",
+          "details": "station-app directly names Application Client client-conformance but did not explicitly name consumer-integration-gate."
+        },
+        {
+          "source": "application-client-graph",
+          "repositoryMain": "17bf33a44285ae9bc2bef1432d76256db681c89c",
+          "path": ".streamliner/workstreams/application-client/graph.json",
+          "details": "consumer-integration-gate depends on client-conformance and requires Operator Station and Watcher to validate the supported client before product integration continues."
+        },
+        {
+          "source": "planning-prompt",
+          "commit": "50dfd62f665c411d8d61cfc5aabc15e9e5e823b4",
+          "path": "streamliner/telex/prompts/app/operator-station-workstream-orchestrator-app-v1.md",
+          "details": "The prompt keeps station-app planned until both client-conformance and the consumer-integration gate permit launch."
+        },
+        {
+          "source": "cross-workstream-design-adjudication",
+          "repositoryMain": "17bf33a44285ae9bc2bef1432d76256db681c89c",
+          "details": "Application Client, Watcher, and Operator Station classified the gate as pre-product exact-revision consumer attestation after conformance; campaign accepted that classification for combined packet client-conformance-shaping-152-v1."
+        }
+      ]
+    }
+  ]
+}

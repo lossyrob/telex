@@ -1,19 +1,99 @@
-# Supported Application Client core
+# Supported Rust Application Client
 
-The Rust library exposes `telex::application_client` as the supported semantic
-boundary for long-lived applications. It implements the API-neutral contract in
+The root `telex` crate exposes `telex::application_client` as the first supported
+application binding. It implements the API-neutral contract in
 [`docs/design/application-client.md`](design/application-client.md) without
 making applications parse CLI output or depend on daemon frames, database paths,
 connection strings, or product-private helpers.
-
-This node ships the core, not a public language binding. Later bindings wrap
-these types and preserve their identities, outcomes, and error distinctions.
 
 The public module defines its own `ApplicationCapability` and error taxonomy;
 daemon IPC enums are not part of the supported API. Message, delivery,
 disposition, operation, compound-step, and delta records returned by the module
 are intentional stable domain records. Their JSON payload fields are opaque
 versioned evidence and must not be interpreted as backend table layouts.
+
+## Dependency profiles
+
+Application consumers disable the root package defaults and select backend
+features explicitly:
+
+| Profile | Cargo features |
+| --- | --- |
+| SQLite | `sqlite` |
+| Postgres | `postgres` |
+| Postgres with Entra | `entra` (includes `postgres`) |
+| SQLite and Postgres | `sqlite,postgres` |
+| SQLite and Postgres with Entra | `sqlite,entra` |
+
+For example:
+
+```toml
+[dependencies]
+telex = { git = "https://github.com/lossyrob/telex", rev = "<full-commit-sha>", default-features = false, features = ["sqlite"] }
+```
+
+None of these profiles enables `self-update`. A single-backend profile does not
+enable the other backend.
+
+No published Telex release contains this binding yet. Source consumers must
+replace the placeholder with the full commit ID of a reviewed revision. The
+compatibility promise applies to that pinned source revision and subsequent
+documented version transitions; an unpinned Git dependency follows a moving
+branch and is outside the promise.
+
+## Compatibility boundary
+
+The root `telex` crate version governs Rust source compatibility. The supported
+surface is the contract-bearing types and behavior exposed by
+`telex::application_client`: client and maintenance handles; responsibility,
+runtime, store, and operation identities; capability and recovery policy;
+lifecycle and compensation results; send, reply, recovery, and reconciliation;
+exact delivery and acknowledgement; receipt evidence; typed errors; health,
+provenance, history, and ordered deltas; compound operations; and bounded
+maintenance. Contract-bearing `telex::model` types already used by these public
+signatures share that source-compatibility commitment.
+
+Breaking changes require an appropriate crate-version transition and migration
+guidance. Telex deprecates before removal when a compatible transition is
+possible. Serde support lets applications persist typed evidence; it does not
+promise stable JSON, a C ABI, a cross-language serialization format, or a public
+daemon protocol. Backend rows not already used by the binding, daemon frames,
+CLI types, private helpers, and product DTOs are not supported binding surfaces.
+
+## Runtime and cancellation
+
+The caller creates and configures the Tokio runtime. Application Client futures
+run in that runtime, SQLite blocking operations use its blocking pool, and
+Postgres connection drivers use tasks on that runtime. The binding creates no
+Tokio runtime, application-specific daemon, or sidecar.
+
+Cancellation stops the caller's observation of a future; it does not prove that
+Telex or the selected backend committed nothing:
+
+- For multi-address attach, reconcile, or detach that may be canceled, create a
+  stateful operation with `begin_attach`, `begin_reconcile_many`, or
+  `begin_detach_many`. Drive `run` or `advance` in the caller's cancellation
+  selection. After cancellation, `cancelled_outcome` preserves completed
+  per-address results and compensation, identifies one in-flight address that
+  may have committed, and lists addresses not attempted. Reconcile the uncertain
+  address before retrying. An in-flight canceled reconciliation remains
+  `InProgress` in lifecycle health (and `recovering` for bounded repair) until a
+  later reconciliation establishes a terminal result. The direct `attach`,
+  `reconcile_many`, and
+  `detach_many` methods are run-to-completion conveniences.
+- Canceling `receive` does not acknowledge a delivery. A returned
+  `ReceivedDelivery` remains unacknowledged until the caller durably ingests it
+  and calls `acknowledge` or records a terminal exact-recipient disposition.
+- Before polling `send` or `reply`, persist the `RecoveryHandle` returned by
+  `prepare_send` or `prepare_reply`. Reconcile a canceled or transport-uncertain
+  attempt with `reconcile_operation`; cancellation never authorizes a blind
+  resend.
+- A canceled acknowledgement, disposition, cleanup, or recovery call may have
+  committed. Use its exact identity and authoritative refresh or reconciliation
+  rather than inferring absence from cancellation.
+
+The binding does not retain a detached lifecycle executor. The caller owns the
+operation object and the Tokio task that drives it.
 
 ## Core model
 
@@ -168,3 +248,7 @@ credentialed Postgres:
    handles, and crash continuation;
 10. schema v2-to-v3 migration, newer-schema refusal, bounded cleanup, principal
     provenance, and raw path/credential exclusion.
+
+This binding does not complete that matrix, authorize Watcher or Operator
+Station integration, or establish packaging, upgrade, or production-readiness
+claims.

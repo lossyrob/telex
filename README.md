@@ -22,8 +22,19 @@ session env into generic telex session inputs, handles CLI and Copilot App
 Full documentation (install, concepts, guides, and the generated CLI reference)
 is at **<https://lossyrob.github.io/telex/>**.
 
-Long-lived non-agent applications use the supported Rust
-[`application_client`](docs/application-client-core.md) semantic core.
+Long-lived non-agent applications use the supported
+[`telex::application_client`](docs/application-client-core.md) Rust binding.
+Disable package defaults and select a backend explicitly:
+
+```toml
+telex = { git = "https://github.com/lossyrob/telex", rev = "<full-commit-sha>", default-features = false, features = ["sqlite"] }
+```
+
+Supported profiles are `sqlite`, `postgres`, `entra`, `sqlite,postgres`, and
+`sqlite,entra`; none implicitly enables `self-update`.
+No published Telex release contains this binding yet. Replace the placeholder
+with the full commit ID of a reviewed source revision; unpinned Git dependencies
+are outside the compatibility promise.
 
 ## Install
 

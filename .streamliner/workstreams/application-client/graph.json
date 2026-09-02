@@ -3,11 +3,11 @@
   "id": "application-client",
   "projectKey": "telex",
   "title": "Telex Application Client (supported long-lived application integration)",
-  "summary": "The supported Application Client core merged through PR #132, closing issues #129 and #124. Rust-first binding is selected, tracked by issue #149, ready, and unlaunched; client-conformance and later gates remain held on their declared dependencies.",
+  "summary": "The supported Application Client core and Rust-first binding are complete. Issue #152 and its bundle-first task make client-conformance ready but unlaunched to prove the ten accepted families across SQLite and credentialed Postgres through the public Rust surface. The consumer-integration gate and supported-client checkpoint remain planned; Watcher and Operator Station retain direct conformance holds and also wait for exact-head consumer attestations.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-08-27T21:36:21Z",
+  "updatedAt": "2026-09-02T14:27:17Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -128,9 +128,9 @@
       "id": "first-binding",
       "type": "task",
       "title": "First supported Rust binding",
-      "summary": "Selected, tracked by issue #149, ready, and unlaunched. Promote telex::application_client in the root telex crate as the first supported binding; document default-features=false backend profiles and compatibility, caller-owned Tokio runtime, and cancellation contracts; stabilize only contract-bearing Rust types; defer external bindings and preserve the full conformance gate. Task spec: .streamliner/workstreams/application-client/tasks/first-binding.md.",
-      "status": "ready",
-      "attention": "focus",
+      "summary": "Completed through issue #149 and PR #151 at exact reviewed head c03db454781164f47a20e997665fe1251e07bd15, merged as ddedfab57cc305a1e91a81d7e49e712bb36d32fd. The root telex crate now exposes telex::application_client with supported defaults-disabled backend profiles, caller-owned Tokio, cancellation-safe lifecycle evidence, source compatibility guidance, and no external binding or private fallback.",
+      "status": "completed",
+      "attention": "watch",
       "repoIds": [
         "telex"
       ],
@@ -148,12 +148,18 @@
       "id": "client-conformance",
       "type": "task",
       "title": "Application Client conformance and migration",
-      "summary": "Prove the supported core and binding against SQLite/Postgres, restart and membership loss, multi-address compensation, send-only/bidirectional capability, delivery-row identity, receipt-state separation, retry-safe operations, ordered resync, and migration away from temporary seams. Sketch; detail after implementation shape is known.",
-      "status": "planned",
-      "attention": "watch",
+      "summary": "Ready but unlaunched under issue #152. One node and PR must prove all ten accepted semantic families through the public Rust surface across isolated SQLite and credentialed Postgres, include public-only Watcher send-only and Station bidirectional fixtures, repair missing shared semantics in the same PR, and provide temporary-seam replacement guidance without introducing a duplicate framework or product implementation.",
+      "status": "ready",
+      "attention": "focus",
       "repoIds": [
         "telex"
       ],
+      "tracker": {
+        "type": "github",
+        "owner": "lossyrob",
+        "repo": "telex",
+        "number": 152
+      },
       "dependsOn": [
         "client-core",
         "first-binding"
@@ -163,7 +169,7 @@
       "id": "consumer-integration-gate",
       "type": "gate",
       "title": "Supported client is consumable by both product workstreams",
-      "summary": "Operator Station and Watcher validate the supported client against their merged contracts and confirm no product-private integration seam is required before product integration continues.",
+      "summary": "After client-conformance completes, Watcher and Operator Station independently attest the same exact reviewed and green conformance head against their merged contracts and confirm that no CLI, raw IPC, spike helper, product DTO promotion, or product-private client is required. This is pre-product-integration consumability evidence, not product implementation, usability, packaging, or operational proof.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [

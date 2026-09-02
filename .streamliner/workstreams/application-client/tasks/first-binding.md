@@ -3,10 +3,13 @@
 - **Workstream:** `application-client`
 - **Node:** `first-binding`
 - **Type:** implementation
-- **Status:** ready, unlaunched
-- **Attention:** focus
+- **Status:** completed
+- **Attention:** watch
 - **Depends on:** completed `client-core`
 - **Tracker:** [lossyrob/telex#149](https://github.com/lossyrob/telex/issues/149)
+- **Merged:** [lossyrob/telex#151](https://github.com/lossyrob/telex/pull/151)
+  at `ddedfab57cc305a1e91a81d7e49e712bb36d32fd` from exact reviewed head
+  `c03db454781164f47a20e997665fe1251e07bd15`
 - **Parent workstream:** [lossyrob/telex#117](https://github.com/lossyrob/telex/issues/117)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
@@ -19,7 +22,7 @@ its compatibility, caller-owned runtime, and cancellation behavior while
 preserving the complete API-neutral contract and avoiding a new language, ABI,
 process, or product-specific boundary.
 
-This node promotes the existing Rust core as the first supported binding. It does
+This node promoted the existing Rust core as the first supported binding. It did
 not complete cross-backend conformance or authorize consumer integration.
 
 ## Design References
@@ -36,7 +39,7 @@ not complete cross-backend conformance or authorize consumer integration.
 - [`../../../../Cargo.toml`](../../../../Cargo.toml) - root crate, current backend
   features, and package defaults.
 - [Issue #12](https://github.com/lossyrob/telex/issues/12) - semantic ownership
-  and implementation publication revision 3.
+  and binding publication revision 4.
 
 ## Inputs
 
@@ -99,29 +102,28 @@ not complete cross-backend conformance or authorize consumer integration.
   `postgres`, `entra` (which includes `postgres`), or `sqlite` plus `postgres`
   with optional `entra`. None includes `self-update` implicitly.
 - **The caller owns Tokio.** The binding runs in the consumer's runtime and does
-  not create a hidden runtime, daemon, or sidecar. The worker chooses the
-  concrete API and ownership mechanics.
+  not create a hidden runtime, daemon, or sidecar. Lifecycle operation objects
+  preserve completed, uncertain in-flight, untouched, and compensation evidence.
 - **Cancellation preserves uncertainty.** Cancellation does not prove
   non-acceptance. Retryable operations use persisted prepared recovery handles;
   cancelled receive work does not acknowledge delivery; lifecycle cancellation
-  retains typed partial and compensation evidence. The worker chooses the
-  concrete cancellation API.
+  retains typed partial and compensation evidence.
 - **Only contract-bearing Rust surfaces stabilize.** Backend rows, daemon frames,
   CLI types, private helpers, and product DTOs remain outside the public
-  compatibility contract. The worker chooses exact versioning, deprecation, and
-  migration mechanics consistent with this boundary.
+  compatibility contract. Until a release contains the binding, supported
+  source consumption uses an exact full commit SHA; unpinned Git dependencies
+  remain outside the compatibility promise.
 - **External bindings remain deferred, not rejected.** napi-rs/TypeScript and
   other ABI or process boundaries require separate authority after consumer
   architecture is known.
 - **Conformance is not reduced or absorbed.** This node must preserve AC-C01
   through AC-C20 but does not mark the cross-backend matrix complete.
 
-## Design-impact expectation
+## Design-impact result
 
-Expect `updated-docs` for the supported Rust consumer, compatibility, runtime,
-and cancellation contracts. Do not change the API-neutral semantic contract
-unless implementation exposes a genuine semantic gap; report such a gap as
-`decision-needed` instead.
+The corrected exact head remained within accepted authority. It documented the
+supported Rust consumer, compatibility, runtime, and cancellation contracts
+without changing the API-neutral semantic contract.
 
 ## Success criteria
 
@@ -143,14 +145,23 @@ unless implementation exposes a genuine semantic gap; report such a gap as
 - Documentation makes no claim of completed conformance, consumer integration,
   production packaging, upgrade readiness, or operational hardening.
 
-## Engagement
+## Completion
 
-- Review the worker plan before implementation to confirm the proposed stable
-  Rust surface is no broader than the accepted contract.
-- Review the compatibility, runtime, and cancellation contract before finalizing
-  code or durable documentation.
-- Review the exact implementation head before merge. Reconciliation does not
-  launch this node. After the reviewed Tier B packet lands on `main` and launch
-  preparation validates the exact main, tracker, task, and session inputs, the
-  existing operator decision authorizes routine orchestrator launch. Conformance
-  promotion, consumer integration, gates, and merge remain separate actions.
+PR #151 completed this node from exact reviewed head
+`c03db454781164f47a20e997665fe1251e07bd15`, merged as
+`ddedfab57cc305a1e91a81d7e49e712bb36d32fd`. Issue #149 closed as
+completed at `2026-09-02T13:56:22Z`.
+
+Full PAW review
+[5052221269](https://github.com/lossyrob/telex/pull/151#pullrequestreview-5052221269)
+and exact-head delta review
+[5052369562](https://github.com/lossyrob/telex/pull/151#pullrequestreview-5052369562)
+accepted the implementation after the three-way compensation correction. All
+six checks succeeded, all three review threads were resolved, and
+[field report 5454362721](https://github.com/lossyrob/telex/issues/149#issuecomment-5454362721)
+records validation and downstream limits.
+
+This completion does not advance `client-conformance`, consumer integration,
+the `supported-client` checkpoint, packaging, operational hardening, or any
+gate. `client-conformance` requires separate shaping, a tracker, a reviewed task
+spec, and launch preparation.

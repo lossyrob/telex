@@ -101,12 +101,10 @@ dirty forensic worktree must not be removed without explicit cleanup
 authorization.
 
 Issue [#12](https://github.com/lossyrob/telex/issues/12) remains the semantic
-contract owner. Publication revision 2 now points to clean PR #126 authority:
-the normative contract and ADR 0049 at merge `62c2b23`, non-normative
-traceability at `docs/notes/application-client/requirements-crosswalk.md`,
-manifest blob `25f27401100a89b1e90dba46b44973a3e3d43908`, and SHA-256
-`085deed89cef1741fb6967bbd9f5e87e4f9cf104917518a234006c35b0f62296`.
-The `application-client-ready` checkpoint and gate are complete.
+contract owner. Publication revision 4 preserves the revision 2
+`application-client-ready` checkpoint, records the revision 3 supported Rust
+core, and publishes the first supported Rust binding merged through PR #151.
+The `application-client-ready` checkpoint and gate remain complete.
 
 The supported `client-core` node completed through
 [#129](https://github.com/lossyrob/telex/issues/129),
@@ -124,18 +122,38 @@ regenerated `docs/design/application-client.bundle.json` is 2,423 bytes, Git
 blob `231cfd231d2a343b59d8538a08002087b0f17aa8`, and SHA-256
 `9dbc5cf90b917f602de8c2430438ed6f57d529893f8aaaa52f3996b51330252e`.
 
-`first-binding` is selected, tracked by
-[#149](https://github.com/lossyrob/telex/issues/149), ready, and focus-level but
-unlaunched. The operator selected a Rust-first binding in the root `telex`
-crate, preserving `telex::application_client`. The task must publish supported
-`default-features = false` consumer profiles and define compatibility, runtime,
-and cancellation behavior without widening the stable surface beyond
-contract-bearing Rust types. `client-conformance`, the consumer integration
-gate, operational hardening, and closure gate remain unchanged on their declared
-dependencies. Tracker creation alone does not authorize launch. The existing
-operator decision authorizes routine launch only after the reviewed Tier B
-packet lands on `main` and launch preparation validates the exact main, tracker,
-task, and session inputs. Reconciliation itself does not launch.
+The Rust-first `first-binding` completed through
+[#149](https://github.com/lossyrob/telex/issues/149) and
+[PR #151](https://github.com/lossyrob/telex/pull/151). Exact reviewed head
+`c03db454781164f47a20e997665fe1251e07bd15` merged as
+`ddedfab57cc305a1e91a81d7e49e712bb36d32fd`. Full PAW review
+[5052221269](https://github.com/lossyrob/telex/pull/151#pullrequestreview-5052221269)
+and delta review
+[5052369562](https://github.com/lossyrob/telex/pull/151#pullrequestreview-5052369562)
+covered the binding; all six exact-head checks succeeded and no review thread
+remained unresolved. The
+[field report](https://github.com/lossyrob/telex/issues/149#issuecomment-5454362721)
+records the implementation and validation evidence. Issue #149 closed as
+completed at `2026-09-02T13:56:22Z`.
+
+`client-conformance` is now tracked by
+[#152](https://github.com/lossyrob/telex/issues/152), fully specified, ready,
+and unlaunched. One node, tracker, and delivery PR must prove all ten conformance
+families through the public Rust surface across SQLite and credentialed
+Postgres. The same PR owns public-only Watcher send-only and Operator Station
+bidirectional fixtures, any missing shared-semantic repair, and guidance for
+replacing temporary consumer seams. Runtime fixtures use production
+`InstalledCurrent { trusted_root }` daemon bootstrap under the Local
+Daemon-owned selector-admission and process-authentication contract; compile-only
+fixtures are insufficient.
+
+`consumer-integration-gate` remains planned. After conformance review and
+required CI pass on one exact head, Watcher and Operator Station independently
+attest that same bundle against their merged contracts and confirm no private
+seam is required. Product implementation, usability, packaging, and operational
+evidence remain downstream. Watcher runtime and Station app retain direct
+conformance dependencies and also wait on the consumer gate. No checkpoint or
+gate advances with this shaping reconciliation.
 
 ## Decisions
 
@@ -176,10 +194,8 @@ task, and session inputs. Reconciliation itself does not launch.
   implementer/reviewer defaults are resolved and launched through
   `/api/launch-preparations/runs`, not hand-written terminal prompts.
 - **Core and binding remain sequential:** `client-core` completed first;
-  `first-binding` is selected, tracked by #149, and ready but unlaunched. The
-  existing operator decision authorizes routine launch after the reviewed Tier B
-  packet lands on `main` and launch preparation validates the exact main,
-  tracker, task, and session inputs; no new operator decision is required.
+  `first-binding` then completed through issue #149 and PR #151. Conformance
+  remains a separate node and gate boundary.
 - **The first binding is Rust-first:** the supported binding remains in the root
   `telex` crate at `telex::application_client`. It does not introduce a second
   crate or a language-translation boundary.
@@ -190,35 +206,68 @@ task, and session inputs. Reconciliation itself does not launch.
   `entra`). The `self-update` feature is not part of an application-consumer
   profile.
 - **The caller owns the async runtime:** the Rust binding runs in a
-  caller-provided Tokio runtime and must not create a hidden runtime, daemon, or
-  sidecar. Exact ownership and API mechanics remain worker decisions.
+  caller-provided Tokio runtime and does not create a hidden runtime,
+  application-specific daemon, or sidecar. Selecting the shared installed Telex
+  daemon does not transfer daemon lifecycle ownership to the consumer.
+  Lifecycle operation objects preserve completed, uncertain in-flight,
+  untouched, and compensation evidence across cancellation.
+- **Production consumers use trusted installed-current daemon selection:**
+  `ApplicationDaemonBootstrap::InstalledCurrent { trusted_root }` and additive
+  `ApplicationClient::connect_with_daemon` preserve existing config literals.
+  The client holds Local Daemon's shared selector admission from
+  manifest-validated target resolution through authenticated `HelloAck`;
+  upgrade and rollback use exclusive admission across drain and selector
+  publication. A spawned daemon independently holds shared admission through
+  endpoint and readiness publication. Existing current-executable connect and
+  explicit exact-target selection are subordinate development/test support,
+  not production fallback.
+- **Local Daemon owns install and process authority:** Local Daemon validates the
+  trusted root, selector, manifest, immutable versioned target, ownership and
+  writability, platform file identity, persistent selector-lock admission,
+  captured selection token, protocol/capabilities, and readiness publication.
+  Application Client owns the public policy,
+  config-compatible constructor, typed failure projection, and runtime consumer
+  evidence.
 - **Cancellation preserves durable uncertainty:** cancellation never proves that
   an operation was not accepted. Callers persist prepared `RecoveryHandle`
   evidence and reconcile uncertain operations; cancelled receive work does not
-  acknowledge a delivery. Exact cancellation API shape remains a worker
-  decision.
+  acknowledge a delivery.
 - **Only semantic Rust types stabilize:** compatibility commitments cover public
   types and behavior that carry the accepted Application Client contract. They
   do not promote backend records, daemon frames, CLI types, or consumer DTOs into
-  the supported surface. Version and deprecation mechanics remain worker
-  decisions within the root crate's compatibility contract.
+  the supported surface. Until a release contains the binding, supported source
+  consumption uses an exact full commit SHA; unpinned Git dependencies remain
+  outside the compatibility promise.
 - **External boundaries remain deferred:** napi-rs/TypeScript, a separate client
   crate, C ABI, public socket or sidecar protocols, and product DTOs require
   later decisions. This deferral does not permit a private consumer fallback.
 - **Conformance remains a separate gate:** first-binding must preserve the full
   AC-C01 through AC-C20 model. It does not complete cross-backend conformance,
   consumer integration, packaging, upgrade readiness, or production hardening.
+- **Conformance is one complete delivery bundle:** issue #152 owns all ten
+  semantic families, SQLite and credentialed-Postgres parity, public-only
+  send-only and bidirectional fixtures, missing shared-semantic repair, and
+  temporary-seam replacement guidance in one PR. It also absorbs
+  `application-client-daemon-bootstrap-gap-v1`: installed-current runtime
+  bootstrap, Windows/Linux proof, selector upgrade/rollback races, and product
+  design promotion stay in the same PR. Backend, test-family, fixture,
+  migration, bootstrap, and reviewability splits are not independent confidence
+  transitions.
+- **Consumer attestations are pre-integration gate evidence:** after
+  implementation review and required CI pass on one exact conformance head,
+  Watcher and Operator Station independently validate the supported public seam.
+  Their attestations do not implement either product or pass the gate by
+  themselves.
+- **Material discoveries receive durable disposition:** required conformance
+  work stays in issue #152; real prerequisites name their owning dependency and
+  exact resume condition; product-only work routes to its owning workstream.
+  No material item may remain untriaged at merge readiness.
 - **Issue #124 completed within client-core:** PR #132 closed both #129 and #124
   and reported the regenerated manifest identity. This factual reconciliation
   does not mutate issue #12.
 
 ## Open Questions
 
-- What concrete Rust API, ownership, feature-alias, deprecation, and cancellation
-  mechanics best satisfy the approved compatibility, runtime, and recovery
-  contracts?
-- Which conformance evidence is required before product integration PRs may
-  merge, beyond the earlier semantic `application-client-ready` checkpoint?
 - Which external language or process boundary, if any, should follow Rust after
   consumer architecture is authoritative?
 
@@ -242,14 +291,18 @@ task, and session inputs. Reconciliation itself does not launch.
   product integration.
 - Explicit migration guidance away from temporary CLI, raw-IPC, and spike
   integration seams.
+- Exact-head public-seam attestations from Watcher and Operator Station for the
+  planned `consumer-integration-gate`.
 
 ## Closeout Observations
 
-- Issue #12 publication revision 2 now reflects clean PR #126 authority; the
-  `application-client-ready` checkpoint and gate are complete.
+- Issue #12 publication revision 4 records the design checkpoint, supported Rust
+  core, and first supported Rust binding without claiming conformance.
 - W-05 taxonomy wording from issue #124 completed within client-core issue #129
-  and merged through PR #132. The Rust-first `first-binding` task is selected,
-  tracked by #149, and ready but remains unlaunched.
+  and merged through PR #132.
+- The Rust-first `first-binding` completed through issue #149 and PR #151.
+  Issue #152 and its bundle-first task make `client-conformance` ready but
+  unlaunched; the consumer gate and `supported-client` remain planned.
 - Polluted PR #123 and its dirty worktree are deferred with rationale for
   protocol forensics; cleanup requires explicit operator authorization.
 - The clean #118 implementation worktree is also deferred for cleanup until the
