@@ -977,7 +977,77 @@ mod imp {
         Ok(())
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "macos")]
+    pub(super) fn validate_local_advisory_filesystem(
+        file: &std::fs::File,
+        path: &Path,
+    ) -> Result<()> {
+        let mut stat: libc::statfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstatfs(file.as_raw_fd(), &mut stat) } != 0 {
+            return Err(io_err(
+                "checking advisory-lock filesystem",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let type_len = stat
+            .f_fstypename
+            .iter()
+            .position(|&byte| byte == 0)
+            .ok_or_else(|| FsError::Unsupported {
+                capability: "owner-private advisory lock",
+                message: format!("{} has an unterminated filesystem type", path.display()),
+            })?;
+        let type_bytes = stat.f_fstypename[..type_len]
+            .iter()
+            .map(|&byte| byte as u8)
+            .collect::<Vec<_>>();
+        let filesystem_type =
+            std::str::from_utf8(&type_bytes).map_err(|_| FsError::Unsupported {
+                capability: "owner-private advisory lock",
+                message: format!("{} has a non-UTF-8 filesystem type", path.display()),
+            })?;
+        validate_macos_advisory_filesystem_attributes(path, stat.f_flags, filesystem_type)
+    }
+
+    #[cfg(target_os = "macos")]
+    pub(super) fn validate_macos_advisory_filesystem_attributes(
+        path: &Path,
+        flags: u32,
+        filesystem_type: &str,
+    ) -> Result<()> {
+        if flags & libc::MNT_LOCAL as u32 == 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-private advisory lock",
+                message: format!(
+                    "{} is on non-local filesystem type {filesystem_type}",
+                    path.display()
+                ),
+            });
+        }
+        if flags & libc::MNT_IGNORE_OWNERSHIP as u32 != 0 {
+            return Err(FsError::Unsupported {
+                capability: "owner-private advisory lock",
+                message: format!(
+                    "{} is on filesystem type {filesystem_type}, which ignores ownership",
+                    path.display()
+                ),
+            });
+        }
+        // APFS and HFS+ provide local kernel flock semantics and enforce Unix ownership/mode bits.
+        // Every other type remains unsupported even when it advertises MNT_LOCAL.
+        if !matches!(filesystem_type, "apfs" | "hfs") {
+            return Err(FsError::Unsupported {
+                capability: "owner-private advisory lock",
+                message: format!(
+                    "{} is on filesystem type {filesystem_type}, whose local advisory-lock semantics cannot be proven",
+                    path.display()
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     pub(super) fn validate_local_advisory_filesystem(
         _file: &std::fs::File,
         _path: &Path,
@@ -2990,6 +3060,26 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_advisory_filesystem_validation_accepts_only_known_local_owner_enforcing_types() {
+        let path = Path::new("/private/tmp/telex.intent.lock");
+        let local = libc::MNT_LOCAL as u32;
+
+        assert!(imp::validate_macos_advisory_filesystem_attributes(path, local, "apfs").is_ok());
+        assert!(imp::validate_macos_advisory_filesystem_attributes(path, local, "hfs").is_ok());
+        assert!(imp::validate_macos_advisory_filesystem_attributes(path, 0, "apfs").is_err());
+        assert!(imp::validate_macos_advisory_filesystem_attributes(
+            path,
+            local | libc::MNT_IGNORE_OWNERSHIP as u32,
+            "apfs"
+        )
+        .is_err());
+        assert!(
+            imp::validate_macos_advisory_filesystem_attributes(path, local, "unknown").is_err()
+        );
+    }
 
     #[cfg(windows)]
     #[test]

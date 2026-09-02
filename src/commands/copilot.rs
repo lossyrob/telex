@@ -4780,7 +4780,10 @@ mod tests {
 
     #[cfg(unix)]
     fn write_test_bridge_registry(home: &Path, session: &str) -> PathBuf {
-        let path = home.join("telex-bridge").join(format!("{session}.json"));
+        let path = home
+            .join(".copilot")
+            .join("telex-bridge")
+            .join(format!("{session}.json"));
         std::fs::create_dir_all(path.parent().unwrap()).expect("bridge root");
         let registry = serde_json::json!({
             "sessionId": session,
@@ -4805,8 +4808,8 @@ mod tests {
         let session = format!("registry-mode-{}", std::process::id());
         let home = std::env::temp_dir().join(&session);
         let _ = std::fs::remove_dir_all(&home);
-        let prior_home = std::env::var_os("COPILOT_HOME");
-        std::env::set_var("COPILOT_HOME", &home);
+        let prior_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home);
         let path = write_test_bridge_registry(&home, &session);
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o644))
             .expect("weaken registry permissions");
@@ -4815,10 +4818,10 @@ mod tests {
             .err()
             .expect("insecure registry must be rejected")
             .to_string();
-        restore_env("COPILOT_HOME", prior_home);
+        restore_env("HOME", prior_home);
         let _ = std::fs::remove_dir_all(&home);
         assert!(
-            error.contains("owner-private") || error.contains("permissions"),
+            error.contains("group/world accessible"),
             "the authority-bearing read must fail closed, got: {error}"
         );
     }
@@ -4832,8 +4835,8 @@ mod tests {
         let session = format!("registry-link-{}", std::process::id());
         let home = std::env::temp_dir().join(&session);
         let _ = std::fs::remove_dir_all(&home);
-        let prior_home = std::env::var_os("COPILOT_HOME");
-        std::env::set_var("COPILOT_HOME", &home);
+        let prior_home = std::env::var_os("HOME");
+        std::env::set_var("HOME", &home);
         let path = write_test_bridge_registry(&home, &session);
         let target = home.join("outside.json");
         std::fs::rename(&path, &target).expect("move registry target");
@@ -4843,7 +4846,7 @@ mod tests {
             .err()
             .expect("symlinked registry must be rejected")
             .to_string();
-        restore_env("COPILOT_HOME", prior_home);
+        restore_env("HOME", prior_home);
         let _ = std::fs::remove_dir_all(&home);
         assert!(
             error.contains("symlink") || error.contains("opening owner-only file"),
@@ -5879,6 +5882,7 @@ mod tests {
     impl ForeignProcess {
         fn spawn() -> Option<Self> {
             use std::process::Stdio;
+            let own_exe = crate::platform_fs::process_exe_path(std::process::id()).ok()?;
             let mut child = idle_child_command()?
                 .stdin(Stdio::piped())
                 .stdout(Stdio::null())
@@ -5886,21 +5890,37 @@ mod tests {
                 .spawn()
                 .ok()?;
             let pid = child.id();
-            match crate::session_watch::capture_process_start_time(pid)
-                .zip(crate::platform_fs::process_exe_path(pid).ok())
-            {
-                Some((start_time, exe)) => Some(Self {
-                    child,
-                    pid,
-                    start_time,
-                    exe,
-                }),
-                None => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    None
+            let deadline = std::time::Instant::now() + Duration::from_secs(1);
+            loop {
+                if !matches!(child.try_wait(), Ok(None)) {
+                    break;
                 }
+                if let Some((start_time, exe)) =
+                    crate::session_watch::capture_process_start_time(pid)
+                        .zip(crate::platform_fs::process_exe_path(pid).ok())
+                {
+                    // On Unix, spawn can return after fork but before exec. Sampling in that window
+                    // reports this test binary as the child's executable and defeats the fixture.
+                    if !exe
+                        .to_string_lossy()
+                        .eq_ignore_ascii_case(&own_exe.to_string_lossy())
+                    {
+                        return Some(Self {
+                            child,
+                            pid,
+                            start_time,
+                            exe,
+                        });
+                    }
+                }
+                if std::time::Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
             }
+            let _ = child.kill();
+            let _ = child.wait();
+            None
         }
     }
 
