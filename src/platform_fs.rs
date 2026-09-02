@@ -80,6 +80,57 @@ pub struct OwnerOnlyFileMeta {
     pub modified_ms: Option<i64>,
 }
 
+/// A held, owner-private OS advisory lock. Dropping it releases the lock; the
+/// lock file itself deliberately remains in place so no process can replace its
+/// inode while another process is using it as the lock authority.
+#[derive(Debug)]
+#[allow(dead_code)]
+pub struct OwnerPrivateAdvisoryLock(std::fs::File);
+
+/// Acquire a non-blocking exclusive advisory lock on an owner-private file.
+///
+/// The file is created once with the platform's strict owner-only descriptor
+/// and is never deleted, renamed, or replaced by this primitive. The backing
+/// filesystem must be positively identified as local before the advisory lock
+/// is trusted; network and otherwise unknown filesystems fail closed.
+///
+/// A contended lock is returned as an I/O error with `ErrorKind::WouldBlock`.
+/// The caller owns any retry budget. OS process death releases the held lock.
+pub fn try_acquire_owner_private_advisory_lock(path: &Path) -> Result<OwnerPrivateAdvisoryLock> {
+    match path_present(path) {
+        Ok(false) => match write_owner_only_file_exact(path, b"") {
+            Ok(()) => {}
+            Err(FsError::Io { source, .. })
+                if source.kind() == std::io::ErrorKind::AlreadyExists => {}
+            Err(error) => return Err(error),
+        },
+        Ok(true) => {}
+        Err(error) => return Err(error),
+    }
+
+    // Lock contents are deliberately ignored. Accepting a small, owner-private legacy lock file
+    // lets an upgrade replace its old create-new protocol with the OS lock without deleting it.
+    let (file, _) = imp::open_owner_only_file(path, 4096)?;
+    imp::validate_local_advisory_filesystem(&file, path)?;
+    imp::try_lock_exclusive(&file)?;
+    Ok(OwnerPrivateAdvisoryLock(file))
+}
+
+/// Require a filesystem that this build recognizes as local enough for
+/// owner-private advisory-lock authority. This does not acquire a lock.
+pub fn require_supported_local_filesystem(path: &Path) -> Result<()> {
+    #[cfg(windows)]
+    {
+        imp::validate_local_advisory_path(path)
+    }
+    #[cfg(not(windows))]
+    {
+        let file = std::fs::File::open(path)
+            .map_err(|e| io_err("opening local filesystem for validation", e))?;
+        imp::validate_local_advisory_filesystem(&file, path)
+    }
+}
+
 /// Read an owner-private file fail-closed, per-file, on both platforms.
 ///
 /// Rejects (never "warns and continues"): a non-regular file, a symlink or reparse point, a file
@@ -720,6 +771,7 @@ mod imp {
     use super::{io_err, system_time_to_ms, FsError, OwnerOnlyFileMeta, Result};
     use std::io::Read;
     use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt, PermissionsExt};
+    use std::os::unix::io::AsRawFd;
     use std::path::{Path, PathBuf};
 
     pub(super) fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
@@ -873,6 +925,72 @@ mod imp {
                 modified_ms,
             },
         ))
+    }
+
+    pub(super) fn try_lock_exclusive(file: &std::fs::File) -> Result<()> {
+        let result = unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) };
+        if result == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if matches!(
+            error.raw_os_error(),
+            Some(libc::EWOULDBLOCK) | Some(libc::EAGAIN)
+        ) {
+            return Err(io_err(
+                "acquiring owner-private advisory lock",
+                std::io::Error::from(std::io::ErrorKind::WouldBlock),
+            ));
+        }
+        Err(io_err("acquiring owner-private advisory lock", error))
+    }
+
+    #[cfg(target_os = "linux")]
+    pub(super) fn validate_local_advisory_filesystem(
+        file: &std::fs::File,
+        path: &Path,
+    ) -> Result<()> {
+        let mut stat: libc::statfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::fstatfs(file.as_raw_fd(), &mut stat) } != 0 {
+            return Err(io_err(
+                "checking advisory-lock filesystem",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        // Only filesystems with local kernel lock semantics are trusted. In particular this
+        // rejects NFS, CIFS/SMB, 9p, FUSE, and every unknown network-like filesystem.
+        const LOCAL_TYPES: &[libc::c_long] = &[
+            0x0000_ef53,                     // ext2/3/4
+            0x0102_1994,                     // tmpfs
+            0x5846_5342,                     // xfs
+            0x794c_7630,                     // overlayfs (CI containers)
+            0x9123_683e_u64 as libc::c_long, // btrfs
+            0x2fc1_2fc1,                     // zfs
+        ];
+        if !LOCAL_TYPES.contains(&stat.f_type) {
+            return Err(FsError::Unsupported {
+                capability: "owner-private advisory lock",
+                message: format!(
+                    "{} is on filesystem type {:#x}, whose local advisory-lock semantics cannot be proven",
+                    path.display(),
+                    stat.f_type
+                ),
+            });
+        }
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    pub(super) fn validate_local_advisory_filesystem(
+        _file: &std::fs::File,
+        _path: &Path,
+    ) -> Result<()> {
+        Err(FsError::Unsupported {
+            capability: "owner-private advisory lock",
+            message:
+                "local advisory-lock filesystem validation is not implemented on this Unix platform"
+                    .into(),
+        })
     }
 
     pub(super) fn read_owner_only_file_with_meta(
@@ -1092,9 +1210,10 @@ mod imp {
         TOKEN_QUERY, TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateDirectoryW, CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT, FILE_GENERIC_READ,
-        FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+        CreateDirectoryW, CreateFileW, GetDriveTypeW, LockFileEx, CREATE_NEW,
+        FILE_ATTRIBUTE_NORMAL, FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_OPEN_REPARSE_POINT,
+        FILE_GENERIC_READ, FILE_GENERIC_WRITE, FILE_SHARE_DELETE, FILE_SHARE_READ,
+        FILE_SHARE_WRITE, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY, OPEN_EXISTING,
     };
     use windows_sys::Win32::System::Registry::{
         RegDeleteKeyExW, RegDeleteTreeW, RegGetValueW, RegSetKeyValueW, HKEY_CURRENT_USER,
@@ -1105,6 +1224,7 @@ mod imp {
         CreateMutexW, GetCurrentProcess, OpenProcess, OpenProcessToken, QueryFullProcessImageNameW,
         ReleaseMutex, WaitForSingleObject, PROCESS_QUERY_LIMITED_INFORMATION,
     };
+    use windows_sys::Win32::System::IO::OVERLAPPED;
 
     pub(super) const FILE_ATTRIBUTE_REPARSE_POINT_BIT: u32 = FILE_ATTRIBUTE_REPARSE_POINT;
 
@@ -1115,6 +1235,8 @@ mod imp {
     /// `TOKEN_GROUPS` struct but not these attribute bits, and they are fixed ABI values.
     const SE_GROUP_OWNER: u32 = 0x0000_0008;
     const SE_GROUP_USE_FOR_DENY_ONLY: u32 = 0x0000_0010;
+    const DRIVE_FIXED: u32 = 3;
+    const DRIVE_RAMDISK: u32 = 6;
 
     /// Whether an ACE trustee is one telex considers safe on an owner-private object.
     ///
@@ -1496,6 +1618,74 @@ mod imp {
                 modified_ms,
             },
         ))
+    }
+
+    pub(super) fn try_lock_exclusive(file: &std::fs::File) -> Result<()> {
+        let mut overlapped: OVERLAPPED = unsafe { std::mem::zeroed() };
+        let ok = unsafe {
+            LockFileEx(
+                file.as_raw_handle() as HANDLE,
+                LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY,
+                0,
+                u32::MAX,
+                u32::MAX,
+                &mut overlapped,
+            )
+        };
+        if ok != 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.raw_os_error() == Some(33) {
+            return Err(io_err(
+                "acquiring owner-private advisory lock",
+                std::io::Error::from(std::io::ErrorKind::WouldBlock),
+            ));
+        }
+        Err(io_err("acquiring owner-private advisory lock", error))
+    }
+
+    pub(super) fn validate_local_advisory_filesystem(
+        _file: &std::fs::File,
+        path: &Path,
+    ) -> Result<()> {
+        validate_local_advisory_path(path)
+    }
+
+    pub(super) fn validate_local_advisory_path(path: &Path) -> Result<()> {
+        if path.components().any(|component| {
+            matches!(
+                component,
+                Component::Prefix(prefix)
+                    if matches!(prefix.kind(), Prefix::UNC(_, _) | Prefix::VerbatimUNC(_, _))
+            )
+        }) {
+            return Err(FsError::Unsupported {
+                capability: "owner-private advisory lock",
+                message: format!("{} is a UNC path", path.display()),
+            });
+        }
+        let canonical = std::fs::canonicalize(path)
+            .map_err(|e| io_err("canonicalizing advisory-lock path", e))?;
+        let root = canonical
+            .ancestors()
+            .last()
+            .ok_or_else(|| FsError::Unsupported {
+                capability: "owner-private advisory lock",
+                message: format!("cannot determine volume root for {}", path.display()),
+            })?;
+        let wide = wide_null(root.as_os_str());
+        let drive_type = unsafe { GetDriveTypeW(wide.as_ptr()) };
+        if drive_type != DRIVE_FIXED && drive_type != DRIVE_RAMDISK {
+            return Err(FsError::Unsupported {
+                capability: "owner-private advisory lock",
+                message: format!(
+                    "{} is not on a fixed local volume (GetDriveTypeW={drive_type})",
+                    path.display()
+                ),
+            });
+        }
+        Ok(())
     }
 
     pub(super) fn read_owner_only_file_with_meta(
@@ -2744,6 +2934,23 @@ mod imp {
         })
     }
 
+    pub(super) fn try_lock_exclusive(_file: &std::fs::File) -> Result<()> {
+        Err(FsError::Unsupported {
+            capability: "owner-private advisory lock",
+            message: "no advisory lock implementation for this platform".into(),
+        })
+    }
+
+    pub(super) fn validate_local_advisory_filesystem(
+        _file: &std::fs::File,
+        _path: &Path,
+    ) -> Result<()> {
+        Err(FsError::Unsupported {
+            capability: "owner-private advisory lock",
+            message: "no local filesystem validation for this platform".into(),
+        })
+    }
+
     pub(super) fn read_owner_only_file_with_meta(
         _path: &Path,
         _max_bytes: u64,
@@ -2786,6 +2993,17 @@ mod imp {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn advisory_lock_filesystem_validation_rejects_unc_before_opening_it() {
+        let result =
+            require_supported_local_filesystem(Path::new(r"\\untrusted-server\share\intent.lock"));
+        assert!(
+            matches!(result, Err(FsError::Unsupported { .. })),
+            "a UNC/SMB lock path must fail closed before a lock is trusted: {result:?}"
+        );
+    }
 
     fn temp_dir(label: &str) -> PathBuf {
         let dir = std::env::temp_dir().join(format!(

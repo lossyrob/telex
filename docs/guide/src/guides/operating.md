@@ -167,6 +167,12 @@ backoff, quarantine, and slow intents mean there is no truthful minimum progress
 Use successive reconcile reports and `telex status` to observe progress rather than deriving a
 completion time from the scope size.
 
+If a report is truncated or degraded, its count and over-cap indication are lower bounds, not an
+inventory or capacity-recovery promise. Automatic scans and GC eventually cover only supported,
+available local storage. Exact inventory or reclamation requires recovery tooling to stop normal
+writers and use the supported offline complete-scan API; do not infer completeness from bounded
+reports.
+
 At the 512-record write cap, existing records can still be updated or explicitly withdrawn. A live
 record withdrawn to `revoked` continues to occupy its slot for the seven-day terminal TTL; daemon
 GC frees it only after that TTL. Detach therefore does not free capacity immediately.

@@ -388,3 +388,9 @@ Intents are host-local files, so the cross-host topology of sec. 7 is unaffected
 second host cannot see, let alone restore, another host's bridge. Within a host, the epoch fence of
 sec. 6 remains the single-writer authority — a reconciled restore claims the lease exactly as an
 ordinary register does, and never force-steals an incumbent.
+
+Intent mutations serialize on a persistent owner-private OS advisory lock for that hashed binding.
+The lock file is never removed or replaced. Unsupported, network, or unprovable filesystems fail
+closed; a contended live holder is reported as bounded degradation. A four-second reconcile response
+only bounds the response: an already-entered blocking filesystem operation may finish later, but its
+generation check and this lock cannot delete or replace a later generation.

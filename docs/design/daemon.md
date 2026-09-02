@@ -1958,6 +1958,14 @@ daemon is running **and** this producer proves it is alive, restore this exact p
   never a reason to delete anything. Deletion happens in exactly three places, all conditional and
   lock-held: GC (sec. 18.2.2), the attach rollback, and an explicit withdrawal of an unfinalized
   `pending` record (sec. 18.2.3).
+- Each intent also has a persistent `<hashed-id>.intent.json.lock` file in the same owner-private
+  scope. Writers use an exclusive OS advisory lock (`flock` on supported Unix local filesystems;
+  `LockFileEx` on fixed local Windows volumes). The file is never deleted, renamed, replaced, aged
+  out, or stolen. An unprovable owner/privacy/local-filesystem/lock condition fails closed; a live
+  hung holder yields bounded degradation. Kernel process-death cleanup releases a held lock.
+- A bounded scan reports `discovery_truncated`. When that is true, `observed_count` and `over_cap`
+  are lower bounds only, and automatic discovery and GC have only conditional eventual coverage.
+  Exact counts or reclaim claims require an offline complete scan on supported local storage.
 
 ### 18.2 States
 

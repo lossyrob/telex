@@ -112,7 +112,6 @@ const ENUMERATION_DEADLINE_STRIDE: usize = 64;
 const INTENT_LOCK_SUFFIX: &str = ".lock";
 const INTENT_LOCK_ATTEMPTS: u32 = 25;
 const INTENT_LOCK_RETRY: Duration = Duration::from_millis(20);
-const INTENT_LOCK_STALE: Duration = Duration::from_secs(10);
 
 // ---------------------------------------------------------------------------------------------
 // Errors
@@ -1265,8 +1264,9 @@ where
 /// Run blocking work with a cooperative cancellation signal for work that can mutate durable state.
 ///
 /// On timeout the caller stops waiting and signals the worker before returning. The worker must
-/// check the signal immediately before every durable commit; this prevents a timed-out discovery
-/// or GC pass from advancing a cursor or deleting a manifest after its IPC response was sent.
+/// check the signal immediately before every durable commit. A signal prevents new work where it
+/// is observed, but cannot interrupt a syscall that already entered rename or unlink; a timed-out
+/// pass therefore reports truncation rather than claiming no late completion is possible.
 pub async fn run_blocking_cancellable_within<T, F>(
     deadline: PassDeadline,
     grace: Duration,
@@ -1323,8 +1323,8 @@ where
 /// nothing derived from it. For a phase that mutates *durable, pass-visible* state — the evidence
 /// block, the round-robin cursor — it is not: abandoning the wait leaves a write that can land after
 /// the pass has already answered its caller, so the pass can no longer make the statement a
-/// request-scoped caller needs, which is "nothing this pass was going to change had still not
-/// changed when I answered".
+/// request-scoped caller needs: a bounded response with explicit incomplete state, not a claim that
+/// a syscall already entered cannot finish later.
 ///
 /// The fix is to not start it. A durable write is launched only while `reserve` of the deadline
 /// remains and is then joined inside that same deadline, so the ordinary near-deadline case degrades
@@ -1335,8 +1335,8 @@ where
 /// intact and still has not returned by the deadline. It is reported as `Overran` and left to
 /// finish, never cancelled, because a staged atomic write torn in half is strictly worse than a late
 /// one. What bounds the blast radius is what such a write is allowed to be: a single-file atomic
-/// rewrite guarded by a generation CAS. It cannot register a member, cannot emit a report, and
-/// cannot resurrect a record a concurrent teardown has since moved on from.
+/// rewrite guarded by a generation CAS and the persistent per-intent OS lock. It cannot register a
+/// member, cannot emit a report, and cannot replace or delete a later generation.
 pub async fn run_blocking_reserved<T, F>(
     deadline: PassDeadline,
     reserve: Duration,
@@ -1592,6 +1592,12 @@ impl IntentStore {
     /// Write an intent atomically. Enforces the per-scope count cap for *new* ids (an existing
     /// intent may always be rewritten, so an over-cap scope can still be revoked or GC'd out).
     pub fn write_atomic(&self, intent: &StationIntentV1) -> Result<()> {
+        let _lock = self.lock_intent(&intent.id())?;
+        self.write_atomic_held(intent)
+    }
+
+    /// The atomic rewrite with this intent's advisory lock already held.
+    fn write_atomic_held(&self, intent: &StationIntentV1) -> Result<()> {
         intent.validate()?;
         let id = intent.id();
         let path = self.path_for(&id);
@@ -1635,7 +1641,7 @@ impl IntentStore {
         // and *create* — overwriting a record the caller could not see rather than losing the CAS.
         if !path_present(&self.path_for(&id))? {
             if expected_generation == 0 {
-                self.write_atomic(intent)?;
+                self.write_atomic_held(intent)?;
                 return Ok(true);
             }
             return Ok(false);
@@ -1644,7 +1650,7 @@ impl IntentStore {
         if current.generation != expected_generation {
             return Ok(false);
         }
-        self.write_atomic(intent)?;
+        self.write_atomic_held(intent)?;
         Ok(true)
     }
 
@@ -1669,7 +1675,7 @@ impl IntentStore {
         if current.generation != expected_generation {
             return Ok(false);
         }
-        self.write_atomic(intent)?;
+        self.write_atomic_held(intent)?;
         Ok(true)
     }
 
@@ -1688,7 +1694,7 @@ impl IntentStore {
             return Ok(None);
         }
         intent.generation = intent.generation.saturating_add(1);
-        self.write_atomic(&intent)?;
+        self.write_atomic_held(&intent)?;
         Ok(Some(intent))
     }
 
@@ -1776,7 +1782,7 @@ impl IntentStore {
                 next.armed = None;
             }
         }
-        self.write_atomic(&next)?;
+        self.write_atomic_held(&next)?;
         Ok(PendingWrite::Created {
             generation: next.generation,
         })
@@ -1856,32 +1862,29 @@ impl IntentStore {
 
     /// Acquire the per-intent write lock, or fail rather than write unserialized.
     ///
-    /// Bounded (never blocks a reconcile pass past its per-intent budget) and stale-tolerant: a
-    /// holder that died mid-write leaves a lock file, so one older than `INTENT_LOCK_STALE` is
-    /// stolen rather than wedging the binding forever.
-    fn lock_intent(&self, id: &IntentId) -> Result<IntentWriteLock> {
+    /// Bounded (never blocks a reconcile pass past its per-intent budget) and process-death-safe.
+    ///
+    /// The persistent lock file is owner-private and opened only after the platform verifies a
+    /// supported local filesystem. Its OS lock is released by process death; it is never aged out,
+    /// removed, renamed, replaced, or stolen. A live hung holder therefore produces a bounded
+    /// failure/degradation rather than permitting a stale writer to overlap a newer generation.
+    fn lock_intent(&self, id: &IntentId) -> Result<platform_fs::OwnerPrivateAdvisoryLock> {
         let path = self
             .root
             .join(format!("{}{INTENT_LOCK_SUFFIX}", id.file_name()));
         for attempt in 0..INTENT_LOCK_ATTEMPTS {
-            match std::fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .open(&path)
-            {
-                Ok(_) => return Ok(IntentWriteLock { path }),
-                Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-                    if file_age_ms(&path, crate::model::now_ms())
-                        .is_some_and(|age| age > INTENT_LOCK_STALE.as_millis() as i64)
-                    {
-                        let _ = std::fs::remove_file(&path);
-                        continue;
-                    }
+            match platform_fs::try_acquire_owner_private_advisory_lock(&path) {
+                Ok(lock) => return Ok(lock),
+                Err(platform_fs::FsError::Io { source, .. })
+                    if source.kind() == std::io::ErrorKind::WouldBlock =>
+                {
                     if attempt + 1 < INTENT_LOCK_ATTEMPTS {
                         std::thread::sleep(INTENT_LOCK_RETRY);
                     }
                 }
-                Err(e) => return Err(IntentError::Io(format!("locking intent {id}: {e}"))),
+                Err(error) => {
+                    return Err(IntentError::from(error));
+                }
             }
         }
         Err(IntentError::Io(format!(
@@ -1996,9 +1999,8 @@ impl IntentStore {
             IntentRecoveryState::Revoked => Ok(Withdrawal::AlreadyRevoked { generation }),
             IntentRecoveryState::Pending => {
                 // Re-checked under the lock even though it was just read under the same lock: the
-                // lock is stale-tolerant by design (a writer that died mid-update must not wedge a
-                // binding forever), so "the record still says what I decided about" is proven at
-                // the unlink rather than assumed from the lock alone.
+                // The record is re-checked even under the OS lock, so the deletion remains safe
+                // across old binaries and externally interrupted atomic rewrites.
                 if self.remove_if_unchanged_held(id, generation, |current| {
                     current.state == IntentRecoveryState::Pending
                 })? {
@@ -2132,18 +2134,6 @@ impl IntentStore {
     }
 }
 
-/// Per-intent write lock file, removed on drop.
-#[derive(Debug)]
-struct IntentWriteLock {
-    path: PathBuf,
-}
-
-impl Drop for IntentWriteLock {
-    fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
-    }
-}
-
 impl IntentStore {
     /// Delete one intent, but **only** while holding its write lock and only if the record on disk
     /// still matches what the caller decided about.
@@ -2248,6 +2238,16 @@ impl IntentStore {
     /// maintenance); everything on the reconcile path calls [`IntentStore::scan_bounded`].
     pub fn scan(&self, budget: usize) -> Result<ScanPage> {
         self.scan_bounded(budget, None, PassDeadline::unbounded())
+    }
+
+    /// Perform an offline recovery scan on a supported local filesystem.
+    ///
+    /// With no concurrent writers, the unbounded enumeration completes before this returns, so
+    /// `observed_count` is exact and `discovery_truncated` is false. Normal daemon passes must not
+    /// infer either property: their bounded, concurrent observations are lower bounds only.
+    pub fn scan_complete_local(&self, budget: usize) -> Result<ScanPage> {
+        platform_fs::require_supported_local_filesystem(&self.root)?;
+        self.scan(budget)
     }
 
     /// One bounded scan pass for `scope`, resuming from that scope's persisted cursors and
@@ -2609,6 +2609,21 @@ impl IntentStore {
         self.gc_bounded(now_ms, local_host, local_boot, PassDeadline::unbounded())
     }
 
+    /// Run offline recovery GC on a supported local filesystem.
+    ///
+    /// This is the recovery-only counterpart of [`scan_complete_local`]. It is exact only while
+    /// normal writers are stopped; routine bounded GC remains eventual and may report a partial
+    /// slice when its deadline expires.
+    pub fn gc_complete_local(
+        &self,
+        now_ms: i64,
+        local_host: Option<&str>,
+        local_boot: Option<&str>,
+    ) -> Result<GcReport> {
+        platform_fs::require_supported_local_filesystem(&self.root)?;
+        self.gc(now_ms, local_host, local_boot)
+    }
+
     /// The deadline-bounded form, and the one every scheduled sweep uses.
     ///
     /// GC is `O(scope)` file I/O — a `load` and, for a candidate, a lock acquisition and an unlink
@@ -2803,25 +2818,22 @@ impl IntentStore {
         None
     }
 
-    /// Remove orphaned atomic-write temp files and abandoned write locks.
+    /// Remove orphaned atomic-write temp files.
     ///
-    /// Neither is visible to `list_ids` or `gc`'s per-intent loop (they do not carry the intent
-    /// filename shape), so without this an interrupted write leaks into the scope forever.
+    /// They are not visible to `list_ids` or `gc`'s per-intent loop (they do not carry the intent
+    /// filename shape), so without this an interrupted write leaks into the scope forever. Lock
+    /// files are persistent authority objects and are intentionally never swept.
     fn sweep_write_debris(&self, now_ms: i64) {
         let Ok(entries) = std::fs::read_dir(&self.root) else {
             return;
         };
         for entry in entries.flatten() {
             let name = entry.file_name().to_string_lossy().into_owned();
-            let stale_after = if name.ends_with(INTENT_LOCK_SUFFIX) {
-                INTENT_LOCK_STALE
-            } else if name.ends_with(".tmp") {
-                STATION_INTENT_PENDING_TTL
-            } else {
+            if !name.ends_with(".tmp") {
                 continue;
-            };
+            }
             if file_age_ms(&entry.path(), now_ms)
-                .is_some_and(|age| age > stale_after.as_millis() as i64)
+                .is_some_and(|age| age > STATION_INTENT_PENDING_TTL.as_millis() as i64)
             {
                 let _ = std::fs::remove_file(entry.path());
             }
@@ -4460,18 +4472,22 @@ mod tests {
         pending.state = IntentRecoveryState::Pending;
         store.write_pending(&pending).expect("write pending");
         let path = store.path_for(&pending.id());
-        let lock = store
-            .root()
-            .join(format!("{}{INTENT_LOCK_SUFFIX}", pending.id().file_name()));
-
         // A held lock makes the locked load fail with I/O, and the record really is deleted while
         // the stamp is waiting for it — the rollback race the remap exists for.
-        std::fs::write(&lock, b"held by another writer").expect("hold the lock");
         let racing_path = path.clone();
+        let racing_store = store.clone();
+        let racing_id = pending.id();
+        let (ready, start) = std::sync::mpsc::channel();
         let deleter = std::thread::spawn(move || {
+            let lock = racing_store
+                .lock_intent(&racing_id)
+                .expect("hold advisory lock");
+            ready.send(()).expect("signal lock holder");
             std::thread::sleep(std::time::Duration::from_millis(150));
             std::fs::remove_file(&racing_path).expect("the concurrent rollback deletes the record");
+            drop(lock);
         });
+        start.recv().expect("wait for lock holder");
         let stamped = store.stamp_armed_proof("sqlite:/a", "sess", "addr", "inst-1", 2_000);
         deleter.join().expect("deleter");
         assert_eq!(
@@ -4481,9 +4497,19 @@ mod tests {
 
         // The same interleaving, except the re-check cannot decide. `after(.., 1)` lets the entry
         // check answer truthfully and faults only the re-check, which is the decision under test.
-        std::fs::remove_file(&lock).expect("release the lock between the two halves");
         store.write_pending(&pending).expect("rewrite pending");
-        std::fs::write(&lock, b"held by another writer").expect("hold the lock again");
+        let racing_store = store.clone();
+        let racing_id = pending.id();
+        let (ready, start) = std::sync::mpsc::channel();
+        let holder = std::thread::spawn(move || {
+            let lock = racing_store
+                .lock_intent(&racing_id)
+                .expect("hold advisory lock");
+            ready.send(()).expect("signal lock holder");
+            std::thread::sleep(std::time::Duration::from_millis(150));
+            drop(lock);
+        });
+        start.recv().expect("wait for lock holder");
         let _fault = platform_fs::stat_faults::Unstatable::after(&path, 1);
         assert!(
             store
@@ -4491,7 +4517,7 @@ mod tests {
                 .is_err(),
             "an undecidable re-check must not launder an I/O failure into 'nothing to prove'"
         );
-        let _ = std::fs::remove_file(&lock);
+        holder.join().expect("holder");
         let _ = std::fs::remove_dir_all(&run_dir);
     }
 
@@ -4697,6 +4723,112 @@ mod tests {
 
         // And it refuses to write anything that is not a pending record at all.
         assert!(store.write_pending(&live).is_err());
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn persistent_os_lock_is_bounded_and_never_removed() {
+        let run_dir = temp_run_dir("persistent-advisory-lock");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let id = sample_intent("sqlite:/a", "sess", "addr").id();
+        let lock_path = store
+            .root
+            .join(format!("{}{INTENT_LOCK_SUFFIX}", id.file_name()));
+
+        let first = store.lock_intent(&id).expect("first lock");
+        let start = Instant::now();
+        assert!(
+            store.lock_intent(&id).is_err(),
+            "a live lock holder must cause a bounded failure, not lock theft"
+        );
+        assert!(
+            start.elapsed() < INTENT_LOCK_RETRY * (INTENT_LOCK_ATTEMPTS + 2),
+            "the contender must honor the bounded acquisition policy"
+        );
+        assert!(lock_path.exists(), "the advisory lock file is persistent");
+        drop(first);
+        store
+            .lock_intent(&id)
+            .expect("dropping a holder releases the OS lock");
+        assert!(
+            lock_path.exists(),
+            "releasing the OS lock must not delete or replace its file"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn late_old_generation_cannot_delete_or_commit_over_new_generation() {
+        let run_dir = temp_run_dir("late-old-generation");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let old = sample_intent("sqlite:/a", "sess", "addr");
+        store.write_atomic(&old).expect("seed generation one");
+
+        let mut next = old.clone();
+        next.generation = 2;
+        next.occupant = "new-owner".to_string();
+        assert!(store
+            .write_cas(old.generation, &next)
+            .expect("generation two write"));
+
+        assert!(
+            !store
+                .remove_if_unchanged(&old.id(), old.generation, |_| true)
+                .expect("late old delete"),
+            "a late deletion classified from generation N must not remove generation N+1"
+        );
+        assert!(
+            store
+                .commit_if_live_generation(&old.id(), old.generation, || ())
+                .expect("late old commit gate")
+                .is_none(),
+            "a late generation N reconciliation must not publish over generation N+1"
+        );
+        assert_eq!(
+            store
+                .load(&old.id())
+                .expect("generation two remains")
+                .occupant,
+            "new-owner"
+        );
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn offline_complete_scan_reports_exact_count_on_supported_local_storage() {
+        let run_dir = temp_run_dir("offline-complete-scan");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        for i in 0..3 {
+            store
+                .write_atomic(&sample_intent("sqlite:/a", "sess", &format!("addr-{i}")))
+                .expect("seed intent");
+        }
+        let page = store.scan_complete_local(8).expect("supported local scan");
+        assert!(!page.discovery_truncated);
+        assert_eq!(page.observed_count, 3);
+        assert_eq!(page.loaded.len(), 3);
+        let _ = std::fs::remove_dir_all(&run_dir);
+    }
+
+    #[test]
+    fn offline_complete_gc_can_report_reclamation_on_supported_local_storage() {
+        let run_dir = temp_run_dir("offline-complete-gc");
+        let store = IntentStore::open(&run_dir, "hash").expect("store");
+        let mut expired = sample_intent("sqlite:/a", "sess", "addr");
+        expired.state = IntentRecoveryState::Pending;
+        expired.created_at_ms = 0;
+        expired.updated_at_ms = 0;
+        store.write_atomic(&expired).expect("seed expired pending");
+
+        let report = store
+            .gc_complete_local(
+                STATION_INTENT_PENDING_TTL.as_millis() as i64 + 1,
+                None,
+                None,
+            )
+            .expect("supported local offline GC");
+        assert!(report.complete);
+        assert_eq!(report.removed, vec![expired.id()]);
         let _ = std::fs::remove_dir_all(&run_dir);
     }
 

@@ -84,6 +84,11 @@ Look at the `station_intent` line:
 | `quarantined` | Ten consecutive genuine failures; now retrying hourly. | Fix the underlying cause, then resume to reset it. |
 | `revoked` | The station was explicitly detached or its session ended. | Intentional. Explicit attach is the only way back. |
 
+If reconciliation reports a lock or local-filesystem failure, keep the intent scope on owner-private
+fixed local storage. Network shares, NFS/SMB, 9p, and filesystems whose advisory-lock semantics
+cannot be proven are intentionally refused. A busy live writer is bounded and reported; it is never
+stolen. Retry after that writer exits.
+
 Messages are durable the whole time — read them with `telex inbox --address <addr>` — and the turn
 guard warns rather than blocking, so an unrestored intent never wedges a session.
 

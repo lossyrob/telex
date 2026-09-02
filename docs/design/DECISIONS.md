@@ -2299,6 +2299,20 @@ The daemon owns reconciliation as its own operation, not as a `Register` side ef
    a previous daemon's authority. The generation still advances monotonically across the transition,
    so the rollback's generation gate and every CAS holder are unaffected.
 
+9b. **Intent mutation uses persistent OS lock authority — hardening for PR #138.** Each hashed
+   binding has one owner-private lock file in its existing scope. `flock` (supported local Unix) or
+   `LockFileEx` (fixed local Windows) serializes every mutation, including conditional deletion and
+   commit gating. The lock file is never deleted, renamed, replaced, age-taken, or stolen. Unknown
+   or network filesystem semantics, privacy failures, and live lock contention fail closed; process
+   death releases the OS lock. The four-second admin response remains bounded, but an operation
+   already in a blocking filesystem syscall may finish after that response. Its generation check and
+   lock still prevent generation N from overwriting or deleting N+1.
+
+   Bounded enumeration reports truncation/degradation. Counts and over-cap results from such a pass
+   are lower bounds only; routine discovery and GC promise conditional eventual coverage, not a fair
+   stable-tail scan or exact capacity recovery. An offline complete scan on supported local storage
+   is the only path that may state exact counts or reclamation.
+
 **Bounded ADR 0028 exception.** `upgrade` and `rollback` spawn the successor they just installed and
 wait, bounded, for one reconcile report. Without this, the issue's motivating scenario — `telex
 upgrade` with an idle Copilot session — still needs a human. The exception is narrow: only these two
@@ -2323,6 +2337,9 @@ recoverable intents.
 - Rolling back to a binary that predates this work returns those stations to manual `copilot
   resume`; the rollback output says so. Intents are never deleted by a rollback, and the
   singleton-hash namespacing plus schema range keep a pre-feature binary inert with respect to them.
+- Issue #153 remains mandatory for final transactional-authority closure, but it does not block this
+  #138 hardening. This change does not alter schema, manifest layout, file naming, indexes, or the
+  authority work reserved for #153.
 
 **Deviation from the plan, recorded.** The plan specified `ensure_owner_private_dir` for the producer
 root. On Windows that rewrites the directory to a *protected* DACL, which re-propagates inheritance

@@ -2944,20 +2944,18 @@ async fn station_intent_a_pass_past_its_deadline_publishes_nothing_before_or_aft
 /// only ever find *more* evidence of a late publication.
 const POST_RESPONSE_SETTLE: Duration = Duration::from_millis(750);
 
-/// The same property across the **real IPC surface**, at the deadline edge, with the round trip
-/// timed against the published bound.
+/// The same response-bound property across the **real IPC surface**, at the deadline edge.
 ///
 /// The contention is the point. Holding the binding's admission guard makes the wave spend its whole
 /// `RECONCILE_PER_INTENT_TIMEOUT`, which is the case that used to expose two clocks pretending to be
 /// one bound: the handler spawned the pass and raced it with a `timeout` of the same length but a
 /// *different origin*, so it could answer `admin_deadline` while the pass was still mid-wave and the
 /// pass would then go on registering members, advancing cursors, and publishing a report belonging
-/// to a request that had already been answered. One request-originated deadline, handed to the pass
-/// and joined by the handler, is what makes the report the caller receives the pass's own and makes
-/// "it published nothing after answering" a statement about the transport rather than about
-/// `handle_request`.
+/// to a request that had already been answered. One request-originated deadline prevents those
+/// asynchronous pass publications. It does not claim that an already-entered blocking filesystem
+/// rename or unlink cannot finish later; those mutations are guarded by generation and OS lock.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn station_intent_the_ipc_reconcile_round_trip_publishes_nothing_after_it_answers() {
+async fn station_intent_the_ipc_reconcile_round_trip_has_no_late_pass_publication() {
     use telex::daemon_reconcile::{RECONCILE_MAX_CONCURRENCY, RECONCILE_PASS_DEADLINE};
 
     let scenario = Scenario::new("intent-ipc-edge", ProducerBehavior::Healthy).await;
