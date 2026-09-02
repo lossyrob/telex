@@ -1303,7 +1303,6 @@ mod imp {
     const SE_GROUP_OWNER: u32 = 0x0000_0008;
     const SE_GROUP_USE_FOR_DENY_ONLY: u32 = 0x0000_0010;
     const DRIVE_FIXED: u32 = 3;
-    const DRIVE_RAMDISK: u32 = 6;
 
     /// Whether an ACE trustee is one telex considers safe on an owner-private object.
     ///
@@ -1743,7 +1742,11 @@ mod imp {
             })?;
         let wide = wide_null(root.as_os_str());
         let drive_type = unsafe { GetDriveTypeW(wide.as_ptr()) };
-        if drive_type != DRIVE_FIXED && drive_type != DRIVE_RAMDISK {
+        validate_windows_drive_type(path, drive_type)
+    }
+
+    fn validate_windows_drive_type(path: &Path, drive_type: u32) -> Result<()> {
+        if drive_type != DRIVE_FIXED {
             return Err(FsError::Unsupported {
                 capability: "owner-private advisory lock",
                 message: format!(
@@ -1753,6 +1756,11 @@ mod imp {
             });
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_validate_windows_drive_type(path: &Path, drive_type: u32) -> Result<()> {
+        validate_windows_drive_type(path, drive_type)
     }
 
     pub(super) fn read_owner_only_file_with_meta(
@@ -3090,6 +3098,19 @@ mod tests {
             matches!(result, Err(FsError::Unsupported { .. })),
             "a UNC/SMB lock path must fail closed before a lock is trusted: {result:?}"
         );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn advisory_lock_filesystem_validation_accepts_only_fixed_volumes() {
+        let path = Path::new(r"C:\owner-private\intent.lock");
+        assert!(imp::test_validate_windows_drive_type(path, 3).is_ok());
+        for unsupported in [0, 1, 2, 4, 5, 6] {
+            assert!(
+                imp::test_validate_windows_drive_type(path, unsupported).is_err(),
+                "GetDriveTypeW={unsupported} must fail closed"
+            );
+        }
     }
 
     fn temp_dir(label: &str) -> PathBuf {

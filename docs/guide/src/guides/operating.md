@@ -286,9 +286,6 @@ seconds ago is counted correctly, and a station whose recorded producer identity
 (the usual case after `extensions_reload`) is counted as recoverable rather than carrying forward the
 failure the repair fixed.
 
-The report reads the durable records as well as the daemon's own view, so a station you attached
-seconds before draining is counted correctly rather than appearing as nothing to hand over.
-
 `telex upgrade` and `telex rollback` then drive one reconciliation pass on the successor by invoking
 the binary the switch just selected (`telex daemon reconcile` on that binary). That indirection is
 required, not cosmetic: the daemon only accepts IPC from a client whose executable matches its own,
