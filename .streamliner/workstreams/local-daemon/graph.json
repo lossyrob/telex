@@ -3,11 +3,11 @@
   "id": "local-daemon",
   "projectKey": "telex",
   "title": "Local presence/transport daemon (eliminate the per-session holder)",
-  "summary": "The local exchange, both backends, Copilot push bridge, upgrade path, and release-confidence validation are complete. Issue #106 / PR #138 is the active station-intent hardening repair required before the builder hardening gate: preserve desired push registration across daemon replacement without turning durable intent into membership or weakening fencing.",
+  "summary": "The local exchange, both backends, Copilot push bridge, upgrade path, and release-confidence validation are complete. Issue #106 / PR #138 may resume under the operator-accepted station-intent safety and degraded-enumeration contract. A mandatory downstream XL node restores transactional generation authority and unconditional fair maintenance before workstream closure.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-08-27T17:45:00.000Z",
+  "updatedAt": "2026-09-02T18:34:00.000Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -300,7 +300,7 @@
       "id": "station-intent-reconciliation",
       "type": "task",
       "title": "Durable station intent reconciliation after daemon replacement",
-      "summary": "Adopt issue #106 and existing PR #138 rather than replacing them. Reconcile the PR with current main without rewriting history, preserve merged PR #139 Copilot App lifecycle semantics, repair all blocking review findings, and prove bounded restart/drain/upgrade recovery on SQLite and Postgres with isolated test roots and the branch binary. Durable station intent describes desired push registration only; it never establishes membership, attendance, lease ownership, positive liveness, or permission to deliver. The proposed contract remains pending promotion until the integrated exact head is reviewed, green, and merged.",
+      "summary": "Adopt issue #106 and existing PR #138 rather than replacing them. Preserve merged PR #139 Copilot App lifecycle semantics and desired-state-only station intent. Replace age-stealable intent locks with persistent owner-private OS advisory locks that fail closed on unsupported semantics. Keep the four-second response, expose truncated discovery and lower-bound counts, and claim eventual discovery, GC, and over-cap recovery only when required enumeration and reads eventually complete. Promote ADR 0052 and the normative contract, repair all review and CI findings, and prove the complete narrowed outcome on SQLite and Postgres.",
       "status": "in-progress",
       "attention": "focus",
       "repoIds": [
@@ -314,6 +314,20 @@
       },
       "dependsOn": [
         "release-confidence-validation"
+      ]
+    },
+    {
+      "id": "station-intent-transactional-authority",
+      "type": "task",
+      "title": "Transactional station-intent authority and fair maintenance",
+      "summary": "Close the accepted PR #138 degraded-enumeration gap with one transactional station-intent authority per daemon singleton scope. Provide atomic generation mutation, seekable fair discovery and GC, exact counts and over-cap recovery, and a versioned crash-safe migration that prevents old and new writers from splitting authority. This mandatory XL follow-up begins after station-intent-reconciliation and blocks Local Daemon closure, not PR #138 or its hardening gate.",
+      "status": "planned",
+      "attention": "focus",
+      "repoIds": [
+        "telex"
+      ],
+      "dependsOn": [
+        "station-intent-reconciliation"
       ]
     },
     {
@@ -376,7 +390,7 @@
     {
       "id": "closure-gate",
       "type": "gate",
-      "title": "End-to-end unblock + closure",
+      "title": "End-to-end unblock + closure after station-intent authority convergence",
       "summary": "Builder validates the full system: give a real session the new plugin + new telex and confirm it is unblocked end-to-end. Retire superseded mechanisms (pid-watch-as-holder, #3 relay, the re-arm dance) and update SKILL.md.",
       "status": "planned",
       "attention": "focus",
@@ -385,7 +399,8 @@
       ],
       "dependsOn": [
         "hardening-gate",
-        "push-delivery"
+        "push-delivery",
+        "station-intent-transactional-authority"
       ]
     }
   ],
@@ -433,7 +448,7 @@
     {
       "id": "complete",
       "title": "Full deliverable complete",
-      "summary": "This checkpoint completes only after the full seamless upgrade platform (#6), both backends, plugin, release path, and daemon-replacement station-intent repair have landed; builder hardening and closure validation remain separate.",
+      "summary": "This checkpoint completes only after the full seamless upgrade platform (#6), both backends, plugin, release path, daemon-replacement station-intent repair, and downstream transactional station-intent authority have landed; builder hardening and closure validation remain separate.",
       "status": "planned",
       "nodeIds": [
         "seamless-upgrade",
@@ -442,7 +457,8 @@
         "bridge-liveness-hardening",
         "public-release",
         "release-upgrade",
-        "station-intent-reconciliation"
+        "station-intent-reconciliation",
+        "station-intent-transactional-authority"
       ]
     },
     {

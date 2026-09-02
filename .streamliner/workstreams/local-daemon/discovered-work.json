@@ -13,20 +13,14 @@
       "description": "Resolve whether stale-generation local filesystem work can delete or replace newer station-intent state after the response deadline.",
       "affectedOutcome": "Stale-generation work must never delete or replace newer station-intent state while bounded responses permit one already-entered late filesystem commit.",
       "requiredness": "Required for current PR correctness.",
-      "sequencing": "Resolve before PR #138 implementation resumes; retain the same node, branch, and PR.",
-      "recommendedDisposition": "After an explicit operator decision, absorb bounded OS-lock containment into PR #138 or freeze/resume PR #138 on the accepted authority migration.",
-      "selectedDisposition": null,
-      "target": null,
-      "owner": "local-daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 with campaign/operator confirmation",
-      "terminalPath": "An exact steward decision packet plus campaign/operator confirmation selects the same-PR implementation or the modeled prerequisite; implementation, exact-head review, CI, and design inspection then complete on one head.",
-      "status": "untriaged",
-      "dispositionAuthority": "None; operator design decision is pending.",
-      "blocker": {
-        "dependsOn": [],
-        "externalDependsOn": [],
-        "graphGap": true,
-        "reason": "The current graph only lists release-confidence-validation as a dependency of station-intent-reconciliation; no graph dependency owns this pending operator design decision."
-      }
+      "sequencing": "Absorb into the existing issue #106 / PR #138 implementation before final exact-head review; retain the same node, branch, and PR.",
+      "recommendedDisposition": "Absorb persistent owner-private OS advisory locking into PR #138.",
+      "selectedDisposition": "Absorb persistent owner-private OS advisory locking into PR #138: Unix flock and Windows LockFileEx, no age takeover or lock-path deletion, bounded acquisition, process-death release, and fail-closed unsupported semantics.",
+      "target": "station-intent-reconciliation / issue #106 / PR #138",
+      "owner": "PR #138 implementer under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "PR #138 removes age-stealable lock ownership, proves stale generation N cannot delete or replace N+1 on supported Windows and Unix local filesystems, and completes exact-head implementation review, required CI, and design inspection.",
+      "status": "absorbed",
+      "dispositionAuthority": "Operator Option A decision at 2026-09-02T14:34-04:00, relayed by the campaign orchestrator."
     },
     {
       "id": "local-daemon-pr138-m5-enumeration-liveness",
@@ -39,20 +33,14 @@
       "description": "Choose a scope-correct eventual discovery and GC fairness contract that remains compatible with the four-second response bound.",
       "affectedOutcome": "PR #138 must provide accepted eventual discovery, GC coverage, and over-cap recovery for the original station-intent outcome unless the operator explicitly accepts a narrowed degraded-mode contract.",
       "requiredness": "Required for the original node outcome.",
-      "sequencing": "Resolve before PR #138 implementation resumes; retain the same node, branch, and PR.",
-      "recommendedDisposition": "After an explicit operator decision, absorb the accepted contract and implementation into PR #138 or model the authoritative-store prerequisite and freeze/resume the same PR.",
-      "selectedDisposition": null,
-      "target": null,
-      "owner": "local-daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 with campaign/operator confirmation",
-      "terminalPath": "An exact steward decision packet plus campaign/operator confirmation selects the complete same-PR outcome or a modeled prerequisite; no narrowed or partial result is complete without explicit gap acceptance.",
-      "status": "untriaged",
-      "dispositionAuthority": "None; operator design decision is pending.",
-      "blocker": {
-        "dependsOn": [],
-        "externalDependsOn": [],
-        "graphGap": true,
-        "reason": "The current graph only lists release-confidence-validation as a dependency of station-intent-reconciliation; no graph dependency owns this pending operator design decision."
-      }
+      "sequencing": "PR #138 absorbs the accepted degraded contract first. The downstream transactional-authority node begins after station-intent-reconciliation and must complete before Local Daemon closure, but it does not block PR #138.",
+      "recommendedDisposition": "Absorb the truthful degraded contract in PR #138 and route unconditional authority to a mandatory connected XL node.",
+      "selectedDisposition": "Absorb observable truncation, lower-bound counts, conditional eventual coverage, and offline or supported-local-storage recovery into PR #138; route unconditional transactional generation authority, seekable fair discovery and GC, exact counts, and exact over-cap recovery to station-intent-transactional-authority.",
+      "target": "station-intent-reconciliation / PR #138 and downstream station-intent-transactional-authority",
+      "owner": "PR #138 implementer owns the degraded-contract slice; the Local Daemon workstream orchestrator owns XL node/issue materialization and terminal evidence",
+      "terminalPath": "PR #138 promotes and proves the narrowed contract on one reviewed and green exact head. The connected XL node then lands transactional generation authority, seekable fair maintenance, exact counts, migration and rollback safety, and exact over-cap recovery before the Local Daemon closure gate.",
+      "status": "routed",
+      "dispositionAuthority": "Operator Option A decision at 2026-09-02T14:34-04:00, relayed by the campaign orchestrator."
     },
     {
       "id": "local-daemon-pr138-pending-review-slot",
@@ -164,7 +152,7 @@
       "owner": "Application Client issue #152 implementer, with Local Daemon trust/spawn authority owned by the Local Daemon steward and orchestrator",
       "terminalPath": "Complete production InstalledCurrent selection, selector-lock and selection-token admission, exact-image prestarted reuse, and fail-closed upgrade/rollback behavior; promote matching product design and guidance; prove Windows and Linux plus SQLite and Postgres behavior; then obtain exact-head implementation review, required CI, consumer attestations, and design inspection.",
       "status": "routed",
-      "dispositionAuthority": "Campaign/operator decision for application-client-daemon-bootstrap-gap-v1. This work is independent of PR #138 and does not alter either untriaged station-intent graph gap."
+      "dispositionAuthority": "Campaign/operator decision for application-client-daemon-bootstrap-gap-v1. This work is independent of PR #138 and does not alter the M3/M5 station-intent dispositions recorded above."
     }
   ]
 }
