@@ -142,7 +142,10 @@ and unlaunched. One node, tracker, and delivery PR must prove all ten conformanc
 families through the public Rust surface across SQLite and credentialed
 Postgres. The same PR owns public-only Watcher send-only and Operator Station
 bidirectional fixtures, any missing shared-semantic repair, and guidance for
-replacing temporary consumer seams.
+replacing temporary consumer seams. Runtime fixtures use production
+`InstalledCurrent { trusted_root }` daemon bootstrap under the Local
+Daemon-owned selector-admission and process-authentication contract; compile-only
+fixtures are insufficient.
 
 `consumer-integration-gate` remains planned. After conformance review and
 required CI pass on one exact head, Watcher and Operator Station independently
@@ -203,9 +206,28 @@ gate advances with this shaping reconciliation.
   `entra`). The `self-update` feature is not part of an application-consumer
   profile.
 - **The caller owns the async runtime:** the Rust binding runs in a
-  caller-provided Tokio runtime and does not create a hidden runtime, daemon, or
-  sidecar. Lifecycle operation objects preserve completed, uncertain in-flight,
+  caller-provided Tokio runtime and does not create a hidden runtime,
+  application-specific daemon, or sidecar. Selecting the shared installed Telex
+  daemon does not transfer daemon lifecycle ownership to the consumer.
+  Lifecycle operation objects preserve completed, uncertain in-flight,
   untouched, and compensation evidence across cancellation.
+- **Production consumers use trusted installed-current daemon selection:**
+  `ApplicationDaemonBootstrap::InstalledCurrent { trusted_root }` and additive
+  `ApplicationClient::connect_with_daemon` preserve existing config literals.
+  The client holds Local Daemon's shared selector admission from
+  manifest-validated target resolution through authenticated `HelloAck`;
+  upgrade and rollback use exclusive admission across drain and selector
+  publication. A spawned daemon independently holds shared admission through
+  endpoint and readiness publication. Existing current-executable connect and
+  explicit exact-target selection are subordinate development/test support,
+  not production fallback.
+- **Local Daemon owns install and process authority:** Local Daemon validates the
+  trusted root, selector, manifest, immutable versioned target, ownership and
+  writability, platform file identity, persistent selector-lock admission,
+  captured selection token, protocol/capabilities, and readiness publication.
+  Application Client owns the public policy,
+  config-compatible constructor, typed failure projection, and runtime consumer
+  evidence.
 - **Cancellation preserves durable uncertainty:** cancellation never proves that
   an operation was not accepted. Callers persist prepared `RecoveryHandle`
   evidence and reconcile uncertain operations; cancelled receive work does not
@@ -225,8 +247,11 @@ gate advances with this shaping reconciliation.
 - **Conformance is one complete delivery bundle:** issue #152 owns all ten
   semantic families, SQLite and credentialed-Postgres parity, public-only
   send-only and bidirectional fixtures, missing shared-semantic repair, and
-  temporary-seam replacement guidance in one PR. Backend, test-family,
-  fixture, migration, and reviewability splits are not independent confidence
+  temporary-seam replacement guidance in one PR. It also absorbs
+  `application-client-daemon-bootstrap-gap-v1`: installed-current runtime
+  bootstrap, Windows/Linux proof, selector upgrade/rollback races, and product
+  design promotion stay in the same PR. Backend, test-family, fixture,
+  migration, bootstrap, and reviewability splits are not independent confidence
   transitions.
 - **Consumer attestations are pre-integration gate evidence:** after
   implementation review and required CI pass on one exact conformance head,

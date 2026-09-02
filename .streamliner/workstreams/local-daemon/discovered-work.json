@@ -143,6 +143,28 @@
         "supersessionComment": "https://github.com/lossyrob/telex/pull/120#issuecomment-5511099793"
       },
       "dispositionAuthority": "app-existing-campaign-adoption-protocol-v1.md at planning commit 50dfd62 and campaign protocol-follow-through."
+    },
+    {
+      "id": "application-client-daemon-bootstrap-trust-v1",
+      "sourceNode": null,
+      "source": "lossyrob/telex#152 and campaign/operator decision at main 251e85602a5ecf9fbe58fe26494a9cbda90e57d2",
+      "crossReference": "Application Client discovery application-client-daemon-bootstrap-gap-v1",
+      "evidence": {
+        "main": "251e85602a5ecf9fbe58fe26494a9cbda90e57d2",
+        "details": "ApplicationClient attach reaches unparameterized daemon::connect_or_spawn. Peer authentication and spawn both derive their expected executable from the consumer process current_exe, so an external supported library client cannot start a Telex daemon or authenticate a prestarted root Telex daemon through the public lifecycle.",
+        "operatorDecision": "Issue #152 must add production InstalledCurrent selection from an explicitly trusted install root. Local Daemon owns the trust, selector coordination, peer-authentication, spawn, singleton, and readiness-publication invariants."
+      },
+      "description": "Provide the Local Daemon trust and admission contract for Application Client production InstalledCurrent daemon bootstrap.",
+      "affectedOutcome": "Supported external Application Client consumers can use the Telex daemon lifecycle without implementing daemon serve, private IPC, a direct backend, or an application-specific daemon.",
+      "requiredness": "Required for issue #152 public consumer conformance under the explicit operator decision.",
+      "sequencing": "Land the reviewed Local Daemon and Application Client Tier B authority packet before issue #152 product writes, then implement the complete contract in the same issue #152 PR.",
+      "disposition": "Route to Application Client client-conformance / issue #152 and require Local Daemon trust/spawn review on the same exact implementation head.",
+      "decisionState": "accepted",
+      "target": "application-client/client-conformance / issue #152",
+      "owner": "Application Client issue #152 implementer, with Local Daemon trust/spawn authority owned by the Local Daemon steward and orchestrator",
+      "terminalPath": "Complete production InstalledCurrent selection, selector-lock and selection-token admission, exact-image prestarted reuse, and fail-closed upgrade/rollback behavior; promote matching product design and guidance; prove Windows and Linux plus SQLite and Postgres behavior; then obtain exact-head implementation review, required CI, consumer attestations, and design inspection.",
+      "status": "routed",
+      "dispositionAuthority": "Campaign/operator decision for application-client-daemon-bootstrap-gap-v1. This work is independent of PR #138 and does not alter either untriaged station-intent graph gap."
     }
   ]
 }

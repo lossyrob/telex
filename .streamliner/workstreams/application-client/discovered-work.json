@@ -1,8 +1,41 @@
 {
   "schemaVersion": 1,
   "workstreamId": "application-client",
-  "updatedAt": "2026-09-02T14:49:50Z",
+  "updatedAt": "2026-09-02T16:24:08Z",
   "items": [
+    {
+      "id": "application-client-daemon-bootstrap-gap-v1",
+      "sourceNodeId": "client-conformance",
+      "source": "Issue #152 worker discovery, joint Application Client and Local Daemon adjudication, and operator decision",
+      "evidence": {
+        "issue": "https://github.com/lossyrob/telex/issues/152",
+        "repositoryMain": "251e85602a5ecf9fbe58fe26494a9cbda90e57d2",
+        "applicationClientPath": "src/application_client.rs",
+        "daemonPath": "src/daemon.rs",
+        "details": "The public client delegated attach and bounded repair to connect-or-spawn, which derived both the spawn command and expected server image from the consumer executable. External Watcher and Station binaries therefore could not start or authenticate the shared Telex daemon through only the supported client."
+      },
+      "description": "Provide production installed-current daemon selection from an explicitly trusted root, with one immutable manifest-validated target shared by spawn and pre-Hello authentication under Local Daemon selector admission.",
+      "affectedOutcome": "Issue #152 must prove executable public consumer runtime behavior; compile-only fixtures cannot establish consumer consumability.",
+      "requiredness": "Required in the current client-conformance PR.",
+      "sequencing": "Direct-main task and both current-design authorities land before the frozen issue #152 worker resumes. Product implementation, design promotion, review, CI, cross-platform and cross-backend proof, consumer attestations, and design inspection then remain in the same PR.",
+      "disposition": "Absorb the Application Client public bootstrap policy, typed failures, runtime fixtures, and product-design promotion in client-conformance; consume Local Daemon trust item application-client-daemon-bootstrap-trust-v1 without duplicating its lock, token, admission, or readiness-publication ownership.",
+      "target": {
+        "workstreamId": "application-client",
+        "nodeId": "client-conformance",
+        "issue": 152,
+        "owner": "Application Client workstream orchestrator",
+        "crossWorkstreamDiscovery": {
+          "workstreamId": "local-daemon",
+          "id": "application-client-daemon-bootstrap-trust-v1",
+          "owner": "Local Daemon workstream orchestrator"
+        }
+      },
+      "owner": "Application Client workstream orchestrator with Local Daemon trust authority",
+      "terminalPath": "Complete InstalledCurrent implementation and product-design promotion in issue #152, prove the exact head on Windows and Linux against SQLite and credentialed Postgres with public Watcher and Station fixtures, then pass final implementation review, required CI, consumer attestations, and exact-head design inspection.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Operator decision from campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c after joint Application Client and Local Daemon adjudication."
+    },
     {
       "id": "client-conformance-consumer-attestation",
       "sourceNodeId": "client-conformance",

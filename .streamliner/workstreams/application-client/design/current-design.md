@@ -60,7 +60,8 @@ The Application Client owns generic application integration semantics:
 Watcher owns detector execution, scheduling, provider semantics, event-state
 transactions, and runtime policy. Operator Station owns presentation, human
 interaction, and local workflow policy. Telex core owns durable transport,
-membership, delivery rows, leases, and backend authority.
+membership, delivery rows, leases, backend authority, installed-version
+selection, daemon process admission, and upgrade/rollback coordination.
 
 The client does not interpret product metadata, choose human-routing policy,
 become a workflow engine, expose database or daemon-wire details as its public
@@ -188,13 +189,136 @@ transition and migration guidance; exact versioning and deprecation mechanics
 remain implementation choices. The Rust surface does not promise a stable C ABI,
 JSON wire protocol, or cross-language serialization contract.
 
+## Installed-current daemon bootstrap
+
+Production consumers select the shared Telex daemon through an explicitly
+trusted absolute install root:
+
+```rust
+#[non_exhaustive]
+pub enum ApplicationDaemonBootstrap {
+    InstalledCurrent { trusted_root: PathBuf },
+    ExactExecutable { executable: PathBuf },
+}
+
+#[non_exhaustive]
+pub enum DaemonBootstrapFailure {
+    InvalidTrustedRoot,
+    UnsafeInstallAuthority,
+    MissingCurrent,
+    InvalidManifest,
+    IncompatibleManifest,
+    SelectionUnstable,
+    MissingExecutable,
+    ExecutableIdentityMismatch,
+    ForeignDaemon,
+}
+
+impl ApplicationClient {
+    pub async fn connect_with_daemon(
+        config: ApplicationClientConfig,
+        daemon: ApplicationDaemonBootstrap,
+    ) -> Result<Self, ApplicationClientError>;
+}
+```
+
+`InstalledCurrent` is the supported production policy for Watcher and Operator
+Station. The additive constructor preserves existing `ApplicationClientConfig`
+struct literals. Existing `ApplicationClient::connect(config)` retains its
+current-executable behavior for source compatibility, but that path and
+`ExactExecutable` are subordinate development and test support rather than an
+automatic production fallback. Configuration rejects a relative trusted root
+and captures one immutable canonical absolute root before any connection or
+reconnect, so a working-directory change cannot reinterpret it.
+
+For each installed-current connect-or-spawn cycle, the client obtains a shared
+OS-backed selector-admission lease on a persistent lock file under the trusted
+root before reading `current`. Unix uses a local-filesystem advisory lock with
+process-crash release. Windows uses an owner-restricted shared/exclusive
+`LockFileEx` range lock. The lock file is never replaced or deleted as part of
+selection. A filesystem that cannot prove equivalent ownership and lock
+semantics is unsupported.
+
+While holding shared admission, the client validates the root, selector,
+selected manifest, version directory, and executable; resolves one canonical
+target containing the selected tag, manifest identity and load-bearing fields,
+canonical executable path, and platform file identity; and uses that immutable
+target for both spawn and pre-`Hello` peer authentication. It re-reads and
+compares the complete selection immediately before spawn. The parent lease
+remains held through a successful `HelloAck`. Upgrade and rollback hold the same
+lock exclusively across daemon drain, predecessor exit, validated selector
+switch, and selector publication. Lock order is selector admission before daemon
+singleton/spawn admission, and a drain served inside exclusive admission does
+not reacquire the selector lock.
+
+Before binding its serving endpoint or publishing capability or readiness, a
+spawned daemon independently acquires a shared selector-admission lease,
+validates the captured selection token, a fresh installed-current resolution,
+the selected manifest/build metadata, and its own process image, and holds its
+lease through publication. The parent retains its separate lease through
+authenticated `HelloAck`. If either process dies, the remaining or next
+admission still prevents stale-child publication. A token, image, or lock
+mismatch exits without serving. This prevents an old selection from spawning
+after a switch; neither `current` plus `previous` acceptance nor post-spawn
+stale-daemon cleanup is allowed.
+
+Installed-current resolution derives
+`<trusted-root>/versions/<current-tag>/telex[.exe]`; it does not trust an
+arbitrary manifest path or search `PATH`. The canonical version directory and
+executable must remain beneath the canonical trusted root. Selector, manifest,
+version-directory, and executable aliases that can redirect through symlinks or
+reparse points fail closed. The root and authority chain must be owned by the
+current OS user and must not grant write, delete, or ownership control to
+another principal. Owner writability remains necessary for same-user upgrade
+administration.
+
+The selected manifest must bind its tag and executable and supply validated
+build identity, package version, supported schema range, protocol version, and
+required capabilities. These fields are compatibility and selection metadata.
+They do not provide executable-content integrity, signature, publisher or
+package provenance, protection from malicious same-user administration, or
+intra-user isolation.
+
+A prestarted daemon is reusable only when OS peer checks prove the same user,
+reuse-safe PID/start time, UID or SID, canonical process-image path, and
+platform file identity before metadata leaves the client.
+`HelloAck` then proves the selected build identity, auth policy, protocol, and
+capabilities. Linux uses an open process-image descriptor plus device/inode
+identity. Windows captures canonical final path and volume/file identity from
+handles and holds the executable handle with compatible sharing through process
+creation. A different image is a foreign daemon; the client does not trust,
+drain, kill, or start beside it.
+
+Selector admission and authority publication belong to Local Daemon. The
+Application Client owns the public bootstrap policy, additive constructor,
+typed failures, and use of the supported admission flow. Bootstrap failures are
+reported as `ApplicationClientError::DaemonBootstrap(DaemonBootstrapFailure)`.
+The typed reasons are `InvalidTrustedRoot`, `UnsafeInstallAuthority`,
+`MissingCurrent`, `InvalidManifest`, `IncompatibleManifest`,
+`SelectionUnstable`, `MissingExecutable`, `ExecutableIdentityMismatch`, and
+`ForeignDaemon`. They do not expose raw authority paths as durable application
+evidence. Internal selector movement or admission contention retries are
+bounded; exhaustion fails closed as `SelectionUnstable`.
+
+`--skip-drain` remains a CLI break-glass action, not supported installed-current
+evidence. A failed drain, switch, token validation, or readiness publication
+preserves the old selection or leaves consumers visibly unavailable; it never
+authorizes a stale or foreign daemon. SQLite uses release followed by
+next-call spawn. Postgres preserves its accepted fencing and ordered-handoff
+semantics. Both backends use the same installed-current trust boundary.
+`ExactExecutable` applies the same canonical process-image, platform file
+identity, and untrusted-writability checks, remains pinned, and does not follow
+upgrade or rollback. It has no installed manifest authority and does not claim
+one.
+
 The binding executes in a caller-provided Tokio runtime. It does not create a
-hidden runtime, daemon, or sidecar. Cancellation is not evidence that a durable
-operation failed or was absent: callers persist a prepared `RecoveryHandle`
-before the first retryable attempt and reconcile an uncertain result. Cancelling
-receive work does not acknowledge a delivery. Lifecycle cancellation must retain
-typed partial and compensation evidence. The worker owns the concrete API and
-runtime mechanics inside these constraints.
+hidden runtime, application-specific daemon, or sidecar. Selecting and
+auto-spawning the shared installed Telex daemon through this explicit policy
+does not transfer daemon lifecycle ownership to the consumer. Cancellation is
+not evidence that a durable operation failed or was absent: callers persist a
+prepared `RecoveryHandle` before the first retryable attempt and reconcile an
+uncertain result. Cancelling receive work does not acknowledge a delivery.
+Lifecycle cancellation must retain typed partial and compensation evidence.
 
 napi-rs/TypeScript, a separate client crate, C ABI, public socket or sidecar
 protocol, and consumer-specific DTOs remain deferred. The historical TypeScript
@@ -245,11 +369,11 @@ workstreams validate the supported client without a private fallback.
 
 - **High confidence:** the shared semantic boundary, Rust core, identity model,
   explicit capability split, exact-delivery acknowledgement, typed operation
-  recovery, quarantine evidence, backend-neutral contracts, and Rust-first
-  binding boundary are accepted authority.
-- **Unresolved implementation details:** concrete Rust API and ownership shape,
-  feature aliases, compatibility and deprecation mechanics, cancellation API,
-  test layout, and consumer host projection.
+  recovery, quarantine evidence, backend-neutral contracts, Rust-first binding,
+  and installed-current daemon bootstrap boundary are accepted authority.
+- **Unresolved implementation details:** feature aliases beyond the accepted
+  profiles, broader compatibility and deprecation mechanics, test layout, and
+  consumer host projection.
 - **Deferred design choices:** TypeScript/napi-rs, a separate crate, C ABI,
   public socket or sidecar protocols, consumer DTOs, and later language order.
 - **Not yet proven:** the complete cross-backend conformance matrix, consumer
