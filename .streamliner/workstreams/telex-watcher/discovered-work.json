@@ -1,0 +1,46 @@
+{
+  "schemaVersion": 1,
+  "workstreamId": "telex-watcher",
+  "updatedAt": "2026-09-02T14:21:42Z",
+  "items": [
+    {
+      "id": "watcher-runtime-consumer-gate-graph-gap-v1",
+      "sourceNodeId": "watcher-runtime-core",
+      "requiredness": "required-before-future-runtime-launch",
+      "description": "Determine whether the Watcher orchestrator prompt, Watcher graph, or Application Client consumer-integration gate needs correction so future Watcher runtime launch has explicit, acyclic ordering.",
+      "disposition": "route-to-design-adjudication",
+      "target": {
+        "id": "watcher-runtime-consumer-gate-adjudication-v1",
+        "owners": [
+          "Telex Watcher design steward",
+          "Application Client design steward",
+          "Application Client workstream orchestrator"
+        ]
+      },
+      "status": "routed",
+      "decisionState": "unresolved",
+      "terminalPath": "Exactly one of prompt correction, graph dependency, or gate reshape.",
+      "dispositionAuthority": "Campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c.",
+      "evidence": [
+        {
+          "source": "planning-prompt",
+          "commit": "50dfd62f665c411d8d61cfc5aabc15e9e5e823b4",
+          "path": "streamliner/telex/prompts/app/telex-watcher-workstream-orchestrator-app-v1.md",
+          "details": "The prompt says watcher-runtime-core remains planned until Application Client client-conformance and the consumer-integration gate permit it."
+        },
+        {
+          "source": "watcher-graph",
+          "repositoryMain": "b17bec16a0ab37d73629627c27d22db74c11e136",
+          "path": ".streamliner/workstreams/telex-watcher/graph.json",
+          "details": "watcher-runtime-core depends on dumb-watcher-contract-gate and externally on Application Client client-conformance; it does not name consumer-integration-gate."
+        },
+        {
+          "source": "campaign-roadmap",
+          "repositoryMain": "b17bec16a0ab37d73629627c27d22db74c11e136",
+          "path": ".streamliner/shaping/roadmap.md",
+          "details": "The roadmap keeps both consumer runtimes blocked through conformance and the consumer-integration gate, and keeps watcher-runtime-core planned until client-conformance proves the required cross-backend behavior."
+        }
+      ]
+    }
+  ]
+}
