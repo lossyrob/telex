@@ -1,0 +1,17 @@
+[package]
+name = "telex-application-client-consumer"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[workspace]
+
+[dependencies]
+telex = { path = "../../..", default-features = false }
+tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
+
+[features]
+default = []
+sqlite = ["telex/sqlite"]
+postgres = ["telex/postgres"]
+entra = ["telex/entra"]
