@@ -21,11 +21,24 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Install Node
+        # Pinned: the bridge contract step below relies on Node's own positional-glob expansion,
+        # which requires Node >= 21. Without a pin the step silently depends on whatever the
+        # runner image ships, and on Node 20 the quoted pattern is passed through literally and
+        # matches nothing.
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Check embedded bridge JS syntax
         run: node --check copilot/bridge/extension.mjs
 
-      - name: Test embedded bridge busy/idle contract
-        run: node --test copilot/bridge/busy-state.test.mjs
+      - name: Test embedded bridge contracts
+        # Glob rather than a single hardcoded path, so every `copilot/bridge/*.test.mjs` actually
+        # runs (the busy/idle contract and the probe protocol). The glob form is used instead of
+        # passing the directory because Node's directory discovery does not resolve on Windows
+        # runners; Node expands this pattern itself on both platforms.
+        run: node --test "copilot/bridge/*.test.mjs"
 
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -70,6 +83,14 @@ jobs:
 
       - name: Exercise generated fallback launcher
         run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite copilot_fallback
+
+      - name: Exercise station-intent reconciliation
+        # Same macOS/Windows coverage as the fallback E2E: the intent store, the owner-private
+        # credential rules, and the producer probe are all platform-specific — and those live in
+        # the *core* station-intent suite, not only in the three process tests, so both run here.
+        # `build-test` covers Linux and Windows; without this line macOS never exercises the
+        # credential rules, the probe transports, or the scan cursor at all.
+        run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite --test station_intent station_intent_
 
   feature-check:
     name: Feature combinations build

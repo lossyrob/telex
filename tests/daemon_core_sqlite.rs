@@ -804,6 +804,7 @@ async fn section17_15_ipc_compatibility() {
         address: Some("addr:a".to_string()),
         message_id: Some(7),
         lease_epoch: Some(3),
+        drain_intents: None,
     };
     let ack_json = serde_json::to_string(&ack_frame).expect("ack json");
     assert!(ack_json.contains("ack-no-op"));
