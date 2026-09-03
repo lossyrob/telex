@@ -91,7 +91,9 @@ network/rate-limit error aborts without changing `current`. Set `GITHUB_TOKEN` t
 rate limit. Prebuilt binaries are published for Windows (x86_64, ARM64), Linux (x86_64), and
 macOS (Apple Silicon, Intel); on other platforms install from source with
 `cargo install --git https://github.com/lossyrob/telex --features entra`. If telex is already on
-the resolved release it reports "already current" and does nothing (override with `--force`).
+the resolved release it reports "already current" and does nothing. `--force`
+may repair a missing target, but it never overwrites an existing immutable
+version directory; publish a new version tag instead.
 
 `telex upgrade` reads the downloaded (checksum-verified) binary's own metadata by running it
 once (`telex --json version`) before installing; in locked-down environments an OS quarantine

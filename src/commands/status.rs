@@ -254,7 +254,11 @@ async fn daemon_detail(ctx: &Ctx) -> Result<Option<DaemonStatus>> {
             Ok(mut client) => {
                 let response = client
                     .request(&Request::Status {
-                        store_key: Some(store_key.clone()),
+                        // Top-level status needs the all-store view to warn
+                        // when the requested address is active on another
+                        // backend. Store-scoped consumers request an exact
+                        // store directly.
+                        store_key: None,
                         detail: true,
                         proof: Some(cap.admin_cap),
                     })

@@ -2192,3 +2192,142 @@ hidden mediation dependency. Historical mediation evidence remains useful, but n
 current Station requirement, downstream `operator-broker`, or Telex core behavior
 depends on it. Any future first-party mediation product requires its own design decision
 and cannot silently re-enter the Station contract.
+
+## 0053 — Application Client selects the daemon through an explicitly trusted installed-current bootstrap
+
+- **Date:** 2026-09-02
+- **Status:** Accepted (issue #152)
+- **Numbering.** ADR 0052 is reserved for the independent PR #138
+  daemon-replacement station-intent decision and is not allocated here.
+
+**Context.** Watcher and Operator Station need to reach the shared Telex daemon
+without parsing CLI output, opening raw private daemon IPC as a public seam,
+searching `PATH`, embedding `daemon serve` in the consumer, or starting beside a
+foreign executable. The current `ApplicationClient::connect` behavior binds
+peer identity to the calling executable, which is source-compatible for
+existing tests but is not a supported production selection for external
+consumers. Absent an explicit installed-target contract, each consumer would
+reinvent trust and either duplicate the shared client or ship a
+product-private fallback. Issue #152 owns the Application Client conformance
+outcome and this decision.
+
+**Decision.** Production consumers select the daemon through an additive,
+config-compatible public bootstrap policy that lives on the supported
+Application Client surface:
+
+- `ApplicationDaemonBootstrap::InstalledCurrent { trusted_root }` is the
+  supported production seam. `ApplicationClient::connect_with_daemon(config,
+  daemon)` is additive so existing `ApplicationClientConfig` struct literals
+  continue to compile.
+- `ApplicationDaemonBootstrap::ExactExecutable { executable }` is a
+  subordinate, pinned development-and-test seam. It applies the same
+  canonical process-image and untrusted-writability checks, has no installed
+  manifest authority, and does not follow upgrade or rollback.
+- The existing `ApplicationClient::connect(config)` retains source-compatible
+  current-executable behavior for legacy and development callers. It is
+  never an automatic fallback from `InstalledCurrent`.
+
+The trusted root is an explicitly configured absolute path. Configuration
+rejects a relative root and captures one immutable canonical absolute root
+before any connect or reconnect, so a later working-directory change cannot
+reinterpret it. `current` is the sole selection authority; `previous` is
+bookkeeping for rollback and is never independently acceptable.
+
+For each `InstalledCurrent` connect-or-spawn cycle the client resolves and
+validates one immutable target:
+
+- selected tag, versioned executable, build identity, package version,
+  supported schema range, protocol version, and required security and
+  Application Client capabilities read from the selected manifest bound to
+  its tag and executable;
+- canonical containment of the selected version directory and executable
+  beneath the canonical trusted root;
+- current-OS-user ownership of the root and the authority chain, denying
+  write, delete, or ownership control to any other principal on Unix
+  permissions and Windows DACLs (owner writability remains permitted for
+  same-user upgrade administration);
+- refusal of any selector, manifest, version directory, or executable that
+  redirects through a symlink or reparse point;
+- canonical selected target used for both spawn and pre-`Hello` peer
+  authentication; and
+- platform file and process identity (Linux process-image descriptor plus
+  device/inode; Windows canonical final path plus volume/file identity held
+  through process creation with compatible sharing).
+
+These fields are compatibility and selection metadata. They do **not**
+provide an executable-content digest or hash, an executable-content
+migration or missing-digest rule, a signature, publisher or package
+provenance, protection from malicious same-user administration, or
+intra-user isolation. The bundle-integrity SHA-256 recorded in
+`application-client.bundle.json` is publication-time evidence for the design
+sources; it is **not** executable identity and never serves as bootstrap
+trust.
+
+Selector movement is serialized by one persistent OS-backed
+shared/exclusive coordination lock beneath the trusted install root. Unix
+uses a local-filesystem advisory shared/exclusive lock with process-crash
+release; Windows uses the equivalent owner-restricted `LockFileEx` range
+lock. The lock file is never replaced or deleted as part of selection.
+Filesystems that cannot prove equivalent ownership and shared/exclusive
+lock semantics are unsupported and fail closed.
+
+- Parent connect-or-spawn acquires the shared admission lease before
+  reading `current`, holds it through resolution, prestarted or spawned
+  peer authentication, and successful `HelloAck`.
+- The spawned child independently acquires a shared admission lease
+  before binding its serving endpoint or publishing capability or
+  readiness. It validates the captured selection token, a fresh
+  installed-current resolution, the selected manifest and build metadata,
+  and its own process image; it releases only after publishing endpoint,
+  capability, and readiness.
+- Upgrade and rollback acquire the exclusive lease across candidate
+  validation, matching-daemon drain, predecessor exit, atomic
+  `previous`/`current` switch, and selector publication. The drain
+  operates inside that exclusive context and does not reacquire the
+  shared lock.
+- Lock order is selector admission before daemon singleton or spawn
+  admission.
+- Selector movement and admission contention retries are bounded and
+  observed only for `current`; exhaustion fails closed as
+  `SelectionUnstable`.
+- A prestarted daemon is reusable only when reuse-safe PID/start-time,
+  UID or SID, canonical process-image path, and platform file identity
+  match the frozen target. A foreign peer is refused before the client
+  sends `Hello` or any store or session metadata.
+
+Bootstrap failures project as `ApplicationClientError::DaemonBootstrap(
+DaemonBootstrapFailure)` with typed reasons `InvalidTrustedRoot`,
+`UnsafeInstallAuthority`, `MissingCurrent`, `InvalidManifest`,
+`IncompatibleManifest`, `SelectionUnstable`, `MissingExecutable`,
+`ExecutableIdentityMismatch`, and `ForeignDaemon`. Durable public evidence
+does not expose raw authority paths. The client never drains, kills,
+trusts, or starts beside a foreign daemon.
+
+Local Daemon owns the install layout, manifest and build contract,
+selector lock and selection token, daemon process admission, OS peer
+checks, readiness publication, and upgrade and rollback coordination.
+Application Client owns the public bootstrap policy, additive
+constructor, typed failure projection, and use of the supported admission
+flow. The caller-owned Tokio runtime and explicit reconcile-after-restart
+membership behavior remain unchanged.
+
+**Consequences.** External Watcher and Operator Station consumers reach
+one supported public seam without a private client, CLI parsing, raw
+daemon IPC, spike helper, subprocess courier, or hidden runtime. The
+promoted contract lives in
+[application-client.md](application-client.md) and
+[daemon.md](daemon.md); the supported Rust surface is documented in
+[application-client-core.md](../application-client-core.md). The
+installed-current mechanism must have Windows and Linux process tests
+covering already-running matching daemons, current-version spawn,
+upgrade, rollback, selector movement at each admission boundary, stale
+prestarted images, selector-client death during spawn, PID reuse,
+symlink or reparse escape, untrusted writability, incompatible manifest
+or build metadata, platform file identity mismatch, and readiness
+refusal. Credentialed Postgres and Linux process evidence remain
+authoritative CI obligations for issue #152; this decision does not by
+itself pass `consumer-integration-gate`, publish a release, complete
+packaging or operational hardening, or authorize consumer launch. ADR
+0049 remains the load-bearing shared-client boundary; this decision
+narrows how a consumer reaches that supported client without weakening
+its semantics or introducing a new language, ABI, or process boundary.

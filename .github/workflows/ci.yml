@@ -43,11 +43,39 @@ jobs:
       - name: Test
         run: cargo test --workspace --verbose
 
+      - name: Complete SQLite Application Client suite
+        # The public Application Client battery, the executable external
+        # consumer fixture, and the isolated InstalledCurrent process proofs all
+        # spawn real daemons from an isolated installed layout, so they run on
+        # both OS axes with the SQLite backend selected explicitly.
+        run: >-
+          cargo test --no-default-features --features sqlite
+          --test application_client_conformance
+          --test application_client_core
+          --test application_client_binding
+          --test application_client_bundle
+          --test application_client_fixture
+          --test installed_current_process
+          -- --test-threads=1
+
       - name: Check formatting
         run: cargo fmt --check
 
       - name: Run Clippy
         run: cargo clippy --workspace -- -D warnings
+
+      - name: Run Clippy over the Application Client test surface
+        # Warnings-denied lint for the conformance battery, the external
+        # consumer fixture harness, and the InstalledCurrent process proofs.
+        run: >-
+          cargo clippy --no-default-features --features sqlite
+          --test application_client_conformance
+          --test application_client_core
+          --test application_client_binding
+          --test application_client_bundle
+          --test application_client_fixture
+          --test installed_current_process
+          -- -D warnings
 
   copilot-fallback:
     name: Copilot fallback E2E (${{ matrix.os }})
@@ -111,6 +139,21 @@ jobs:
           cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features "sqlite,postgres"
           cargo check --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features "sqlite,entra"
 
+      - name: Consumer fixture stays free of private seams
+        # The external fixture is a public-surface consumer stand-in. Compiling
+        # it is not enough: assert it never names daemon, install, backend, IPC,
+        # CLI, registry, or profile internals.
+        run: |
+          set -o pipefail
+          if grep -REn 'telex::(daemon|daemon_ipc|daemon_bootstrap|install|backend|cli|commands|ipc|registry|profiles|config|session_watch|identity|release|output)\b' tests/fixtures/application-client-consumer/src; then
+            echo "::error::the external consumer fixture reached a private/internal telex module"
+            exit 1
+          fi
+          echo "ok: the consumer fixture uses only telex::application_client and telex::model"
+
+      - name: Lint the external consumer fixture with warnings denied
+        run: cargo clippy --manifest-path tests/fixtures/application-client-consumer/Cargo.toml --no-default-features --features sqlite --all-targets -- -D warnings
+
       - name: Release-upgrade fallback error when self-update is compiled out
         # A build without `self-update` must reject `telex upgrade` (no --from) with an
         # actionable error AND a non-zero exit. Assert both, so a regression where the stub
@@ -169,3 +212,36 @@ jobs:
           TELEX_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           TELEX_PG_REQUIRE: "1"
         run: cargo test --all-features --test conformance --test daemon_core_postgres
+
+      - name: Run the Application Client battery and consumer fixtures on live Postgres
+        # The same backend-neutral semantic battery as the SQLite leg, plus the
+        # executable external consumer probes, against per-run and per-test
+        # unique schemas. TELEX_PG_REQUIRE=1 makes a missing or empty URL a hard
+        # failure, so this job can never pass by silently skipping Postgres.
+        env:
+          TELEX_PG_REQUIRE: "1"
+          PGHOST: 127.0.0.1
+          PGPORT: "5432"
+          PGUSER: postgres
+          PGPASSWORD: postgres
+          PGDATABASE: postgres
+        run: |
+          export TELEX_PG_URL="postgres://${PGUSER}:${PGPASSWORD}@${PGHOST}:${PGPORT}/${PGDATABASE}"
+          cargo test --all-features \
+            --test application_client_conformance \
+            --test application_client_fixture \
+            -- --test-threads=1
+
+      - name: Missing Postgres URL fails closed under TELEX_PG_REQUIRE
+        # Proves the fail-closed guard itself: with TELEX_PG_REQUIRE=1 and no
+        # URL the Postgres legs must fail rather than skip.
+        env:
+          TELEX_PG_REQUIRE: "1"
+          TELEX_PG_URL: ""
+        run: |
+          set -o pipefail
+          if cargo test --all-features --test application_client_conformance -- --test-threads=1 postgres_application_client_conformance; then
+            echo "::error::TELEX_PG_REQUIRE=1 with no TELEX_PG_URL must fail, not skip"
+            exit 1
+          fi
+          echo "ok: the Postgres Application Client leg fails closed without credentials"

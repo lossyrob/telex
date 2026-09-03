@@ -6,9 +6,21 @@ publish = false
 
 [workspace]
 
+[lib]
+name = "telex_application_client_consumer"
+path = "src/lib.rs"
+
+# Thin selector binary so the probes are *executed*, not merely compiled.
+[[bin]]
+name = "telex-application-client-consumer"
+path = "src/main.rs"
+
 [dependencies]
 telex = { path = "../../..", default-features = false }
-tokio = { version = "1", default-features = false, features = ["macros", "sync"] }
+tokio = { version = "1", default-features = false, features = ["macros", "sync", "rt", "rt-multi-thread", "time"] }
+# Required by the public `CompoundStep` / `CompoundDispositionRequest` surface,
+# which carries `serde_json::Value` declarations and outcomes.
+serde_json = "1"
 
 [features]
 default = []

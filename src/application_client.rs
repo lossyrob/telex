@@ -13,6 +13,8 @@
 //! persisted [`RecoveryHandle`] prepared before the first attempt.
 
 use crate::backend::Backend;
+use crate::daemon_bootstrap::BootstrapPolicy;
+pub use crate::daemon_bootstrap::DaemonBootstrapFailure;
 use crate::daemon_ipc::{
     DeliveryMode, MemberStatus, NeedsAttachReason, Request, Response,
     StationCapability as WireCapability,
@@ -114,6 +116,7 @@ pub struct CollisionEvidence {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[non_exhaustive]
 pub enum ApplicationClientError {
     MembershipLost {
         address: String,
@@ -163,6 +166,10 @@ pub enum ApplicationClientError {
     },
     TransportUncertain(String),
     Unavailable(String),
+    /// Fail-closed daemon bootstrap error carrying one typed
+    /// [`DaemonBootstrapFailure`]. Durable public evidence never carries the
+    /// raw authority path or manifest binding.
+    DaemonBootstrap(DaemonBootstrapFailure),
 }
 
 impl fmt::Display for ApplicationClientError {
@@ -213,6 +220,9 @@ impl fmt::Display for ApplicationClientError {
                 write!(f, "application transport outcome is uncertain: {detail}")
             }
             Self::Unavailable(detail) => write!(f, "application client unavailable: {detail}"),
+            Self::DaemonBootstrap(reason) => {
+                write!(f, "daemon bootstrap failed: {reason}")
+            }
         }
     }
 }
@@ -255,6 +265,42 @@ pub struct ApplicationClientConfig {
     pub responsibility: ApplicationResponsibility,
     pub backend: Option<String>,
     pub db_override: Option<String>,
+}
+
+/// Explicit daemon bootstrap policy for the supported Application Client.
+///
+/// - [`ApplicationDaemonBootstrap::InstalledCurrent`] is the production seam:
+///   the client resolves the shared Telex daemon through the explicitly
+///   trusted absolute install root. Configuration rejects a relative root and
+///   captures one immutable canonical absolute root before any connect or
+///   reconnect, so a later working-directory change cannot reinterpret it.
+/// - [`ApplicationDaemonBootstrap::ExactExecutable`] is a pinned
+///   development-and-test seam. It applies the same canonical process-image
+///   and untrusted-writability checks, has no installed manifest authority,
+///   and does not follow upgrade or rollback.
+///
+/// Neither mode searches `PATH`, embeds `daemon serve` in the consumer, opens
+/// raw daemon IPC as a public seam, or falls back automatically from
+/// `InstalledCurrent`.
+#[derive(Clone, Debug)]
+#[non_exhaustive]
+pub enum ApplicationDaemonBootstrap {
+    InstalledCurrent { trusted_root: std::path::PathBuf },
+    ExactExecutable { executable: std::path::PathBuf },
+}
+
+impl ApplicationDaemonBootstrap {
+    fn freeze(self) -> Result<Arc<BootstrapPolicy>, ApplicationClientError> {
+        let result = match self {
+            ApplicationDaemonBootstrap::InstalledCurrent { trusted_root } => {
+                BootstrapPolicy::installed_current(trusted_root)
+            }
+            ApplicationDaemonBootstrap::ExactExecutable { executable } => {
+                BootstrapPolicy::exact_executable(executable)
+            }
+        };
+        result.map_err(ApplicationClientError::DaemonBootstrap)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -671,6 +717,10 @@ pub struct ApplicationClient {
     outstanding_acks: Mutex<BTreeSet<(i64, String, i64)>>,
     recovery_attempts: Mutex<BTreeMap<String, RecoveryAttempt>>,
     lifecycle_observations: Mutex<BTreeMap<String, LifecycleObservation>>,
+    /// Frozen daemon bootstrap policy applied to every connect-or-spawn cycle.
+    /// `None` retains the legacy current-executable behavior for existing
+    /// [`ApplicationClient::connect`] callers.
+    bootstrap: Option<Arc<BootstrapPolicy>>,
 }
 
 #[derive(Clone, Copy)]
@@ -960,6 +1010,31 @@ impl<'a> LifecycleOperation<'a> {
 
 impl ApplicationClient {
     pub async fn connect(config: ApplicationClientConfig) -> Result<Self, ApplicationClientError> {
+        Self::connect_inner(config, None).await
+    }
+
+    /// Connect through an explicit daemon bootstrap policy.
+    ///
+    /// This is the supported production path for public consumers: they select
+    /// [`ApplicationDaemonBootstrap::InstalledCurrent`] against an explicitly
+    /// trusted absolute install root, and every connect-or-spawn cycle uses
+    /// the frozen policy through Local Daemon-owned selector admission. The
+    /// existing [`ApplicationClient::connect`] and
+    /// [`ApplicationDaemonBootstrap::ExactExecutable`] paths remain for
+    /// development and tests; the client does not fall back from
+    /// `InstalledCurrent` to either of them.
+    pub async fn connect_with_daemon(
+        config: ApplicationClientConfig,
+        daemon: ApplicationDaemonBootstrap,
+    ) -> Result<Self, ApplicationClientError> {
+        let policy = daemon.freeze()?;
+        Self::connect_inner(config, Some(policy)).await
+    }
+
+    async fn connect_inner(
+        config: ApplicationClientConfig,
+        bootstrap: Option<Arc<BootstrapPolicy>>,
+    ) -> Result<Self, ApplicationClientError> {
         let (_, profile) =
             crate::profiles::resolve(config.backend.as_deref(), config.db_override.as_deref())
                 .map_err(unavailable)?;
@@ -980,6 +1055,7 @@ impl ApplicationClient {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
             lifecycle_observations: Mutex::new(BTreeMap::new()),
+            bootstrap,
         })
     }
 
@@ -1011,22 +1087,10 @@ impl ApplicationClient {
     ) -> Result<MembershipHandle, ApplicationClientError> {
         if policy == RecoveryPolicy::Strict {
             let current = self.membership(&spec.address)?;
-            let status = match self
-                .request(
-                    Request::Status {
-                        store_key: Some(self.store_key.clone()),
-                        detail: false,
-                        proof: None,
-                    },
-                    false,
-                )
-                .await?
-            {
-                Response::StatusReport { status } => status,
-                _ => return Err(unexpected_response("status")),
-            };
+            let status = self.store_status().await?;
             if status.members.iter().any(|member| {
-                member.session_id == self.runtime_id.0
+                member.store_key == self.store_key
+                    && member.session_id == self.runtime_id.0
                     && member.address == spec.address
                     && !member.idle
             }) {
@@ -1054,19 +1118,24 @@ impl ApplicationClient {
                 .await
                 .map_err(unavailable)?
             {
-                if lease.owner_instance_id.as_deref()
-                    != Some(current.handle.owner_instance_id.as_str())
-                {
-                    let error = ApplicationClientError::Collision(CollisionEvidence {
-                        address: spec.address.clone(),
-                        owner_instance_id: lease.owner_instance_id,
-                        lease_epoch: lease.lease_epoch,
-                        guidance:
-                            "wait for the current owner or use an explicitly authorized reset"
-                                .to_string(),
-                    });
-                    self.record_lifecycle_failure(spec, &error);
-                    return Err(error);
+                // Only a *different, present* owner is a collision. A released
+                // lease (no owner instance) is an unowned address -- the state a
+                // drained daemon restart leaves behind -- and must project as a
+                // membership loss, not as a competing owner the caller is told
+                // to wait for.
+                if let Some(owner) = lease.owner_instance_id.as_deref() {
+                    if owner != current.handle.owner_instance_id.as_str() {
+                        let error = ApplicationClientError::Collision(CollisionEvidence {
+                            address: spec.address.clone(),
+                            owner_instance_id: lease.owner_instance_id,
+                            lease_epoch: lease.lease_epoch,
+                            guidance:
+                                "wait for the current owner or use an explicitly authorized reset"
+                                    .to_string(),
+                        });
+                        self.record_lifecycle_failure(spec, &error);
+                        return Err(error);
+                    }
                 }
             }
             let error = ApplicationClientError::MembershipLost {
@@ -2757,19 +2826,9 @@ impl ApplicationClient {
     }
 
     pub async fn health(&self) -> Result<Vec<ApplicationHealth>, ApplicationClientError> {
-        let status = match self
-            .request(
-                Request::Status {
-                    store_key: Some(self.store_key.clone()),
-                    detail: false,
-                    proof: None,
-                },
-                false,
-            )
-            .await
-        {
-            Ok(Response::StatusReport { status }) => Some(status),
-            Ok(_) => return Err(unexpected_response("health-status")),
+        let status = match self.store_status().await {
+            Ok(status) => Some(status),
+            Err(error @ ApplicationClientError::DaemonBootstrap(_)) => return Err(error),
             Err(_) => None,
         };
         let memberships = self.memberships.lock().unwrap().clone();
@@ -2779,7 +2838,8 @@ impl ApplicationClient {
             .map(|local| {
                 let member = status.as_ref().and_then(|status| {
                     status.members.iter().find(|member| {
-                        member.session_id == self.runtime_id.0
+                        member.store_key == self.store_key
+                            && member.session_id == self.runtime_id.0
                             && member.address == local.handle.address
                     })
                 });
@@ -2819,10 +2879,11 @@ impl ApplicationClient {
                             });
                     }
                 } else if let Some(other) = status.as_ref().and_then(|status| {
-                    status
-                        .members
-                        .iter()
-                        .find(|member| member.address == local.handle.address && !member.idle)
+                    status.members.iter().find(|member| {
+                        member.store_key == self.store_key
+                            && member.address == local.handle.address
+                            && !member.idle
+                    })
                 }) {
                     projected
                         .lifecycle
@@ -3088,19 +3149,84 @@ impl ApplicationClient {
         }
     }
 
+    /// Read this client's own store-scoped daemon status.
+    ///
+    /// The daemon's unprivileged `detail: false` projection deliberately omits
+    /// members, recent errors, and waiters; that boundary is a landed Local
+    /// Daemon decision and is not changed here. An Application Client that
+    /// asked only for the unprivileged projection could never observe its own
+    /// membership, so strict reconciliation always reported a lost attachment
+    /// and `health()` always reported `registered: false`. Present the
+    /// same-user capability proof from the owner-private run directory -- the
+    /// pattern every other first-party client already uses -- and fall back to
+    /// the unprivileged projection when no proof is readable or the daemon
+    /// rejects a rotated one.
+    async fn store_status(
+        &self,
+    ) -> Result<crate::daemon_ipc::DaemonStatus, ApplicationClientError> {
+        let proof = crate::daemon::DaemonPaths::current()
+            .ok()
+            .and_then(|paths| crate::daemon::read_cap_file(&paths.cap_path).ok())
+            .map(|cap| cap.admin_cap);
+        let privileged = proof.is_some();
+        let response = self
+            .request(
+                Request::Status {
+                    store_key: Some(self.store_key.clone()),
+                    detail: privileged,
+                    proof,
+                },
+                false,
+            )
+            .await?;
+        match response {
+            Response::StatusReport { status } => Ok(status),
+            Response::Error { .. } if privileged => match self
+                .request(
+                    Request::Status {
+                        store_key: Some(self.store_key.clone()),
+                        detail: false,
+                        proof: None,
+                    },
+                    false,
+                )
+                .await?
+            {
+                Response::StatusReport { status } => Ok(status),
+                _ => Err(unexpected_response("status")),
+            },
+            _ => Err(unexpected_response("status")),
+        }
+    }
+
     async fn request_staged(
         &self,
         request: Request,
         spawn: bool,
     ) -> Result<Response, RequestFailure> {
-        let mut client = if spawn {
-            crate::daemon::connect_or_spawn(&self.store_key)
-                .await
-                .map_err(|error| RequestFailure::BeforePeerDecision(unavailable(error)))?
-        } else {
-            crate::daemon::connect_existing(&self.store_key)
-                .await
-                .map_err(|error| RequestFailure::BeforePeerDecision(unavailable(error)))?
+        let mut client = match &self.bootstrap {
+            Some(policy) => {
+                if spawn {
+                    crate::daemon::connect_or_spawn_with_bootstrap(&self.store_key, policy)
+                        .await
+                        .map_err(map_bootstrap_or_transport)?
+                } else {
+                    crate::daemon::connect_existing_with_bootstrap(&self.store_key, policy)
+                        .await
+                        .map_err(map_bootstrap_or_transport)?
+                }
+            }
+            None => {
+                if spawn {
+                    crate::daemon::connect_or_spawn(&self.store_key)
+                        .await
+                        .map_err(|error| RequestFailure::BeforePeerDecision(unavailable(error)))?
+                } else {
+                    crate::daemon::connect_existing(&self.store_key)
+                        .await
+                        .map_err(|error| RequestFailure::BeforePeerDecision(unavailable(error)))?
+                }
+            }
         };
         if Self::is_application_request(&request)
             && !client
@@ -3672,6 +3798,21 @@ fn transport_uncertain(error: impl fmt::Display) -> ApplicationClientError {
     ))
 }
 
+/// Map an error from the bootstrap-parameterized daemon connect path to a
+/// pre-peer-decision request failure.
+///
+/// Bootstrap failures are typed and never expose raw authority paths;
+/// underlying daemon transport failures fall through the same
+/// `unavailable`/`transport_uncertain` projection used by the legacy path.
+fn map_bootstrap_or_transport(error: crate::daemon::DaemonError) -> RequestFailure {
+    if let crate::daemon::DaemonError::Bootstrap(failure) = &error {
+        return RequestFailure::BeforePeerDecision(ApplicationClientError::DaemonBootstrap(
+            *failure,
+        ));
+    }
+    RequestFailure::BeforePeerDecision(unavailable(error))
+}
+
 fn invalid(error: impl fmt::Display) -> ApplicationClientError {
     ApplicationClientError::InvalidRequest(error.to_string())
 }
@@ -3778,6 +3919,7 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
             lifecycle_observations: Mutex::new(BTreeMap::new()),
+            bootstrap: None,
         };
         (client, backend)
     }
@@ -3857,6 +3999,7 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
             lifecycle_observations: Mutex::new(BTreeMap::new()),
+            bootstrap: None,
         };
         let fingerprint = "d".repeat(64);
         let operation = NewApplicationOperation {
@@ -4022,6 +4165,7 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
             lifecycle_observations: Mutex::new(BTreeMap::new()),
+            bootstrap: None,
         };
         let axes = sender_client
             .refresh_receipt_axes(&RecoveryHandle {
@@ -5081,6 +5225,7 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
             lifecycle_observations: Mutex::new(BTreeMap::new()),
+            bootstrap: None,
         };
         let current_noncomparable = RecoveryHandle {
             logical_store_id: logical_store_id.clone(),
@@ -5129,6 +5274,7 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
             lifecycle_observations: Mutex::new(BTreeMap::new()),
+            bootstrap: None,
         };
         let mismatched_reference = RecoveryHandle {
             logical_store_id: LogicalStoreId::persisted("store-v1-other".into()),
@@ -5209,6 +5355,7 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
             lifecycle_observations: Mutex::new(BTreeMap::new()),
+            bootstrap: None,
         };
         let reference = client
             .operation_reference(
@@ -5338,6 +5485,7 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
             lifecycle_observations: Mutex::new(BTreeMap::new()),
+            bootstrap: None,
         };
         for index in 0..3 {
             backend
@@ -5390,6 +5538,7 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
             lifecycle_observations: Mutex::new(BTreeMap::new()),
+            bootstrap: None,
         };
         let operation_id = OperationId("indeterminate-peer-error".into());
         let payload_fingerprint = "b".repeat(64);
@@ -5555,6 +5704,7 @@ mod tests {
             outstanding_acks: Mutex::new(BTreeSet::new()),
             recovery_attempts: Mutex::new(BTreeMap::new()),
             lifecycle_observations: Mutex::new(BTreeMap::new()),
+            bootstrap: None,
         };
         assert!(client
             .history(None, false, None, None, None, 10)
@@ -5616,5 +5766,113 @@ mod tests {
         assert!(!send_only_health.attended_but_deaf);
         assert!(send_only_health.evidence.is_empty());
         assert!(!send_only_health.degraded);
+    }
+
+    #[tokio::test]
+    async fn connect_with_daemon_rejects_relative_trusted_root() {
+        let result = ApplicationClient::connect_with_daemon(
+            ApplicationClientConfig {
+                responsibility: ApplicationResponsibility("app:test".to_string()),
+                backend: None,
+                db_override: None,
+            },
+            ApplicationDaemonBootstrap::InstalledCurrent {
+                trusted_root: std::path::PathBuf::from("relative/root"),
+            },
+        )
+        .await;
+        match result {
+            Err(ApplicationClientError::DaemonBootstrap(
+                DaemonBootstrapFailure::InvalidTrustedRoot,
+            )) => {}
+            Err(other) => panic!("expected InvalidTrustedRoot, got {other:?}"),
+            Ok(_) => panic!("relative root should fail before backend probe"),
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_with_daemon_rejects_empty_trusted_root() {
+        let result = ApplicationClient::connect_with_daemon(
+            ApplicationClientConfig {
+                responsibility: ApplicationResponsibility("app:test".to_string()),
+                backend: None,
+                db_override: None,
+            },
+            ApplicationDaemonBootstrap::InstalledCurrent {
+                trusted_root: std::path::PathBuf::new(),
+            },
+        )
+        .await;
+        match result {
+            Err(ApplicationClientError::DaemonBootstrap(
+                DaemonBootstrapFailure::InvalidTrustedRoot,
+            )) => {}
+            Err(other) => panic!("expected InvalidTrustedRoot, got {other:?}"),
+            Ok(_) => panic!("empty root should fail closed"),
+        }
+    }
+
+    #[tokio::test]
+    async fn connect_with_daemon_rejects_missing_exact_executable() {
+        let missing = std::env::temp_dir().join(format!(
+            "telex-application-client-missing-exact-{}",
+            std::process::id()
+        ));
+        let result = ApplicationClient::connect_with_daemon(
+            ApplicationClientConfig {
+                responsibility: ApplicationResponsibility("app:test".to_string()),
+                backend: None,
+                db_override: None,
+            },
+            ApplicationDaemonBootstrap::ExactExecutable {
+                executable: missing,
+            },
+        )
+        .await;
+        match result {
+            Err(ApplicationClientError::DaemonBootstrap(
+                DaemonBootstrapFailure::MissingExecutable,
+            )) => {}
+            Err(other) => panic!("expected MissingExecutable, got {other:?}"),
+            Ok(_) => panic!("missing executable should fail before backend probe"),
+        }
+    }
+
+    #[test]
+    fn daemon_bootstrap_error_display_does_not_expose_raw_paths() {
+        // Even the outer client-facing display shape must not include raw
+        // authority paths from the trusted root, manifest, or executable.
+        let candidates = [
+            DaemonBootstrapFailure::InvalidTrustedRoot,
+            DaemonBootstrapFailure::UnsafeInstallAuthority,
+            DaemonBootstrapFailure::MissingCurrent,
+            DaemonBootstrapFailure::InvalidManifest,
+            DaemonBootstrapFailure::IncompatibleManifest,
+            DaemonBootstrapFailure::SelectionUnstable,
+            DaemonBootstrapFailure::MissingExecutable,
+            DaemonBootstrapFailure::ExecutableIdentityMismatch,
+            DaemonBootstrapFailure::ForeignDaemon,
+        ];
+        for failure in candidates {
+            let error = ApplicationClientError::DaemonBootstrap(failure);
+            let rendered = error.to_string();
+            assert!(rendered.starts_with("daemon bootstrap failed:"));
+            assert!(!rendered.contains('/'));
+            assert!(!rendered.contains('\\'));
+        }
+    }
+
+    #[test]
+    fn config_struct_literal_still_compiles_without_new_fields() {
+        // Ensure `ApplicationClientConfig` struct literals with the existing
+        // three fields continue to compile: `bootstrap` lives on
+        // `ApplicationClient`, not on the config, so external callers that
+        // use `ApplicationClientConfig { responsibility, backend, db_override }`
+        // must not need to add any new named field.
+        let _cfg = ApplicationClientConfig {
+            responsibility: ApplicationResponsibility("app:literal".to_string()),
+            backend: Some("sqlite".to_string()),
+            db_override: Some("test.db".to_string()),
+        };
     }
 }

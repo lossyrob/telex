@@ -1814,6 +1814,175 @@ below):
   `daemon-core`, cross-major live migration of a blocked wait is **out of scope**; the
   blocked wait simply re-targets the correct singleton on its next reconnect.
 
+## 16A. Application Client installed-current daemon selection
+
+**Scope.** This section is the daemon-side contract that the shared Application
+Client relies on for
+[ADR 0053](DECISIONS.md#0053--application-client-selects-the-daemon-through-an-explicitly-trusted-installed-current-bootstrap)
+and for AC-C21 in
+[application-client.md](application-client.md). It governs how installed
+`current` selection, selector admission, pre-`Hello` peer authentication, and
+upgrade/rollback publication reach a live daemon. It preserves the singleton
+and IPC contract in [§2](#2-daemon-singleton-identity-and-auto-spawn),
+[§6](#6-ipc-protocol), and [§7](#7-authorization-and-the-trust-boundary),
+and preserves the daemon-replacement station-intent boundary tracked by
+PR #138. It does not describe or modify additional implementation milestones.
+
+**Install authority.** An install root is a caller-supplied absolute path
+that owns the versioned Telex installation. The daemon-side authority chain
+covers the trusted root, the selector-coordination lock file, the `current`
+selector, the selected manifest, the selected version directory, and the
+selected executable. Each element MUST canonicalize without symlink or
+reparse-point escape, be owned by the current OS user, and deny write,
+delete, or ownership control to other principals. Owner writability remains
+permitted so a same-user upgrade can administer the tree. Filesystems that
+cannot represent equivalent ownership or shared/exclusive lock semantics
+are unsupported and MUST fail closed. `current` is the sole trust source;
+`previous` is bookkeeping for rollback and never independently acceptable.
+
+**Selected manifest.** The selected manifest MUST bind its tag and
+executable and MUST supply validated build identity, package version,
+protocol major/minor, supported schema range, and required daemon
+capabilities. These fields are compatibility and selection metadata. They
+do not provide an executable-content digest or hash, an executable-content
+migration or missing-digest rule, a signature, publisher or package
+provenance, protection from malicious same-user administration, or
+intra-user isolation. Any bundle-integrity SHA-256 published next to
+`application-client.md` is design-source publication evidence, not
+bootstrap trust.
+
+**Selection token.** The parent constructs one immutable selection token
+containing the selected tag, manifest identity and load-bearing fields,
+canonical executable path, and platform file identity, and hands it to the
+spawned daemon as a nonsecret witness of one resolution attempt. The token
+is not a bearer secret and is not part of the public IPC surface. Its only
+purpose is to let the child verify that it is the intended process before
+publishing endpoint, capability, or readiness.
+
+**Selector lock: OS behavior.** Selector movement is serialized by one
+persistent OS-backed coordination lock beneath the trusted install root.
+Unix uses a local-filesystem advisory shared/exclusive lock with
+process-crash release. Windows uses the equivalent owner-restricted
+`LockFileEx` range lock. The lock file MUST NOT be replaced or deleted as
+part of selection. This is a coordination primitive, not a shell sidecar,
+service, or second runtime actor. A `run_dir`- or `config_root`-scoped
+lock is not a substitute; the selector lock lives beneath the trusted
+install root itself.
+
+**Lock lifetimes.**
+
+- **Parent (`InstalledCurrent` connect-or-spawn).** Acquire the shared
+  admission lease before reading `current`. Hold it through canonical
+  resolution and validation of the root, selector, manifest, version
+  directory, and executable; through reuse of a prestarted matching
+  daemon or through spawn; through the client-verifies-server pre-`Hello`
+  identity check ([§7.2](#72-os-level-trust-boundary-mr5)); and through
+  a successful `HelloAck` ([§6.1](#61-version-handshake--capability-negotiation-hello--helloack-sf2)).
+  Release only after `HelloAck` completes or the attempt fails.
+- **Child (spawned daemon).** Before binding the serving endpoint,
+  writing `daemon-<H>.cap`, or emitting readiness, independently acquire
+  a shared admission lease. Verify a fresh `InstalledCurrent` resolution
+  against the captured selection token and validate the child's own
+  process image (canonical process-image path plus platform file
+  identity). Hold the shared lease through endpoint, capability, and
+  readiness publication, then release. If either process dies, the
+  remaining or next admission still prevents stale-child publication.
+- **Upgrade and rollback (exclusive).** Acquire the exclusive lease
+  before resolving the old selection. Hold it across candidate
+  validation, authenticated matching-daemon drain, predecessor exit,
+  atomic `previous`/`current` switch, and selector publication. The
+  drain operates inside that exclusive lease and MUST NOT reacquire the
+  shared lease.
+
+**Lock order.** Selector admission MUST precede the daemon singleton or
+spawn admission described in [§2.2](#22-auto-spawn-connect-or-spawn-and-the-spawn-lock).
+The daemon MUST NOT acquire the selector lock while serving a drain
+request.
+
+**Readiness boundary.** For an `InstalledCurrent`-selected daemon,
+readiness ([§2.3](#23-readiness-ack)) additionally requires that the
+child holds a shared selector admission lease, has revalidated the
+selection token against a fresh installed-current resolution, and has
+proved its own process image matches. A missing, replaced, foreign, or
+unverifiable image exits without serving and MUST NOT bind the endpoint
+or write `daemon-<H>.cap`.
+
+**Pre-`Hello` peer authentication.** The client-verifies-server check
+described in [§7.2](#72-os-level-trust-boundary-mr5) is extended for
+`InstalledCurrent` connect-or-spawn: before sending `Hello`, `store_key`,
+`session_id`, or any data-bearing frame, the client MUST verify that the
+connected server's canonical process-image path and platform file
+identity match the frozen selection token and that reuse-safe
+PID/start-time, UID or SID, and OS peer credentials are consistent with
+the same-user, same-selection target. Linux uses open process-image
+descriptor plus device/inode identity. Windows captures canonical final
+path and volume/file identity from held executable handles and preserves
+compatible sharing through process creation. A different image is a
+foreign daemon; the client refuses it before metadata leaves the client.
+
+**`HelloAck` build/protocol/capability proof.** `HelloAck`
+([§6.1](#61-version-handshake--capability-negotiation-hello--helloack-sf2))
+is the final authoritative check that the peer serves the selected
+build, protocol, and required security and Application Client
+capabilities. The daemon MUST project the manifest-declared build
+identity, protocol major/minor, and required capabilities through
+`HelloAck` so an image that matches path and file identity but exposes
+an unexpected build or capability set fails closed. `admin_cap` and
+per-session capability policy remain unchanged.
+
+**Upgrade and rollback flow.** Upgrade installs and validates a
+candidate under the exclusive selector lease. It then authenticates and
+drains the currently selected daemon
+([§16](#16-minimal-upgrade-floor)), waits for predecessor exit, revalidates
+the candidate selection against the same tag/manifest/build/executable
+identity checks, atomically moves `current`, and publishes the new
+selection before releasing. Rollback follows the same rule and only then
+makes the prior `previous` acceptable. A skipped drain or a selector
+mutation outside the coordinated writer path never authorizes a stale or
+foreign daemon: the next `InstalledCurrent` connect-or-spawn rejects a
+mismatched prestarted peer, and `--skip-drain` remains a CLI break-glass
+action rather than supported installed-current evidence. Neither
+accepting `current` plus `previous` nor cleaning up a stale spawn after
+readiness publication is permitted.
+
+**Current-only trust.** Only `current` authorizes a running daemon.
+`previous` exists solely to support validated rollback and MUST NOT be
+substituted when `current` is missing, unstable, or fails validation.
+Bounded selector-movement retries are observed only for `current`;
+exhaustion fails closed as an unstable-selection outcome and does not
+fall back to `previous`.
+
+**Exact target for development and tests.** The Application Client
+subordinate pinned-target policy (Rust `ApplicationDaemonBootstrap::
+ExactExecutable`) shares the canonical process-image and
+untrusted-writability checks and reuses the same daemon endpoint and
+IPC. It has no installed-manifest authority, does not follow upgrade or
+rollback, and is not a supported production seam. The root Telex CLI MAY
+use the same installed-current resolver where an `InstalledCurrent`
+policy is in force.
+
+**Bounded failures.** Lock acquisition, token validation, resolution
+retries, and selector-movement observation are bounded. Exhaustion, an
+unsupported filesystem, an incompatible manifest, a missing executable,
+a mismatching platform file identity, or a foreign peer projects a
+typed fail-closed outcome. Durable public evidence does not expose raw
+authority paths.
+
+**Platform evidence (Windows and Linux).** The mechanism MUST have
+Windows and Linux process tests covering already-running matching
+daemons, current-version spawn, upgrade, rollback, selector movement at
+each resolution and spawn admission boundary, stale prestarted images,
+selector-client death during spawn, PID reuse,
+symlink/reparse escape, untrusted writability, incompatible manifest or
+build metadata, platform file identity mismatch, and daemon-side
+readiness refusal before endpoint, capability, or readiness
+publication. SQLite and Postgres use the same daemon selection and
+peer-authentication contract; backend concurrency and epoch behavior
+remain owned by [§11](#11-lease-epoch-fence-the-spine) and
+[§13](#13-delivery-and-seen-dedup). The existing daemon membership,
+epoch, and push contracts, and the daemon-replacement station-intent
+boundary tracked by PR #138, remain unchanged.
+
 ## 17. Gating tests + per-backend conformance matrix (daemon-core acceptance)
 
 The executable gating tests below are **frozen as `daemon-core` acceptance**, each with the

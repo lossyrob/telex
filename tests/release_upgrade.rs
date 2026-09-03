@@ -425,7 +425,7 @@ fn release_upgrade_explicit_version_installs_by_tag() {
 }
 
 #[test]
-fn release_upgrade_already_current_then_force_reinstalls() {
+fn release_upgrade_already_current_preserves_immutable_version() {
     let (routes, _archive_name, _kind) = happy_routes();
     let port = spawn_server(routes);
     let root = temp_root("already-current");
@@ -446,12 +446,14 @@ fn release_upgrade_already_current_then_force_reinstalls() {
         "already-current output omits the release envelope"
     );
 
-    // --force reinstalls even though it is already current.
+    // --force bypasses the shortcut but cannot overwrite an immutable
+    // versioned target that may be the selected process image.
     let forced = run_upgrade_args(port, &root, &["--force"]);
-    assert!(forced.status.success(), "forced reinstall should succeed");
-    let fv: Value = serde_json::from_slice(&forced.stdout).unwrap();
-    assert_eq!(fv["upgrade"], true);
-    assert_eq!(fv["switch"]["switched_to"], TAG);
+    assert!(
+        !forced.status.success(),
+        "forced reinstall must not overwrite an existing version target"
+    );
+    assert!(String::from_utf8_lossy(&forced.stderr).contains("immutable"));
     std::fs::remove_dir_all(&root).ok();
 }
 

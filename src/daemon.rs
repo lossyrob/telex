@@ -86,6 +86,11 @@ pub enum DaemonError {
         message: String,
     },
     Protocol(String),
+    /// Application-client daemon bootstrap failure with a typed reason.
+    /// Only produced by the InstalledCurrent/ExactExecutable connect path;
+    /// the legacy `connect`/`connect_or_spawn` flow never returns this
+    /// variant so its source compatibility is preserved.
+    Bootstrap(crate::daemon_bootstrap::DaemonBootstrapFailure),
 }
 
 fn verify_expected_peer_identity(
@@ -136,6 +141,7 @@ impl fmt::Display for DaemonError {
                 message,
             } => write!(f, "{capability} is unsupported on this platform: {message}"),
             DaemonError::Protocol(msg) => write!(f, "daemon IPC protocol error: {msg}"),
+            DaemonError::Bootstrap(reason) => write!(f, "daemon bootstrap failed: {reason}"),
         }
     }
 }
@@ -523,10 +529,21 @@ struct EndedSessionRecord {
 
 impl DaemonState {
     async fn status(&self) -> DaemonStatus {
-        self.status_with_thresholds(
+        self.status_with_thresholds_for_store(
             retention_warn_threshold(),
             idle_station_warn_threshold(),
             deaf_warn_threshold_ms(),
+            None,
+        )
+        .await
+    }
+
+    async fn status_for_store(&self, store_key: &str) -> DaemonStatus {
+        self.status_with_thresholds_for_store(
+            retention_warn_threshold(),
+            idle_station_warn_threshold(),
+            deaf_warn_threshold_ms(),
+            Some(store_key),
         )
         .await
     }
@@ -556,12 +573,29 @@ impl DaemonState {
         idle_station_warn_threshold: usize,
         deaf_warn_threshold_ms: i64,
     ) -> DaemonStatus {
+        self.status_with_thresholds_for_store(
+            retention_warn_threshold,
+            idle_station_warn_threshold,
+            deaf_warn_threshold_ms,
+            None,
+        )
+        .await
+    }
+
+    async fn status_with_thresholds_for_store(
+        &self,
+        retention_warn_threshold: i64,
+        idle_station_warn_threshold: usize,
+        deaf_warn_threshold_ms: i64,
+        requested_store: Option<&str>,
+    ) -> DaemonStatus {
         self.prune_dead_waiters();
         let store_entries: Vec<(String, StoreEntry)> = self
             .stores
             .lock()
             .unwrap()
             .iter()
+            .filter(|(store_key, _)| requested_store.is_none_or(|wanted| *store_key == wanted))
             .map(|(store_key, entry)| (store_key.clone(), entry.clone()))
             .collect();
         let stores = store_entries
@@ -587,9 +621,19 @@ impl DaemonState {
             }
         }
 
-        let live_waiters = self.live_waiter_statuses();
-        let member_records: Vec<MemberRecord> =
-            self.members.lock().unwrap().values().cloned().collect();
+        let live_waiters: Vec<_> = self
+            .live_waiter_statuses()
+            .into_iter()
+            .filter(|waiter| requested_store.is_none_or(|wanted| waiter.store_key == wanted))
+            .collect();
+        let member_records: Vec<MemberRecord> = self
+            .members
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|member| requested_store.is_none_or(|wanted| member.store_key == wanted))
+            .cloned()
+            .collect();
         let store_backends: HashMap<String, Arc<dyn Backend>> = store_entries
             .iter()
             .map(|(store_key, entry)| (store_key.clone(), entry.backend.clone()))
@@ -657,7 +701,10 @@ impl DaemonState {
         let member_records: Vec<MemberRecord> = {
             let now = now_ms();
             let mut members = self.members.lock().unwrap();
-            for member in members.values_mut() {
+            for member in members
+                .values_mut()
+                .filter(|member| requested_store.is_none_or(|wanted| member.store_key == wanted))
+            {
                 let live_waiters_count = live_waiters
                     .iter()
                     .filter(|waiter| {
@@ -697,7 +744,11 @@ impl DaemonState {
                     member.unattended_with_backlog_since_ms = None;
                 }
             }
-            members.values().cloned().collect()
+            members
+                .values()
+                .filter(|member| requested_store.is_none_or(|wanted| member.store_key == wanted))
+                .cloned()
+                .collect()
         };
         let members: Vec<MemberStatus> = member_records
             .iter()
@@ -751,10 +802,18 @@ impl DaemonState {
             singleton_key: self.paths.singleton.redacted_material(),
             stores,
             backoff: vec!["n/a: crashloop backoff is not persisted by the daemon".to_string()],
-            recent_errors: self.recent_errors(),
+            recent_errors: if requested_store.is_none() {
+                self.recent_errors()
+            } else {
+                Vec::new()
+            },
             epoch_by_address,
             members,
-            membership_losses: self.membership_losses(),
+            membership_losses: self
+                .membership_losses()
+                .into_iter()
+                .filter(|loss| requested_store.is_none_or(|wanted| loss.store_key == wanted))
+                .collect(),
             live_waiters,
             retention,
             idle_stations: IdleStationStatus {
@@ -1868,6 +1927,303 @@ pub async fn connect_existing(store_key: &str) -> Result<DaemonClient> {
     handshake_connected(conn, paths, store_key).await
 }
 
+/// Bootstrap-parameterized variant of [`connect_existing`].
+///
+/// Reuses the resolved InstalledCurrent target executable as the pre-Hello
+/// peer image and validates the peer HelloAck build id against the frozen
+/// selection when the manifest supplied one.
+pub(crate) async fn connect_existing_with_bootstrap(
+    store_key: &str,
+    policy: &crate::daemon_bootstrap::BootstrapPolicy,
+) -> Result<DaemonClient> {
+    let (client, _selection) = connect_existing_bootstrap_with_selection(store_key, policy).await?;
+    Ok(client)
+}
+
+async fn connect_existing_bootstrap_with_selection(
+    store_key: &str,
+    policy: &crate::daemon_bootstrap::BootstrapPolicy,
+) -> Result<(
+    DaemonClient,
+    Option<crate::daemon_bootstrap::SelectionToken>,
+)> {
+    let resolved = resolve_bootstrap_expected(policy).await?;
+    let client = connect_existing_against_resolved(store_key, &resolved).await?;
+    Ok((client, resolved.selection))
+}
+
+async fn connect_existing_against_resolved(
+    store_key: &str,
+    resolved: &ResolvedBootstrap,
+) -> Result<DaemonClient> {
+    let parent_admission = resolved.admission.as_ref();
+    #[cfg(debug_assertions)]
+    if parent_admission.is_some() {
+        if let Ok(marker) = std::env::var("TELEX_TEST_PARENT_ADMISSION_MARKER") {
+            let root = resolved
+                .selection
+                .as_ref()
+                .map(|selection| selection.trusted_root.display().to_string())
+                .unwrap_or_default();
+            let _ = std::fs::write(marker, root);
+        }
+    }
+    let paths = DaemonPaths::current()?;
+    let cap = read_cap_file(&paths.cap_path)?;
+    let (server_pid, server_start_time) = cap_required_peer_identity(&cap)?;
+    let conn = platform::connect(&paths.endpoint).await?;
+    platform::verify_server_peer_bootstrap(
+        &conn,
+        &resolved.expected_exe,
+        Some(server_pid),
+        Some(server_start_time),
+        Some(&resolved.expected_identity),
+    )
+    .map_err(bootstrap_error_from_peer)?;
+    let client = handshake_connected(conn, paths, store_key).await?;
+    if let Some(sel) = resolved.selection.as_ref() {
+        verify_helloack_against_selection(&client.ack, sel)?;
+    }
+    if resolved.selection.is_some() {
+        debug_assert!(
+            parent_admission.is_some(),
+            "InstalledCurrent must hold parent selector admission through HelloAck"
+        );
+    }
+    Ok(client)
+}
+
+/// Bootstrap-parameterized variant of [`connect_or_spawn`].
+///
+/// Holds shared selector admission across selection, peer authentication /
+/// spawn, and `HelloAck` completion. On selector movement or manifest
+/// replacement it re-reads and retries within a bounded readiness window;
+/// exhaustion fails closed with
+/// [`DaemonBootstrapFailure::SelectionUnstable`].
+pub(crate) async fn connect_or_spawn_with_bootstrap(
+    store_key: &str,
+    policy: &crate::daemon_bootstrap::BootstrapPolicy,
+) -> Result<DaemonClient> {
+    let deadline = Instant::now() + READINESS_TIMEOUT;
+    let mut launches: Vec<Instant> = Vec::new();
+    let mut backoff = BACKOFF_INITIAL;
+    let mut last_err: Option<DaemonError>;
+    let existing_probe_deadline = Instant::now() + Duration::from_millis(250);
+
+    loop {
+        match tokio::time::timeout(
+            CONNECT_ATTEMPT_TIMEOUT,
+            connect_existing_bootstrap_with_selection(store_key, policy),
+        )
+        .await
+        {
+            Ok(Ok((client, _))) => return Ok(client),
+            Ok(Err(e @ (DaemonError::Unauthorized(_) | DaemonError::Incompatible(_)))) => {
+                return Err(e)
+            }
+            Ok(Err(e @ DaemonError::Bootstrap(_))) => return Err(e),
+            Ok(Err(e)) => last_err = Some(e),
+            Err(_) => last_err = Some(DaemonError::Timeout("connect attempt timed out".into())),
+        }
+        if Instant::now() >= existing_probe_deadline {
+            break;
+        }
+        tokio::time::sleep(BACKOFF_INITIAL).await;
+    }
+
+    while Instant::now() < deadline {
+        launches.retain(|t| t.elapsed() < CRASHLOOP_WINDOW);
+        if launches.len() >= CRASHLOOP_MAX {
+            return Err(DaemonError::Timeout(format!(
+                "daemon failed readiness {CRASHLOOP_MAX} times within {:?}",
+                CRASHLOOP_WINDOW
+            )));
+        }
+        launches.push(Instant::now());
+        // Re-read the selection immediately before spawn so any selector or
+        // manifest movement is caught within the same shared-admission
+        // window; the admission guard is held through spawn.
+        let resolved = resolve_bootstrap_expected(policy).await?;
+        spawn_daemon_process_bootstrap(
+            &resolved.expected_exe,
+            &bootstrap_spawn_env(resolved.selection.as_ref()),
+            #[cfg(windows)]
+            Some(&resolved.exe_witness),
+        )?;
+        // Keep the parent's selector admission through the post-spawn
+        // pre-Hello peer authentication and successful HelloAck. The child
+        // independently acquires its own shared lease before publishing
+        // readiness; the two guards intentionally overlap.
+
+        loop {
+            if Instant::now() >= deadline {
+                break;
+            }
+            match tokio::time::timeout(
+                CONNECT_ATTEMPT_TIMEOUT,
+                connect_existing_against_resolved(store_key, &resolved),
+            )
+            .await
+            {
+                Ok(Ok(client)) => {
+                    drop(resolved);
+                    return Ok(client);
+                }
+                Ok(Err(e @ DaemonError::Bootstrap(_))) => return Err(e),
+                Ok(Err(e)) => last_err = Some(e),
+                Err(_) => last_err = Some(DaemonError::Timeout("connect attempt timed out".into())),
+            }
+            tokio::time::sleep(backoff).await;
+            backoff = std::cmp::min(backoff.saturating_mul(2), BACKOFF_MAX);
+        }
+    }
+
+    Err(DaemonError::Timeout(format!(
+        "daemon did not return HelloAck before readiness timeout; last error: {}",
+        last_err
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "none".to_string())
+    )))
+}
+
+/// Resolved bootstrap selection with the selector admission and (on Windows)
+/// the executable witness handle held through the caller's use.
+struct ResolvedBootstrap {
+    expected_exe: PathBuf,
+    expected_identity: crate::daemon_bootstrap::FileIdentity,
+    selection: Option<crate::daemon_bootstrap::SelectionToken>,
+    #[allow(dead_code)]
+    admission: Option<crate::daemon_bootstrap::SelectorAdmission>,
+    #[cfg(windows)]
+    exe_witness: crate::daemon_bootstrap::WindowsExecutableWitness,
+}
+
+/// Resolve the bootstrap policy into a concrete peer-image path, expected
+/// file identity, and the parent's shared selector admission. On Windows,
+/// also open an executable witness handle whose sharing prevents replacement
+/// or delete until the caller drops it.
+async fn resolve_bootstrap_expected(
+    policy: &crate::daemon_bootstrap::BootstrapPolicy,
+) -> Result<ResolvedBootstrap> {
+    use crate::daemon_bootstrap::{BootstrapPolicy, SelectorAdmission};
+    match policy {
+        BootstrapPolicy::InstalledCurrent {
+            trusted_root,
+            root_identity,
+        } => {
+            let admission = SelectorAdmission::shared_async(trusted_root.clone())
+                .await
+                .map_err(DaemonError::Bootstrap)?;
+            let token = crate::daemon_bootstrap::resolve_installed_current(trusted_root)
+                .map_err(DaemonError::Bootstrap)?;
+            if token.trusted_root != *trusted_root || token.root_identity != *root_identity {
+                return Err(DaemonError::Bootstrap(
+                    crate::daemon_bootstrap::DaemonBootstrapFailure::SelectionUnstable,
+                ));
+            }
+            let expected_exe = token.target_exe.clone();
+            let expected_identity = token.file_identity;
+            #[cfg(windows)]
+            let exe_witness = crate::daemon_bootstrap::open_windows_witness(&expected_exe)
+                .map_err(DaemonError::Bootstrap)?;
+            #[cfg(windows)]
+            if exe_witness.identity != expected_identity {
+                return Err(DaemonError::Bootstrap(
+                    crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
+                ));
+            }
+            Ok(ResolvedBootstrap {
+                expected_exe,
+                expected_identity,
+                selection: Some(token),
+                admission: Some(admission),
+                #[cfg(windows)]
+                exe_witness,
+            })
+        }
+        BootstrapPolicy::ExactExecutable {
+            executable,
+            file_identity,
+        } => {
+            #[cfg(windows)]
+            let exe_witness = crate::daemon_bootstrap::open_windows_witness(executable)
+                .map_err(DaemonError::Bootstrap)?;
+            #[cfg(windows)]
+            if exe_witness.identity != *file_identity {
+                return Err(DaemonError::Bootstrap(
+                    crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
+                ));
+            }
+            Ok(ResolvedBootstrap {
+                expected_exe: executable.clone(),
+                expected_identity: *file_identity,
+                selection: None,
+                admission: None,
+                #[cfg(windows)]
+                exe_witness,
+            })
+        }
+    }
+}
+
+fn verify_helloack_against_selection(
+    ack: &crate::daemon_ipc::HelloAck,
+    selection: &crate::daemon_bootstrap::SelectionToken,
+) -> Result<()> {
+    // The manifest binding rejects empty/unknown build identity, so the
+    // selection token always carries a load-bearing build id at this point.
+    // A HelloAck without a matching build id is a foreign daemon on the
+    // shared endpoint, not a legacy peer.
+    debug_assert!(
+        !selection.build_id.is_empty(),
+        "manifest binding must reject empty build_id before this point"
+    );
+    if ack.build_id.is_empty() || ack.build_id != selection.build_id {
+        return Err(DaemonError::Bootstrap(
+            crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
+        ));
+    }
+    if ack.protocol_version.major != selection.protocol_major
+        || ack.protocol_version.minor != selection.protocol_minor
+    {
+        return Err(DaemonError::Bootstrap(
+            crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
+        ));
+    }
+    let selected_capabilities: std::collections::BTreeSet<_> =
+        selection.required_capabilities.iter().collect();
+    let acknowledged_capabilities: std::collections::BTreeSet<_> =
+        ack.required_capabilities.iter().collect();
+    if selected_capabilities != acknowledged_capabilities {
+        return Err(DaemonError::Bootstrap(
+            crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
+        ));
+    }
+    Ok(())
+}
+
+fn bootstrap_error_from_peer(error: DaemonError) -> DaemonError {
+    // A peer that authenticates as the current user but fails canonical-image
+    // or file-identity match is a foreign daemon on the shared endpoint. Non
+    // peer-verification errors (transport, protocol, JSON) pass through
+    // unchanged so their existing projections remain intact.
+    match &error {
+        DaemonError::Unauthorized(_) => {
+            DaemonError::Bootstrap(crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon)
+        }
+        _ => error,
+    }
+}
+
+fn bootstrap_spawn_env(
+    selection: Option<&crate::daemon_bootstrap::SelectionToken>,
+) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+    match selection {
+        Some(token) => crate::daemon_bootstrap::spawn_env(token),
+        None => Vec::new(),
+    }
+}
+
 pub async fn connect_or_spawn(store_key: &str) -> Result<DaemonClient> {
     let deadline = Instant::now() + READINESS_TIMEOUT;
     let mut launches: Vec<Instant> = Vec::new();
@@ -1958,6 +2314,24 @@ fn spawn_daemon() -> Result<()> {
 
 #[cfg(not(windows))]
 fn spawn_daemon_process(exe: &Path) -> Result<()> {
+    spawn_daemon_process_with_env(exe, &[])
+}
+
+#[cfg(not(windows))]
+fn spawn_daemon_process_bootstrap(
+    exe: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> Result<()> {
+    // Unix: `Command::env` scopes the additional environment variables to the
+    // child process without mutating the parent's environment.
+    spawn_daemon_process_with_env(exe, env)
+}
+
+#[cfg(not(windows))]
+fn spawn_daemon_process_with_env(
+    exe: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+) -> Result<()> {
     let mut command = std::process::Command::new(exe);
     command
         .arg("daemon")
@@ -1965,6 +2339,9 @@ fn spawn_daemon_process(exe: &Path) -> Result<()> {
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    for (k, v) in env {
+        command.env(k, v);
+    }
     configure_daemon_spawn(&mut command);
     command
         .spawn()
@@ -1977,6 +2354,27 @@ fn configure_daemon_spawn(_command: &mut std::process::Command) {}
 
 #[cfg(windows)]
 fn spawn_daemon_process(exe: &Path) -> Result<()> {
+    spawn_daemon_process_windows_native(exe, &[], None)
+}
+
+#[cfg(windows)]
+fn spawn_daemon_process_bootstrap(
+    exe: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+    witness: Option<&crate::daemon_bootstrap::WindowsExecutableWitness>,
+) -> Result<()> {
+    // The bootstrap path holds an executable-file witness handle across
+    // `CreateProcessW`. The witness is passed by borrow so it is dropped
+    // strictly after the child process is created, not during the spawn.
+    spawn_daemon_process_windows_native(exe, env, witness)
+}
+
+#[cfg(windows)]
+fn spawn_daemon_process_windows_native(
+    exe: &Path,
+    env: &[(std::ffi::OsString, std::ffi::OsString)],
+    _witness: Option<&crate::daemon_bootstrap::WindowsExecutableWitness>,
+) -> Result<()> {
     use std::mem::zeroed;
     use std::os::windows::ffi::OsStrExt;
     use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
@@ -1987,6 +2385,7 @@ fn spawn_daemon_process(exe: &Path) -> Result<()> {
     const DETACHED_PROCESS: u32 = 0x0000_0008;
     const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
     const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    const CREATE_UNICODE_ENVIRONMENT: u32 = 0x0000_0400;
 
     let command_line = format!("{} daemon serve", quote_windows_arg(&exe.to_string_lossy()));
     let mut command_line_wide: Vec<u16> = std::ffi::OsStr::new(&command_line)
@@ -1996,6 +2395,21 @@ fn spawn_daemon_process(exe: &Path) -> Result<()> {
     let mut startup: STARTUPINFOW = unsafe { zeroed() };
     startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
     let mut process_info: PROCESS_INFORMATION = unsafe { zeroed() };
+
+    // Build an explicit per-child Unicode environment block, layering the
+    // requested overrides on top of the parent's environment without any
+    // process-global mutation. Passing `CREATE_UNICODE_ENVIRONMENT` tells the
+    // loader the block is UTF-16, matching the encoding we produce.
+    let mut env_block = build_windows_env_block(env);
+    let (env_ptr, env_flag) = if env.is_empty() {
+        (std::ptr::null::<std::ffi::c_void>(), 0u32)
+    } else {
+        (
+            env_block.as_mut_ptr() as *const std::ffi::c_void,
+            CREATE_UNICODE_ENVIRONMENT,
+        )
+    };
+    let creation_flags = env_flag | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
 
     // SAFETY: `command_line_wide` is a mutable, null-terminated buffer as required by
     // CreateProcessW. `inherit_handles=FALSE` is the critical bit: daemon auto-spawn must not keep
@@ -2007,13 +2421,16 @@ fn spawn_daemon_process(exe: &Path) -> Result<()> {
             std::ptr::null(),
             std::ptr::null(),
             FALSE,
-            DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW,
-            std::ptr::null(),
+            creation_flags,
+            env_ptr,
             std::ptr::null(),
             &startup,
             &mut process_info,
         )
     };
+    // Keep the witness alive until CreateProcessW has published the child's
+    // image mapping. Rebinding here defeats any drop-earlier optimization.
+    let _witness_kept = _witness;
     if ok == 0 {
         return Err(io_err("spawning daemon", std::io::Error::last_os_error()));
     }
@@ -2022,6 +2439,61 @@ fn spawn_daemon_process(exe: &Path) -> Result<()> {
         CloseHandle(process_info.hProcess);
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn build_windows_env_block(overrides: &[(std::ffi::OsString, std::ffi::OsString)]) -> Vec<u16> {
+    use std::collections::BTreeMap;
+    use std::os::windows::ffi::OsStrExt;
+    // Read the parent's environment through the safe API rather than any
+    // process-global mutation. Windows expects the block sorted by variable
+    // name (case-insensitive); `std::env::vars_os` does not guarantee order.
+    let mut merged: BTreeMap<Vec<u16>, Vec<u16>> = BTreeMap::new();
+    for (k, v) in std::env::vars_os() {
+        let key_wide: Vec<u16> = k.encode_wide().collect();
+        let val_wide: Vec<u16> = v.encode_wide().collect();
+        merged.insert(
+            normalize_env_key(&key_wide),
+            pair_bytes(&key_wide, &val_wide),
+        );
+    }
+    for (k, v) in overrides {
+        let key_wide: Vec<u16> = k.encode_wide().collect();
+        let val_wide: Vec<u16> = v.encode_wide().collect();
+        merged.insert(
+            normalize_env_key(&key_wide),
+            pair_bytes(&key_wide, &val_wide),
+        );
+    }
+    let mut block: Vec<u16> = Vec::new();
+    for entry in merged.values() {
+        block.extend_from_slice(entry);
+        block.push(0);
+    }
+    block.push(0);
+    block
+}
+
+#[cfg(windows)]
+fn normalize_env_key(k: &[u16]) -> Vec<u16> {
+    k.iter()
+        .map(|c| {
+            if (b'a' as u16..=b'z' as u16).contains(c) {
+                c - 32
+            } else {
+                *c
+            }
+        })
+        .collect()
+}
+
+#[cfg(windows)]
+fn pair_bytes(k: &[u16], v: &[u16]) -> Vec<u16> {
+    let mut out = Vec::with_capacity(k.len() + 1 + v.len());
+    out.extend_from_slice(k);
+    out.push(b'=' as u16);
+    out.extend_from_slice(v);
+    out
 }
 
 #[cfg(windows)]
@@ -2078,11 +2550,27 @@ async fn handshake_connected(
 }
 
 pub async fn serve() -> Result<()> {
+    // Child-side installed-current admission: when a spawned daemon inherits
+    // TELEX_DAEMON_SELECTION_TOKEN, it must independently acquire shared
+    // selector admission, prove a fresh InstalledCurrent resolution matches
+    // the token, and verify its own image before serving. On mismatch the
+    // child exits without binding an endpoint, publishing capability, or
+    // signalling readiness. Legacy CLI-driven `daemon serve` invocations
+    // (no env) skip this admission entirely and preserve current behavior.
+    let bootstrap_admission = crate::daemon_bootstrap::child_validate_bootstrap_env()
+        .await
+        .map_err(DaemonError::Bootstrap)?;
     let paths = DaemonPaths::current()?;
     let mut listener = platform::Listener::bind(&paths.endpoint)?;
     let state = Arc::new(new_state(paths)?);
     let (drain_tx, mut drain_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let heartbeat_task = tokio::spawn(heartbeat_loop(state.clone()));
+    // Readiness is now published: endpoint is bound, capability file is
+    // written, and the listener is armed. Release the child's shared
+    // selector admission before serving drain requests so upgrade or
+    // rollback exclusive-before-drain acquisition is not deadlocked by the
+    // child's own shared lease for the entire serve lifetime.
+    crate::daemon_bootstrap::release_after_readiness_publication(bootstrap_admission);
 
     loop {
         tokio::select! {
@@ -3598,6 +4086,15 @@ async fn handle_client(
         }
     };
     let ack = proto::evaluate_hello(&hello);
+    #[cfg(debug_assertions)]
+    if let Ok(raw) = std::env::var("TELEX_TEST_HELLO_ACK_DELAY_MS") {
+        if let Ok(delay_ms) = raw.parse::<u64>() {
+            if let Ok(marker) = std::env::var("TELEX_TEST_HELLO_ACK_DELAY_MARKER") {
+                let _ = std::fs::write(marker, b"waiting");
+            }
+            tokio::time::sleep(Duration::from_millis(delay_ms.min(30_000))).await;
+        }
+    }
     write_json_line(&mut write_half, &ack).await?;
     if !ack.accepted {
         return Ok(ClientAction::Continue);
@@ -3650,13 +4147,20 @@ async fn handle_request_with_capabilities(
             instance_id: state.instance_id.clone(),
             capabilities: proto::daemon_capabilities(),
         },
-        Request::Status { detail, proof, .. } => {
+        Request::Status {
+            store_key,
+            detail,
+            proof,
+        } => {
             if detail {
                 if let Err(response) = state.check_admin_cap(proof.as_deref()) {
                     return (response, ClientAction::Continue);
                 }
                 Response::StatusReport {
-                    status: state.status().await,
+                    status: match store_key.as_deref() {
+                        Some(store_key) => state.status_for_store(store_key).await,
+                        None => state.status().await,
+                    },
                 }
             } else {
                 Response::StatusReport {
@@ -11572,7 +12076,9 @@ mod p3_tests {
     async fn status_detail_requires_proof_and_minimal_status_is_unprivileged() {
         let state = test_state("status-detail");
         let store = store_key("status-detail");
+        let other_store = store_key("status-detail-other");
         registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        registered_epoch(state.clone(), &other_store, "s2", "addr:a").await;
 
         let minimal = request(
             state.clone(),
@@ -11609,14 +12115,31 @@ mod p3_tests {
         let detailed = request(
             state.clone(),
             Request::Status {
-                store_key: Some(store),
+                store_key: Some(store.clone()),
                 detail: true,
                 proof: Some(state.admin_cap.clone()),
             },
         )
         .await;
         match detailed {
-            Response::StatusReport { status } => assert_eq!(status.members.len(), 1),
+            Response::StatusReport { status } => {
+                assert_eq!(status.members.len(), 1);
+                assert_eq!(status.members[0].store_key, store);
+                assert_eq!(status.stores.len(), 1);
+                assert_eq!(status.stores[0].store_key, store);
+                assert!(status
+                    .epoch_by_address
+                    .iter()
+                    .all(|epoch| epoch.store_key == store));
+                assert!(status
+                    .live_waiters
+                    .iter()
+                    .all(|waiter| waiter.store_key == store));
+                assert!(status
+                    .retention
+                    .iter()
+                    .all(|retention| retention.store_key == store));
+            }
             other => panic!("expected detailed status, got {other:?}"),
         }
     }
@@ -12433,6 +12956,20 @@ mod platform {
         expected_pid: Option<u32>,
         expected_start_time: Option<u64>,
     ) -> Result<()> {
+        verify_server_peer_bootstrap(conn, expected_exe, expected_pid, expected_start_time, None)
+    }
+
+    /// Extended peer verification that additionally checks the peer image's
+    /// platform file identity when the caller supplies one. Used by the
+    /// InstalledCurrent connect path so a peer running a canonical-path-match
+    /// but different-inode binary is refused as a foreign daemon.
+    pub fn verify_server_peer_bootstrap(
+        conn: &ClientConn,
+        expected_exe: &Path,
+        expected_pid: Option<u32>,
+        expected_start_time: Option<u64>,
+        expected_identity: Option<&crate::daemon_bootstrap::FileIdentity>,
+    ) -> Result<()> {
         let (pid, uid) = peer_pid_uid(conn)?;
         let pid = u32::try_from(pid).map_err(|_| {
             DaemonError::Unauthorized(format!("server pid {pid} cannot be represented as u32"))
@@ -12451,9 +12988,66 @@ mod platform {
                 expected_exe.display()
             )));
         }
+        if let Some(expected) = expected_identity {
+            // On Linux this reads /proc/<pid>/exe which is TOCTOU-safe:
+            // the kernel captures the image inode at exec time.
+            let peer_identity = peer_process_file_identity(pid, &exe)?;
+            if peer_identity != *expected {
+                return Err(DaemonError::Unauthorized(
+                    "server executable file identity does not match selection".into(),
+                ));
+            }
+        }
         let start_time = server_process_start_time(pid)?;
         verify_expected_peer_identity(pid, Some(start_time), expected_pid, expected_start_time)?;
         Ok(())
+    }
+
+    #[cfg(target_os = "linux")]
+    fn peer_process_file_identity(
+        pid: u32,
+        _fallback_path: &Path,
+    ) -> Result<crate::daemon_bootstrap::FileIdentity> {
+        use std::os::unix::fs::MetadataExt;
+        // `/proc/<pid>/exe` is a magic symlink resolved by the kernel to the
+        // actual mapped image, closing the TOCTOU window that would exist if
+        // we re-opened the canonical path.
+        let path = format!("/proc/{pid}/exe");
+        let meta = std::fs::metadata(&path).map_err(|e| {
+            io_err(
+                "reading peer process image identity",
+                std::io::Error::new(e.kind(), format!("{path}: {e}")),
+            )
+        })?;
+        Ok(crate::daemon_bootstrap::FileIdentity {
+            kind: crate::daemon_bootstrap::FileIdentityKind::UnixDevIno,
+            high: meta.dev(),
+            low: meta.ino(),
+        })
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    fn peer_process_file_identity(
+        _pid: u32,
+        fallback_path: &Path,
+    ) -> Result<crate::daemon_bootstrap::FileIdentity> {
+        use std::os::unix::fs::MetadataExt;
+        // macOS: `KERN_PROCARGS2` and `proc_pidpath` cannot atomically hand
+        // back a file descriptor. Fall back to the canonical path (already
+        // verified as matching the selection), accepting a bounded TOCTOU
+        // window that is tighter than the one guarded by the parent's
+        // selector admission.
+        let meta = std::fs::metadata(fallback_path).map_err(|e| {
+            io_err(
+                "reading peer process image identity",
+                std::io::Error::new(e.kind(), format!("{}: {e}", fallback_path.display())),
+            )
+        })?;
+        Ok(crate::daemon_bootstrap::FileIdentity {
+            kind: crate::daemon_bootstrap::FileIdentityKind::UnixDevIno,
+            high: meta.dev(),
+            low: meta.ino(),
+        })
     }
 
     #[cfg(target_os = "linux")]
@@ -12792,6 +13386,21 @@ mod platform {
         expected_pid: Option<u32>,
         expected_start_time: Option<u64>,
     ) -> Result<()> {
+        verify_server_peer_bootstrap(conn, expected_exe, expected_pid, expected_start_time, None)
+    }
+
+    /// Extended peer verification that additionally checks the peer image's
+    /// platform file identity when the caller supplies one. Used by the
+    /// InstalledCurrent connect path so a peer whose canonical exe path
+    /// matches the selection but whose file identity does not (a replaced
+    /// on-disk binary) is refused as a foreign daemon.
+    pub fn verify_server_peer_bootstrap(
+        conn: &ClientConn,
+        expected_exe: &Path,
+        expected_pid: Option<u32>,
+        expected_start_time: Option<u64>,
+        expected_identity: Option<&crate::daemon_bootstrap::FileIdentity>,
+    ) -> Result<()> {
         let mut pid = 0u32;
         let ok = unsafe { GetNamedPipeServerProcessId(conn.as_raw_handle() as HANDLE, &mut pid) };
         if ok == 0 {
@@ -12801,6 +13410,20 @@ mod platform {
             ));
         }
         let info = verify_process_owner_and_exe(pid, expected_exe)?;
+        if let Some(expected) = expected_identity {
+            let peer_identity =
+                crate::daemon_bootstrap::file_identity(info.exe.as_deref().unwrap_or(expected_exe))
+                    .map_err(|_| {
+                        DaemonError::Unauthorized(
+                            "peer executable file identity could not be read".into(),
+                        )
+                    })?;
+            if peer_identity != *expected {
+                return Err(DaemonError::Unauthorized(
+                    "server executable file identity does not match selection".into(),
+                ));
+            }
+        }
         verify_expected_peer_identity(
             pid,
             Some(info.start_time_100ns),
@@ -13537,6 +14160,19 @@ mod platform {
             message: "no peer credential primitive for this platform".into(),
         })
     }
+
+    pub fn verify_server_peer_bootstrap(
+        _conn: &ClientConn,
+        _expected_exe: &Path,
+        _expected_pid: Option<u32>,
+        _expected_start_time: Option<u64>,
+        _expected_identity: Option<&crate::daemon_bootstrap::FileIdentity>,
+    ) -> Result<()> {
+        Err(DaemonError::Unsupported {
+            capability: "client-side server-auth bootstrap",
+            message: "no peer credential primitive for this platform".into(),
+        })
+    }
 }
 
 fn same_canonical_path(a: &Path, b: &Path) -> bool {
@@ -13652,6 +14288,77 @@ mod tests {
             cap_required_peer_identity(&missing_start),
             Err(DaemonError::Unauthorized(_))
         ));
+    }
+
+    #[test]
+    fn helloack_build_id_mandatory_rejects_empty_and_mismatch_as_foreign() {
+        // Any InstalledCurrent selection reaches `verify_helloack_against_selection`
+        // with a load-bearing (non-empty) build id, because manifest binding
+        // rejects empty/unknown build identity upstream.
+        let selection = crate::daemon_bootstrap::SelectionToken {
+            trusted_root: PathBuf::from("/tmp/telex-test-root"),
+            root_identity: crate::daemon_bootstrap::FileIdentity {
+                kind: crate::daemon_bootstrap::FileIdentityKind::UnixDevIno,
+                high: 0,
+                low: 0,
+            },
+            tag: "v1".to_string(),
+            package_version: "9.9.9".to_string(),
+            build_id: "expected-build".to_string(),
+            schema_min: 2,
+            schema_max: 3,
+            protocol_major: crate::daemon_ipc::PROTOCOL_MAJOR,
+            protocol_minor: crate::daemon_ipc::PROTOCOL_MINOR,
+            required_capabilities: Vec::new(),
+            target_exe: PathBuf::from("/tmp/telex-test-root/exe"),
+            file_identity: crate::daemon_bootstrap::FileIdentity {
+                kind: crate::daemon_bootstrap::FileIdentityKind::UnixDevIno,
+                high: 0,
+                low: 0,
+            },
+        };
+
+        // Legacy/empty ack build id is now rejected as ForeignDaemon rather
+        // than tolerated.
+        let ack_empty = crate::daemon_ipc::HelloAck {
+            protocol_version: crate::daemon_ipc::ProtocolVersion {
+                major: crate::daemon_ipc::PROTOCOL_MAJOR,
+                minor: crate::daemon_ipc::PROTOCOL_MINOR,
+            },
+            daemon_version: "d".to_string(),
+            auth_policy_version: 1,
+            accepted: true,
+            required_capabilities: Vec::new(),
+            capabilities: Vec::new(),
+            reason: None,
+            capability_scopes: Vec::new(),
+            build_id: String::new(),
+        };
+        match verify_helloack_against_selection(&ack_empty, &selection) {
+            Err(DaemonError::Bootstrap(
+                crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
+            )) => {}
+            other => panic!("expected ForeignDaemon for empty ack build_id, got {other:?}"),
+        }
+
+        // Mismatched build id is likewise ForeignDaemon.
+        let ack_wrong = crate::daemon_ipc::HelloAck {
+            build_id: "different-build".to_string(),
+            ..ack_empty.clone()
+        };
+        match verify_helloack_against_selection(&ack_wrong, &selection) {
+            Err(DaemonError::Bootstrap(
+                crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
+            )) => {}
+            other => panic!("expected ForeignDaemon for wrong ack build_id, got {other:?}"),
+        }
+
+        // Matching build id accepts.
+        let ack_ok = crate::daemon_ipc::HelloAck {
+            build_id: "expected-build".to_string(),
+            ..ack_empty
+        };
+        verify_helloack_against_selection(&ack_ok, &selection).expect("matching build id");
     }
 
     #[test]

@@ -173,6 +173,10 @@ pub fn layout_from_optional_root(root: Option<PathBuf>) -> Result<InstallLayout>
     }))
 }
 
+pub(crate) fn prepare_install_root(path: &Path) -> Result<()> {
+    ensure_private_dir(path)
+}
+
 pub fn infer_install_root_from_exe(exe: &Path) -> Option<PathBuf> {
     let parent = exe.parent()?;
     if parent.file_name().and_then(|n| n.to_str()) == Some("bin") {
@@ -293,6 +297,44 @@ pub fn install_binary(
     switch_current: bool,
     source_metadata: Option<SourceMetadata>,
 ) -> Result<InstallResult> {
+    install_binary_inner(
+        layout,
+        tag,
+        source_binary,
+        source_label,
+        switch_current,
+        source_metadata,
+        true,
+    )
+}
+
+pub(crate) fn install_binary_without_launcher(
+    layout: &InstallLayout,
+    tag: &str,
+    source_binary: &Path,
+    source_label: &str,
+    source_metadata: Option<SourceMetadata>,
+) -> Result<InstallResult> {
+    install_binary_inner(
+        layout,
+        tag,
+        source_binary,
+        source_label,
+        false,
+        source_metadata,
+        false,
+    )
+}
+
+fn install_binary_inner(
+    layout: &InstallLayout,
+    tag: &str,
+    source_binary: &Path,
+    source_label: &str,
+    switch_current: bool,
+    source_metadata: Option<SourceMetadata>,
+    refresh_path_launcher: bool,
+) -> Result<InstallResult> {
     validate_tag(tag)?;
     if !source_binary.is_file() {
         bail!("upgrade source is not a file: {}", source_binary.display());
@@ -300,35 +342,62 @@ pub fn install_binary(
     let previous_tag = read_tag_file(&layout.current_path)?;
     let version_dir = layout.versions_dir.join(tag);
     let version_binary = version_dir.join(exe_name());
-    std::fs::create_dir_all(&version_dir)
-        .with_context(|| format!("creating version dir {}", version_dir.display()))?;
-    copy_if_different(source_binary, &version_binary)
-        .with_context(|| format!("installing binary into {}", version_binary.display()))?;
-
-    let mut warnings = Vec::new();
-    let launcher = layout.bin_dir.join(exe_name());
-    std::fs::create_dir_all(&layout.bin_dir)
-        .with_context(|| format!("creating bin dir {}", layout.bin_dir.display()))?;
-    if !launcher.exists() {
-        copy_if_different(source_binary, &launcher)
-            .with_context(|| format!("creating launcher {}", launcher.display()))?;
-    } else if std::fs::canonicalize(&launcher).ok() != std::fs::canonicalize(source_binary).ok() {
-        if let Err(e) = copy_if_different(source_binary, &launcher) {
-            warnings.push(format!(
-                "could not refresh launcher {} ({e}); existing PATH binary may predate launcher mode, so rerun the installer after old processes exit",
-                launcher.display()
-            ));
-        }
+    ensure_private_dir(&layout.root)?;
+    ensure_private_dir(&layout.versions_dir)?;
+    if version_dir.exists() {
+        bail!("installed version {tag} is immutable; choose a new version tag or switch to it");
+    }
+    let staging_dir = layout.versions_dir.join(format!(
+        ".{tag}.install-{}-{}",
+        std::process::id(),
+        crate::model::now_ms()
+    ));
+    if staging_dir.exists() {
+        std::fs::remove_dir_all(&staging_dir)?;
+    }
+    ensure_private_dir(&staging_dir)
+        .with_context(|| format!("creating staging dir {}", staging_dir.display()))?;
+    let staging_binary = staging_dir.join(exe_name());
+    let staged = (|| -> Result<()> {
+        copy_if_different(source_binary, &staging_binary)
+            .with_context(|| format!("staging binary into {}", staging_binary.display()))?;
+        let canonical_versions =
+            std::fs::canonicalize(&layout.versions_dir).with_context(|| {
+                format!(
+                    "canonicalizing versions directory {}",
+                    layout.versions_dir.display()
+                )
+            })?;
+        let final_manifest_binary = canonical_versions.join(tag).join(exe_name());
+        let manifest = current_manifest(
+            tag,
+            &final_manifest_binary,
+            source_label,
+            previous_tag.clone(),
+            source_metadata,
+        );
+        let raw = serde_json::to_string_pretty(&manifest)?;
+        atomic_write(&staging_dir.join("manifest.json"), &raw)?;
+        std::fs::rename(&staging_dir, &version_dir).with_context(|| {
+            format!(
+                "publishing immutable version directory {}",
+                version_dir.display()
+            )
+        })?;
+        Ok(())
+    })();
+    if let Err(error) = staged {
+        let _ = std::fs::remove_dir_all(&staging_dir);
+        return Err(error);
     }
 
-    let manifest = current_manifest(
-        tag,
-        &version_binary,
-        source_label,
-        previous_tag.clone(),
-        source_metadata,
-    );
-    write_manifest(layout, tag, &manifest)?;
+    let launcher = layout.bin_dir.join(exe_name());
+    let warnings = if refresh_path_launcher {
+        refresh_launcher(layout, &version_binary)?
+    } else {
+        Vec::new()
+    };
+
     if switch_current {
         switch_to(layout, tag)?;
     }
@@ -343,6 +412,28 @@ pub fn install_binary(
         switched: switch_current,
         warnings,
     })
+}
+
+pub(crate) fn refresh_launcher(
+    layout: &InstallLayout,
+    source_binary: &Path,
+) -> Result<Vec<String>> {
+    let launcher = layout.bin_dir.join(exe_name());
+    ensure_private_dir(&layout.bin_dir)
+        .with_context(|| format!("creating bin dir {}", layout.bin_dir.display()))?;
+    let mut warnings = Vec::new();
+    if !launcher.exists() {
+        copy_if_different(source_binary, &launcher)
+            .with_context(|| format!("creating launcher {}", launcher.display()))?;
+    } else if std::fs::canonicalize(&launcher).ok() != std::fs::canonicalize(source_binary).ok() {
+        if let Err(error) = copy_if_different(source_binary, &launcher) {
+            warnings.push(format!(
+                "could not refresh launcher {} ({error}); existing PATH binary may predate launcher mode, so rerun the installer after old processes exit",
+                launcher.display()
+            ));
+        }
+    }
+    Ok(warnings)
 }
 
 pub fn switch_to(layout: &InstallLayout, tag: &str) -> Result<SwitchResult> {
@@ -535,8 +626,13 @@ fn remove_version_dir(path: &Path, force: bool) -> Result<()> {
                 )
             })
         }
+
         Err(e) => Err(e.into()),
     }
+}
+
+pub(crate) fn remove_rejected_candidate(layout: &InstallLayout, tag: &str) -> Result<()> {
+    remove_version_dir(&layout.versions_dir.join(tag), false)
 }
 
 fn make_tree_writable(path: &Path) -> Result<()> {
@@ -557,12 +653,6 @@ fn make_tree_writable(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn write_manifest(layout: &InstallLayout, tag: &str, manifest: &VersionManifest) -> Result<()> {
-    let path = layout.versions_dir.join(tag).join("manifest.json");
-    let raw = serde_json::to_string_pretty(manifest)?;
-    atomic_write(&path, &raw)
-}
-
 fn read_tag_file(path: &Path) -> Result<Option<String>> {
     match std::fs::read_to_string(path) {
         Ok(raw) => {
@@ -576,10 +666,11 @@ fn read_tag_file(path: &Path) -> Result<Option<String>> {
 
 fn atomic_write(path: &Path, value: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
+        ensure_private_dir(parent)?;
     }
     let tmp = path.with_extension(format!("{}.tmp", std::process::id()));
     std::fs::write(&tmp, value)?;
+    ensure_private_file(&tmp, false)?;
     match std::fs::rename(&tmp, path) {
         Ok(()) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
@@ -596,12 +687,34 @@ fn atomic_write(path: &Path, value: &str) -> Result<()> {
 
 fn copy_if_different(source: &Path, dest: &Path) -> Result<()> {
     if let Some(parent) = dest.parent() {
-        std::fs::create_dir_all(parent)?;
+        ensure_private_dir(parent)?;
     }
     if std::fs::canonicalize(source).ok() == std::fs::canonicalize(dest).ok() {
+        ensure_private_file(dest, true)?;
         return Ok(());
     }
     std::fs::copy(source, dest)?;
+    ensure_private_file(dest, true)?;
+    Ok(())
+}
+
+fn ensure_private_dir(path: &Path) -> Result<()> {
+    std::fs::create_dir_all(path)?;
+    #[cfg(unix)]
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))?;
+    Ok(())
+}
+
+fn ensure_private_file(path: &Path, executable: bool) -> Result<()> {
+    #[cfg(unix)]
+    std::fs::set_permissions(
+        path,
+        std::fs::Permissions::from_mode(if executable { 0o700 } else { 0o600 }),
+    )?;
+    #[cfg(not(unix))]
+    let _ = path;
+    #[cfg(not(unix))]
+    let _ = executable;
     Ok(())
 }
 

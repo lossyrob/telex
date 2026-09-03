@@ -505,7 +505,8 @@ pub struct UpgradeArgs {
     /// binary's package version).
     #[arg(long)]
     pub version: Option<String>,
-    /// Reinstall/switch even when the resolved release is already the current version.
+    /// Bypass the already-current shortcut to repair a missing immutable version target.
+    /// An existing version directory is never overwritten.
     #[arg(long)]
     pub force: bool,
     /// GitHub repository (owner/name) to fetch releases from. Hidden: for tests and

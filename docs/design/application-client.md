@@ -9,7 +9,11 @@ Issue [#12](https://github.com/lossyrob/telex/issues/12) owns the shared
 contract, issue [#118](https://github.com/lossyrob/telex/issues/118) converges
 the two consumer requirement sets, and
 [ADR 0049](DECISIONS.md#0049--one-api-neutral-application-client-contract-governs-explicit-station-capabilities-and-forbids-private-fallbacks)
-records the load-bearing boundary.
+records the load-bearing boundary. Issue
+[#152](https://github.com/lossyrob/telex/issues/152) owns Application Client
+conformance, and
+[ADR 0053](DECISIONS.md#0053--application-client-selects-the-daemon-through-an-explicitly-trusted-installed-current-bootstrap)
+records the accepted daemon-selection policy the AC-C21 requirement promotes.
 
 The terms **MUST**, **MUST NOT**, **SHOULD**, **SHOULD NOT**, and **MAY** are
 normative. This contract defines semantics, state, and evidence. It does not
@@ -485,6 +489,122 @@ disposition, the disposition MUST NOT become terminal until the prerequisite
 operation is durably accepted. Whether a workflow requires a reply, another
 message, or disposition alone remains caller policy.
 
+### AC-C21: Daemon selection is an explicit, admission-gated policy
+
+Production consumers MUST select the shared Telex daemon through an
+explicitly trusted absolute install root. The configuration MUST:
+
+- reject a relative or empty trusted root;
+- capture one immutable canonical absolute root before any connection or
+  reconnect;
+- treat the installed selector's `current` tag as the sole selection
+  authority; `previous` is bookkeeping for rollback and is never
+  independently acceptable; and
+- never search `PATH`, embed a daemon `serve` entry in the consumer, open
+  raw daemon IPC as a public seam, talk directly to a backend, or fall
+  back to a foreign executable.
+
+A subordinate pinned-target policy MAY be exposed for development and
+tests only. It applies the same canonical process-image, platform file
+identity, and untrusted-writability checks; has no installed manifest
+authority; and does not follow upgrade or rollback. A source-compatible
+legacy or dev connect that binds peer identity to the calling executable
+MAY remain available, but it MUST NOT be an automatic fallback from a
+failed installed-current resolution.
+
+For each installed-current connect-or-spawn cycle the client MUST resolve
+and validate one immutable target that includes:
+
+- selected tag and versioned executable;
+- selected manifest bound to that tag and executable, with validated
+  build identity, package version, supported schema range, protocol
+  version, and required security and Application Client capabilities;
+- canonical containment of the selected version directory and executable
+  beneath the canonical trusted root;
+- current-OS-user ownership of the root and the authority chain, denying
+  write, delete, or ownership control to any other principal on
+  equivalent Unix permission and Windows DACL semantics (owner
+  writability remains permitted for same-user upgrade administration);
+- refusal of any selector, manifest, version directory, or executable
+  that redirects through a symlink or reparse point;
+- one canonical selected target used for both spawn and pre-connection
+  peer authentication; and
+- platform file and process identity evidence (an open process-image
+  descriptor plus device and inode identity on Linux; canonical final
+  path plus volume and file identity from held executable handles on
+  Windows, with compatible sharing preserved through process creation).
+
+These fields are compatibility and selection metadata. The contract MUST
+NOT claim an executable-content digest or hash, an executable-content
+migration or missing-digest rule, a signature, publisher or package
+provenance, protection from malicious same-user administration, or
+intra-user isolation. Any bundle-integrity SHA-256 recorded next to this
+contract is publication-time evidence for the design sources; it is not
+executable identity and never serves as bootstrap trust.
+
+Selector movement MUST be serialized by one persistent OS-backed
+shared/exclusive coordination lock beneath the trusted install root.
+Unix uses a local-filesystem advisory shared/exclusive lock with
+process-crash release; Windows uses the equivalent owner-restricted
+range lock. The lock file MUST NOT be replaced or deleted as part of
+selection. Filesystems that cannot prove equivalent ownership and
+shared/exclusive lock semantics are unsupported and MUST fail closed.
+
+Lock behavior MUST distinguish:
+
+- **Parent shared admission.** The parent connect-or-spawn holds the
+  shared lease from before reading `current` through resolution,
+  prestarted or spawned peer authentication, and successful readiness
+  acknowledgment.
+- **Child independent shared validation.** A spawned daemon
+  independently acquires a shared admission lease before binding its
+  serving endpoint or publishing capability or readiness, validates the
+  captured non-secret selection token against a fresh installed-current
+  resolution and its own process image, and holds that lease through
+  endpoint, capability, and readiness publication before releasing.
+- **Upgrade and rollback exclusive.** Upgrade and rollback hold the
+  exclusive lease across candidate validation, matching-daemon drain,
+  predecessor exit, atomic `previous`/`current` switch, and selector
+  publication. The drain operates inside that exclusive context and
+  MUST NOT reacquire the shared lease.
+- **Lock order.** Selector admission MUST precede daemon singleton or
+  spawn admission.
+- **Bounded fail-closed movement.** Selector movement and admission
+  contention retries observed only for `current` MUST be bounded and
+  fail closed on exhaustion as a typed unstable-selection outcome.
+- **Matching-only prestarted reuse.** A prestarted daemon is reusable
+  only when reuse-safe process identity, canonical process-image path,
+  and platform file identity match the frozen target. A foreign peer
+  MUST be refused before the client sends any store or session metadata
+  or its version and capability handshake.
+
+Bootstrap failures MUST be typed and MUST NOT expose the raw authority
+path or manifest binding as durable public evidence. The taxonomy MUST
+distinguish at least: invalid trusted root, unsafe install authority,
+missing current selector, invalid manifest, incompatible manifest,
+unstable selection, missing executable, executable identity mismatch,
+and foreign daemon. Additional typed variants MAY be added; the
+contract MUST NOT collapse a known reason into an untyped bucket.
+
+The client MUST NOT drain, kill, trust, or start beside a foreign
+daemon. It MUST NOT expose raw daemon IPC frames as a supported
+application contract or promote a private admission or drain seam as
+public policy. The Local Daemon owns the install layout, manifest and
+build contract, selector lock and selection token, daemon process
+admission, OS peer checks, readiness publication, and upgrade and
+rollback coordination; the Application Client owns the public policy,
+typed failure projection, and use of the supported admission flow.
+
+**Application binding note.** The supported Rust binding realizes this
+policy as `ApplicationDaemonBootstrap::InstalledCurrent { trusted_root
+}`, the subordinate `ExactExecutable { executable }`, and the additive
+`ApplicationClient::connect_with_daemon(config, daemon)` constructor,
+with `ApplicationClientError::DaemonBootstrap(DaemonBootstrapFailure)`
+carrying the typed failure reasons. These names are Rust implementation
+guidance for this binding. Other bindings MAY choose different names;
+they MUST preserve the semantic contract stated above and MUST NOT
+expose raw daemon IPC as a supported application API.
+
 ## Product boundary and prohibited fallback seams
 
 The following remain outside the shared client:
@@ -503,7 +623,10 @@ The following MUST NOT become a supported production fallback:
 - using spike environment variables, helper binaries, namespaces, local UUID
   files, or store-path fingerprints as shared identity;
 - implementing a Watcher-private or Operator-private client when a required
-  shared semantic is missing.
+  shared semantic is missing;
+- searching `PATH`, embedding a daemon `serve` entry in the consumer, or
+  starting beside a foreign executable in place of the AC-C21
+  installed-current selection.
 
 If a required semantic is absent, the affected consumer remains blocked until
 the shared client contract and implementation are extended.
@@ -544,7 +667,14 @@ The accepted contract decomposes into these ordered work areas:
 3. **Conformance**
    - create backend-parity, restart, collision, receipt-axis, exact-delivery,
      retry-window, snapshot-fence, and compound-operation tests;
-   - exercise both send-only and bidirectional capabilities.
+   - exercise both send-only and bidirectional capabilities;
+   - exercise AC-C21 installed-current selection, including trusted-root and
+     authority-chain refusal, manifest/build/version compatibility, immutable
+     tag behavior, shared and exclusive selector admission, matching-only
+     prestarted reuse, platform file and process identity mismatch,
+     symlink/reparse refusal, concurrent spawn, selector-client death during
+     spawn, child admission failure, upgrade, rollback, selector contention,
+     daemon crash and restart, and no stale-version resurrection.
 4. **Watcher integration**
    - replace spike-private send/membership seams with the supported client;
    - preserve receipt-gated state and send-only readiness invariants.

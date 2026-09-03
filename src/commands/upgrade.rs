@@ -219,6 +219,27 @@ async fn perform_upgrade(
     plan: InstallPlan,
     args: &UpgradeArgs,
 ) -> Result<i32> {
+    install::prepare_install_root(&layout.root)
+        .map_err(|error| anyhow!("create install root before selector admission: {error}"))?;
+    let canonical_root = crate::daemon_bootstrap::validate_install_root_for_switch(&layout.root)
+        .map_err(|error| anyhow!("validate install root before upgrade: {error}"))?;
+    let canonical_layout = install::layout_for_root(canonical_root);
+    let layout = &canonical_layout;
+    // Serialize candidate installation as well as selector publication. A
+    // same-tag install can overwrite the currently selected target, so taking
+    // admission only around drain/switch would leave active readers exposed.
+    let _selector_admission =
+        crate::daemon_bootstrap::SelectorAdmission::exclusive_async(layout.root.clone())
+            .await
+            .map_err(|error| {
+                anyhow!("acquire exclusive selector admission before install/switch: {error}")
+            })?;
+    if layout.versions_dir.join(&plan.tag).exists() {
+        bail!(
+            "installed version {} is immutable; choose a new version tag or use rollback/switch",
+            plan.tag
+        );
+    }
     let source_metadata = source_metadata(&plan.source, &layout.root)?;
     // Release path only: the asset's self-reported version must match the tag it was published
     // under, so a mislabeled/renamed release asset cannot be installed under the wrong tag.
@@ -234,18 +255,32 @@ async fn perform_upgrade(
             );
         }
     }
-    let installed = install::install_binary(
+    let mut installed = install::install_binary_without_launcher(
         layout,
         &plan.tag,
         &plan.source,
         &plan.source_label,
-        false,
         Some(source_metadata),
     )?;
-    if !args.no_switch {
+    let validation = (|| -> Result<()> {
         let manifest = install::read_manifest(layout, &plan.tag)?;
         install::validate_manifest_for_current(&manifest)?;
+        crate::daemon_bootstrap::validate_installed_target_for_switch(layout, &plan.tag)
+            .map_err(|error| anyhow!("candidate is not safe for installed-current: {error}"))
+    })();
+    if let Err(error) = validation {
+        let cleanup = install::remove_rejected_candidate(layout, &plan.tag);
+        return match cleanup {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(anyhow!(
+                "{error}; additionally failed to remove rejected candidate: {cleanup_error}"
+            )),
+        };
     }
+    let installed_binary = PathBuf::from(&installed.binary);
+    installed
+        .warnings
+        .extend(install::refresh_launcher(layout, &installed_binary)?);
     let drain = if args.no_switch || args.skip_drain {
         json!({"skipped": true})
     } else {
@@ -355,6 +390,15 @@ fn sweep_stale_staging(base: &Path) {
 
 pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     let layout = install::layout_from_optional_root(args.root)?;
+    let canonical_root = crate::daemon_bootstrap::validate_install_root_for_switch(&layout.root)
+        .map_err(|error| anyhow!("validate install root before rollback: {error}"))?;
+    let layout = install::layout_for_root(canonical_root);
+    let _selector_admission =
+        crate::daemon_bootstrap::SelectorAdmission::exclusive_async(layout.root.clone())
+            .await
+            .map_err(|error| {
+                anyhow!("acquire exclusive selector admission before rollback resolution: {error}")
+            })?;
     let target = match args.version {
         Some(tag) => tag,
         None => install::version_info(Some(layout.root.clone()))?
@@ -364,6 +408,8 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     };
     let manifest = install::read_manifest(&layout, &target)?;
     install::validate_manifest_for_current(&manifest)?;
+    crate::daemon_bootstrap::validate_installed_target_for_switch(&layout, &target)
+        .map_err(|error| anyhow!("rollback target is not safe for installed-current: {error}"))?;
     let drain = if args.skip_drain {
         json!({"skipped": true})
     } else {
@@ -569,6 +615,8 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         }
         Err(e) => return Err(e.into()),
     };
+    let server_pid = cap.server_pid;
+    let server_start_time = cap.server_start_time;
     let timeout = Duration::from_millis(timeout_ms.max(1));
     let response = match tokio::time::timeout(timeout, async {
         let mut client = crate::daemon::connect_existing(&store_key).await?;
@@ -591,7 +639,19 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         Err(_) => bail!("daemon drain timed out after {timeout_ms}ms"),
     };
     match response {
-        Response::Ack { .. } => Ok(json!({"drained": true, "status": "draining"})),
+        Response::Ack { .. } => {
+            let Some(pid) = server_pid else {
+                bail!("daemon drain acknowledged without a reuse-safe server pid")
+            };
+            let deadline = Instant::now() + timeout;
+            while crate::session_watch::process_alive_with_start_time(pid, server_start_time) {
+                if Instant::now() >= deadline {
+                    bail!("daemon drain acknowledged but process {pid} did not exit in time");
+                }
+                tokio::time::sleep(Duration::from_millis(25)).await;
+            }
+            Ok(json!({"drained": true, "status": "stopped"}))
+        }
         Response::Error { code, message, .. } if code == ERROR_NOT_RUNNING => {
             Ok(json!({"drained": false, "status": "not_running", "message": message}))
         }

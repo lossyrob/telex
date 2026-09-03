@@ -178,6 +178,12 @@ pub struct HelloAck {
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub capability_scopes: Vec<CapabilityScope>,
+    /// Build identity of the serving daemon binary. Filled from
+    /// `crate::install::BUILD_ID` on the server. Kept `#[serde(default)]` so
+    /// older peers that omit it still round-trip; the InstalledCurrent
+    /// bootstrap path fails closed on an empty or mismatched build id.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub build_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -962,6 +968,7 @@ pub fn evaluate_hello(hello: &Hello) -> HelloAck {
         capabilities,
         reason,
         capability_scopes: Vec::new(),
+        build_id: crate::install::BUILD_ID.to_string(),
     }
 }
 
@@ -1283,6 +1290,27 @@ mod tests {
         assert!(ack.accepted, "unexpected rejection: {:?}", ack.reason);
         assert_eq!(ack.protocol_version, current_protocol_version());
         assert_eq!(ack.required_capabilities, daemon_required_capabilities());
+        assert_eq!(ack.build_id, crate::install::BUILD_ID);
+    }
+
+    #[test]
+    fn hello_ack_build_id_defaults_to_empty_for_legacy_wire_bytes() {
+        // Round-trip a legacy HelloAck that omits `build_id` entirely and
+        // confirm the client-side struct reads an empty build id (which the
+        // InstalledCurrent bootstrap treats as "no build binding claimed").
+        let legacy = serde_json::json!({
+            "protocol_version": current_protocol_version(),
+            "daemon_version": DAEMON_VERSION,
+            "auth_policy_version": AUTH_POLICY_VERSION,
+            "accepted": true,
+            "required_capabilities": daemon_required_capabilities(),
+        });
+        let ack: HelloAck = serde_json::from_value(legacy).unwrap();
+        assert!(ack.accepted);
+        assert!(
+            ack.build_id.is_empty(),
+            "legacy peer without build_id must round-trip as empty"
+        );
     }
 
     #[test]

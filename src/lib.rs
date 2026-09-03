@@ -12,6 +12,11 @@ pub mod config;
 #[cfg(feature = "entra")]
 pub mod credential;
 pub mod daemon;
+// Application-client daemon bootstrap: InstalledCurrent selection, selector
+// admission, and pre-Hello peer identity projection. Intentionally
+// crate-private: consumers use the public policy types re-exported by
+// `application_client` instead of touching this module directly.
+pub(crate) mod daemon_bootstrap;
 pub mod daemon_ipc;
 pub mod identity;
 pub mod install;
