@@ -37,10 +37,14 @@ reclaim (competing daemons); **seamless upgrade** (#6) lands
 the unblock. The original large validation-harness and AKS-scale shape was later
 replaced by a practical **release-confidence-validation** node, which is complete.
 Issue #106 / PR #138 is the active hardening repair discovered after that
-validation; it must land before the builder **hardening gate** can be presented.
-The final **closure gate** still validates the real-world unblock and retires
-superseded mechanisms. Nodes are coarse and PAW-sized; the completeness split is
-justified by distinct expertise, independent validation, and parallelism.
+validation. The operator accepted persistent OS-lock containment and a truthful
+degraded-enumeration contract for that PR. The mandatory downstream
+**station-intent-transactional-authority** node
+([#153](https://github.com/lossyrob/telex/issues/153)) closes the accepted gap before
+the final **closure gate**, without blocking PR #138 or the builder
+**hardening gate**. Nodes are coarse and PAW-sized; the completeness split is
+justified by a transactional migration boundary and an independently useful,
+safe PR #138 outcome.
 
 The richer design rationale and the full decision ledger that led here live in
 [`docs/initial-shaping.md`](docs/initial-shaping.md). The brief stays current and
@@ -54,8 +58,8 @@ The authoritative design layer (merged from `design-foundation`) lives under
 - `telex:docs/design/daemon.md` - the **normative daemon contract** the implementation
   nodes build against (17 sections + the sec.17 gating tests).
 - [`design/current-design.md`](design/current-design.md) - the canonical integrated
-  workstream design. It summarizes merged authority and keeps issue #106 / PR #138
-  explicitly behind a pending-promotion boundary.
+  workstream design. It summarizes merged authority and keeps accepted issue #106 /
+  PR #138 direction explicitly behind a product-promotion boundary.
 - `telex:docs/design/DESIGN.md` - the local-exchange architecture.
 - `telex:docs/design/DECISIONS.md` - the ADR log; **0014-0024** are this workstream's
   decisions (0023 = the minimal session/presence/delivery model; 0021 = the
@@ -84,7 +88,9 @@ The authoritative design layer (merged from `design-foundation`) lives under
   --drain` + next-call respawn + legacy/non-epoch cutover rule) in `daemon-core` with
   full seamless upgrade (#6) last; retiring superseded mechanisms (#3 relay, pid-watch
   as a per-session holder, the re-arm dance) and updating the docs **with**
-  `daemon-core`, not at closure.
+  `daemon-core`, not at closure; desired station-intent recovery with bounded
+  OS-lock safety and a degraded partial-scan contract; and the downstream
+  transactional-authority closure.
 - **Out of scope:** the embeddable SDK client (#12) - it shares the
   collapse-into-one-process theme and should reuse the stabilized Layer-1 IPC, but
   is a separate solve; response windows / TTL deadlines (#2); the `store_key` helper
@@ -106,17 +112,24 @@ turn-idle and bridge-host lifecycle behavior.
 
 Dogfooding then exposed issue #106: daemon replacement can preserve durable messages
 while losing a still-live bridge's desired push registration. Existing PR #138 is the
-adopted `station-intent-reconciliation` repair. It remains in progress and pending
-design promotion: its historical exact head conflicts with current `main`, has a
-blocking PAW review with unresolved threads, and must preserve PR #139 semantics while
-repairing and revalidating both backends. The **hardening gate is not ready** until
-that repair is integrated, reviewed on its final exact head, merged, and presented
-with isolated restart/drain/upgrade and push-recovery evidence. The **closure gate**
-remains separate and planned.
+adopted `station-intent-reconciliation` repair. The operator selected persistent
+owner-private OS advisory locking to prevent stale pathname mutation and accepted a
+degraded contract for bounded partial directory scans. PR #138 may resume after this
+Tier B authority lands, but it remains in progress and pending design promotion,
+review repair, exact-head CI, and both-backend proof. The **hardening gate is not
+ready** until that narrowed repair is merged and presented with isolated
+restart/drain/upgrade and push-recovery evidence.
 
-Workstream and design-steward branches are proposal/integration workspaces, not silent
-authority. Canonical design and orchestration changes become durable only through a
-reviewed, operator-authorized GitHub PR merged to `main`.
+Unconditional transactional generation authority, seekable fair discovery and
+garbage collection, exact counts, and exact over-cap recovery belong to the planned
+XL `station-intent-transactional-authority` node
+([#153](https://github.com/lossyrob/telex/issues/153)). That node follows PR #138 and
+blocks the final **closure gate**, not PR #138 or the hardening gate.
+
+Workstream and design-steward branches are proposal/integration workspaces, not
+silent authority. Streamliner artifact changes become durable only through the
+campaign's sole artifact reconciler applying the reviewed, operator-authorized
+packet directly to `main`.
 
 ## Decisions
 
@@ -158,6 +171,12 @@ reviewed, operator-authorized GitHub PR merged to `main`.
   in-memory `session->addresses` map is the authority. Reuse the hook plumbing as
   a non-destructive liveness input; explicit detach, not sessionEnd, owns
   membership removal.
+- **Station-intent safety now, transactional convergence downstream:** PR #138
+  replaces age-stealable intent locks with persistent owner-private OS advisory
+  locks and exposes partial-scan degradation under the four-second response
+  contract. A connected XL node restores unconditional transactional generation
+  authority and fair maintenance before workstream closure. This preserves one
+  complete, useful PR #138 outcome while keeping the accepted gap durable.
 - **Docs/SKILL cutover with `daemon-core` (council):** keep the verb names; update
   `SKILL.md` + plugin docs when behavior changes, not at closure, so instructions
   never describe a dead holder/waiter model mid-workstream.
@@ -172,10 +191,10 @@ legacy cutover (0020/0024), explicit membership and agent acknowledgement
 
 The earlier `validation-harness`, Entra multi-host campaign, and AKS scale-rig
 concepts were superseded by the completed `release-confidence-validation` node
-(issue #78). The remaining execution question is bounded to issue #106 / PR #138:
-whether durable desired push registration can be restored across daemon
-replacement without weakening explicit membership, liveness proof, or epoch
-fencing.
+(issue #78). The operator resolved the PR #138 M3/M5 fork on 2026-09-02:
+PR #138 owns safe desired push restoration with persistent OS locking and an
+explicit degraded-enumeration contract; the downstream transactional node owns
+unconditional generation, discovery, GC, and over-cap authority.
 
 ## Imports and Exports
 
