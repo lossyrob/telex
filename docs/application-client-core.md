@@ -60,6 +60,14 @@ promise stable JSON, a C ABI, a cross-language serialization format, or a public
 daemon protocol. Backend rows not already used by the binding, daemon frames,
 CLI types, private helpers, and product DTOs are not supported binding surfaces.
 
+No published release contains the binding yet. Issue #152 is therefore a
+documented pre-release source transition from the first-binding commit:
+`ApplicationClientError` is now `#[non_exhaustive]` and includes the
+authority-required `DaemonBootstrap` variant. Source consumers pinned to the
+earlier commit must add a wildcard arm to exhaustive error matches when moving
+to this conformance revision. The first published version that contains the
+binding will establish the release-level compatibility baseline.
+
 ## Runtime and cancellation
 
 The caller creates and configures the Tokio runtime. Application Client futures

@@ -1170,6 +1170,55 @@ pub(crate) struct WindowsExecutableWitness {
     handle: isize,
 }
 
+#[cfg(target_os = "linux")]
+pub(crate) struct LinuxExecutableWitness {
+    #[allow(dead_code)]
+    file: std::fs::File,
+    pub(crate) identity: FileIdentity,
+    exec_path: PathBuf,
+}
+
+#[cfg(target_os = "linux")]
+impl LinuxExecutableWitness {
+    pub(crate) fn exec_path(&self) -> &Path {
+        &self.exec_path
+    }
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn open_linux_witness(
+    path: &Path,
+) -> Result<LinuxExecutableWitness, DaemonBootstrapFailure> {
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{MetadataExt, OpenOptionsExt};
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NOFOLLOW)
+        .open(path)
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    if !metadata.is_file() {
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    let identity = FileIdentity {
+        kind: FileIdentityKind::UnixDevIno,
+        high: metadata.dev(),
+        low: metadata.ino(),
+    };
+    let exec_path = PathBuf::from(format!(
+        "/proc/{}/fd/{}",
+        std::process::id(),
+        file.as_raw_fd()
+    ));
+    Ok(LinuxExecutableWitness {
+        file,
+        identity,
+        exec_path,
+    })
+}
+
 #[cfg(windows)]
 impl Drop for WindowsExecutableWitness {
     fn drop(&mut self) {

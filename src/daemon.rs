@@ -567,6 +567,7 @@ impl DaemonState {
         }
     }
 
+    #[allow(dead_code)]
     async fn status_with_thresholds(
         &self,
         retention_warn_threshold: i64,
@@ -2045,7 +2046,7 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
         // window; the admission guard is held through spawn.
         let resolved = resolve_bootstrap_expected(policy).await?;
         spawn_daemon_process_bootstrap(
-            &resolved.expected_exe,
+            resolved.spawn_executable(),
             &bootstrap_spawn_env(resolved.selection.as_ref()),
             #[cfg(windows)]
             Some(&resolved.exe_witness),
@@ -2096,6 +2097,21 @@ struct ResolvedBootstrap {
     admission: Option<crate::daemon_bootstrap::SelectorAdmission>,
     #[cfg(windows)]
     exe_witness: crate::daemon_bootstrap::WindowsExecutableWitness,
+    #[cfg(target_os = "linux")]
+    exe_witness: crate::daemon_bootstrap::LinuxExecutableWitness,
+}
+
+impl ResolvedBootstrap {
+    fn spawn_executable(&self) -> &Path {
+        #[cfg(target_os = "linux")]
+        {
+            self.exe_witness.exec_path()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            &self.expected_exe
+        }
+    }
 }
 
 /// Resolve the bootstrap policy into a concrete peer-image path, expected
@@ -2132,12 +2148,23 @@ async fn resolve_bootstrap_expected(
                     crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
                 ));
             }
+            #[cfg(target_os = "linux")]
+            let exe_witness = crate::daemon_bootstrap::open_linux_witness(&expected_exe)
+                .map_err(DaemonError::Bootstrap)?;
+            #[cfg(target_os = "linux")]
+            if exe_witness.identity != expected_identity {
+                return Err(DaemonError::Bootstrap(
+                    crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
+                ));
+            }
             Ok(ResolvedBootstrap {
                 expected_exe,
                 expected_identity,
                 selection: Some(token),
                 admission: Some(admission),
                 #[cfg(windows)]
+                exe_witness,
+                #[cfg(target_os = "linux")]
                 exe_witness,
             })
         }
@@ -2154,12 +2181,23 @@ async fn resolve_bootstrap_expected(
                     crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
                 ));
             }
+            #[cfg(target_os = "linux")]
+            let exe_witness = crate::daemon_bootstrap::open_linux_witness(executable)
+                .map_err(DaemonError::Bootstrap)?;
+            #[cfg(target_os = "linux")]
+            if exe_witness.identity != *file_identity {
+                return Err(DaemonError::Bootstrap(
+                    crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
+                ));
+            }
             Ok(ResolvedBootstrap {
                 expected_exe: executable.clone(),
                 expected_identity: *file_identity,
                 selection: None,
                 admission: None,
                 #[cfg(windows)]
+                exe_witness,
+                #[cfg(target_os = "linux")]
                 exe_witness,
             })
         }
