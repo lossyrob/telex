@@ -171,6 +171,7 @@ for the daemon:
 | `3` | daemon gone (connect/read failed or EOF) **after** the reconnect-on-EOF grace expired |
 | `4` | daemon hung (no frame within the hang window, or heartbeat observed stale) |
 | `5` | **presence ended** — the exchange **reaped** this blocked `wait` (a `PresenceEnded` frame: sessionEnd hook, loader-pid death, **or the idle-TTL backstop** — [§9](#9-liveness-model)/[§10](#10-reaping-and-the-idle-ttl-backstop)). **Non-destructive**: the station persists; a still-live agent **re-attaches + re-waits** (handled like reconnect-on-EOF), and a new message still wakes it. |
+| `7` | backend unavailable after transient recovery exhausted its reconnect grace; the station remains registered |
 
 One-shot verbs (`attach`/`detach`/`send`/`reply`/`status`) return `0` on success and a
 documented non-zero on a daemon-down or protocol error; the exact non-zero set is frozen
