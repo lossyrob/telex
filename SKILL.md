@@ -110,6 +110,7 @@ map the harness's own session id for you. Telex fails closed rather than guessin
    | 4 | daemon hung / no response after a finite wait's `--timeout-ms + --hang-ms` watchdog | Re-arm or restart the daemon if repeated. |
    | 5 | presence ended | Non-destructive reap; live sessions should `attach`/`wait` again. |
    | 6 | delivery quarantined | Read and preserve `status.json.quarantine`; this is not a delivered message, so do not ack it. Re-arm immediately because later deliveries can progress. |
+   | 7 | backend unavailable | Backend reconnect grace expired. Check `telex daemon status` and backend connectivity, then re-arm after recovery; the station remains registered. |
 
 3. After reading the delivered JSON, explicitly ack it, then apply the workflow
    disposition that reflects the actual outcome:

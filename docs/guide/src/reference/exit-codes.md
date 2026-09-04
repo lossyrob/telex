@@ -14,6 +14,7 @@ detached task's reported exit code.
 | 4 | Daemon hung / no response after the `--timeout-ms + --hang-ms` watchdog | Re-arm, or restart the daemon if it repeats. |
 | 5 | Presence ended | Non-destructive reap. A live session should `attach` and `wait` again. |
 | 6 | Delivery quarantined | The daemon preserved but could not represent one historical delivery within the frame limit. Read and preserve `status.json.quarantine` (not `message.json`/`delivery.json`), do not ack it, then re-arm immediately; later deliveries can progress. |
+| 7 | Backend unavailable | Transient backend recovery exhausted its reconnect grace. Check `telex daemon status` and backend connectivity, then re-arm after recovery; the station remains registered. |
 
 `wait` does not spawn a missing daemon; that is what `attach` is for. If a
 replacement daemon already exists, a `wait` can reconnect and re-register during

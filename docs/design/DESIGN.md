@@ -606,7 +606,8 @@ forever (agent runtimes cap tool-call duration); a daemon-gone error (`3`) **aft
 reconnect-on-EOF grace; a daemon-hung error (`4`); and **presence-ended (`5`)** when the exchange
 reaps the waiter (sessionEnd hook / loader-pid death / idle-TTL — the agent re-attaches + re-waits);
 and delivery-quarantined (`6`) when one preserved historical delivery cannot fit unchanged in
-the current frame (the caller records the structured evidence and immediately re-waits).
+the current frame (the caller records the structured evidence and immediately re-waits); and
+backend-unavailable (`7`) when transient backend recovery exhausts its reconnect grace.
 Crucially, a daemon **restart or
 ordered handoff is not a turn failure**: `telex wait` reconnects within a short grace
 window and, on `NeedsAttach`, **explicitly re-attaches** the session from inherited environment
@@ -699,8 +700,9 @@ RECEIVE
   Block on the exchange; on delivery print one message as JSON and exit 0. Exit codes:
   0 delivered, 2 idle-timeout, 3 daemon-gone (after the reconnect-on-EOF grace),
   4 daemon-hung, 5 presence-ended (the exchange reaped the waiter — sessionEnd hook /
-  loader-pid death / idle-TTL; the agent re-attaches + re-waits). A daemon restart/handoff is
-  not a turn failure — `wait` reconnects and re-attaches on `NeedsAttach` within the grace window.
+  loader-pid death / idle-TTL; the agent re-attaches + re-waits), 6 delivery-quarantined,
+  and 7 backend-unavailable (backend reconnect grace exhausted). A daemon restart/handoff is not
+  a turn failure — `wait` reconnects and re-attaches on `NeedsAttach` within the grace window.
 - `telex inbox [--address <addr>] [--all] [--limit N]`
   List actionable (requires-disposition, not yet terminally dispositioned) and recent
   messages for the address.
