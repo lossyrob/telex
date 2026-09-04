@@ -4,11 +4,13 @@ use std::path::Path;
 use std::time::Duration;
 
 use crate::cli::{Ctx, WaitArgs};
-use crate::daemon_ipc::{NeedsAttachReason, Request, Response, ERROR_NEEDS_ATTACH};
+use crate::daemon_ipc::{
+    NeedsAttachReason, Request, Response, DEFAULT_WAIT_RECONNECT_GRACE_MS,
+    ERROR_BACKEND_UNAVAILABLE, ERROR_NEEDS_ATTACH,
+};
 use crate::identity::{default_occupant, resolve_session_id};
 use crate::model::now_ms;
 
-const DEFAULT_RECONNECT_GRACE_MS: u64 = 3_000;
 const RECONNECT_RETRY_SLEEP_MS: u64 = 50;
 
 pub async fn run(ctx: &Ctx, args: WaitArgs) -> Result<i32> {
@@ -55,6 +57,7 @@ pub async fn run(ctx: &Ctx, args: WaitArgs) -> Result<i32> {
     let outcome = match wait_loop(&mut connector, &cfg).await {
         Ok(WaitTerminal::DaemonGone(message)) => WaitOutcome::daemon_gone(message),
         Ok(WaitTerminal::DaemonHung(message)) => WaitOutcome::daemon_hung(message),
+        Ok(WaitTerminal::BackendUnavailable(message)) => WaitOutcome::backend_unavailable(message),
         Ok(WaitTerminal::Response(response)) => WaitOutcome::from_response(response)?,
         Err(e) => {
             if let Some(dir) = args.out_dir.as_deref() {
@@ -93,6 +96,7 @@ enum WaitTerminal {
     Response(Response),
     DaemonGone(String),
     DaemonHung(String),
+    BackendUnavailable(String),
 }
 
 #[async_trait(?Send)]
@@ -249,6 +253,9 @@ async fn wait_loop<C: WaitConnector>(
                     }
                 }
             }
+            Response::Error { code, message, .. } if code == ERROR_BACKEND_UNAVAILABLE => {
+                return Ok(WaitTerminal::BackendUnavailable(message));
+            }
             Response::Message { .. }
             | Response::DeliveryQuarantined { .. }
             | Response::Timeout
@@ -392,7 +399,7 @@ fn reconnect_grace_ms(arg: Option<u64>) -> u64 {
             .ok()
             .and_then(|s| s.parse::<u64>().ok())
     })
-    .unwrap_or(DEFAULT_RECONNECT_GRACE_MS)
+    .unwrap_or(DEFAULT_WAIT_RECONNECT_GRACE_MS)
 }
 
 /// The terminal result of a `wait`, decoupled from how it is reported so the same outcome can
@@ -420,6 +427,16 @@ impl WaitOutcome {
         WaitOutcome {
             exit_code: 4,
             outcome: "daemon-hung",
+            detail: Some(detail),
+            message: None,
+            quarantine: None,
+        }
+    }
+
+    fn backend_unavailable(detail: String) -> Self {
+        WaitOutcome {
+            exit_code: 7,
+            outcome: "backend-unavailable",
             detail: Some(detail),
             message: None,
             quarantine: None,
@@ -547,6 +564,10 @@ fn emit_outcome(outcome: WaitOutcome, out_dir: Option<&Path>, address: &str) -> 
                 )
             }
             "daemon-hung" => eprintln!("[wait] HUNG: {}", outcome.detail.as_deref().unwrap_or("")),
+            "backend-unavailable" => eprintln!(
+                "[wait] backend-unavailable: {}",
+                outcome.detail.as_deref().unwrap_or("")
+            ),
             "delivery-quarantined" => {
                 if let Some(quarantine) = &outcome.quarantine {
                     eprintln!("[wait] delivery-quarantined: {quarantine}");
@@ -984,6 +1005,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn backend_unavailable_response_is_actionable_terminal() {
+        let mut connector = ScriptConnector::new().client(vec![ScriptAction::Response(
+            crate::daemon_ipc::error_response(
+                ERROR_BACKEND_UNAVAILABLE,
+                "backend recovery grace expired",
+            ),
+        )]);
+
+        let outcome = wait_loop(&mut connector, &cfg()).await.unwrap();
+        assert!(matches!(
+            outcome,
+            WaitTerminal::BackendUnavailable(ref detail)
+                if detail == "backend recovery grace expired"
+        ));
+        assert_eq!(connector.request_ops(), vec!["wait"]);
+    }
+
+    #[tokio::test]
     async fn reconnect_grace_expiry_returns_daemon_gone_terminal() {
         let mut cfg = cfg();
         cfg.reconnect_grace_ms = 1;
@@ -1172,6 +1211,28 @@ mod tests {
                 .unwrap()
                 .trim(),
             "3"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn out_dir_backend_unavailable_records_exit_seven() {
+        let dir = artifact_dir("backend-unavailable");
+        let outcome =
+            WaitOutcome::backend_unavailable("backend recovery grace expired".to_string());
+        let code = emit_outcome(outcome, Some(dir.as_path()), "addr:a").unwrap();
+        assert_eq!(code, 7);
+
+        let status: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(dir.join("status.json")).unwrap())
+                .unwrap();
+        assert_eq!(status["outcome"], "backend-unavailable");
+        assert_eq!(status["exit_code"], 7);
+        assert_eq!(
+            std::fs::read_to_string(dir.join("exit.code"))
+                .unwrap()
+                .trim(),
+            "7"
         );
         std::fs::remove_dir_all(&dir).ok();
     }

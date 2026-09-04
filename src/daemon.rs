@@ -8,7 +8,7 @@ use crate::backend::postgres::{
 };
 #[cfg(feature = "sqlite")]
 use crate::backend::sqlite::SqliteBackend;
-use crate::backend::{Backend, WaitFetchOptions};
+use crate::backend::{is_retryable_backend_error, Backend, WaitFetchOptions};
 use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
     DeafStationStatus, DeliveryMode, EpochStatus, HandshakeError, HelloAck, IdleStationStatus,
@@ -56,6 +56,11 @@ const RECENT_DELIVERY_HEALTH_GRACE_MS: i64 = 2 * 60 * 1000;
 const DEFAULT_RETENTION_WARN_ROWS: i64 = 100_000;
 const DEFAULT_IDLE_STATION_WARN: usize = 1_000;
 const DEFAULT_DEAF_WARN_MS: i64 = 2 * 60 * 1000;
+#[cfg(not(test))]
+const WAIT_BACKEND_RECOVERY_GRACE: Duration =
+    Duration::from_millis(proto::DEFAULT_WAIT_RECONNECT_GRACE_MS);
+#[cfg(test)]
+const WAIT_BACKEND_RECOVERY_GRACE: Duration = Duration::from_millis(100);
 
 pub type Result<T> = std::result::Result<T, DaemonError>;
 
@@ -330,6 +335,8 @@ pub struct DaemonState {
     delivery_admissions: Mutex<HashMap<MemberKey, Weak<AsyncMutex<()>>>>,
     #[cfg(test)]
     delivery_admission_control: Mutex<Option<Arc<DeliveryAdmissionTestControl>>>,
+    #[cfg(test)]
+    wait_fetch_failures: AtomicU64,
     next_waiter_id: AtomicU64,
     recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
@@ -522,6 +529,24 @@ struct EndedSessionRecord {
 }
 
 impl DaemonState {
+    #[cfg(test)]
+    fn inject_wait_fetch_failures(&self, count: u64) {
+        self.wait_fetch_failures.store(count, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    fn take_wait_fetch_failure(&self) -> bool {
+        self.wait_fetch_failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                if remaining > 0 {
+                    Some(remaining - 1)
+                } else {
+                    None
+                }
+            })
+            .is_ok()
+    }
+
     async fn status(&self) -> DaemonStatus {
         self.status_with_thresholds(
             retention_warn_threshold(),
@@ -2132,6 +2157,8 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         delivery_admissions: Mutex::new(HashMap::new()),
         #[cfg(test)]
         delivery_admission_control: Mutex::new(None),
+        #[cfg(test)]
+        wait_fetch_failures: AtomicU64::new(0),
         next_waiter_id: AtomicU64::new(1),
         recent_errors: Arc::new(Mutex::new(VecDeque::new())),
         ended_sessions: Mutex::new(BTreeMap::new()),
@@ -5104,6 +5131,8 @@ async fn wait_for_message_with_idle_ttl(
         }
     };
     let mut skipped_oversized_cc = BTreeSet::new();
+    let mut backend_recovery_deadline: Option<Instant> = None;
+    let mut backend_recovery_backoff = BACKOFF_INITIAL;
     loop {
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             state.record_waiter_exit(
@@ -5148,17 +5177,88 @@ async fn wait_for_message_with_idle_ttl(
         if current.idle {
             return Response::PresenceEnded;
         }
-        let candidates = match backend
-            .fetch_wait_candidates(
-                &address,
-                WaitFetchOptions {
-                    wake_on_cc,
-                    cc_after_ms: cc_after_ms.unwrap_or_default(),
-                },
-            )
-            .await
-        {
-            Ok(rows) => rows,
+        let fetch = async {
+            #[cfg(test)]
+            if state.take_wait_fetch_failure() {
+                return Err(crate::backend::retryable_backend_error(
+                    "injected transient backend failure",
+                ));
+            }
+            backend
+                .fetch_wait_candidates(
+                    &address,
+                    WaitFetchOptions {
+                        wake_on_cc,
+                        cc_after_ms: cc_after_ms.unwrap_or_default(),
+                    },
+                )
+                .await
+        };
+        let fetch_deadline = backend_recovery_deadline.map(|recovery_deadline| {
+            deadline.map_or(recovery_deadline, |wait_deadline| {
+                recovery_deadline.min(wait_deadline)
+            })
+        });
+        let candidates_result = match fetch_deadline {
+            Some(fetch_deadline) => {
+                let remaining = fetch_deadline.saturating_duration_since(Instant::now());
+                match tokio::time::timeout(remaining, fetch).await {
+                    Ok(result) => result,
+                    Err(_) => Err(crate::backend::retryable_backend_error(
+                        "backend reconnect attempt timed out",
+                    )),
+                }
+            }
+            None => fetch.await,
+        };
+        let candidates = match candidates_result {
+            Ok(rows) => {
+                backend_recovery_deadline = None;
+                backend_recovery_backoff = BACKOFF_INITIAL;
+                rows
+            }
+            Err(e) if is_retryable_backend_error(&e) => {
+                let detail = format!("{e:#}");
+                let now = Instant::now();
+                if deadline.is_some_and(|wait_deadline| now >= wait_deadline) {
+                    continue;
+                }
+                let recovery_deadline = *backend_recovery_deadline.get_or_insert_with(|| {
+                    state.push_recent_error(
+                        "BackendDegraded",
+                        format!(
+                            "transient backend failure while fetching wait candidates for {address}; retrying: {detail}"
+                        ),
+                    );
+                    now + WAIT_BACKEND_RECOVERY_GRACE
+                });
+                if now >= recovery_deadline {
+                    let detail = format!(
+                        "backend recovery grace expired while fetching wait candidates for {address}: {detail}"
+                    );
+                    state.record_waiter_exit(
+                        &store_key,
+                        &session_id,
+                        &address,
+                        WaiterOutcome::BackendUnavailable,
+                        Some(7),
+                        Some(detail.clone()),
+                        waiter_pid_for_status,
+                    );
+                    waiter_guard.suppress_abnormal_on_drop();
+                    return proto::error_response(proto::ERROR_BACKEND_UNAVAILABLE, detail);
+                }
+                let retry_until = deadline.map_or(recovery_deadline, |wait_deadline| {
+                    recovery_deadline.min(wait_deadline)
+                });
+                tokio::time::sleep(
+                    backend_recovery_backoff
+                        .min(retry_until.saturating_duration_since(Instant::now())),
+                )
+                .await;
+                backend_recovery_backoff = (backend_recovery_backoff * 2).min(BACKOFF_MAX);
+                continue;
+            }
             Err(e) => {
                 let detail = format!("{e:#}");
                 waiter_guard.suppress_abnormal_on_drop();
@@ -6155,6 +6255,8 @@ mod p3_tests {
             delivery_admissions: Mutex::new(HashMap::new()),
             #[cfg(test)]
             delivery_admission_control: Mutex::new(None),
+            #[cfg(test)]
+            wait_fetch_failures: AtomicU64::new(0),
             next_waiter_id: AtomicU64::new(1),
             recent_errors: Arc::new(Mutex::new(VecDeque::new())),
             ended_sessions: Mutex::new(BTreeMap::new()),
@@ -10902,6 +11004,7 @@ mod p3_tests {
             (WaiterOutcome::DeliveryQuarantined, "delivery-quarantined"),
             (WaiterOutcome::IdleTimeout, "idle-timeout"),
             (WaiterOutcome::PresenceEnded, "presence-ended"),
+            (WaiterOutcome::BackendUnavailable, "backend-unavailable"),
             (WaiterOutcome::AbnormalExit, "abnormal-exit"),
         ];
         for (outcome, expected) in values {
@@ -10958,6 +11061,53 @@ mod p3_tests {
         let status = state.status().await;
         assert_eq!(status.members[0].last_waiter_outcome, None);
         assert_eq!(status.members[0].last_waiter_pid, None);
+    }
+
+    #[tokio::test]
+    async fn wait_retries_transient_backend_fetch_without_dropping_presence() {
+        let state = test_state("wait-backend-recovery");
+        let store = store_key("wait-backend-recovery");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let message_id = insert_to(&state, &store, "addr:a").await;
+        state.inject_wait_fetch_failures(1);
+
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(wait, Response::Message { id, .. } if id == message_id));
+
+        let status = state.status().await;
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::Message)
+        );
+        assert!(status
+            .recent_errors
+            .iter()
+            .any(|error| error.kind == "BackendDegraded"));
+    }
+
+    #[tokio::test]
+    async fn exhausted_backend_recovery_is_an_actionable_wait_outcome() {
+        let state = test_state("wait-backend-unavailable");
+        let store = store_key("wait-backend-unavailable");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        state.inject_wait_fetch_failures(10);
+
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(
+            wait,
+            Response::Error { ref code, .. } if code == proto::ERROR_BACKEND_UNAVAILABLE
+        ));
+
+        let status = state.status().await;
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::BackendUnavailable)
+        );
+        assert_eq!(status.members[0].last_waiter_exit_code, Some(7));
+        assert!(status.members[0]
+            .last_waiter_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("backend recovery grace expired")));
     }
 
     #[tokio::test]
@@ -11778,6 +11928,8 @@ pub mod test_support {
                 delivery_admissions: Mutex::new(HashMap::new()),
                 #[cfg(test)]
                 delivery_admission_control: Mutex::new(None),
+                #[cfg(test)]
+                wait_fetch_failures: AtomicU64::new(0),
                 next_waiter_id: AtomicU64::new(1),
                 recent_errors: Arc::new(Mutex::new(VecDeque::new())),
                 ended_sessions: Mutex::new(BTreeMap::new()),

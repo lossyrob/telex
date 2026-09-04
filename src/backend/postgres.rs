@@ -5,11 +5,12 @@
 use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use tokio::sync::{Mutex as AsyncMutex, MutexGuard};
+use tokio_postgres::error::SqlState;
 use tokio_postgres::{IsolationLevel, Row, Transaction};
 
 use super::{
-    application_compound_state_delta, application_operation_state_delta, Backend, Capabilities,
-    WaitCandidate, WaitFetchOptions,
+    application_compound_state_delta, application_operation_state_delta, retryable_backend_error,
+    Backend, Capabilities, WaitCandidate, WaitFetchOptions,
 };
 use crate::model::*;
 
@@ -47,6 +48,23 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(0x100000001b3);
     }
     hash
+}
+
+fn is_transient_connection_error(error: &anyhow::Error) -> bool {
+    error.chain().any(|source| {
+        source
+            .downcast_ref::<tokio_postgres::Error>()
+            .is_some_and(|error| {
+                error.is_closed()
+                    || error.code().is_some_and(|code| {
+                        code == &SqlState::CONNECTION_EXCEPTION
+                            || code == &SqlState::CONNECTION_FAILURE
+                            || code == &SqlState::ADMIN_SHUTDOWN
+                            || code == &SqlState::CRASH_SHUTDOWN
+                            || code == &SqlState::CANNOT_CONNECT_NOW
+                    })
+            })
+    })
 }
 
 pub fn make_tls() -> Result<postgres_native_tls::MakeTlsConnector> {
@@ -1872,65 +1890,83 @@ impl Backend for PgBackend {
         address: &str,
         options: WaitFetchOptions,
     ) -> Result<Vec<WaitCandidate>> {
-        let client = self.client().await?;
-        materialize_pending_delivery_rows_for_recipient(&client, address).await?;
-        let terminal = terminal_dispositions_sql_list();
-        let primary_sql = format!(
-            "SELECT {MSG_COLS_M}, d.id AS delivery_id,
-                    (SELECT version FROM application_state_version WHERE singleton=1)
-                    AS snapshot_version
-             FROM deliveries d
-             JOIN messages m ON m.id=d.message_id
-             WHERE d.recipient=$1
-               AND d.consumed_at_ms IS NULL
-               AND COALESCE((SELECT disp.state FROM dispositions disp
-                             WHERE disp.message_id=m.id AND disp.recipient=$1
-                             ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})
-             ORDER BY d.message_id"
-        );
-        let mut candidates: Vec<WaitCandidate> = client
-            .query(&primary_sql, &[&address])
-            .await?
-            .into_iter()
-            .map(|row| {
-                WaitCandidate::primary(
-                    map_message(&row),
-                    Some(row.get("delivery_id")),
-                    row.get("snapshot_version"),
-                )
-            })
-            .collect();
-
-        if options.wake_on_cc {
-            let cc_sql = format!(
+        let client = self
+            .client()
+            .await
+            .map_err(|error| retryable_backend_error(format!("{error:#}")))?;
+        let result: Result<Vec<WaitCandidate>> = async {
+            materialize_pending_delivery_rows_for_recipient(&client, address).await?;
+            let terminal = terminal_dispositions_sql_list();
+            let primary_sql = format!(
                 "SELECT {MSG_COLS_M}, d.id AS delivery_id,
                         (SELECT version FROM application_state_version WHERE singleton=1)
                         AS snapshot_version
                  FROM deliveries d
                  JOIN messages m ON m.id=d.message_id
                  WHERE d.recipient=$1
-                   AND d.consumed_at_ms IS NOT NULL
-                   AND d.delivered_at_ms > $2
+                   AND d.consumed_at_ms IS NULL
                    AND COALESCE((SELECT disp.state FROM dispositions disp
                                  WHERE disp.message_id=m.id AND disp.recipient=$1
                                  ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})
                  ORDER BY d.message_id"
             );
-            let cc_messages = client
-                .query(&cc_sql, &[&address, &options.cc_after_ms])
-                .await?;
-            candidates.extend(cc_messages.into_iter().filter_map(|row| {
-                let message = map_message(&row);
-                let delivery_id = row.get("delivery_id");
-                let snapshot_version = row.get("snapshot_version");
-                (delivery_role(address, &message.to_addr, message.cc.as_deref()) == "cc").then(
-                    || WaitCandidate::cc_notification(message, Some(delivery_id), snapshot_version),
-                )
-            }));
-        }
+            let mut candidates: Vec<WaitCandidate> = client
+                .query(&primary_sql, &[&address])
+                .await?
+                .into_iter()
+                .map(|row| {
+                    WaitCandidate::primary(
+                        map_message(&row),
+                        Some(row.get("delivery_id")),
+                        row.get("snapshot_version"),
+                    )
+                })
+                .collect();
 
-        candidates.sort_by_key(|candidate| candidate.message.id);
-        Ok(candidates)
+            if options.wake_on_cc {
+                let cc_sql = format!(
+                    "SELECT {MSG_COLS_M}, d.id AS delivery_id,
+                            (SELECT version FROM application_state_version WHERE singleton=1)
+                            AS snapshot_version
+                     FROM deliveries d
+                     JOIN messages m ON m.id=d.message_id
+                     WHERE d.recipient=$1
+                       AND d.consumed_at_ms IS NOT NULL
+                       AND d.delivered_at_ms > $2
+                       AND COALESCE((SELECT disp.state FROM dispositions disp
+                                     WHERE disp.message_id=m.id AND disp.recipient=$1
+                                     ORDER BY disp.id DESC LIMIT 1), '') NOT IN ({terminal})
+                     ORDER BY d.message_id"
+                );
+                let cc_messages = client
+                    .query(&cc_sql, &[&address, &options.cc_after_ms])
+                    .await?;
+                candidates.extend(cc_messages.into_iter().filter_map(|row| {
+                    let message = map_message(&row);
+                    let delivery_id = row.get("delivery_id");
+                    let snapshot_version = row.get("snapshot_version");
+                    (delivery_role(address, &message.to_addr, message.cc.as_deref()) == "cc").then(
+                        || {
+                            WaitCandidate::cc_notification(
+                                message,
+                                Some(delivery_id),
+                                snapshot_version,
+                            )
+                        },
+                    )
+                }));
+            }
+
+            candidates.sort_by_key(|candidate| candidate.message.id);
+            Ok(candidates)
+        }
+        .await;
+        match result {
+            Err(error) if client.is_closed() || is_transient_connection_error(&error) => {
+                Err(retryable_backend_error(format!("{error:#}")))
+            }
+            result => result,
+        }
     }
 
     async fn has_delivery_for_recipient(&self, message_id: i64, recipient: &str) -> Result<bool> {
