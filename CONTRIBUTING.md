@@ -44,6 +44,25 @@ TELEX_PG_URL='postgresql://user@host:5432/telex?sslmode=disable' \
 - `TELEX_PG_REQUIRE=1` — fail instead of skipping when `TELEX_PG_URL` is unset/empty, so a CI
   job that intends to exercise the Postgres leg can't pass by silently skipping it.
 
+## Windows token-user regression coverage
+
+On Windows, run `cargo test --lib windows_token_user_alignment` to exercise the
+SQLite current-user SID lookup and daemon peer identity lookup. Both paths check
+the allocation element's alignment guarantee and the returned pointer's alignment
+before dereferencing `TOKEN_USER`. A `Vec<u8>` regression fails the element check
+even if the allocator happens to return an aligned address. The daemon tests also
+check that an invalid token retains the existing sizing error.
+
+The `windows-token-user` CI job runs this proof with default features, SQLite-only,
+PostgreSQL-only, Entra-only, SQLite+PostgreSQL, SQLite+Entra, SQLite+self-update, and
+all features. SQLite-disabled profiles exercise the daemon path. The existing
+Windows process suite also exercises the aligned owner-private fixture helper in
+`tests/daemon_process_sqlite.rs`.
+
+These checks establish token-buffer alignment and preserve identity/error
+behavior. They do not establish that alignment caused historical heap-corruption
+crashes.
+
 ## Releasing
 
 Maintainers cut public releases by pushing a `vX.Y.Z` tag, which triggers the
