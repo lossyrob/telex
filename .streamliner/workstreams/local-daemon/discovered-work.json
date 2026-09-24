@@ -153,6 +153,81 @@
       "terminalPath": "Complete production InstalledCurrent selection, selector-lock and selection-token admission, exact-image prestarted reuse, and fail-closed upgrade/rollback behavior; promote matching product design and guidance; prove Windows and Linux plus SQLite and Postgres behavior; then obtain exact-head implementation review, required CI, consumer attestations, and design inspection.",
       "status": "routed",
       "dispositionAuthority": "Campaign/operator decision for application-client-daemon-bootstrap-gap-v1. This work is independent of PR #138 and does not alter the M3/M5 station-intent dispositions recorded above."
+    },
+    {
+      "id": "local-daemon-windows-token-buffer-alignment",
+      "sourceNode": null,
+      "source": "lossyrob/telex#154, PR #138 review discovery, and exact-main correction approved 2026-09-24",
+      "evidence": {
+        "repositoryMain": "ed417c6b938f92fe3bfb84f3b0cc0bea719fbbd0",
+        "issue": "https://github.com/lossyrob/telex/issues/154",
+        "issueTitle": "Fix unaligned Windows TOKEN_USER buffers",
+        "issueBodyUpdatedAt": "2026-09-24T21:14:24Z",
+        "issueBodySha256": "16e87cf86a3fd600214a94523ee7376d6fc7d9f33a5285946499f9917adf6f69",
+        "priorProposalCommit": "bcfe3d12ea8737bd78d243da71322615e233d595",
+        "paths": [
+          "src/backend/sqlite.rs",
+          "src/daemon.rs"
+        ],
+        "details": "At exact main, both paths call GetTokenInformation(TokenUser) into Vec<u8> and dereference that byte-aligned storage as TOKEN_USER, which requires pointer alignment. The daemon-only aligned repair exists on unmerged PR #138 and is not main authority. The corrected live tracker covers both sites and does not claim that alignment caused the intermittent heap corruption observed during PR #138 validation."
+      },
+      "description": "Repair both exact-main call sites with storage aligned for TOKEN_USER or a shared safe token-information helper, prove alignment before dereference across supported Windows platform/feature coverage, and audit all remaining GetTokenInformation call sites.",
+      "affectedOutcome": "The Local Daemon hardening gate cannot be accepted while a supported Windows identity path contains undefined behavior.",
+      "requiredness": "Required before Local Daemon hardening-gate acceptance and before schema3-release-preparation; independent of PR #138.",
+      "sequencing": "Keep PR #138 independent and excluded. Land the reviewed Tier B packet, verify exact authority, then launch one isolated #154 repair session. Merge only the exact reviewed, green, inspected head after campaign authorization.",
+      "selectedDisposition": "Route both exact-main call sites to the standalone windows-token-buffer-alignment node and issue #154. Do not depend on or inherit the unmerged PR #138 repair.",
+      "target": "windows-token-buffer-alignment / issue #154",
+      "owner": "Local Daemon workstream orchestrator until an authorized implementer is assigned",
+      "terminalPath": "Issue #154 repairs both exact-main TOKEN_USER paths, preserves SID identity, authentication, owner-private storage, and fallback behavior, proves alignment before dereference across supported Windows platform/feature coverage, audits the remaining GetTokenInformation call sites, and completes exact-head review, required CI, and campaign-authorized merge before hardening-gate acceptance or schema3-release-preparation.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Prior proposal bcfe3d12 preserved; exact-main correction and recovery release packet explicitly approved by the operator on 2026-09-24. Product launch remains conditional on Tier B landing and exact verification."
+    },
+    {
+      "id": "local-daemon-postgres-wait-reset-recovery",
+      "sourceNode": null,
+      "source": "lossyrob/telex#155, open draft PR #156, and operator repair decision",
+      "evidence": {
+        "repositoryMain": "ed417c6b938f92fe3bfb84f3b0cc0bea719fbbd0",
+        "issue": "https://github.com/lossyrob/telex/issues/155",
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "publishedBranch": "copilot/fix-postgres-connection-reset",
+        "publishedHead": "5c302dacb1c3e659e7f89c3c9670e3cf5cbc5105",
+        "details": "Transient PostgreSQL query or LISTEN connection resets can abort an active pull waiter with generic exit 1 while the shared daemon and unrelated push station remain healthy. Draft PR #156 is four commits ahead of exact main and already carries the proposed recovery, actionable exhaustion, documentation, and fault-injection coverage."
+      },
+      "description": "Adopt and complete the existing PR #156 repair for transient PostgreSQL query and LISTEN resets without replacing its branch, code, or history.",
+      "affectedOutcome": "Pull and push attendance over PostgreSQL must survive bounded transient resets or fail with an actionable exhausted-recovery outcome while finite deadlines remain finite.",
+      "requiredness": "Required before schema3-release-preparation; the operator chose repair rather than documenting an accepted limitation.",
+      "sequencing": "After Tier B landing, establish exactly one writer and verify no cloud or legacy writer overlap before resuming the published PR #156 branch. Preserve finite deadlines, bounded retry, and the existing branch/history.",
+      "selectedDisposition": "Adopt open draft PR #156 at its published head and complete the full issue #155 repair in place.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "Local Daemon workstream orchestrator until one authorized PR #156 implementer is verified online",
+      "terminalPath": "PR #156 proves transient query and LISTEN reset recovery with shared-daemon pull and push coverage, preserves finite deadlines, bounds retry, surfaces actionable exhaustion, completes compatibility/design inspection and exact-head CI/review, and merges only after exact-head campaign authorization.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Operator decision to fix issue #155 and adopt existing draft PR #156; no limitation-only disposition and no replacement branch are authorized."
+    },
+    {
+      "id": "local-daemon-schema3-recovery-release",
+      "sourceNode": null,
+      "source": "schema-3 incident evidence and lossyrob/telex#157",
+      "evidence": {
+        "repositoryMain": "ed417c6b938f92fe3bfb84f3b0cc0bea719fbbd0",
+        "issue": "https://github.com/lossyrob/telex/issues/157",
+        "incidentEvidence": "C:\\Users\\robemanuele\\.copilot\\session-state\\b737a932-c687-4b95-b273-8335a59f6e89\\files\\schema3-release-incident-evidence.md",
+        "details": "Released v0.1.2 supports schema 2 and protocol 1.4. Exact main supports schema 2..3 and protocol 1.5, while a schema-3 shared store already exists. Code reading suggests a 2..3 manifest remains parseable by v0.1.2, but compatibility remains inference until a genuine isolated old-binary upgrade exercises the real manifest and checksum path."
+      },
+      "description": "Prepare one bounded v0.2.0 schema-3 recovery candidate after issues #154 and #155 merge, then submit its immutable evidence to a separate operator publication gate.",
+      "affectedOutcome": "Users need a release that can connect to schema 3 and includes both recovery repairs without risking the operator installation, daemon, configuration, or shared database.",
+      "requiredness": "Required for the bounded v0.2.0 recovery release; distinct from hardening and closure acceptance.",
+      "sequencing": "Campaign verifies both repair merges before launching one new isolated release worker. Preparation produces an immutable reviewed candidate. Tagging and publication wait for explicit operator approval at schema3-release-gate, after which the same worker performs publication and installation verification.",
+      "selectedDisposition": "Route only the v0.2.0 recovery scope to schema3-release-preparation and schema3-release-gate. Keep completed release nodes historical and exclude PR #138, issues #152/#153, Watcher/Station runtimes, and campaign closure.",
+      "target": "schema3-release-preparation / schema3-release-gate / issue #157",
+      "owner": "Local Daemon orchestrator for preparation; campaign and operator for publication approval",
+      "terminalPath": "After both repairs merge, one isolated worker aligns v0.2.0 metadata, proves genuine v0.1.2 upgrade and fresh installs with controlled candidate assets, exercises schema-2 migration and preexisting schema-3 connection in disposable databases, completes exact-head CI and the build-only Release matrix, and binds all assets, checksums, build identities, source association, notes, exclusions, and limitations to one reviewed candidate. The operator then explicitly approves or declines publication; approval returns publication and installation verification to the same worker.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Explicit operator approval for the Tier B recovery release packet on 2026-09-24. Preparation authority does not authorize tag or publication."
     }
   ]
 }
