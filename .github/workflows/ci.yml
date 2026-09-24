@@ -168,4 +168,4 @@ jobs:
         env:
           TELEX_PG_URL: postgres://postgres:postgres@127.0.0.1:5432/postgres
           TELEX_PG_REQUIRE: "1"
-        run: cargo test --all-features --test conformance --test daemon_core_postgres
+        run: cargo test --all-features --test conformance --test daemon_core_postgres --test wait_recovery_process

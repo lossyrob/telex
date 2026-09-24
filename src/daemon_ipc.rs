@@ -50,6 +50,7 @@ pub const ON_DELIVER_DEFERRED_EXIT: i32 = 4;
 pub const CAP_ON_DELIVER_DEFERRED: &str = "on_deliver_deferred_v1";
 pub const CAP_APPLICATION_CLIENT_V1: &str = "application_client_v1";
 pub const CAP_DELIVERY_QUARANTINE_V1: &str = "delivery_quarantine_v1";
+pub const CAP_WAIT_BACKEND_RECOVERY: &str = "wait-backend-recovery";
 
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
@@ -911,6 +912,7 @@ pub fn daemon_capabilities() -> Vec<String> {
     caps.push(CAP_ON_DELIVER_DEFERRED.to_string());
     caps.push(CAP_APPLICATION_CLIENT_V1.to_string());
     caps.push(CAP_DELIVERY_QUARANTINE_V1.to_string());
+    caps.push(CAP_WAIT_BACKEND_RECOVERY.to_string());
     caps
 }
 

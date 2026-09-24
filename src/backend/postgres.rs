@@ -52,19 +52,39 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 
 fn is_transient_connection_error(error: &anyhow::Error) -> bool {
     error.chain().any(|source| {
+        if let Some(error) = source.downcast_ref::<tokio_postgres::Error>() {
+            return error.is_closed()
+                || error.code().is_some_and(|code| {
+                    code == &SqlState::CONNECTION_EXCEPTION
+                        || code == &SqlState::CONNECTION_FAILURE
+                        || code == &SqlState::ADMIN_SHUTDOWN
+                        || code == &SqlState::CRASH_SHUTDOWN
+                        || code == &SqlState::CANNOT_CONNECT_NOW
+                });
+        }
         source
-            .downcast_ref::<tokio_postgres::Error>()
+            .downcast_ref::<std::io::Error>()
             .is_some_and(|error| {
-                error.is_closed()
-                    || error.code().is_some_and(|code| {
-                        code == &SqlState::CONNECTION_EXCEPTION
-                            || code == &SqlState::CONNECTION_FAILURE
-                            || code == &SqlState::ADMIN_SHUTDOWN
-                            || code == &SqlState::CRASH_SHUTDOWN
-                            || code == &SqlState::CANNOT_CONNECT_NOW
-                    })
+                matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionRefused
+                        | std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::NotConnected
+                        | std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::UnexpectedEof
+                )
             })
     })
+}
+
+fn classify_wait_error(error: anyhow::Error) -> anyhow::Error {
+    if is_transient_connection_error(&error) {
+        retryable_backend_error(format!("{error:#}"))
+    } else {
+        error
+    }
 }
 
 pub fn make_tls() -> Result<postgres_native_tls::MakeTlsConnector> {
@@ -1316,17 +1336,21 @@ impl Backend for PgBackend {
         owner_instance_id: &str,
         lease_epoch: i64,
     ) -> Result<bool> {
-        let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
-        let n = client
-            .execute(
-                "UPDATE leases
-                    SET heartbeat_at_ms=$4
-                  WHERE address=$1 AND owner_instance_id=$2 AND lease_epoch=$3",
-                &[&address, &owner_instance_id, &lease_epoch, &now],
-            )
-            .await?;
-        Ok(n > 0)
+        let result = async {
+            let client = self.client().await?;
+            let now = pg_now_ms(&client).await?;
+            let n = client
+                .execute(
+                    "UPDATE leases
+                        SET heartbeat_at_ms=$4
+                      WHERE address=$1 AND owner_instance_id=$2 AND lease_epoch=$3",
+                    &[&address, &owner_instance_id, &lease_epoch, &now],
+                )
+                .await?;
+            Ok(n > 0)
+        }
+        .await;
+        result.map_err(classify_wait_error)
     }
 
     async fn release_epoch_lease(
@@ -1562,8 +1586,12 @@ impl Backend for PgBackend {
     }
 
     async fn durable_clock_now_ms(&self) -> Result<i64> {
-        let client = self.client().await?;
-        pg_advance_clock_hwm(&client).await
+        let result = async {
+            let client = self.client().await?;
+            pg_advance_clock_hwm(&client).await
+        }
+        .await;
+        result.map_err(classify_wait_error)
     }
 
     async fn delivery_retention_count(&self) -> Result<i64> {
@@ -1890,11 +1918,8 @@ impl Backend for PgBackend {
         address: &str,
         options: WaitFetchOptions,
     ) -> Result<Vec<WaitCandidate>> {
-        let client = self
-            .client()
-            .await
-            .map_err(|error| retryable_backend_error(format!("{error:#}")))?;
         let result: Result<Vec<WaitCandidate>> = async {
+            let client = self.client().await?;
             materialize_pending_delivery_rows_for_recipient(&client, address).await?;
             let terminal = terminal_dispositions_sql_list();
             let primary_sql = format!(
@@ -1961,12 +1986,7 @@ impl Backend for PgBackend {
             Ok(candidates)
         }
         .await;
-        match result {
-            Err(error) if client.is_closed() || is_transient_connection_error(&error) => {
-                Err(retryable_backend_error(format!("{error:#}")))
-            }
-            result => result,
-        }
+        result.map_err(classify_wait_error)
     }
 
     async fn has_delivery_for_recipient(&self, message_id: i64, recipient: &str) -> Result<bool> {
@@ -3281,7 +3301,44 @@ impl Backend for PgBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::sanitize_ident;
+    use super::{classify_wait_error, sanitize_ident};
+    use crate::backend::is_retryable_backend_error;
+
+    #[test]
+    fn wait_classifies_structural_network_errors_through_context() {
+        for kind in [
+            std::io::ErrorKind::ConnectionReset,
+            std::io::ErrorKind::ConnectionRefused,
+            std::io::ErrorKind::BrokenPipe,
+            std::io::ErrorKind::TimedOut,
+            std::io::ErrorKind::UnexpectedEof,
+        ] {
+            let error = anyhow::Error::new(std::io::Error::new(kind, "network fault"))
+                .context("reconnecting to postgres");
+            assert!(is_retryable_backend_error(&classify_wait_error(error)));
+        }
+    }
+
+    #[test]
+    fn wait_does_not_retry_permanent_or_untyped_errors() {
+        for error in [
+            anyhow::Error::new(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "credential command denied",
+            )),
+            sanitize_ident("invalid-schema").unwrap_err(),
+            "not a connection string"
+                .parse::<tokio_postgres::Config>()
+                .unwrap_err()
+                .into(),
+            anyhow::anyhow!("connection closed"),
+        ] {
+            let detail = format!("{error:#}");
+            let classified = classify_wait_error(error);
+            assert!(!is_retryable_backend_error(&classified), "{detail}");
+            assert_eq!(format!("{classified:#}"), detail);
+        }
+    }
 
     #[test]
     fn sanitize_ident_accepts_valid_names() {

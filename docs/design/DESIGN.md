@@ -607,7 +607,13 @@ reconnect-on-EOF grace; a daemon-hung error (`4`); and **presence-ended (`5`)** 
 reaps the waiter (sessionEnd hook / loader-pid death / idle-TTL — the agent re-attaches + re-waits);
 and delivery-quarantined (`6`) when one preserved historical delivery cannot fit unchanged in
 the current frame (the caller records the structured evidence and immediately re-waits); and
-backend-unavailable (`7`) when transient backend recovery exhausts its reconnect grace.
+backend-unavailable (`7`) when transient backend recovery exhausts its three-second
+budget and both CLI and daemon advertise `wait-backend-recovery`. Legacy CLIs
+receive the same decodable backend error through their existing exit-1 path.
+The daemon's terminal classification remains `7`, while its typed
+`backend-unavailable` Status value is omitted only for requesters that cannot
+decode it. Recovery preserves the original finite deadline (timeout wins ties),
+station registration, and the epoch proof before delivery.
 Crucially, a daemon **restart or
 ordered handoff is not a turn failure**: `telex wait` reconnects within a short grace
 window and, on `NeedsAttach`, **explicitly re-attaches** the session from inherited environment

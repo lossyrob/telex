@@ -101,6 +101,7 @@ enum WaitTerminal {
 
 #[async_trait(?Send)]
 trait WaitClient {
+    fn supports_backend_recovery(&self) -> bool;
     async fn request(&mut self, request: Request) -> crate::daemon::Result<Response>;
 }
 
@@ -116,6 +117,13 @@ struct RealWaitConnector;
 
 #[async_trait(?Send)]
 impl WaitClient for crate::daemon::DaemonClient {
+    fn supports_backend_recovery(&self) -> bool {
+        self.ack
+            .capabilities
+            .iter()
+            .any(|capability| capability == crate::daemon_ipc::CAP_WAIT_BACKEND_RECOVERY)
+    }
+
     async fn request(&mut self, request: Request) -> crate::daemon::Result<Response> {
         crate::daemon::DaemonClient::request(self, &request).await
     }
@@ -152,36 +160,54 @@ async fn wait_loop<C: WaitConnector>(
         }
         let mut client = match reconnect_deadline {
             Some(deadline) => {
+                let deadline = wait_deadline.map_or(deadline, |wait| wait.min(deadline));
                 match connect_within_grace(connector, &cfg.store_key, deadline).await? {
                     Some(client) => client,
                     None => {
+                        if remaining_wait_timeout_ms(wait_deadline) == Some(0) {
+                            return Ok(WaitTerminal::Response(Response::Timeout));
+                        }
                         return Ok(WaitTerminal::DaemonGone(
                             last_reconnect_error
                                 .unwrap_or_else(|| "reconnect grace expired".to_string()),
-                        ))
+                        ));
                     }
                 }
             }
-            None => match connector.connect_or_spawn(&cfg.store_key).await {
-                Ok(client) => client,
-                Err(crate::daemon::DaemonError::Timeout(e)) => {
-                    return Ok(WaitTerminal::DaemonHung(e));
+            None => {
+                let connect = connector.connect_or_spawn(&cfg.store_key);
+                let result = match wait_deadline {
+                    Some(deadline) => match tokio::time::timeout_at(deadline, connect).await {
+                        Ok(result) => result,
+                        Err(_) => return Ok(WaitTerminal::Response(Response::Timeout)),
+                    },
+                    None => connect.await,
+                };
+                match result {
+                    Ok(client) => client,
+                    Err(crate::daemon::DaemonError::Timeout(e)) => {
+                        return Ok(WaitTerminal::DaemonHung(e));
+                    }
+                    Err(crate::daemon::DaemonError::NotRunning(e)) => {
+                        return Ok(WaitTerminal::DaemonGone(e));
+                    }
+                    Err(crate::daemon::DaemonError::Unauthorized(e)) => {
+                        return Err(crate::daemon::DaemonError::Unauthorized(e).into());
+                    }
+                    Err(crate::daemon::DaemonError::Incompatible(e)) => {
+                        return Err(crate::daemon::DaemonError::Incompatible(e).into());
+                    }
+                    Err(e) => {
+                        return Ok(WaitTerminal::DaemonGone(e.to_string()));
+                    }
                 }
-                Err(crate::daemon::DaemonError::NotRunning(e)) => {
-                    return Ok(WaitTerminal::DaemonGone(e));
-                }
-                Err(crate::daemon::DaemonError::Unauthorized(e)) => {
-                    return Err(crate::daemon::DaemonError::Unauthorized(e).into());
-                }
-                Err(crate::daemon::DaemonError::Incompatible(e)) => {
-                    return Err(crate::daemon::DaemonError::Incompatible(e).into());
-                }
-                Err(e) => {
-                    return Ok(WaitTerminal::DaemonGone(e.to_string()));
-                }
-            },
+            }
         };
 
+        let timeout_ms = remaining_wait_timeout_ms(wait_deadline);
+        if timeout_ms == Some(0) {
+            return Ok(WaitTerminal::Response(Response::Timeout));
+        }
         let request = wait_request(cfg, timeout_ms);
         let response_result = match timeout_ms {
             Some(wait_ms) => {
@@ -244,16 +270,25 @@ async fn wait_loop<C: WaitConnector>(
                 let deadline = *reconnect_deadline.get_or_insert_with(|| {
                     tokio::time::Instant::now() + Duration::from_millis(cfg.reconnect_grace_ms)
                 });
+                let deadline = wait_deadline.map_or(deadline, |wait| wait.min(deadline));
                 match register_for_retry(connector, cfg, deadline).await? {
                     Some(()) => retried_after_attach = true,
                     None => {
+                        if remaining_wait_timeout_ms(wait_deadline) == Some(0) {
+                            return Ok(WaitTerminal::Response(Response::Timeout));
+                        }
                         return Ok(WaitTerminal::DaemonGone(
                             "reconnect grace expired before re-register completed".to_string(),
                         ));
                     }
                 }
             }
-            Response::Error { code, message, .. } if code == ERROR_BACKEND_UNAVAILABLE => {
+            Response::Error { code, message, .. }
+                if code == ERROR_BACKEND_UNAVAILABLE && client.supports_backend_recovery() =>
+            {
+                if remaining_wait_timeout_ms(wait_deadline) == Some(0) {
+                    return Ok(WaitTerminal::Response(Response::Timeout));
+                }
                 return Ok(WaitTerminal::BackendUnavailable(message));
             }
             Response::Message { .. }
@@ -739,11 +774,13 @@ mod tests {
         connect_errors: VecDeque<DaemonError>,
         connects: usize,
         requests: Arc<Mutex<Vec<Request>>>,
+        connect_delay: Duration,
     }
 
     struct ScriptClient {
         actions: VecDeque<ScriptAction>,
         requests: Arc<Mutex<Vec<Request>>>,
+        supports_backend_recovery: bool,
     }
 
     enum ScriptAction {
@@ -754,6 +791,10 @@ mod tests {
 
     #[async_trait(?Send)]
     impl WaitClient for ScriptClient {
+        fn supports_backend_recovery(&self) -> bool {
+            self.supports_backend_recovery
+        }
+
         async fn request(&mut self, request: Request) -> crate::daemon::Result<Response> {
             self.requests.lock().unwrap().push(request);
             let action = self
@@ -778,6 +819,9 @@ mod tests {
             _store_key: &str,
         ) -> crate::daemon::Result<Box<dyn WaitClient>> {
             self.connects += 1;
+            if !self.connect_delay.is_zero() {
+                tokio::time::sleep(self.connect_delay).await;
+            }
             if let Some(client) = self.clients.pop_front() {
                 return Ok(Box::new(client));
             }
@@ -795,6 +839,7 @@ mod tests {
                 connect_errors: VecDeque::new(),
                 connects: 0,
                 requests: Arc::new(Mutex::new(Vec::new())),
+                connect_delay: Duration::ZERO,
             }
         }
 
@@ -802,6 +847,7 @@ mod tests {
             self.clients.push_back(ScriptClient {
                 actions: actions.into(),
                 requests: self.requests.clone(),
+                supports_backend_recovery: true,
             });
             self
         }
@@ -1020,6 +1066,88 @@ mod tests {
                 if detail == "backend recovery grace expired"
         ));
         assert_eq!(connector.request_ops(), vec!["wait"]);
+    }
+
+    #[tokio::test]
+    async fn backend_recovery_requires_actual_daemon_offer() {
+        let mut connector = ScriptConnector::new().client(vec![ScriptAction::Response(
+            crate::daemon_ipc::error_response(
+                ERROR_BACKEND_UNAVAILABLE,
+                "backend recovery grace expired",
+            ),
+        )]);
+        connector.clients[0].supports_backend_recovery = false;
+        let error = wait_loop(&mut connector, &cfg()).await.unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "BackendUnavailable: backend recovery grace expired"
+        );
+        assert_eq!(connector.request_ops(), vec!["wait"]);
+    }
+
+    #[tokio::test]
+    async fn finite_wait_bounds_initial_connection_and_recomputes_request_budget() {
+        let mut cfg = cfg();
+        cfg.timeout_ms = Some(50);
+        let mut connector =
+            ScriptConnector::new().client(vec![ScriptAction::Response(Response::Timeout)]);
+        connector.connect_delay = Duration::from_millis(1_000);
+        let started = tokio::time::Instant::now();
+        assert!(matches!(
+            wait_loop(&mut connector, &cfg).await.unwrap(),
+            WaitTerminal::Response(Response::Timeout)
+        ));
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert!(connector.request_ops().is_empty());
+
+        cfg.timeout_ms = Some(1_000);
+        connector.connect_delay = Duration::from_millis(50);
+        assert!(matches!(
+            wait_loop(&mut connector, &cfg).await.unwrap(),
+            WaitTerminal::Response(Response::Timeout)
+        ));
+        assert!(matches!(
+            connector.requests.lock().unwrap()[0],
+            Request::Wait { timeout_ms: Some(ms), .. } if ms <= 950
+        ));
+    }
+
+    #[tokio::test]
+    async fn finite_wait_deadline_precedes_reconnect_grace() {
+        let mut cfg = cfg();
+        cfg.timeout_ms = Some(20);
+        cfg.reconnect_grace_ms = 1_000;
+        let mut connector = ScriptConnector::new().client(vec![ScriptAction::Error(
+            DaemonError::Protocol("EOF".into()),
+        )]);
+        connector
+            .connect_errors
+            .push_back(DaemonError::NotRunning("gone".into()));
+        let started = tokio::time::Instant::now();
+        assert!(matches!(
+            wait_loop(&mut connector, &cfg).await.unwrap(),
+            WaitTerminal::Response(Response::Timeout)
+        ));
+        assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[tokio::test]
+    async fn legacy_daemon_errors_are_not_relabelled_as_backend_exhaustion() {
+        let mut connector = ScriptConnector::new().client(vec![ScriptAction::Response(
+            crate::daemon_ipc::internal("connection closed"),
+        )]);
+        connector.clients[0].supports_backend_recovery = false;
+        let error = wait_loop(&mut connector, &cfg()).await.unwrap_err();
+        assert_eq!(error.to_string(), "Internal: connection closed");
+        assert_eq!(connector.request_ops(), vec!["wait"]);
+
+        let mut connector =
+            ScriptConnector::new().client(vec![ScriptAction::Response(Response::Timeout)]);
+        connector.clients[0].supports_backend_recovery = false;
+        assert!(matches!(
+            wait_loop(&mut connector, &cfg()).await.unwrap(),
+            WaitTerminal::Response(Response::Timeout)
+        ));
     }
 
     #[tokio::test]

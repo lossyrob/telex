@@ -1,0 +1,30 @@
+{
+  "commit": "7ed886b07620e8ab8adba68249ab84f96ea26013",
+  "blobs": {
+    "src/commands/wait.rs": "c3526da3a5f24cff9b00585f9998879cfd15fdfe",
+    "src/cli.rs": "e5a84b065b8947f7ea2d5f39bb7fe1a451eef95a",
+    "src/daemon_ipc.rs": "96a1bb3b9c9abcdede113781899c5b28c4a9fdbe"
+  },
+  "extractions": {
+    "historical_wait.rs": {
+      "source": "src/commands/wait.rs",
+      "selection": "production prefix before #[cfg(test)]",
+      "sha256": "5e6c519889d82996760cd6d9058ea0f2fbf82aebc09644f5543bed052f3674c7"
+    },
+    "historical_hello.rs": {
+      "source": "src/daemon_ipc.rs",
+      "selection": "daemon_capabilities through client_hello",
+      "sha256": "86ecfb40c7dc388018eeb09b03f3fdd0746d2914c8ae2744557ca77e34c80dca"
+    },
+    "historical_outcome.rs": {
+      "source": "src/daemon_ipc.rs",
+      "selection": "WaiterOutcome and its exact derives",
+      "sha256": "1790e96bd8f86463f02b9f0e741c65694896ede14c1c95e81604359f024b67f9"
+    },
+    "historical_result.rs": {
+      "source": "src/cli.rs",
+      "selection": "run's final match result expression",
+      "sha256": "a7b143b49fa440407a4ca0cc9f29a350330011df71ca433cc2f73158ada7cf96"
+    }
+  }
+}

@@ -757,7 +757,7 @@ if ($inputText -match '"body":"first cc"') {
     $count = [int]((Get-Content -LiteralPath $countPath -Raw).Trim())
   }
   $count += 1
-  Set-Content -LiteralPath $countPath -Value $count -Encoding utf8
+  Set-Content -LiteralPath $countPath -Value $count -Encoding ascii
   $attemptPath = Join-Path $Root "first-$count.json"
   [IO.File]::WriteAllText($attemptPath, $inputText, [Text.UTF8Encoding]::new($false))
   if ($count -eq 1) { exit 1 }
@@ -2028,121 +2028,298 @@ async fn postgres_reset_does_not_abort_pull_or_unregister_push_station() {
     ));
     tokio::time::sleep(Duration::from_millis(250)).await;
 
-    admin_exec(
-        &cfg,
-        &format!(
-            "SET search_path TO {schema}, public;
-             CREATE SEQUENCE wait_fault_seq;
-             CREATE FUNCTION fail_first_pull_delivery() RETURNS trigger AS $$
-             BEGIN
-               IF NEW.recipient = 'addr:pull'
-                  AND nextval('{schema}.wait_fault_seq') = 1 THEN
-                 RAISE EXCEPTION 'injected transient shutdown' USING ERRCODE = '57P01';
-               END IF;
-               RETURN NEW;
-             END
-             $$ LANGUAGE plpgsql;
-             CREATE TRIGGER fail_first_pull_delivery
-               BEFORE INSERT ON deliveries
-               FOR EACH ROW EXECUTE FUNCTION fail_first_pull_delivery();"
-        ),
-    )
-    .await
-    .expect("install one-shot wait fetch fault");
+    let original_members = daemon.status().await.members;
+    let (control, connection) = cfg.connect(make_tls().unwrap()).await.unwrap();
+    tokio::spawn(async move { connection.await.expect("reset control connection") });
+    let (blocker, connection) = cfg.connect(make_tls().unwrap()).await.unwrap();
+    tokio::spawn(async move { connection.await.expect("reset lock connection") });
 
-    let waiter = {
-        let daemon = daemon.clone();
-        let store_key = store_key.clone();
-        tokio::spawn(async move { daemon.wait(&store_key, "pull", "addr:pull", 5_000).await })
-    };
-    tokio::time::sleep(Duration::from_millis(50)).await;
-    admin_exec(
-        &cfg,
-        &format!(
-            "SELECT pg_terminate_backend(pid)
-             FROM pg_stat_activity
-             WHERE pid <> pg_backend_pid()
-               AND application_name = '{application_name}'"
-        ),
-    )
-    .await
-    .expect("terminate daemon postgres connections");
-
-    let notify_deadline = Instant::now() + Duration::from_secs(3);
-    loop {
-        if daemon
-            .status()
-            .await
-            .recent_errors
-            .iter()
-            .any(|error| error.kind == "NotifyDegraded")
-        {
-            break;
+    for reset in ["query", "listen"] {
+        if reset == "query" {
+            blocker
+                .batch_execute(&format!(
+                    "BEGIN; LOCK TABLE {schema}.deliveries IN ACCESS EXCLUSIVE MODE"
+                ))
+                .await
+                .unwrap();
         }
-        assert!(
-            Instant::now() < notify_deadline,
-            "expected LISTEN connection degradation after reset"
-        );
-        tokio::time::sleep(Duration::from_millis(50)).await;
+        let waiter = {
+            let daemon = daemon.clone();
+            let store_key = store_key.clone();
+            tokio::spawn(async move { daemon.wait(&store_key, "pull", "addr:pull", 5_000).await })
+        };
+        let pid_deadline = Instant::now() + Duration::from_secs(2);
+        let reset_pid = loop {
+            let rows = control
+                .query(
+                    "SELECT pid FROM pg_stat_activity
+                     WHERE datname = current_database() AND application_name = $1
+                       AND (($2 = 'query' AND wait_event_type = 'Lock'
+                             AND query LIKE '%deliveries%')
+                         OR ($2 = 'listen' AND query LIKE 'LISTEN telex_messages_%'))",
+                    &[&application_name, &reset],
+                )
+                .await
+                .unwrap();
+            if let Some(row) = rows.first() {
+                assert_eq!(rows.len(), 1, "reset must target exactly one connection");
+                break row.get::<_, i32>(0);
+            }
+            assert!(
+                Instant::now() < pid_deadline,
+                "{reset} connection never ready"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        };
+        assert!(control
+            .query_one("SELECT pg_terminate_backend($1)", &[&reset_pid])
+            .await
+            .unwrap()
+            .get::<_, bool>(0));
+        if reset == "query" {
+            blocker.batch_execute("ROLLBACK").await.unwrap();
+        }
+
+        let expected_error = if reset == "query" {
+            "BackendDegraded"
+        } else {
+            "NotifyDegraded"
+        };
+        let recovery_deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let status = daemon.status().await;
+            let listener_ready = !control
+                .query(
+                    "SELECT pid FROM pg_stat_activity
+                     WHERE datname = current_database() AND application_name = $1
+                       AND query LIKE 'LISTEN telex_messages_%' AND pid <> $2",
+                    &[&application_name, &reset_pid],
+                )
+                .await
+                .unwrap()
+                .is_empty();
+            if listener_ready
+                && status
+                    .recent_errors
+                    .iter()
+                    .any(|error| error.kind == expected_error)
+                && status
+                    .members
+                    .iter()
+                    .any(|member| member.session_id == "pull" && member.live_waiters_count == 1)
+            {
+                break;
+            }
+            assert!(
+                Instant::now() < recovery_deadline,
+                "{reset} did not recover"
+            );
+            assert!(
+                !waiter.is_finished(),
+                "pull waiter aborted during {reset} reset"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(!waiter.is_finished(), "waiter must survive {reset} reset");
+
+        let pull_body = format!("pull after {reset} reset");
+        let sent = daemon
+            .request(send_request(
+                &store_key,
+                "sender",
+                Some("addr:sender"),
+                "addr:pull",
+                None,
+                &pull_body,
+            ))
+            .await;
+        let pull_id = match sent {
+            Response::Sent { receipt } => receipt.id,
+            other => panic!("send failed: {other:?}"),
+        };
+        assert!(matches!(
+            waiter.await.expect("waiter task"),
+            Response::Message { id, ref body, .. } if id == pull_id && body == &pull_body
+        ));
+        assert!(matches!(
+            daemon.ack(&store_key, "pull", "addr:pull", pull_id).await,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
+
+        if push_output.exists() {
+            std::fs::remove_file(&push_output).unwrap();
+        }
+        let push_body = format!("push after {reset} reset");
+        let pushed = daemon
+            .request(send_request(
+                &store_key,
+                "sender",
+                Some("addr:sender"),
+                "addr:push",
+                None,
+                &push_body,
+            ))
+            .await;
+        let push_id = match pushed {
+            Response::Sent { receipt } => receipt.id,
+            other => panic!("send failed: {other:?}"),
+        };
+        let push_deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Ok(bytes) = std::fs::read(&push_output) {
+                if let Ok(payload) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    assert_eq!(payload["body"], push_body);
+                    assert_eq!(payload["delivered_to"], "addr:push");
+                    assert_eq!(payload["message_id"], push_id);
+                    break;
+                }
+            }
+            assert!(
+                Instant::now() < push_deadline,
+                "push did not deliver after {reset}"
+            );
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        let status = daemon.status().await;
+        assert_eq!(status.members.len(), original_members.len());
+        for original in &original_members {
+            let member = status
+                .members
+                .iter()
+                .find(|member| member.session_id == original.session_id)
+                .unwrap();
+            assert_eq!(member.lease_epoch, original.lease_epoch);
+            assert_eq!(member.owner_instance_id, original.owner_instance_id);
+            assert_eq!(member.push_registered, original.push_registered);
+            assert!(!member.idle);
+        }
     }
-
-    let sent = daemon
-        .request(send_request(
-            &store_key,
-            "sender",
-            Some("addr:sender"),
-            "addr:pull",
-            None,
-            "pull after reset",
-        ))
-        .await;
-    assert!(
-        matches!(sent, Response::Sent { .. }),
-        "send failed: {sent:?}"
-    );
-    assert!(matches!(
-        waiter.await.expect("waiter task"),
-        Response::Message { ref body, .. } if body == "pull after reset"
-    ));
-
-    let pushed = daemon
-        .request(send_request(
-            &store_key,
-            "sender",
-            Some("addr:sender"),
-            "addr:push",
-            None,
-            "push after reset",
-        ))
-        .await;
-    assert!(
-        matches!(pushed, Response::Sent { .. }),
-        "send failed: {pushed:?}"
-    );
-    let push_deadline = Instant::now() + Duration::from_secs(3);
-    while !push_output.exists() {
-        assert!(
-            Instant::now() < push_deadline,
-            "push station did not deliver after reset"
-        );
-        tokio::time::sleep(Duration::from_millis(25)).await;
-    }
-
-    let status = daemon.status().await;
-    assert!(status
-        .recent_errors
-        .iter()
-        .any(|error| error.kind == "BackendDegraded"));
-    assert!(status.members.iter().any(|member| {
-        member.session_id == "push"
-            && member.address == "addr:push"
-            && member.push_registered
-            && !member.idle
-    }));
+    drop(blocker);
+    drop(control);
 
     admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
         .await
         .expect("post-test schema cleanup");
     let _ = std::fs::remove_dir_all(config_path.parent().unwrap());
+    restore_env("TELEX_CONFIG", prior_config);
+}
+
+#[tokio::test]
+async fn postgres_wait_does_not_retry_permanent_reconnect_configuration() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) =
+        pg_url_or_skip("postgres_wait_does_not_retry_permanent_reconnect_configuration")
+    else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let unique = format!("{}_{}", std::process::id(), now_ms());
+    let schema = sanitize_ident(&format!("telex_pg_permanent_{unique}")).unwrap();
+    let application_name = format!("telex_pg_permanent_{unique}");
+    let password_env = format!("TELEX_TEST_PASSWORD_{unique}");
+    std::env::set_var(
+        &password_env,
+        std::str::from_utf8(cfg.get_password().expect("test database password")).unwrap(),
+    );
+    let prior_config = std::env::var_os("TELEX_CONFIG");
+    let profile = BackendProfile {
+        kind: "postgres".into(),
+        path: None,
+        url: Some(pg_url_with_application_name(&url, &application_name)),
+        auth: Some("password".into()),
+        password_env: Some(password_env.clone()),
+        password_command: None,
+        schema: Some(schema.clone()),
+        entra_cred: None,
+        entra_scope: None,
+    };
+    let store_key = profiles::store_key(&profile, None);
+    let config_path = write_temp_config(
+        "permanent-reconnect",
+        &ConfigFile {
+            default: Some("test".into()),
+            backends: BTreeMap::from([("test".into(), profile)]),
+        },
+    );
+    std::env::set_var("TELEX_CONFIG", &config_path);
+    let daemon = TestDaemon::new("pg-permanent-reconnect");
+    let (epoch, owner) = registered_epoch(&daemon, &store_key, "pull", "addr:pull").await;
+    let (control, connection) = cfg.connect(make_tls().unwrap()).await.unwrap();
+    tokio::spawn(async move { connection.await.expect("permanent fault control") });
+    let listener_deadline = Instant::now() + Duration::from_secs(2);
+    while control
+        .query(
+            "SELECT pid FROM pg_stat_activity WHERE application_name=$1
+         AND query LIKE 'LISTEN telex_messages_%'",
+            &[&application_name],
+        )
+        .await
+        .unwrap()
+        .is_empty()
+    {
+        assert!(
+            Instant::now() < listener_deadline,
+            "LISTEN connection did not subscribe"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let pids = control
+        .query(
+            "SELECT pid FROM pg_stat_activity WHERE application_name=$1
+         AND query NOT LIKE 'LISTEN telex_messages_%'",
+            &[&application_name],
+        )
+        .await
+        .unwrap();
+    assert_eq!(pids.len(), 1, "exact query connection must exist");
+    let pid: i32 = pids[0].get(0);
+    std::env::remove_var(&password_env);
+    assert!(control
+        .query_one("SELECT pg_terminate_backend($1)", &[&pid])
+        .await
+        .unwrap()
+        .get::<_, bool>(0));
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !control
+        .query("SELECT pid FROM pg_stat_activity WHERE pid=$1", &[&pid])
+        .await
+        .unwrap()
+        .is_empty()
+    {
+        assert!(Instant::now() < deadline, "query connection did not close");
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let started = Instant::now();
+    let response = daemon.wait(&store_key, "pull", "addr:pull", 5_000).await;
+    assert!(
+        matches!(
+            response,
+            Response::Error { ref code, ref message, .. }
+                if code == proto::ERROR_INTERNAL && message.contains(&password_env)
+        ),
+        "permanent configuration failure must remain actionable: {response:?}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(1));
+    std::env::set_var(
+        &password_env,
+        std::str::from_utf8(cfg.get_password().unwrap()).unwrap(),
+    );
+    let status = daemon.status().await;
+    assert_eq!(status.members.len(), 1);
+    assert_eq!(status.members[0].lease_epoch, epoch);
+    assert_eq!(status.members[0].owner_instance_id, owner);
+    assert!(!status
+        .recent_errors
+        .iter()
+        .any(|error| error.kind == "BackendDegraded"));
+    std::env::remove_var(&password_env);
+    drop(control);
+    admin_exec(&cfg, &format!("DROP SCHEMA {schema} CASCADE"))
+        .await
+        .unwrap();
+    std::fs::remove_dir_all(config_path.parent().unwrap()).unwrap();
     restore_env("TELEX_CONFIG", prior_config);
 }
