@@ -46,6 +46,14 @@ the final **closure gate**, without blocking PR #138 or the builder
 justified by a transactional migration boundary and an independently useful,
 safe PR #138 outcome.
 
+The schema-3 recovery release is a separate, bounded chain. Issue #154 covers
+the two unsafe Windows `TOKEN_USER` reads on exact main. Issue #155 adopts draft
+PR #156 for PostgreSQL query and `LISTEN` reset recovery. After both repairs merge
+and the campaign verifies dependency closure, one isolated worker prepares an
+immutable v0.2.0 candidate for the campaign/operator-owned
+`schema3-release-gate`. This chain does not reopen the completed release nodes and
+does not accept hardening or closure.
+
 The richer design rationale and the full decision ledger that led here live in
 [`docs/initial-shaping.md`](docs/initial-shaping.md). The brief stays current and
 distilled.
@@ -90,11 +98,16 @@ The authoritative design layer (merged from `design-foundation`) lives under
   as a per-session holder, the re-arm dance) and updating the docs **with**
   `daemon-core`, not at closure; desired station-intent recovery with bounded
   OS-lock safety and a degraded partial-scan contract; and the downstream
-  transactional-authority closure.
+  transactional-authority closure. The bounded recovery-release addition covers
+  issue #154 Windows token-buffer alignment, issue #155 PostgreSQL wait-reset
+  recovery, and isolated v0.2.0 schema-3 candidate preparation and publication
+  gating after both repairs merge.
 - **Out of scope:** the embeddable SDK client (#12) - it shares the
   collapse-into-one-process theme and should reuse the stabilized Layer-1 IPC, but
   is a separate solve; response windows / TTL deadlines (#2); the `store_key` helper
-  (#25).
+  (#25). The recovery-release packet also excludes PR #138, issues #152/#153,
+  Watcher and Operator Station runtimes, campaign closure, schema-policy redesign,
+  shared or production database mutation, and operator-installed daemon operations.
 - **Deferred:** a richer non-binary occupant status policy beyond the accepted
   non-destructive liveness states; the pid-reuse-immune fd-over-IPC backstop
   (#28-flavored), awkward with a singleton daemon (the accepted process evidence
@@ -114,17 +127,26 @@ Dogfooding then exposed issue #106: daemon replacement can preserve durable mess
 while losing a still-live bridge's desired push registration. Existing PR #138 is the
 adopted `station-intent-reconciliation` repair. The operator selected persistent
 owner-private OS advisory locking to prevent stale pathname mutation and accepted a
-degraded contract for bounded partial directory scans. PR #138 may resume after this
-Tier B authority lands, but it remains in progress and pending design promotion,
-review repair, exact-head CI, and both-backend proof. The **hardening gate is not
-ready** until that narrowed repair is merged and presented with isolated
-restart/drain/upgrade and push-recovery evidence.
+degraded contract for bounded partial directory scans. PR #138 remains open,
+merge-unapproved, and excluded from this recovery packet; this authority does not
+revive its worker. The **hardening gate is not ready** until that narrowed repair is
+merged and presented with isolated restart/drain/upgrade and push-recovery evidence.
 
 Unconditional transactional generation authority, seekable fair discovery and
 garbage collection, exact counts, and exact over-cap recovery belong to the planned
 XL `station-intent-transactional-authority` node
 ([#153](https://github.com/lossyrob/telex/issues/153)). That node follows PR #138 and
 blocks the final **closure gate**, not PR #138 or the hardening gate.
+
+Exact main `ed417c6b938f92fe3bfb84f3b0cc0bea719fbbd0` is schema 3 and protocol
+1.5, while released v0.1.2 supports schema 2 and protocol 1.4. Exact main also
+contains unsafe `Vec<u8>`-backed `TOKEN_USER` reads in both
+`src/backend/sqlite.rs` and `src/daemon.rs`; the daemon alignment repair exists
+only on unmerged PR #138. Draft PR #156 is published at
+`5c302dacb1c3e659e7f89c3c9670e3cf5cbc5105` for issue #155 and must be adopted
+without replacing its branch or history. The recovery release prepares v0.2.0 only
+after issues #154 and #155 merge, using disposable isolated roots and databases.
+Tagging and publication remain a separate explicit operator decision.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
@@ -177,6 +199,11 @@ packet directly to `main`.
   contract. A connected XL node restores unconditional transactional generation
   authority and fair maintenance before workstream closure. This preserves one
   complete, useful PR #138 outcome while keeping the accepted gap durable.
+- **Recovery release is an isolated confidence chain:** Repair #154 and adopted
+  PR #156/#155 first. After both merge, one isolated worker prepares one immutable
+  v0.2.0 candidate and evidence packet. The campaign/operator publication gate is
+  distinct from hardening and closure; green evidence never implies publication
+  approval.
 - **Docs/SKILL cutover with `daemon-core` (council):** keep the verb names; update
   `SKILL.md` + plugin docs when behavior changes, not at closure, so instructions
   never describe a dead holder/waiter model mid-workstream.
