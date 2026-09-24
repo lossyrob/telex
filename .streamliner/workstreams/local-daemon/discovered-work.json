@@ -228,6 +228,55 @@
       "status": "routed",
       "decisionState": "accepted",
       "dispositionAuthority": "Explicit operator approval for the Tier B recovery release packet on 2026-09-24. Preparation authority does not authorize tag or publication."
+    },
+    {
+      "id": "local-daemon-postgres-reset-deadline-classification",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "lossyrob/telex#155 and PR #156 worker inspection",
+      "evidence": {
+        "repositoryMain": "7ed886b07620e8ab8adba68249ab84f96ea26013",
+        "branch": "copilot/fix-postgres-connection-reset",
+        "inheritedHead": "3423cd675b0378b587d842fd5ac6b02d9d6e15be",
+        "inheritedHeadParents": [
+          "5c302dacb1c3e659e7f89c3c9670e3cf5cbc5105",
+          "7ed886b07620e8ab8adba68249ab84f96ea26013"
+        ],
+        "details": "At the inherited head, src/daemon.rs near line 5197 applies a bounded fetch deadline only after a first backend failure has started recovery, so a stalled first attempt is not bounded by that recovery deadline. src/backend/postgres.rs near line 1893 maps every client acquisition failure to a retryable backend error, including failures that may be permanent, such as authentication or configuration errors."
+      },
+      "description": "Bound the first PostgreSQL wait attempt by the finite wait deadline and distinguish permanent acquisition failures from transient resets.",
+      "affectedOutcome": "Finite wait deadlines must stay finite during a stalled first attempt, and permanent authentication or configuration failures must not be retried as transient resets.",
+      "requiredness": "Required for current PR #156 correctness.",
+      "sequencing": "Absorb into the same issue #155 node, branch, and PR #156 before final exact-head review.",
+      "selectedDisposition": "Absorb into issue #155 / PR #156.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "PR #156 adds tests for a stalled first attempt under a finite deadline and for permanent authentication and configuration classification, then completes required review, exact-head CI, and design inspection before exact-head campaign merge authorization.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope."
+    },
+    {
+      "id": "local-daemon-postgres-reset-status-compatibility",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "lossyrob/telex#155, PR #156 worker inspection, and Local Daemon design steward review",
+      "evidence": {
+        "repositoryMain": "7ed886b07620e8ab8adba68249ab84f96ea26013",
+        "branch": "copilot/fix-postgres-connection-reset",
+        "inheritedHead": "3423cd675b0378b587d842fd5ac6b02d9d6e15be",
+        "details": "At the inherited head, src/daemon_ipc.rs near line 697 adds BackendUnavailable to the closed WaiterOutcome enum while IPC protocol 1.5 is unchanged. A legacy STATUS decoder that does not know the new variant fails to decode the response.",
+        "designSteward": "af271672-5d33-418c-bb9c-0f4d4570c7d7"
+      },
+      "description": "Keep STATUS decodable by legacy peers while PR #156 reports the new backend-unavailable waiter outcome.",
+      "affectedOutcome": "Adding a waiter outcome must not break existing STATUS clients under the unchanged IPC 1.5 contract.",
+      "requiredness": "Required for current PR #156 compatibility.",
+      "sequencing": "Absorb into the same issue #155 node, branch, and PR #156. Promote the product contract in PR #156 before final exact-head review.",
+      "selectedDisposition": "Absorb into PR #156 using the steward-accepted design: an optional wait-backend-recovery capability with a STATUS projection for each current authenticated peer. Preserve full daemon state, code 7, detail, and time. Omit only the new typed BackendUnavailable outcome for peers that do not advertise support. Apply recovery to all peers. Document that legacy WAIT exits with 1 and new WAIT exits with 7. Make no IPC version, schema, required-capability, authentication, guard, or ADR reservation change.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "PR #156 adds tests from exact main 7ed886b for the legacy decoder, the old and new Hello matrix, STATUS state preservation, WAIT outdir, the deadline tie, permanent errors, and mixed query and LISTEN resets across pull and push. It promotes normative documentation and completes full review, exact-head CI, and final design inspection before exact-head campaign merge authorization.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 accepted the design in-node. It is pending product promotion in PR #156 and is not merged or current product authority."
     }
   ]
 }

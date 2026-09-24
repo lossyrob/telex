@@ -148,6 +148,15 @@ without replacing its branch or history. The recovery release prepares v0.2.0 on
 after issues #154 and #155 merge, using disposable isolated roots and databases.
 Tagging and publication remain a separate explicit operator decision.
 
+Both recovery repairs launched against main
+`7ed886b07620e8ab8adba68249ab84f96ea26013` and are in progress. Issue #154 has one
+worker on `feature/windows-token-buffer-alignment`, with no PR yet. Issue #155 has
+one worker completing adopted draft PR #156 in place on
+`copilot/fix-postgres-connection-reset`; its local starting head `3423cd6` merges
+main into published head `5c302dac` without rewriting history. Neither repair has
+completed review, CI, or merge. Issue #157 is not launched, and the release gate,
+hardening gate, and closure gate remain planned.
+
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
 campaign's sole artifact reconciler applying the reviewed, operator-authorized

@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-09-25T01:12:49.050Z",
+  "updatedAt": "2026-09-24T22:33:09.104Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -321,7 +321,7 @@
       "type": "task",
       "title": "Align Windows token-information storage",
       "summary": "Repair both unsafe TOKEN_USER reads present on exact main ed417c6: src/backend/sqlite.rs and src/daemon.rs each pass Vec<u8> storage to GetTokenInformation and dereference it as TOKEN_USER. The daemon-only aligned change exists on unmerged PR #138 and is neither main authority nor a dependency. Preserve SID identity, authentication, owner-private storage, and fallback behavior; prove alignment before dereference across the supported Windows platform/feature matrix; and audit all remaining GetTokenInformation call sites. Required by hardening-gate and schema3-release-preparation.",
-      "status": "planned",
+      "status": "in-progress",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -339,7 +339,7 @@
       "type": "task",
       "title": "Recover PostgreSQL waiters after connection resets",
       "summary": "Adopt open draft PR #156 and its published branch copilot/fix-postgres-connection-reset at 5c302dac without replacing or rewriting them. Before launch, establish one writer and verify that no cloud or legacy writer overlaps. Recover transient query and LISTEN resets for shared-daemon pull and push delivery, preserve finite wait deadlines, bound retry, surface actionable exhaustion, and complete exact-head CI, review, compatibility/design inspection, and fault-injection proof. The operator chose repair, not an accepted limitation.",
-      "status": "planned",
+      "status": "in-progress",
       "attention": "focus",
       "repoIds": [
         "telex"
