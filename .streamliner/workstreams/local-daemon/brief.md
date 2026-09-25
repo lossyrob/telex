@@ -171,6 +171,14 @@ helper; both are absorbed into PR #156. The same #155 worker is repairing them.
 There is no new head yet, and design inspection and merge remain held. The
 earlier CI success covers only `25aea118`.
 
+The M2 repair is on an operator-owned contract hold. The M2 finding is accepted,
+but its remedy is not selected. The operator must decide whether credential
+helpers are invocation-scoped or may intentionally outlive the command, and how
+the repair treats helpers that escape. Until then, the #155 worker may finish
+only the independent M1, C1, and C2 checks and owned-fixture cleanup, then
+quiesce, and nothing may present M2 as repaired. The #154 candidate remains
+blocked separately on the operator-owned App link, and #157 is not launched.
+
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
 campaign's sole artifact reconciler applying the reviewed, operator-authorized

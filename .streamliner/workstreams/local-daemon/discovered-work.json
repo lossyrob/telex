@@ -408,6 +408,31 @@
       "status": "absorbed",
       "decisionState": "accepted",
       "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending repair and proof; not completed."
+    },
+    {
+      "id": "local-daemon-postgres-credential-lifecycle-contract",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "PR #156 review finding M2, Local Daemon design steward adjudication, and campaign disposition request",
+      "crossReference": "local-daemon-postgres-credential-cancellation",
+      "evidence": {
+        "reviewedHead": "25aea118e04c4e93eb4e748fe7c1989338931ac2",
+        "review": "5311857915",
+        "reviewThread": "https://github.com/lossyrob/telex/pull/156#discussion_r4099847843",
+        "designSteward": "af271672-5d33-418c-bb9c-0f4d4570c7d7",
+        "campaign": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+        "decisionArtifact": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\pr156-m2-lifecycle-checkpoint.json",
+        "details": "The existing shell password-command contract does not require descendants to stay invocation-scoped. After the shell succeeds and output reaches EOF, a redirected helper may intentionally persist, so killing it is a deliberate lifetime change. A Unix process group cannot contain helpers that call setsid or setpgid or ask an external broker to create work, and a Windows job does not own broker-created work either. The steward judged a credential-local, runtime-independent native worker a proportionate prototype, not an accepted lifecycle. Bounded ownership, admission, output handling, drain at normal process exit, failure handling, and executed Windows and Unix runtime proof remain technical gates. The campaign asked the operator to choose between an explicit invocation-scoped contract and preserving background-helper semantics. The operator was unavailable and made no selection, narrowing, or waiver."
+      },
+      "description": "Decide the credential-command descendant lifetime and escape policy that the M2 repair must implement.",
+      "affectedOutcome": "The M2 repair cannot be designed, proven, or accepted until the supported helper lifetime and escape semantics are chosen.",
+      "requiredness": "Required before the M2 repair in PR #156 can proceed; the accepted M2 finding remains open.",
+      "sequencing": "Hold policy-dependent M2 implementation, design, and proof expansion. The worker may finish only the independent, already-authorized M1, C1, and C2 checks and the owned-fixture cleanup to an exact checkpoint, then quiesce. Preserve the current contract, the published PR #156 branch at 25aea118, and the existing local M1 work and prototypes. No push, review-ready request, or merge request may present M2 as repaired. No process-global infrastructure, new session, destructive cleanup, or open-ended alternative-design loop.",
+      "selectedDisposition": "Route to an operator-owned policy decision. No remedy, contract narrowing, or Unix escape-coverage waiver is selected, and the native-worker prototype is not accepted. General autonomy does not authorize any of these choices.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "Campaign and operator own the policy decision; after it, PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f and Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 own the technical design",
+      "terminalPath": "The operator explicitly selects the supported helper lifetime and escape policy, or authorizes a complete alternative that genuinely preserves current semantics. The steward then separately adjudicates a concrete bounded model for owner, readers, admission, shutdown, and failure, with executed proof on supported Windows and Unix. Same-PR review responses, a new exact-head review, CI, and design inspection follow before campaign merge authorization. Policy approval alone does not complete this item.",
+      "status": "routed",
+      "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c requested this hold; the policy decision belongs to the operator, who has not made it. This entry records a pending, unselected decision, not an accepted remedy."
     }
   ]
 }
