@@ -421,18 +421,162 @@
         "designSteward": "af271672-5d33-418c-bb9c-0f4d4570c7d7",
         "campaign": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
         "decisionArtifact": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\pr156-m2-lifecycle-checkpoint.json",
-        "details": "The existing shell password-command contract does not require descendants to stay invocation-scoped. After the shell succeeds and output reaches EOF, a redirected helper may intentionally persist, so killing it is a deliberate lifetime change. A Unix process group cannot contain helpers that call setsid or setpgid or ask an external broker to create work, and a Windows job does not own broker-created work either. The steward judged a credential-local, runtime-independent native worker a proportionate prototype, not an accepted lifecycle. Bounded ownership, admission, output handling, drain at normal process exit, failure handling, and executed Windows and Unix runtime proof remain technical gates. The campaign asked the operator to choose between an explicit invocation-scoped contract and preserving background-helper semantics. The operator was unavailable and made no selection, narrowing, or waiver."
+        "details": "Both operator policies and the exact reviewed intended technical design are selected. Campaign accepted the credential-local runtime-independent native owner, registry, admission, I/O, cancellation and publication, platform receipt, join, failure-hold, and shutdown design, including C=2 and B=3s as unmeasured engineering limits. The design orders final signaling, irreversible signal-authority revocation, exact leader reap, read-only group absence observation, I/O closure, and native completion before receipt. It is not implementation, runtime proof, product-write authority, or M2 completion.",
+        "decisionHistory": [
+          {
+            "state": "operator-unavailable-unselected",
+            "recordedOnMain": "c5d888de80bfdad79c78cff38c7cfda53a3111e9",
+            "operatorAvailable": false,
+            "selectedDisposition": "Route to an operator-owned policy decision. No remedy, contract narrowing, or Unix escape-coverage waiver is selected, and the native-worker prototype is not accepted. General autonomy does not authorize any of these choices.",
+            "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c requested this hold; the policy decision belongs to the operator, who has not made it. This entry records a pending, unselected decision, not an accepted remedy."
+          },
+          {
+            "state": "operator-selected",
+            "reportedAt": "2026-09-24T21:30:50-04:00",
+            "question": "May Telex define --password-command as a one-shot invocation, cleaning up its owned in-scope helpers on completion or cancellation and explicitly excluding intentionally persistent, escaped, or broker-launched background work from this command's supported lifecycle contract?",
+            "exactChoice": "Approve the one-shot invocation contract (Recommended)"
+          },
+          {
+            "state": "operator-selected-shutdown-policy",
+            "reportedBy": "38d183fb-df5d-4e65-88f3-e27b62e3c92f",
+            "reportedAt": "2026-09-25T13:11:15-04:00",
+            "question": "For normal Telex host shutdown, may credential cleanup add up to 3 seconds after logical command/Wait completion, with admission closed and owned workers drained/joined; if receipt is still missing at that bound, should Telex report cleanup failure and retain ownership rather than report a clean exit?",
+            "exactChoice": "Approve bounded orderly-exit drain and explicit failure hold (Recommended)"
+          },
+          {
+            "state": "campaign-technical-accepted",
+            "authoritySession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "reportedAt": "2026-09-25T13:41:31-04:00",
+            "decision": "TECHNICAL-ACCEPTED",
+            "reviewedProposal": "75913cbaecb4d009887d8ab31f999ccd0311f496",
+            "reviewDisposition": "full-review-approved; 0 blockers and 0 warnings",
+            "priorState": "The mechanism and numeric targets were conditional and unaccepted before this decision; earlier decision-history entries and proposal commits remain historical snapshots.",
+            "acceptedScope": "The exact reviewed credential-local native owner, registry, finite admission, C=2 aggregate occupied slots, same-source barrier, owned nonblocking I/O, atomic cancellation and publication, B=3s internal cleanup-observation target, platform receipt, join, failure-hold, and shutdown design with every stated condition and limit.",
+            "limits": "The accepted numeric limits are not measured performance or universal finite OS guarantees. Product writes, runtime proof, M2 closure, thread resolution, merge, and release remain unauthorized."
+          }
+        ],
+        "conditionalTechnicalRecommendation": {
+          "source": "Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7",
+          "accepted": true,
+          "acceptedBy": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "acceptedAt": "2026-09-25T13:41:31-04:00",
+          "reviewedProposal": "75913cbaecb4d009887d8ab31f999ccd0311f496",
+          "scope": "Credential-specific process-local admission and ownership registry shared across password-command calls and Tokio runtimes in one host, not a global service or general process manager.",
+          "proposedCapacity": 2,
+          "proposedCleanupObservationSeconds": 3,
+          "numericTargetsApproved": true,
+          "numericTargetsMeasured": false,
+          "cleanupObservationBasis": "The proposed three seconds reuses the existing recovery grace and is not a measured OS reap guarantee.",
+          "admission": "Count setup, running, output collection, cancellation, completed-but-unjoined work, and FAILED_HELD through ownership discharge. Retain the same-source barrier through cleanup. A queued caller uses its existing budget, launches no native work before admission, and does not enter an internal payload queue. Capacity pressure is not bad credentials and does not reset clocks.",
+          "ownership": "The native owner retains process scope, stdout and stderr pipes, cancellation, result publication, cleanup receipt, and thread completion independently of Tokio. Cancellation and result publication are atomic.",
+          "output": "Use nonblocking owned readers with no detached readers, partial credential publication, or new truncation policy. Preserve environment, working directory, shell parsing, complete UTF-8 trim, and nonzero behavior. Sanitize diagnostics.",
+          "failure": "Cleanup observation timeout or failure enters FAILED_HELD and retains the exact invocation registry record: slot, source reservation, owned Windows process and job handles or Unix unreaped leader, pipes, and worker-thread obligation. The owning host retains the record, closes affected admission, and reports a sanitized failure naming the obligation. It is not a cleanup receipt and does not authorize automatic restart, discarded ownership, a hidden forever worker, or a replacement cleanup queue. Permanently holding every ordinary Unix completion is not an adequate implementation.",
+          "platform": "Windows requires a private noninheritable job, documented process and primary-thread handles, suspended create and assign-before-resume, no breakaway fallback, explicit setup-failure cleanup, and observed process, zero-active-job, reader, and thread completion. Unix requires pre-exec group setup, the sole unreaped leader through the last signal, exact child reap, and no cached-PGID signal after reap, subreaper, global wait, process scan, or escaped-process action.",
+          "unixReceipt": "Establish a dedicated group before exec, retain the exclusive waitable unreaped leader through every mutating group signal, send the final signal while the anchor is valid, irreversibly revoke further signal authority, reap the exact leader, and use the former PGID only as a read-only observation key. Receipt requires conclusive platform absence, exact leader reap, completed or closed owned I/O, and native completion and join. Presence, denial, ambiguity, possible reuse, or errors retain the cleanup obligation without signal authority.",
+          "platformProof": "Execute real Windows and every claimed supported Unix target, including Linux and macOS if both remain supported. Compile-only or skipped runtime coverage is insufficient."
+        },
+        "postPolicyTechnicalVerdict": {
+          "source": "Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7",
+          "reportedAt": "2026-09-25T13:15:39-04:00",
+          "verdict": "design-feasibility-blocked",
+          "historicalDisposition": "Superseded by unixReceiptRecommendation after the single bounded API-level follow-up; retained for chronology and not the current technical recommendation.",
+          "currentBlocker": false,
+          "policiesSettled": true,
+          "scope": "Ordinary non-escaped Unix helpers, separate from intentionally escaped, persistent, or broker-created work.",
+          "requiredProductionSequence": "For each claimed Unix target, name the stable owned object, member-completion observation excluding the identity anchor, last signal, nonconsuming observation where needed, exact leader reap, identity release, and error behavior.",
+          "forbiddenApproaches": "Do not use PID, name, or ancestry scans, unrelated waits, a subreaper, global manager, cgroup, or coverage waiver.",
+          "proofBoundary": "Production API feasibility is required before implementation. Real-helper tests later corroborate implementation correctness and do not replace the production completion definition.",
+          "notImpossibilityProof": "No supported complete sequence has yet been supplied or justified. This does not assert that no platform-specific solution exists."
+        },
+        "unixReceiptRecommendation": {
+          "source": "Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7",
+          "reportedAt": "2026-09-25T13:25:05-04:00",
+          "verdict": "design-recommendation-ready; technically feasible with supported-API conditions",
+          "accepted": true,
+          "acceptedBy": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "acceptedAt": "2026-09-25T13:41:31-04:00",
+          "reviewedProposal": "75913cbaecb4d009887d8ab31f999ccd0311f496",
+          "supersedes": "The earlier blanket Unix ordinary-helper receipt feasibility blocker, but not its chronology.",
+          "groupLifetime": "An ordinary non-escaped member keeps the original process group extant after leader reap, and reparenting does not erase its group membership. Conclusive later absence proves the original group ended. Later numeric reuse may produce conservative presence or error holds but cannot restore that group or confer signaling authority.",
+          "ordering": [
+            "Establish a dedicated group before exec with leader PID equal to PGID and greater than one.",
+            "Retain exclusive waitable unreaped leader ownership through every mutating group signal; nonconsuming leader observation may be used.",
+            "Send the last termination signal while the identity anchor is valid, then irreversibly enter a no-more-group-signals state.",
+            "Observe and reap only the exact owned leader; ECHILD or competing reaping is an ownership error, not receipt.",
+            "After reap, use the former PGID only as a read-only observation key within the existing cleanup budget and never send it another nonzero signal.",
+            "Require exact leader reap, conclusive group absence, completed or closed owned I/O, and native completion and join before receipt and admission release."
+          ],
+          "linux": {
+            "query": "getpriority(PRIO_PGRP, P), never setpriority; clear thread-local errno before each call.",
+            "absence": "Only return -1 with errno ESRCH is conclusive absence.",
+            "presence": "Any successful result is presence, including nice value -1 with errno zero.",
+            "inconclusive": "EINTR permits read-only retry within the same budget. EPERM, EACCES, EINVAL, ENOSYS, unexpected errors, unknown context, or known ESRCH-fabricating sandbox or interposer behavior are not absence.",
+            "limit": "Require the native PID namespace and supported syscall semantics. Do not claim universal result-fabrication detection or use Linux kill(-P, 0) as the absence predicate."
+          },
+          "macos": {
+            "query": "Supported libc POSIX/UNIX03 kill(-P, 0), not a private raw syscall or legacy non-POSIX variant.",
+            "absence": "Return -1 with ESRCH is conclusive absence under the supported POSIX-mode semantics.",
+            "presenceOrInconclusive": "Return zero is presence. EPERM, including unsignalable, MAC-denied, or zombie-only cases, is not absence.",
+            "bindingProof": "Implementation review and genuine runtime tests must verify the actual libc binding and supported-target conformance. Do not generalize the Linux getpriority predicate to macOS."
+          },
+          "errorsAndRaces": "Final SIGKILL failure, partial delivery, changed permissions, missed concurrent forks, surviving ordinary helpers, zombies, reparenting, or slow adopter reaping prevent receipt or retain a conservative hold. Telex reaps only its exact child and sends no post-reap catch-up signal.",
+          "failedHeld": "After reap, FAILED_HELD retains the exact invocation record, slot, source reservation, responsible host, observation key, pipes, and native thread obligation, but no signal authority. It reports sanitized failure and permits no automatic restart, ownership discard, growing retry queue, or clean-exit claim.",
+          "proofBoundary": "Campaign accepted this intended design. Product implementation and genuine Windows, Linux, and macOS runtime proof remain pending; existing tests are not proof of the new mechanism.",
+          "references": [
+            "https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap03.html#tag_03_283",
+            "https://pubs.opengroup.org/onlinepubs/9799919799/basedefs/V1_chap04.html#tag_04_17",
+            "https://man7.org/linux/man-pages/man2/setpgid.2.html",
+            "https://pubs.opengroup.org/onlinepubs/9799919799/functions/waitid.html",
+            "https://pubs.opengroup.org/onlinepubs/9799919799/functions/kill.html",
+            "https://man7.org/linux/man-pages/man2/getpriority.2.html",
+            "https://github.com/torvalds/linux/blob/v6.12/kernel/sys.c#L297-L359",
+            "https://github.com/torvalds/linux/blob/v6.12/kernel/signal.c#L830-L864",
+            "https://github.com/torvalds/linux/blob/v6.12/kernel/pid.c#L346-L367",
+            "https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/libsyscall/wrappers/kill.c",
+            "https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/bsd/kern/kern_sig.c#L1642-L1721",
+            "https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/bsd/kern/kern_proc.c#L2947-L2967",
+            "https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/bsd/sys/cdefs.h#L757-L771"
+          ]
+        },
+        "operatorShutdownDecision": {
+          "reportedBy": "38d183fb-df5d-4e65-88f3-e27b62e3c92f",
+          "reportedAt": "2026-09-25T13:11:15-04:00",
+          "question": "For normal Telex host shutdown, may credential cleanup add up to 3 seconds after logical command/Wait completion, with admission closed and owned workers drained/joined; if receipt is still missing at that bound, should Telex report cleanup failure and retain ownership rather than report a clean exit?",
+          "choiceSelected": "Approve bounded orderly-exit drain and explicit failure hold (Recommended)",
+          "approvedScope": "Preserve logical command and Wait result deadlines. Normal exit of the host that owns credential work may take up to three additional seconds to close admission and drain and join owned workers concurrently against one absolute current cleanup budget.",
+          "budgetLimits": "Do not renew the budget per worker or multiply it by capacity. Waiting three seconds is not a cleanup receipt.",
+          "missingReceipt": "Report cleanup failure and retain named ownership and escalation, potentially beyond three seconds. Do not report clean exit or promise an unconditional three-second OS process-exit bound.",
+          "ownershipLimit": "Only the host owning credential work drains it. A client does not drain remote-host work, and Telex does not own preexisting external agents or broker-created work.",
+          "notApproved": "Measured performance, a universal finite OS cleanup guarantee, product implementation, runtime correctness proof, M2 completion, product writes, thread resolution, merge, and release remain unapproved."
+        },
+        "currentAuthority": {
+          "authoritySession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "reportedAt": "2026-09-25T13:41:31-04:00",
+          "decision": "TECHNICAL-ACCEPTED",
+          "reviewedProposal": "75913cbaecb4d009887d8ab31f999ccd0311f496",
+          "reviewDisposition": "full-review-approved; 0 blockers and 0 warnings",
+          "intendedMechanismAccepted": true,
+          "aggregateCapacity": 2,
+          "internalObservationSeconds": 3,
+          "numericTargetsApproved": true,
+          "numericTargetsMeasured": false,
+          "landingAuthorized": false,
+          "productWritesAuthorized": false,
+          "runtimeProofComplete": false,
+          "nextGate": "Bounded mechanical review of the status-only delta, then campaign authorization of the exact final four blobs for atomic landing on c5d888d, independent landing verification, and separate same-worker M2 write authority."
+        }
       },
-      "description": "Decide the credential-command descendant lifetime and escape policy that the M2 repair must implement.",
-      "affectedOutcome": "The M2 repair cannot be designed, proven, or accepted until the supported helper lifetime and escape semantics are chosen.",
-      "requiredness": "Required before the M2 repair in PR #156 can proceed; the accepted M2 finding remains open.",
-      "sequencing": "Hold policy-dependent M2 implementation, design, and proof expansion. The worker may finish only the independent, already-authorized M1, C1, and C2 checks and the owned-fixture cleanup to an exact checkpoint, then quiesce. Preserve the current contract, the published PR #156 branch at 25aea118, and the existing local M1 work and prototypes. No push, review-ready request, or merge request may present M2 as repaired. No process-global infrastructure, new session, destructive cleanup, or open-ended alternative-design loop.",
-      "selectedDisposition": "Route to an operator-owned policy decision. No remedy, contract narrowing, or Unix escape-coverage waiver is selected, and the native-worker prototype is not accepted. General autonomy does not authorize any of these choices.",
+      "description": "Record both selected credential-command policies and the campaign-accepted intended technical design while retaining product-promotion, implementation, and proof gates for M2.",
+      "affectedOutcome": "The M2 repair has accepted helper-lifetime and orderly-host-exit policies plus a campaign-accepted intended credential lifecycle mechanism. Product promotion, implementation, and genuine supported-platform proof remain incomplete.",
+      "requiredness": "Required policy authority for the M2 repair in PR #156; the accepted finding, repair, and proof remain open.",
+      "sequencing": "Keep the product worker source-quiet at local checkpoint 5d956618 with the three unpublished M1, C1, and C2 commits and intentionally red untracked M2 evidence. Existing reviewer f7c90ee2 performs a bounded mechanical review of 75913cba through this status-only commit. Campaign must then authorize the exact final four blobs for atomic landing on c5d888d, the landing must be independently verified, and campaign must separately authorize the same worker's M2 writes. Post-implementation correctness still requires genuine Windows, Linux, and macOS runtime proof for every claimed target. No push, thread resolution, merge request, or release claim may present M2 as repaired before those gates, review, CI, and design inspection.",
+      "selectedDisposition": "Use both operator-selected policies. Normal, error, and cancellation completion clean up Telex-owned helpers that remain within the supported invocation scope; intentionally persistent, escaped, broker-launched, and preexisting external-agent work remains outside Telex ownership. Logical command and Wait result deadlines remain unchanged. Normal exit of the owning host may add up to three seconds for one concurrent drain against one absolute current cleanup budget. A missing receipt requires explicit failure with retained named ownership and escalation, potentially beyond three seconds, not a clean exit or an unconditional three-second OS exit guarantee.",
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
-      "owner": "Campaign and operator own the policy decision; after it, PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f and Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 own the technical design",
-      "terminalPath": "The operator explicitly selects the supported helper lifetime and escape policy, or authorizes a complete alternative that genuinely preserves current semantics. The steward then separately adjudicates a concrete bounded model for owner, readers, admission, shutdown, and failure, with executed proof on supported Windows and Unix. Same-PR review responses, a new exact-head review, CI, and design inspection follow before campaign merge authorization. Policy approval alone does not complete this item.",
+      "owner": "The operator owns the selected policies; campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c owns landing and product-write authority; PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f remains source-quiet until separate campaign M2 write authority",
+      "terminalPath": "The status-only delta receives bounded mechanical review, campaign authorizes exact four-blob atomic landing on c5d888d, and landing is independently verified before separate same-worker M2 write authority. The worker then implements both selected policies and the accepted bounded mechanism, executes the genuine Windows, Linux, and macOS runtime matrix including capacity, cancellation, output, platform receipt, failure-hold, runtime-drop, orderly-exit, and unsupported escape and broker cases, preserves M1/C1/C2, and completes same-PR review responses, new exact-head review, CI, and design inspection before campaign merge authorization. Technical acceptance does not complete this item.",
       "status": "routed",
-      "dispositionAuthority": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c requested this hold; the policy decision belongs to the operator, who has not made it. This entry records a pending, unselected decision, not an accepted remedy."
+      "decisionState": "accepted",
+      "dispositionAuthority": "The operator selected `Approve the one-shot invocation contract (Recommended)` through designated worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f at 2026-09-24T21:30:50-04:00, then selected `Approve bounded orderly-exit drain and explicit failure hold (Recommended)` through the same worker at 2026-09-25T13:11:15-04:00; campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c confirmed both scopes. Steward af271672 reported the earlier feasibility blocker at 2026-09-25T13:15:39-04:00, then superseded it with `design-recommendation-ready; technically feasible with supported-API conditions` at 2026-09-25T13:25:05-04:00. Campaign accepted the exact reviewed intended mechanism from 75913cba as `TECHNICAL-ACCEPTED` at 2026-09-25T13:41:31-04:00, including C=2 and B=3s as selected but unmeasured engineering limits. Landing, product writes, implementation, runtime proof, M2 resolution, thread resolution, merge, and release remain unauthorized or incomplete."
     }
   ]
 }

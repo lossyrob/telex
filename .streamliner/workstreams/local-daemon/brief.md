@@ -171,13 +171,58 @@ helper; both are absorbed into PR #156. The same #155 worker is repairing them.
 There is no new head yet, and design inspection and merge remain held. The
 earlier CI success covers only `25aea118`.
 
-The M2 repair is on an operator-owned contract hold. The M2 finding is accepted,
-but its remedy is not selected. The operator must decide whether credential
-helpers are invocation-scoped or may intentionally outlive the command, and how
-the repair treats helpers that escape. Until then, the #155 worker may finish
-only the independent M1, C1, and C2 checks and owned-fixture cleanup, then
-quiesce, and nothing may present M2 as repaired. The #154 candidate remains
-blocked separately on the operator-owned App link, and #157 is not launched.
+The operator selected the one-shot `--password-command` lifecycle contract for
+M2. Normal, error, and cancellation completion must clean up Telex-owned helpers
+that remain within the supported invocation scope. Intentionally persistent,
+escaped, or broker-launched background work is outside that command lifecycle.
+Querying an already-running credential agent does not make Telex its owner or
+authorize Telex to terminate it. This policy does not promise universal
+all-descendant containment or fail-closed detection of every Unix escape.
+
+The operator also selected `Approve bounded orderly-exit drain and explicit
+failure hold (Recommended)`. Logical command and Wait result deadlines remain
+unchanged. Normal exit of the host that owns credential work may take up to
+three additional seconds to drain and join owned work concurrently against one
+absolute current cleanup budget. The budget is not renewed or multiplied by
+capacity. Waiting three seconds is not proof of cleanup. If receipt remains
+missing, Telex must report failure and retain named ownership and escalation,
+potentially beyond three seconds, rather than report a clean exit or promise an
+unconditional three-second OS exit bound.
+
+Campaign accepted the exact reviewed intended M2 technical design on
+2026-09-25T13:41:31-04:00. The accepted engineering limits include the
+credential-specific process-local native owner and registry, finite admission,
+aggregate capacity `C=2`, same-source barrier, owned nonblocking I/O, atomic
+cancellation and publication, platform receipt conditions, join and shutdown
+ownership, and internal cleanup-observation target `B=3s`. These limits are not
+measured performance or universal finite OS cleanup guarantees.
+
+The accepted design uses the steward's technically feasible Unix receipt
+sequence with supported-API conditions, superseding the earlier blanket
+feasibility blocker.
+Telex would retain the unreaped group leader through every mutating group signal,
+send the final termination signal while that identity anchor is valid, enter an
+irreversible no-more-group-signals state, reap the exact leader, and then use the
+former group ID only for read-only absence observation. Linux would use
+`getpriority(PRIO_PGRP, P)` with exact `errno` handling; macOS would use the
+supported libc POSIX/UNIX03 `kill(-P, 0)` binding. Receipt would require
+conclusive group absence, exact leader reap, closed or completed owned I/O, and
+native owner completion. Presence, denial, ambiguity, or possible reuse would
+retain the cleanup obligation without restoring signal authority.
+
+The reviewed intended mechanism is accepted, but it is not implemented or
+runtime-proven. The worker remains source-quiet until this status delta receives
+bounded mechanical review, campaign authorizes exact four-blob atomic landing
+on `c5d888d`, landing is independently verified, and campaign separately grants
+the same worker M2 write authority. Genuine Windows, Linux, and macOS runtime
+proof follows implementation.
+
+PR #156 remains published at `25aea118`; the same worker is source-quiet at local
+`5d956618` with three unpublished M1, C1, and C2 commits plus an intentionally
+red untracked M2 regression. The #154 candidate `f8363be` is complete, but
+publication remains blocked by the actual App EMU 403 and the latest same-worker
+quota result. Any retry requires restored credit, deduplication, and explicit
+authority. Issue #157 is not launched.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
