@@ -312,6 +312,97 @@ credentials and protocol, detach/reset precedence, status projection,
 reconciliation scheduling, upgrade/rollback drain handoff, and SQLite and
 Postgres recovery behavior.
 
+## Accepted intended change: one-shot credential invocation
+
+**Promotion boundary:** the operator accepted the intended
+`--password-command` descendant-lifecycle policy for issue #155 and PR #156 on
+2026-09-24. Current normative product documentation and code do not yet provide
+the accepted cleanup contract. PR #156 must promote the matching contract,
+implementation, review, and supported-platform evidence before clients may rely
+on it.
+
+`--password-command` is one invocation. Normal, error, and cancellation
+completion clean up helpers that Telex owns and that remain within the supported
+invocation scope. Intentionally persistent, escaped, or broker-launched
+background work is outside this command lifecycle. Querying an already-running
+external credential agent does not transfer ownership to Telex and does not
+authorize Telex to terminate it.
+
+The policy acknowledges platform boundaries. Windows jobs and Unix process groups
+provide different containment and escape behavior. The contract does not claim
+universal all-descendant containment, ownership of broker-created work, or
+fail-closed detection of every Unix escape.
+
+The operator also accepted a bounded orderly-exit policy. Logical command and
+Wait result deadlines remain unchanged. Normal exit of the host that owns
+credential work may take up to three additional seconds to close admission and
+drain and join owned credential work concurrently against one absolute current
+cleanup budget. The budget is not renewed per worker or multiplied by capacity.
+Waiting for the budget is not a cleanup receipt. If receipt remains missing,
+Telex must report cleanup failure and retain named ownership and escalation,
+potentially beyond three seconds, rather than report clean exit or promise an
+unconditional three-second OS process-exit bound. A client does not drain work
+owned by a remote host.
+
+Campaign accepted the exact reviewed intended mechanism on
+2026-09-25T13:41:31-04:00. The acceptance selects the ownership mechanism,
+aggregate capacity, admission behavior, cleanup-observation target,
+failure-hold behavior, runtime-shutdown ownership, and platform receipt
+conditions below. It does not establish measured performance, a universal
+finite OS cleanup guarantee, product implementation, or runtime correctness.
+
+### Accepted intended mechanism pending product promotion
+
+Use a credential-local process registry with finite aggregate admission,
+capacity `C=2`, a same-source barrier, a native owner, nonblocking owned pipes,
+atomic cancellation and publication, and internal per-invocation observation
+target `B=3s`. These are selected engineering limits, not measured performance.
+`B=3s` is an observation target within existing budgets, not proof of cleanup or
+an unconditional OS exit bound.
+
+On Unix, create a dedicated process group before exec with leader PID equal to
+PGID and greater than one. The exclusive owner retains the waitable unreaped
+leader through every mutating group signal. It sends the final termination
+signal while the anchor is valid, then irreversibly enters a
+no-more-group-signals state. After observing and reaping the exact leader, the
+former PGID becomes a read-only observation key and must never receive another
+nonzero signal.
+
+Linux observes group absence with `getpriority(PRIO_PGRP, P)`: after clearing
+thread-local `errno`, only return `-1` with `ESRCH` is absence. A successful
+value, including `-1` with `errno` zero, is presence. macOS uses the supported
+libc POSIX/UNIX03 `kill(-P, 0)` binding: zero is presence, `ESRCH` is absence,
+and `EPERM` is presence or inconclusive, never absence. Unknown bindings,
+denials, unexpected errors, and possible reuse retain the cleanup obligation.
+
+An ordinary non-escaped member keeps the original group extant after leader
+reap. Conclusive later absence therefore proves the original group ended; later
+numeric reuse can only cause a conservative hold and cannot restore the ended
+group or signaling authority. Receipt and admission release require conclusive
+platform absence, exact owned-leader reap, finished or closed owned I/O, and
+native owner completion and join. Direct-child reap, a kill request, shell exit,
+or pipe EOF alone is not receipt.
+
+`FAILED_HELD` retains the exact invocation record, slot, source reservation,
+owned Windows process and job handles or Unix unreaped leader, pipes, native
+thread obligation, and responsible host. It reports a sanitized failure and
+permits no automatic discard, restart, growing retry queue, clean-exit claim, or
+post-reap catch-up signal. The owner must survive Tokio runtime drop while the
+embedding process remains alive, but it cannot outlive host process exit.
+
+Windows uses suspended `CreateProcess`, documented process and
+primary-thread handles, private noninheritable kill-on-close job, no breakaway,
+assign-before-resume sequence, and receipt requiring process wait, zero active
+job members, completed I/O, and native thread completion. Closing the job or
+requesting termination alone is not normal receipt.
+
+The accepted intended design excludes a generic manager or service, subreaper, cgroup,
+PID, name, or ancestry scan, unrelated waits, post-reap mutating signals, and a
+coverage waiver. Bounded mechanical delta review, campaign authorization of the
+exact final four blobs for atomic landing, independent landing verification,
+separate same-worker product-write authority, implementation, and genuine
+Windows, Linux, and macOS runtime proof remain pending.
+
 ## Remaining questions and confidence
 
 - **High confidence:** the accepted current design outside the named promotion
@@ -339,3 +430,13 @@ Postgres recovery behavior.
 - **Downstream design detail:** the transactional node owns the exact local
   storage, migration, cutover, rollback, corruption, and old-writer refusal
   design needed to restore unconditional authority.
+- **Accepted policy and intended mechanism, pending promotion:** issue #155 uses
+  a one-shot `--password-command` contract and the reviewed credential-local
+  owner, admission, shutdown, failure, and platform-receipt design. Product code,
+  runtime proof, thread resolution, merge, and release remain pending.
+- **Selected shutdown policy, pending implementation:** the owning host may use
+  one bounded concurrent drain of up to three seconds after logical completion,
+  followed by an explicit ownership failure hold when receipt is absent.
+- **Selected engineering limits:** the process-local registry uses aggregate
+  capacity `C=2` and internal observation target `B=3s`. They are approved
+  intended limits but remain unmeasured and unimplemented.
