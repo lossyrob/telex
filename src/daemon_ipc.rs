@@ -15,6 +15,7 @@ pub const AUTH_POLICY_VERSION: u16 = 1;
 pub const MAX_JSONL_FRAME_BYTES: usize = 1024 * 1024;
 pub const MAX_MESSAGE_BODY_METADATA_BYTES: usize = MAX_JSONL_FRAME_BYTES - (64 * 1024);
 pub const MAX_MESSAGE_RECIPIENTS: usize = 256;
+pub const DEFAULT_WAIT_RECONNECT_GRACE_MS: u64 = 3_000;
 
 pub const CAP_JSONL: &str = "jsonl_v1";
 pub const CAP_ADMIN_CAP: &str = "admin_cap_v1";
@@ -49,6 +50,7 @@ pub const ON_DELIVER_DEFERRED_EXIT: i32 = 4;
 pub const CAP_ON_DELIVER_DEFERRED: &str = "on_deliver_deferred_v1";
 pub const CAP_APPLICATION_CLIENT_V1: &str = "application_client_v1";
 pub const CAP_DELIVERY_QUARANTINE_V1: &str = "delivery_quarantine_v1";
+pub const CAP_WAIT_BACKEND_RECOVERY: &str = "wait-backend-recovery";
 
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
@@ -74,6 +76,7 @@ pub const ERROR_UNSUPPORTED: &str = "Unsupported";
 pub const ERROR_NOT_OWNER: &str = "NotOwner";
 pub const ERROR_COLLISION: &str = "Collision";
 pub const ERROR_CAPABILITY_CONFLICT: &str = "CapabilityConflict";
+pub const ERROR_BACKEND_UNAVAILABLE: &str = "BackendUnavailable";
 pub const REDACTED_SECRET: &str = "[redacted]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -697,6 +700,7 @@ pub enum WaiterOutcome {
     DeliveryQuarantined,
     IdleTimeout,
     PresenceEnded,
+    BackendUnavailable,
     AbnormalExit,
 }
 
@@ -908,6 +912,7 @@ pub fn daemon_capabilities() -> Vec<String> {
     caps.push(CAP_ON_DELIVER_DEFERRED.to_string());
     caps.push(CAP_APPLICATION_CLIENT_V1.to_string());
     caps.push(CAP_DELIVERY_QUARANTINE_V1.to_string());
+    caps.push(CAP_WAIT_BACKEND_RECOVERY.to_string());
     caps
 }
 

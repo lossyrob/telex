@@ -110,6 +110,14 @@ map the harness's own session id for you. Telex fails closed rather than guessin
    | 4 | daemon hung / no response after a finite wait's `--timeout-ms + --hang-ms` watchdog | Re-arm or restart the daemon if repeated. |
    | 5 | presence ended | Non-destructive reap; live sessions should `attach`/`wait` again. |
    | 6 | delivery quarantined | Read and preserve `status.json.quarantine`; this is not a delivered message, so do not ack it. Re-arm immediately because later deliveries can progress. |
+   | 7 | backend unavailable | Backend reconnect grace expired. Check `telex daemon status` and backend connectivity, then re-arm after recovery; the station remains registered. |
+
+   Exit 7 requires a recovery-aware CLI and daemon (`wait-backend-recovery`).
+   Older CLIs report the same `BackendUnavailable` detail through exit 1;
+   daemon terminal code 7 does not prove the old process exited 7. With an older
+   daemon, existing errors remain unchanged. Backend recovery is bounded to
+   three seconds and never extends a finite wait's original deadline; timeout
+   wins as exit 2. `--reconnect-grace-ms` controls IPC reconnect, not this budget.
 
 3. After reading the delivered JSON, explicitly ack it, then apply the workflow
    disposition that reflects the actual outcome:

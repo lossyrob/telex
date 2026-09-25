@@ -4,6 +4,7 @@
 
 use anyhow::{bail, Result};
 use async_trait::async_trait;
+use std::fmt;
 
 use crate::model::*;
 
@@ -11,6 +12,25 @@ use crate::model::*;
 pub mod postgres;
 #[cfg(feature = "sqlite")]
 pub mod sqlite;
+
+#[derive(Debug)]
+struct RetryableBackendError(String);
+
+impl fmt::Display for RetryableBackendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for RetryableBackendError {}
+
+pub(crate) fn retryable_backend_error(error: impl fmt::Display) -> anyhow::Error {
+    anyhow::Error::new(RetryableBackendError(error.to_string()))
+}
+
+pub(crate) fn is_retryable_backend_error(error: &anyhow::Error) -> bool {
+    error.downcast_ref::<RetryableBackendError>().is_some()
+}
 
 pub(crate) fn application_operation_state_delta(
     logical_store_id: &str,
