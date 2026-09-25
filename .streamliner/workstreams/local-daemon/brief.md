@@ -221,14 +221,17 @@ actual regression test; its original negative evidence is retained.
 Two platform receipt axes are held for adjudication, and neither has an accepted
 correction. On Windows, worker-supplied runtime evidence shows the current job
 accounting can report zero active processes while a retained helper process
-handle is still unsignaled. The steward's documentary verdict is
-design-feasibility-blocked: no documented ordering guarantee was found, and no
-supported replacement is justified yet. Affected Windows receipt work is stopped.
-On macOS, source-only analysis predicts that the final group `SIGKILL` can fail
-with `EPERM` when only the unreaped leader zombie remains, holding an otherwise
-finished invocation. No macOS program has run, and all Linux and macOS runtime
-proof remains unrun. Any material change to intended authority requires reviewed
-Tier B reconciliation.
+handle is still unsignaled. The steward's consolidated review of the frozen
+packet found no code error that explains this away and kept the verdict
+design-feasibility-blocked: job accounting reaching zero is not a documented
+completion fence for every member, and no supported replacement is justified yet.
+Affected Windows receipt work is held. On macOS, the frozen Unix code confirms a
+conditional source defect: a final group `SIGKILL` that fails with `EPERM` on a
+zombie-only group is latched as failure before the exact reap and independent
+absence check. The steward proposed a narrow correction that never treats `EPERM`
+as absence; campaign has not yet classified or approved it. No macOS program has
+run, and all Linux and macOS runtime proof remains unrun. Any material change to
+intended authority requires reviewed Tier B reconciliation.
 
 M2 is not implemented, measured, runtime-proven, reviewed, or merged. PR #156
 remains published at `25aea118`, and all new M2 work is uncommitted and
