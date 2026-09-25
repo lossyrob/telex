@@ -415,14 +415,22 @@ async fn register_for_retry<C: WaitConnector>(
             Ok(Ok(Response::Error { code, .. }))
                 if code == crate::daemon_ipc::ERROR_NOT_RUNNING =>
             {
-                tokio::time::sleep(Duration::from_millis(RECONNECT_RETRY_SLEEP_MS)).await;
+                tokio::time::sleep(
+                    Duration::from_millis(RECONNECT_RETRY_SLEEP_MS)
+                        .min(deadline.saturating_duration_since(tokio::time::Instant::now())),
+                )
+                .await;
             }
             Ok(Ok(Response::Error { code, message, .. })) => {
                 return Err(anyhow!("{code}: {message}"));
             }
             Ok(Ok(other)) => return Err(anyhow!("unexpected daemon register response: {other:?}")),
             Ok(Err(_)) | Err(_) => {
-                tokio::time::sleep(Duration::from_millis(RECONNECT_RETRY_SLEEP_MS)).await;
+                tokio::time::sleep(
+                    Duration::from_millis(RECONNECT_RETRY_SLEEP_MS)
+                        .min(deadline.saturating_duration_since(tokio::time::Instant::now())),
+                )
+                .await;
             }
         }
     }
@@ -1129,6 +1137,38 @@ mod tests {
             WaitTerminal::Response(Response::Timeout)
         ));
         assert!(started.elapsed() < Duration::from_millis(500));
+    }
+
+    #[tokio::test]
+    async fn register_retry_sleep_is_clipped_at_effective_deadline() {
+        for response in [
+            Response::Registered {
+                lease_epoch: 1,
+                owner_instance_id: "test".into(),
+            },
+            crate::daemon_ipc::error_response(ERROR_NOT_RUNNING, "draining"),
+        ] {
+            let delay = if matches!(response, Response::Registered { .. }) {
+                200
+            } else {
+                15
+            };
+            let mut connector = ScriptConnector::new().client(vec![ScriptAction::DelayResponse(
+                Duration::from_millis(delay),
+                response,
+            )]);
+            let started = tokio::time::Instant::now();
+            let deadline = started + Duration::from_millis(20);
+            assert!(register_for_retry(&mut connector, &cfg(), deadline)
+                .await
+                .unwrap()
+                .is_none());
+            assert!(
+                started.elapsed() < Duration::from_millis(60),
+                "Register retry added a full 50ms sleep after its remaining budget"
+            );
+            assert_eq!(connector.request_ops(), vec!["register"]);
+        }
     }
 
     #[tokio::test]
