@@ -277,6 +277,91 @@
       "status": "absorbed",
       "decisionState": "accepted",
       "dispositionAuthority": "Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 accepted the design in-node. It is pending product promotion in PR #156 and is not merged or current product authority."
+    },
+    {
+      "id": "local-daemon-postgres-reset-fault-proof",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "lossyrob/telex#155 and PR #156 worker required-PostgreSQL run",
+      "evidence": {
+        "inheritedHead": "3423cd675b0378b587d842fd5ac6b02d9d6e15be",
+        "candidateHead": "25aea118e04c4e93eb4e748fe7c1989338931ac2",
+        "details": "With TELEX_PG_REQUIRE=1 against a disposable loopback PostgreSQL 17.6 cluster, the inherited test in tests/daemon_core_postgres.rs near line 2099 failed the sender send with Internal / SQLSTATE 57P01. Its fail_first_pull_delivery trigger is BEFORE INSERT ON deliveries, so it fires in the sender insert rather than the waiter candidate query. The inherited test therefore did not prove waiter recovery. The worker reports that the corrected isolated live proof passed; that report is worker evidence only."
+      },
+      "description": "Replace the misleading sender-side fault injection with fault proof that exercises the waiter query and LISTEN connections.",
+      "affectedOutcome": "PR #156 must prove that pull and push waiters actually recover from the intended PostgreSQL connection faults.",
+      "requiredness": "Required for current PR #156 validation.",
+      "sequencing": "Absorb into the same issue #155 node, branch, and PR #156 before final exact-head review.",
+      "selectedDisposition": "Absorb into PR #156: in an isolated cluster only, deterministically terminate the application-tagged waiter query connection after observing its lock, and separately terminate the exact LISTEN backend PID. Do not expand sender retry policy or mask errors.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Each intended fault is observed to occur. After each fault, the test proves reconnect and resubscription and verifies pull and push payload, message ID, registration, owner, and epoch. PostgreSQL is required with no skip, synchronization is bounded, and only the owned cluster is cleaned up. Full review, exact-head CI, and final design inspection then precede exact-head campaign merge authorization.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending product proof; not completed."
+    },
+    {
+      "id": "local-daemon-postgres-reset-legacy-process-proof",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "lossyrob/telex#155, PR #156 worker inspection, Local Daemon design steward review, and campaign confirmation",
+      "evidence": {
+        "repositoryMain": "7ed886b07620e8ab8adba68249ab84f96ea26013",
+        "candidateHead": "25aea118e04c4e93eb4e748fe7c1989338931ac2",
+        "designSteward": "af271672-5d33-418c-bb9c-0f4d4570c7d7",
+        "details": "At main 7ed886b, canonical-executable peer authentication rejects an ordinary pairing of distinct old and new binaries before Hello, so legacy-client behavior cannot be proven that way. The worker reports that the local proof passed; it is not independently approved."
+      },
+      "description": "Prove legacy-client WAIT and STATUS behavior for PR #156 without bypassing peer authentication.",
+      "affectedOutcome": "PR #156 compatibility claims for legacy peers need process-level evidence through the real production IPC path.",
+      "requiredness": "Required for current PR #156 compatibility evidence.",
+      "sequencing": "Absorb into the same issue #155 node, branch, and PR #156 before final exact-head review.",
+      "selectedDisposition": "Absorb steward strategy A into PR #156: a narrow test-only same-image authenticated subprocess daemon host paired with a source-pinned historical frontend. The proof uses real production IPC, peer verification, Hello, and routing. It keeps the historical wait error, outdir, and CLI exit bodies unchanged, lists any adapters separately, and records offline commit, blob, and extraction provenance. Actual backend exhaustion must produce the real legacy exit 1 and artifacts; a Timeout control exits 2 with no outdir; legacy STATUS omits only the unsupported typed outcome while preserving daemon code 7, detail, and time and a later capable snapshot. A separate proof shows the current CLI with a matching daemon exits 7. Never claim released mixed-binary support or bypass authentication.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "PR #156 carries the tested and documented evidence, then completes full review, exact-head CI, and final design inspection before exact-head campaign merge authorization. This acceptance is only the issue #155 evidence strategy; issue #157 still requires genuine v0.1.2 ordered upgrade, daemon replacement, and fresh install in disposable roots.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 accepted strategy A, and the campaign confirmed it. Pending product proof; not completed."
+    },
+    {
+      "id": "local-daemon-postgres-numeric-counter-encoding",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "lossyrob/telex#155 and PR #156 worker required-PostgreSQL run",
+      "evidence": {
+        "repositoryMain": "7ed886b07620e8ab8adba68249ab84f96ea26013",
+        "candidateHead": "25aea118e04c4e93eb4e748fe7c1989338931ac2",
+        "details": "At main 7ed886b, tests/daemon_core_postgres.rs near line 751 writes the numeric first.count file with Windows PowerShell Set-Content -Encoding utf8, which emits the bytes EF BB BF 31 0D 0A. The reader near line 1124 applies trim().parse::<u32>(), which fails on the BOM even though the push payload succeeded. The worker reports that required conformance (12), daemon (14), and process and provenance (2) tests passed; that report is worker evidence only."
+      },
+      "description": "Write the Windows test fixture's numeric counter as plain ASCII so the parity test reads it correctly.",
+      "affectedOutcome": "The required PostgreSQL parity suite must not fail on a test-fixture encoding artifact.",
+      "requiredness": "Required for current PR #156 validation.",
+      "sequencing": "Absorb into the same issue #155 node, branch, and PR #156 before final exact-head review.",
+      "selectedDisposition": "Absorb into PR #156: change only the one-line numeric counter output to ASCII. Message payloads remain UTF-8, and production code and assertions are unchanged.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Rerun the full required-PostgreSQL parity suite, then complete full review, exact-head CI, and final design inspection in PR #156.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending external gates; not completed."
+    },
+    {
+      "id": "local-daemon-token-fixture-immutable-attrs",
+      "sourceNode": "windows-token-buffer-alignment",
+      "source": "lossyrob/telex#154 worker lint run",
+      "evidence": {
+        "repositoryMain": "7ed886b07620e8ab8adba68249ab84f96ea26013",
+        "candidateHead": "f8363be368c4785314ce36bd11f2bd4c74644793",
+        "details": "The touched Windows fixture in tests/daemon_process_sqlite.rs near line 308 passes &mut attrs to CreateDirectoryW, which triggers the unnecessary_mut_passed lint. Candidate f8363be is complete, pushed, and clean, but PR publication is blocked; it is not merged or externally reviewed."
+      },
+      "description": "Pass the security attributes to CreateDirectoryW by immutable reference in the touched Windows fixture.",
+      "affectedOutcome": "The issue #154 candidate must pass lint without weakening the owner-private fixture.",
+      "requiredness": "Required for current issue #154 lint cleanliness.",
+      "sequencing": "Absorb into the same issue #154 node and branch before external review.",
+      "selectedDisposition": "Absorb into issue #154: a two-line immutable-reference cleanup in the same owner-private helper, with behavior and privacy preserved. The new test-only eight-profile Windows matrix follows the baseline warning policy. Existing lint and build strictness and assertions must not be weakened.",
+      "target": "windows-token-buffer-alignment / issue #154",
+      "owner": "Issue #154 worker d13b474e-e729-491b-a466-1b9c1110bb6c under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Targeted lint proof, then external review of the issue #154 candidate.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #154 repair scope. Pending external review; not completed."
     }
   ]
 }

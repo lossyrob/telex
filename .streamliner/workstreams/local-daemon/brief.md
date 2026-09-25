@@ -153,9 +153,16 @@ Both recovery repairs launched against main
 worker on `feature/windows-token-buffer-alignment`, with no PR yet. Issue #155 has
 one worker completing adopted draft PR #156 in place on
 `copilot/fix-postgres-connection-reset`; its local starting head `3423cd6` merges
-main into published head `5c302dac` without rewriting history. Neither repair has
-completed review, CI, or merge. Issue #157 is not launched, and the release gate,
-hardening gate, and closure gate remain planned.
+main into published head `5c302dac` without rewriting history. At launch, neither
+repair had completed review, CI, or merge. Issue #157 is not launched, and the
+release gate, hardening gate, and closure gate remain planned.
+
+As of 2026-09-25T00:09Z, PR #156 is no longer draft, and its complete candidate
+`25aea118` is under initial full PAW review (`8cda7626`). Exact-head CI run
+36071395738 succeeded; design inspection and merge remain pending, and the #155
+worker is quiescent. The #154 candidate `f8363be` is pushed and clean but has no
+PR; publication is held on an operator-owned App link. Both nodes remain in
+progress.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
