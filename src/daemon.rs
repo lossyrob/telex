@@ -1436,6 +1436,41 @@ impl DaemonState {
         }
     }
 
+    fn record_backend_exhaustion_if_current(
+        &self,
+        expected: &MemberRecord,
+        deadline: Option<Instant>,
+        detail: String,
+        pid: Option<u32>,
+    ) -> Option<Response> {
+        let mut members = self.members.lock().unwrap();
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return None;
+        }
+        let member = members.get_mut(&Self::member_key(
+            &expected.store_key,
+            &expected.session_id,
+            &expected.address,
+        ))?;
+        if member.idle {
+            return Some(Response::PresenceEnded);
+        }
+        if member.lease_epoch != expected.lease_epoch
+            || member.owner_instance_id != expected.owner_instance_id
+        {
+            return None;
+        }
+        member.last_waiter_exit_at_ms = Some(now_ms());
+        member.last_waiter_outcome = Some(WaiterOutcome::BackendUnavailable);
+        member.last_waiter_exit_code = Some(7);
+        member.last_waiter_detail = Some(detail.clone());
+        member.last_waiter_pid = pid;
+        Some(proto::error_response(
+            proto::ERROR_BACKEND_UNAVAILABLE,
+            detail,
+        ))
+    }
+
     fn record_waiter_message_exit(
         &self,
         store_key: &str,
@@ -5275,17 +5310,16 @@ async fn wait_for_message_with_idle_ttl(
                     let detail = format!(
                         "backend recovery grace expired while fetching wait candidates for {address}: {detail}"
                     );
-                    state.record_waiter_exit(
-                        &store_key,
-                        &session_id,
-                        &address,
-                        WaiterOutcome::BackendUnavailable,
-                        Some(7),
-                        Some(detail.clone()),
+                    let Some(response) = state.record_backend_exhaustion_if_current(
+                        &current,
+                        deadline,
+                        detail,
                         waiter_pid_for_status,
-                    );
+                    ) else {
+                        continue;
+                    };
                     waiter_guard.suppress_abnormal_on_drop();
-                    return proto::error_response(proto::ERROR_BACKEND_UNAVAILABLE, detail);
+                    return response;
                 }
                 let retry_until = deadline.map_or(recovery_deadline, |wait_deadline| {
                     recovery_deadline.min(wait_deadline)
@@ -11397,6 +11431,63 @@ mod p3_tests {
             .unwrap());
         assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
         assert!(state.get_member(&store, "s1", "addr:a").unwrap().idle);
+    }
+
+    #[tokio::test]
+    async fn backend_exhaustion_preserves_station_stop_during_drain() {
+        let state = test_state("wait-backend-stop-exhaustion");
+        let store = store_key("wait-backend-stop-exhaustion");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        state.wait_fetch_delay_ms.store(10_000, Ordering::SeqCst);
+        let waiter_state = state.clone();
+        let waiter_request = wait_req(&store, "s1", "addr:a", 8_000);
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_request).await });
+        let admitted_by = Instant::now() + Duration::from_secs(1);
+        while !state.has_live_waiter_for(&store, "s1", "addr:a") {
+            assert!(Instant::now() < admitted_by);
+            tokio::task::yield_now().await;
+        }
+        let stop = request(
+            state.clone(),
+            Request::StationStop {
+                store_key: store.clone(),
+                session_id: "s1".into(),
+                address: "addr:a".into(),
+                wait_grace_ms: 5_000,
+            },
+        );
+        tokio::pin!(stop);
+        assert!(tokio::time::timeout(Duration::from_millis(10), &mut stop)
+            .await
+            .is_err());
+        let stopped = state.get_member(&store, "s1", "addr:a").unwrap();
+        assert!(stopped.idle);
+        assert_eq!(
+            stopped.last_waiter_outcome,
+            Some(WaiterOutcome::PresenceEnded)
+        );
+        assert_eq!(stopped.last_waiter_exit_code, Some(5));
+        assert_eq!(stopped.last_waiter_detail.as_deref(), Some("station-stop"));
+
+        // Keep the stop future in its drain phase until the terminal record is inspected.
+        let response = waiter.await.unwrap();
+        let terminal = state.get_member(&store, "s1", "addr:a").unwrap();
+        assert!(matches!(response, Response::PresenceEnded), "{response:?}");
+        assert_eq!(terminal.last_waiter_outcome, stopped.last_waiter_outcome);
+        assert_eq!(
+            terminal.last_waiter_exit_code,
+            stopped.last_waiter_exit_code
+        );
+        assert_eq!(terminal.last_waiter_detail, stopped.last_waiter_detail);
+        assert_eq!(
+            terminal.last_waiter_exit_at_ms,
+            stopped.last_waiter_exit_at_ms
+        );
+        assert!(matches!(
+            stop.await,
+            Response::StationStopped { detached: true, .. }
+        ));
+        assert!(state.get_member(&store, "s1", "addr:a").is_none());
     }
 
     #[tokio::test]
