@@ -362,6 +362,52 @@
       "status": "absorbed",
       "decisionState": "accepted",
       "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #154 repair scope. Pending external review; not completed."
+    },
+    {
+      "id": "local-daemon-postgres-reset-stop-precedence",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "PR #156 full independent PAW review 5311857915 finding M1",
+      "evidence": {
+        "reviewedHead": "25aea118e04c4e93eb4e748fe7c1989338931ac2",
+        "review": "5311857915",
+        "reviewThread": "https://github.com/lossyrob/telex/pull/156#discussion_r4099847838",
+        "reviewReport": "C:\\Users\\robemanuele\\.copilot\\session-state\\8cda7626-12d2-415e-af2e-b5fa4f249c32\\files\\PR-156\\FinalReport.md",
+        "details": "At src/daemon.rs lines 5274-5288 on the reviewed head, the new exhaustion branch publishes the waiter terminal record unconditionally. If station stop has already marked the member idle and recorded PresenceEnded with code 5 and a stop reason, a stalled Wait that exhausts its attempt during the active drain overwrites that record with BackendUnavailable code 7. The source-proven schedule is an 8-second Wait stalled in its attempt, a stop at 0.5 seconds with the default 3-second drain, and a 3-second attempt timeout. This is a source-level finding, not a live PostgreSQL run or a data-loss finding."
+      },
+      "description": "Keep an established station-stop outcome when a stalled Wait later exhausts backend recovery.",
+      "affectedOutcome": "A station stop recorded during drain must not be replaced by a later backend-unavailable outcome.",
+      "requiredness": "Required for current PR #156 correctness; P2 review blocker.",
+      "sequencing": "Absorb into the same issue #155 node, branch, and PR #156 before re-review.",
+      "selectedDisposition": "Absorb into PR #156: make the lifecycle eligibility check and the conditional terminal publication atomic. Preserve finite Timeout precedence and the existing changed-member and missing-member behavior. Introduce no check-then-write race and no await while holding the lock.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "A deterministic regression stops the station during a stalled attempt and shows that PresenceEnded code 5 and the station-stop reason are retained before detach. The worker replies to and resolves the review thread directly. A reviewed, green new head and design inspection then precede exact-head campaign merge authorization.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending repair and proof; not completed."
+    },
+    {
+      "id": "local-daemon-postgres-credential-cancellation",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "PR #156 full independent PAW review 5311857915 finding M2",
+      "evidence": {
+        "reviewedHead": "25aea118e04c4e93eb4e748fe7c1989338931ac2",
+        "review": "5311857915",
+        "reviewThread": "https://github.com/lossyrob/telex/pull/156#discussion_r4099847843",
+        "reviewReport": "C:\\Users\\robemanuele\\.copilot\\session-state\\8cda7626-12d2-415e-af2e-b5fa4f249c32\\files\\PR-156\\FinalReport.md",
+        "details": "At src/daemon.rs lines 5212-5220 on the reviewed head, the new timeout wraps PgBackend client acquisition and reconnect, which reach pg_connect_config and the profile password command (src/backend/postgres.rs lines 880-901 and src/profiles.rs lines 288-323). The callee predates this PR; the new timed caller newly couples it to cancellation. An exact-head Windows probe through the public library timed out at 3013 ms and, with the runtime still active, observed one owned helper still alive before cleanup; the probe then killed and reaped it explicitly. This does not prove a full PostgreSQL Wait, repeated accumulation, harm, or cross-platform behavior. The shell-parent check ran after the helper was killed, so it shows nothing about shell state at timeout."
+      },
+      "description": "Make the credential-command helper safe to cancel when the new acquisition timeout fires.",
+      "affectedOutcome": "A timed-out credential acquisition must not leave an owned helper process running.",
+      "requiredness": "Required for current PR #156 correctness; P2 review blocker.",
+      "sequencing": "Absorb into the same issue #155 node, branch, and PR #156 before re-review.",
+      "selectedDisposition": "Absorb into PR #156: bounded, cancellation-safe ownership, termination, and reaping of the credential command. Do not extend the original Wait deadline or allow unbounded cleanup. Preserve output, error, and security behavior. No specific process-tree mechanism is prescribed.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Regressions with finite-grace and delayed non-secret helpers check helper liveness before failure cleanup and prove owned cleanup with platform coverage. The worker replies to and resolves the review thread directly. Review, CI, and design inspection then precede exact-head campaign merge authorization.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending repair and proof; not completed."
     }
   ]
 }

@@ -157,12 +157,19 @@ main into published head `5c302dac` without rewriting history. At launch, neithe
 repair had completed review, CI, or merge. Issue #157 is not launched, and the
 release gate, hardening gate, and closure gate remain planned.
 
-As of 2026-09-25T00:09Z, PR #156 is no longer draft, and its complete candidate
-`25aea118` is under initial full PAW review (`8cda7626`). Exact-head CI run
-36071395738 succeeded; design inspection and merge remain pending, and the #155
-worker is quiescent. The #154 candidate `f8363be` is pushed and clean but has no
-PR; publication is held on an operator-owned App link. Both nodes remain in
-progress.
+As of 2026-09-25T00:09Z, PR #156 was no longer draft, and its complete candidate
+`25aea118` was under initial full PAW review (`8cda7626`). Exact-head CI run
+36071395738 succeeded on that head. The #154 candidate `f8363be` is pushed and
+clean but has no PR; publication is held on an operator-owned App link. Both nodes
+remain in progress.
+
+The full independent PAW review of `25aea118` is complete and was posted as
+GitHub COMMENT review 5311857915. Its verdict is changes requested: two P2
+blockers, no warnings, and two optional low-priority observations. The blockers
+are stop-outcome precedence during drain and cancellation of the credential
+helper; both are absorbed into PR #156. The same #155 worker is repairing them.
+There is no new head yet, and design inspection and merge remain held. The
+earlier CI success covers only `25aea118`.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
