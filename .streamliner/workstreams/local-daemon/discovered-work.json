@@ -618,7 +618,7 @@
         "frozenPacketSha256": "d61430a33b27fda06cdf475090dd8b337585f879142b021c41b0384793bfd728",
         "frozenPacketReportedAt": "2026-09-25T15:09:32-04:00",
         "evidenceCheckpoint": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\pr156-m2-windows-receipt-checkpoint.json",
-        "evidenceCheckpointSha256": "fbf7001c9ce01ac36b289997f07b711cf8386ae0d3ac638a88dde1c0250ab8bc",
+        "evidenceCheckpointSha256": "9ca8736faa8f73556c25378a883c64a3bafd013463ba32f617e7c39219e4696a",
         "evidenceLevel": "Worker-supplied runtime evidence. The Local orchestrator verified all eight frozen artifact hashes, and the reconciler rechecked the packet index and checkpoint hashes. No one reran the tests or established source-to-binary exactness.",
         "insidePollCleanup": "After helper readiness and verified membership in the private invocation job, inside poll_cleanup immediately before it would return true, the retained leader handle was signaled and a successful accounting query reported ActiveProcesses 0, while the retained helper process handle with SYNCHRONIZE rights returned WAIT_TIMEOUT (258). In an isolated diagnostic the helper signaled about 1.4766 ms later without a second kill or fallback; that is not a maximum or acceptable delay. The assertion stops before return, so this does not show that the execution emitted a receipt or released admission.",
         "afterRelease": "Separate parent capacity and repeated-cancellation cases observed an unsignaled retained helper or shell handle after native-owner join, cleaned-scope drop including kill-on-close job closure, and registry removal. They did not record which process index failed or the later signal delay, and do not independently establish the membership or lag seen inside poll_cleanup.",
@@ -632,7 +632,7 @@
           "codeSpecificAttribution": "Pending the steward's review of the frozen packet for wrong job or handle, query failure or default zero, ABI or layout, handle reuse, and measurement-order errors."
         },
         "scopeLimit": "No harm, security impact, indefinite survival, repeated production leak, or general Windows lifetime conclusion is established.",
-        "evidenceCheckpointHashedAt": "2026-09-25T15:19:00-04:00",
+        "evidenceCheckpointHashedAt": "2026-09-25T15:26:00-04:00",
         "consolidatedAdjudication": {
           "steward": "af271672-5d33-418c-bb9c-0f4d4570c7d7",
           "reportedAt": "2026-09-25T15:15:09-04:00",
@@ -642,12 +642,30 @@
           "evidenceSeparation": "The A assertion runs before poll_cleanup returns true and is not itself a receipt or publication. B observes retained handles after join, cleaned-scope and job-handle drop, and record removal, and does not identify the failing role, job membership, or lag. Post-run snapshots cannot certify the originally compiled bytes.",
           "conclusion": "Job accounting reaching zero is not a documented fence for completion of every member. No complete supported stronger production sequence is justified yet. This is not an impossibility, kernel-cause, continued-user-code, or harm claim, and it grants no new supervision machinery.",
           "remainingRequirement": "A supported invocation-local completion barrier, or complete lifetime-safe member-handle ownership and observation covering all ordinary scoped descendants, including concurrent and short-lived ones, before receipt and admission release."
+        },
+        "campaignAssessmentAuthorization": {
+          "authoritySession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "scope": "One final documentation-only assessment by the existing steward of DEBUG_PROCESS child-handle lifetime and complete scope. No debug experiment, implementation, new agent, or selected Windows replacement."
+        },
+        "finalDebugCandidateAssessment": {
+          "steward": "af271672-5d33-418c-bb9c-0f4d4570c7d7",
+          "reportedAt": "2026-09-25T15:23:13-04:00",
+          "verdict": "design-feasibility-blocked; candidate not accepted within current scope",
+          "documentedPerProcessFence": "For a process in the debugging chain, Windows documents a per-process fence: keep an authorized duplicate of its CREATE_PROCESS_DEBUG_EVENT process handle, continue its EXIT_PROCESS_DEBUG_EVENT, then wait for the duplicate to signal.",
+          "inventoryGap": "DEBUG_PROCESS inheritance stops when another process in the chain is created with DEBUG_PROCESS. An ordinary child can start a new debugging chain while staying in the private job, which is not necessarily job escape, persistent background work, or broker creation. The accepted exclusions therefore do not make the debug inventory equal the job scope, and root exit, empty known handles, event-wait timeout, or job accounting zero do not prove complete inventory.",
+          "materialSemantics": "Debugger-visible behavior is materially new semantics: tools can detect a debugger, debug events suspend processes until continued, and event, handle, continuation, and thread-ownership obligations are added. Approving that behavior alone would not close the inventory gap.",
+          "limits": "No supported replacement is accepted. Not a general Windows impossibility claim or a runtime claim. No debug experiment, new agent, or source work was performed."
+        },
+        "campaignDisposition": {
+          "authoritySession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "windowsImplementationHeld": true,
+          "nextInput": "Campaign disposition is required before any further Windows research or mechanism work."
         }
       },
       "description": "Decide whether the Windows job-accounting predicate is a sufficient M2 completion receipt for every in-scope credential-command process, and what supported correction or authority change is required.",
       "affectedOutcome": "The accepted M2 design requires documented completion of every ordinary in-scope process before receipt. The Windows receipt axis cannot be accepted while this ordering is unproven.",
       "requiredness": "Required for the M2 repair in PR #156. Not an accepted limitation, waiver, or follow-up delivery.",
-      "sequencing": "Affected Windows receipt implementation and acceptance are held after the steward's consolidated verdict; the uncommitted work, red tests, and frozen packet are preserved. The Windows delegate is quiet after safe owned cleanup. No partial review-ready state or M2 thread closure.",
+      "sequencing": "Affected Windows receipt implementation and acceptance are held. The final documentation-only DEBUG_PROCESS assessment is complete and did not justify a complete-scope replacement; further replacement research stops pending campaign disposition. The uncommitted work, red tests, and frozen packet are preserved, and the Windows delegate is quiet after safe owned cleanup. No partial review-ready state or M2 thread closure.",
       "selectedDisposition": "None selected. Route to steward and campaign adjudication. No sleep, timing margin, assertion weakening, repeated zero query, job close or extra termination request, PID snapshot, completion-port notification without a stronger guarantee, or fixture-only helper handle may substitute for a production complete-scope receipt. No replacement mechanism is accepted and canonical authority is not superseded.",
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f holds the evidence; existing steward af271672-5d33-418c-bb9c-0f4d4570c7d7 and campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c adjudicate",
@@ -678,18 +696,28 @@
           "conclusion": "Because pinned XNU returns EPERM for a zombie-only group on a nonzero signal, this is a concrete conditional source defect in ordinary leaf completion. It is not an executed macOS failure or pass.",
           "proposedCorrection": "For the justified macOS final-attempt EPERM case only: keep the error as attempt evidence, irreversibly seal signals, then proceed with bounded exact-owned leader reap and the independent post-reap absence, I/O, and join predicate. Post-reap EPERM stays Present, never absence. Ownership, setup, ECHILD, ABI, reap, and query failures are never ignored, and cancellation or command errors never become credential success.",
           "proposalStatus": "Steward proposal only; not approved."
+        },
+        "campaignCorrectionAuthorization": {
+          "authoritySession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "classification": "Ordinary implementation correction of the already-accepted independent receipt ordering, limited to the justified macOS final nonzero-signal EPERM path. Not a new predicate or policy.",
+          "authorizedImplementers": "Lead worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f with existing Unix delegate 32add9eb-9543-42bf-808c-7d6e34d032f3.",
+          "sequence": "Record the attempt result, irreversibly seal signals, reap the exact owned leader, then require independent UNIX03 absence plus completed owned I/O and native join.",
+          "prohibited": "EPERM is never absence or a successful kill, and post-reap EPERM means Present. Setup, identity, ECHILD, ABI, reap, and query errors are never ignored. No new privilege, post-reap kill, renewed budget, or partial credential. Other error, cancellation, and output rules are unchanged. Anything beyond this exact path requires a stop and reviewed Tier B reconciliation.",
+          "workerAcknowledgement": "The worker acknowledged before editing; message timestamp 2026-09-25T15:20:59-04:00. Head 2e2f3b991bece6e0309b4efdd59a88cfb556e76b and Unix snapshot ec76a12e were verified.",
+          "proofStatus": "macOS runtime is unrun. The correction is neither proven nor complete."
         }
       },
       "description": "Resolve the ordering between the anchored final group signal, the exact leader reap, and the later read-only absence check so ordinary macOS completions are not held by a zombie-only group.",
       "affectedOutcome": "The accepted Unix receipt sequence may hold ordinary successful macOS invocations if the final signal meets a zombie-only group.",
       "requiredness": "Required for the M2 repair in PR #156. Not an accepted limitation, waiver, or follow-up delivery.",
-      "sequencing": "The Unix module and its original 22 tests stay unchanged. The steward's consolidated adjudication is complete; affected edits stay held until campaign classifies and approves the bounded correction, through reviewed Tier B reconciliation if it is material.",
-      "selectedDisposition": "None selected; the steward's bounded attempt-record, seal, exact reap, and independent-absence correction awaits campaign classification and approval. Not authorized: treating EPERM as absence, signaling after reap, ignoring ownership errors, privilege or subreaper changes, a new agent, or a coverage waiver. The accepted post-reap read-only rule, where EPERM means presence or inconclusive, is unchanged.",
+      "sequencing": "The campaign-authorized narrow correction is being implemented by the same worker and existing Unix delegate from local head 2e2f3b99. Anything beyond the exact authorized path requires a stop and reviewed Tier B reconciliation.",
+      "selectedDisposition": "Campaign selected the steward's bounded correction for the justified macOS final nonzero-signal EPERM path only, as an ordinary implementation correction of the accepted receipt ordering: record the attempt result, irreversibly seal signals, reap the exact owned leader, then require independent absence, I/O, and join. Not authorized: treating EPERM as absence, signaling after reap, ignoring setup, identity, ECHILD, ABI, reap, or query errors, privilege or subreaper changes, a renewed budget, a partial credential, a new agent, or a coverage waiver. The accepted post-reap read-only rule, where EPERM means presence or inconclusive, is unchanged.",
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f holds the evidence; existing steward af271672-5d33-418c-bb9c-0f4d4570c7d7 and campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c adjudicate",
       "terminalPath": "The steward answers the bounded ordering question and campaign classifies authority; any material change to intended authority passes reviewed Tier B reconciliation. The selected correction is implemented and proven by real macOS runtime evidence, including permission denial and zombie cases within the permitted ownership boundary, as part of the three-platform bundle before independent review, CI, design inspection, and campaign merge.",
       "status": "routed",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 routed this within the issue #155 repair scope. Pending adjudication; no correction accepted."
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 routed this within the issue #155 repair scope. Pending adjudication; no correction accepted. Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c then authorized the narrow correction; the worker acknowledged at 2026-09-25T15:20:59-04:00. Pending implementation and real macOS runtime proof; not completed."
     }
   ]
 }

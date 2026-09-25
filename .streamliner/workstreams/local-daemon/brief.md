@@ -218,18 +218,26 @@ commits, the worker acknowledged the grant before editing at local head
 phases P1-P7. The intentionally red credential regression may now become an
 actual regression test; its original negative evidence is retained.
 
-Two platform receipt axes are held for adjudication, and neither has an accepted
-correction. On Windows, worker-supplied runtime evidence shows the current job
-accounting can report zero active processes while a retained helper process
+Two platform receipt axes were held for adjudication. On Windows,
+worker-supplied runtime evidence shows the current job accounting can report
+zero active processes while a retained helper process
 handle is still unsignaled. The steward's consolidated review of the frozen
 packet found no code error that explains this away and kept the verdict
 design-feasibility-blocked: job accounting reaching zero is not a documented
 completion fence for every member, and no supported replacement is justified yet.
-Affected Windows receipt work is held. On macOS, the frozen Unix code confirms a
+A final documentation-only `DEBUG_PROCESS` assessment found a documented
+per-process exit fence, but a child can start a new debugging chain inside the
+job, so debug inventory does not cover the complete scope; debugger-visible
+behavior would also be new semantics. Windows receipt work remains held, and
+further replacement research stops pending campaign disposition.
+
+On macOS, the frozen Unix code confirms a
 conditional source defect: a final group `SIGKILL` that fails with `EPERM` on a
 zombie-only group is latched as failure before the exact reap and independent
-absence check. The steward proposed a narrow correction that never treats `EPERM`
-as absence; campaign has not yet classified or approved it. No macOS program has
+absence check. Campaign then authorized the steward's narrow correction as an
+ordinary implementation fix: record the attempt, seal signals, reap the exact
+leader, and require independent absence. `EPERM` is never absence. The worker
+acknowledged at 2026-09-25T15:20:59-04:00 before editing. No macOS program has
 run, and all Linux and macOS runtime proof remains unrun. Any material change to
 intended authority requires reviewed Tier B reconciliation.
 
