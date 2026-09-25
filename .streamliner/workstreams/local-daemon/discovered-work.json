@@ -453,6 +453,31 @@
             "priorState": "The mechanism and numeric targets were conditional and unaccepted before this decision; earlier decision-history entries and proposal commits remain historical snapshots.",
             "acceptedScope": "The exact reviewed credential-local native owner, registry, finite admission, C=2 aggregate occupied slots, same-source barrier, owned nonblocking I/O, atomic cancellation and publication, B=3s internal cleanup-observation target, platform receipt, join, failure-hold, and shutdown design with every stated condition and limit.",
             "limits": "The accepted numeric limits are not measured performance or universal finite OS guarantees. Product writes, runtime proof, M2 closure, thread resolution, merge, and release remain unauthorized."
+          },
+          {
+            "state": "intended-authority-landed",
+            "authoritySession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "landedCommit": "a6eabbaeb87775f208d3d3facb6b1ab97447fa27",
+            "parent": "c5d888de80bfdad79c78cff38c7cfda53a3111e9",
+            "tree": "f3b3dbb5a8eb3ce6e40581449a1abc8a5b56e1ec",
+            "note": "Campaign authorized the exact four-blob atomic landing, and the Local orchestrator independently verified it. The installed blobs kept recommendation-time fields, including landingAuthorized false; this entry and currentAuthority resolve landing only."
+          },
+          {
+            "state": "campaign-m2-product-write-authorized",
+            "authoritySession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+            "reportedAt": "2026-09-25T14:27:39-04:00",
+            "worker": "38d183fb-df5d-4e65-88f3-e27b62e3c92f",
+            "startingHead": "2e2f3b991bece6e0309b4efdd59a88cfb556e76b",
+            "startingHeadParents": [
+              "5d9566182429066ee8b51cd8dd569065f9abdb5a",
+              "a6eabbaeb87775f208d3d3facb6b1ab97447fa27"
+            ],
+            "contextRefresh": "763b59c6-25d4-4f15-8e2b-5ca8e292901d",
+            "planSha256": "ddb434f8421cbf41049065edff0ad55f0ee758ddaf2a44ebcb33682a7a503de1",
+            "acknowledgement": "The same worker acknowledged the standalone grant before editing at 2e2f3b99 and began the accepted plan phases P1-P7.",
+            "scope": "Complete bounded P1-P7 implementation and proof in original PR #156, including the narrow existing console owning-host drain. The original M1, C1, and C2 commits and PAW history are preserved. The intentionally red credential regression may become an actual regression while its original negative evidence is retained.",
+            "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\pr156-m2-lifecycle-checkpoint.json",
+            "limits": "Permission and phase progress only. M2 is not implemented, measured, runtime-proven, reviewed, or merged; merge and release are not authorized."
           }
         ],
         "conditionalTechnicalRecommendation": {
@@ -551,7 +576,7 @@
         },
         "currentAuthority": {
           "authoritySession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
-          "reportedAt": "2026-09-25T13:41:31-04:00",
+          "reportedAt": "2026-09-25T14:27:39-04:00",
           "decision": "TECHNICAL-ACCEPTED",
           "reviewedProposal": "75913cbaecb4d009887d8ab31f999ccd0311f496",
           "reviewDisposition": "full-review-approved; 0 blockers and 0 warnings",
@@ -560,23 +585,92 @@
           "internalObservationSeconds": 3,
           "numericTargetsApproved": true,
           "numericTargetsMeasured": false,
-          "landingAuthorized": false,
-          "productWritesAuthorized": false,
+          "landingAuthorized": true,
+          "productWritesAuthorized": true,
           "runtimeProofComplete": false,
-          "nextGate": "Bounded mechanical review of the status-only delta, then campaign authorization of the exact final four blobs for atomic landing on c5d888d, independent landing verification, and separate same-worker M2 write authority."
+          "nextGate": "The same worker implements accepted phases P1-P7. The Windows job receipt and macOS final-signal axes are held for adjudication under local-daemon-credential-windows-job-receipt and local-daemon-credential-macos-final-signal-ordering. Genuine Windows, Linux, and macOS runtime proof, same-PR review responses, new exact-head review, CI, and design inspection then precede campaign merge authorization.",
+          "landedCommit": "a6eabbaeb87775f208d3d3facb6b1ab97447fa27",
+          "productWriteStartingHead": "2e2f3b991bece6e0309b4efdd59a88cfb556e76b"
         }
       },
       "description": "Record both selected credential-command policies and the campaign-accepted intended technical design while retaining product-promotion, implementation, and proof gates for M2.",
       "affectedOutcome": "The M2 repair has accepted helper-lifetime and orderly-host-exit policies plus a campaign-accepted intended credential lifecycle mechanism. Product promotion, implementation, and genuine supported-platform proof remain incomplete.",
       "requiredness": "Required policy authority for the M2 repair in PR #156; the accepted finding, repair, and proof remain open.",
-      "sequencing": "Keep the product worker source-quiet at local checkpoint 5d956618 with the three unpublished M1, C1, and C2 commits and intentionally red untracked M2 evidence. Existing reviewer f7c90ee2 performs a bounded mechanical review of 75913cba through this status-only commit. Campaign must then authorize the exact final four blobs for atomic landing on c5d888d, the landing must be independently verified, and campaign must separately authorize the same worker's M2 writes. Post-implementation correctness still requires genuine Windows, Linux, and macOS runtime proof for every claimed target. No push, thread resolution, merge request, or release claim may present M2 as repaired before those gates, review, CI, and design inspection.",
+      "sequencing": "Campaign granted the same worker M2 product writes at 2026-09-25T14:27:39-04:00 after the a6eabba landing was verified; implementation of accepted phases P1-P7 is active from local head 2e2f3b99 and uncommitted. The Windows job receipt and macOS final-signal axes are held for adjudication, and any material change to intended authority requires reviewed Tier B reconciliation. Post-implementation correctness still requires genuine Windows, Linux, and macOS runtime proof for every claimed target. No push, thread resolution, merge request, or release claim may present M2 as repaired before those gates, review, CI, and design inspection.",
       "selectedDisposition": "Use both operator-selected policies. Normal, error, and cancellation completion clean up Telex-owned helpers that remain within the supported invocation scope; intentionally persistent, escaped, broker-launched, and preexisting external-agent work remains outside Telex ownership. Logical command and Wait result deadlines remain unchanged. Normal exit of the owning host may add up to three seconds for one concurrent drain against one absolute current cleanup budget. A missing receipt requires explicit failure with retained named ownership and escalation, potentially beyond three seconds, not a clean exit or an unconditional three-second OS exit guarantee.",
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "The operator owns the selected policies; campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c owns landing and product-write authority; PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f remains source-quiet until separate campaign M2 write authority",
       "terminalPath": "The status-only delta receives bounded mechanical review, campaign authorizes exact four-blob atomic landing on c5d888d, and landing is independently verified before separate same-worker M2 write authority. The worker then implements both selected policies and the accepted bounded mechanism, executes the genuine Windows, Linux, and macOS runtime matrix including capacity, cancellation, output, platform receipt, failure-hold, runtime-drop, orderly-exit, and unsupported escape and broker cases, preserves M1/C1/C2, and completes same-PR review responses, new exact-head review, CI, and design inspection before campaign merge authorization. Technical acceptance does not complete this item.",
       "status": "routed",
       "decisionState": "accepted",
-      "dispositionAuthority": "The operator selected `Approve the one-shot invocation contract (Recommended)` through designated worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f at 2026-09-24T21:30:50-04:00, then selected `Approve bounded orderly-exit drain and explicit failure hold (Recommended)` through the same worker at 2026-09-25T13:11:15-04:00; campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c confirmed both scopes. Steward af271672 reported the earlier feasibility blocker at 2026-09-25T13:15:39-04:00, then superseded it with `design-recommendation-ready; technically feasible with supported-API conditions` at 2026-09-25T13:25:05-04:00. Campaign accepted the exact reviewed intended mechanism from 75913cba as `TECHNICAL-ACCEPTED` at 2026-09-25T13:41:31-04:00, including C=2 and B=3s as selected but unmeasured engineering limits. Landing, product writes, implementation, runtime proof, M2 resolution, thread resolution, merge, and release remain unauthorized or incomplete."
+      "dispositionAuthority": "The operator selected `Approve the one-shot invocation contract (Recommended)` through designated worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f at 2026-09-24T21:30:50-04:00, then selected `Approve bounded orderly-exit drain and explicit failure hold (Recommended)` through the same worker at 2026-09-25T13:11:15-04:00; campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c confirmed both scopes. Steward af271672 reported the earlier feasibility blocker at 2026-09-25T13:15:39-04:00, then superseded it with `design-recommendation-ready; technically feasible with supported-API conditions` at 2026-09-25T13:25:05-04:00. Campaign accepted the exact reviewed intended mechanism from 75913cba as `TECHNICAL-ACCEPTED` at 2026-09-25T13:41:31-04:00, including C=2 and B=3s as selected but unmeasured engineering limits. Landing, product writes, implementation, runtime proof, M2 resolution, thread resolution, merge, and release remain unauthorized or incomplete. Campaign then authorized the exact four-blob landing, recorded as a6eabbaeb87775f208d3d3facb6b1ab97447fa27, and granted the same worker M2 product writes at 2026-09-25T14:27:39-04:00. Implementation, runtime proof, M2 resolution, thread resolution, merge, and release remain incomplete or unauthorized."
+    },
+    {
+      "id": "local-daemon-credential-windows-job-receipt",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "PR #156 M2 Windows receipt implementation evidence from worker 38d183fb and its Windows platform delegate, with existing design steward documentary adjudication",
+      "crossReference": "local-daemon-postgres-credential-lifecycle-contract",
+      "evidence": {
+        "worktreeBase": "2e2f3b991bece6e0309b4efdd59a88cfb556e76b",
+        "publishedHead": "25aea118e04c4e93eb4e748fe7c1989338931ac2",
+        "platformDelegate": "56099301-8bd2-4ae7-a823-5c690c6f9deb",
+        "frozenPacket": "C:\\Users\\robemanuele\\.copilot\\session-state\\38d183fb-df5d-4e65-88f3-e27b62e3c92f\\files\\windows-job-receipt-packet-20260925.md",
+        "frozenPacketSha256": "d61430a33b27fda06cdf475090dd8b337585f879142b021c41b0384793bfd728",
+        "frozenPacketReportedAt": "2026-09-25T15:09:32-04:00",
+        "evidenceCheckpoint": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\pr156-m2-windows-receipt-checkpoint.json",
+        "evidenceCheckpointSha256": "f9f9cb05ebb12319d8ff953b5b51eb55edbaf86901f116e5f051d16aa79528a8",
+        "evidenceLevel": "Worker-supplied runtime evidence. The Local orchestrator verified all eight frozen artifact hashes, and the reconciler rechecked the packet index and checkpoint hashes. No one reran the tests or established source-to-binary exactness.",
+        "insidePollCleanup": "After helper readiness and verified membership in the private invocation job, inside poll_cleanup immediately before it would return true, the retained leader handle was signaled and a successful accounting query reported ActiveProcesses 0, while the retained helper process handle with SYNCHRONIZE rights returned WAIT_TIMEOUT (258). In an isolated diagnostic the helper signaled about 1.4766 ms later without a second kill or fallback; that is not a maximum or acceptable delay. The assertion stops before return, so this does not show that the execution emitted a receipt or released admission.",
+        "afterRelease": "Separate parent capacity and repeated-cancellation cases observed an unsignaled retained helper or shell handle after native-owner join, cleaned-scope drop including kill-on-close job closure, and registry removal. They did not record which process index failed or the later signal delay, and do not independently establish the membership or lag seen inside poll_cleanup.",
+        "results": "Stronger module suite 7 passed, 3 failed, 1 child-only entry ignored; isolated diagnostic red; parent target 5 passed, 2 failed. Earlier green finite and grace cases polled both conditions and did not establish ordering.",
+        "provenanceLimit": "Hashes freeze post-run artifacts only; no contemporaneous source-tree or executable digest was captured. Some raw API values, complete accounting buffers, per-operation timestamps, test PE architecture, and every member's final independent signaling are unrecorded.",
+        "stewardDocumentaryVerdict": {
+          "steward": "af271672-5d33-418c-bb9c-0f4d4570c7d7",
+          "reportedAt": "2026-09-25T14:59:31-04:00",
+          "verdict": "design-feasibility-blocked",
+          "conclusion": "No documented guarantee was established that successful ActiveProcesses-zero accounting is ordered after every former member process object becomes signaled. No complete supported stronger production sequence is justified yet; this is not an impossibility proof.",
+          "codeSpecificAttribution": "Pending the steward's review of the frozen packet for wrong job or handle, query failure or default zero, ABI or layout, handle reuse, and measurement-order errors."
+        },
+        "scopeLimit": "No harm, security impact, indefinite survival, repeated production leak, or general Windows lifetime conclusion is established."
+      },
+      "description": "Decide whether the Windows job-accounting predicate is a sufficient M2 completion receipt for every in-scope credential-command process, and what supported correction or authority change is required.",
+      "affectedOutcome": "The accepted M2 design requires documented completion of every ordinary in-scope process before receipt. The Windows receipt axis cannot be accepted while this ordering is unproven.",
+      "requiredness": "Required for the M2 repair in PR #156. Not an accepted limitation, waiver, or follow-up delivery.",
+      "sequencing": "Affected Windows receipt implementation and acceptance are stopped; the uncommitted work, red tests, and frozen packet are preserved. The Windows delegate quiesces this axis after safe owned cleanup. Previously authorized Unix and common work continues within its approved scope. No partial review-ready state or M2 thread closure.",
+      "selectedDisposition": "None selected. Route to steward and campaign adjudication. No sleep, timing margin, assertion weakening, repeated zero query, job close or extra termination request, PID snapshot, completion-port notification without a stronger guarantee, or fixture-only helper handle may substitute for a production complete-scope receipt. No replacement mechanism is accepted and canonical authority is not superseded.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f holds the evidence; existing steward af271672-5d33-418c-bb9c-0f4d4570c7d7 and campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c adjudicate",
+      "terminalPath": "The steward completes code-specific adjudication of the frozen packet, and the steward and campaign either identify a supported stronger ownership or completion rule or state the exact blocking gap. Any material change to intended authority passes campaign authority and reviewed Tier B reconciliation before affected Windows implementation resumes. Real negative-to-positive Windows proof and the complete three-platform bundle then precede independent review, CI, design inspection, and campaign merge.",
+      "status": "routed",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 routed this within the issue #155 repair scope. Both operator policies remain selected. Pending adjudication; no replacement accepted."
+    },
+    {
+      "id": "local-daemon-credential-macos-final-signal-ordering",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "PR #156 M2 Unix platform delegate source analysis, with existing design steward interpretation",
+      "crossReference": "local-daemon-postgres-credential-lifecycle-contract",
+      "evidence": {
+        "worktreeBase": "2e2f3b991bece6e0309b4efdd59a88cfb556e76b",
+        "platformDelegate": "32add9eb-9543-42bf-808c-7d6e34d032f3",
+        "sourceReport": "C:\\Users\\robemanuele\\.copilot\\session-state\\38d183fb-df5d-4e65-88f3-e27b62e3c92f\\files\\macos-final-signal-ordering-evidence-20260925.md",
+        "sourceReportSha256": "8873bca200b381e6199224402d63ff128cf39e12bd77ee54612439e845b3b617",
+        "frozenUnixSource": "C:\\Users\\robemanuele\\.copilot\\session-state\\38d183fb-df5d-4e65-88f3-e27b62e3c92f\\files\\macos-final-signal-ordering-unix-snapshot-20260925.rs",
+        "frozenUnixSourceSha256": "ec76a12e09c1c6eba68647a4bb5df81215118d870c1fa95da6d2cbdbd32bdffe",
+        "darwinReference": "https://github.com/apple-oss-distributions/xnu/blob/f6217f891ac0bb64f3d375211650a4c1ff8ca1ea/bsd/kern/kern_sig.c#L1714-L1718",
+        "evidenceLevel": "Source-only prediction. No macOS program was run, and all Linux and macOS runtime proof remains unrun. Only cross-target cargo check and clippy for x86_64-apple-darwin were reported.",
+        "details": "In pinned XNU, process-group signaling skips zombies and POSIX behavior returns EPERM when no member is signalable. The frozen Unix implementation sends a mandatory final group SIGKILL while the leader is still unreaped, and returns any nonzero signal error, including EPERM, as cleanup failure. If ordinary successful completion leaves only the unreaped leader zombie, that signal could fail and hold an otherwise finished invocation, conflicting with the requirement that ordinary completions not remain permanently held.",
+        "stewardInterpretation": "The steward reads the pinned zombie filtering and UNIX03 EPERM behavior as applying to the final SIGKILL, and recommends only that the anchored attempt result stay separate from the independent later receipt: record the attempt, seal signals, reap the exact leader, then require the full read-only absence, I/O, and join conjunction. The correction hold remains while campaign classifies authority."
+      },
+      "description": "Resolve the ordering between the anchored final group signal, the exact leader reap, and the later read-only absence check so ordinary macOS completions are not held by a zombie-only group.",
+      "affectedOutcome": "The accepted Unix receipt sequence may hold ordinary successful macOS invocations if the final signal meets a zombie-only group.",
+      "requiredness": "Required for the M2 repair in PR #156. Not an accepted limitation, waiver, or follow-up delivery.",
+      "sequencing": "The Unix module and its original 22 tests stay unchanged while the steward answers one bounded documentary ordering question. The current code snapshot and hash are frozen; no duplicate probe.",
+      "selectedDisposition": "None selected; the fix is undecided. Not authorized: treating EPERM as absence, signaling after reap, privilege or subreaper changes, a new agent, or a coverage waiver. The accepted post-reap read-only rule, where EPERM means presence or inconclusive, is unchanged.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f holds the evidence; existing steward af271672-5d33-418c-bb9c-0f4d4570c7d7 and campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c adjudicate",
+      "terminalPath": "The steward answers the bounded ordering question and campaign classifies authority; any material change to intended authority passes reviewed Tier B reconciliation. The selected correction is implemented and proven by real macOS runtime evidence, including permission denial and zombie cases within the permitted ownership boundary, as part of the three-platform bundle before independent review, CI, design inspection, and campaign merge.",
+      "status": "routed",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 routed this within the issue #155 repair scope. Pending adjudication; no correction accepted."
     }
   ]
 }

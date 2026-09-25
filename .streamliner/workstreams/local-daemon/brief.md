@@ -210,19 +210,32 @@ conclusive group absence, exact leader reap, closed or completed owned I/O, and
 native owner completion. Presence, denial, ambiguity, or possible reuse would
 retain the cleanup obligation without restoring signal authority.
 
-The reviewed intended mechanism is accepted, but it is not implemented or
-runtime-proven. The worker remains source-quiet until this status delta receives
-bounded mechanical review, campaign authorizes exact four-blob atomic landing
-on `c5d888d`, landing is independently verified, and campaign separately grants
-the same worker M2 write authority. Genuine Windows, Linux, and macOS runtime
-proof follows implementation.
+The accepted intended design landed on main at `a6eabba`. Campaign then granted
+the same #155 worker M2 product-write authority at 2026-09-25T14:27:39-04:00.
+After a context refresh that preserved the three unpublished M1, C1, and C2
+commits, the worker acknowledged the grant before editing at local head
+`2e2f3b99`, which merges `5d956618` and `a6eabba`, and began the accepted plan
+phases P1-P7. The intentionally red credential regression may now become an
+actual regression test; its original negative evidence is retained.
 
-PR #156 remains published at `25aea118`; the same worker is source-quiet at local
-`5d956618` with three unpublished M1, C1, and C2 commits plus an intentionally
-red untracked M2 regression. The #154 candidate `f8363be` is complete, but
-publication remains blocked by the actual App EMU 403 and the latest same-worker
-quota result. Any retry requires restored credit, deduplication, and explicit
-authority. Issue #157 is not launched.
+Two platform receipt axes are held for adjudication, and neither has an accepted
+correction. On Windows, worker-supplied runtime evidence shows the current job
+accounting can report zero active processes while a retained helper process
+handle is still unsignaled. The steward's documentary verdict is
+design-feasibility-blocked: no documented ordering guarantee was found, and no
+supported replacement is justified yet. Affected Windows receipt work is stopped.
+On macOS, source-only analysis predicts that the final group `SIGKILL` can fail
+with `EPERM` when only the unreaped leader zombie remains, holding an otherwise
+finished invocation. No macOS program has run, and all Linux and macOS runtime
+proof remains unrun. Any material change to intended authority requires reviewed
+Tier B reconciliation.
+
+M2 is not implemented, measured, runtime-proven, reviewed, or merged. PR #156
+remains published at `25aea118`, and all new M2 work is uncommitted and
+unpushed. The #154 candidate `f8363be` is complete, but publication remains
+blocked by the actual App EMU 403 and the latest same-worker quota result. Any
+retry requires restored credit, deduplication, and explicit authority. Issue #157
+is not launched.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
