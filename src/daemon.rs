@@ -24,6 +24,7 @@ use crate::model::{
 };
 #[cfg(test)]
 use crate::model::{ApplicationOperationBegin, NewApplicationOperation};
+use crate::station_intent;
 #[cfg(feature = "postgres")]
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
@@ -58,6 +59,15 @@ const DEFAULT_IDLE_STATION_WARN: usize = 1_000;
 const DEFAULT_DEAF_WARN_MS: i64 = 2 * 60 * 1000;
 
 pub type Result<T> = std::result::Result<T, DaemonError>;
+
+/// Daemon-owned station-intent reconciliation (issue #106 / ADR 0052).
+///
+/// Physically `src/daemon_reconcile.rs`. It is mounted as a child of `daemon` rather than as a
+/// sibling crate module because it manipulates member records, admission guards, and epoch leases —
+/// state that must stay private to the daemon. The crate root re-exports it as
+/// `crate::daemon_reconcile`.
+#[path = "daemon_reconcile.rs"]
+pub mod reconcile;
 
 #[cfg(windows)]
 const WINDOWS_ELEVATION_MISMATCH_HINT: &str = "On Windows, this usually means the telex daemon and this process are running at different elevations (Administrator vs non-Administrator), so they cannot authenticate over the daemon named pipe. Stop the existing daemon from a matching-elevation terminal, or restart/attach from the same elevation as this session (for an elevated session, start telex from an Administrator terminal).";
@@ -153,6 +163,26 @@ impl std::error::Error for DaemonError {
 impl From<serde_json::Error> for DaemonError {
     fn from(value: serde_json::Error) -> Self {
         DaemonError::Json(value)
+    }
+}
+
+/// Shared owner-private filesystem errors map onto the two `DaemonError` variants they were
+/// raised as before the primitives moved into `crate::platform_fs`, so daemon-facing error text
+/// is unchanged.
+impl From<crate::platform_fs::FsError> for DaemonError {
+    fn from(value: crate::platform_fs::FsError) -> Self {
+        match value {
+            crate::platform_fs::FsError::Io { action, source } => {
+                DaemonError::Io { action, source }
+            }
+            crate::platform_fs::FsError::Unsupported {
+                capability,
+                message,
+            } => DaemonError::Unsupported {
+                capability,
+                message,
+            },
+        }
     }
 }
 
@@ -335,6 +365,9 @@ pub struct DaemonState {
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
     draining: AtomicBool,
     on_deliver: OnDeliverState,
+    /// Station-intent reconciliation state: the cached index, the per-scope single-flight guard,
+    /// and the trigger/report seam (issue #106 / ADR 0052).
+    intents: reconcile::IntentRuntime,
 }
 
 #[derive(Clone)]
@@ -533,6 +566,7 @@ impl DaemonState {
 
     fn status_minimal(&self) -> DaemonStatus {
         DaemonStatus {
+            capabilities: proto::daemon_capabilities(),
             protocol_version: current_protocol_version(),
             daemon_version: proto::DAEMON_VERSION.to_string(),
             instance_id: self.instance_id.clone(),
@@ -547,6 +581,11 @@ impl DaemonState {
             retention: Vec::new(),
             idle_stations: IdleStationStatus::default(),
             deaf_stations: DeafStationStatus::default(),
+            // Intent rows are part of the authenticated projection only; the uncapped minimal
+            // projection must not leak session ids or addresses.
+            intents: Vec::new(),
+            intent_index_as_of_ms: None,
+            intent_over_cap: false,
         }
     }
 
@@ -744,7 +783,12 @@ impl DaemonState {
             .collect();
         let idle_count = members.iter().filter(|m| m.idle).count();
         let deaf_count = members.iter().filter(|m| m.deaf_warn).count();
+        // Intent rows come from the cached index only, so building status never touches the intent
+        // directory and never probes a producer.
+        let intent_index = self.intent_index_snapshot();
+        let intents = self.intent_statuses(None);
         DaemonStatus {
+            capabilities: proto::daemon_capabilities(),
             protocol_version: current_protocol_version(),
             daemon_version: proto::DAEMON_VERSION.to_string(),
             instance_id: self.instance_id.clone(),
@@ -767,6 +811,9 @@ impl DaemonState {
                 warn: deaf_count > 0,
                 warn_threshold_ms: deaf_warn_threshold_ms,
             },
+            intents,
+            intent_index_as_of_ms: Some(intent_index.as_of_ms),
+            intent_over_cap: intent_index.over_cap,
         }
     }
 
@@ -886,6 +933,20 @@ impl DaemonState {
             .collect()
     }
 
+    /// Active members attending one address in one store, whatever session holds them.
+    ///
+    /// The member half of an operator reset's binding set; the other half is the durable scope,
+    /// because a station with no member at all still has desired state to withdraw.
+    fn address_members(&self, store_key: &str, address: &str) -> Vec<MemberRecord> {
+        self.members
+            .lock()
+            .unwrap()
+            .values()
+            .filter(|m| m.store_key == store_key && m.address == address && !m.idle)
+            .cloned()
+            .collect()
+    }
+
     /// Active members for a session across ALL stores. The idle drain (issue #65) uses this instead
     /// of the store-scoped variant: the `agentStop` drain hook is static and resolves the client's
     /// ambient store, which differs from a session attached with a named `--backend`/`--db`. Since
@@ -927,92 +988,6 @@ impl DaemonState {
             Self::member_key(&record.store_key, &record.session_id, &record.address),
             record,
         );
-    }
-
-    fn mark_session_idle(
-        &self,
-        store_key: &str,
-        session_id: &str,
-        kind: &str,
-        reason: &str,
-        definite_end: bool,
-    ) -> Vec<MemberRecord> {
-        let mut affected = Vec::new();
-        {
-            let mut members = self.members.lock().unwrap();
-            for member in members
-                .values_mut()
-                .filter(|m| m.store_key == store_key && m.session_id == session_id && !m.idle)
-            {
-                let prior = member.clone();
-                member.idle = true;
-                member.idle_rearmable = false;
-                member.waiters = 0;
-                member.unattended_since_ms = Some(now_ms());
-                member.unattended_with_backlog_since_ms = None;
-                if prior.waiters > 0 {
-                    member.last_waiter_exit_at_ms = Some(now_ms());
-                    member.last_waiter_outcome = Some(WaiterOutcome::PresenceEnded);
-                    member.last_waiter_exit_code = Some(5);
-                    member.last_waiter_detail = Some(presence_ended_detail(kind));
-                }
-                affected.push(prior);
-            }
-        }
-        for member in &affected {
-            self.push_recent_error(
-                kind,
-                format!(
-                    "{kind}: marked idle store={} session={} address={} prior_occupant={} prior_waiters={}: {reason}",
-                    member.store_key, member.session_id, member.address, member.occupant, member.waiters
-                ),
-            );
-        }
-        if definite_end && !affected.is_empty() {
-            self.record_definite_session_end(store_key, session_id, kind, &affected);
-        }
-        affected
-    }
-
-    fn mark_address_idle(
-        &self,
-        store_key: &str,
-        address: &str,
-        kind: &str,
-        reason: &str,
-    ) -> Vec<MemberRecord> {
-        let mut affected = Vec::new();
-        {
-            let mut members = self.members.lock().unwrap();
-            for member in members
-                .values_mut()
-                .filter(|m| m.store_key == store_key && m.address == address && !m.idle)
-            {
-                let prior = member.clone();
-                member.idle = true;
-                member.idle_rearmable = false;
-                member.waiters = 0;
-                member.unattended_since_ms = Some(now_ms());
-                member.unattended_with_backlog_since_ms = None;
-                if prior.waiters > 0 {
-                    member.last_waiter_exit_at_ms = Some(now_ms());
-                    member.last_waiter_outcome = Some(WaiterOutcome::PresenceEnded);
-                    member.last_waiter_exit_code = Some(5);
-                    member.last_waiter_detail = Some(presence_ended_detail(kind));
-                }
-                affected.push(prior);
-            }
-        }
-        for member in &affected {
-            self.push_recent_error(
-                kind,
-                format!(
-                    "{kind}: marked idle store={} session={} address={} prior_occupant={} prior_waiters={}: {reason}",
-                    member.store_key, member.session_id, member.address, member.occupant, member.waiters
-                ),
-            );
-        }
-        affected
     }
 
     fn mark_member_idle(
@@ -2083,6 +2058,9 @@ pub async fn serve() -> Result<()> {
     let state = Arc::new(new_state(paths)?);
     let (drain_tx, mut drain_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let heartbeat_task = tokio::spawn(heartbeat_loop(state.clone()));
+    // Startup scan (trigger (a) of ADR 0052). Spawned, never awaited: the daemon accepts
+    // connections immediately, so a large or corrupt intent scope cannot delay readiness.
+    reconcile::spawn_startup_scan(state.clone());
 
     loop {
         tokio::select! {
@@ -2137,6 +2115,7 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         ended_sessions: Mutex::new(BTreeMap::new()),
         draining: AtomicBool::new(false),
         on_deliver: OnDeliverState::default(),
+        intents: reconcile::IntentRuntime::default(),
     })
 }
 
@@ -3295,9 +3274,37 @@ fn spawn_on_deliver_backlog(state: Arc<DaemonState>, member: MemberRecord) {
 }
 
 async fn heartbeat_loop(state: Arc<DaemonState>) {
+    // One loop, two responsibilities. Reconciliation rides the existing heartbeat tick rather
+    // than adding a second timer, and it also wakes on an explicit trigger pulse (startup,
+    // upgrade/rollback, `ReconcileIntents`, tests) so callers can drive a pass without waiting
+    // out the interval. A pulse only *schedules* work: per-intent backoff, quarantine, and
+    // deferred cadences are still honored inside the pass.
+    //
+    // The heartbeat deadline is tracked explicitly rather than by recreating a sleep each
+    // iteration. Recreating it meant any trigger pulse restarted the elapsed heartbeat time, so a
+    // caller pulsing faster than `HEARTBEAT_INTERVAL` starved `heartbeat_members_once` — the one
+    // thing that renews every member's epoch lease — and let leases go stale inside
+    // `liveness_window_secs()`, inviting a successor to claim them.
+    let mut next_heartbeat = Instant::now() + HEARTBEAT_INTERVAL;
     loop {
-        tokio::time::sleep(HEARTBEAT_INTERVAL).await;
-        heartbeat_members_once(state.clone()).await;
+        let tick = tokio::time::sleep_until(next_heartbeat.into());
+        tokio::pin!(tick);
+        tokio::select! {
+            _ = &mut tick => {}
+            _ = state.intents.trigger.notified() => {}
+        }
+        if Instant::now() >= next_heartbeat {
+            heartbeat_members_once(state.clone()).await;
+            // Anchored to the deadline, not to "now", so a slow heartbeat or a long pass cannot
+            // make the effective interval drift outward tick after tick.
+            let now = Instant::now();
+            while next_heartbeat <= now {
+                next_heartbeat += HEARTBEAT_INTERVAL;
+            }
+        }
+        // The pass is bounded by `RECONCILE_PASS_DEADLINE < HEARTBEAT_INTERVAL`, so it cannot
+        // overrun the tick that started it.
+        reconcile::reconcile_once(state.clone(), None).await;
     }
 }
 
@@ -3523,6 +3530,19 @@ async fn needs_attach_for_missing_member(
             NeedsAttachReason::DeliberatelyDetached,
         );
     }
+    // A `pending` station intent means a push attach for this binding is mid-flight, or crashed
+    // before it finalized. The daemon never acts on a pending intent, so a generic
+    // re-register-and-retry would race the attach and could create a pull-only member over a push
+    // provisioning in progress. Report the specific reason instead, so the client stops and points
+    // the user at the finalizing step rather than silently retrying.
+    if state.pending_push_intent(store_key, session_id, address) {
+        return proto::needs_attach_with_reason(
+            format!(
+                "session {session_id} has a push attach for {address} in {store_key} that has not finalized yet"
+            ),
+            NeedsAttachReason::PushIntentPending,
+        );
+    }
     state.push_recent_error(
         "NeedsAttach",
         format!("NeedsAttach operation={operation} store={store_key} session={session_id} address={address}"),
@@ -3533,8 +3553,19 @@ async fn needs_attach_for_missing_member(
     )
 }
 
+/// Bounded wait for in-flight `on_deliver` handlers before a graceful drain releases leases.
+///
+/// Epoch advancement fences the *daemon*, not helper processes a dying one already spawned. On the
+/// graceful path we can close that overlap completely by simply waiting for the helpers to finish,
+/// so a successor never races a predecessor's handler. It is bounded because a wedged helper must
+/// not be able to hold a drain open indefinitely; the `--daemon-instance` fence covers whatever
+/// escapes the bound (and the crash path, which has no drain at all).
+const DRAIN_INFLIGHT_WAIT: Duration = Duration::from_secs(5);
+const DRAIN_INFLIGHT_POLL: Duration = Duration::from_millis(50);
+
 async fn drain_members(state: Arc<DaemonState>) -> std::result::Result<(), Response> {
     state.begin_draining();
+    wait_for_inflight_handlers(&state, DRAIN_INFLIGHT_WAIT).await;
     let members = state.members_snapshot();
     for member in &members {
         let backend = match state.backend_for(&member.store_key).await {
@@ -3576,6 +3607,31 @@ async fn drain_members(state: Arc<DaemonState>) -> std::result::Result<(), Respo
     }
     state.clear_members();
     Ok(())
+}
+
+/// Wait, bounded, for every in-flight push helper to finish. `begin_draining` has already stopped
+/// new pushes from being spawned, so this converges; the bound only guards against a helper that
+/// never exits.
+async fn wait_for_inflight_handlers(state: &Arc<DaemonState>, budget: Duration) {
+    let deadline = Instant::now() + budget;
+    loop {
+        let inflight = state.on_deliver.inflight.lock().unwrap().len();
+        if inflight == 0 {
+            return;
+        }
+        if Instant::now() >= deadline {
+            state.push_recent_error(
+                "DrainInflight",
+                format!(
+                    "graceful drain proceeded with {inflight} in-flight push handler(s) after {}ms; \
+                     the --daemon-instance fence stops them from injecting into a successor's session",
+                    budget.as_millis()
+                ),
+            );
+            return;
+        }
+        tokio::time::sleep(DRAIN_INFLIGHT_POLL).await;
+    }
 }
 
 async fn handle_client(
@@ -3698,6 +3754,10 @@ async fn handle_request_with_capabilities(
             if let Err(response) = state.check_admin_cap(proof.as_deref()) {
                 return (response, ClientAction::Continue);
             }
+            // Computed from in-memory members plus the cached intent index, *before* the
+            // lease-release loop, so it describes what a successor will find and cannot push the
+            // graceful drain past `--drain-timeout-ms`.
+            let drain_intents = Some(state.drain_intent_report());
             if let Err(response) = drain_members(state.clone()).await {
                 return (response, ClientAction::Continue);
             }
@@ -3708,9 +3768,49 @@ async fn handle_request_with_capabilities(
                     address: None,
                     message_id: None,
                     lease_epoch: None,
+                    drain_intents,
                 },
                 ClientAction::Drain,
             );
+        }
+        Request::ReconcileIntents { proof, scope } => {
+            // Admin-proofed exactly like `Drain`: reconciliation arms delivery and spawns handler
+            // processes, so it must not be reachable from an unproofed request path.
+            if let Err(response) = state.check_admin_cap(proof.as_deref()) {
+                return (response, ClientAction::Continue);
+            }
+            // **One** deadline, originated here, shared with the pass.
+            //
+            // The previous shape was a spawned pass on its own four-second clock plus a
+            // four-second `timeout` on the handler. Equal lengths, different origins: the handler's
+            // clock started when the request arrived and the pass's when the task was scheduled, so
+            // the handler could answer `admin_deadline` while the pass was still mid-wave — and the
+            // pass then went on registering members, advancing cursors, and publishing a report
+            // that belonged to a request already answered. Handing the pass this instant instead
+            // makes "the pass is bounded" and "the request is bounded" the same statement, and
+            // `RECONCILE_RESPONSE_RESERVE` is the slack between the pass's last phase and this
+            // handler's answer.
+            //
+            // Spawned, then **joined** — not detached. Spawning is what keeps a client that hangs
+            // up mid-request from tearing a pass in half at an arbitrary await point; joining is
+            // what guarantees every member registration, cursor advance, and report the pass
+            // performs has already happened when this response is written.
+            let deadline = Instant::now() + reconcile::RECONCILE_PASS_WORK_BUDGET;
+            let pass = tokio::spawn(reconcile::reconcile_once_until(
+                state.clone(),
+                scope,
+                deadline,
+                reconcile::PassOrigin::Request,
+            ));
+            match pass.await {
+                Ok(report) => Response::Reconciled { report },
+                // A panicked pass has no report to give. `ran: false` is the existing protocol for
+                // "no result to report"; the CLI and the turn-boundary hook already retry on it
+                // rather than reading a zeroed report as a successful pass that restored nothing.
+                Err(_) => Response::Reconciled {
+                    report: reconcile::abandoned_pass_report(&state, "pass_aborted"),
+                },
+            }
         }
         Request::Register {
             store_key,
@@ -3998,6 +4098,13 @@ async fn handle_request_with_capabilities(
     (response, ClientAction::Continue)
 }
 
+/// `Register`.
+///
+/// An **arming** register (`on_deliver.is_some()`) is a *durable* push registration whenever the
+/// binding has a station-intent record: the durable armed proof is committed inside this function,
+/// immediately before the member is installed, and a register that cannot persist the proof it owes
+/// is aborted rather than reported as a success — see [`commit_armed_proof`].
+#[allow(clippy::too_many_arguments)]
 async fn register_member(
     state: Arc<DaemonState>,
     store_key: String,
@@ -4031,6 +4138,43 @@ async fn register_member(
         .await;
     let _delivery_admission_guard = delivery_admission.lock().await;
     let watch_pids = capture_watch_pids(watch_pids);
+
+    // Does this register *owe* a durable armed proof?
+    //
+    // Read once, here, under the per-station admission guard and before any commit path runs. The
+    // question it answers cannot be answered at stamp time: "no record for this binding" is both
+    // the ordinary pull or plain `--on-deliver` attach (nothing was ever written, so nothing is
+    // owed) and a concurrent attach rollback that deleted the record this register was about to
+    // stamp (everything is owed). Observing the record's existence up front separates the two, and
+    // the two possible interleavings after this point are both safe: a record created between here
+    // and the stamp is stamped anyway, and a record deleted between here and the stamp aborts the
+    // register instead of returning an unbacked durable success.
+    //
+    // An unreadable scope fails closed for exactly the reason the anti-downgrade guard below does:
+    // it is the `Insecure` condition the rest of this design refuses to guess about, and guessing
+    // "no record" here is guessing in the direction that silently loses recovery.
+    let owes_armed_proof = if on_deliver.is_some() {
+        match state.durable_intent_present(&store_key, &session_id, &address) {
+            Ok(present) => present,
+            Err(detail) => {
+                state.push_recent_error(
+                    "StationIntent",
+                    format!(
+                        "refused push registration because the station-intent scope could not be read store={store_key} session={session_id} address={address}: {detail}"
+                    ),
+                );
+                return proto::incompatible_with_reason(
+                    format!(
+                        "the station-intent scope could not be read ({detail}), so push for {address} cannot be registered durably; \
+                         fix the scope permissions and re-run the attach"
+                    ),
+                    NeedsAttachReason::PushIntentUnrecoverable,
+                );
+            }
+        }
+    } else {
+        false
+    };
 
     if on_deliver.is_some() && state.has_live_waiter_for(&store_key, &session_id, &address) {
         state.push_recent_error(
@@ -4130,13 +4274,38 @@ async fn register_member(
                     );
                 }
                 state.check_session_id_reuse_tripwire(&refreshed);
-                if !recovery {
-                    state.clear_definite_session_end(&store_key, &session_id);
-                }
                 #[cfg(test)]
                 state
                     .delivery_admission_before_commit(DeliveryAdmissionKind::Register)
                     .await;
+                // Explicit push→pull downgrade: withdraw the durable intent as part of this same
+                // admitted transition. See `withdraw_downgraded_intent`.
+                if removing_push {
+                    if let Err(response) =
+                        withdraw_downgraded_intent(&state, &store_key, &session_id, &address)
+                    {
+                        return response;
+                    }
+                }
+                // Commit the durable proof *before* the member, and before any other side effect
+                // this branch performs. On failure the pre-existing member is left exactly as it
+                // was: `existing` is still the installed record, its epoch lease is untouched, and
+                // nothing this call built has been published — which is the whole reason the stamp
+                // sits here rather than after the commit.
+                if on_deliver.is_some() {
+                    if let Err(response) = commit_armed_proof(
+                        &state,
+                        &store_key,
+                        &session_id,
+                        &address,
+                        owes_armed_proof,
+                    ) {
+                        return response;
+                    }
+                }
+                if !recovery {
+                    state.clear_definite_session_end(&store_key, &session_id);
+                }
                 state.insert_member(refreshed.clone());
                 // Reset the push retry state and re-scan backlog only on an explicit
                 // (re-)provision; a plain refresh that merely preserved the handler keeps its
@@ -4187,6 +4356,115 @@ async fn register_member(
                 conflict.address, conflict.session_id
             ),
         );
+    }
+
+    // Anti-downgrade (issue #106 / ADR 0052 decision 10).
+    //
+    // We are about to create a **new** member for this key. If a live push intent exists for it,
+    // creating a pull-only member here would silently downgrade a station the user provisioned for
+    // push — the exact failure the issue calls out. The guard lives here, in `register_member`,
+    // rather than in a Copilot-specific path, so it also covers older clients and plain
+    // `telex attach`.
+    //
+    // It calls `reconcile_intent_locked`, the **guard-free inner** entry point: this function
+    // already holds the per-`MemberKey` admission guard for this key, and that guard is documented
+    // as outermost and non-reentrant, so calling the acquiring `reconcile_once` here would
+    // self-deadlock the hottest register path.
+    if on_deliver.is_none() && !replace_on_deliver {
+        let intent_key = reconcile::IntentKey {
+            store_key: store_key.clone(),
+            session_id: session_id.clone(),
+            address: address.clone(),
+        };
+        // Consult the **durable manifest**, not only the cached index. The index is populated by the
+        // first reconcile pass, and `serve()` accepts connections before that pass runs — which is
+        // exactly the daemon-replacement window this guard exists to protect.
+        //
+        // Three-way, deliberately: "the scope could not be opened" is the `Insecure` condition the
+        // rest of the design fails closed on, and folding it into "no intent" made the guard fail
+        // **open** in that same window — before the index is populated, an unopenable scope plus an
+        // empty index meant a pull-only member was created over a live push intent on disk.
+        let lookup = state.lookup_live_intent(&intent_key);
+        let indexed_live = state.live_push_intent(&intent_key).is_some();
+        match lookup {
+            reconcile::LiveIntentLookup::Unavailable(detail) => {
+                state.push_recent_error(
+                    "PushIntentUnrecoverable",
+                    format!(
+                        "refused pull-only registration because the station-intent scope could not be read store={store_key} session={session_id} address={address}: {detail}"
+                    ),
+                );
+                return proto::incompatible_with_reason(
+                    format!(
+                        "the station-intent scope could not be read ({detail}), so a live push intent for {address} cannot be ruled out; \
+                         fix the scope permissions, or re-provision push with `telex --address {address} copilot resume` before attaching pull-only"
+                    ),
+                    NeedsAttachReason::PushIntentUnrecoverable,
+                );
+            }
+            reconcile::LiveIntentLookup::Live(intent) => {
+                let outcome = reconcile::reconcile_intent_locked(state.clone(), &intent).await;
+                reconcile::apply_inline_success_projection(&state, &intent, &outcome);
+                match outcome {
+                    // Push was restored (or was already live): treat the incoming registration
+                    // as a refresh of the now-push member rather than creating a pull-only one.
+                    reconcile::IntentOutcome::Restored
+                    | reconcile::IntentOutcome::RefreshedNoOp => {
+                        if let Some(restored) = state.get_member(&store_key, &session_id, &address)
+                        {
+                            // Carry the incoming registration's process anchors onto the restored
+                            // member: dropping them silently disabled `WatchPidDeath` reaping for
+                            // a caller that registered with `--watch-pid`.
+                            if !watch_pids.is_empty() {
+                                let mut anchored = restored.clone();
+                                anchored.watch_pids = watch_pids.clone();
+                                state.insert_member(anchored);
+                            }
+                            return Response::Registered {
+                                lease_epoch: restored.lease_epoch,
+                                owner_instance_id: restored.owner_instance_id,
+                            };
+                        }
+                    }
+                    // A live armed pull waiter wins (decision 13): the anti-downgrade guarantee
+                    // is explicitly scoped to the no-live-waiter case, so fall through and let
+                    // the normal pull registration proceed.
+                    reconcile::IntentOutcome::DeferredPullWaiter => {}
+                    // Anything else means we could not prove the push path is recoverable, so
+                    // we fail closed with a typed reason instead of creating a pull-only member
+                    // over a live push intent.
+                    other => {
+                        let code = other.failure_code().unwrap_or("unrecoverable").to_string();
+                        state.push_recent_error(
+                            "PushIntentUnrecoverable",
+                            format!(
+                                "refused pull-only registration over a live push intent store={store_key} session={session_id} address={address}: {code}"
+                            ),
+                        );
+                        return proto::incompatible_with_reason(
+                            format!(
+                                "address {address} has a live push intent for session {session_id} that could not be restored ({code}); \
+                                 re-provision push with `telex --address {address} copilot resume`, or detach it with `telex --address {address} copilot detach` before attaching pull-only"
+                            ),
+                            NeedsAttachReason::PushIntentUnrecoverable,
+                        );
+                    }
+                }
+            }
+            reconcile::LiveIntentLookup::Absent => {
+                if indexed_live {
+                    // The index says live but the manifest is gone or no longer live. Fail closed
+                    // rather than guess.
+                    return proto::incompatible_with_reason(
+                        format!(
+                            "address {address} has a live push intent for session {session_id} whose manifest could not be read; \
+                             re-provision push with `telex --address {address} copilot resume`, or detach it before attaching pull-only"
+                        ),
+                        NeedsAttachReason::PushIntentUnrecoverable,
+                    );
+                }
+            }
+        }
     }
 
     let backend = match state.backend_for(&store_key).await {
@@ -4398,9 +4676,6 @@ async fn register_member(
         on_deliver_cc_after_ms,
     };
     state.check_session_id_reuse_tripwire(&record);
-    if !recovery {
-        state.clear_definite_session_end(&store_key, &session_id);
-    }
     let backlog = if record.on_deliver.is_some() {
         Some(record.clone())
     } else {
@@ -4425,6 +4700,33 @@ async fn register_member(
             }
         }
     }
+    // Commit the durable proof before publishing the member. If this fails, release the claimed
+    // lease so reconciliation can retry without an in-memory member outrunning durable intent.
+    if record.on_deliver.is_some() {
+        if let Err(response) =
+            commit_armed_proof(&state, &store_key, &session_id, &address, owes_armed_proof)
+        {
+            let _ = backend
+                .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                .await;
+            return response;
+        }
+    }
+    // Explicit push→pull downgrade on a binding that had no in-memory member (the daemon-restart
+    // shape: the manifest survived, the member did not). Same combined transition, same guard, same
+    // rollback discipline as the armed proof above.
+    if record.on_deliver.is_none() && replace_on_deliver {
+        if let Err(response) = withdraw_downgraded_intent(&state, &store_key, &session_id, &address)
+        {
+            let _ = backend
+                .release_epoch_lease(&address, &claimed.owner_instance_id, claimed.lease_epoch)
+                .await;
+            return response;
+        }
+    }
+    if !recovery {
+        state.clear_definite_session_end(&store_key, &session_id);
+    }
     state.insert_member(record.clone());
     if let Some(member) = backlog {
         state.on_deliver_forget_member(&MemberKey {
@@ -4437,6 +4739,111 @@ async fn register_member(
     Response::Registered {
         lease_epoch: claimed.lease_epoch,
         owner_instance_id: claimed.owner_instance_id,
+    }
+}
+
+/// Commit the durable **armed proof** for an arming push registration, or refuse the registration.
+///
+/// This is the transactional half of the arming register. It runs immediately before the member is
+/// installed, so:
+///
+/// * There is no window in which a register has committed a member and not yet persisted its
+///   proof. That window was real: a concurrent attach's rollback, deleting the `pending` record it
+///   had just written, could land inside it — and the register still returned success for a push
+///   station whose only durable trace had been destroyed.
+/// * The per-intent write lock serializes this against `write_pending` and against the conditional
+///   rollback delete, so a concurrent rollback either runs first (this reports `NoRecord`, and the
+///   register is refused) or second (it finds an armed record and refuses to delete it). There is
+///   no interleaving that yields "member armed, nothing durable".
+///
+/// `owes_proof` is the observation made at the top of the register, before any of this: it is what
+/// separates "this binding has no intent record, so a proof is neither owed nor meaningful" — the
+/// ordinary pull attach, or `telex attach --on-deliver` from a client that writes no intent — from
+/// "the record that was here is gone".
+///
+/// The decision itself is the table in [`station_intent::armed_proof_admission`], so what this
+/// function contributes is the wiring and the message, not a policy of its own. The part worth
+/// stating here is the one that is *not* symmetric: a failure to open the scope refuses only a
+/// register that owes a proof, because for a register that owes nothing the scope open is a
+/// *create* of a directory it has nothing to put in — refusing push for every client that writes no
+/// intent because that create failed is a denial with no durable state to protect. A record that is
+/// present but unreadable is refused either way.
+fn commit_armed_proof(
+    state: &Arc<DaemonState>,
+    store_key: &str,
+    session_id: &str,
+    address: &str,
+    owes_proof: bool,
+) -> std::result::Result<(), Response> {
+    let stamped = state.stamp_intent_armed(store_key, session_id, address);
+    let outcome = match &stamped {
+        Ok(stamp) => Ok(*stamp),
+        Err(refusal) => Err(refusal.failure),
+    };
+    if station_intent::armed_proof_admission(outcome, owes_proof)
+        == station_intent::ArmedProofAdmission::Commit
+    {
+        return Ok(());
+    }
+    let detail = match &stamped {
+        Ok(_) => "the station-intent record for this binding was removed while the registration was in flight".to_string(),
+        Err(refusal) => refusal.detail.clone(),
+    };
+    state.push_recent_error(
+        "StationIntent",
+        format!(
+            "refused push registration because the armed proof could not be persisted store={store_key} session={session_id} address={address}: {detail}"
+        ),
+    );
+    Err(proto::incompatible_with_reason(
+        format!(
+            "push for {address} was not registered: the station-intent record that proves it is armed could not be written ({detail}); \
+             re-run `telex --address {address} copilot resume` once the station-intent scope is writable"
+        ),
+        NeedsAttachReason::PushIntentUnrecoverable,
+    ))
+}
+
+/// Withdraw the durable push intent for an explicit push→pull downgrade, or refuse the register.
+///
+/// `Register { on_deliver: None, replace_on_deliver: true }` is the one request shape that *means*
+/// "give up push for this binding" — it is the only thing that clears an installed `on_deliver`,
+/// and it is already exempt from the anti-downgrade guard for exactly that reason. The durable
+/// desired state has to go with it, and it has to go under the **same** admission guard that
+/// installs the pull-only member, because that is what makes the pair a single transition.
+///
+/// The fallback used to do this from the CLI, after the register returned. That is two transitions
+/// with a gap: the daemon released this binding's admission at the end of the register, a reconcile
+/// pass could take it and restore the push member from the still-live manifest, and the CLI's later
+/// withdrawal then revoked the manifest while leaving the restored member armed next to the pull
+/// waiter it was downgrading *to*. Doing it here closes the gap without a new protocol field —
+/// there is no request shape to add, because the downgrade already had one.
+///
+/// Fallible and refusing: reporting `Registered` for a downgrade whose desired state still says
+/// "restore push" hands back a member that the next pass is entitled to overwrite.
+fn withdraw_downgraded_intent(
+    state: &Arc<DaemonState>,
+    store_key: &str,
+    session_id: &str,
+    address: &str,
+) -> std::result::Result<(), Response> {
+    match state.withdraw_intent_admitted(store_key, session_id, address, None) {
+        Ok(_) => Ok(()),
+        Err(detail) => {
+            state.push_recent_error(
+                "StationIntent",
+                format!(
+                    "refused push-to-pull downgrade because the station intent could not be withdrawn store={store_key} session={session_id} address={address}: {detail}"
+                ),
+            );
+            Err(proto::incompatible_with_reason(
+                format!(
+                    "push for {address} was not downgraded to pull: its station-intent record could not be withdrawn ({detail}); \
+                     a reconcile pass would restore push over the pull waiter, so the downgrade is refused"
+                ),
+                NeedsAttachReason::PushIntentUnrecoverable,
+            ))
+        }
     }
 }
 
@@ -4521,9 +4928,28 @@ async fn drain_deferred(
         address: None,
         message_id: None,
         lease_epoch: None,
+        drain_intents: None,
     }
 }
 
+/// End a session's membership: release each binding's durable lease, mark it idle, and withdraw its
+/// durable desired state — **each binding under its own admission guard, held across all three**.
+///
+/// Holding the guard across the whole per-binding transition is the correctness property, not an
+/// optimization. Before it, the member snapshot, the lease releases and the idle marking all ran
+/// outside the guard and only the withdrawal took it: a reconcile pass that held admission could
+/// publish an armed push member in between, and the session end would then revoke the manifest
+/// while leaving the member that manifest had authorized installed and delivering.
+///
+/// The binding set is the union of this session's live members and every binding the durable scope
+/// names for it, because either one alone misses a case: a member with no manifest (nothing to
+/// withdraw, but a member to end) and a manifest with no member (nothing to release, but the record
+/// that would bring the session back).
+///
+/// Bounded by one total [`TEARDOWN_DEADLINE`] rather than a fresh budget per binding, and every
+/// expiry is a failure of the whole request: an ended session whose desired state still says
+/// "restore push" is exactly the state the next pass resurrects it from, so a partial teardown is
+/// reported as a failed one.
 async fn end_session_members(
     state: Arc<DaemonState>,
     store_key: String,
@@ -4531,17 +4957,96 @@ async fn end_session_members(
     kind: &str,
     reason: &str,
 ) -> Response {
-    let active = state.session_members(&store_key, &session_id);
-    let release_error = release_definite_end_members(&state, &active, kind).await;
-    if let Some(response) = release_error {
-        return response;
+    let deadline = station_intent::PassDeadline::at(Instant::now() + reconcile::TEARDOWN_DEADLINE);
+    let durable = match state
+        .session_teardown_bindings(&store_key, &session_id, deadline)
+        .await
+    {
+        Ok(bindings) => bindings,
+        Err(e) => {
+            state.push_recent_error(kind, e.clone());
+            return proto::internal(format!(
+                "{kind} could not enumerate station intents for session {session_id} in {store_key}: {e}"
+            ));
+        }
+    };
+    let mut addresses: BTreeSet<String> = state
+        .session_members(&store_key, &session_id)
+        .into_iter()
+        .map(|member| member.address)
+        .collect();
+    addresses.extend(durable.into_iter().map(|binding| binding.address));
+
+    let mut affected = Vec::new();
+    for address in addresses {
+        let admission_budget = match teardown_budget(deadline) {
+            Ok(budget) => budget,
+            Err(e) => {
+                state.push_recent_error(kind, e.clone());
+                return proto::internal(format!(
+                    "{kind} could not complete the teardown of session {session_id} in {store_key}: {e}"
+                ));
+            }
+        };
+        let admit = match state
+            .admit_binding(&store_key, &session_id, &address, admission_budget)
+            .await
+        {
+            Ok(admit) => admit,
+            Err(e) => {
+                state.push_recent_error(kind, e.clone());
+                return proto::internal(format!(
+                    "{kind} could not complete the teardown of session {session_id} in {store_key}: {e}"
+                ));
+            }
+        };
+        // Re-read under the guard: the member this teardown must end is whatever is installed
+        // *now*, including one a reconcile pass published while this loop was waiting for
+        // admission. Acting on the pre-admission snapshot is what let a freshly restored member
+        // outlive the desired state that authorized it.
+        if let Some(member) = state.get_member(&store_key, &session_id, &address) {
+            if !member.idle {
+                if let Some(response) =
+                    release_definite_end_members(&state, std::slice::from_ref(&member), kind).await
+                {
+                    return response;
+                }
+            }
+            if let Some(prior) =
+                state.mark_member_idle(&store_key, &session_id, &address, kind, reason)
+            {
+                affected.push(prior);
+            }
+        }
+        // An ended session must never be re-attended by a stale intent. This is daemon-owned and
+        // harness-neutral: it covers `sessionEnd`, watch-pid death, and idle-TTL reaping alike,
+        // because intents are generic records the daemon owns rather than Copilot state.
+        //
+        // Fallible, and it fails the request. A swallowed error here left desired state saying
+        // "restore push" for a session that had ended, and the next reconcile pass — or the next
+        // daemon — brought it back; the caller would have seen an `Ack` and had no reason to retry.
+        if let Err(e) = state.withdraw_intent_admitted(&store_key, &session_id, &address, None) {
+            state.push_recent_error(kind, e.clone());
+            return proto::internal(format!(
+                "{kind} could not withdraw station intents for session {session_id} in {store_key}: {e}"
+            ));
+        }
+        // Still under the guard: nothing may have published a member here, and if anything did it
+        // is a member the withdrawn record no longer authorizes.
+        if let Some(stray) = state.mark_member_idle(&store_key, &session_id, &address, kind, reason)
+        {
+            affected.push(stray);
+        }
+        drop(admit);
     }
-    let affected = state.mark_session_idle(&store_key, &session_id, kind, reason, true);
+
     if affected.is_empty() {
         state.push_recent_error(
             kind,
             format!("{kind} no-op store={store_key} session={session_id}: no active members"),
         );
+    } else {
+        state.record_definite_session_end(&store_key, &session_id, kind, &affected);
     }
     Response::Ack {
         message: Some(presence_ended_detail(kind)),
@@ -4549,6 +5054,25 @@ async fn end_session_members(
         address: None,
         message_id: None,
         lease_epoch: None,
+        drain_intents: None,
+    }
+}
+
+/// What is left of a teardown's one total deadline, or the explicit incomplete-teardown error.
+///
+/// Zero is refused rather than passed on: a zero-budget admission attempt is a teardown that
+/// reports an answer it never waited for.
+fn teardown_budget(
+    deadline: station_intent::PassDeadline,
+) -> std::result::Result<Duration, String> {
+    match deadline.remaining() {
+        Some(remaining) if remaining.is_zero() => Err(
+            "the teardown deadline expired before every binding was withdrawn; \
+             refusing to report a teardown that did not complete"
+                .to_string(),
+        ),
+        Some(remaining) => Ok(remaining),
+        None => Ok(reconcile::TEARDOWN_DEADLINE),
     }
 }
 
@@ -4603,7 +5127,101 @@ async fn release_definite_end_members(
     None
 }
 
+/// `Reset`: withdraw an address's attendance, in every session that holds it.
+///
+/// Each binding's idle marking and intent withdrawal run under **that binding's** admission guard,
+/// held across both. Marking idle outside the guard and withdrawing inside it is not a
+/// linearization: a reconcile pass holding admission could publish an armed push member between the
+/// two, so the reset revoked the manifest and left behind precisely the armed member the operator
+/// had just asked it to give up — with no durable marker anywhere saying so.
+///
+/// Scoped by *address*, not by the members this reset changed. Deriving the set from the affected
+/// members missed exactly the cases that need it most: a station whose member was already idle
+/// (marking it idle changes nothing, so nothing was withdrawn) and a station with no member at all,
+/// where the manifest is the only thing left and is precisely what the next pass would restore from.
+///
+/// Reset is a deliberate operator withdrawal of attendance, so the *desired* state has to be
+/// withdrawn with it. Without that the station intent stayed `live` and the next reconcile pass
+/// re-registered the member within a tick — silently undoing the one operator action that has no
+/// durable marker. Withdrawal is exact per binding and reversible with an explicit
+/// `telex --address <address> copilot resume`.
 async fn reset_station(state: Arc<DaemonState>, store_key: String, address: String) -> Response {
+    let deadline = station_intent::PassDeadline::at(Instant::now() + reconcile::TEARDOWN_DEADLINE);
+    let durable = match state
+        .address_teardown_bindings(&store_key, &address, deadline)
+        .await
+    {
+        Ok(bindings) => bindings,
+        Err(e) => {
+            state.push_recent_error("Reset", e.clone());
+            return proto::internal(format!(
+                "reset could not enumerate station intents for {address} in {store_key}: {e}"
+            ));
+        }
+    };
+    let mut sessions: BTreeSet<String> = state
+        .address_members(&store_key, &address)
+        .into_iter()
+        .map(|member| member.session_id)
+        .collect();
+    sessions.extend(durable.into_iter().map(|binding| binding.session_id));
+
+    let mut affected = Vec::new();
+    for session_id in sessions {
+        let admission_budget = match teardown_budget(deadline) {
+            Ok(budget) => budget,
+            Err(e) => {
+                state.push_recent_error("Reset", e.clone());
+                return proto::internal(format!(
+                    "reset could not complete the teardown of {address} in {store_key}: {e}"
+                ));
+            }
+        };
+        let admit = match state
+            .admit_binding(&store_key, &session_id, &address, admission_budget)
+            .await
+        {
+            Ok(admit) => admit,
+            Err(e) => {
+                state.push_recent_error("Reset", e.clone());
+                return proto::internal(format!(
+                    "reset could not complete the teardown of {address} in {store_key}: {e}"
+                ));
+            }
+        };
+        // Re-read under the guard, so a member a reconcile pass published while this loop waited
+        // for admission is idled by this reset rather than surviving it.
+        if let Some(prior) = state.mark_member_idle(
+            &store_key,
+            &session_id,
+            &address,
+            "Reset",
+            "operator reset requested",
+        ) {
+            affected.push(prior);
+        }
+        if let Err(e) = state.withdraw_intent_admitted(&store_key, &session_id, &address, None) {
+            state.push_recent_error("Reset", e.clone());
+            return proto::internal(format!(
+                "reset could not withdraw station intents for {address} in {store_key}: {e}"
+            ));
+        }
+        if let Some(stray) = state.mark_member_idle(
+            &store_key,
+            &session_id,
+            &address,
+            "Reset",
+            "operator reset requested",
+        ) {
+            affected.push(stray);
+        }
+        drop(admit);
+    }
+
+    // Resetting the epoch is the durable fence. Do it only after every binding we could enumerate
+    // has been made non-deliverable under its own admission guard. If enumeration or withdrawal
+    // fails, leaving the existing epoch in place is safer than releasing it while a local member
+    // can still deliver.
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
         Err(response) => return response,
@@ -4616,8 +5234,7 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
             ))
         }
     };
-    let affected =
-        state.mark_address_idle(&store_key, &address, "Reset", "operator reset requested");
+
     if affected.is_empty() {
         state.push_recent_error(
             "Reset",
@@ -4629,7 +5246,8 @@ async fn reset_station(state: Arc<DaemonState>, store_key: String, address: Stri
         delivery_outcome: None,
         address: Some(address),
         message_id: None,
-        lease_epoch: affected.first().map(|m| m.lease_epoch).or(durable_epoch),
+        lease_epoch: durable_epoch.or_else(|| affected.first().map(|m| m.lease_epoch)),
+        drain_intents: None,
     }
 }
 
@@ -4731,6 +5349,33 @@ async fn detach_member(
     session_id: String,
     address: String,
 ) -> Response {
+    // Admission is taken *before* the member is read, and held across the whole detach: the
+    // backend release, the local member removal, and the intent withdrawal. Reading the member
+    // outside the guard and withdrawing inside it is not a linearization — a reconcile pass
+    // holding admission can publish an armed push member between the two, so the detach removed
+    // the member it saw, revoked the manifest, and left the *new* member installed and armed.
+    //
+    // Admission is an in-memory async lock, so spanning the backend awaits is safe (it is the
+    // outermost lock in the ordering and never held while acquiring another admission). What must
+    // not span a backend await is the per-intent *filesystem* lock, and it does not:
+    // `withdraw_intent_admitted` is a self-contained synchronous store operation.
+    let admit = match state
+        .admit_binding(
+            &store_key,
+            &session_id,
+            &address,
+            reconcile::TEARDOWN_DEADLINE,
+        )
+        .await
+    {
+        Ok(admit) => admit,
+        Err(e) => {
+            state.push_recent_error("Detach", e.clone());
+            return proto::internal(format!(
+                "detach could not take delivery admission for {address} in {store_key}: {e}"
+            ));
+        }
+    };
     let member = state.get_member(&store_key, &session_id, &address);
     if let Some(member) = member {
         let backend = match state.backend_for(&store_key).await {
@@ -4760,6 +5405,31 @@ async fn detach_member(
                 // backend contract). A second, non-atomic write can race a concurrent explicit
                 // re-attach's tombstone clear and recreate a stale tombstone for a freshly-live
                 // station, which `telex copilot push` would then refuse permanently.
+                //
+                // Intent withdrawal happens *after* the durable tombstone, deliberately: a crash
+                // between the two leaves tombstone-wins, which the reconciler already honors, so
+                // the station still cannot auto-return. The reverse order could leave a live
+                // intent with no tombstone.
+                //
+                // The withdrawal itself is a self-contained synchronous store operation, and the
+                // admission guard taken at the top of this function is still held, so no
+                // filesystem lock is held across the backend awaits above or below it. It is
+                // fallible and it fails the detach: reporting "detached" while the desired state
+                // still says "restore push" is the exact shape of the bug this ordering exists to
+                // prevent — with a tombstone present the station would not return, but the
+                // operator would have no signal that the local record disagreed.
+                if let Err(e) =
+                    state.withdraw_intent_admitted(&store_key, &session_id, &address, None)
+                {
+                    state.push_recent_error("Detach", e.clone());
+                    return proto::internal(format!(
+                        "detached {address} durably but could not withdraw its station intent: {e}"
+                    ));
+                }
+                // Nothing can have published a member since admission was taken, but sweep anyway:
+                // this is the one place that can still prove the guard held, and removing an
+                // already-absent member is free.
+                state.remove_member(&store_key, &session_id, &address);
             }
 
             Ok(false) => {
@@ -4787,12 +5457,14 @@ async fn detach_member(
                 ));
             }
         }
+        drop(admit);
         Response::Ack {
             message: Some("detached".to_string()),
             delivery_outcome: None,
             address: Some(address),
             message_id: None,
             lease_epoch: Some(member.lease_epoch),
+            drain_intents: None,
         }
     } else {
         let backend = match state.backend_for(&store_key).await {
@@ -4813,12 +5485,28 @@ async fn detach_member(
                 "Detach recorded terminal tombstone store={store_key} session={session_id} address={address}: no active in-memory member"
             ),
         );
+        // Same ordering as the attached branch: durable tombstone first, local intent second, both
+        // under the admission guard taken at the top.
+        //
+        // This is the branch that most needs to be fallible. "No in-memory member" is exactly the
+        // state a daemon restart leaves behind, so the manifest here is very often the *only*
+        // remaining record of the binding — and the only thing that could bring it back.
+        if let Err(e) = state.withdraw_intent_admitted(&store_key, &session_id, &address, None) {
+            state.push_recent_error("Detach", e.clone());
+            return proto::internal(format!(
+                "recorded a durable detach tombstone for {address} but could not withdraw its \
+                 station intent: {e}"
+            ));
+        }
+        state.remove_member(&store_key, &session_id, &address);
+        drop(admit);
         Response::Ack {
             message: Some("not-attached".to_string()),
             delivery_outcome: None,
             address: Some(address),
             message_id: None,
             lease_epoch: None,
+            drain_intents: None,
         }
     }
 }
@@ -4831,6 +5519,26 @@ async fn detach_application_member(
     address: String,
     capability: StationCapability,
 ) -> Response {
+    // Application detach and register must share the binding admission boundary. In particular,
+    // the durable detach intent must remain ordered with local-member publication: a registration
+    // that clears it cannot publish a member between this lookup and its removal.
+    let _admit = match state
+        .admit_binding(
+            &store_key,
+            &session_id,
+            &address,
+            reconcile::TEARDOWN_DEADLINE,
+        )
+        .await
+    {
+        Ok(admit) => admit,
+        Err(e) => {
+            state.push_recent_error("ApplicationDetach", e.clone());
+            return proto::internal(format!(
+                "application detach could not take delivery admission for {address} in {store_key}: {e}"
+            ));
+        }
+    };
     let backend = match state.backend_for(&store_key).await {
         Ok(backend) => backend,
         Err(response) => return response,
@@ -4875,6 +5583,7 @@ async fn detach_application_member(
                     address: Some(address),
                     message_id: None,
                     lease_epoch: Some(member.lease_epoch),
+                    drain_intents: None,
                 }
             }
             Ok(false) => {
@@ -4913,6 +5622,7 @@ async fn detach_application_member(
             address: Some(address),
             message_id: None,
             lease_epoch: None,
+            drain_intents: None,
         }
     }
 }
@@ -5642,6 +6352,7 @@ async fn ack_message_inner(
                 address: Some(address),
                 message_id: Some(message_id),
                 lease_epoch: Some(member.lease_epoch),
+                drain_intents: None,
             }
         }
         Err(e) => proto::unsupported(format!("acking message {message_id}: {e:#}")),
@@ -6160,6 +6871,7 @@ mod p3_tests {
             ended_sessions: Mutex::new(BTreeMap::new()),
             draining: AtomicBool::new(false),
             on_deliver: OnDeliverState::default(),
+            intents: reconcile::IntentRuntime::default(),
         })
     }
 
@@ -6542,6 +7254,767 @@ mod p3_tests {
         run_concurrent_delivery_admission_case(false).await;
     }
 
+    // -----------------------------------------------------------------------------------------
+    // The arming-proof transaction (issue #106 / ADR 0052).
+    //
+    // A push register that owes a durable armed proof commits that proof *before* the member, and
+    // fails the whole registration when it cannot. These tests drive each way the proof can fail
+    // deterministically, through the same admission commit gate the linearizability test above
+    // uses, so the interleaving is scheduled rather than raced.
+    // -----------------------------------------------------------------------------------------
+
+    /// Open the daemon's own intent scope, creating the run dir the way the real startup path does.
+    fn intent_scope(state: &Arc<DaemonState>) -> crate::station_intent::IntentStore {
+        std::fs::create_dir_all(&state.paths.run_dir).expect("create test run dir");
+        crate::station_intent::IntentStore::open(&state.paths.run_dir, &state.paths.singleton_hash)
+            .expect("open intent scope")
+    }
+
+    /// Seed the `Pending` record a first attach writes, and return its id.
+    fn seed_pending_intent(
+        state: &Arc<DaemonState>,
+        store: &str,
+        session: &str,
+        address: &str,
+    ) -> crate::station_intent::IntentId {
+        let intent = crate::intent_test_support::pending_intent(
+            store,
+            session,
+            address,
+            &state.paths.singleton_hash,
+        );
+        let id = intent.id();
+        intent_scope(state).write_pending(&intent).expect("seed");
+        id
+    }
+
+    fn push_register_req(store: &str, session: &str, address: &str) -> Request {
+        let mut req = register_req(store, session, address);
+        if let Request::Register {
+            on_deliver,
+            replace_on_deliver,
+            ..
+        } = &mut req
+        {
+            // Empty argv: `push_registered` is true and the daemon never execs a handler.
+            *on_deliver = Some(Vec::new());
+            *replace_on_deliver = true;
+        }
+        req
+    }
+
+    /// Drive one arming register up to its commit gate, run `interleave` while it is parked there,
+    /// then let it finish. The register is paused *after* every fallible step and *before* the
+    /// proof commit, which is exactly the window a concurrent attach rollback lands in.
+    ///
+    /// Whatever `interleave` returns is held alive until the register has completed, so a scoped
+    /// guard (an RAII filesystem fault, say) covers the proof commit rather than only the closure.
+    async fn register_push_with_interleave<F, T>(
+        state: &Arc<DaemonState>,
+        store: &str,
+        session: &str,
+        address: &str,
+        interleave: F,
+    ) -> Response
+    where
+        F: FnOnce() -> T,
+    {
+        let control = Arc::new(DeliveryAdmissionTestControl::new());
+        *state.delivery_admission_control.lock().unwrap() = Some(control.clone());
+        control.release_before_lock(DeliveryAdmissionKind::Register);
+
+        let request_state = state.clone();
+        let req = push_register_req(store, session, address);
+        let task = tokio::spawn(async move { request(request_state, req).await });
+
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            control.wait_before_commit(DeliveryAdmissionKind::Register),
+        )
+        .await
+        .expect("arming register reached its commit gate");
+        let held = interleave();
+        control.release_commit(DeliveryAdmissionKind::Register);
+
+        let response = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("arming register completed")
+            .expect("register task joined");
+        drop(held);
+        *state.delivery_admission_control.lock().unwrap() = None;
+        response
+    }
+
+    fn assert_refused_for_unrecoverable_proof(response: &Response) {
+        match response {
+            Response::Error {
+                code,
+                needs_attach_reason,
+                ..
+            } => {
+                assert_eq!(code, proto::ERROR_INCOMPATIBLE, "got {response:?}");
+                assert_eq!(
+                    needs_attach_reason.as_ref(),
+                    Some(&NeedsAttachReason::PushIntentUnrecoverable),
+                    "the refusal must carry the typed reason the client acts on: {response:?}"
+                );
+            }
+            other => panic!("expected a typed refusal, got {other:?}"),
+        }
+    }
+
+    /// The exact concurrent-attach race the finding names, scheduled rather than hoped for.
+    ///
+    /// Attach A writes its `pending` record and registers. Concurrent attach B, for the same
+    /// binding, replaces that record with its own generation, then fails downstream and rolls its
+    /// write back — deleting the file. Before the fix, A's proof was stamped *after* A had already
+    /// committed its member and A's response had been decided, so the delete landed in between: the
+    /// stamp found nothing, the miss was swallowed as "the ordinary pull-attach case", and A
+    /// returned a successful push registration whose only durable trace had been destroyed. The
+    /// station delivered until the next daemon replacement and then silently stopped.
+    ///
+    /// Now the proof is committed before the member, so this interleaving cannot produce an armed
+    /// member with no record: it produces a refusal, with the lease released and no member.
+    #[tokio::test]
+    async fn a_concurrent_pending_rollback_before_the_proof_refuses_the_register() {
+        let state = test_state("arming-proof-missing-manifest");
+        let store = store_key("arming-proof-missing-manifest");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+
+        let scope = intent_scope(&state);
+        let racing_scope = scope.clone();
+        let racing_id = id.clone();
+        let racing_store = store.clone();
+        let racing_hash = state.paths.singleton_hash.clone();
+        let response = register_push_with_interleave(&state, &store, "s1", "addr:a", move || {
+            // B's pending write: the same binding, a new generation, no armed proof yet.
+            let replacement = crate::intent_test_support::pending_intent(
+                &racing_store,
+                "s1",
+                "addr:a",
+                &racing_hash,
+            );
+            let crate::station_intent::PendingWrite::Created { generation } = racing_scope
+                .write_pending(&replacement)
+                .expect("concurrent pending write")
+            else {
+                panic!("the concurrent attach must have created its own generation");
+            };
+            // B fails and rolls back exactly what it wrote. Both of the rollback's own gates still
+            // hold at this instant — the record is `Pending` and unarmed — so the delete happens.
+            assert!(
+                racing_scope
+                    .remove_if_unchanged(&racing_id, generation, |c| c.state
+                        == crate::daemon_ipc::IntentRecoveryState::Pending
+                        && !c.is_armed())
+                    .expect("rollback delete"),
+                "precondition: the concurrent rollback really removed the record"
+            );
+        })
+        .await;
+
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(
+            state.get_member(&store, "s1", "addr:a").is_none(),
+            "a refused register must not leave an armed member with no durable proof behind"
+        );
+        assert!(
+            scope.load(&id).is_err(),
+            "and it must not resurrect the record the rollback deleted"
+        );
+        // The epoch lease is released, so the address is claimable again rather than wedged by a
+        // registration that was refused.
+        let backend = state.backend_for(&store).await.expect("backend");
+        let claimed = backend
+            .claim_epoch_lease("addr:a", "another-instance", 30)
+            .await
+            .expect("claim");
+        assert!(
+            matches!(claimed, EpochClaimResult::Claimed(_)),
+            "the refused register must have released its lease, got {claimed:?}"
+        );
+    }
+
+    /// The narrower shape of the same failure: the manifest is simply **missing** at the moment the
+    /// proof would be written, with no concurrent writer involved (an operator wipe, an external
+    /// cleaner, a scope on a volume that went away). A register that observed a record when it
+    /// started still owes a proof, so this is a refusal, not a silent downgrade to "nothing to do".
+    #[tokio::test]
+    async fn a_register_whose_manifest_is_missing_at_the_proof_is_refused() {
+        let state = test_state("arming-proof-manifest-gone");
+        let store = store_key("arming-proof-manifest-gone");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+
+        let gone = scope.clone();
+        let gone_id = id.clone();
+        let response = register_push_with_interleave(&state, &store, "s1", "addr:a", move || {
+            std::fs::remove_file(gone.path_for(&gone_id)).expect("remove the manifest");
+        })
+        .await;
+
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(state.get_member(&store, "s1", "addr:a").is_none());
+    }
+
+    /// A record that exists but cannot be *written* is the same refusal.
+    ///
+    /// The stamp is the durability guarantee, so "the manifest is corrupt / the scope is broken"
+    /// must fail the register rather than being logged and shrugged off.
+    #[tokio::test]
+    async fn a_register_whose_proof_cannot_be_written_is_refused_and_leaves_no_member() {
+        let state = test_state("arming-proof-write-failure");
+        let store = store_key("arming-proof-write-failure");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+
+        let corrupt = scope.clone();
+        let corrupt_id = id.clone();
+        let response = register_push_with_interleave(&state, &store, "s1", "addr:a", move || {
+            std::fs::write(corrupt.path_for(&corrupt_id), b"{ truncated")
+                .expect("corrupt the manifest under the register");
+        })
+        .await;
+
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(
+            state.get_member(&store, "s1", "addr:a").is_none(),
+            "a register that could not persist its proof must not leave a member behind"
+        );
+    }
+
+    /// A **committed** register's record cannot be removed by a concurrent rollback before the
+    /// proof lands, because the proof lands first.
+    ///
+    /// The rollback's own conditional delete is the second gate: once the record carries the proof,
+    /// `rollback_removable` no longer holds and the generation has moved, so the delete is refused
+    /// twice over. The register is idempotent across a repeat, which is what a re-attach does.
+    #[tokio::test]
+    async fn a_concurrent_rollback_cannot_delete_the_record_of_a_committed_register() {
+        let state = test_state("arming-proof-rollback-race");
+        let store = store_key("arming-proof-rollback-race");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+        let before = scope.load(&id).expect("seeded record");
+
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "got {response:?}"
+        );
+        let armed = scope.load(&id).expect("the record must still be here");
+        assert!(
+            armed.is_armed(),
+            "a successful arming register is only successful once its proof is durable"
+        );
+        assert!(armed.generation > before.generation);
+
+        // The losing half of the race: a concurrent attach's rollback, deciding from the
+        // generation it wrote, now tries to delete this record.
+        assert!(
+            !scope
+                .remove_if_unchanged(&id, before.generation, |c| c.state
+                    == crate::daemon_ipc::IntentRecoveryState::Pending
+                    && !c.is_armed())
+                .expect("stale-generation rollback"),
+            "a rollback holding the pre-register generation must never delete the proof"
+        );
+        assert!(
+            !scope
+                .remove_if_unchanged(&id, armed.generation, |c| c.state
+                    == crate::daemon_ipc::IntentRecoveryState::Pending
+                    && !c.is_armed())
+                .expect("current-generation rollback"),
+            "and even at the current generation the armed record is not the rollback's to delete"
+        );
+        assert!(scope.load(&id).is_ok(), "the proof survives both attempts");
+
+        // Idempotency: a re-register (a re-attach, a resume) proves the same thing without
+        // churning the generation, so concurrent CAS holders stay valid.
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "got {response:?}"
+        );
+        let again = scope.load(&id).expect("reload");
+        assert_eq!(
+            again.generation, armed.generation,
+            "an idempotent re-register must not move the generation"
+        );
+        assert_eq!(again.armed, armed.armed);
+    }
+
+    /// A binding with **no** durable record is a supported mode, and it must stay one.
+    ///
+    /// A plain `telex attach --on-deliver` (and every pull attach) writes no intent, so there is
+    /// nothing to prove and nothing to fail. Refusing those would break push for every client that
+    /// is not the Copilot bridge — which is why the register observes whether a record exists
+    /// *before* it runs, rather than inferring it from a missing record at stamp time.
+    #[tokio::test]
+    async fn a_push_register_for_a_binding_with_no_intent_record_still_succeeds() {
+        let state = test_state("arming-proof-no-record");
+        let store = store_key("arming-proof-no-record");
+        let scope = intent_scope(&state);
+
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "a push attach that never wrote an intent must not be refused, got {response:?}"
+        );
+        assert!(state
+            .get_member(&store, "s1", "addr:a")
+            .is_some_and(|member| member.on_deliver.is_some()));
+        assert!(
+            scope
+                .load(&crate::station_intent::IntentId::derive(
+                    &store, "s1", "addr:a"
+                ))
+                .is_err(),
+            "and it must not invent a record either"
+        );
+    }
+
+    /// The whole point of the previous test, held apart from the failure this one pins: **absence**
+    /// is what commits, and absence has to be *proven*.
+    ///
+    /// `Path::exists()` answers `false` for a record it could not stat — an ACL, an untraversable
+    /// parent, a volume that went away — so an existing record that had become invisible read as
+    /// "this binding is new": the up-front observation said no proof was owed, the stamp said
+    /// `NoRecord` for the same reason, and the admission table then *committed* an armed member
+    /// over a durable record it had never proven anything about. The register reported a durable
+    /// push registration, and the record on disk — possibly a `live` one mid-reconcile — was
+    /// neither armed nor consulted.
+    ///
+    /// Scheduled at the exact interleaving that makes it worst: nothing exists when the register
+    /// makes its `owes` observation (so `owes_armed_proof == false`, the permissive column of the
+    /// admission table), and the record appears and becomes unstatable while the register is parked
+    /// at its commit gate. `RecordUnusable` is the one outcome that refuses in *both* columns, so
+    /// this must be a refusal.
+    #[tokio::test]
+    async fn an_unstatable_record_refuses_an_arming_register_that_owed_no_proof() {
+        let state = test_state("arming-proof-unstatable-record");
+        let store = store_key("arming-proof-unstatable-record");
+        let scope = intent_scope(&state);
+        let id = crate::station_intent::IntentId::derive(&store, "s1", "addr:a");
+        assert!(
+            !scope.path_for(&id).exists(),
+            "precondition: the register must observe no record, so it owes no proof"
+        );
+
+        let racing_scope = scope.clone();
+        let racing_store = store.clone();
+        let racing_hash = state.paths.singleton_hash.clone();
+        let faulted_path = scope.path_for(&id);
+        let response = register_push_with_interleave(&state, &store, "s1", "addr:a", move || {
+            // A record for this binding appears after the observation — a concurrent attach, a
+            // resume, an operator restore — and its metadata then becomes unreadable.
+            let appeared = crate::intent_test_support::pending_intent(
+                &racing_store,
+                "s1",
+                "addr:a",
+                &racing_hash,
+            );
+            racing_scope
+                .write_pending(&appeared)
+                .expect("the record appears after the owes observation");
+            crate::platform_fs::stat_faults::Unstatable::new(faulted_path)
+        })
+        .await;
+
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(
+            state.get_member(&store, "s1", "addr:a").is_none(),
+            "an unprovable record must not leave an armed member behind"
+        );
+        let record = scope
+            .load(&id)
+            .expect("the refused register must leave the record it could not read alone");
+        assert!(
+            !record.is_armed(),
+            "and it must not have claimed a proof it never wrote"
+        );
+
+        // The control, on the same state and the same binding: with the fault gone the record is
+        // visible again, so the identical register now succeeds *and* stamps its proof. The refusal
+        // above was caused by the unreadable record and by nothing else about this scenario.
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "a readable record must still register, got {response:?}"
+        );
+        assert!(
+            scope.load(&id).expect("reload").is_armed(),
+            "and the register that succeeded must have left its durable proof"
+        );
+    }
+
+    /// The same collapse one step earlier, in the observation itself.
+    ///
+    /// `durable_intent_present` answers "does this register owe a proof?". An existing record it
+    /// could not stat used to answer `false` — no proof owed — which is the permissive column of
+    /// the admission table for every subsequent outcome. Undecidable existence is now an error, and
+    /// the register fails closed exactly as it does for an unreadable scope.
+    #[tokio::test]
+    async fn an_unstatable_record_makes_an_arming_register_fail_closed_up_front() {
+        let state = test_state("arming-proof-unstatable-observation");
+        let store = store_key("arming-proof-unstatable-observation");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+
+        let _fault = crate::platform_fs::stat_faults::Unstatable::new(scope.path_for(&id));
+        assert!(
+            state
+                .durable_intent_present(&store, "s1", "addr:a")
+                .is_err(),
+            "an undecidable record must not be reported as 'this binding has no record'"
+        );
+
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(
+            state.get_member(&store, "s1", "addr:a").is_none(),
+            "a register that could not tell whether it owes a proof must commit nothing"
+        );
+    }
+
+    /// A scope whose *root* cannot be stat'd is not an empty scope.
+    ///
+    /// `open_existing` returns `Ok(None)` for "this host never attached", which every read path
+    /// treats as "no binding here has a durable record". Handing that answer to a scope full of
+    /// records the daemon merely could not see is the same fail-open one directory higher up.
+    #[tokio::test]
+    async fn an_unstatable_scope_root_is_not_an_empty_scope() {
+        let state = test_state("arming-proof-unstatable-scope");
+        let store = store_key("arming-proof-unstatable-scope");
+        seed_pending_intent(&state, &store, "s1", "addr:a");
+
+        let _fault = crate::platform_fs::stat_faults::Unstatable::new(
+            state
+                .paths
+                .run_dir
+                .join("intents")
+                .join(&state.paths.singleton_hash),
+        );
+        assert!(
+            state
+                .durable_intent_present(&store, "s1", "addr:a")
+                .is_err(),
+            "an unreadable scope root must fail closed, not report an empty scope"
+        );
+
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(state.get_member(&store, "s1", "addr:a").is_none());
+    }
+
+    /// The anti-downgrade guard is the other consumer of the same question, and it fails open in
+    /// the same way.
+    ///
+    /// A pull-only registration over a binding that has a durable push intent must be refused. The
+    /// guard re-reads the manifest precisely because the cached index is empty in the
+    /// daemon-replacement window it protects — and then `Path::exists()` handed it `Absent` for a
+    /// record it could not stat, which is the one answer that lets the downgrade through.
+    #[tokio::test]
+    async fn an_unstatable_record_refuses_a_pull_only_downgrade_rather_than_allowing_it() {
+        let state = test_state("anti-downgrade-unstatable-record");
+        let store = store_key("anti-downgrade-unstatable-record");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+
+        let key = reconcile::IntentKey {
+            store_key: store.clone(),
+            session_id: "s1".to_string(),
+            address: "addr:a".to_string(),
+        };
+        let fault = crate::platform_fs::stat_faults::Unstatable::new(scope.path_for(&id));
+        assert!(
+            matches!(
+                state.lookup_live_intent(&key),
+                reconcile::LiveIntentLookup::Unavailable(_)
+            ),
+            "a record the guard could not stat must be 'unavailable', never 'absent'"
+        );
+
+        let response = request(state.clone(), register_req(&store, "s1", "addr:a")).await;
+        assert_refused_for_unrecoverable_proof(&response);
+        assert!(
+            state.get_member(&store, "s1", "addr:a").is_none(),
+            "a pull-only member must not be created over a record the guard could not read"
+        );
+
+        // And a scope the guard *can* read still admits the pull-only registration: absence is
+        // proven here, not assumed.
+        drop(fault);
+        assert!(
+            matches!(
+                state.lookup_live_intent(&key),
+                reconcile::LiveIntentLookup::Absent
+            ),
+            "a readable non-live record is genuinely absent for the guard's purposes"
+        );
+        let response = request(state.clone(), register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "got {response:?}"
+        );
+    }
+
+    /// A store file whose metadata could not be read is **transient**, not terminal.
+    ///
+    /// `store_missing` parks the intent on the hour-long quarantine cadence, on the reasoning that
+    /// a store which does not exist will not start existing. `Path::exists()` handed that verdict
+    /// to a store file behind a lock, an ACL, or a mount that came back a second later — replacing
+    /// the published recovery bounds with an hour of silence for a condition that self-heals.
+    #[tokio::test]
+    async fn an_unreadable_sqlite_store_file_is_transient_not_terminal() {
+        let state = test_state("store-open-unstatable");
+        let store = store_key("store-open-unstatable");
+        let path = crate::daemon::test_support::store_path_from_key(&store).expect("sqlite path");
+
+        // Provable absence keeps its terminal verdict, which is what makes the other half a real
+        // distinction rather than a blanket downgrade.
+        assert!(!path.exists(), "precondition: nothing has opened the store");
+        let absent = reconcile::backend_open_existing_only(&state, &store).await;
+        assert!(
+            matches!(
+                absent.as_ref().err().map(String::as_str),
+                Some("store_missing")
+            ),
+            "an absent store keeps its terminal verdict, got {:?}",
+            absent.as_ref().err()
+        );
+
+        std::fs::write(&path, b"").expect("create the store file");
+        let _fault = crate::platform_fs::stat_faults::Unstatable::new(&path);
+        let unreadable = reconcile::backend_open_existing_only(&state, &store).await;
+        let detail = unreadable
+            .as_ref()
+            .err()
+            .cloned()
+            .unwrap_or_else(|| "opened a store it could not stat".to_string());
+        assert!(
+            detail.starts_with("store_unreadable"),
+            "an undecidable store file must take the retry ladder, got {detail:?}"
+        );
+    }
+
+    /// A refused proof on a **refresh** must not disturb the member that was already there.
+    ///
+    /// The refresh path adopts an existing member and its epoch lease. Rolling the refresh back by
+    /// removing the member (or releasing that lease) would turn a failed *diagnostic* write into
+    /// the loss of a working station, so the proof is committed before the refreshed record is
+    /// installed and a failure simply leaves the incumbent alone.
+    #[tokio::test]
+    async fn a_failed_proof_on_a_refresh_leaves_the_pre_existing_member_untouched() {
+        let state = test_state("arming-proof-refresh-rollback");
+        let store = store_key("arming-proof-refresh-rollback");
+        let id = seed_pending_intent(&state, &store, "s1", "addr:a");
+        let scope = intent_scope(&state);
+
+        // First register: succeeds and stamps, so a member and a lease now exist.
+        let first = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        let Response::Registered {
+            lease_epoch,
+            owner_instance_id,
+        } = first
+        else {
+            panic!("expected the first register to succeed, got {first:?}");
+        };
+        let adopted = state
+            .get_member(&store, "s1", "addr:a")
+            .expect("member installed");
+
+        // Now break the record and re-register. The refresh path must refuse, and the incumbent
+        // member must be exactly as it was.
+        std::fs::write(scope.path_for(&id), b"{ truncated").expect("corrupt the manifest");
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert_refused_for_unrecoverable_proof(&response);
+
+        let after = state
+            .get_member(&store, "s1", "addr:a")
+            .expect("the pre-existing member must survive a refused refresh");
+        assert_eq!(after.lease_epoch, lease_epoch);
+        assert_eq!(after.owner_instance_id, owner_instance_id);
+        assert_eq!(after.on_deliver, adopted.on_deliver);
+        assert!(
+            !after.idle,
+            "the incumbent must not be demoted by a refused refresh"
+        );
+    }
+
+    /// A register that owes **no** proof must not be refused because the scope could not be
+    /// *created*.
+    ///
+    /// The proof commit opened the scope through the creating path, so a run directory in which the
+    /// intent scope cannot be made — here a plain file where the `intents` directory belongs, but
+    /// equally a read-only volume, a full disk, or leftover debris — turned every push registration
+    /// into `Incompatible` / `PushIntentUnrecoverable`, including the ones for clients that write no
+    /// intent at all and therefore have no durable state to lose. That is a denial with nothing to
+    /// protect: the register is refused to guard a record that provably does not exist.
+    ///
+    /// The stamp now opens the scope through the read path, so a scope with no directory is
+    /// `NoRecord` — "provably nothing to prove" — rather than a failure, and it creates nothing as a
+    /// side effect of a registration that has nothing to write.
+    #[tokio::test]
+    async fn a_push_register_owing_no_proof_survives_a_scope_that_cannot_be_created() {
+        let state = test_state("arming-proof-uncreatable-scope");
+        let store = store_key("arming-proof-uncreatable-scope");
+        std::fs::create_dir_all(&state.paths.run_dir).expect("run dir");
+        // A file where the scope's parent directory belongs: the scope cannot be created, and it
+        // does not exist, so nothing about this binding is durable.
+        std::fs::write(state.paths.run_dir.join("intents"), b"not a directory")
+            .expect("block the scope");
+
+        assert!(
+            matches!(
+                state.stamp_intent_armed(&store, "s1", "addr:a"),
+                Ok(crate::station_intent::ArmedProofStamp::NoRecord)
+            ),
+            "precondition: a scope that does not exist holds no records"
+        );
+
+        let response = request(state.clone(), push_register_req(&store, "s1", "addr:a")).await;
+        assert!(
+            matches!(response, Response::Registered { .. }),
+            "a push register with no durable record must not be refused by a scope it never used, got {response:?}"
+        );
+        assert!(state
+            .get_member(&store, "s1", "addr:a")
+            .is_some_and(|member| member.on_deliver.is_some()));
+        assert!(
+            !state.paths.run_dir.join("intents").is_dir(),
+            "and the proof commit must not have created a scope it had nothing to put in"
+        );
+    }
+
+    /// The proof-commit gate, driven directly across both values of the obligation.
+    ///
+    /// `commit_armed_proof` is the whole difference between "a push registration that is durably
+    /// recoverable" and "one that says it is", so its two directions are pinned here rather than
+    /// only through the register paths above: a *scope-level* failure refuses only a register that
+    /// owes a proof, while a record that is present and unreadable refuses **either way** — that is
+    /// durable state about this binding that could not be verified, and it fails closed exactly as
+    /// the anti-downgrade guard does.
+    #[test]
+    fn the_proof_commit_gate_refuses_an_unowed_register_only_for_a_broken_record() {
+        let state = test_state("arming-proof-gate");
+        let store = store_key("arming-proof-gate");
+
+        // (a) No record and no scope: nothing is owed, nothing is provable, and a register that
+        // owes nothing commits. A register that *did* observe a record fails closed.
+        assert!(commit_armed_proof(&state, &store, "s1", "addr:a", false).is_ok());
+        let refused = commit_armed_proof(&state, &store, "s1", "addr:a", true)
+            .expect_err("an owed proof with no record must refuse");
+        assert_refused_for_unrecoverable_proof(&refused);
+
+        // (b) A healthy record is stamped whether or not the up-front observation saw it. This is
+        // the benign half of the observation race: a record created between the observation and the
+        // stamp is proven anyway.
+        let id = seed_pending_intent(&state, &store, "s1", "addr:b");
+        let scope = intent_scope(&state);
+        assert!(commit_armed_proof(&state, &store, "s1", "addr:b", false).is_ok());
+        assert!(
+            scope.load(&id).expect("reload").is_armed(),
+            "an unowed commit still stamps a record that is there"
+        );
+
+        // (c) A record that is present and unreadable is a refusal in both directions.
+        let broken = seed_pending_intent(&state, &store, "s1", "addr:c");
+        std::fs::write(scope.path_for(&broken), b"{ truncated").expect("corrupt the manifest");
+        assert!(
+            matches!(
+                state.stamp_intent_armed(&store, "s1", "addr:c"),
+                Err(reconcile::ArmedProofRefusal {
+                    failure: crate::station_intent::ArmedProofFailure::RecordUnusable,
+                    ..
+                })
+            ),
+            "precondition: a corrupt record is classified as the record's failure, not the scope's"
+        );
+        let refused = commit_armed_proof(&state, &store, "s1", "addr:c", false)
+            .expect_err("a broken record refuses even an unowed register");
+        assert_refused_for_unrecoverable_proof(&refused);
+        let refused = commit_armed_proof(&state, &store, "s1", "addr:c", true)
+            .expect_err("and certainly an owed one");
+        assert_refused_for_unrecoverable_proof(&refused);
+    }
+
+    /// **Post-combination invariant.** Both durable commits inside `register_member` still happen
+    /// *before* the member is published, after the withdrawal work reordered the paths around them.
+    ///
+    /// The two orderings are the register-side counterpart of the withdrawal rules: the armed proof
+    /// must be durable before an armed member exists (or a crash leaves push delivery working with
+    /// no record that can recover it), and an Application Client's durable detach intent must be
+    /// cleared before its member exists (or the member is observable while durable state still says
+    /// the responsibility was detached). Both are structural — the failure they prevent is a crash
+    /// in a window, which no behavioral test can schedule — so they are asserted against the source
+    /// the same way the reconciler's tombstone-clearing claim is.
+    #[test]
+    fn register_member_commits_durable_state_before_it_publishes_the_member() {
+        let source = include_str!("daemon.rs");
+        let start = source
+            .find("async fn register_member(")
+            .expect("register_member must exist");
+        let body = &source[start..];
+        let end = body
+            .find("\nasync fn commit_armed_proof")
+            .or_else(|| body.find("\nfn commit_armed_proof"))
+            .unwrap_or(body.len());
+        let body = &body[..end];
+
+        let insert = body
+            .find("state.insert_member(record.clone());")
+            .expect("register_member must publish the member");
+        let proof = body
+            .find("commit_armed_proof(")
+            .expect("register_member must commit the armed proof");
+        let detach_intent = body
+            .find("clear_application_detach_intent(")
+            .expect("register_member must clear the application detach intent");
+
+        assert!(
+            proof < insert,
+            "the armed proof must be durable before an armed push member exists"
+        );
+        assert!(
+            detach_intent < insert,
+            "an Application Client's durable detach intent must be cleared before its member exists"
+        );
+    }
+
+    /// **Post-combination invariant.** Every explicit teardown routes through the one linearized
+    /// withdrawal operation, and none of them reaches a raw revoke.
+    ///
+    /// Asserted structurally because the failure it prevents is a *new* teardown path being added
+    /// later with its own best-effort revocation — exactly how the paths this work consolidated
+    /// drifted apart in the first place.
+    #[test]
+    fn no_teardown_path_bypasses_the_linearized_withdrawal() {
+        for (name, source) in [
+            ("daemon.rs", include_str!("daemon.rs")),
+            ("daemon_reconcile.rs", include_str!("daemon_reconcile.rs")),
+            ("commands/copilot.rs", include_str!("commands/copilot.rs")),
+        ] {
+            let production = match source.find("mod tests {") {
+                Some(index) => &source[..index],
+                None => source,
+            };
+            for (index, line) in production.lines().enumerate() {
+                let trimmed = line.trim_start();
+                if trimmed.starts_with("//") || trimmed.starts_with("///") {
+                    continue;
+                }
+                assert!(
+                    !line.contains("revoke_intent_for_binding")
+                        && !line.contains("revoke_intents_for_session")
+                        && !line.contains(".revoke("),
+                    "{name}:{} reaches a raw revoke instead of withdraw_binding",
+                    index + 1
+                );
+            }
+        }
+    }
+
     #[test]
     fn on_deliver_descriptor_has_transport_fields() {
         let row = MessageRow {
@@ -6668,26 +8141,42 @@ mod p3_tests {
             .id
     }
 
-    fn wait_for_file(path: &std::path::Path, timeout: Duration) -> bool {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            if path.exists() {
+    /// How long a test may wait for an out-of-process on-deliver handler to be observed.
+    ///
+    /// Every assertion below that asks "was this pushed?" is really waiting on a **child process
+    /// launch**: the daemon records the attempt only once the handler has exited, so the wait
+    /// covers spawn + interpreter startup + exit. On Windows the recording handler is
+    /// `powershell.exe`, whose cold start is seconds — not milliseconds — on a loaded four-core CI
+    /// runner, and none of that is bounded by anything telex controls.
+    ///
+    /// This is a ceiling, not a measurement. A correct implementation satisfies these waits in
+    /// milliseconds, so the suite stays fast; a broken one still fails, just at the ceiling instead
+    /// of at an arbitrary 2.5s that a busy runner can blow through on its own. The two tests that
+    /// failed on `windows-latest` while every sibling with identical logic passed
+    /// (`on_deliver_wake_on_cc_pushes_live_cc_without_replay`,
+    /// `drain_deferred_repushes_unacked_after_turn_stop`) were exactly the two whose end-to-end
+    /// budget had to cover a PowerShell start.
+    const HANDLER_OBSERVATION_BUDGET: Duration = Duration::from_secs(60);
+
+    /// Poll `observed` until it holds or [`HANDLER_OBSERVATION_BUDGET`] runs out.
+    ///
+    /// Async on purpose: these run on a current-thread runtime, and the push being waited on is a
+    /// task on that same runtime. A blocking sleep would starve the thing under observation.
+    async fn wait_for(mut observed: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + HANDLER_OBSERVATION_BUDGET;
+        loop {
+            if observed() {
                 return true;
             }
-            std::thread::sleep(Duration::from_millis(25));
-        }
-        false
-    }
-
-    async fn wait_until_async(timeout: Duration, mut condition: impl FnMut() -> bool) -> bool {
-        let deadline = Instant::now() + timeout;
-        while Instant::now() < deadline {
-            if condition() {
-                return true;
+            if Instant::now() >= deadline {
+                return false;
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
-        condition()
+    }
+
+    async fn wait_for_file(path: &std::path::Path) -> bool {
+        wait_for(|| path.exists()).await
     }
 
     #[tokio::test]
@@ -6721,14 +8210,8 @@ mod p3_tests {
             session_id: "rcv".to_string(),
             address: "addr:rcv".to_string(),
         };
-        let mut pushed = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
-                pushed = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let pushed =
+            wait_for(|| state.on_deliver_should_skip(&member_key, id, Instant::now())).await;
         assert!(
             pushed,
             "a successful on-deliver handler should record a push attempt (backed off)"
@@ -6860,13 +8343,11 @@ mod p3_tests {
         );
         assert_eq!(state.on_deliver_cc_candidates(&store, &row).len(), 1);
         state.fire_on_deliver_on_commit(&store, &row);
-        let attempted = wait_until_async(Duration::from_secs(10), || {
-            state.on_deliver_should_skip(&member_key, live, Instant::now())
-        })
-        .await;
+        let attempted =
+            wait_for(|| state.on_deliver_should_skip(&member_key, live, Instant::now())).await;
         assert!(attempted, "live CC should record an on-deliver attempt");
         assert!(
-            wait_for_file(&descriptor_path, Duration::from_secs(3)),
+            wait_for_file(&descriptor_path).await,
             "live CC should push to opted-in on-deliver handler"
         );
         let descriptor: serde_json::Value =
@@ -6949,14 +8430,8 @@ mod p3_tests {
             address: "addr:rcv".to_string(),
         };
         // The failed attempt is recorded and backed off (no every-heartbeat hammering)...
-        let mut recorded = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
-                recorded = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let recorded =
+            wait_for(|| state.on_deliver_should_skip(&member_key, id, Instant::now())).await;
         assert!(
             recorded,
             "a failed on-deliver attempt must be recorded and backed off"
@@ -7491,14 +8966,8 @@ mod p3_tests {
             .unwrap();
         state.fire_on_deliver_on_commit(&store, &row);
         let member_key = mk(&store, "rcv", "addr:rcv");
-        let mut accepted = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
-                accepted = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let accepted =
+            wait_for(|| state.on_deliver_should_skip(&member_key, id, Instant::now())).await;
         assert!(
             accepted,
             "the no-disposition note should be pushed and recorded accepted"
@@ -7764,14 +9233,7 @@ mod p3_tests {
             address: "addr:rcv".to_string(),
         };
         // Wait for the permanent-exit handler to run and dead-letter the message.
-        let mut dead = false;
-        for _ in 0..100 {
-            if state.on_deliver_should_skip(&member_key, id, Instant::now()) {
-                dead = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let dead = wait_for(|| state.on_deliver_should_skip(&member_key, id, Instant::now())).await;
         assert!(
             dead,
             "a permanent-exit handler must dead-letter the message"
@@ -7886,14 +9348,7 @@ mod p3_tests {
             session_id: "rcv".to_string(),
             address: "addr:rcv".to_string(),
         };
-        let mut deferred = false;
-        for _ in 0..100 {
-            if state.on_deliver_deferred_count(&member_key) == 1 {
-                deferred = true;
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(50)).await;
-        }
+        let deferred = wait_for(|| state.on_deliver_deferred_count(&member_key) == 1).await;
         assert!(
             deferred,
             "an ON_DELIVER_DEFERRED_EXIT handler must record a deferred push attempt"
@@ -8087,9 +9542,8 @@ mod p3_tests {
         assert!(matches!(drained, Response::Ack { .. }));
         // Async poll (yields to the runtime so the spawned sweep/child-process can progress; a
         // blocking wait would starve the current-thread executor).
-        let pushed = wait_until_async(Duration::from_secs(10), || marker.exists()).await;
         assert!(
-            pushed,
+            wait_for_file(&marker).await,
             "idle drain must re-push a still-unacked deferred message after the turn stops"
         );
     }
@@ -11741,6 +13195,24 @@ pub mod test_support {
         _inner: platform::Listener,
     }
 
+    /// A live accept loop on a [`TestDaemon`]'s **real** IPC endpoint.
+    ///
+    /// `TestDaemon` normally short-circuits the transport and calls `handle_request` directly, which
+    /// is right for behavioral tests and wrong for the one property that is *about* the transport:
+    /// the published four-second `ReconcileIntents` bound is end-to-end, so the only way to check it
+    /// is to make a real client, over a real socket, against the real `handle_client` path — hello
+    /// frame, peer verification, request, response — and time it. Aborted on drop, so a test that
+    /// fails still tears its endpoint down.
+    pub struct TestIpcServer {
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl Drop for TestIpcServer {
+        fn drop(&mut self) {
+            self.task.abort();
+        }
+    }
+
     #[derive(Debug, Clone, Copy, PartialEq, Eq)]
     pub enum TestClientAction {
         Continue,
@@ -11753,6 +13225,19 @@ pub mod test_support {
                 ClientAction::Continue => Self::Continue,
                 ClientAction::Drain => Self::Drain,
             }
+        }
+    }
+
+    /// A `Send`-able handle onto a running `TestDaemon`, for tests that need a second concurrent
+    /// request (e.g. holding a live pull waiter open while a reconcile pass runs).
+    #[derive(Clone)]
+    pub struct TestDaemonHandle {
+        state: Arc<DaemonState>,
+    }
+
+    impl TestDaemonHandle {
+        pub async fn request(&self, request: Request) -> Response {
+            handle_request(self.state.clone(), request).await.0
         }
     }
 
@@ -11783,10 +13268,342 @@ pub mod test_support {
                 ended_sessions: Mutex::new(BTreeMap::new()),
                 draining: AtomicBool::new(false),
                 on_deliver: OnDeliverState::default(),
+                intents: reconcile::IntentRuntime::default(),
             });
             Self { state, root }
         }
 
+        /// A `TestDaemon` that has exercised the **real** startup path: the run dir is created and
+        /// owner-private-checked, the intent scope is opened, and the startup scan (GC + first
+        /// reconcile pass) has completed.
+        ///
+        /// The plain constructor deliberately skips this so existing tests stay fast and hermetic;
+        /// startup reconciliation needs the real path, so it gets its own constructor rather than a
+        /// flag that silently changes what every other test exercises.
+        pub async fn with_startup_scan(label: &str) -> Self {
+            let daemon = Self::new(label);
+            std::fs::create_dir_all(daemon.state.paths.run_dir.clone())
+                .expect("create test run dir");
+            let mut reports = daemon.state.reconcile_reports();
+            let before = reports.borrow_and_update().pass_seq;
+            reconcile::spawn_startup_scan(daemon.state.clone());
+            let _ = reconcile::await_next_report(reports, before, Duration::from_secs(30)).await;
+            daemon
+        }
+
+        /// Open (creating if needed) this daemon's station-intent scope, so a test can seed intents
+        /// exactly where the daemon will look for them.
+        pub fn intent_store(&self) -> crate::station_intent::IntentStore {
+            std::fs::create_dir_all(&self.state.paths.run_dir).expect("create test run dir");
+            crate::station_intent::IntentStore::open(
+                &self.state.paths.run_dir,
+                &self.state.paths.singleton_hash,
+            )
+            .expect("open test intent scope")
+        }
+
+        pub fn singleton_hash(&self) -> &str {
+            &self.state.paths.singleton_hash
+        }
+
+        /// Drive exactly one reconciliation pass and return its report. Deterministic: no wall-clock
+        /// sleep, no polling.
+        pub async fn reconcile_once(&self) -> crate::daemon_ipc::ReconcileReport {
+            reconcile::reconcile_once(self.state.clone(), None).await
+        }
+
+        /// Drive one pass against a **caller-supplied absolute deadline**, exactly as the admin
+        /// request handler does.
+        ///
+        /// This is the seam a deadline-edge test needs: passing an instant that has already elapsed
+        /// puts every phase on the far side of its budget deterministically, with no sleep, no
+        /// filesystem fault injection, and no dependence on how fast the runner is.
+        pub async fn reconcile_once_until(
+            &self,
+            deadline: std::time::Instant,
+        ) -> crate::daemon_ipc::ReconcileReport {
+            reconcile::reconcile_once_until(
+                self.state.clone(),
+                None,
+                deadline,
+                reconcile::PassOrigin::Request,
+            )
+            .await
+        }
+
+        /// The bytes of this scope's reconcile event log, or `None` when nothing has been appended.
+        pub fn reconcile_event_log_bytes(&self) -> Option<Vec<u8>> {
+            std::fs::read(
+                self.intent_store()
+                    .root()
+                    .join(reconcile::RECONCILE_EVENT_LOG_FILE),
+            )
+            .ok()
+        }
+
+        /// Every `(store_key, session_id, address)` this daemon currently holds a member for.
+        ///
+        /// The membership table itself rather than a status projection: "no member was published
+        /// after the response" has to be checked against what the daemon actually holds, not against
+        /// a view that could filter one out.
+        pub fn member_keys(&self) -> Vec<String> {
+            self.state
+                .members
+                .lock()
+                .unwrap()
+                .keys()
+                .map(|key| format!("{key:?}"))
+                .collect()
+        }
+
+        /// Run the trigger half of the production `heartbeat_loop`: wake on a trigger pulse and
+        /// drive a pass. Nothing else from that loop, so a test still controls every tick.
+        ///
+        /// This exists so the trigger seam can be asserted for real. `TestDaemon` does not run
+        /// `serve()`, so before this the only consumer of `IntentRuntime::trigger` in a test
+        /// process was nothing at all: a pulse-and-wait always timed out and fell back to calling
+        /// `reconcile_once` directly, which means the seam could have been completely unwired
+        /// with the "seam works" test still green (and taking the full timeout to say so).
+        pub fn spawn_trigger_consumer(&self) -> tokio::task::JoinHandle<()> {
+            let state = self.state.clone();
+            tokio::spawn(async move {
+                loop {
+                    state.intents.trigger.notified().await;
+                    reconcile::reconcile_once(state.clone(), None).await;
+                }
+            })
+        }
+
+        /// Pulse the reconcile trigger and await the report of the pass it drives.
+        ///
+        /// Requires a trigger consumer to be running — see [`TestDaemon::spawn_trigger_consumer`].
+        /// Without one the pulse has nowhere to go and this necessarily times out, which is
+        /// exactly how a "the seam is wired" test can pass while the seam is entirely unwired.
+        pub async fn pulse_reconcile_and_wait(
+            &self,
+            timeout: Duration,
+        ) -> Option<crate::daemon_ipc::ReconcileReport> {
+            let mut reports = self.state.reconcile_reports();
+            let before = reports.borrow_and_update().pass_seq;
+            self.state.pulse_reconcile();
+            reconcile::await_next_report(reports, before, timeout).await
+        }
+
+        pub fn reconcile_reports(
+            &self,
+        ) -> tokio::sync::watch::Receiver<crate::daemon_ipc::ReconcileReport> {
+            self.state.reconcile_reports()
+        }
+
+        pub fn intent_index(&self) -> reconcile::IntentIndexSnapshot {
+            self.state.intent_index_snapshot()
+        }
+
+        pub fn drain_intent_report(&self) -> crate::daemon_ipc::DrainIntentReport {
+            self.state.drain_intent_report()
+        }
+
+        /// Model the daemon's in-memory advance of a push member's CC watermark, which normally
+        /// happens as CC notifications are accepted.
+        pub fn set_member_cc_after_ms(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+            value: Option<i64>,
+        ) {
+            let key = DaemonState::member_key(store_key, session_id, address);
+            let mut members = self.state.members.lock().unwrap();
+            if let Some(member) = members.get_mut(&key) {
+                member.on_deliver_cc_after_ms = value;
+            }
+        }
+
+        pub fn member_cc_after_ms(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+        ) -> Option<Option<i64>> {
+            self.state
+                .get_member(store_key, session_id, address)
+                .map(|member| member.on_deliver_cc_after_ms)
+        }
+
+        /// Model a daemon replacement for the cached index only: the durable scope survives, the
+        /// in-memory projection does not.
+        pub fn clear_intent_index(&self) {
+            let mut index = self.state.intents.index_for_test().lock().unwrap();
+            index.entries.clear();
+            index.as_of_ms = crate::model::now_ms();
+        }
+
+        pub fn set_draining_for_test(&self, draining: bool) {
+            self.state.draining.store(draining, Ordering::SeqCst);
+        }
+
+        /// The intent-row projection the authenticated status surface exposes.
+        pub fn intent_statuses(&self) -> Vec<crate::daemon_ipc::IntentStatus> {
+            self.state.intent_statuses(None)
+        }
+
+        /// Reconcile one intent while *holding* its admission guard, exactly as the inline
+        /// anti-downgrade path inside `register_member` does. A deadlock here is a real deadlock in
+        /// the hottest register path, so this is exercised directly.
+        pub async fn reconcile_intent_under_admission_guard(
+            &self,
+            intent: &crate::station_intent::StationIntentV1,
+        ) -> String {
+            let admission = self
+                .state
+                .delivery_admission(
+                    &intent.store_key,
+                    &intent.session_id,
+                    &intent.address,
+                    DeliveryAdmissionKind::Register,
+                )
+                .await;
+            let _guard = admission.lock().await;
+            let outcome = reconcile::reconcile_intent_locked(self.state.clone(), intent).await;
+            format!("{outcome:?}")
+        }
+
+        /// Hold a binding's delivery-admission guard, exactly as a concurrent register, detach, or
+        /// reset does while it works.
+        ///
+        /// Returned owned so a test can keep it across awaits and observe what a *contended* guard
+        /// does to a bounded operation. Contention here is not exotic: the guard is the outermost
+        /// lock on the two writers of a station's membership, so every published bound on the
+        /// reconcile path has to hold while it is held by someone else.
+        pub async fn hold_delivery_admission(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+        ) -> tokio::sync::OwnedMutexGuard<()> {
+            self.state
+                .delivery_admission(
+                    store_key,
+                    session_id,
+                    address,
+                    DeliveryAdmissionKind::Register,
+                )
+                .await
+                .lock_owned()
+                .await
+        }
+
+        /// Withdraw one binding with an explicit admission budget, as `apply_outcome` does with
+        /// whatever is left of the pass deadline.
+        pub async fn withdraw_within(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+            admission_budget: Duration,
+        ) -> std::result::Result<String, String> {
+            self.state
+                .withdraw_intent_at_generation_within(
+                    store_key,
+                    session_id,
+                    address,
+                    None,
+                    admission_budget,
+                )
+                .await
+                .map(|outcome| format!("{outcome:?}"))
+        }
+
+        /// Publish an armed push member for a binding **without** taking its admission guard, as a
+        /// reconcile pass does at the end of a restore it is already admitted for.
+        ///
+        /// This is what makes the reverse-order race deterministic. A test holds the binding's
+        /// admission guard, starts a teardown (which must now block on that guard), and then calls
+        /// this — modelling the pass that publishes a member *after* the teardown began but
+        /// *before* it could act. A teardown that reads membership outside the guard leaves this
+        /// member installed; one that re-reads under the guard does not.
+        ///
+        /// It goes through the real backend (`ensure_address` + `claim_epoch_lease`) rather than
+        /// only inserting a record, so the published member has a genuine owner and epoch and a
+        /// detach's `release_epoch_lease_for_detach` sees an owner it can actually release.
+        pub async fn publish_push_member_unadmitted(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+        ) {
+            let backend = match self.state.backend_for(store_key).await {
+                Ok(backend) => backend,
+                Err(response) => panic!("test backend for {store_key}: {response:?}"),
+            };
+            backend
+                .ensure_address(address, None, None, None)
+                .await
+                .expect("ensure address for published push member");
+            let claimed = match backend
+                .claim_epoch_lease(address, &self.state.instance_id, liveness_window_secs())
+                .await
+                .expect("claim epoch lease for published push member")
+            {
+                EpochClaimResult::Claimed(claimed) => claimed,
+                other => panic!("expected a fresh epoch claim, got {other:?}"),
+            };
+            self.state.insert_member(MemberRecord {
+                address: address.to_string(),
+                capability: StationCapability::default(),
+                store_key: store_key.to_string(),
+                backend: backend.kind().to_string(),
+                session_id: session_id.to_string(),
+                application_responsibility: None,
+                occupant: "reconciler".to_string(),
+                host: crate::config::hostname(),
+                waiters: 0,
+                watch_pids: Vec::new(),
+                description: None,
+                scope: None,
+                tags: None,
+                lease_epoch: claimed.lease_epoch,
+                owner_instance_id: claimed.owner_instance_id,
+                idle: false,
+                idle_rearmable: false,
+                unattended_since_ms: Some(now_ms()),
+                unattended_with_backlog_since_ms: None,
+                last_waiter_exit_at_ms: None,
+                last_waiter_outcome: None,
+                last_waiter_exit_code: None,
+                last_waiter_detail: None,
+                last_waiter_pid: None,
+                last_delivered_message_id: None,
+                on_deliver: Some(vec!["cmd".to_string(), "--armed".to_string()]),
+                on_deliver_wake_on_cc: false,
+                on_deliver_cc_after_ms: None,
+            });
+        }
+
+        /// Whether an **active** (non-idle) push-armed member is installed for this binding.
+        ///
+        /// Idleness matters: `reset` and session end mark members idle rather than removing them,
+        /// and a member's `on_deliver` survives that. The question a teardown race asks is whether
+        /// live push coverage remains, which is "armed *and* not idle".
+        pub fn has_active_push_member(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+        ) -> bool {
+            self.state
+                .get_member(store_key, session_id, address)
+                .is_some_and(|member| !member.idle && member.on_deliver.is_some())
+        }
+
+        /// Whether any member record at all is installed for this binding.
+        pub fn has_member(&self, store_key: &str, session_id: &str, address: &str) -> bool {
+            self.state
+                .get_member(store_key, session_id, address)
+                .is_some()
+        }
+
+        /// The daemon's run/state paths.
         pub fn root(&self) -> &Path {
             &self.root
         }
@@ -11947,6 +13764,80 @@ pub mod test_support {
                 proof: Some(self.state.admin_cap.clone()),
             })
             .await
+        }
+
+        /// Drop a member from the in-memory table **without** tombstoning it, modelling exactly
+        /// what a daemon replacement leaves behind: the durable intent survives, the member does
+        /// not, and no explicit detach was ever performed.
+        pub fn forget_member(&self, store_key: &str, session_id: &str, address: &str) {
+            self.state.remove_member(store_key, session_id, address);
+        }
+
+        /// The opened backend for a store, so a test can assert on durable state (tombstones,
+        /// leases) that the daemon's own response does not expose.
+        pub async fn open_backend(&self, store_key: &str) -> Arc<dyn Backend> {
+            self.state
+                .backend_for(store_key)
+                .await
+                .expect("open test backend")
+        }
+
+        /// A cheap handle a spawned task can use to issue requests against this daemon, so a test
+        /// can hold a live `Wait` open while driving another operation.
+        pub fn handle(&self) -> TestDaemonHandle {
+            TestDaemonHandle {
+                state: self.state.clone(),
+            }
+        }
+
+        /// Start serving this daemon's real IPC endpoint. See [`TestIpcServer`].
+        pub fn serve_ipc(&self) -> TestIpcServer {
+            std::fs::create_dir_all(&self.state.paths.run_dir).expect("create test run dir");
+            let mut listener = platform::Listener::bind(&self.state.paths.endpoint)
+                .expect("bind the test daemon endpoint");
+            let state = self.state.clone();
+            let task = tokio::spawn(async move {
+                loop {
+                    let Ok(conn) = listener.accept().await else {
+                        return;
+                    };
+                    if listener.ready_for_next().is_err() {
+                        return;
+                    }
+                    let state = state.clone();
+                    tokio::spawn(async move {
+                        let _ = handle_client(conn, state).await;
+                    });
+                }
+            });
+            TestIpcServer { task }
+        }
+
+        /// Connect a real client to this daemon's endpoint through the production handshake.
+        ///
+        /// Requires [`TestDaemon::serve_ipc`] to be running.
+        pub async fn connect_ipc(&self, store_key: &str) -> DaemonClient {
+            let conn = platform::connect(&self.state.paths.endpoint)
+                .await
+                .expect("connect to the test daemon endpoint");
+            handshake_connected(conn, self.state.paths.clone(), store_key)
+                .await
+                .expect("handshake with the test daemon")
+        }
+
+        /// The bytes of this scope's round-robin cursor file, or `None` when no pass has written
+        /// one yet.
+        ///
+        /// Byte-exact rather than parsed on purpose: a test asserting "nothing was published after
+        /// the response" has to fail on *any* difference, including one a future field would hide
+        /// from a structural comparison.
+        pub fn scan_cursor_bytes(&self) -> Option<Vec<u8>> {
+            std::fs::read(
+                self.intent_store()
+                    .root()
+                    .join(crate::station_intent::SCAN_CURSOR_FILE),
+            )
+            .ok()
         }
 
         pub async fn status(&self) -> DaemonStatus {
@@ -12208,9 +14099,12 @@ fn prepare_runtime_dir() -> Result<PathBuf> {
 #[cfg(unix)]
 mod platform {
     use super::*;
-    use std::os::unix::fs::{
-        DirBuilderExt, FileTypeExt, MetadataExt, OpenOptionsExt, PermissionsExt,
-    };
+    // Exactly the two extension traits this module still calls through: `FileTypeExt` for
+    // `is_socket()` on the stale-endpoint check, and `OpenOptionsExt` for `.mode(0o600)` on the
+    // endpoint lock. The mode/uid/permission work that needed `DirBuilderExt`, `MetadataExt`, and
+    // `PermissionsExt` moved to `platform_fs::imp` when the owner-private primitives were promoted,
+    // so importing them here is an unused import — and CI builds with `-D warnings`.
+    use std::os::unix::fs::{FileTypeExt, OpenOptionsExt};
     use std::os::unix::io::AsRawFd;
     use tokio::net::{UnixListener, UnixStream};
 
@@ -12358,62 +14252,20 @@ mod platform {
         Ok(format!("uid:{}", unsafe { libc::geteuid() }))
     }
 
+    // Owner-private filesystem and process-identity primitives live in `crate::platform_fs` so the
+    // daemon and the station-intent store share one hardened implementation (ADR 0052). These
+    // wrappers only adapt the shared error type; the daemon's cap-file, socket, and
+    // peer-verification behavior is byte-for-byte unchanged.
     pub fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
-        if !path.exists() {
-            let mut builder = std::fs::DirBuilder::new();
-            builder.recursive(true).mode(0o700);
-            builder
-                .create(path)
-                .map_err(|e| io_err("creating owner-private daemon directory", e))?;
-        }
-        let link_meta = std::fs::symlink_metadata(path)
-            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
-        if link_meta.file_type().is_symlink() {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is a symlink", path.display()),
-            });
-        }
-        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o700))
-            .map_err(|e| io_err("setting owner-private daemon directory permissions", e))?;
-        let meta = std::fs::metadata(path)
-            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
-        let uid = unsafe { libc::geteuid() };
-        if meta.uid() != uid {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!(
-                    "{} is owned by uid {}, expected uid {}",
-                    path.display(),
-                    meta.uid(),
-                    uid
-                ),
-            });
-        }
-        if meta.mode() & 0o077 != 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is group/world accessible", path.display()),
-            });
-        }
-        std::fs::canonicalize(path).map_err(|e| io_err("canonicalizing daemon directory", e))
+        crate::platform_fs::ensure_owner_private_dir(path).map_err(Into::into)
     }
 
     pub fn write_owner_only_file(path: &Path, bytes: &[u8]) -> Result<()> {
-        let mut file = std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .mode(0o600)
-            .open(path)
-            .map_err(|e| io_err("creating owner-only daemon capability file", e))?;
-        use std::io::Write;
-        file.write_all(bytes)
-            .map_err(|e| io_err("writing daemon capability file", e))?;
-        file.write_all(b"\n")
-            .map_err(|e| io_err("writing daemon capability file", e))?;
-        file.sync_all()
-            .map_err(|e| io_err("syncing daemon capability file", e))?;
-        Ok(())
+        crate::platform_fs::write_owner_only_file(path, bytes).map_err(Into::into)
+    }
+
+    pub fn process_exe_path(pid: u32) -> Result<PathBuf> {
+        crate::platform_fs::process_exe_path(pid).map_err(Into::into)
     }
 
     pub fn verify_client_peer(conn: &ServerConn) -> Result<()> {
@@ -12520,42 +14372,17 @@ mod platform {
 
     #[cfg(target_os = "linux")]
     fn server_executable(pid: u32) -> Result<PathBuf> {
-        std::fs::canonicalize(format!("/proc/{pid}/exe")).map_err(|e| DaemonError::Unsupported {
+        process_exe_path(pid).map_err(|e| DaemonError::Unsupported {
             capability: "client-side server executable verification",
-            message: format!("cannot verify /proc/{pid}/exe: {e}"),
+            message: e.to_string(),
         })
     }
 
     #[cfg(target_os = "macos")]
     fn server_executable(pid: u32) -> Result<PathBuf> {
-        use std::ffi::OsString;
-        use std::os::unix::ffi::OsStringExt;
-
-        let mut buffer = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
-        let bytes = unsafe {
-            libc::proc_pidpath(
-                pid as libc::c_int,
-                buffer.as_mut_ptr() as *mut libc::c_void,
-                buffer.len() as u32,
-            )
-        };
-        if bytes <= 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "client-side server executable verification",
-                message: format!(
-                    "cannot resolve executable path for pid {pid}: {}",
-                    std::io::Error::last_os_error()
-                ),
-            });
-        }
-        buffer.truncate(bytes as usize);
-        if buffer.last() == Some(&0) {
-            buffer.pop();
-        }
-        let path = PathBuf::from(OsString::from_vec(buffer));
-        std::fs::canonicalize(&path).map_err(|e| DaemonError::Unsupported {
+        process_exe_path(pid).map_err(|e| DaemonError::Unsupported {
             capability: "client-side server executable verification",
-            message: format!("cannot canonicalize {} for pid {pid}: {e}", path.display()),
+            message: e.to_string(),
         })
     }
 
@@ -12617,30 +14444,24 @@ mod platform {
 #[cfg(windows)]
 mod platform {
     use super::*;
-    use std::ffi::{c_void, OsStr, OsString};
-    use std::io::Write;
-    use std::os::windows::ffi::{OsStrExt, OsStringExt};
-    use std::os::windows::io::{AsRawHandle, FromRawHandle};
+    use std::ffi::{c_void, OsStr};
+    use std::os::windows::ffi::OsStrExt;
+    use std::os::windows::io::AsRawHandle;
     use tokio::net::windows::named_pipe::{ClientOptions, NamedPipeClient, NamedPipeServer};
     use windows_sys::Win32::Foundation::{
-        CloseHandle, GetLastError, LocalFree, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS,
-        ERROR_PIPE_BUSY, FILETIME, HANDLE, INVALID_HANDLE_VALUE, PSID,
+        CloseHandle, LocalFree, ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, ERROR_PIPE_BUSY,
+        FILETIME, HANDLE, INVALID_HANDLE_VALUE,
     };
     use windows_sys::Win32::Security::Authorization::{
         ConvertSidToStringSidW, ConvertStringSecurityDescriptorToSecurityDescriptorW,
-        ConvertStringSidToSidW, GetNamedSecurityInfoW, SetNamedSecurityInfoW, SDDL_REVISION_1,
-        SE_FILE_OBJECT,
+        SDDL_REVISION_1,
     };
     use windows_sys::Win32::Security::{
-        AclSizeInformation, EqualSid, GetAce, GetAclInformation, GetSecurityDescriptorControl,
-        GetSecurityDescriptorDacl, GetSecurityDescriptorOwner, GetTokenInformation, TokenUser,
-        ACCESS_ALLOWED_ACE, ACCESS_DENIED_ACE, ACL, ACL_SIZE_INFORMATION,
-        DACL_SECURITY_INFORMATION, OWNER_SECURITY_INFORMATION, PROTECTED_DACL_SECURITY_INFORMATION,
-        SECURITY_ATTRIBUTES, SE_DACL_PRESENT, SE_DACL_PROTECTED, TOKEN_QUERY, TOKEN_USER,
+        GetTokenInformation, TokenUser, SECURITY_ATTRIBUTES, TOKEN_INFORMATION_CLASS, TOKEN_QUERY,
+        TOKEN_USER,
     };
     use windows_sys::Win32::Storage::FileSystem::{
-        CreateDirectoryW, CreateFileW, CREATE_NEW, FILE_ATTRIBUTE_NORMAL,
-        FILE_ATTRIBUTE_REPARSE_POINT, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
+        CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_FLAG_FIRST_PIPE_INSTANCE, FILE_FLAG_OVERLAPPED,
         FILE_GENERIC_WRITE, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING, PIPE_ACCESS_DUPLEX,
     };
     use windows_sys::Win32::System::Pipes::{
@@ -12649,7 +14470,7 @@ mod platform {
     };
     use windows_sys::Win32::System::Threading::{
         GetCurrentProcess, GetProcessTimes, OpenProcess, OpenProcessToken,
-        QueryFullProcessImageNameW, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_QUERY_LIMITED_INFORMATION,
     };
 
     pub type ClientConn = NamedPipeClient;
@@ -12726,52 +14547,20 @@ mod platform {
         sid_string_from_token(token.0)
     }
 
+    // Owner-private filesystem and process-identity primitives live in `crate::platform_fs` so the
+    // daemon and the station-intent store share one hardened implementation (ADR 0052). These
+    // wrappers only adapt the shared error type; the daemon's cap-file, pipe, and
+    // peer-verification behavior is byte-for-byte unchanged.
     pub fn ensure_owner_private_dir(path: &Path) -> Result<PathBuf> {
-        if !path.exists() {
-            if let Some(parent) = path.parent() {
-                std::fs::create_dir_all(parent)
-                    .map_err(|e| io_err("creating daemon directory parent", e))?;
-            }
-            create_owner_only_dir(path)?;
-        }
-        validate_owner_private_dir_shape(path)?;
-        set_owner_only_dir_security(path)?;
-        let canonical = std::fs::canonicalize(path)
-            .map_err(|e| io_err("canonicalizing daemon directory", e))?;
-        validate_owner_private_dir_shape(&canonical)?;
-        set_owner_only_dir_security(&canonical)?;
-        validate_owner_private_dir_security(&canonical)?;
-        Ok(canonical)
+        crate::platform_fs::ensure_owner_private_dir(path).map_err(Into::into)
     }
 
     pub fn write_owner_only_file(path: &Path, bytes: &[u8]) -> Result<()> {
-        let sa = owner_only_security_attributes()?;
-        let wide = wide_null(path.as_os_str());
-        let handle = unsafe {
-            CreateFileW(
-                wide.as_ptr(),
-                FILE_GENERIC_WRITE,
-                0,
-                &sa.attrs,
-                CREATE_NEW,
-                FILE_ATTRIBUTE_NORMAL,
-                0,
-            )
-        };
-        if handle == INVALID_HANDLE_VALUE {
-            return Err(io_err(
-                "creating owner-only daemon capability file",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let mut file = unsafe { std::fs::File::from_raw_handle(handle as _) };
-        file.write_all(bytes)
-            .map_err(|e| io_err("writing daemon capability file", e))?;
-        file.write_all(b"\n")
-            .map_err(|e| io_err("writing daemon capability file", e))?;
-        file.sync_all()
-            .map_err(|e| io_err("syncing daemon capability file", e))?;
-        Ok(())
+        crate::platform_fs::write_owner_only_file(path, bytes).map_err(Into::into)
+    }
+
+    pub fn process_exe_path(pid: u32) -> Result<PathBuf> {
+        crate::platform_fs::process_exe_path(pid).map_err(Into::into)
     }
 
     pub fn verify_client_peer(conn: &NamedPipeServer) -> Result<()> {
@@ -12843,241 +14632,6 @@ mod platform {
         }
         unsafe { NamedPipeServer::from_raw_handle(handle as _) }
             .map_err(|e| io_err("wrapping daemon named pipe handle", e))
-    }
-
-    fn create_owner_only_dir(path: &Path) -> Result<()> {
-        let sa = owner_only_security_attributes()?;
-        let wide = wide_null(path.as_os_str());
-        let ok = unsafe { CreateDirectoryW(wide.as_ptr(), &sa.attrs) };
-        if ok == 0 {
-            let err = unsafe { GetLastError() };
-            if err == ERROR_ALREADY_EXISTS {
-                return Ok(());
-            }
-            return Err(io_err(
-                "creating owner-private daemon directory",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        Ok(())
-    }
-
-    fn set_owner_only_dir_security(path: &Path) -> Result<()> {
-        let sa = owner_only_security_attributes()?;
-        let mut dacl_present = 0;
-        let mut dacl_defaulted = 0;
-        let mut dacl = std::ptr::null_mut();
-        let ok = unsafe {
-            GetSecurityDescriptorDacl(
-                sa.descriptor,
-                &mut dacl_present,
-                &mut dacl,
-                &mut dacl_defaulted,
-            )
-        };
-        if ok == 0 || dacl_present == 0 || dacl.is_null() {
-            return Err(io_err(
-                "reading owner-private daemon directory DACL",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let mut owner_defaulted = 0;
-        let mut owner = std::ptr::null_mut();
-        let ok =
-            unsafe { GetSecurityDescriptorOwner(sa.descriptor, &mut owner, &mut owner_defaulted) };
-        if ok == 0 || owner.is_null() {
-            return Err(io_err(
-                "reading owner-private daemon directory owner",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let wide = wide_null(path.as_os_str());
-        let rc = unsafe {
-            SetNamedSecurityInfoW(
-                wide.as_ptr(),
-                SE_FILE_OBJECT,
-                OWNER_SECURITY_INFORMATION
-                    | DACL_SECURITY_INFORMATION
-                    | PROTECTED_DACL_SECURITY_INFORMATION,
-                owner,
-                std::ptr::null_mut(),
-                dacl,
-                std::ptr::null_mut(),
-            )
-        };
-        if rc != 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!(
-                    "setting DACL for {} failed: {}",
-                    path.display(),
-                    std::io::Error::from_raw_os_error(rc as i32)
-                ),
-            });
-        }
-        Ok(())
-    }
-
-    fn validate_owner_private_dir_shape(path: &Path) -> Result<()> {
-        use std::os::windows::fs::MetadataExt;
-        use std::path::{Component, Prefix};
-
-        if path.components().any(|component| {
-            matches!(
-                component,
-                Component::Prefix(prefix)
-                    if matches!(prefix.kind(), Prefix::UNC(_, _) | Prefix::VerbatimUNC(_, _))
-            )
-        }) {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is not a local path", path.display()),
-            });
-        }
-        let meta = std::fs::symlink_metadata(path)
-            .map_err(|e| io_err("checking owner-private daemon directory", e))?;
-        if !meta.is_dir() {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is not a directory", path.display()),
-            });
-        }
-        if meta.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is a reparse point", path.display()),
-            });
-        }
-        Ok(())
-    }
-
-    fn validate_owner_private_dir_security(path: &Path) -> Result<()> {
-        const ACCESS_ALLOWED_ACE_TYPE: u8 = 0;
-        const ACCESS_DENIED_ACE_TYPE: u8 = 1;
-
-        let mut sd: *mut c_void = std::ptr::null_mut();
-        let mut owner: PSID = std::ptr::null_mut();
-        let mut dacl: *mut ACL = std::ptr::null_mut();
-        let wide = wide_null(path.as_os_str());
-        let rc = unsafe {
-            GetNamedSecurityInfoW(
-                wide.as_ptr(),
-                SE_FILE_OBJECT,
-                OWNER_SECURITY_INFORMATION | DACL_SECURITY_INFORMATION,
-                &mut owner,
-                std::ptr::null_mut(),
-                &mut dacl,
-                std::ptr::null_mut(),
-                &mut sd,
-            )
-        };
-        if rc != 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!(
-                    "cannot read security descriptor for {}: {}",
-                    path.display(),
-                    std::io::Error::from_raw_os_error(rc as i32)
-                ),
-            });
-        }
-        let _sd_guard = LocalAllocGuard(sd);
-
-        let current_sid = sid_from_string(&current_user_identity()?)?;
-        let system_sid = sid_from_string("S-1-5-18")?;
-        let admins_sid = sid_from_string("S-1-5-32-544")?;
-
-        if owner.is_null() || unsafe { EqualSid(owner, current_sid.0) } == 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is not owned by the current SID", path.display()),
-            });
-        }
-
-        let mut control = 0u16;
-        let mut revision = 0u32;
-        let ok = unsafe { GetSecurityDescriptorControl(sd, &mut control, &mut revision) };
-        if ok == 0 || control & SE_DACL_PRESENT == 0 || control & SE_DACL_PROTECTED == 0 {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} does not have a protected explicit DACL", path.display()),
-            });
-        }
-        if dacl.is_null() {
-            return Err(DaemonError::Unsupported {
-                capability: "owner-private daemon directory",
-                message: format!("{} is missing a DACL", path.display()),
-            });
-        }
-
-        let mut info = ACL_SIZE_INFORMATION {
-            AceCount: 0,
-            AclBytesInUse: 0,
-            AclBytesFree: 0,
-        };
-        let ok = unsafe {
-            GetAclInformation(
-                dacl,
-                &mut info as *mut _ as *mut c_void,
-                std::mem::size_of::<ACL_SIZE_INFORMATION>() as u32,
-                AclSizeInformation,
-            )
-        };
-        if ok == 0 || info.AceCount == 0 {
-            return Err(io_err(
-                "reading daemon directory ACL",
-                std::io::Error::last_os_error(),
-            ));
-        }
-
-        for idx in 0..info.AceCount {
-            let mut ace_ptr: *mut c_void = std::ptr::null_mut();
-            let ok = unsafe { GetAce(dacl, idx, &mut ace_ptr) };
-            if ok == 0 || ace_ptr.is_null() {
-                return Err(io_err(
-                    "reading daemon directory ACE",
-                    std::io::Error::last_os_error(),
-                ));
-            }
-
-            let header = unsafe { &*(ace_ptr as *const windows_sys::Win32::Security::ACE_HEADER) };
-            match header.AceType {
-                ACCESS_ALLOWED_ACE_TYPE => {
-                    let ace = unsafe { &*(ace_ptr as *const ACCESS_ALLOWED_ACE) };
-                    let sid = (&ace.SidStart as *const u32).cast::<c_void>() as PSID;
-                    let allowed = unsafe {
-                        EqualSid(sid, current_sid.0) != 0
-                            || EqualSid(sid, system_sid.0) != 0
-                            || EqualSid(sid, admins_sid.0) != 0
-                    };
-                    if !allowed {
-                        return Err(DaemonError::Unsupported {
-                            capability: "owner-private daemon directory",
-                            message: format!("{} grants access to a non-owner SID", path.display()),
-                        });
-                    }
-                }
-                ACCESS_DENIED_ACE_TYPE => {
-                    let _ace = unsafe { &*(ace_ptr as *const ACCESS_DENIED_ACE) };
-                    return Err(DaemonError::Unsupported {
-                        capability: "owner-private daemon directory",
-                        message: format!("{} contains a deny ACE", path.display()),
-                    });
-                }
-                _ => {
-                    return Err(DaemonError::Unsupported {
-                        capability: "owner-private daemon directory",
-                        message: format!(
-                            "{} contains unsupported ACE type {}",
-                            path.display(),
-                            header.AceType
-                        ),
-                    });
-                }
-            }
-        }
-
-        Ok(())
     }
 
     #[cfg(test)]
@@ -13213,7 +14767,13 @@ mod platform {
         let sid = sid_string_from_token(token.0)?;
         let start_time_100ns = process_start_time(process.0)?;
         let exe = if expected_exe.is_some() {
-            Some(process_exe(process.0)?)
+            // One implementation of executable resolution, shared with the intent producer-identity
+            // path (`platform_fs::process_exe_path`), so the two can never disagree about what
+            // "this pid's executable" means.
+            Some(process_exe_path(pid).map_err(|e| DaemonError::Unsupported {
+                capability: "peer process executable verification",
+                message: e.to_string(),
+            })?)
         } else {
             None
         };
@@ -13238,25 +14798,6 @@ mod platform {
             ));
         }
         Ok(((creation.dwHighDateTime as u64) << 32) | creation.dwLowDateTime as u64)
-    }
-
-    fn process_exe(process: HANDLE) -> Result<PathBuf> {
-        let mut buf = vec![0u16; 32768];
-        let mut len = buf.len() as u32;
-        let ok = unsafe { QueryFullProcessImageNameW(process, 0, buf.as_mut_ptr(), &mut len) };
-        if ok == 0 {
-            return Err(io_err(
-                "reading peer process executable",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let raw = PathBuf::from(OsString::from_wide(&buf[..len as usize]));
-        std::fs::canonicalize(&raw).map_err(|e| {
-            io_err(
-                "canonicalizing peer process executable",
-                std::io::Error::new(e.kind(), format!("{}: {e}", raw.display())),
-            )
-        })
     }
 
     fn current_process_token() -> Result<Handle> {
@@ -13290,70 +14831,8 @@ mod platform {
         ))
     }
 
-    struct LocalAllocGuard(*mut c_void);
-
-    impl Drop for LocalAllocGuard {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe {
-                    LocalFree(self.0);
-                }
-            }
-        }
-    }
-
-    struct OwnedSid(PSID);
-
-    impl Drop for OwnedSid {
-        fn drop(&mut self) {
-            if !self.0.is_null() {
-                unsafe {
-                    LocalFree(self.0);
-                }
-            }
-        }
-    }
-
-    fn sid_from_string(sid: &str) -> Result<OwnedSid> {
-        let wide = wide_null(OsStr::new(sid));
-        let mut raw: PSID = std::ptr::null_mut();
-        let ok = unsafe { ConvertStringSidToSidW(wide.as_ptr(), &mut raw) };
-        if ok == 0 || raw.is_null() {
-            return Err(io_err(
-                "converting SID string",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        Ok(OwnedSid(raw))
-    }
-
     fn sid_string_from_token(token: HANDLE) -> Result<String> {
-        let mut needed = 0u32;
-        unsafe {
-            GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
-        }
-        if needed == 0 {
-            return Err(io_err(
-                "sizing token user information",
-                std::io::Error::last_os_error(),
-            ));
-        }
-        let mut buf = vec![0u8; needed as usize];
-        let ok = unsafe {
-            GetTokenInformation(
-                token,
-                TokenUser,
-                buf.as_mut_ptr() as *mut c_void,
-                needed,
-                &mut needed,
-            )
-        };
-        if ok == 0 {
-            return Err(io_err(
-                "reading token user information",
-                std::io::Error::last_os_error(),
-            ));
-        }
+        let buf = token_information(token, TokenUser, "reading token user information")?;
         let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
         let mut sid_ptr: *mut u16 = std::ptr::null_mut();
         let ok = unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_ptr) };
@@ -13368,6 +14847,43 @@ mod platform {
             LocalFree(sid_ptr as *mut c_void);
         }
         Ok(sid)
+    }
+
+    /// `GetTokenInformation` with storage aligned for every token structure read from it.
+    fn token_information(
+        token: HANDLE,
+        class: TOKEN_INFORMATION_CLASS,
+        action: &'static str,
+    ) -> Result<Vec<u64>> {
+        let mut needed = 0u32;
+        unsafe {
+            GetTokenInformation(token, class, std::ptr::null_mut(), 0, &mut needed);
+        }
+        if needed == 0 {
+            return Err(io_err(action, std::io::Error::last_os_error()));
+        }
+        // A byte vector does not guarantee the alignment required to dereference TOKEN_USER.
+        let mut buf = vec![0u64; needed as usize / std::mem::size_of::<u64>() + 1];
+        let ok = unsafe {
+            GetTokenInformation(
+                token,
+                class,
+                buf.as_mut_ptr() as *mut c_void,
+                needed,
+                &mut needed,
+            )
+        };
+        if ok == 0 {
+            return Err(io_err(action, std::io::Error::last_os_error()));
+        }
+        Ok(buf)
+    }
+
+    #[cfg(test)]
+    pub(super) fn token_user_information_is_aligned() -> Result<bool> {
+        let token = current_process_token()?;
+        let buf = token_information(token.0, TokenUser, "reading token user information")?;
+        Ok((buf.as_ptr() as usize) % std::mem::align_of::<TOKEN_USER>() == 0)
     }
 
     struct OwnerOnlySecurityAttributes {
@@ -13539,6 +15055,189 @@ mod platform {
     }
 }
 
+/// One authenticated line exchange with a **local** endpoint whose owner is already known.
+///
+/// This is the client half of the daemon's peer rule, factored out of the reconciler's producer
+/// probe so that every path that hands a secret to a local endpoint gets the same order of
+/// operations rather than a re-implementation of it:
+///
+/// 1. connect,
+/// 2. `platform::verify_server_peer` — same user, the recorded executable, and the recorded
+///    `(pid, start_time)` — **before a single byte is written**,
+/// 3. write exactly one request line,
+/// 4. read exactly one response line, hard-capped at a frame of `max_response_bytes` (newline
+///    included) — one byte more is refused rather than returned truncated.
+///
+/// The order is the property. A request that carries a credential is unrecoverable once written:
+/// endpoint names are predictable (they are derived from a session id), so anything that can bind
+/// the name first receives whatever the client sends before it ever inspects an answer. Proving
+/// the peer *after* the write, or inferring identity from the reply, protects nothing. A platform
+/// that cannot resolve the peer fails closed for the same reason.
+///
+/// Visibility is deliberately `pub(crate)`: this exposes the daemon's private `platform` peer
+/// primitives to the rest of the crate and nothing wider.
+pub(crate) mod verified_peer {
+    use super::*;
+    use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt};
+
+    /// Windows named-pipe busy retry interval while a prior client holds the instance.
+    #[cfg(windows)]
+    const PIPE_BUSY_RETRY: Duration = Duration::from_millis(50);
+
+    /// The identity the endpoint's server process must prove before anything is sent to it.
+    #[derive(Debug, Clone, Copy)]
+    pub(crate) struct ExpectedPeer<'a> {
+        pub exe_path: &'a Path,
+        pub pid: u32,
+        pub start_time: u64,
+    }
+
+    /// What the exchange does, and the ceilings it is held to.
+    #[derive(Debug, Clone, Copy)]
+    pub(crate) struct LineExchange<'a> {
+        /// The request, without a trailing newline — the exchange frames it.
+        pub request_line: &'a str,
+        /// Hard ceiling on the answer, **newline included**: a frame of exactly this many bytes is
+        /// answered, one byte more is refused. The peer is authenticated but never *trusted*: an
+        /// unbounded read lets a buggy or hostile server stream until the timeout and hand an
+        /// arbitrarily large string to the caller.
+        pub max_response_bytes: u64,
+        pub connect_timeout: Duration,
+        pub exchange_timeout: Duration,
+    }
+
+    /// Why an exchange did not produce an answer. Split finely enough that every caller can keep
+    /// the failure classification it already published.
+    #[derive(Debug)]
+    pub(crate) enum ExchangeError {
+        /// The endpoint could not be reached at all.
+        Connect(DaemonError),
+        /// Connecting did not complete inside `connect_timeout`.
+        ConnectTimeout,
+        /// The peer is not the expected producer — **nothing was sent**.
+        PeerUnverified(DaemonError),
+        /// Transport failure during the exchange itself.
+        Io(std::io::Error),
+        /// The exchange did not complete inside `exchange_timeout`.
+        ExchangeTimeout,
+        /// The answer's frame exceeded `max_response_bytes`.
+        ResponseTooLarge,
+    }
+
+    impl std::fmt::Display for ExchangeError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            match self {
+                ExchangeError::Connect(e) => write!(f, "connecting to the endpoint: {e}"),
+                ExchangeError::ConnectTimeout => write!(f, "the endpoint did not accept in time"),
+                ExchangeError::PeerUnverified(e) => write!(
+                    f,
+                    "the process serving the endpoint is not the expected peer, so nothing was sent: {e}"
+                ),
+                ExchangeError::Io(e) => write!(f, "the endpoint exchange failed: {e}"),
+                ExchangeError::ExchangeTimeout => write!(f, "the endpoint did not answer in time"),
+                ExchangeError::ResponseTooLarge => {
+                    write!(f, "the endpoint's answer exceeded the response cap")
+                }
+            }
+        }
+    }
+
+    /// A local endpoint at `path`, in the transport this platform uses for one.
+    pub(crate) fn local_endpoint(path: &str) -> Endpoint {
+        #[cfg(windows)]
+        {
+            Endpoint::WindowsPipe(path.to_string())
+        }
+        #[cfg(unix)]
+        {
+            Endpoint::UnixSocket(PathBuf::from(path))
+        }
+        #[cfg(not(any(unix, windows)))]
+        {
+            let _ = path;
+            unreachable!("no local endpoint transport on this platform")
+        }
+    }
+
+    /// Connect, retrying only the "another client holds the single pipe instance" condition, which
+    /// is transient by construction. Every other error returns immediately, so an absent endpoint
+    /// is still reported as absent rather than waited on.
+    async fn connect_when_free(endpoint: &Endpoint) -> Result<platform::ClientConn> {
+        #[cfg(windows)]
+        {
+            loop {
+                match platform::connect(endpoint).await {
+                    Ok(conn) => return Ok(conn),
+                    Err(DaemonError::Timeout(_)) => {
+                        tokio::time::sleep(PIPE_BUSY_RETRY).await;
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+        #[cfg(not(windows))]
+        {
+            platform::connect(endpoint).await
+        }
+    }
+
+    /// Connect to `endpoint`, prove the peer, then exchange one line. See the module docs for why
+    /// the order is the whole of the guarantee.
+    pub(crate) async fn exchange(
+        endpoint: &Endpoint,
+        peer: ExpectedPeer<'_>,
+        exchange: LineExchange<'_>,
+    ) -> std::result::Result<String, ExchangeError> {
+        let conn = match tokio::time::timeout(exchange.connect_timeout, connect_when_free(endpoint))
+            .await
+        {
+            Ok(Ok(conn)) => conn,
+            Ok(Err(e)) => return Err(ExchangeError::Connect(e)),
+            Err(_) => return Err(ExchangeError::ConnectTimeout),
+        };
+        // Same-user ownership, executable match, and pid+start-time identity, all in one call,
+        // before a single byte leaves this process.
+        if let Err(e) = platform::verify_server_peer(
+            &conn,
+            peer.exe_path,
+            Some(peer.pid),
+            Some(peer.start_time),
+        ) {
+            return Err(ExchangeError::PeerUnverified(e));
+        }
+
+        let (read_half, mut write_half) = tokio::io::split(conn);
+        // Read one byte *past* the cap rather than exactly up to it. `max_response_bytes` is the
+        // largest frame that is allowed through, newline included, so a reader limited to exactly
+        // the cap cannot tell "a legal frame that happens to be cap bytes" from "a frame that was
+        // cut off at the cap": both come back cap bytes long, and the only way to stay safe is to
+        // reject the legal one too. The extra byte makes the two distinguishable — an over-cap
+        // answer is the only thing that can produce more than `max_response_bytes` — so the
+        // boundary is exact: a `cap`-byte frame is answered, a `cap + 1`-byte one is refused, and
+        // nothing larger is ever buffered.
+        let read_budget = exchange.max_response_bytes.saturating_add(1);
+        let mut reader = BufReader::new(read_half.take(read_budget));
+        let request = exchange.request_line;
+        let io = async {
+            write_half.write_all(request.as_bytes()).await?;
+            write_half.write_all(b"\n").await?;
+            write_half.flush().await?;
+            let mut response = String::new();
+            reader.read_line(&mut response).await?;
+            Ok::<String, std::io::Error>(response)
+        };
+        let response = match tokio::time::timeout(exchange.exchange_timeout, io).await {
+            Ok(Ok(response)) => response,
+            Ok(Err(e)) => return Err(ExchangeError::Io(e)),
+            Err(_) => return Err(ExchangeError::ExchangeTimeout),
+        };
+        if response.len() as u64 > exchange.max_response_bytes {
+            return Err(ExchangeError::ResponseTooLarge);
+        }
+        Ok(response)
+    }
+}
+
 fn same_canonical_path(a: &Path, b: &Path) -> bool {
     #[cfg(windows)]
     {
@@ -13696,6 +15395,15 @@ mod tests {
             &authenticated_users,
             &sid
         ));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_peer_token_information_is_pointer_aligned() {
+        assert!(
+            platform::token_user_information_is_aligned().expect("read current token"),
+            "TOKEN_USER must never be dereferenced through byte-aligned storage"
+        );
     }
 
     #[tokio::test]

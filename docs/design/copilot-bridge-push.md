@@ -472,3 +472,46 @@ queued turn arrived later as stale, already-handled work. Issue #65 replaces "qu
   heartbeat sweep re-attempt within a bounded delay (a re-defer while busy is cheap and injects no
   stale turn); re-provision (reattach / `/clear` reload) still re-delivers unacked backlog. Durable
   Telex state remains authoritative throughout.
+
+## Liveness probe verb: bridge protocol 2 (issue #106)
+
+`COPILOT_BRIDGE_PROTOCOL` moves `1 -> 2`. The bridge gains one verb, and the registry it writes
+gains three fields.
+
+**Request** (same newline-delimited framing, same per-session secret):
+
+```json
+{"op": "probe", "nonce": "<32 hex chars>", "protocol": 2, "secret": "<registry secret>"}
+```
+
+**Response:**
+
+```json
+{"ok": true, "nonce": "<echoed byte-for-byte>", "sessionId": "...", "protocol": 2, "bridgeGeneration": 1785000000000}
+```
+
+Deliberately absent from the response: file paths, endpoint details, busy/idle diagnostics, and the
+secret. A probe answers "are you alive and are you the session I recorded" and nothing else; the
+endpoint's whole job makes it a natural information-disclosure surface otherwise.
+
+Errors are `unauthorized`, `nonce_required`, `unsupported_protocol`, `unsupported_op`, and
+`rate_limited`. `unsupported_op` / `unsupported_protocol` classify the producer as **legacy**, not
+failed — a pre-probe bridge is never auto-restored, but it never wedges anything either, and the
+documented manual `telex copilot resume` path keeps working.
+
+Hardening:
+
+- The secret comparison is constant-time (`crypto.timingSafeEqual`), on the push path too.
+- Probes are rate limited (30 per 10 s sliding window) so an unbounded verb on a long-lived endpoint
+  cannot burn a session's CPU.
+- The protocol lives in `copilot/bridge/probe-protocol.mjs`, a pure SDK-free module (the
+  `busy-state.mjs` precedent), so the contract is unit-tested and its literal op/field/error strings
+  are asserted against their Rust counterparts.
+
+Registry additions: `protocol`, `bridgeGeneration`, `startTimeMs`. `startTimeMs` is diagnostic only
+— the authoritative process start time in a station intent is captured by telex through the shared
+platform primitive, never trusted from this file.
+
+Authorization order matters: telex verifies the peer process at the OS level (same user, matching
+executable, matching pid + start time) **before** sending the probe, so the secret only ever reaches
+a process already proven to be the recorded producer.

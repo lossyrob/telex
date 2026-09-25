@@ -27,13 +27,23 @@
 // The bridge forwards `mode` verbatim; the attention->mode decision
 // (interrupt -> immediate, else -> enqueue) is made by `telex copilot push`.
 
-import { mkdir, writeFile, rename, rm, chmod, readFile } from "node:fs/promises";
+import { mkdir, writeFile, rm, chmod, readFile, rename } from "node:fs/promises";
 import { createServer } from "node:net";
 import { homedir, platform } from "node:os";
 import { join } from "node:path";
 import { joinSession } from "@github/copilot-sdk/extension";
 import { randomBytes } from "node:crypto";
 import { createBusyTracker, DEFERRED_UNTIL_IDLE } from "./busy-state.mjs";
+import {
+  COPILOT_BRIDGE_PROTOCOL,
+  PROBE_ERRORS,
+  buildProbeError,
+  buildProbeResponse,
+  classifyRequest,
+  createProbeRateLimiter,
+  secretMatches,
+  validateProbeRequest,
+} from "./probe-protocol.mjs";
 
 const isPosix = platform() !== "win32";
 const MAX_REQUEST_BYTES = 8 * 1024 * 1024; // 8 MiB: fits a max daemon message plus JSON-escaped prompt wrapping, so large messages push as turns instead of dead-lettering
@@ -85,7 +95,14 @@ session.on((event) => busyTracker.onEvent(event));
 // over the OS ACL, needed because the default Windows named-pipe DACL grants Everyone READ.
 const secret = randomBytes(32).toString("hex");
 const registryPath = join(registryDir, `${sessionId}.json`);
-const registryTempPath = `${registryPath}.${process.pid}.tmp`;
+
+// Bridge generation: a monotonic marker for "this bridge process". The daemon carries it through a
+// probe response so a reload is distinguishable from a still-running instance. It is diagnostic
+// only — never an authorization input; process identity is proved at the OS level before a probe
+// is ever sent.
+const bridgeGeneration = Date.now();
+const startTimeMs = Math.round(Date.now() - process.uptime() * 1000);
+const probeRateLimiter = createProbeRateLimiter();
 
 // Derive the same-user endpoint from the session id (stable across reloads).
 const endpoint =
@@ -150,8 +167,34 @@ async function handleConnection(socket) {
       socket.end();
       return;
     }
-    if (typeof input.secret !== "string" || input.secret !== secret) {
+    if (typeof input.secret !== "string" || !secretMatches(input.secret, secret)) {
       writeResponse(socket, { ok: false, error: "unauthorized" });
+      socket.end();
+      return;
+    }
+    // Liveness probe (protocol 2): answer "yes, this is session X's bridge" and nothing more. No
+    // paths, no busy diagnostics, no secret. Handled before the push path so a probe never touches
+    // the busy tracker or the send queue.
+    if (classifyRequest(input).kind === "probe") {
+      if (!probeRateLimiter.allow()) {
+        writeResponse(socket, buildProbeError(PROBE_ERRORS.RATE_LIMITED));
+        socket.end();
+        return;
+      }
+      const validated = validateProbeRequest(input, secret);
+      if (!validated.ok) {
+        writeResponse(socket, buildProbeError(validated.error));
+        socket.end();
+        return;
+      }
+      writeResponse(
+        socket,
+        buildProbeResponse({
+          nonce: validated.nonce,
+          sessionId,
+          bridgeGeneration,
+        }),
+      );
       socket.end();
       return;
     }
@@ -248,10 +291,15 @@ const createdAt = new Date().toISOString();
 // Registry write, re-run on a heartbeat so `telex copilot push` and the turn guard can tell a
 // live bridge (fresh heartbeat + live pid) from a stale registry a crashed process left behind.
 // It also advertises the max request size so push can preflight against the real (negotiated) cap.
+//
+// Written temp-then-rename rather than in place: a plain `writeFile` truncates first, so a reader
+// landing in that window sees a partial document. The daemon reads this file on every reconcile
+// pass to resolve the producer credential, and a truncated read there is classified as a
+// credential failure for the binding, so the partial-write window was a routine source of
+// spurious failures at the 15 s heartbeat cadence.
+let registrySeq = 0;
 async function writeRegistry() {
-  await writeFile(
-    registryTempPath,
-    JSON.stringify(
+  const payload = JSON.stringify(
       {
         sessionId,
         endpoint,
@@ -259,6 +307,14 @@ async function writeRegistry() {
         lifecyclePid: process.ppid,
         secret,
         maxRequestBytes: MAX_REQUEST_BYTES,
+        // Wire protocol this bridge speaks. `telex copilot attach/resume` records the range in the
+        // station intent so the daemon can tell a probe-capable producer (>= 2) from a *legacy*
+        // one — legacy is never auto-restored, but it never wedges anything either.
+        protocol: COPILOT_BRIDGE_PROTOCOL,
+        bridgeGeneration,
+        // Diagnostic. The authoritative process start time in a station intent is captured by
+        // telex through the platform primitive, never trusted from this file.
+        startTimeMs,
         createdAt,
         heartbeatAt: new Date().toISOString(),
         // Diagnostic only (issue #65): the bridge's connect-time answer is the ONLY authoritative
@@ -274,16 +330,18 @@ async function writeRegistry() {
       },
       null,
       2,
-    ),
-    "utf8",
-  );
-  if (isPosix) {
-    await chmod(registryTempPath, 0o600);
+    );
+  const tmpPath = `${registryPath}.${process.pid}.${registrySeq++}.tmp`;
+  try {
+    await writeFile(tmpPath, payload, { encoding: "utf8", mode: 0o600 });
+    if (isPosix) {
+      await chmod(tmpPath, 0o600).catch(() => {});
+    }
+    await rename(tmpPath, registryPath);
+  } catch (e) {
+    await rm(tmpPath, { force: true }).catch(() => {});
+    throw e;
   }
-  // Publish complete heartbeat snapshots atomically. `telex copilot session-end`
-  // reads this file at turn-stop; direct truncate-and-rewrite could otherwise
-  // make a live App bridge look absent during the brief partial-JSON window.
-  await rename(registryTempPath, registryPath);
 }
 let registryWrite = Promise.resolve();
 function queueRegistryWrite() {
@@ -306,9 +364,8 @@ const cleanup = async () => {
   try {
     clearInterval(heartbeatTimer);
   } catch {}
-  // Let a queued heartbeat finish before removing its temp or published registry.
+  // Let a queued heartbeat finish before removing the published registry.
   await registryWrite.catch(() => {});
-  await rm(registryTempPath, { force: true }).catch(() => {});
   try {
     server.close();
   } catch {}
