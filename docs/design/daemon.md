@@ -163,7 +163,7 @@ Active waits recover from structurally identified transient PostgreSQL connectio
 failures without unregistering the station. Candidate fetch and the epoch
 heartbeat immediately before delivery share a bounded attempt. A stalled initial
 acquisition/query is bounded too. Recovery has a fixed 3,000 ms budget, with
-exponential delays starting at 50 ms and capped at 2,000 ms; failed attempts do not
+exponential delays starting at 50 ms and capped at 500 ms; failed attempts do not
 restart that budget. A successful attempt resets it for a later independent
 failure. The original finite wait deadline bounds every attempt and retry delay.
 If that deadline expires before or at the recovery deadline, the outcome is
