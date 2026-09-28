@@ -1,0 +1,47 @@
+{
+  "schema_version": 1,
+  "generation": 3,
+  "created_at_ms": 1785000000000,
+  "updated_at_ms": 1785000000500,
+  "state": "live",
+  "store_key": "sqlite:/frozen/telex.db",
+  "session_id": "frozen-session",
+  "address": "addr:frozen",
+  "occupant": "frozen-occupant",
+  "description": "frozen v1 fixture",
+  "delivery_mode": "push",
+  "wake_on_cc": true,
+  "cc_watermark_ms": 1785000000123,
+  "handler": {
+    "kind": "telex_copilot_push_v1",
+    "session_id": "frozen-session"
+  },
+  "producer": {
+    "kind": "local_endpoint_challenge_v1",
+    "transport": "unix_socket",
+    "endpoint_path": "/frozen/telex-bridge/frozen-session.sock",
+    "exe_path": "/frozen/node",
+    "pid": 4242,
+    "start_time": 987654321,
+    "host_id": "0123456789abcdef0123456789abcdef",
+    "boot_id": "fedcba9876543210fedcba9876543210",
+    "protocol": { "min": 2, "max": 2 },
+    "credential": {
+      "kind": "owner_private_json_field_v1",
+      "root_id": "copilot_bridge_root",
+      "path": "/frozen/telex-bridge/frozen-session.json",
+      "pointer": "/secret",
+      "max_age_ms": 60000
+    }
+  },
+  "daemon_compat": { "protocol_major": 1, "protocol_minor": 5 },
+  "singleton_hash": "frozenhash123",
+  "evidence": {
+    "last_attempt_ms": 1785000000400,
+    "last_success_ms": 1785000000450,
+    "attempts": 2,
+    "consecutive_failures": 0,
+    "producer_verified_ms": 1785000000440
+  },
+  "a_field_from_a_future_build": { "must": "survive a rewrite" }
+}

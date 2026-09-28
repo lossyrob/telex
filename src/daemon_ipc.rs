@@ -50,6 +50,13 @@ pub const CAP_ON_DELIVER_DEFERRED: &str = "on_deliver_deferred_v1";
 pub const CAP_APPLICATION_CLIENT_V1: &str = "application_client_v1";
 pub const CAP_DELIVERY_QUARANTINE_V1: &str = "delivery_quarantine_v1";
 
+/// Advertised (not required): the daemon owns durable station intents and reconciles them
+/// (`Request::ReconcileIntents`, intent rows in status, `IntentRecoveryState`). Advertised rather
+/// than required so a pre-P11 client still handshakes; a client that needs the behavior checks the
+/// daemon minor against `RECONCILE_MIN_DAEMON_MINOR` and refuses to write an intent an older
+/// daemon would never act on.
+pub const CAP_STATION_INTENT: &str = "station_intent_v1";
+
 pub const REQUIRED_CAPABILITIES: &[&str] = &[
     CAP_JSONL,
     CAP_ADMIN_CAP,
@@ -389,6 +396,15 @@ pub enum Request {
         #[serde(default)]
         proof: Option<String>,
     },
+    /// Explicit station-intent reconciliation (issue #106 / ADR 0052). Admin-proofed exactly like
+    /// `Drain`: reconciliation arms delivery and spawns push handler processes, so it must not be
+    /// reachable from an unproofed request path. `scope` optionally narrows the pass to one store.
+    ReconcileIntents {
+        #[serde(default)]
+        proof: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        scope: Option<String>,
+    },
     Ping,
 }
 
@@ -396,6 +412,13 @@ pub enum Request {
 pub enum NeedsAttachReason {
     RestartLost,
     DeliberatelyDetached,
+    /// A `pending` station intent exists for this binding: an attach is mid-flight (or crashed
+    /// before finalizing). Explicit attach/resume is the way forward; the daemon will not act on a
+    /// pending intent.
+    PushIntentPending,
+    /// A `live` push intent exists for this binding but could not be reconciled, so the daemon
+    /// refused to create a *pull-only* member over it. This is the anti-downgrade signal.
+    PushIntentUnrecoverable,
     PredicateDeath,
     Unknown(String),
 }
@@ -405,6 +428,8 @@ impl NeedsAttachReason {
         match self {
             Self::RestartLost => "restart_lost",
             Self::DeliberatelyDetached => "deliberately_detached",
+            Self::PushIntentPending => "push_intent_pending",
+            Self::PushIntentUnrecoverable => "push_intent_unrecoverable",
             Self::PredicateDeath => "predicate_death",
             Self::Unknown(raw) => raw,
         }
@@ -428,10 +453,184 @@ impl<'de> Deserialize<'de> for NeedsAttachReason {
         Ok(match String::deserialize(deserializer)?.as_str() {
             "restart_lost" => Self::RestartLost,
             "deliberately_detached" => Self::DeliberatelyDetached,
+            "push_intent_pending" => Self::PushIntentPending,
+            "push_intent_unrecoverable" => Self::PushIntentUnrecoverable,
             "predicate_death" => Self::PredicateDeath,
             raw => Self::Unknown(raw.to_string()),
         })
     }
+}
+
+/// Recovery state of a station intent, as projected by the daemon.
+///
+/// Only `Pending`, `Live`, and `Revoked` are ever *persisted*; the rest are runtime projections
+/// held in the daemon's in-memory intent index, so a transient probe failure never rewrites
+/// durable state. `Unknown` is the forward-compat catch-all, matching `StationHealth`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum IntentRecoveryState {
+    Pending,
+    #[default]
+    Live,
+    Restored,
+    DeferredLease,
+    DeferredPullWaiter,
+    LegacyProducer,
+    Incompatible,
+    Unverifiable,
+    Insecure,
+    Quarantined,
+    Tombstoned,
+    Revoked,
+    OwnershipConflict,
+    #[serde(other)]
+    Unknown,
+}
+
+impl IntentRecoveryState {
+    pub fn precedence(self) -> u8 {
+        match self {
+            IntentRecoveryState::Tombstoned => 13,
+            IntentRecoveryState::Revoked => 12,
+            IntentRecoveryState::Insecure => 11,
+            IntentRecoveryState::Incompatible => 10,
+            IntentRecoveryState::OwnershipConflict => 9,
+            IntentRecoveryState::Quarantined => 8,
+            IntentRecoveryState::Unverifiable => 7,
+            IntentRecoveryState::LegacyProducer => 6,
+            IntentRecoveryState::DeferredPullWaiter => 5,
+            IntentRecoveryState::DeferredLease => 4,
+            IntentRecoveryState::Pending => 3,
+            IntentRecoveryState::Restored => 2,
+            IntentRecoveryState::Live => 1,
+            IntentRecoveryState::Unknown => 0,
+        }
+    }
+
+    pub fn max(self, other: Self) -> Self {
+        if other.precedence() > self.precedence() {
+            other
+        } else {
+            self
+        }
+    }
+
+    pub fn is_waiting(self) -> bool {
+        matches!(
+            self,
+            IntentRecoveryState::DeferredLease
+                | IntentRecoveryState::DeferredPullWaiter
+                | IntentRecoveryState::Pending
+        )
+    }
+
+    pub fn is_recoverable(self) -> bool {
+        matches!(
+            self,
+            IntentRecoveryState::Live
+                | IntentRecoveryState::Restored
+                | IntentRecoveryState::DeferredLease
+                | IntentRecoveryState::DeferredPullWaiter
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntentStatus {
+    pub store_key: String,
+    pub session_id: String,
+    pub address: String,
+    pub state: IntentRecoveryState,
+    pub generation: u64,
+    #[serde(default)]
+    pub delivery_mode: DeliveryMode,
+    #[serde(default)]
+    pub wake_on_cc: bool,
+    #[serde(default)]
+    pub has_member: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cc_watermark_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_attempt_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_success_ms: Option<i64>,
+    #[serde(default)]
+    pub attempts: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_code: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub producer_verified_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_attempt_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recovery_latency_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub index_as_of_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReconcileReport {
+    pub pass_seq: u64,
+    #[serde(default = "ReconcileReport::default_ran")]
+    pub ran: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub skipped_reason: Option<String>,
+    pub scanned: usize,
+    pub restored: usize,
+    pub refreshed_no_op: usize,
+    pub deferred_lease: usize,
+    pub deferred_pull_waiter: usize,
+    pub failed: usize,
+    pub skipped: usize,
+    pub inert: usize,
+    pub over_cap: bool,
+    pub observed_count: usize,
+    pub duration_ms: u64,
+    pub deadline_reached: bool,
+    pub index_as_of_ms: i64,
+}
+
+impl ReconcileReport {
+    fn default_ran() -> bool {
+        true
+    }
+
+    pub fn skipped_pass(pass_seq: u64, reason: &str) -> Self {
+        Self {
+            pass_seq,
+            ran: false,
+            skipped_reason: Some(reason.to_string()),
+            ..Default::default()
+        }
+    }
+}
+
+/// Pre/post-drain intent signal, computed from in-memory state only (members + the cached intent
+/// index). No directory scan, no probe, no network I/O — so producing it can never push a graceful
+/// drain past `--drain-timeout-ms`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DrainIntentReport {
+    /// Intents a compatible successor is expected to restore automatically.
+    pub recoverable: usize,
+    /// Intents written by an attach that has not finalized yet. Never reconciled, so never
+    /// "restored automatically" — counted separately rather than folded into `recoverable`.
+    #[serde(default)]
+    pub pending: usize,
+    /// Intents that need operator action (unverifiable, insecure, quarantined).
+    pub degraded: usize,
+    /// Intents this build cannot reconcile (schema or descriptor incompatibility, legacy producer).
+    pub incompatible: usize,
+    /// Intents whose state is not yet known to the index.
+    pub unknown: usize,
+    /// Manifests the scan rejected before it could establish which binding they name. Included in
+    /// `degraded` so the operator-facing total is never silently zero, and reported separately so
+    /// "unreadable" is distinguishable from "readable but broken".
+    #[serde(default)]
+    pub unidentifiable: usize,
+    pub over_cap: bool,
+    pub observed_count: usize,
+    /// Index freshness, so an operator sees staleness rather than assuming the report is live.
+    pub index_as_of_ms: i64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -487,6 +686,10 @@ pub enum Response {
     StatusReport {
         status: DaemonStatus,
     },
+    /// One completed reconciliation pass.
+    Reconciled {
+        report: ReconcileReport,
+    },
     Pong {
         protocol_version: ProtocolVersion,
         daemon_version: String,
@@ -505,6 +708,10 @@ pub enum Response {
         message_id: Option<i64>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         lease_epoch: Option<i64>,
+        /// Pre-drain station-intent signal, present on the `Drain` ack. Additive and optional, so
+        /// an older client deserializing a newer daemon's ack simply ignores it.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        drain_intents: Option<DrainIntentReport>,
     },
     StationStopped {
         store_key: String,
@@ -553,6 +760,11 @@ pub struct SentReceipt {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DaemonStatus {
+    /// Optional capabilities this daemon advertises, so a client can gate on the capability
+    /// string as well as on the protocol minor (the minor is the axis most likely to be reused
+    /// for an unrelated additive change later). Absent from an older daemon's status.
+    #[serde(default)]
+    pub capabilities: Vec<String>,
     pub protocol_version: ProtocolVersion,
     pub daemon_version: String,
     pub instance_id: String,
@@ -577,6 +789,16 @@ pub struct DaemonStatus {
     pub idle_stations: IdleStationStatus,
     #[serde(default)]
     pub deaf_stations: DeafStationStatus,
+    /// Station-intent rows, including intent-only rows with no member. Part of the authenticated
+    /// (`detail: true`) projection only — never the uncapped `status_minimal` projection.
+    #[serde(default)]
+    pub intents: Vec<IntentStatus>,
+    /// When the cached intent index was last refreshed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent_index_as_of_ms: Option<i64>,
+    /// Whether the intent scope holds more than the per-scope write cap.
+    #[serde(default)]
+    pub intent_over_cap: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -906,6 +1128,10 @@ pub fn daemon_capabilities() -> Vec<String> {
     // Advertised-but-optional (issue #65): lets a client detect a daemon that understands the
     // deferred outcome + `DrainDeferred`, so version skew against an older daemon is diagnosable.
     caps.push(CAP_ON_DELIVER_DEFERRED.to_string());
+    // Advertised-but-optional (issue #106): durable station intents plus daemon-owned
+    // reconciliation. A client that would write an intent checks this (and the daemon minor)
+    // rather than assuming a connected daemon will ever act on one.
+    caps.push(CAP_STATION_INTENT.to_string());
     caps.push(CAP_APPLICATION_CLIENT_V1.to_string());
     caps.push(CAP_DELIVERY_QUARANTINE_V1.to_string());
     caps
@@ -995,6 +1221,16 @@ pub fn needs_attach_with_reason(message: impl Into<String>, reason: NeedsAttachR
 
 pub fn ambiguous(message: impl Into<String>) -> Response {
     error_response(ERROR_AMBIGUOUS, message.into())
+}
+
+/// `ERROR_INCOMPATIBLE` carrying a typed reason, so a client can render an actionable recovery
+/// path instead of parsing free text. Used by the anti-downgrade guard.
+pub fn incompatible_with_reason(message: impl Into<String>, reason: NeedsAttachReason) -> Response {
+    Response::Error {
+        code: ERROR_INCOMPATIBLE.to_string(),
+        message: message.into(),
+        needs_attach_reason: Some(reason),
+    }
 }
 
 pub fn unsupported(message: impl Into<String>) -> Response {

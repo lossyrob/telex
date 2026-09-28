@@ -818,3 +818,170 @@ fn plugin_versions_track_the_crate_version() {
          Cargo.toml [package].version ({crate_version})"
     );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Version axes (issue #106 / ADR 0052)
+// ---------------------------------------------------------------------------------------------
+
+/// The four release axes this feature touches, checked against a **frozen previous-release
+/// fixture** rather than against a second copy of the current constants.
+///
+/// Comparing a constant to itself asserts nothing. Comparing it to a recorded previous value is
+/// what makes "this axis is deliberately unchanged" a real, failing check: if someone bumps
+/// `MIN_COMPATIBLE_PLUGIN_VERSION`, this test fails and forces the runbook to be updated with it.
+///
+/// The assertions are on the **relationship** the fixture declares (`expected_movement`), not on
+/// hardcoded current values. That is what makes the runbook step executable: rolling the fixture
+/// forward to record this release's values and resetting every axis to `unchanged` leaves this
+/// test green, where a test that hardcoded both sides turned the documented step into an
+/// instant CI failure with no instruction to also edit the test.
+#[test]
+fn station_intent_version_axes_match_the_frozen_previous_release_contract() {
+    let fixture: Value =
+        serde_json::from_str(&read("tests/fixtures/release/version-axes-previous.json"))
+            .expect("parse the frozen version-axis fixture");
+    let previous = &fixture["axes"];
+    let movement = &fixture["expected_movement"];
+    let expected = |axis: &str| {
+        movement
+            .get(axis)
+            .and_then(Value::as_str)
+            .unwrap_or("unchanged")
+            .to_string()
+    };
+
+    let check_u64 = |axis: &str, current: u64| {
+        let recorded = previous[axis].as_u64();
+        match expected(axis).as_str() {
+            "introduced" => assert!(
+                previous[axis].is_null(),
+                "{axis} is declared newly introduced, so the fixture must record it as null"
+            ),
+            "changed" => {
+                let recorded = recorded.unwrap_or_else(|| {
+                    panic!("{axis} is declared changed, so it must be recorded")
+                });
+                assert!(
+                    current > recorded,
+                    "{axis} is declared changed: current {current} must be greater than the \
+                     recorded previous {recorded}"
+                );
+            }
+            "unchanged" => assert_eq!(
+                recorded,
+                Some(current),
+                "{axis} is an asserted-unchanged axis for this release; if it really changed, \
+                 update tests/fixtures/release/version-axes-previous.json AND the release runbook"
+            ),
+            other => panic!("unknown expected_movement {other:?} for {axis}"),
+        }
+    };
+
+    check_u64(
+        "copilot_bridge_protocol",
+        telex::commands::copilot::COPILOT_BRIDGE_PROTOCOL as u64,
+    );
+    let probe_protocol = read("copilot/bridge/probe-protocol.mjs");
+    let js_u32 = |name: &str| {
+        let pattern = format!("export const {name} = ");
+        let value = probe_protocol
+            .split(&pattern)
+            .nth(1)
+            .unwrap_or_else(|| panic!("{name} not found in probe-protocol.mjs"))
+            .split(';')
+            .next()
+            .expect("constant terminator")
+            .trim();
+        value
+            .parse::<u32>()
+            .unwrap_or_else(|e| panic!("{name} must be a u32 literal, got {value:?}: {e}"))
+    };
+    assert_eq!(
+        js_u32("COPILOT_BRIDGE_PROTOCOL"),
+        telex::commands::copilot::COPILOT_BRIDGE_PROTOCOL,
+        "the Rust and JavaScript bridge protocol constants must be bumped together"
+    );
+    assert_eq!(
+        js_u32("BRIDGE_PROBE_MIN_PROTOCOL"),
+        telex::daemon_reconcile::BRIDGE_PROBE_MIN_PROTOCOL,
+        "the Rust and JavaScript minimum probe protocol constants must be bumped together"
+    );
+    check_u64("protocol_minor", telex::daemon_ipc::PROTOCOL_MINOR as u64);
+    check_u64(
+        "station_intent_schema_version",
+        telex::station_intent::STATION_INTENT_SCHEMA_VERSION as u64,
+    );
+    assert_eq!(
+        telex::daemon_reconcile::RECONCILE_MIN_DAEMON_MINOR,
+        telex::daemon_ipc::PROTOCOL_MINOR,
+        "the client capability gate must name the minor that actually introduced reconciliation"
+    );
+    assert_eq!(
+        telex::station_intent::STATION_INTENT_SCHEMA_MIN_SUPPORTED,
+        1
+    );
+    assert_eq!(
+        telex::station_intent::STATION_INTENT_SCHEMA_MAX_SUPPORTED,
+        telex::station_intent::STATION_INTENT_SCHEMA_VERSION
+    );
+
+    // The axis asserted UNCHANGED: a string, so it does not go through `check_u64`.
+    assert_eq!(
+        expected("min_compatible_plugin_version"),
+        "unchanged",
+        "MIN_COMPATIBLE_PLUGIN_VERSION is an asserted-unchanged axis for this release"
+    );
+    assert_eq!(
+        previous["min_compatible_plugin_version"].as_str(),
+        Some(telex::commands::copilot::MIN_COMPATIBLE_PLUGIN_VERSION),
+        "MIN_COMPATIBLE_PLUGIN_VERSION is an asserted-unchanged axis for this release; \
+         if the plugin/bridge contract really changed, update the fixture AND the release runbook"
+    );
+
+    // And the runbook must actually document all four axes.
+    let runbook = read("docs/developing/releasing.md");
+    for axis in [
+        "STATION_INTENT_SCHEMA_VERSION",
+        "COPILOT_BRIDGE_PROTOCOL",
+        "PROTOCOL_MINOR",
+        "MIN_COMPATIBLE_PLUGIN_VERSION",
+    ] {
+        assert!(
+            runbook.contains(axis),
+            "docs/developing/releasing.md must document the {axis} release axis"
+        );
+    }
+    assert!(
+        runbook.contains("expected_movement"),
+        "the runbook must tell the releaser to reset expected_movement when rolling the fixture forward"
+    );
+}
+
+/// A frozen V1 manifest must still load, and a rewrite must preserve a field this build does not
+/// know about.
+#[test]
+fn station_intent_frozen_v1_fixture_loads_and_preserves_unknown_fields() {
+    let raw = read("tests/fixtures/station_intent/v1/live.intent.json");
+    let intent: telex::station_intent::StationIntentV1 =
+        serde_json::from_str(&raw).expect("a frozen V1 manifest must still deserialize");
+    intent
+        .validate()
+        .expect("a frozen V1 manifest must still validate");
+    assert_eq!(intent.schema_version, 1);
+    assert_eq!(intent.delivery_mode, "push");
+    assert_eq!(intent.cc_watermark_ms, Some(1_785_000_000_123));
+    assert_eq!(
+        intent.extra.get("a_field_from_a_future_build"),
+        Some(&serde_json::json!({"must": "survive a rewrite"})),
+        "a V1 daemon must not drop a future build's field"
+    );
+
+    let rewritten = serde_json::to_string(&intent).expect("re-encode");
+    let round_tripped: telex::station_intent::StationIntentV1 =
+        serde_json::from_str(&rewritten).expect("re-decode");
+    assert_eq!(round_tripped, intent);
+    assert!(
+        rewritten.contains("a_field_from_a_future_build"),
+        "the unknown field must survive the rewrite, not just the in-memory copy"
+    );
+}

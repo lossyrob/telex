@@ -259,12 +259,26 @@ async fn perform_upgrade(
     } else {
         Some(install::switch_to(layout, &plan.tag)?)
     };
+    // Post-switch successor (ADR 0052 decision 14c): spawn the daemon this switch just installed
+    // and wait, bounded, for a reconcile pass, so an idle attached session regains push without
+    // the user running anything. Skipped when nothing was drained or nothing is recoverable.
+    let reconcile = match &switched {
+        Some(switched) => {
+            verify_successor_reconcile(ctx, &drain, Path::new(&switched.current_binary)).await
+        }
+        None => json!({
+            "attempted": false,
+            "successor_binary": serde_json::Value::Null,
+            "reason": "no switch performed",
+        }),
+    };
     let out = json!({
         "upgrade": true,
         "installed": installed,
         "drain": drain,
         "switch": switched,
         "release": plan.release,
+        "station_intent_reconcile": reconcile,
     });
     emit(ctx.fmt, &out, || {
         println!("installed {}", plan.tag);
@@ -277,6 +291,7 @@ async fn perform_upgrade(
         } else {
             println!("current unchanged (--no-switch)");
         }
+        print_station_intent_summary(&drain, &reconcile);
     });
     Ok(0)
 }
@@ -370,14 +385,35 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
         drain_daemon(ctx, args.drain_timeout_ms).await?
     };
     let switched = install::switch_to(&layout, &target)?;
+    // Rollback gets the same pre-flight report as upgrade, plus an explicit warning: a target
+    // binary that predates station-intent reconciliation cannot restore these intents, and the
+    // documented consequence is a return to manual `telex copilot resume`. Intents are never
+    // deleted by a rollback — an older daemon simply ignores a directory it does not know, the
+    // singleton-hash namespacing plus the schema range keep it inert with respect to them, and GC
+    // deliberately never removes a manifest it cannot read because of its schema version.
+    //
+    // The successor is the binary the rollback just selected, invoked as a child. Calling
+    // `connect_or_spawn` here would have spawned the *new* binary this rollback is moving away
+    // from, resurrecting exactly what the operator asked to roll back.
+    let reconcile =
+        verify_successor_reconcile(ctx, &drain, Path::new(&switched.current_binary)).await;
     let out = json!({
         "rollback": true,
         "drain": drain,
         "switch": switched,
+        "station_intent_reconcile": reconcile,
     });
     emit(ctx.fmt, &out, || {
         println!("current {}", switched.switched_to);
         println!("binary {}", switched.current_binary);
+        print_station_intent_summary(&drain, &reconcile);
+        if recoverable_intent_count(&drain).unwrap_or(0) > 0 {
+            println!(
+                "station intents  WARNING: if {} predates station-intent reconciliation it cannot restore these bindings; \
+                 run `telex --address <station> copilot resume` per station after rolling back",
+                switched.switched_to
+            );
+        }
     });
     Ok(0)
 }
@@ -591,7 +627,14 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         Err(_) => bail!("daemon drain timed out after {timeout_ms}ms"),
     };
     match response {
-        Response::Ack { .. } => Ok(json!({"drained": true, "status": "draining"})),
+        Response::Ack { drain_intents, .. } => Ok(json!({
+            "drained": true,
+            "status": "draining",
+            // The pre-drain station-intent signal (issue #106), carried through so `upgrade` and
+            // `rollback` can report — and, for upgrade, verify — what a successor must restore.
+            // `null` means the drained daemon predates station-intent reporting.
+            "station_intents": drain_intents,
+        })),
         Response::Error { code, message, .. } if code == ERROR_NOT_RUNNING => {
             Ok(json!({"drained": false, "status": "not_running", "message": message}))
         }
@@ -600,6 +643,422 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         }
         Response::Error { code, message, .. } => bail!("daemon drain failed: {code}: {message}"),
         other => bail!("unexpected daemon drain response: {other:?}"),
+    }
+}
+
+/// How long a post-switch successor is given to report a completed reconciliation pass.
+///
+/// Derived from the published graceful bound plus the successor's own spawn/readiness time, so it
+/// is generous enough not to be flaky and still bounded — `upgrade`/`rollback` must never hang.
+const SUCCESSOR_RECONCILE_TIMEOUT: Duration = Duration::from_secs(30);
+
+/// Wall-clock bound on the successor *process*: its own reconcile bound plus spawn/exit slack.
+const SUCCESSOR_WAIT_TIMEOUT: Duration =
+    Duration::from_secs(SUCCESSOR_RECONCILE_TIMEOUT.as_secs() + 10);
+
+/// How long a killed (or already exited) successor gets to close its pipes before we give up on
+/// its diagnostics. Never unbounded: a grandchild that inherited a pipe can hold it open forever.
+const SUCCESSOR_PIPE_DRAIN_GRACE: Duration = Duration::from_secs(2);
+
+/// How long we wait to *reap* a successor we just killed, so the child never outlives this
+/// process as a zombie (Unix) or an unclosed handle (Windows).
+const SUCCESSOR_REAP_GRACE: Duration = Duration::from_secs(5);
+
+/// Byte caps on what we capture from the successor's pipes. Follows the watcher's
+/// `MAX_STDOUT_BYTES` / `MAX_STDERR_BYTES` split: stdout carries a JSON report, stderr a message.
+const SUCCESSOR_STDOUT_CAP: usize = 64 * 1024;
+const SUCCESSOR_STDERR_CAP: usize = 16 * 1024;
+
+/// Character cap on any successor-provided text that reaches the result JSON.
+const SUCCESSOR_DIAGNOSTIC_CHARS: usize = 512;
+
+/// Number of recoverable intents at drain time, or `None` when the daemon did not report any.
+fn recoverable_intent_count(drain: &serde_json::Value) -> Option<u64> {
+    drain.get("station_intents")?.get("recoverable")?.as_u64()
+}
+
+/// Spawn the successor daemon the switch just installed and wait, bounded, for one reconcile pass.
+///
+/// This is a deliberate, bounded extension of "only `attach` auto-spawns" (ADR 0028), recorded in
+/// ADR 0052: it is what makes the issue's motivating scenario — `telex upgrade` with an idle
+/// Copilot session — recover without the user typing anything.
+///
+/// It runs the pass by **invoking the newly selected binary**, not by calling
+/// `connect_or_spawn` in this process. Two reasons, both load-bearing:
+///
+/// * `connect_or_spawn` spawns `current_exe()`, which during an upgrade is the *pre-switch*
+///   binary (the launcher execs `versions/<current>/telex`). That left the old binary running as
+///   the daemon, and because `connect_existing` requires the server executable to match the
+///   client's, every subsequent client — all of which are the new binary — got `Unauthorized`
+///   from a daemon that has no idle shutdown. `telex daemon stop` failed the same way.
+/// * The same executable-match rule means this process cannot request a pass from a
+///   correctly-spawned successor either. The child does both, and its own
+///   `telex daemon reconcile` retries a draining predecessor and a pass that did not run.
+///
+/// It never fails the upgrade: a successor that cannot be reached is reported, not fatal, because
+/// the binary is already switched and the next client operation will spawn one anyway.
+async fn verify_successor_reconcile(
+    ctx: &Ctx,
+    drain: &serde_json::Value,
+    successor_binary: &Path,
+) -> serde_json::Value {
+    let Some(recoverable) = recoverable_intent_count(drain) else {
+        return json!({
+            "attempted": false,
+            "successor_binary": successor_binary.to_string_lossy(),
+            "reason": "no station-intent report from the drained daemon",
+        });
+    };
+    if recoverable == 0 {
+        return json!({
+            "attempted": false,
+            "successor_binary": successor_binary.to_string_lossy(),
+            "recoverable_at_drain": 0,
+            "reason": "no recoverable station intents",
+        });
+    }
+    if !successor_binary.is_file() {
+        return json!({
+            "attempted": false,
+            "successor_binary": successor_binary.to_string_lossy(),
+            "recoverable_at_drain": recoverable,
+            "reason": format!("successor binary {} is missing", successor_binary.display()),
+        });
+    }
+    let mut command = tokio::process::Command::new(successor_binary);
+    command
+        .arg("--json")
+        .arg("daemon")
+        .arg("reconcile")
+        .arg("--timeout-ms")
+        .arg(SUCCESSOR_RECONCILE_TIMEOUT.as_millis().to_string())
+        // The successor binary lives under `versions/`, not `bin/`, so it would not re-dispatch
+        // anyway; the guard makes that explicit rather than incidental.
+        .env(crate::install::LAUNCHER_GUARD_ENV, "1");
+    if let Some(db) = ctx.cfg.db_override.as_deref() {
+        command.arg("--db").arg(db);
+    }
+    if let Some(backend) = ctx.cfg.backend_selector.as_deref() {
+        command.arg("--backend").arg(backend);
+    }
+    run_successor_reconcile(
+        command,
+        successor_binary,
+        recoverable,
+        SUCCESSOR_WAIT_TIMEOUT,
+    )
+    .await
+}
+
+/// Run one successor `daemon reconcile` child to completion (or to a kill), bounded end to end.
+///
+/// Three properties this owes the caller, none of which `Command::output()` under a timeout gives:
+///
+/// * **No pipe deadlock.** Both pipes are drained concurrently in their own tasks and keep reading
+///   past the capture cap, so a child that fills one stream while we read the other cannot wedge.
+/// * **No direct-child survivor.** A child that overruns the bound is explicitly killed *and
+///   reaped*: dropping a `tokio` child neither signals nor collects it. A daemon the child
+///   successfully spawned is a separate detached service and remains governed by daemon lifecycle.
+/// * **A result on every path.** Every branch reports `successor_binary`, so a consumer can always
+///   tell which binary the report is about.
+async fn run_successor_reconcile(
+    mut command: tokio::process::Command,
+    successor_binary: &Path,
+    recoverable: u64,
+    wait_timeout: Duration,
+) -> serde_json::Value {
+    let binary = successor_binary.to_string_lossy().to_string();
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let mut child = match command.spawn() {
+        Ok(child) => child,
+        Err(e) => {
+            return json!({
+                "attempted": true,
+                "successor_binary": binary,
+                "recoverable_at_drain": recoverable,
+                "error": format!("spawning the successor: {e}"),
+            })
+        }
+    };
+    let pid = child.id();
+    let stdout_capture = child
+        .stdout
+        .take()
+        .map(|pipe| tokio::spawn(drain_capped(pipe, SUCCESSOR_STDOUT_CAP)));
+    let stderr_capture = child
+        .stderr
+        .take()
+        .map(|pipe| tokio::spawn(drain_capped(pipe, SUCCESSOR_STDERR_CAP)));
+    let status = match tokio::time::timeout(wait_timeout, child.wait()).await {
+        Ok(Ok(status)) => status,
+        Ok(Err(e)) => {
+            // A failed `wait` leaves the child's fate unknown, so it gets the same kill-and-reap
+            // treatment as an overrun rather than being abandoned.
+            let terminated = child.start_kill().is_ok();
+            let reaped = matches!(
+                tokio::time::timeout(SUCCESSOR_REAP_GRACE, child.wait()).await,
+                Ok(Ok(_))
+            );
+            let stderr = collect_capture(stderr_capture).await;
+            let _ = collect_capture(stdout_capture).await;
+            return json!({
+                "attempted": true,
+                "successor_binary": binary,
+                "recoverable_at_drain": recoverable,
+                "terminated": terminated,
+                "reaped": reaped,
+                "successor_pid": pid,
+                "stderr": bounded_diagnostic(&stderr),
+                "error": format!("waiting for the successor: {e}"),
+            });
+        }
+        Err(_) => {
+            let terminated = child.start_kill().is_ok();
+            let reaped = matches!(
+                tokio::time::timeout(SUCCESSOR_REAP_GRACE, child.wait()).await,
+                Ok(Ok(_))
+            );
+            let stderr = collect_capture(stderr_capture).await;
+            let _ = collect_capture(stdout_capture).await;
+            return json!({
+                "attempted": true,
+                "successor_binary": binary,
+                "recoverable_at_drain": recoverable,
+                "timed_out": true,
+                "terminated": terminated,
+                "reaped": reaped,
+                "successor_pid": pid,
+                "stderr": bounded_diagnostic(&stderr),
+                "error": format!(
+                    "successor did not report a reconcile pass within {}",
+                    render_bound(wait_timeout)
+                ),
+            });
+        }
+    };
+    let stdout = collect_capture(stdout_capture).await;
+    let stderr = collect_capture(stderr_capture).await;
+    successor_reconcile_result(
+        recoverable,
+        status.success(),
+        status.code(),
+        &stdout,
+        &stderr,
+        successor_binary,
+    )
+}
+
+/// Drain a child pipe to EOF, keeping at most `cap` bytes.
+///
+/// It keeps reading after the cap instead of stopping: the point is that the child never blocks on
+/// a full pipe, which is exactly what a capped-then-abandoned reader would cause.
+async fn drain_capped<R: tokio::io::AsyncRead + Unpin>(mut reader: R, cap: usize) -> Vec<u8> {
+    use tokio::io::AsyncReadExt;
+    let mut captured = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        match reader.read(&mut buffer).await {
+            Ok(0) | Err(_) => return captured,
+            Ok(count) => {
+                if captured.len() < cap {
+                    let take = count.min(cap - captured.len());
+                    captured.extend_from_slice(&buffer[..take]);
+                }
+            }
+        }
+    }
+}
+
+/// Collect a pipe-drain task, bounded. A reader still blocked after the grace is aborted rather
+/// than awaited: a grandchild holding the inherited pipe open must not extend `upgrade`.
+async fn collect_capture(capture: Option<tokio::task::JoinHandle<Vec<u8>>>) -> Vec<u8> {
+    let Some(mut capture) = capture else {
+        return Vec::new();
+    };
+    match tokio::time::timeout(SUCCESSOR_PIPE_DRAIN_GRACE, &mut capture).await {
+        Ok(Ok(bytes)) => bytes,
+        Ok(Err(_)) => Vec::new(),
+        Err(_) => {
+            capture.abort();
+            Vec::new()
+        }
+    }
+}
+
+/// Trimmed, character-bounded rendering of captured child output for a diagnostic JSON field.
+fn bounded_diagnostic(bytes: &[u8]) -> String {
+    bounded_text(&String::from_utf8_lossy(bytes))
+}
+
+fn bounded_text(text: &str) -> String {
+    text.trim()
+        .chars()
+        .take(SUCCESSOR_DIAGNOSTIC_CHARS)
+        .collect()
+}
+
+/// Render a bound for the operator-facing message: whole seconds normally, milliseconds for a
+/// sub-second bound, which would otherwise read as "within 0s".
+fn render_bound(bound: Duration) -> String {
+    if bound.subsec_millis() == 0 {
+        format!("{}s", bound.as_secs())
+    } else {
+        format!("{}ms", bound.as_millis())
+    }
+}
+
+/// Classify one finished successor run into the `station_intent_reconcile` result.
+///
+/// stdout is parsed **before** the exit status is consulted. `telex daemon reconcile` exits
+/// non-zero precisely when it reports `reconciled: false` — a structured, actionable answer
+/// ("no reconcile pass completed before the timeout", "the daemon did not answer...") — so keying
+/// on the status first threw away the only diagnosis the successor produced and replaced it with a
+/// generic "rejected" plus a stderr tail the daemon never writes.
+///
+/// Every branch carries `successor_binary`, and every non-zero exit still carries `exit_code` and
+/// `min_daemon_minor`, so existing consumers see nothing removed.
+fn successor_reconcile_result(
+    recoverable: u64,
+    success: bool,
+    exit_code: Option<i32>,
+    stdout: &[u8],
+    stderr: &[u8],
+    successor_binary: &Path,
+) -> serde_json::Value {
+    let binary = successor_binary.to_string_lossy().to_string();
+    let stderr_tail = bounded_diagnostic(stderr);
+    let min_daemon_minor = crate::daemon_reconcile::RECONCILE_MIN_DAEMON_MINOR;
+    let parsed: serde_json::Value = match serde_json::from_slice(stdout) {
+        Ok(parsed) => parsed,
+        Err(e) => {
+            // No structured report to preserve. A non-zero exit with unparseable stdout is the
+            // "successor is too old to understand `daemon reconcile`" shape (a clap usage error),
+            // which is what `min_daemon_minor` is a hint for.
+            let mut result = json!({
+                "attempted": true,
+                "successor_binary": binary,
+                "recoverable_at_drain": recoverable,
+                "exit_code": exit_code,
+                "stderr": stderr_tail,
+                "stdout": bounded_diagnostic(stdout),
+                "error": if success {
+                    format!("successor reconcile output was not JSON ({e})")
+                } else {
+                    "the successor rejected `daemon reconcile`".to_string()
+                },
+            });
+            if !success {
+                result["min_daemon_minor"] = json!(min_daemon_minor);
+            }
+            return result;
+        }
+    };
+    if parsed
+        .get("reconciled")
+        .and_then(serde_json::Value::as_bool)
+        != Some(true)
+    {
+        let mut result = json!({
+            "attempted": true,
+            "successor_binary": binary,
+            "recoverable_at_drain": recoverable,
+            "exit_code": exit_code,
+            "reconciled": false,
+            "stderr": stderr_tail,
+            "error": parsed
+                .get("error")
+                .and_then(serde_json::Value::as_str)
+                .map(bounded_text)
+                .unwrap_or_else(|| "successor reported no completed reconcile pass".to_string()),
+        });
+        if let Some(store_key) = parsed.get("store_key").and_then(serde_json::Value::as_str) {
+            result["store_key"] = json!(bounded_text(store_key));
+        }
+        if !success {
+            result["min_daemon_minor"] = json!(min_daemon_minor);
+        }
+        return result;
+    }
+    let report = parsed.get("report").cloned().unwrap_or(json!({}));
+    let count = |key: &str| {
+        report
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .unwrap_or(0)
+    };
+    json!({
+        "attempted": true,
+        "reconciled": true,
+        "recoverable_at_drain": recoverable,
+        "exit_code": exit_code,
+        "restored": count("restored"),
+        "refreshed_no_op": count("refreshed_no_op"),
+        "deferred_lease": count("deferred_lease"),
+        "failed": count("failed"),
+        "pass_seq": count("pass_seq"),
+        "successor_binary": binary,
+    })
+}
+
+/// Render the station-intent part of an upgrade/rollback result in text mode.
+fn print_station_intent_summary(drain: &serde_json::Value, reconcile: &serde_json::Value) {
+    match drain.get("station_intents") {
+        Some(serde_json::Value::Object(report)) => {
+            let get = |key: &str| {
+                report
+                    .get(key)
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0)
+            };
+            println!(
+                "station intents  recoverable {} pending {} degraded {} incompatible {} unknown {}",
+                get("recoverable"),
+                get("pending"),
+                get("degraded"),
+                get("incompatible"),
+                get("unknown")
+            );
+            if get("pending") > 0 {
+                println!(
+                    "station intents  {} pending intent(s) are not finalized; a successor cannot restore them until the next Copilot turn boundary",
+                    get("pending")
+                );
+            }
+            if get("degraded") + get("incompatible") > 0 {
+                println!(
+                    "station intents  {} intent(s) need `telex --address <station> copilot resume` after this switch",
+                    get("degraded") + get("incompatible")
+                );
+            }
+        }
+        _ => println!("station intents  unavailable (no report from the drained daemon)"),
+    }
+    if reconcile
+        .get("attempted")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        match reconcile.get("error").and_then(serde_json::Value::as_str) {
+            Some(error) => println!("station intents  successor reconcile incomplete: {error}"),
+            None => println!(
+                "station intents  successor restored {} / deferred {} / failed {}",
+                reconcile
+                    .get("restored")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                reconcile
+                    .get("deferred_lease")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0),
+                reconcile
+                    .get("failed")
+                    .and_then(serde_json::Value::as_u64)
+                    .unwrap_or(0)
+            ),
+        }
     }
 }
 
@@ -704,5 +1163,298 @@ mod tests {
         current["version"]["build_id"] = serde_json::json!("candidate-build");
         let metadata = parse_source_metadata(&current).unwrap();
         assert_eq!(metadata.build_id, "candidate-build");
+    }
+
+    #[test]
+    fn successor_reconcile_reports_rejection_with_bounded_stderr() {
+        let stderr = format!("unsupported argument {}", "x".repeat(700));
+        let result = successor_reconcile_result(
+            2,
+            false,
+            Some(2),
+            b"",
+            stderr.as_bytes(),
+            Path::new("old-telex"),
+        );
+        assert_eq!(result["attempted"], true);
+        assert_eq!(result["recoverable_at_drain"], 2);
+        assert_eq!(result["exit_code"], 2);
+        assert_eq!(result["error"], "the successor rejected `daemon reconcile`");
+        assert!(
+            result["stderr"].as_str().unwrap().chars().count() <= 512,
+            "stderr must stay bounded in JSON and text output"
+        );
+        assert_eq!(
+            result["min_daemon_minor"],
+            crate::daemon_reconcile::RECONCILE_MIN_DAEMON_MINOR
+        );
+    }
+
+    #[test]
+    fn successor_reconcile_preserves_non_json_diagnostics() {
+        let result = successor_reconcile_result(
+            1,
+            true,
+            Some(0),
+            b"not json",
+            b"current successor could not open the intent scope",
+            Path::new("current-telex"),
+        );
+        assert_eq!(result["attempted"], true);
+        assert!(result["error"]
+            .as_str()
+            .unwrap()
+            .contains("output was not JSON"));
+        assert_eq!(
+            result["stderr"],
+            "current successor could not open the intent scope"
+        );
+    }
+
+    fn test_ctx() -> Ctx {
+        Ctx {
+            cfg: crate::config::Config {
+                backend_selector: None,
+                db_override: None,
+                default_address: None,
+                liveness_window_secs: 30,
+            },
+            fmt: crate::output::Format::Json,
+            address: None,
+        }
+    }
+
+    /// A command that outlives any bound this test gives it, with no grandchildren to orphan.
+    fn long_sleep_command() -> tokio::process::Command {
+        #[cfg(windows)]
+        {
+            let mut command = tokio::process::Command::new("powershell");
+            command.args(["-NoProfile", "-Command", "Start-Sleep -Seconds 120"]);
+            command
+        }
+        #[cfg(unix)]
+        {
+            let mut command = tokio::process::Command::new("sh");
+            command.args(["-c", "sleep 120"]);
+            command
+        }
+    }
+
+    #[cfg(unix)]
+    fn process_is_running(pid: u32) -> bool {
+        // The child has already been reaped, so ESRCH here means "gone", not "not ours".
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+
+    #[cfg(windows)]
+    fn process_is_running(pid: u32) -> bool {
+        // Reuse the daemon's own liveness probe, which is deliberately conservative: an ambiguous
+        // failure reports *alive*, so this assertion cannot pass by accident.
+        crate::session_watch::process_alive(pid)
+    }
+
+    /// `telex daemon reconcile` exits non-zero for exactly the case it explains best: a pass that
+    /// did not run. Keying on the exit status first discarded that structured answer, so an
+    /// operator saw "the successor rejected `daemon reconcile`" for a successor that had in fact
+    /// answered in full.
+    #[test]
+    fn successor_reconcile_preserves_a_structured_report_from_a_nonzero_exit() {
+        let stdout = br#"{"reconciled":false,"store_key":"scope-abc","error":"no reconcile pass completed before the timeout"}"#;
+        let result = successor_reconcile_result(
+            3,
+            false,
+            Some(1),
+            stdout,
+            b"",
+            Path::new("versions/v2/telex"),
+        );
+        assert_eq!(result["attempted"], true);
+        assert_eq!(result["reconciled"], false);
+        assert_eq!(result["exit_code"], 1);
+        assert_eq!(result["recoverable_at_drain"], 3);
+        assert_eq!(
+            result["error"], "no reconcile pass completed before the timeout",
+            "the successor's own diagnosis must survive its non-zero exit: {result}"
+        );
+        assert_eq!(result["store_key"], "scope-abc");
+        assert_eq!(result["successor_binary"], "versions/v2/telex");
+        // Additive compatibility: every non-zero exit still carries the old hint fields.
+        assert_eq!(
+            result["min_daemon_minor"],
+            crate::daemon_reconcile::RECONCILE_MIN_DAEMON_MINOR
+        );
+    }
+
+    #[test]
+    fn successor_reconcile_bounds_a_structured_error_from_a_nonzero_exit() {
+        let stdout = serde_json::to_vec(&json!({
+            "reconciled": false,
+            "store_key": "s".repeat(4096),
+            "error": "x".repeat(9000),
+        }))
+        .expect("encode oversized successor report");
+        let result =
+            successor_reconcile_result(1, false, Some(1), &stdout, b"", Path::new("next-telex"));
+        assert_eq!(result["reconciled"], false);
+        assert!(
+            result["error"].as_str().unwrap().chars().count() <= SUCCESSOR_DIAGNOSTIC_CHARS,
+            "a child-provided error must stay bounded: {result}"
+        );
+        assert!(
+            result["store_key"].as_str().unwrap().chars().count() <= SUCCESSOR_DIAGNOSTIC_CHARS,
+            "a child-provided store key must stay bounded: {result}"
+        );
+    }
+
+    /// Whichever way the successor step ends, the result must say which binary it is about —
+    /// otherwise a report from `upgrade` and one from `rollback` are indistinguishable.
+    #[tokio::test]
+    async fn successor_reconcile_names_the_binary_on_every_branch() {
+        let ctx = test_ctx();
+        let missing = std::env::current_dir()
+            .expect("cwd")
+            .join("no-such-successor-telex");
+        let skipped = vec![
+            (
+                "no station-intent report",
+                verify_successor_reconcile(&ctx, &json!({}), &missing).await,
+            ),
+            (
+                "nothing recoverable",
+                verify_successor_reconcile(
+                    &ctx,
+                    &json!({"station_intents": {"recoverable": 0}}),
+                    &missing,
+                )
+                .await,
+            ),
+            (
+                "missing successor binary",
+                verify_successor_reconcile(
+                    &ctx,
+                    &json!({"station_intents": {"recoverable": 2}}),
+                    &missing,
+                )
+                .await,
+            ),
+        ];
+        for (label, result) in &skipped {
+            assert_eq!(result["attempted"], false, "{label}: {result}");
+            assert_eq!(
+                result["successor_binary"],
+                missing.to_string_lossy().as_ref(),
+                "{label} must still name the successor: {result}"
+            );
+        }
+
+        let spawn_failure = run_successor_reconcile(
+            tokio::process::Command::new(&missing),
+            &missing,
+            2,
+            Duration::from_secs(5),
+        )
+        .await;
+        assert_eq!(spawn_failure["attempted"], true);
+        assert_eq!(
+            spawn_failure["successor_binary"],
+            missing.to_string_lossy().as_ref(),
+            "a spawn failure must name the successor: {spawn_failure}"
+        );
+
+        let reconciled = successor_reconcile_result(
+            1,
+            true,
+            Some(0),
+            br#"{"reconciled":true,"report":{"restored":1,"pass_seq":4}}"#,
+            b"",
+            Path::new("done-telex"),
+        );
+        let structured_failure = successor_reconcile_result(
+            1,
+            false,
+            Some(1),
+            br#"{"reconciled":false,"error":"the daemon did not answer"}"#,
+            b"",
+            Path::new("failed-telex"),
+        );
+        let malformed_zero =
+            successor_reconcile_result(1, true, Some(0), b"not json", b"", Path::new("odd-telex"));
+        let malformed_nonzero = successor_reconcile_result(
+            1,
+            false,
+            Some(2),
+            b"error: unrecognized subcommand",
+            b"usage: telex daemon",
+            Path::new("old-telex"),
+        );
+        for (label, result, expected) in [
+            ("reconciled", &reconciled, "done-telex"),
+            ("structured failure", &structured_failure, "failed-telex"),
+            ("malformed on exit 0", &malformed_zero, "odd-telex"),
+            ("malformed on exit 2", &malformed_nonzero, "old-telex"),
+        ] {
+            assert_eq!(result["attempted"], true, "{label}: {result}");
+            assert_eq!(
+                result["successor_binary"], expected,
+                "{label} must name the successor: {result}"
+            );
+        }
+        assert_eq!(reconciled["restored"], 1);
+        assert_eq!(reconciled["pass_seq"], 4);
+        assert_eq!(reconciled["reconciled"], true);
+    }
+
+    /// A successor CLI child that never exits must not outlive the `upgrade` that started it: the
+    /// old code dropped the direct child on timeout, which neither signals nor collects it.
+    #[tokio::test]
+    async fn successor_reconcile_kills_and_reaps_a_child_that_overruns_the_bound() {
+        let started = Instant::now();
+        let result = run_successor_reconcile(
+            long_sleep_command(),
+            Path::new("hung-telex"),
+            4,
+            Duration::from_millis(750),
+        )
+        .await;
+        assert!(
+            started.elapsed() < Duration::from_secs(30),
+            "the successor step must stay bounded, took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(result["attempted"], true, "{result}");
+        assert_eq!(result["timed_out"], true, "{result}");
+        assert_eq!(result["terminated"], true, "{result}");
+        assert_eq!(result["reaped"], true, "{result}");
+        assert_eq!(result["recoverable_at_drain"], 4, "{result}");
+        assert_eq!(result["successor_binary"], "hung-telex", "{result}");
+        assert!(
+            result["error"]
+                .as_str()
+                .unwrap()
+                .contains("did not report a reconcile pass within 750ms"),
+            "the message must name the bound it actually applied: {result}"
+        );
+        let pid = result["successor_pid"]
+            .as_u64()
+            .expect("the timeout branch must report the pid it killed") as u32;
+        assert!(
+            !process_is_running(pid),
+            "the timed-out successor (pid {pid}) must be terminated, not abandoned"
+        );
+    }
+
+    /// The capture is bounded, but the reader must keep draining past the cap — a reader that
+    /// stops reading is exactly how a child blocks forever on a full pipe.
+    #[tokio::test]
+    async fn successor_capture_is_bounded_but_keeps_draining() {
+        let payload = vec![b'x'; 200_000];
+        let captured = drain_capped(&payload[..], 1024).await;
+        assert_eq!(
+            captured.len(),
+            1024,
+            "capture must stop growing at the cap while the drain continues"
+        );
+        let bounded = bounded_diagnostic(&captured);
+        assert!(bounded.chars().count() <= SUCCESSOR_DIAGNOSTIC_CHARS);
     }
 }
