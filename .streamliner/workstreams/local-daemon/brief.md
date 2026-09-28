@@ -294,8 +294,17 @@ is same-image rather than a genuine v0.1.2 deployment.
 Campaign has independently verified both repair merges, both closed issues, and
 their ancestry in `62291a78`, closing the dependencies of release preparation.
 It directed Local to launch exactly one #157 worker under the accepted scope.
-The `schema3-release-preparation` node stays planned until that worker actually
-launches. Tagging and publication still require explicit operator approval.
+
+Issue #157 release preparation is in progress. On 2026-09-28 campaign created
+one branch-mode release worker (`ebfd215b`) on
+`feature/schema3-release-preparation`, controlled by the Local orchestrator.
+The worker acknowledged write authority before editing and is implementing
+under routine autonomy. Its read-only audit found that `install.ps1` always
+changes the user PATH; a default-preserving opt-out for disposable install
+proof is accepted in the same node and still pending. Genuine v0.1.2 upgrade,
+protocol 1.4-to-1.5, schema-2 and schema-3, fresh-install, CI, and built-asset
+proof all remain required. `schema3-release-gate` stays planned, and tagging
+and publication still require explicit operator approval.
 
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later

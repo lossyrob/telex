@@ -3,14 +3,16 @@
 - **Workstream:** `local-daemon`
 - **Node:** `schema3-release-preparation`
 - **Type:** implementation
-- **Status:** planned; both repairs merged (`afda9460` and `62291a78`), and
-  campaign verified dependency closure on 2026-09-28. Launch pending an actual
-  worker identity
+- **Status:** in progress; both repairs merged (`afda9460` and `62291a78`),
+  campaign verified dependency closure, and the release worker launched on
+  2026-09-28
 - **Attention:** focus
 - **Depends on:** completed `windows-token-buffer-alignment`, completed `postgres-wait-reset-recovery`
 - **Blocks:** `schema3-release-gate`
-- **Owner:** Local Daemon workstream orchestrator until the isolated release worker is authorized
+- **Owner:** release worker `ebfd215b-2229-4075-84af-4a4d6de2be7c` under Local Daemon
+  workstream orchestrator authorization
 - **Tracker:** [lossyrob/telex#157](https://github.com/lossyrob/telex/issues/157)
+- **Branch:** `feature/schema3-release-preparation`
 - **Parent workstream:** [lossyrob/telex#32](https://github.com/lossyrob/telex/issues/32)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
@@ -126,3 +128,30 @@ Do not repeat the shared-database investigation or read the shared database.
 - After separate operator approval at `schema3-release-gate`, the same release
   worker owns tagging, publication, and installation verification. Do not create
   another permanent release session.
+
+## Launch evidence
+
+The Engagement steps above are the launch contract. The facts below record
+their completion. The full record is on ledger item
+`local-daemon-schema3-recovery-release`.
+
+- Campaign created exactly one branch-mode App worker, `ebfd215b-2229-4075-84af-4a4d6de2be7c`, at
+  2026-09-28T19:52:59Z in
+  `C:\Users\robemanuele\proj\utils\copilot-worktrees\telex\feature-schema3-release-preparation-157`
+  on `feature/schema3-release-preparation`, with gpt-6-astra, high, and
+  long_context set explicitly. Campaign is the immutable App creator; the Local
+  orchestrator is the controller.
+- Supported preparation run `d824d107` succeeded, and the kickoff was delivered
+  unchanged (SHA-256
+  `b93497dbdb7a8dea1224bb53f11156b25da426b215a13d19d3c1de304e4372b8`).
+- Local verified `session-online` at clean `246db825`, granted standalone
+  write authority, and received the worker acknowledgement before any
+  repository write. The worker then fast-forwarded to `008f3363` and began
+  implementation under routine autonomy.
+- Accepted same-node discovery `local-daemon-release-installer-path-isolation`:
+  `install.ps1` mutates the user PATH even with an isolated install root. A
+  default-preserving explicit opt-out or test seam with targeted tests and
+  documentation is pending implementation and proof.
+- All required compatibility, install, CI, asset, review, and inspection proof
+  above remains pending. `schema3-release-gate` remains planned, and no tag or
+  publication is authorized.
