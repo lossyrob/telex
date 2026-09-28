@@ -853,7 +853,7 @@
           "entra 108976051619"
         ],
         "details": "Only the postgres and entra jobs failed; the other 12 succeeded. Under the actions-rust-lang/setup-rust-toolchain default RUSTFLAGS=-Dwarnings, SQLite-only test imports in src/daemon.rs, a test helper in src/application_client.rs, and a daemon lane constructor and control methods were unused when SQLite was off. The worker reproduced this exactly with strict local flags.",
-        "correction": "The earlier eight-profile local proof ran with RUSTFLAGS unset, so the prior claim that it followed the ordinary warning policy was inaccurate. The claim is kept as history and corrected here.",
+        "correction": "The initial eight-profile local proof used unset RUSTFLAGS and ordinary warning behavior. The earlier claim that omitting explicit job-level RUSTFLAGS also made the new CI job use ordinary warnings was wrong: actions-rust-lang/setup-rust-toolchain defaults to -D warnings. The original local proof and incorrect CI-policy claim remain historical; the strict proof and successful CI at 74b5041 are recorded separately.",
         "workerProof": "Worker-reported: all eight strict profiles and 22 tests, the six helper callers, fmt, and strict clippy passed. A local temporary LOCALAPPDATA parent setup failure was fixed in the fresh fixture only and is not a product defect."
       },
       "description": "Gate SQLite-only test symbols to the configurations that use them so non-SQLite profiles compile under the CI warning policy.",
