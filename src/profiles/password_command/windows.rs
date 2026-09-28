@@ -57,6 +57,8 @@ pub(super) struct Process {
     cleanup_observed: bool,
     close_error: Option<Failure>,
     #[cfg(test)]
+    supplied_job_for_fixture: Option<OwnedHandle>,
+    #[cfg(test)]
     fault: Option<SpawnFault>,
     #[cfg(test)]
     withheld_receipt: Option<ReceiptPart>,
@@ -80,6 +82,8 @@ impl Process {
             cleanup_observed: false,
             close_error: None,
             #[cfg(test)]
+            supplied_job_for_fixture: None,
+            #[cfg(test)]
             fault: None,
             #[cfg(test)]
             withheld_receipt: None,
@@ -98,10 +102,16 @@ impl Process {
 
         // Null security attributes make the unnamed, invocation-private job
         // noninheritable. Neither this handle nor the reader handles is passed on.
-        self.job = Some(owned(
-            unsafe { CreateJobObjectW(null(), null()) },
-            "job creation",
-        )?);
+        let create_job = || owned(unsafe { CreateJobObjectW(null(), null()) }, "job creation");
+        #[cfg(test)]
+        let job = self
+            .supplied_job_for_fixture
+            .take()
+            .map(Ok)
+            .unwrap_or_else(create_job)?;
+        #[cfg(not(test))]
+        let job = create_job()?;
+        self.job = Some(job);
         check_cancelled(cancelled)?;
         let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
         limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -747,16 +757,23 @@ mod tests {
     use std::ops::{Deref, DerefMut};
     use std::process::{Command, Stdio};
     use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-    use windows_sys::Win32::Foundation::FILETIME;
-    use windows_sys::Win32::System::JobObjects::IsProcessInJob;
+    use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, ERROR_ALREADY_EXISTS, FILETIME};
+    use windows_sys::Win32::System::JobObjects::{IsProcessInJob, OpenJobObjectW};
     use windows_sys::Win32::System::Threading::{
-        CreateEventW, GetProcessTimes, OpenEventW, OpenProcess, SetEvent,
-        PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, SYNCHRONIZATION_SYNCHRONIZE,
+        CreateEventW, GetCurrentProcess, GetProcessTimes, OpenEventW, OpenProcess, SetEvent,
+        SuspendThread, PROCESS_QUERY_LIMITED_INFORMATION, PROCESS_SYNCHRONIZE, STARTUPINFOW,
+        SYNCHRONIZATION_SYNCHRONIZE,
     };
 
     const FIXTURE: &str = "profiles::password_command::windows::tests::fixture";
     const MODE: &str = "TELEX_M2_WINDOWS_UNIT_FIXTURE";
     const GATE: &str = "TELEX_M2_WINDOWS_UNIT_GATE";
+    const OUTER_JOB: &str = "TELEX_M2_WINDOWS_UNIT_OUTER_JOB";
+    const RECEIVING_JOB: &str = "TELEX_M2_WINDOWS_UNIT_RECEIVING_JOB";
+    // JOB_OBJECT_QUERY from the SDK; avoids an otherwise unused SystemServices feature.
+    const JOB_QUERY_ACCESS: u32 = 0x0004;
+    // JOB_OBJECT_ASSIGN_PROCESS | SET_ATTRIBUTES | QUERY | TERMINATE.
+    const JOB_CONTROL_ACCESS: u32 = 0x000f;
     const CREATION_WINDOW_CHILDREN: usize = 8;
 
     struct Invocation {
@@ -1359,6 +1376,284 @@ mod tests {
     }
 
     #[test]
+    fn real_incompatible_nested_jobs_reject_assignment_before_resume() {
+        let mut ambient_member = 0;
+        assert_ne!(
+            unsafe { IsProcessInJob(GetCurrentProcess(), 0, &mut ambient_member) },
+            0
+        );
+        eprintln!("nested policy guardian ambient_job_membership={ambient_member}");
+        for restricted in [false, true] {
+            let mut nonce = [0_u8; 16];
+            getrandom::getrandom(&mut nonce).unwrap();
+            let suffix: String = nonce.iter().map(|byte| format!("{byte:02x}")).collect();
+            let name = format!("Local\\telex-nested-job-{suffix}");
+            let receiving_name = format!("Local\\telex-receiving-job-{suffix}");
+            let gate_name = format!("Local\\telex-nested-gate-{suffix}");
+            let wide_job: Vec<_> = name.encode_utf16().chain(Some(0)).collect();
+            let wide_gate: Vec<_> = gate_name.encode_utf16().chain(Some(0)).collect();
+            let wide_receiving: Vec<_> = receiving_name.encode_utf16().chain(Some(0)).collect();
+            let handle = unsafe { CreateJobObjectW(null(), wide_job.as_ptr()) };
+            let create_error = io::Error::last_os_error().raw_os_error();
+            let job = owned(handle, "test private outer job").unwrap();
+            assert_ne!(create_error, Some(ERROR_ALREADY_EXISTS as i32));
+            let handle = unsafe { CreateJobObjectW(null(), wide_receiving.as_ptr()) };
+            let receiving_error = io::Error::last_os_error().raw_os_error();
+            let receiving_job = owned(handle, "test private receiving job").unwrap();
+            assert_ne!(receiving_error, Some(ERROR_ALREADY_EXISTS as i32));
+            let permit = owned(
+                unsafe { CreateEventW(null(), 1, 0, wide_gate.as_ptr()) },
+                "test nested policy permit",
+            )
+            .unwrap();
+            let mut outer = Invocation::new();
+            outer.fixture_job = Some(job.try_clone().unwrap());
+            outer.scope.supplied_job_for_fixture = Some(job);
+            // In the control, the receiving job is a subset of the outer job.
+            // In the rejection case it contains a process outside that outer job,
+            // so adding an outer member cannot form a valid nested hierarchy.
+            let mut sentinel = suspended_job_fixture(
+                receiving_job,
+                if restricted {
+                    None
+                } else {
+                    Some(raw(&outer.fixture_job))
+                },
+            );
+            let mut sentinel_in_outer = 0;
+            assert_ne!(
+                unsafe {
+                    IsProcessInJob(
+                        raw(&sentinel.process),
+                        raw(&outer.fixture_job),
+                        &mut sentinel_in_outer,
+                    )
+                },
+                0
+            );
+            assert_eq!(sentinel_in_outer != 0, !restricted);
+            let mode = if restricted {
+                "nested-incompatible-host"
+            } else {
+                "nested-positive-host"
+            };
+            outer
+                .scope
+                .spawn(
+                    &format!(
+                        "set {OUTER_JOB}={name}&& set {RECEIVING_JOB}={receiving_name}&& \
+                         set {GATE}={gate_name}&& {}",
+                        fixture_command(mode)
+                    ),
+                    &AtomicBool::new(false),
+                )
+                .unwrap();
+            outer.fixture_job = Some(outer.job.as_ref().unwrap().try_clone().unwrap());
+            outer.fixture_root = Some(outer.process.as_ref().unwrap().try_clone().unwrap());
+            let ready = read_until(&mut outer, b"END-READY");
+            retain_ready_helper(&mut outer, &ready);
+            let mut guardian_member = 0;
+            assert_ne!(
+                unsafe {
+                    IsProcessInJob(GetCurrentProcess(), raw(&outer.job), &mut guardian_member)
+                },
+                0
+            );
+            assert_eq!(
+                guardian_member, 0,
+                "guardian must remain outside the private job"
+            );
+            assert_ne!(unsafe { SetEvent(permit.as_raw_handle() as HANDLE) }, 0);
+            let (status, output) = outer.collect();
+            assert_eq!(
+                status,
+                0,
+                "disposable policy host failed: {}",
+                String::from_utf8_lossy(&output)
+            );
+            let marker: &[u8] = if restricted {
+                b"NESTED-POLICY-REJECTION-CLEAN"
+            } else {
+                b"NESTED-POSITIVE-CLEAN"
+            };
+            assert!(output.windows(marker.len()).any(|part| part == marker));
+            eprintln!("{}", String::from_utf8_lossy(&output));
+            sentinel.clean();
+            outer.clean();
+        }
+    }
+
+    fn suspended_job_fixture(job: OwnedHandle, parent: Option<HANDLE>) -> Invocation {
+        let mut fixture = Invocation::new();
+        fixture.scope.job = Some(job);
+        let mut limits: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { zeroed() };
+        limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        checked(
+            unsafe {
+                SetInformationJobObject(
+                    raw(&fixture.job),
+                    JobObjectExtendedLimitInformation,
+                    (&limits as *const JOBOBJECT_EXTENDED_LIMIT_INFORMATION).cast(),
+                    size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+                )
+            },
+            "test receiving job limits",
+        )
+        .unwrap();
+        let application = command_interpreter(&AtomicBool::new(false)).unwrap();
+        let mut command = command_line("exit /b 0").unwrap();
+        let mut startup: STARTUPINFOW = unsafe { zeroed() };
+        startup.cb = size_of::<STARTUPINFOW>() as u32;
+        let mut information: PROCESS_INFORMATION = unsafe { zeroed() };
+        checked(
+            unsafe {
+                CreateProcessW(
+                    application.as_ptr(),
+                    command.as_mut_ptr(),
+                    null(),
+                    null(),
+                    0,
+                    CREATE_SUSPENDED,
+                    null(),
+                    null(),
+                    &startup,
+                    &mut information,
+                )
+            },
+            "test suspended hierarchy member",
+        )
+        .unwrap();
+        fixture.scope.process =
+            Some(unsafe { OwnedHandle::from_raw_handle(information.hProcess as _) });
+        fixture.scope.thread =
+            Some(unsafe { OwnedHandle::from_raw_handle(information.hThread as _) });
+        fixture.fixture_job = Some(fixture.job.as_ref().unwrap().try_clone().unwrap());
+        fixture.fixture_root = Some(fixture.process.as_ref().unwrap().try_clone().unwrap());
+        if let Some(parent) = parent {
+            checked(
+                unsafe { AssignProcessToJobObject(parent, raw(&fixture.process)) },
+                "test hierarchy parent assignment",
+            )
+            .unwrap();
+        }
+        checked(
+            unsafe { AssignProcessToJobObject(raw(&fixture.job), raw(&fixture.process)) },
+            "test hierarchy receiving assignment",
+        )
+        .unwrap();
+        fixture.scope.assigned = true;
+        assert!(!fixture.process_terminated().unwrap());
+        fixture
+    }
+
+    fn nested_policy_host(restricted: bool) {
+        let job_name: Vec<_> = std::env::var(OUTER_JOB)
+            .unwrap()
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        let outer = owned(
+            unsafe { OpenJobObjectW(JOB_QUERY_ACCESS, 0, job_name.as_ptr()) },
+            "test outer observer handle",
+        )
+        .unwrap();
+        let outer_handle = outer.as_raw_handle() as HANDLE;
+        let mut host_member = 0;
+        assert_ne!(
+            unsafe { IsProcessInJob(GetCurrentProcess(), outer_handle, &mut host_member) },
+            0
+        );
+        assert_eq!(host_member, 1);
+        let gate_name: Vec<_> = std::env::var(GATE)
+            .unwrap()
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        let permit = owned(
+            unsafe { OpenEventW(SYNCHRONIZATION_SYNCHRONIZE, 0, gate_name.as_ptr()) },
+            "test nested policy permit",
+        )
+        .unwrap();
+        println!("PARENT-READY {} END-READY", std::process::id());
+        io::stdout().flush().unwrap();
+        assert_eq!(
+            unsafe { WaitForSingleObject(permit.as_raw_handle() as HANDLE, 8000) },
+            WAIT_OBJECT_0
+        );
+        let mut inner = Invocation::new();
+        assert!(inner.fault.is_none());
+        assert!(inner.supplied_job_for_fixture.is_none());
+        let receiving_name: Vec<_> = std::env::var(RECEIVING_JOB)
+            .unwrap()
+            .encode_utf16()
+            .chain(Some(0))
+            .collect();
+        let receiving_job = owned(
+            unsafe { OpenJobObjectW(JOB_CONTROL_ACCESS, 0, receiving_name.as_ptr()) },
+            "test private receiving job",
+        )
+        .unwrap();
+        inner.scope.supplied_job_for_fixture = Some(receiving_job);
+        let result = inner
+            .scope
+            .spawn("echo NESTED-CHILD-EXECUTED", &AtomicBool::new(false));
+        println!(
+            "NESTED-ATTEMPT restricted={restricted}; stage={:?}; os_code={:?}",
+            result.as_ref().err().map(|error| error.stage),
+            result.as_ref().err().and_then(|error| error.os_code)
+        );
+        assert!(inner.job.is_some());
+        assert!(inner.process.is_some());
+        assert!(inner.thread.is_some());
+        inner.fixture_job = Some(inner.job.as_ref().unwrap().try_clone().unwrap());
+        inner.fixture_root = Some(inner.process.as_ref().unwrap().try_clone().unwrap());
+        if restricted {
+            let error = result.unwrap_err();
+            assert_eq!(error.stage, "job assignment");
+            assert_eq!(error.os_code, Some(ERROR_ACCESS_DENIED as i32));
+            assert_ne!(error.os_code, Some(ERROR_INVALID_HANDLE as i32));
+            assert!(!inner.assigned);
+            assert!(!inner.process_terminated().unwrap());
+            assert!(
+                !inner.job_empty().unwrap(),
+                "receiving job retains its other fixture member"
+            );
+            for (job, expected) in [(outer_handle, 1), (raw(&inner.job), 0)] {
+                let mut member = 0;
+                assert_ne!(
+                    unsafe { IsProcessInJob(raw(&inner.process), job, &mut member) },
+                    0
+                );
+                assert_eq!(member, expected);
+            }
+            let previous = unsafe { SuspendThread(raw(&inner.thread)) };
+            assert_eq!(
+                previous, 1,
+                "the actual primary thread must never have resumed"
+            );
+            let mut output = Vec::new();
+            inner.read_available(&mut output).unwrap();
+            assert!(output.is_empty(), "rejected child command executed");
+            inner.clean();
+            assert!(inner.output_closed());
+            assert!(inner.process.is_none() && inner.thread.is_none() && inner.job.is_none());
+            println!(
+                "NESTED-POLICY-REJECTION-CLEAN os_code=5; primary_suspend_count_before_probe={previous}; \
+                 outer_membership=1; inner_membership=0; no_resume=true; no_command_output=true; \
+                 exact_child_signaled=true; checked_finalization=true"
+            );
+        } else {
+            result.unwrap();
+            assert!(inner.assigned);
+            let (status, output) = inner.collect();
+            assert_eq!(status, 0);
+            assert_eq!(output, b"NESTED-CHILD-EXECUTED\r\n");
+            inner.clean();
+            println!("NESTED-POSITIVE-CLEAN same_child_command=true; checked_finalization=true");
+        }
+    }
+
+    #[test]
     fn receipt_requires_each_observed_component_and_retains_handles() {
         let mut invocation = Invocation::spawn("echo complete");
         invocation.collect();
@@ -1623,7 +1918,9 @@ mod tests {
     #[ignore = "disposable child entrypoint, invoked by the lifecycle tests"]
     fn fixture() {
         let mode = std::env::var(MODE).unwrap();
-        if mode == "selection-host" {
+        if mode == "nested-incompatible-host" || mode == "nested-positive-host" {
+            nested_policy_host(mode == "nested-incompatible-host");
+        } else if mode == "selection-host" {
             let command = "echo SYSTEM-SHELL-MUST-NOT-BE-SELECTED";
             let baseline = Command::new("cmd").args(["/C", command]).output().unwrap();
             assert!(!baseline.stdout.windows(8).any(|part| part == b"SELECTED"));
