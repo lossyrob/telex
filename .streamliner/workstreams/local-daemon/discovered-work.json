@@ -660,18 +660,34 @@
           "authoritySession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
           "windowsImplementationHeld": true,
           "nextInput": "Campaign disposition is required before any further Windows research or mechanism work."
+        },
+        "campaignDebugCandidateRejection": {
+          "authoritySession": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "reportedAt": "2026-09-25T15:26:38-04:00",
+          "decision": "Rejected the DEBUG_PROCESS candidate within current authority because of the documented debug-chain inventory gap and unapproved debugger-visible semantics.",
+          "limits": "A bounded negative feasibility result, not a universal Windows impossibility claim. No further Windows research, experiment, agent, debugger, notification, PID-list, or sleep workaround, and no receipt waiver."
+        },
+        "releasePrerequisiteDecision": {
+          "question": "Should #155 remain required for the schema-3 recovery release while its Windows cleanup design is unresolved, or may that release explicitly defer #155 and document the PostgreSQL-reset limitation?",
+          "answer": "Keep #155 required; hold until a reviewed Windows solution exists",
+          "answeredBy": "operator",
+          "relayedBy": "38d183fb-df5d-4e65-88f3-e27b62e3c92f",
+          "reportedAt": "2026-09-28T09:02:17-04:00",
+          "confirmedBy": "e06813c4-1db2-4d77-b8d3-3addc6a1824c",
+          "confirmation": "release prerequisite REAFFIRMED",
+          "meaning": "Hold authority only. It selects no receipt mechanism and grants no research, source, or product-write authority. No PostgreSQL-reset limitation is accepted and no partial PR #156 merge is allowed."
         }
       },
       "description": "Decide whether the Windows job-accounting predicate is a sufficient M2 completion receipt for every in-scope credential-command process, and what supported correction or authority change is required.",
       "affectedOutcome": "The accepted M2 design requires documented completion of every ordinary in-scope process before receipt. The Windows receipt axis cannot be accepted while this ordering is unproven.",
-      "requiredness": "Required for the M2 repair in PR #156. Not an accepted limitation, waiver, or follow-up delivery.",
-      "sequencing": "Affected Windows receipt implementation and acceptance are held. The final documentation-only DEBUG_PROCESS assessment is complete and did not justify a complete-scope replacement; further replacement research stops pending campaign disposition. The uncommitted work, red tests, and frozen packet are preserved, and the Windows delegate is quiet after safe owned cleanup. No partial review-ready state or M2 thread closure.",
+      "requiredness": "Required for the M2 repair in PR #156. Not an accepted limitation, waiver, or follow-up delivery. On 2026-09-28 the operator reaffirmed #155 as a required prerequisite of the schema-3 recovery release; the release is held until a reviewed Windows solution exists.",
+      "sequencing": "Affected Windows receipt implementation and acceptance are held. Campaign rejected the DEBUG_PROCESS candidate within current authority on 2026-09-25, and no further Windows research is authorized. The operator chose to keep #155 required and hold the recovery release until a reviewed Windows solution exists, rather than defer it with a documented limitation. The uncommitted work, red tests, and frozen packet are preserved, and the Windows delegate is quiet after safe owned cleanup. No partial review-ready state or M2 thread closure.",
       "selectedDisposition": "None selected. Route to steward and campaign adjudication. No sleep, timing margin, assertion weakening, repeated zero query, job close or extra termination request, PID snapshot, completion-port notification without a stronger guarantee, or fixture-only helper handle may substitute for a production complete-scope receipt. No replacement mechanism is accepted and canonical authority is not superseded.",
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f holds the evidence; existing steward af271672-5d33-418c-bb9c-0f4d4570c7d7 and campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c adjudicate",
-      "terminalPath": "The steward completes code-specific adjudication of the frozen packet, and the steward and campaign either identify a supported stronger ownership or completion rule or state the exact blocking gap. Any material change to intended authority passes campaign authority and reviewed Tier B reconciliation before affected Windows implementation resumes. Real negative-to-positive Windows proof and the complete three-platform bundle then precede independent review, CI, design inspection, and campaign merge.",
+      "terminalPath": "The steward completes code-specific adjudication of the frozen packet, and the steward and campaign either identify a supported stronger ownership or completion rule or state the exact blocking gap. Any material change to intended authority passes campaign authority and reviewed Tier B reconciliation before affected Windows implementation resumes. Real negative-to-positive Windows proof and the complete three-platform bundle then precede independent review, CI, design inspection, and campaign merge. #155 stays mandatory for the schema-3 recovery release: a reviewed, supported Windows solution and the complete same-PR proof, review, CI, design inspection, and campaign merge are all still required.",
       "status": "routed",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 routed this within the issue #155 repair scope. Both operator policies remain selected. Pending adjudication; no replacement accepted."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 routed this within the issue #155 repair scope. Both operator policies remain selected. Pending adjudication; no replacement accepted. The operator answered the release-prerequisite question on 2026-09-28T09:02:17-04:00 through worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f, and campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c confirmed it; no remedy is selected."
     },
     {
       "id": "local-daemon-credential-macos-final-signal-ordering",

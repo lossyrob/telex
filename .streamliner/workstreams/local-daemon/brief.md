@@ -228,8 +228,9 @@ completion fence for every member, and no supported replacement is justified yet
 A final documentation-only `DEBUG_PROCESS` assessment found a documented
 per-process exit fence, but a child can start a new debugging chain inside the
 job, so debug inventory does not cover the complete scope; debugger-visible
-behavior would also be new semantics. Windows receipt work remains held, and
-further replacement research stops pending campaign disposition.
+behavior would also be new semantics. Campaign rejected that candidate within
+current authority on 2026-09-25. Windows receipt work remains held, and no
+further Windows research is authorized.
 
 On macOS, the frozen Unix code confirms a
 conditional source defect: a final group `SIGKILL` that fails with `EPERM` on a
@@ -247,6 +248,13 @@ unpushed. The #154 candidate `f8363be` is complete, but publication remains
 blocked by the actual App EMU 403 and the latest same-worker quota result. Any
 retry requires restored credit, deduplication, and explicit authority. Issue #157
 is not launched.
+
+On 2026-09-28 the operator answered "Keep #155 required; hold until a reviewed
+Windows solution exists", and campaign confirmed it. The schema-3 recovery release
+stays held: it does not accept the PostgreSQL-reset limitation, PR #156 may not
+merge partially, and #157 stays unlaunched until both #154 and #155 merge. This
+decision selects no Windows mechanism and grants no new research or write
+authority.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
