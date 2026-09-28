@@ -59,6 +59,21 @@ all features. SQLite-disabled profiles exercise the daemon path. The existing
 Windows process suite also exercises the aligned owner-private fixture helper in
 `tests/daemon_process_sqlite.rs`.
 
+The CI toolchain action sets `RUSTFLAGS=-D warnings`. Reproduce that policy
+locally rather than running with unset flags. For the SQLite-disabled profiles
+in PowerShell:
+
+```powershell
+$env:RUSTFLAGS = "-D warnings"
+cargo test --lib --no-default-features --features postgres windows_token_user_alignment
+cargo test --lib --no-default-features --features entra windows_token_user_alignment
+```
+
+Each command must execute two daemon tests; SQLite-enabled profiles execute
+three tests across both production paths. SQLite-only test helpers must carry
+the same feature guards as their callers so these configurations compile with
+warnings denied.
+
 These checks establish token-buffer alignment and preserve identity/error
 behavior. They do not establish that alignment caused historical heap-corruption
 crashes.

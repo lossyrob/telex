@@ -22,7 +22,7 @@ use crate::model::{
     ApplicationMessageOperation, Attention, DeliveryOutcome, Disposition, EpochClaimResult,
     MessageRow, NewMessage, STATUS_RETIRED,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite"))]
 use crate::model::{ApplicationOperationBegin, NewApplicationOperation};
 #[cfg(feature = "postgres")]
 use anyhow::Context;
@@ -376,7 +376,7 @@ struct DeliveryAdmissionTestLane {
     commit_release: Semaphore,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite"))]
 impl DeliveryAdmissionTestLane {
     fn new() -> Self {
         Self {
@@ -396,6 +396,7 @@ struct DeliveryAdmissionTestControl {
 
 #[cfg(test)]
 impl DeliveryAdmissionTestControl {
+    #[cfg(feature = "sqlite")]
     fn new() -> Self {
         Self {
             register: DeliveryAdmissionTestLane::new(),
@@ -430,6 +431,7 @@ impl DeliveryAdmissionTestControl {
             .forget();
     }
 
+    #[cfg(feature = "sqlite")]
     async fn wait_before_lock(&self, kind: DeliveryAdmissionKind) {
         self.lane(kind)
             .before_arrived
@@ -439,6 +441,7 @@ impl DeliveryAdmissionTestControl {
             .forget();
     }
 
+    #[cfg(feature = "sqlite")]
     async fn wait_before_commit(&self, kind: DeliveryAdmissionKind) {
         self.lane(kind)
             .commit_arrived
@@ -448,10 +451,12 @@ impl DeliveryAdmissionTestControl {
             .forget();
     }
 
+    #[cfg(feature = "sqlite")]
     fn release_before_lock(&self, kind: DeliveryAdmissionKind) {
         self.lane(kind).before_release.add_permits(1);
     }
 
+    #[cfg(feature = "sqlite")]
     fn release_commit(&self, kind: DeliveryAdmissionKind) {
         self.lane(kind).commit_release.add_permits(1);
     }
