@@ -139,6 +139,15 @@ class CandidateServer:
         self.thread.join(timeout=10)
         require(not self.thread.is_alive(), "candidate HTTP server did not join")
 
+    def verify_requests(self, start, tag):
+        observed = self.requests[start:]
+        for path in (
+            f"/repos/{REPO}/releases/latest",
+            f"/{REPO}/releases/download/{tag}/{self.asset}",
+            f"/{REPO}/releases/download/{tag}/{self.asset}.sha256",
+        ):
+            require(path in observed, f"release proof never requested {path}")
+
 
 class Proof:
     def __init__(self, args, root, report):
@@ -316,6 +325,7 @@ class Proof:
             self.negative_upgrades(old_installed, env, server, predecessor)
         request_start = len(server.requests)
         result = json.loads(self.telex(old_installed, env, "upgrade").stdout)
+        server.verify_requests(request_start, self.args.tag)
         require(result["release"]["verified"] is True, "old binary did not verify candidate")
         require(result["drain"]["drained"] is True, "old binary did not drain owning daemon")
         require(result["switch"]["switched_to"] == self.args.tag, "selector did not advance")
@@ -408,6 +418,7 @@ class Proof:
         else:
             result = self.run(["sh", ROOT / "install.sh"], env)
         require("Checksum OK." in result.stdout, "fresh installer did not check the sidecar")
+        server.verify_requests(before_requests, self.args.tag)
         installed = Path(env["TELEX_INSTALL_ROOT"]) / "versions" / self.args.tag / candidate.name
         self.metadata(installed, env, self.args.tag[1:], self.args.source_sha, 5, 3)
         launcher_env = dict(env)
@@ -482,8 +493,9 @@ def main():
               "status": "failed"}
     # macOS's default temporary path can exceed the Unix socket path limit.
     root = Path(tempfile.mkdtemp(prefix="tr-", dir=None if os.name == "nt" else "/tmp")).resolve()
-    proof = Proof(args, root, report)
+    proof = None
     try:
+        proof = Proof(args, root, report)
         archive = args.archive.read_bytes()
         expected = Path(str(args.archive) + ".sha256").read_text().split()[0]
         require(digest(archive) == expected, "candidate archive checksum mismatch")
@@ -544,7 +556,8 @@ def main():
         raise
     finally:
         try:
-            proof.cleanup()
+            if proof is not None:
+                proof.cleanup()
             for path in root.glob("daemon-*.log"):
                 report.setdefault("daemon_logs", {})[path.name] = path.read_text(errors="replace")
             shutil.rmtree(root)

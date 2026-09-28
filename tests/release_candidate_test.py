@@ -80,6 +80,21 @@ class ReleaseProofTests(unittest.TestCase):
             self.assertEqual(report["commands"], [])
             self.assertTrue(report["cleanup"][-1]["removed"])
 
+    def test_nonlocal_postgres_is_rejected_before_access_and_root_is_removed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            report_path = Path(directory) / "report.json"
+            argv = ["proof", "--archive", str(Path(directory) / "unused.zip"),
+                    "--target", "x86_64-pc-windows-msvc", "--source-sha", "fixture",
+                    "--postgres-url", "postgresql://example.invalid/shared",
+                    "--disposable-postgres", "--report", str(report_path)]
+            with patch("sys.argv", argv):
+                with self.assertRaisesRegex(RuntimeError, "disposable loopback"):
+                    proof.main()
+            report = json.loads(report_path.read_text())
+            self.assertEqual(report["status"], "failed")
+            self.assertEqual(report["commands"], [])
+            self.assertTrue(report["cleanup"][-1]["removed"])
+
 
 if __name__ == "__main__":
     unittest.main()
