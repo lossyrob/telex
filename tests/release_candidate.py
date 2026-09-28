@@ -218,9 +218,9 @@ class Proof:
                 f"{result.stdout}\n{result.stderr}")
         return result
 
-    def telex(self, binary, env, *args, expected=0):
+    def telex(self, binary, env, *args, expected=0, timeout=45):
         require(binary.is_absolute(), "proof must execute an absolute binary path")
-        return self.run([binary, "--json", *args], env, expected)
+        return self.run([binary, "--json", *args], env, expected, timeout=timeout)
 
     def metadata(self, binary, env, version, sha, minor, schema_max):
         value = json.loads(self.telex(binary, env, "version").stdout)
@@ -287,13 +287,16 @@ class Proof:
             if identity is None:
                 time.sleep(0.05)
                 continue
-            result = self.telex(binary, env, "daemon", "status")
+            remaining = deadline - time.monotonic()
+            require(remaining > 0, "fixture daemon readiness deadline expired")
+            result = self.telex(binary, env, "daemon", "status", timeout=remaining)
             status = json.loads(result.stdout)
             if "instance_id" in status:
                 require(status["protocol_version"] == {"major": 1, "minor": minor},
                         "live daemon protocol mismatch")
                 require(status["instance_id"] == identity["instance_id"],
                         "authenticated status differs from owned daemon publication")
+                require(time.monotonic() < deadline, "fixture daemon readiness deadline expired")
                 self.report["daemons"].append({
                     "pid": process.pid, "binary": str(binary), "protocol_minor": minor,
                     "start_time": identity["server_start_time"],

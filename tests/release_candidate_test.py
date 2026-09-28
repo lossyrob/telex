@@ -71,7 +71,7 @@ class ReleaseProofTests(unittest.TestCase):
             child = Mock(pid=43)
             child.poll.return_value = None
             with patch.object(proof, "read_fixture_identity", side_effect=[old, old, new]) as read:
-                def authenticated_status(*_args):
+                def authenticated_status(*_args, **_kwargs):
                     self.assertEqual(read.call_count, 3, "status raced the known stale publication")
                     return SimpleNamespace(stdout=json.dumps({
                         "instance_id": "new", "protocol_version": {"major": 1, "minor": 5},
@@ -84,6 +84,60 @@ class ReleaseProofTests(unittest.TestCase):
                         status.assert_called_once()
                     finally:
                         fixture.daemons[-1][3].close()
+
+    def test_readiness_status_uses_remaining_budget_and_rejects_late_success(self):
+        for published, finished, accepted in ((14, 14.5, True), (14, 15, False),
+                                               (14, 16, False), (15, 16, False)):
+            with self.subTest(published=published, finished=finished), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                report = {"daemons": []}
+                fixture = proof.Proof(SimpleNamespace(postgres_url=None), root, report)
+                env = proof.clean_environment(root / "env")
+                child = Mock(pid=43)
+                child.poll.return_value = None
+                clock = SimpleNamespace(now=0)
+                identity = {"server_pid": 43, "server_start_time": 200, "instance_id": "new"}
+                reads = []
+                timeouts = []
+
+                def publication(_run_dir):
+                    reads.append(True)
+                    if len(reads) == 1:
+                        return None
+                    clock.now = published
+                    return identity
+
+                def status(*_args, timeout=45):
+                    timeouts.append(timeout)
+                    clock.now = finished
+                    return SimpleNamespace(stdout=json.dumps({
+                        "instance_id": "new", "protocol_version": {"major": 1, "minor": 5},
+                    }))
+
+                with patch.object(proof, "read_fixture_identity", side_effect=publication), \
+                        patch.object(proof.subprocess, "Popen", return_value=child), \
+                        patch.object(proof.time, "monotonic", side_effect=lambda: clock.now), \
+                        patch.object(fixture, "telex", side_effect=status):
+                    try:
+                        if accepted:
+                            self.assertIs(fixture.start_daemon(root / "telex", env, 5), child)
+                        else:
+                            with self.assertRaisesRegex(RuntimeError, "readiness deadline expired"):
+                                fixture.start_daemon(root / "telex", env, 5)
+                        self.assertEqual(timeouts, [1] if published < 15 else [])
+                        self.assertEqual(len(report["daemons"]), int(accepted))
+                    finally:
+                        fixture.daemons[-1][3].close()
+
+    def test_telex_keeps_default_timeout_and_forwards_explicit_budget(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = proof.Proof(SimpleNamespace(postgres_url=None), Path(directory), {})
+            with patch.object(fixture, "run") as run:
+                fixture.telex(Path(directory) / "telex", {}, "version")
+                self.assertEqual(run.call_args.kwargs["timeout"], 45)
+                fixture.telex(Path(directory) / "telex", {}, "daemon", "status", timeout=0.25)
+                self.assertEqual(run.call_args.kwargs["timeout"], 0.25)
 
     def test_child_environment_is_isolated_without_modifying_parent(self):
         with tempfile.TemporaryDirectory() as directory:
