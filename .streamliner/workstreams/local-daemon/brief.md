@@ -306,6 +306,15 @@ protocol 1.4-to-1.5, schema-2 and schema-3, fresh-install, CI, and built-asset
 proof all remain required. `schema3-release-gate` stays planned, and tagging
 and publication still require explicit operator approval.
 
+After campaign authorized exact head `efc30214`, preparation PR #159 merged on
+2026-09-28 as `1b9fc8f0`, with a tree identical to the reviewed source. This
+is a source merge only: issue #157 stays open, and the node stays in progress.
+The same worker now owns final proof against `1b9fc8f0`: merged-source CI, one
+build-only Release run, newly built artifacts, genuine old-binary upgrade and
+install, schema-2 and schema-3, native and Linux PostgreSQL coverage, cleanup,
+and the immutable gate packet. Later artifact-only main movement does not
+change that target.
+
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later
 job-terminal choice supplied that intended Windows receipt but did not by itself

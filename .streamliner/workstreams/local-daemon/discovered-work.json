@@ -342,6 +342,31 @@
           "state": "Implementation is active under full routine autonomy with no plan approval gate. The item stays routed (not completed); schema3-release-gate remains planned and unaccepted.",
           "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\release157-launch-receipt-20260928.json",
           "receiptSha256": "dbea04e4f8d4199f2a78601372b3433d3e10f8ec96b2fa0f0a8516ddde308115"
+        },
+        "preparationMerge": {
+          "stage": "Preparation source merge only. This is not #157 completion, gate acceptance, a tag, or publication.",
+          "pullRequest": "https://github.com/lossyrob/telex/pull/159",
+          "mergedAt": "2026-09-28T22:24:23Z",
+          "mergeCommit": "1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe",
+          "mergeParents": [
+            "950767c6e52ea2c8e7dbc643276a325f99d8b09b",
+            "efc30214b638cbb3ecad073ae0bb1572945a3954"
+          ],
+          "mergeTree": "914cffafcc3c9d05ed0ea183417ecbe9735dcd72",
+          "treeEqualsReviewedSource": true,
+          "productRange": "17 paths, 1403 insertions and 21 deletions, with no .streamliner paths.",
+          "authorization": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c authorized exact head efc30214 for the preparation source merge and same-worker final merged-source validation only; tag and publication were not authorized. The Local orchestrator merged with an ordinary guarded merge (--match-head-commit).",
+          "sourceBranch": "feature/schema3-release-preparation preserved at efc30214.",
+          "issueState": "Issue #157 remains open; PR #159 had no closing references.",
+          "technicalFloorAtSource": "Full COMMENT review 5344963526 at e286b9f9 plus a clean delta review at efc30214, with 0 cumulative findings; all 3 review threads replied to directly and resolved. CI run 36487907750 passed all 15 jobs. Build-only Release run 36488194435 passed the 5 native and the Linux PostgreSQL jobs, with the tag check and publish jobs intentionally skipped. Design inspection PASS 0/0, report SHA-256 b6cb4a3750ea1d4830d9d1ce56e08cad628660f2ec045b9936bb7246e68d6941. PR body SHA-256 571c7a4cf2ca417e40bb416d88165ecc5a2f296ff9803f166c66382c9a114d6c, unchanged.",
+          "branchEvidence": "The worker inventory, API metadata, and provenance records at efc30214 (full hashes in the Local receipt history) are historical branch evidence. They are not proof for the merged commit and must not be relabeled.",
+          "explicitProofTarget": "1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe. Later artifact-only main movement does not retarget the candidate or any future proposed tag target.",
+          "remainingWork": "The same worker ebfd215b-2229-4075-84af-4a4d6de2be7c owns final merged-source CI, one guarded build-only Release run at 1b9fc8f0, newly built artifacts for all five native targets, genuine v0.1.2 upgrade and install proof, schema-2 and schema-3 proof, hosted Linux PostgreSQL, cleanup, an immutable source-bound gate packet, and a field report.",
+          "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\pr159-preparation-merge-receipt-20260928.json",
+          "receiptSha256": "3e514b0801b453369e077179f6b84328cc861e5f984ab706042b11688941e4f8",
+          "review": "Cumulative full review over 950767c6..e60a8562, a1648475, and e286b9f9 (initial COMMENT 5344963526, Changes Requested, preserved as history), then a clean delta at efc30214 (2 files, 227 insertions and 19 deletions). All 3 findings are resolved in source with 0 new remaining. Clean delta report SHA-256 30d254e27e3d72c9131e8faa7d1a33d67cc509efe04b9069b138e58b44b9d278; final review report SHA-256 2994e38d7488ea74aa91f5f32f876b6d9edaadbda8c8c1b4ba3ba2ee06d83404. The reviewer ran 15 offline passes independently; running the old harness against the new tests produced 5 semantic assertion failures and 4 API-shape errors, which are not 9 bugs.",
+          "branchProof": "Branch-only proof at efc30214: CI 36487907750 all 15 jobs SUCCESS; Release 36488194435 all 5 native jobs plus Linux PostgreSQL job 109152890363 SUCCESS, with the tag check and publish skipped and no release created. Worker files: inventory SHA-256 98610f9ee464c51a3573397c449256e1fa54019a822f76addea1fce812839062, API metadata 442f4acc8ad6b0fa9df794535dd106c15c6ca95794fd565ab71412f3399732f9, provenance 37410db8073f8cacfedce621f7f2dc693a7978cb3a174dc444b5b8d2123aa422. Covered: 5 archives and sidecars, 6 runtime sets, 11 unexpired source-bound artifacts, baseline 359082164 from source 636ecce3, 7 Ack receipts, owned cleanup, and 2 PostgreSQL schema drops. Worker actual bytes and native workflow executions are distinct from Local, reviewer, and steward record audits. The identical merged tree supports coverage but does not allow binary SHA reuse for 1b9fc8f0.",
+          "limits": "Earlier pre-commit, debug, e60a8562, a1648475, and e286b9f9 reports and the macOS log EOF are not proof for 1b9fc8f0. Live Entra, PostgreSQL on all platforms, universal cleanup, and signing provenance are not claimed. The selected job-terminal, one-shot, and FAILED_HELD limits and the distinction between a genuine old binary and a legacy fixture remain."
         }
       },
       "description": "Prepare one bounded v0.2.0 schema-3 recovery candidate after issues #154 and #155 merge, then submit its immutable evidence to a separate operator publication gate.",
@@ -1134,7 +1159,11 @@
       "source": "Issue #157 worker read-only installer audit",
       "evidence": {
         "auditedHead": "008f3363e8cd926604a1d54fae6190902a330af1",
-        "details": "install.ps1 unconditionally mutates the user PATH even when an isolated install root is given. Disposable fresh-install proof therefore cannot run without touching the operator PATH."
+        "details": "install.ps1 unconditionally mutates the user PATH even when an isolated install root is given. Disposable fresh-install proof therefore cannot run without touching the operator PATH.",
+        "sourceMerge": {
+          "mergeCommit": "1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe",
+          "state": "The source fix was merged in PR #159 after cumulative review and branch proof at efc30214 (CI 36487907750, build-only Release 36488194435). Final proof at 1b9fc8f0 remains pending, so the item stays absorbed."
+        }
       },
       "description": "Add a minimal explicit PATH opt-out or test seam to install.ps1 so fresh-install proof can run in disposable roots without mutating the user PATH.",
       "affectedOutcome": "Required safe fresh PowerShell installer proof for the v0.2.0 candidate without operator PATH mutation.",
@@ -1147,6 +1176,123 @@
       "status": "absorbed",
       "decisionState": "accepted",
       "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; no new node or policy vote. Implementation and proof are pending."
+    },
+    {
+      "id": "local-daemon-release-native-proof-failures",
+      "sourceNode": "schema3-release-preparation",
+      "source": "PR #159 build-only Release run 36478613430 at e60a8562",
+      "evidence": {
+        "failedHead": "e60a8562d4aabafa51a37f75ad4843d6f7723b98",
+        "failedRun": "36478613430",
+        "failedJobs": "Linux x64, macOS ARM, and macOS x64, after build identity",
+        "details": "The actual old-binary upgrade completed and the predecessor exited 0, but the successor Status still saw the predecessor PID. The failed fixtures owned processes exited 0 and their roots were removed.",
+        "fix": "At a1648475 (2 files, 86 insertions and 7 deletions), a readiness barrier waits within the existing deadline only for a known exited predecessor to be replaced by an owned successor PID, start time, and instance. Foreign, incomplete, and PID-reuse failures are preserved. 8 offline checks passed; the later efc30214 M1 fix tightens the nested Status budget.",
+        "supersession": "The final efc30214 run passed all 5 native jobs and Linux PostgreSQL. That supersedes the old failure without rewriting its history."
+      },
+      "description": "Make successor-readiness proof wait for an owned successor after a known predecessor exits, without masking foreign or reused identities.",
+      "affectedOutcome": "Native release proof must pass on every platform without weakening identity checks.",
+      "requiredness": "Required for the #157 candidate proof.",
+      "sequencing": "Absorbed into the same #157 node, branch, and PR #159.",
+      "selectedDisposition": "Bounded readiness barrier within the existing deadline; no retry masking or identity relaxation.",
+      "target": "schema3-release-preparation / issue #157 / PR #159",
+      "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Source fix merged in PR #159 as 1b9fc8f0; then exact final proof at 1b9fc8f0, independent coverage, and the immutable gate packet.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending."
+    },
+    {
+      "id": "local-daemon-release-metadata-rate-limit",
+      "sourceNode": "schema3-release-preparation",
+      "source": "PR #159 build-only Release run 36480771164 at a1648475",
+      "evidence": {
+        "failedHead": "a16484755c55e9316cbc10ea7c5e7b275b7af8db",
+        "failedRun": "36480771164",
+        "failedJob": "native Windows x64 109125564981",
+        "details": "HTTP 403 from upstream release metadata before any baseline or daemon work. The daemon list was empty and the root was removed. The other 4 native jobs passed; PostgreSQL was skipped.",
+        "fix": "At e286b9f9 (4 files, 52 insertions and 5 deletions), the ephemeral workflow contents:read token is sent as an unredirected header to exactly 2 canonical metadata URLs. No assets, mirrors, loopback, child environment, or operator credentials receive it. 9 offline and 16 contract checks passed at that head, with source-bound negative controls and a current full review."
+      },
+      "description": "Authenticate the release harness baseline metadata requests with the ephemeral workflow token, scoped to two exact URLs.",
+      "affectedOutcome": "Release proof must not fail on anonymous API rate limits.",
+      "requiredness": "Required for the #157 candidate proof.",
+      "sequencing": "Absorbed into the same #157 node, branch, and PR #159.",
+      "selectedDisposition": "Scoped read-only token on exact metadata URLs. Rate-limit failure is not treated as a skip, and production authentication is unchanged.",
+      "target": "schema3-release-preparation / issue #157 / PR #159",
+      "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Source fix merged in PR #159 as 1b9fc8f0; then exact final proof at 1b9fc8f0, independent coverage, and the immutable gate packet.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending."
+    },
+    {
+      "id": "local-daemon-release-readiness-deadline-proof",
+      "sourceNode": "schema3-release-preparation",
+      "source": "PR #159 full review 5344963526, M1 Must (P2), comment 4127282088",
+      "evidence": {
+        "review": "5344963526",
+        "comment": "4127282088",
+        "reply": "4127306686 (direct reply; thread resolved)",
+        "details": "The 15s readiness loop invoked the default 45s Status and could accept late.",
+        "fix": "Commit 013ca958bebd46510ba62478807da1190eecd99d forwards the positive remaining budget and rechecks after identity validation. Other commands keep the 45s default, authentication, and mock compatibility."
+      },
+      "description": "Bound nested Status calls in the release readiness loop by the remaining readiness budget.",
+      "affectedOutcome": "Readiness proof must not accept after its deadline.",
+      "requiredness": "Required for the #157 candidate proof.",
+      "sequencing": "Absorbed into the same #157 node, branch, and PR #159.",
+      "selectedDisposition": "Forward the remaining budget and recheck. This is not a whole-function spawn or OS cleanup bound.",
+      "target": "schema3-release-preparation / issue #157 / PR #159",
+      "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Source fix merged in PR #159 as 1b9fc8f0; then exact final proof at 1b9fc8f0, independent coverage, and the immutable gate packet.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending."
+    },
+    {
+      "id": "local-daemon-release-consumption-attestation",
+      "sourceNode": "schema3-release-preparation",
+      "source": "PR #159 full review 5344963526, S1 Should (P2, nonblocking), comment 4127282096",
+      "evidence": {
+        "review": "5344963526",
+        "comment": "4127282096",
+        "reply": "4127306697 (direct reply; thread resolved)",
+        "details": "Ack exit 0 was not proof that consumption was marked.",
+        "fix": "Commit 5d5d885cbeeed41536d60b0875459da82e670ce4 asserts the message, recipient, and first marked consumption, and retains the receipt. Production Ack is unchanged.",
+        "branchResult": "The efc30214 run reports 7 marked Acks (5 native SQLite plus SQLite and PostgreSQL in the PostgreSQL job), matching the actual commands."
+      },
+      "description": "Assert marked consumption, not just Ack exit status, in release proof.",
+      "affectedOutcome": "Release proof must attest actual message consumption.",
+      "requiredness": "Required for the #157 candidate proof.",
+      "sequencing": "Absorbed into the same #157 node, branch, and PR #159.",
+      "selectedDisposition": "Harness-only attestation with retained receipts; no production Ack change.",
+      "target": "schema3-release-preparation / issue #157 / PR #159",
+      "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Source fix merged in PR #159 as 1b9fc8f0; then exact final proof at 1b9fc8f0, independent coverage, and the immutable gate packet.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending."
+    },
+    {
+      "id": "local-daemon-release-cleanup-failure-evidence",
+      "sourceNode": "schema3-release-preparation",
+      "source": "PR #159 full review 5344963526, S2 Should (P2, nonblocking), comment 4127282101",
+      "evidence": {
+        "review": "5344963526",
+        "comment": "4127282101",
+        "reply": "4127306816 (direct reply; thread resolved)",
+        "details": "A cleanup failure prevented log capture and root disposition.",
+        "fix": "Commit efc30214b638cbb3ecad073ae0bb1572945a3954 finalizes cleanup, logs, and roots independently, preserves the primary failure and nonzero exit, and checks all retained process owners, including unready ones, before safe removal. If removal is unsafe, it retains the root, the reason, and outstanding ownership."
+      },
+      "description": "Keep cleanup failure evidence, logs, and root disposition when release-proof cleanup fails.",
+      "affectedOutcome": "Release proof failures must remain diagnosable without unsafe removal.",
+      "requiredness": "Required for the #157 candidate proof.",
+      "sequencing": "Absorbed into the same #157 node, branch, and PR #159.",
+      "selectedDisposition": "Independent finalization with retained ownership. No universal Drop or report-persistence claim.",
+      "target": "schema3-release-preparation / issue #157 / PR #159",
+      "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Source fix merged in PR #159 as 1b9fc8f0; then exact final proof at 1b9fc8f0, independent coverage, and the immutable gate packet.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending."
     }
   ]
 }

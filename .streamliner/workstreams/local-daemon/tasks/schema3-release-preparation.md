@@ -6,6 +6,8 @@
 - **Status:** in progress; both repairs merged (`afda9460` and `62291a78`),
   campaign verified dependency closure, and the release worker launched on
   2026-09-28
+- **Preparation PR:** [lossyrob/telex#159](https://github.com/lossyrob/telex/pull/159),
+  merged 2026-09-28T22:24:23Z as `1b9fc8f0`; final merged-source proof pending
 - **Attention:** focus
 - **Depends on:** completed `windows-token-buffer-alignment`, completed `postgres-wait-reset-recovery`
 - **Blocks:** `schema3-release-gate`
@@ -155,3 +157,35 @@ their completion. The full record is on ledger item
 - All required compatibility, install, CI, asset, review, and inspection proof
   above remains pending. `schema3-release-gate` remains planned, and no tag or
   publication is authorized.
+
+## Preparation merge
+
+This records the preparation source merge only. It is not completion of this
+node, gate acceptance, a tag, or publication. The full record is on ledger item
+`local-daemon-schema3-recovery-release` (`evidence.preparationMerge`).
+
+- Campaign authorized exact head `efc30214`. PR #159 merged at
+  2026-09-28T22:24:23Z as `1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe` (parents
+  `950767c6` and `efc30214`). The merge tree equals the reviewed source tree;
+  17 paths changed with no `.streamliner` paths. The source branch is
+  preserved, and issue #157 remains open.
+- At `efc30214`: full review 5344963526 plus a clean delta review with 0
+  cumulative findings, CI run 36487907750 on all 15 jobs, build-only Release
+  run 36488194435 on the 5 native and Linux PostgreSQL jobs, and design
+  inspection PASS. Branch artifacts and inventories are historical evidence,
+  not proof for the merged commit.
+- Same-PR discoveries, each absorbed with its source fix merged and final proof
+  at `1b9fc8f0` pending: `local-daemon-release-installer-path-isolation`,
+  `local-daemon-release-native-proof-failures`,
+  `local-daemon-release-metadata-rate-limit`,
+  `local-daemon-release-readiness-deadline-proof`,
+  `local-daemon-release-consumption-attestation`, and
+  `local-daemon-release-cleanup-failure-evidence`.
+- The explicit proof target is `1b9fc8f0`. Later artifact-only main movement
+  does not retarget the candidate.
+- Pending, owned by the same worker: final merged-source CI, one build-only
+  Release run at `1b9fc8f0`, newly built artifacts, genuine v0.1.2 upgrade and
+  install proof, schema-2 and schema-3 proof, native and Linux PostgreSQL
+  coverage, cleanup, the immutable gate packet, and a field report.
+  `schema3-release-gate` remains planned, and no tag or publication is
+  authorized.
