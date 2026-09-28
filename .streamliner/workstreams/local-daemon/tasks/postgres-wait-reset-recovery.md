@@ -436,25 +436,25 @@ pending or active are the contract as written before merge. The facts below
 supersede them. The full record is on ledger item
 local-daemon-postgres-wait-reset-recovery.
 
-- Campaign authorized exact head da9ac24, and the Local orchestrator merged
+- Campaign authorized exact head eda9ac24, and the Local orchestrator merged
   it with an ordinary guarded merge at 2026-09-28T19:32:21Z as 62291a78
-  (parents 4eb95b4 and da9ac24). The first-parent diff is exactly 33
+  (parents 4eb95b4 and eda9ac24). The first-parent diff is exactly 33
   paths (9326 insertions, 229 deletions) with no .streamliner paths. Issue
   #155 closed as completed at 19:32:23Z.
 - Review: the original COMMENT review 5311857915 at 25aea118 is preserved.
   COMMENT review 5342232604 covered a full M2 rebaseline at 836efbc plus the
   causal notify delta at c71befc, with one LOW proof warning (S1). The clean
-  delta at  38eb102 resolved S1 with an actual nested-hierarchy proof, and
-  the clean delta at da9ac24 kept the cumulative result at 0 blockers and 0
+  delta at 038eb102 resolved S1 with an actual nested-hierarchy proof, and
+  the clean delta at eda9ac24 kept the cumulative result at 0 blockers and 0
   warnings. All four original threads were replied to directly and resolved.
-- CI run 36470043028 on da9ac24 passed all 15 jobs, including Live
+- CI run 36470043028 on eda9ac24 passed all 15 jobs, including Live
   PostgreSQL, Windows, macOS credential, feature combinations, both fallback
   E2Es, and eight alignment profiles. Earlier failures in runs 36448934676
-  (836efbc, Live PostgreSQL) and 36464472486 ( 38eb102, Windows readiness)
+  (836efbc, Live PostgreSQL) and 36464472486 (038eb102, Windows readiness)
   remain historical and are recorded as
   local-daemon-postgres-listen-ci-proof and
   local-daemon-credential-helper-readiness-ci.
-- Design inspection by steward f271672 at da9ac24 passed with 0 blockers
+- Design inspection by steward af271672 at eda9ac24 passed with 0 blockers
   and 0 warnings (report SHA-256
   170696e70ec1685c8a6c769f2c44fc3aea7dbcd0310a79f816ad080e0efe5c4e).
 - Hosted macOS runtime proof exists: job 109018355750 at 836efbc and the
