@@ -89,6 +89,33 @@ fn extract_all(haystack: &str, marker: &str, close: char) -> Vec<String> {
 }
 
 #[test]
+fn release_coupled_versions_match_the_package() {
+    let expected = env!("CARGO_PKG_VERSION");
+    assert_eq!(package_version(&read("Cargo.toml")), expected);
+    let marketplace: Value =
+        serde_json::from_str(&read(".github/plugin/marketplace.json")).unwrap();
+    assert_eq!(marketplace["metadata"]["version"], expected);
+    let plugins = marketplace["plugins"].as_array().unwrap();
+    let plugin = plugins.iter().find(|p| p["name"] == "telex").unwrap();
+    assert_eq!(plugin["version"], expected);
+    let manifest: Value = serde_json::from_str(&read("copilot/plugin/plugin.json")).unwrap();
+    assert_eq!(manifest["version"], expected);
+    let bootstrap = read("copilot/plugin/skills/telex/SKILL.md");
+    assert_eq!(
+        extract_all(&bootstrap, "--plugin-version ", '\n'),
+        vec![expected.to_string()]
+    );
+    let lock: toml::Value = toml::from_str(&read("Cargo.lock")).unwrap();
+    let package = lock["package"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"].as_str() == Some("telex"))
+        .unwrap();
+    assert_eq!(package["version"].as_str(), Some(expected));
+}
+
+#[test]
 fn installer_targets_are_a_subset_of_the_release_matrix() {
     let matrix = release_matrix_targets();
     let sh = install_sh_targets();
@@ -699,11 +726,10 @@ fn release_workflow_enforces_the_version_and_publish_guards() {
          so a workflow_dispatch on a tag ref cannot publish"
     );
 
-    // publish must run only after verify-version AND the whole build matrix, so a
-    // mismatched or partial build cannot publish.
+    // Publication also depends on genuine old-binary PostgreSQL upgrade proof.
     assert!(
-        release.contains("needs: [verify-version, build]"),
-        "publish must depend on [verify-version, build]"
+        release.contains("needs: [verify-version, build, postgres-proof]"),
+        "publish must depend on version verification, every native build, and PostgreSQL proof"
     );
 
     assert!(
@@ -726,6 +752,22 @@ fn release_workflow_enforces_the_version_and_publish_guards() {
         3,
         "Cargo.toml [package].version should be X.Y.Z, got {pkg:?}"
     );
+}
+
+#[test]
+fn installers_preserve_defaults_and_expose_isolated_proof_controls() {
+    let ps = read("install.ps1");
+    let sh = read("install.sh");
+    for (script, name) in [(&ps, "install.ps1"), (&sh, "install.sh")] {
+        for base in ["TELEX_UPGRADE_API_BASE", "TELEX_UPGRADE_DOWNLOAD_BASE"] {
+            assert!(script.contains(base), "{name} must support {base}");
+        }
+        assert!(script.contains("https://api.github.com"));
+        assert!(script.contains("https://github.com"));
+    }
+    assert!(ps.contains("if ($env:TELEX_NO_MODIFY_PATH -ne '1') {"));
+    assert!(ps.contains("[Environment]::SetEnvironmentVariable('Path'"));
+    assert!(ps.contains("User PATH unchanged (TELEX_NO_MODIFY_PATH=1)."));
 }
 
 /// Replicates the release.yml `awk` extraction of `[package].version` in Rust:

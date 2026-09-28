@@ -77,6 +77,9 @@ jobs:
           # workflow_dispatch dry-run (which may contain '/'). Sanitize '/' -> '-' so
           # asset paths are always valid; on a real tag push this is a no-op.
           echo "v=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_OUTPUT"
+          crate="$(awk '/^\[/{inpkg=0} /^\[package\]/{inpkg=1} inpkg && /^version[[:space:]]*=/{gsub(/["[:space:]]/,"",$0); sub(/^version=/,""); print; exit}' Cargo.toml)"
+          test -n "$crate"
+          echo "candidate_tag=v${crate}" >> "$GITHUB_OUTPUT"
 
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
@@ -102,10 +105,36 @@ jobs:
           } else {
             "target/${{ matrix.target }}/release/telex"
           }
+          $isolated = Join-Path $env:RUNNER_TEMP "telex-metadata-${{ matrix.target }}"
+          $env:TELEX_HOME = Join-Path $isolated "home"
+          $env:TELEX_CONFIG = Join-Path $isolated "config.toml"
+          $env:TELEX_DB = Join-Path $isolated "store.sqlite"
+          $env:TELEX_INSTALL_ROOT = Join-Path $isolated "install"
+          $env:TELEX_LAUNCHER_ACTIVE = "1"
           $metadata = & $exe --json version | ConvertFrom-Json
           if ($metadata.version.build_id -ne "${{ github.sha }}") {
             throw "release binary build_id '$($metadata.version.build_id)' does not match GITHUB_SHA '${{ github.sha }}'"
           }
+          $crate = (Select-String '^version = "([^"]+)"' Cargo.toml | Select-Object -First 1).Matches.Groups[1].Value
+          if ($LASTEXITCODE -ne 0 -or $metadata.version.package_version -ne $crate) {
+            throw "release binary failed or package version does not match Cargo.toml"
+          }
+          $checkout = git rev-parse HEAD
+          if ($LASTEXITCODE -ne 0 -or $checkout -ne "${{ github.sha }}") {
+            throw "checkout is not the workflow source SHA"
+          }
+          New-Item -ItemType Directory -Force evidence | Out-Null
+          @{
+            source_sha = "${{ github.sha }}"
+            source_tree = (git rev-parse 'HEAD^{tree}')
+            checkout_sha = $checkout
+            workflow_run = "${{ github.run_id }}"
+            workflow_attempt = "${{ github.run_attempt }}"
+            target = "${{ matrix.target }}"
+            features = "default + entra"
+            rustc = (rustc -Vv) -join "`n"
+            binary = $metadata
+          } | ConvertTo-Json -Depth 20 | Set-Content evidence/build.json -Encoding utf8
 
       - name: Package Windows binary
         if: runner.os == 'Windows'
@@ -135,6 +164,29 @@ jobs:
           tar -C package -czf "dist/${archive}" telex LICENSE
           ( cd dist && shasum -a 256 "${archive}" > "${archive}.sha256" )
 
+      - name: Install Python for isolated release proof
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Prove genuine v0.1.2 upgrade and fresh installation
+        shell: pwsh
+        run: |
+          python tests/release_candidate.py `
+            --archive "dist/telex-${{ steps.ver.outputs.v }}-${{ matrix.target }}.${{ matrix.archive }}" `
+            --target "${{ matrix.target }}" --source-sha "${{ github.sha }}" `
+            --tag "${{ steps.ver.outputs.candidate_tag }}" `
+            --report evidence/release-proof.json
+          if ($LASTEXITCODE -ne 0) { throw "native release proof failed" }
+
+      - name: Upload native release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-${{ matrix.target }}
+          path: evidence/
+          if-no-files-found: error
+
       - name: Upload archive artifact
         uses: actions/upload-artifact@v4
         with:
@@ -142,9 +194,53 @@ jobs:
           path: dist/telex-${{ steps.ver.outputs.v }}-${{ matrix.target }}.${{ matrix.archive }}*
           if-no-files-found: error
 
+  postgres-proof:
+    name: Genuine release upgrade (PostgreSQL, Linux x64)
+    needs: build
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: telex-*-x86_64-unknown-linux-gnu
+          path: dist
+          merge-multiple: true
+      - name: Install PostgreSQL assertion client
+        run: sudo apt-get update && sudo apt-get install -y postgresql-client
+      - name: Prove both disposable PostgreSQL schema paths
+        run: |
+          python tests/release_candidate.py \
+            --archive "$(find dist -name '*.tar.gz' -print -quit)" \
+            --target x86_64-unknown-linux-gnu --source-sha "${{ github.sha }}" \
+            --tag "v$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')" \
+            --postgres-url 'postgresql://postgres:postgres@127.0.0.1:5432/postgres' \
+            --disposable-postgres --report evidence/postgres-release-proof.json
+      - name: Upload PostgreSQL release evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-evidence-postgres
+          path: evidence/
+          if-no-files-found: error
+
   publish:
     name: Publish GitHub Release
-    needs: [verify-version, build]
+    needs: [verify-version, build, postgres-proof]
     runs-on: ubuntu-latest
     # Only this job needs write access to create the release (least privilege).
     permissions:
@@ -160,6 +256,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: dist
+          pattern: telex-*
           merge-multiple: true
 
       - name: Verify every archive has a checksum sidecar (and no orphan sidecars)
