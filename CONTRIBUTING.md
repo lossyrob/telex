@@ -44,6 +44,22 @@ TELEX_PG_URL='postgresql://user@host:5432/telex?sslmode=disable' \
 - `TELEX_PG_REQUIRE=1` — fail instead of skipping when `TELEX_PG_URL` is unset/empty, so a CI
   job that intends to exercise the Postgres leg can't pass by silently skipping it.
 
+## Credential-command lifecycle tests
+
+Run the real OS lifecycle targets on Windows, Linux, and macOS:
+
+```text
+cargo test --no-default-features --features postgres --test credential_command --test credential_command_process -- --test-threads=1
+cargo test --no-default-features --features postgres --lib profiles::password_command -- --test-threads=1
+```
+
+These tests use non-secret fixture commands and disposable roots, not operator
+credential commands or a shared database. The macOS credential job is separate
+from SQLite Copilot fallback coverage. The ignored subprocess entrypoint is
+invoked by its parent proof; an ignored or filtered target alone is not runtime
+evidence. Deterministic error/identity seams supplement, rather than replace,
+real platform scope/termination/reap and pipe tests.
+
 ## Releasing
 
 Maintainers cut public releases by pushing a `vX.Y.Z` tag, which triggers the

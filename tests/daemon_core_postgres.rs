@@ -22,6 +22,9 @@ use telex::profiles::{self, BackendProfile, ConfigFile};
 
 static ENV_LOCK: Mutex<()> = Mutex::new(());
 
+#[path = "fixtures/credential_command_helpers.rs"]
+mod credential_helpers;
+
 #[tokio::test]
 async fn application_client_schema_v3_operation_smoke() {
     let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
@@ -2322,4 +2325,250 @@ async fn postgres_wait_does_not_retry_permanent_reconnect_configuration() {
         .unwrap();
     std::fs::remove_dir_all(config_path.parent().unwrap()).unwrap();
     restore_env("TELEX_CONFIG", prior_config);
+}
+
+struct CredentialReconnectFixture {
+    previous_config: Option<std::ffi::OsString>,
+    secret_name: String,
+    previous_secret: Option<std::ffi::OsString>,
+    delay: PathBuf,
+}
+
+impl Drop for CredentialReconnectFixture {
+    fn drop(&mut self) {
+        if let Err(error) = std::fs::remove_file(&self.delay) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("credential fixture rescue marker cleanup failed: {error}");
+            }
+        }
+        restore_env("TELEX_CONFIG", self.previous_config.take());
+        restore_env(&self.secret_name, self.previous_secret.take());
+    }
+}
+
+#[tokio::test]
+async fn postgres_reconnect_credential_cancellation_preserves_wait_budget_and_membership() {
+    let _guard = ENV_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    let Some(url) = pg_url_or_skip(
+        "postgres_reconnect_credential_cancellation_preserves_wait_budget_and_membership",
+    ) else {
+        return;
+    };
+    let cfg = pg_config(&url);
+    let unique = format!("{}_{}", std::process::id(), now_ms());
+    let schema = sanitize_ident(&format!("telex_pg_credential_{unique}")).unwrap();
+    let application_name = format!("telex_credential_{unique}");
+    let secret_name = format!("TELEX_TEST_CREDENTIAL_{unique}");
+    let config_path = write_temp_config("credential-reconnect", &ConfigFile::default());
+    let root = config_path.parent().unwrap();
+    let delay = root.join("delay");
+    let ready = root.join("ready");
+    let fixture = CredentialReconnectFixture {
+        previous_config: std::env::var_os("TELEX_CONFIG"),
+        previous_secret: std::env::var_os(&secret_name),
+        secret_name: secret_name.clone(),
+        delay: delay.clone(),
+    };
+    std::env::set_var(
+        &secret_name,
+        std::str::from_utf8(cfg.get_password().unwrap_or(b"isolated-test-placeholder")).unwrap(),
+    );
+    #[cfg(windows)]
+    let command = {
+        let delay = delay.to_string_lossy().replace('\'', "''");
+        let ready = ready.to_string_lossy().replace('\'', "''");
+        credential_helpers::encoded_powershell(&format!(
+            "if (Test-Path -LiteralPath '{delay}') {{ \
+             [IO.File]::WriteAllText('{ready}', 'ready'); \
+             while (Test-Path -LiteralPath '{delay}') {{ Start-Sleep -Milliseconds 10 }} \
+             }}; [Console]::Out.Write([Environment]::GetEnvironmentVariable('{secret_name}'))"
+        ))
+    };
+    #[cfg(unix)]
+    let command = {
+        let quote =
+            |path: &std::path::Path| format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"));
+        format!(
+            "if test -f {}; then printf ready > {}; \
+             while test -f {}; do sleep 0.01; done; fi; printf '%s' \"${secret_name}\"",
+            quote(&delay),
+            quote(&ready),
+            quote(&delay),
+        )
+    };
+    let profile = BackendProfile {
+        kind: "postgres".into(),
+        path: None,
+        url: Some(pg_url_with_application_name(&url, &application_name)),
+        auth: Some("password".into()),
+        password_env: None,
+        password_command: Some(command),
+        schema: Some(schema.clone()),
+        entra_cred: None,
+        entra_scope: None,
+    };
+    let store_key = profiles::store_key(&profile, None);
+    std::fs::write(
+        &config_path,
+        toml::to_string(&ConfigFile {
+            default: Some("test".into()),
+            backends: BTreeMap::from([("test".into(), profile)]),
+        })
+        .unwrap(),
+    )
+    .unwrap();
+    std::env::set_var("TELEX_CONFIG", &config_path);
+    let daemon = TestDaemon::new("pg-credential-reconnect");
+    let (epoch, owner) = registered_epoch(&daemon, &store_key, "pull", "addr:pull").await;
+    let healthy_store = daemon.store_key("credential-healthy-store");
+    registered_epoch(&daemon, &healthy_store, "healthy", "addr:healthy").await;
+    let (control, connection) = cfg.connect(make_tls().unwrap()).await.unwrap();
+    tokio::spawn(async move {
+        connection
+            .await
+            .expect("credential test control connection")
+    });
+    let listener_deadline = Instant::now() + Duration::from_secs(5);
+    while control
+        .query(
+            "SELECT pid FROM pg_stat_activity WHERE application_name=$1 \
+         AND query LIKE 'LISTEN telex_messages_%'",
+            &[&application_name],
+        )
+        .await
+        .unwrap()
+        .is_empty()
+    {
+        assert!(
+            Instant::now() < listener_deadline,
+            "credential-backed LISTEN never subscribed"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    for (wait_ms, expected_code) in [(1_500, 2), (8_000, 7)] {
+        std::fs::write(&delay, "delay").unwrap();
+        if ready.exists() {
+            std::fs::remove_file(&ready).unwrap();
+        }
+        let queries = control
+            .query(
+                "SELECT pid FROM pg_stat_activity WHERE application_name=$1 \
+             AND query NOT LIKE 'LISTEN telex_messages_%'",
+                &[&application_name],
+            )
+            .await
+            .unwrap();
+        assert_eq!(queries.len(), 1, "exact query connection must exist");
+        let pid: i32 = queries[0].get(0);
+        assert!(control
+            .query_one("SELECT pg_terminate_backend($1)", &[&pid])
+            .await
+            .unwrap()
+            .get::<_, bool>(0));
+        let started = Instant::now();
+        let wait = {
+            let daemon = daemon.clone();
+            let store = store_key.clone();
+            tokio::spawn(async move { daemon.wait(&store, "pull", "addr:pull", wait_ms).await })
+        };
+        let ready_deadline = Instant::now() + Duration::from_secs(2);
+        while !ready.exists() {
+            assert!(
+                !wait.is_finished(),
+                "wait finished before credential helper readiness"
+            );
+            assert!(
+                Instant::now() < ready_deadline,
+                "delayed helper did not start"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        let healthy = daemon
+            .request(send_request(
+                &healthy_store,
+                "healthy",
+                Some("addr:healthy"),
+                "addr:healthy",
+                None,
+                "healthy while another store resolves credentials",
+            ))
+            .await;
+        let healthy_id = match healthy {
+            Response::Sent { receipt } => receipt.id,
+            other => panic!("unrelated established store stalled: {other:?}"),
+        };
+        assert!(matches!(
+            daemon.wait(&healthy_store, "healthy", "addr:healthy", 500).await,
+            Response::Message { id, .. } if id == healthy_id
+        ));
+        assert!(matches!(
+            daemon
+                .ack(&healthy_store, "healthy", "addr:healthy", healthy_id)
+                .await,
+            Response::Ack {
+                delivery_outcome: Some(DeliveryOutcome::Marked),
+                ..
+            }
+        ));
+        let response = wait.await.unwrap();
+        if expected_code == 2 {
+            assert!(matches!(response, Response::Timeout), "{response:?}");
+            assert!(started.elapsed() < Duration::from_millis(2_000));
+        } else {
+            assert!(
+                matches!(
+                    response, Response::Error { ref code, .. }
+                        if code == proto::ERROR_BACKEND_UNAVAILABLE
+                ),
+                "{response:?}"
+            );
+            assert!(started.elapsed() < Duration::from_millis(3_500));
+        }
+        let cleanup_deadline = Instant::now() + Duration::from_millis(3_500);
+        while !profiles::credential_command_obligations().is_empty() {
+            assert!(
+                Instant::now() < cleanup_deadline,
+                "credential ownership receipt missing"
+            );
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        // The rescue condition remains set until production scope cleanup and join complete.
+        std::fs::remove_file(&delay).unwrap();
+        let status = daemon.status().await;
+        assert_eq!(status.members.len(), 2);
+        let pull = status
+            .members
+            .iter()
+            .find(|member| member.session_id == "pull")
+            .unwrap();
+        assert_eq!(pull.lease_epoch, epoch);
+        assert_eq!(pull.owner_instance_id, owner);
+        assert_eq!(pull.last_waiter_exit_code, Some(expected_code));
+        assert_eq!(pull.live_waiters_count, 0);
+        assert!(!pull.idle);
+    }
+    assert!(matches!(
+        daemon
+            .request(send_request(
+                &store_key,
+                "pull",
+                Some("addr:pull"),
+                "addr:pull",
+                None,
+                "after credential cleanup",
+            ))
+            .await,
+        Response::Sent { .. },
+    ));
+    assert!(matches!(
+        daemon.wait(&store_key, "pull", "addr:pull", 1_000).await,
+        Response::Message { ref body, .. } if body == "after credential cleanup",
+    ));
+    drop(control);
+    admin_exec(&cfg, &format!("DROP SCHEMA {schema} CASCADE"))
+        .await
+        .unwrap();
+    drop(fixture);
+    std::fs::remove_dir_all(root).unwrap();
 }

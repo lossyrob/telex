@@ -43,6 +43,9 @@ jobs:
       - name: Test
         run: cargo test --workspace --verbose
 
+      - name: Credential invocation lifecycle
+        run: cargo test --no-default-features --features postgres --test credential_command --test credential_command_process -- --test-threads=1
+
       - name: Check formatting
         run: cargo fmt --check
 
@@ -70,6 +73,23 @@ jobs:
 
       - name: Exercise generated fallback launcher
         run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite copilot_fallback
+
+  credential-macos:
+    name: Credential invocation lifecycle (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Run credential owner unit and OS lifecycle tests
+        run: |
+          cargo test --no-default-features --features postgres --lib profiles::password_command -- --test-threads=1
+          cargo test --no-default-features --features postgres --test credential_command --test credential_command_process -- --test-threads=1
 
   feature-check:
     name: Feature combinations build

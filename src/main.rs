@@ -14,5 +14,7 @@ fn main() {
         .enable_all()
         .build()
         .expect("create tokio runtime");
-    std::process::exit(runtime.block_on(cli::run()));
+    let code = runtime.block_on(cli::run());
+    telex::profiles::drain_password_commands_before_exit();
+    std::process::exit(code);
 }

@@ -1139,7 +1139,7 @@ mod tests {
         assert!(started.elapsed() < Duration::from_millis(500));
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn register_retry_sleep_is_clipped_at_effective_deadline() {
         for response in [
             Response::Registered {
@@ -1164,8 +1164,8 @@ mod tests {
                 .unwrap()
                 .is_none());
             assert!(
-                started.elapsed() < Duration::from_millis(60),
-                "Register retry added a full 50ms sleep after its remaining budget"
+                started.elapsed() <= Duration::from_millis(22),
+                "Register retry exceeded the 20ms budget plus Tokio timer tick rounding"
             );
             assert_eq!(connector.request_ops(), vec!["register"]);
         }

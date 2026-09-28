@@ -179,6 +179,109 @@ wait or disrupt a registered push station.
 This backend budget is independent of the CLI's `--reconnect-grace-ms`, which
 controls reconnecting to an existing daemon after IPC loss.
 
+#### Credential-command ownership during recovery
+
+`--password-command` is a one-shot invocation. Its normal completion, error, and
+cancellation paths clean up Telex-owned helpers within the supported invocation
+scope. Intentionally persistent, escaped, or broker-launched background work is
+outside that contract. Querying an already-running external credential agent
+does not make it Telex-owned and does not authorize its termination. A Windows
+job or Unix process group is not a universal all-descendant containment claim.
+
+One credential-specific registry in the owning process spans calls and Tokio
+runtimes. Its aggregate occupied capacity is two. A configured command source
+cannot overlap itself; its reservation remains held during setup, execution,
+collection, cancellation, completed-but-unjoined work, and `FAILED_HELD`.
+Admission waiting creates no process, native worker, or reader, and spends the
+caller's existing budget without classifying capacity pressure as bad credentials.
+The registry is not a service, a general process manager, or a second retry layer.
+
+A native owner retains the scope, pipes, cancellation state, output, and thread
+obligation independently of Tokio. stdout and stderr are drained by that owner,
+without detached readers or an output truncation policy. Successful shell exit
+while inherited writers remain is still collection. Normal-success cleanup
+requires successful status and complete output/EOF; it must not kill a finite
+helper still producing the credential and publish truncated valid UTF-8.
+Cancellation, timeout, command error, and read failure may stop collection, but
+cannot publish partial or post-cancellation credentials. The environment source
+still takes precedence over the command; shell syntax, inherited environment and
+working directory, full UTF-8 output, and trimming remain the command contract.
+
+Cleanup has an internal three-second observation target, not a universal OS
+termination guarantee. A receipt requires supported-scope completion, exact
+owned-child reap or process wait, completed or closed owned I/O, and native
+owner completion and join. Own-resource finalization has an explicit checked
+result; returning from a destructor is not a success-shaped close receipt.
+Finalization runs under native ownership, outside registry locks, before
+worker completion. The collector joins that worker before atomically selecting
+an eligible result and releasing its source/slot. An established failure hold
+is not erased by a later cleaned result. Partial release retains only still-valid
+ownership and its named failure; closed raw handles/descriptors are never
+reconstructed or blindly retried. A kill request, elapsed time, shell exit,
+EOF, or helper PID probe alone is not receipt.
+
+Windows uses documented suspended creation with actual process and primary
+thread handles. A private noninheritable kill-on-close job is assigned before
+resume; no breakaway or uncontained fallback is permitted. Each job is single-use
+with no later assignment by Telex. The Windows **job-terminal** receipt requires
+checked termination of the exact job, checked zero active job processes, the
+exact launched leader's process handle signaled, completed or closed owned I/O,
+checked release of Telex's own handles, and native owner completion/join before
+eligible publication or admission release. Setup failures retain and clean up
+their exact resources; a created but unassigned suspended leader is not an
+empty-job success.
+
+This is a job-scoped operational receipt, not an all-descendant-kernel-completion
+fence. A former descendant's independently retained process handle may remain
+unsignaled while Windows completes kernel/driver rundown. Telex does not promise
+that all former process handles are signaled, all kernel objects have disappeared,
+or previously issued external I/O has finished at its receipt. Capacity two
+bounds Telex's occupied invocation owners and retained resources, not all residual
+Windows kernel objects across invocations. The earlier stronger-signaling
+counterexamples remain valid evidence of that distinction. Termination/query
+errors, positive active counts, missing leader wait, I/O/finalization failures,
+and missing native join still prohibit receipt. No elapsed-time grace or debugger
+substitutes for the conjunction.
+
+Unix establishes a dedicated group before exec. Its exclusive owner retains the
+waitable unreaped leader through every nonzero group signal, then irreversibly
+seals signal authority before exact leader reap. The former PGID is subsequently
+only a read-only observation key: no normal, error, cancellation, Drop, retry, or
+recheck path may send a nonzero signal after reap. Linux uses
+`getpriority(PRIO_PGRP, P)` with cleared thread-local errno; only `-1/ESRCH`
+establishes absence, while `-1/errno 0` is valid presence. macOS uses the actual
+supported libc POSIX/UNIX03 `kill(-P, 0)` binding: zero is presence, ESRCH is
+absence, and EPERM is presence or inconclusive. Unknown, denied, or ambiguous
+observations retain the obligation. There is no Linux null-signal substitute,
+macOS raw/legacy binding, competing child reaper, or grandchild-reap claim.
+
+On macOS, the final anchored nonzero termination attempt can return EPERM for
+a zombie-only group. That failed attempt is retained as evidence, not called a
+successful kill or absence. After sealing signal authority, exact leader reap
+and independent read-only absence may still establish the remaining receipt
+conditions. This exception does not turn ownership, ECHILD, setup, reap, or
+query failures into success, and post-reap null-query EPERM still prevents receipt.
+
+Missing receipt becomes visible `FAILED_HELD`. The owning host retains the
+invocation ID, source reservation, slot, phase-appropriate resources and native
+thread obligation. After Unix reap it retains read-only observation data, never
+restored signal authority. It cannot discard ownership, restart automatically,
+release capacity on a timer, or claim clean exit. Diagnostics identify the
+obligation, lifecycle stage, and sanitized status; they must not disclose command
+text, credentials, environment, DSNs, or helper stderr.
+
+Only a host that owns credential work drains it before orderly exit. Logical
+command/Wait results retain their deadlines; normal host exit may add up to
+three seconds for concurrent cancellation, receipt, and join under one absolute
+current budget, not a renewed budget per worker. The root CLI and the existing
+in-process console use the same owning-host seam. Embedders call
+`profiles::drain_password_commands_before_exit` before orderly process exit.
+Dropping a Tokio runtime while its process lives does not discard native owners.
+On a missing shutdown receipt, the host reports and retains a named failure hold
+for operator intervention, potentially beyond three seconds. This is not an
+unconditional process-exit bound, and a remote client does not drain daemon-owned
+credential work.
+
 ### 3.2 Exit codes (client-observable)
 
 `telex wait` keeps its existing contract (grounded in `src/commands/wait.rs`), extended
