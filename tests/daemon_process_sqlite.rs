@@ -299,13 +299,13 @@ fn create_owner_private_daemon_fixture_dir(path: &Path) {
         std::io::Error::last_os_error()
     );
 
-    let mut attrs = SECURITY_ATTRIBUTES {
+    let attrs = SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: descriptor,
         bInheritHandle: 0,
     };
     let path_wide = wide_null(path.as_os_str());
-    let ok = unsafe { CreateDirectoryW(path_wide.as_ptr(), &mut attrs) };
+    let ok = unsafe { CreateDirectoryW(path_wide.as_ptr(), &attrs) };
     unsafe {
         LocalFree(descriptor);
     }
@@ -321,6 +321,8 @@ fn create_owner_private_daemon_fixture_dir(path: &Path) {
     }
 
     fn current_user_sid_string() -> String {
+        use std::mem::{size_of, MaybeUninit};
+
         let mut token = 0;
         let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
         assert_ne!(
@@ -334,7 +336,11 @@ fn create_owner_private_daemon_fixture_dir(path: &Path) {
             GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
         }
         assert!(needed > 0, "querying token user buffer length");
-        let mut buf = vec![0u8; needed as usize];
+        // Match the production TOKEN_USER alignment without initializing the SID tail.
+        let mut buf = vec![
+            MaybeUninit::<TOKEN_USER>::uninit();
+            (needed as usize).div_ceil(size_of::<TOKEN_USER>())
+        ];
         let ok = unsafe {
             GetTokenInformation(
                 token,
@@ -353,7 +359,17 @@ fn create_owner_private_daemon_fixture_dir(path: &Path) {
                 std::io::Error::last_os_error()
             );
         }
-        let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+        let token_user = buf.as_ptr().cast::<TOKEN_USER>();
+        assert_eq!(
+            std::mem::align_of_val(&buf[0]),
+            std::mem::align_of::<TOKEN_USER>(),
+            "the allocation element must guarantee TOKEN_USER alignment"
+        );
+        assert!(
+            token_user.is_aligned(),
+            "TOKEN_USER pointer before dereference"
+        );
+        let token_user = unsafe { &*token_user };
         let mut sid_ptr: *mut u16 = std::ptr::null_mut();
         let ok = unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_ptr) };
         unsafe {

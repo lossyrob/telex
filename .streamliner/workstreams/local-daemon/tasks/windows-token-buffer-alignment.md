@@ -3,12 +3,16 @@
 - **Workstream:** `local-daemon`
 - **Node:** `windows-token-buffer-alignment`
 - **Type:** implementation
-- **Status:** planned; launch requires Tier B landing and exact verification
+- **Status:** in progress; PR #158 is open for independent review and CI, with
+  design inspection and merge still gated
 - **Attention:** focus
 - **Depends on:** none
 - **Blocks:** `hardening-gate`, `schema3-release-preparation`
-- **Owner:** Local Daemon workstream orchestrator until an authorized implementer is assigned
+- **Owner:** worker `d13b474e-e729-491b-a466-1b9c1110bb6c` under Local Daemon
+  workstream orchestrator authorization
 - **Tracker:** [lossyrob/telex#154](https://github.com/lossyrob/telex/issues/154)
+- **PR:** [lossyrob/telex#158](https://github.com/lossyrob/telex/pull/158)
+- **Published branch/head:** `feature/windows-token-buffer-alignment` at `f8363be368c4785314ce36bd11f2bd4c74644793`
 - **Parent workstream:** [lossyrob/telex#32](https://github.com/lossyrob/telex/issues/32)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 

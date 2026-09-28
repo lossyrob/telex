@@ -396,6 +396,7 @@ fn parse_sddl_ace_sids(dacl: &str) -> Vec<String> {
 #[cfg(windows)]
 fn windows_current_user_sid() -> Result<String> {
     use std::ffi::c_void;
+    use std::mem::{size_of, MaybeUninit};
     use windows_sys::Win32::Foundation::{CloseHandle, LocalFree, HANDLE, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Security::Authorization::ConvertSidToStringSidW;
     use windows_sys::Win32::Security::{GetTokenInformation, TokenUser, TOKEN_QUERY, TOKEN_USER};
@@ -431,7 +432,11 @@ fn windows_current_user_sid() -> Result<String> {
             std::io::Error::last_os_error()
         );
     }
-    let mut buf = vec![0u8; needed as usize];
+    // Keep the variable-length SID in storage aligned for the TOKEN_USER header.
+    let mut buf = vec![
+        MaybeUninit::<TOKEN_USER>::uninit();
+        (needed as usize).div_ceil(size_of::<TOKEN_USER>())
+    ];
     let ok = unsafe {
         GetTokenInformation(
             token.0,
@@ -447,7 +452,20 @@ fn windows_current_user_sid() -> Result<String> {
             std::io::Error::last_os_error()
         );
     }
-    let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+    let token_user = buf.as_ptr().cast::<TOKEN_USER>();
+    #[cfg(test)]
+    {
+        assert_eq!(
+            std::mem::align_of_val(&buf[0]),
+            std::mem::align_of::<TOKEN_USER>(),
+            "the allocation element must guarantee TOKEN_USER alignment"
+        );
+        assert!(
+            token_user.is_aligned(),
+            "TOKEN_USER pointer before dereference"
+        );
+    }
+    let token_user = unsafe { &*token_user };
     let mut sid_ptr: *mut u16 = std::ptr::null_mut();
     let ok = unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_ptr) };
     if ok == 0 {
@@ -4541,6 +4559,17 @@ mod tests {
             err.to_string().contains("canonicalizing")
                 || err.to_string().contains("physical file identity"),
             "unexpected error: {err:#}"
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_token_user_alignment_preserves_current_sid() {
+        let sid = windows_current_user_sid().expect("read aligned current token user");
+        assert!(sid.starts_with("S-1-"), "expected a Windows SID: {sid}");
+        assert_eq!(
+            windows_current_user_sid().expect("read current SID again"),
+            sid
         );
     }
 

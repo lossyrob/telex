@@ -22,7 +22,7 @@ use crate::model::{
     ApplicationMessageOperation, Attention, DeliveryOutcome, Disposition, EpochClaimResult,
     MessageRow, NewMessage, STATUS_RETIRED,
 };
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite"))]
 use crate::model::{ApplicationOperationBegin, NewApplicationOperation};
 #[cfg(feature = "postgres")]
 use anyhow::Context;
@@ -382,7 +382,7 @@ struct DeliveryAdmissionTestLane {
     commit_release: Semaphore,
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "sqlite"))]
 impl DeliveryAdmissionTestLane {
     fn new() -> Self {
         Self {
@@ -402,6 +402,7 @@ struct DeliveryAdmissionTestControl {
 
 #[cfg(test)]
 impl DeliveryAdmissionTestControl {
+    #[cfg(feature = "sqlite")]
     fn new() -> Self {
         Self {
             register: DeliveryAdmissionTestLane::new(),
@@ -436,6 +437,7 @@ impl DeliveryAdmissionTestControl {
             .forget();
     }
 
+    #[cfg(feature = "sqlite")]
     async fn wait_before_lock(&self, kind: DeliveryAdmissionKind) {
         self.lane(kind)
             .before_arrived
@@ -445,6 +447,7 @@ impl DeliveryAdmissionTestControl {
             .forget();
     }
 
+    #[cfg(feature = "sqlite")]
     async fn wait_before_commit(&self, kind: DeliveryAdmissionKind) {
         self.lane(kind)
             .commit_arrived
@@ -454,10 +457,12 @@ impl DeliveryAdmissionTestControl {
             .forget();
     }
 
+    #[cfg(feature = "sqlite")]
     fn release_before_lock(&self, kind: DeliveryAdmissionKind) {
         self.lane(kind).before_release.add_permits(1);
     }
 
+    #[cfg(feature = "sqlite")]
     fn release_commit(&self, kind: DeliveryAdmissionKind) {
         self.lane(kind).commit_release.add_permits(1);
     }
@@ -528,7 +533,7 @@ struct EndedSessionRecord {
 }
 
 impl DaemonState {
-    #[cfg(test)]
+    #[cfg(all(test, feature = "sqlite"))]
     fn inject_wait_fetch_failures(&self, count: u64) {
         self.wait_fetch_failures.store(count, Ordering::SeqCst);
     }
@@ -13941,6 +13946,8 @@ mod platform {
     }
 
     fn sid_string_from_token(token: HANDLE) -> Result<String> {
+        use std::mem::{size_of, MaybeUninit};
+
         let mut needed = 0u32;
         unsafe {
             GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
@@ -13951,7 +13958,11 @@ mod platform {
                 std::io::Error::last_os_error(),
             ));
         }
-        let mut buf = vec![0u8; needed as usize];
+        // Keep the variable-length SID in storage aligned for the TOKEN_USER header.
+        let mut buf = vec![
+            MaybeUninit::<TOKEN_USER>::uninit();
+            (needed as usize).div_ceil(size_of::<TOKEN_USER>())
+        ];
         let ok = unsafe {
             GetTokenInformation(
                 token,
@@ -13967,7 +13978,20 @@ mod platform {
                 std::io::Error::last_os_error(),
             ));
         }
-        let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+        let token_user = buf.as_ptr().cast::<TOKEN_USER>();
+        #[cfg(test)]
+        {
+            assert_eq!(
+                std::mem::align_of_val(&buf[0]),
+                std::mem::align_of::<TOKEN_USER>(),
+                "the allocation element must guarantee TOKEN_USER alignment"
+            );
+            assert!(
+                token_user.is_aligned(),
+                "TOKEN_USER pointer before dereference"
+            );
+        }
+        let token_user = unsafe { &*token_user };
         let mut sid_ptr: *mut u16 = std::ptr::null_mut();
         let ok = unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_ptr) };
         if ok == 0 {
@@ -14072,6 +14096,43 @@ mod platform {
             ));
         }
         Ok(Handle(handle))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn windows_token_user_alignment_preserves_peer_identity() {
+            let token = current_process_token().expect("current process token");
+            let sid = sid_string_from_token(token.0).expect("read aligned token user");
+            assert!(sid.starts_with("S-1-"), "expected a Windows SID: {sid}");
+            assert_eq!(
+                current_user_identity().expect("singleton user identity"),
+                sid
+            );
+
+            let exe = std::env::current_exe().expect("current executable");
+            let peer = verify_process_owner_and_exe(std::process::id(), &exe)
+                .expect("authenticate current process");
+            assert_eq!(peer.sid, sid);
+            assert!(peer.start_time_100ns > 0);
+        }
+
+        #[test]
+        fn windows_token_user_alignment_invalid_token_keeps_sizing_error() {
+            let err = sid_string_from_token(0).expect_err("invalid token must fail closed");
+            match err {
+                DaemonError::Io { action, source } => {
+                    assert_eq!(action, "sizing token user information");
+                    assert_eq!(
+                        source.raw_os_error(),
+                        Some(windows_sys::Win32::Foundation::ERROR_INVALID_HANDLE as i32)
+                    );
+                }
+                other => panic!("expected existing token sizing error, got {other:?}"),
+            }
+        }
     }
 }
 

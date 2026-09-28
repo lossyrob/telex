@@ -351,7 +351,7 @@ failure-hold behavior, runtime-shutdown ownership, and platform receipt
 conditions below. It does not establish measured performance, a universal
 finite OS cleanup guarantee, product implementation, or runtime correctness.
 
-### Accepted intended mechanism pending product promotion
+### Accepted intended mechanism under implementation
 
 Use a credential-local process registry with finite aggregate admission,
 capacity `C=2`, a same-source barrier, a native owner, nonblocking owned pipes,
@@ -390,18 +390,44 @@ permits no automatic discard, restart, growing retry queue, clean-exit claim, or
 post-reap catch-up signal. The owner must survive Tokio runtime drop while the
 embedding process remains alive, but it cannot outlive host process exit.
 
-Windows uses suspended `CreateProcess`, documented process and
-primary-thread handles, private noninheritable kill-on-close job, no breakaway,
-assign-before-resume sequence, and receipt requiring process wait, zero active
-job members, completed I/O, and native thread completion. Closing the job or
-requesting termination alone is not normal receipt.
+Windows uses suspended `CreateProcess`, documented process and primary-thread
+handles, a private noninheritable single-use kill-on-close job, no breakaway, and
+assignment before resume. Setup failure never resumes an uncontained shell.
 
-The accepted intended design excludes a generic manager or service, subreaper, cgroup,
-PID, name, or ancestry scan, unrelated waits, post-reap mutating signals, and a
-coverage waiver. Bounded mechanical delta review, campaign authorization of the
-exact final four blobs for atomic landing, independent landing verification,
-separate same-worker product-write authority, implementation, and genuine
-Windows, Linux, and macOS runtime proof remain pending.
+The selected job-terminal receipt requires all of the following before eligible
+atomic credential-result publication and source/admission release:
+
+1. checked termination of the exact owned private job;
+2. a checked query reporting zero active job processes;
+3. the exact launched leader process handle signaled;
+4. checked completion or closure of Telex-owned I/O and handles; and
+5. native owner completion and join.
+
+Failure, cancellation, receipt readiness, and `FAILED_HELD` use one final
+arbitration. A close or join failure retains the named obligation and any
+still-valid ownership; closed handles are never reconstructed or retried as
+live handles. Normal credential success also requires the original successful
+shell status, complete stdout and stderr through EOF, full UTF-8 decoding, and
+the existing trim. A finite inherited writer keeps the invocation collecting;
+cancellation or error cannot publish partial or post-cancellation credentials.
+
+This receipt does not require every former descendant process handle to be
+signaled. Such handles may remain nonsignaled during kernel or driver rundown.
+The receipt does not establish completion of every former process object,
+kernel or driver work, previously issued external I/O, or external reference,
+and it does not bound those residual objects. `C=2` bounds Telex invocation
+owners and reservations, not descendant count or all residual Windows
+resources. Closing the job, requesting termination, or observing zero active
+processes alone is not receipt. No debugger is part of the design.
+
+The accepted intended design excludes a generic manager or service, subreaper,
+cgroup, PID, name, or ancestry scan, unrelated waits, post-reap mutating
+signals, debugger supervision, and a coverage waiver. The same implementer owns
+autonomous solution work, isolated experiments, code, tests, ordinary pushes,
+and review fixes. Artifact review and reconciliation proceed in parallel and do
+not gate ordinary implementation. Genuine Windows, Linux, and macOS runtime
+proof, final independent product review, required CI, merge authorization, and
+explicit operator publication approval remain pending.
 
 ## Remaining questions and confidence
 
@@ -430,13 +456,14 @@ Windows, Linux, and macOS runtime proof remain pending.
 - **Downstream design detail:** the transactional node owns the exact local
   storage, migration, cutover, rollback, corruption, and old-writer refusal
   design needed to restore unconditional authority.
-- **Accepted policy and intended mechanism, pending promotion:** issue #155 uses
-  a one-shot `--password-command` contract and the reviewed credential-local
-  owner, admission, shutdown, failure, and platform-receipt design. Product code,
-  runtime proof, thread resolution, merge, and release remain pending.
+- **Accepted policy and intended mechanism, proof pending:** issue #155 uses a
+  one-shot `--password-command` contract, the reviewed credential-local owner,
+  admission, shutdown, and failure design, and the selected Windows job-terminal
+  receipt with its explicit residual limits. Product correctness, runtime proof,
+  thread resolution, merge, and release remain pending.
 - **Selected shutdown policy, pending implementation:** the owning host may use
   one bounded concurrent drain of up to three seconds after logical completion,
   followed by an explicit ownership failure hold when receipt is absent.
 - **Selected engineering limits:** the process-local registry uses aggregate
   capacity `C=2` and internal observation target `B=3s`. They are approved
-  intended limits but remain unmeasured and unimplemented.
+  intended limits but remain unmeasured.
