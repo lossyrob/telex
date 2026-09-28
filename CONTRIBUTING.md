@@ -44,6 +44,33 @@ TELEX_PG_URL='postgresql://user@host:5432/telex?sslmode=disable' \
 - `TELEX_PG_REQUIRE=1` — fail instead of skipping when `TELEX_PG_URL` is unset/empty, so a CI
   job that intends to exercise the Postgres leg can't pass by silently skipping it.
 
+The live LISTEN/NOTIFY proof observes subscription and waiter readiness, then
+disables only the test waiter's polling fallback. A committed row without a
+notification must time out; a real notification must deliver the exact row even
+when its epoch proof is deliberately delayed. This distinguishes the wake path
+from end-to-end SQL/scheduler latency. A separate virtual-time test proves that
+notification selection does not wait for the normal polling deadline. Production
+poll intervals remain unchanged.
+
+## Credential-command lifecycle tests
+
+Run the real OS lifecycle targets on Windows, Linux, and macOS:
+
+```text
+cargo test --no-default-features --features postgres --test credential_command --test credential_command_process -- --test-threads=1
+cargo test --no-default-features --features postgres --lib profiles::password_command -- --test-threads=1
+```
+
+These tests use non-secret fixture commands and disposable roots, not operator
+credential commands or a shared database. The macOS credential job is separate
+from SQLite Copilot fallback coverage. Ignored subprocess entrypoints are
+invoked by their parent proofs; an ignored or filtered target alone is not runtime
+evidence. Delayed credential fixtures publish their native host/owned-child
+identities only after a child-ready barrier, without CIM or parent-process
+discovery. Acquisition errors are observed directly instead of being reported
+as an indistinguishable readiness timeout. Deterministic error/identity seams
+supplement, rather than replace, real platform scope/termination/reap and pipe tests.
+
 ## Windows token-user regression coverage
 
 On Windows, run `cargo test --lib windows_token_user_alignment` to exercise the

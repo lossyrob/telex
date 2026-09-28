@@ -8,7 +8,7 @@ use crate::backend::postgres::{
 };
 #[cfg(feature = "sqlite")]
 use crate::backend::sqlite::SqliteBackend;
-use crate::backend::{Backend, WaitFetchOptions};
+use crate::backend::{is_retryable_backend_error, Backend, WaitFetchOptions};
 use crate::daemon_ipc::{
     self as proto, current_protocol_version, read_json_line, write_json_line, DaemonStatus,
     DeafStationStatus, DeliveryMode, EpochStatus, HandshakeError, HelloAck, IdleStationStatus,
@@ -56,6 +56,8 @@ const RECENT_DELIVERY_HEALTH_GRACE_MS: i64 = 2 * 60 * 1000;
 const DEFAULT_RETENTION_WARN_ROWS: i64 = 100_000;
 const DEFAULT_IDLE_STATION_WARN: usize = 1_000;
 const DEFAULT_DEAF_WARN_MS: i64 = 2 * 60 * 1000;
+const WAIT_BACKEND_RECOVERY_GRACE: Duration =
+    Duration::from_millis(proto::DEFAULT_WAIT_RECONNECT_GRACE_MS);
 
 pub type Result<T> = std::result::Result<T, DaemonError>;
 
@@ -330,6 +332,10 @@ pub struct DaemonState {
     delivery_admissions: Mutex<HashMap<MemberKey, Weak<AsyncMutex<()>>>>,
     #[cfg(test)]
     delivery_admission_control: Mutex<Option<Arc<DeliveryAdmissionTestControl>>>,
+    #[cfg(test)]
+    wait_fetch_failures: AtomicU64,
+    #[cfg(test)]
+    wait_fetch_delay_ms: AtomicU64,
     next_waiter_id: AtomicU64,
     recent_errors: Arc<Mutex<VecDeque<RecentErrorStatus>>>,
     ended_sessions: Mutex<BTreeMap<SessionKey, EndedSessionRecord>>,
@@ -527,6 +533,24 @@ struct EndedSessionRecord {
 }
 
 impl DaemonState {
+    #[cfg(all(test, feature = "sqlite"))]
+    fn inject_wait_fetch_failures(&self, count: u64) {
+        self.wait_fetch_failures.store(count, Ordering::SeqCst);
+    }
+
+    #[cfg(test)]
+    fn take_wait_fetch_failure(&self) -> bool {
+        self.wait_fetch_failures
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+                if remaining > 0 {
+                    Some(remaining - 1)
+                } else {
+                    None
+                }
+            })
+            .is_ok()
+    }
+
     async fn status(&self) -> DaemonStatus {
         self.status_with_thresholds(
             retention_warn_threshold(),
@@ -1417,6 +1441,41 @@ impl DaemonState {
         }
     }
 
+    fn record_backend_exhaustion_if_current(
+        &self,
+        expected: &MemberRecord,
+        deadline: Option<Instant>,
+        detail: String,
+        pid: Option<u32>,
+    ) -> Option<Response> {
+        let mut members = self.members.lock().unwrap();
+        if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            return None;
+        }
+        let member = members.get_mut(&Self::member_key(
+            &expected.store_key,
+            &expected.session_id,
+            &expected.address,
+        ))?;
+        if member.idle {
+            return Some(Response::PresenceEnded);
+        }
+        if member.lease_epoch != expected.lease_epoch
+            || member.owner_instance_id != expected.owner_instance_id
+        {
+            return None;
+        }
+        member.last_waiter_exit_at_ms = Some(now_ms());
+        member.last_waiter_outcome = Some(WaiterOutcome::BackendUnavailable);
+        member.last_waiter_exit_code = Some(7);
+        member.last_waiter_detail = Some(detail.clone());
+        member.last_waiter_pid = pid;
+        Some(proto::error_response(
+            proto::ERROR_BACKEND_UNAVAILABLE,
+            detail,
+        ))
+    }
+
     fn record_waiter_message_exit(
         &self,
         store_key: &str,
@@ -1859,6 +1918,10 @@ pub fn daemon_version_metadata() -> DaemonVersionMetadata {
 }
 
 pub async fn connect_existing(store_key: &str) -> Result<DaemonClient> {
+    connect_existing_with_hello(&proto::client_hello(store_key)).await
+}
+
+async fn connect_existing_with_hello(hello: &proto::Hello) -> Result<DaemonClient> {
     let paths = DaemonPaths::current()?;
     let cap = read_cap_file(&paths.cap_path)?;
     let (server_pid, server_start_time) = cap_required_peer_identity(&cap)?;
@@ -1870,7 +1933,7 @@ pub async fn connect_existing(store_key: &str) -> Result<DaemonClient> {
         Some(server_pid),
         Some(server_start_time),
     )?;
-    handshake_connected(conn, paths, store_key).await
+    handshake_connected(conn, paths, hello).await
 }
 
 pub async fn connect_or_spawn(store_key: &str) -> Result<DaemonClient> {
@@ -2060,12 +2123,11 @@ fn quote_windows_arg(arg: &str) -> String {
 async fn handshake_connected(
     conn: platform::ClientConn,
     paths: DaemonPaths,
-    store_key: &str,
+    hello: &proto::Hello,
 ) -> Result<DaemonClient> {
-    let hello = proto::client_hello(store_key);
     let (read_half, mut write_half) = tokio::io::split(conn);
     let mut reader = BufReader::new(read_half);
-    proto::send_hello_after_verifier(&mut write_half, &hello, || Ok(())).await?;
+    proto::send_hello_after_verifier(&mut write_half, hello, || Ok(())).await?;
     let ack: HelloAck = read_json_line(&mut reader).await?;
     if !ack.accepted {
         return Err(DaemonError::Incompatible(
@@ -2137,6 +2199,10 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         delivery_admissions: Mutex::new(HashMap::new()),
         #[cfg(test)]
         delivery_admission_control: Mutex::new(None),
+        #[cfg(test)]
+        wait_fetch_failures: AtomicU64::new(0),
+        #[cfg(test)]
+        wait_fetch_delay_ms: AtomicU64::new(0),
         next_waiter_id: AtomicU64::new(1),
         recent_errors: Arc::new(Mutex::new(VecDeque::new())),
         ended_sessions: Mutex::new(BTreeMap::new()),
@@ -3456,44 +3522,6 @@ fn self_demote_member(state: &DaemonState, member: &MemberRecord, reason: impl A
     }
 }
 
-async fn prove_current_owner(
-    state: &DaemonState,
-    backend: &Arc<dyn Backend>,
-    member: &MemberRecord,
-    context: &str,
-) -> std::result::Result<(), Response> {
-    match backend
-        .heartbeat_epoch(
-            &member.address,
-            &member.owner_instance_id,
-            member.lease_epoch,
-        )
-        .await
-    {
-        Ok(true) => Ok(()),
-        Ok(false) => {
-            self_demote_member(
-                state,
-                member,
-                format!("{context}: epoch heartbeat returned 0 rows"),
-            );
-            Err(needs_attach_for_missing_member(
-                state,
-                backend,
-                &member.store_key,
-                &member.session_id,
-                &member.address,
-                context,
-            )
-            .await)
-        }
-        Err(e) => Err(proto::internal(format!(
-            "{context}: heartbeating {} at epoch {}: {e:#}",
-            member.address, member.lease_epoch
-        ))),
-    }
-}
-
 async fn needs_attach_for_missing_member(
     state: &DaemonState,
     backend: &Arc<dyn Backend>,
@@ -3588,6 +3616,13 @@ async fn handle_client(
     state: Arc<DaemonState>,
 ) -> Result<ClientAction> {
     platform::verify_client_peer(&conn)?;
+    handle_authenticated_client(conn, state).await
+}
+
+async fn handle_authenticated_client<S>(conn: S, state: Arc<DaemonState>) -> Result<ClientAction>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
     let (read_half, mut write_half) = tokio::io::split(conn);
     let mut reader = BufReader::new(read_half);
 
@@ -3625,8 +3660,21 @@ async fn handle_client(
     };
 
     let supports_delivery_quarantine = peer_supports_delivery_quarantine(&hello);
-    let (response, action) =
+    let (mut response, action) =
         handle_request_with_capabilities(state, request, supports_delivery_quarantine).await;
+    if !hello
+        .capabilities
+        .iter()
+        .any(|capability| capability == proto::CAP_WAIT_BACKEND_RECOVERY)
+    {
+        if let Response::StatusReport { status } = &mut response {
+            for member in &mut status.members {
+                if member.last_waiter_outcome == Some(WaiterOutcome::BackendUnavailable) {
+                    member.last_waiter_outcome = None;
+                }
+            }
+        }
+    }
     write_json_line(&mut write_half, &response).await?;
     Ok(action)
 }
@@ -4948,8 +4996,37 @@ async fn wait_for_message(
         waiter_start_time,
         supports_delivery_quarantine,
         idle_ttl_duration(),
+        WaitPollMode::Normal,
     )
     .await
+}
+
+enum WaitPollMode {
+    Normal,
+    // Integration proof only; IPC wait requests always select Normal.
+    #[cfg(feature = "sqlite")]
+    NotificationOnly(Option<tokio::sync::oneshot::Sender<()>>),
+}
+
+impl WaitPollMode {
+    fn sleep_duration(
+        &mut self,
+        remaining: Duration,
+        poll_interval: Duration,
+    ) -> std::result::Result<Duration, Response> {
+        match self {
+            Self::Normal => Ok(remaining.min(poll_interval)),
+            #[cfg(feature = "sqlite")]
+            Self::NotificationOnly(ready) => {
+                if let Some(ready) = ready.take() {
+                    ready.send(()).map_err(|_| {
+                        proto::internal("notification-only test waiter lost its ready observer")
+                    })?;
+                }
+                Ok(remaining)
+            }
+        }
+    }
 }
 
 async fn wait_for_message_with_idle_ttl(
@@ -4965,11 +5042,13 @@ async fn wait_for_message_with_idle_ttl(
     waiter_start_time: Option<u64>,
     supports_delivery_quarantine: bool,
     idle_ttl: Duration,
+    mut poll_mode: WaitPollMode,
 ) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
     }
 
+    let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     match state.get_member(&store_key, &session_id, &address) {
         Some(member) if member.capability == StationCapability::SendOnly => {
             return proto::unsupported(format!(
@@ -5012,16 +5091,7 @@ async fn wait_for_message_with_idle_ttl(
             backend.kind()
         ));
     }
-    let cc_after_ms = if wake_on_cc {
-        match backend.durable_clock_now_ms().await {
-            Ok(value) => Some(value),
-            Err(e) => {
-                return proto::internal(format!("capturing CC lower bound for {address}: {e:#}"))
-            }
-        }
-    } else {
-        None
-    };
+    let mut cc_after_ms = None;
     let delivery_admission = state
         .delivery_admission(
             &store_key,
@@ -5061,7 +5131,6 @@ async fn wait_for_message_with_idle_ttl(
             .await;
         }
     }
-    let deadline = timeout_ms.map(|ms| Instant::now() + Duration::from_millis(ms));
     let idle_deadline = Instant::now() + idle_ttl;
     if state.has_live_waiter_for(&store_key, &session_id, &address) {
         state.push_recent_error(
@@ -5109,7 +5178,9 @@ async fn wait_for_message_with_idle_ttl(
         }
     };
     let mut skipped_oversized_cc = BTreeSet::new();
-    loop {
+    let mut backend_recovery_deadline: Option<Instant> = None;
+    let mut backend_recovery_backoff = BACKOFF_INITIAL;
+    'wait: loop {
         if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
             state.record_waiter_exit(
                 &store_key,
@@ -5153,17 +5224,149 @@ async fn wait_for_message_with_idle_ttl(
         if current.idle {
             return Response::PresenceEnded;
         }
-        let candidates = match backend
-            .fetch_wait_candidates(
-                &address,
-                WaitFetchOptions {
-                    wake_on_cc,
-                    cc_after_ms: cc_after_ms.unwrap_or_default(),
-                },
-            )
-            .await
+        let fetch = async {
+            #[cfg(test)]
+            {
+                let delay_ms = state.wait_fetch_delay_ms.load(Ordering::SeqCst);
+                if delay_ms > 0 {
+                    tokio::time::sleep(Duration::from_millis(delay_ms)).await;
+                }
+            }
+            #[cfg(test)]
+            if state.take_wait_fetch_failure() {
+                return Err(crate::backend::retryable_backend_error(
+                    "injected transient backend failure",
+                ));
+            }
+            if wake_on_cc && cc_after_ms.is_none() {
+                cc_after_ms = Some(backend.durable_clock_now_ms().await?);
+                if let Some(waiter) = state
+                    .waiters
+                    .lock()
+                    .unwrap()
+                    .get_mut(&DaemonState::waiter_key(waiter_guard.waiter_id))
+                {
+                    waiter.cc_after_ms = cc_after_ms;
+                }
+            }
+            let candidates = backend
+                .fetch_wait_candidates(
+                    &address,
+                    WaitFetchOptions {
+                        wake_on_cc,
+                        cc_after_ms: cc_after_ms.unwrap_or_default(),
+                    },
+                )
+                .await?;
+            let owns_epoch = if candidates.iter().any(|candidate| {
+                wait_attention_matches(
+                    &candidate.message.attention,
+                    attention.as_deref(),
+                    parsed_min_attention,
+                )
+            }) {
+                backend
+                    .heartbeat_epoch(&address, &current.owner_instance_id, current.lease_epoch)
+                    .await?
+            } else {
+                true
+            };
+            Ok((candidates, owns_epoch))
+        };
+        let attempt_started = Instant::now();
+        let recovery_limit =
+            backend_recovery_deadline.unwrap_or(attempt_started + WAIT_BACKEND_RECOVERY_GRACE);
+        let fetch_deadline = deadline.map_or(recovery_limit, |wait_deadline| {
+            recovery_limit.min(wait_deadline)
+        });
+        let candidates_result = match tokio::time::timeout(
+            fetch_deadline.saturating_duration_since(Instant::now()),
+            fetch,
+        )
+        .await
         {
-            Ok(rows) => rows,
+            Ok(result) => result,
+            Err(_) => Err(crate::backend::retryable_backend_error(
+                "backend query or reconnect attempt timed out",
+            )),
+        };
+        if deadline.is_some_and(|wait_deadline| Instant::now() >= wait_deadline) {
+            continue;
+        }
+        let candidates = match candidates_result {
+            Ok((rows, owns_epoch)) => {
+                if !owns_epoch {
+                    if let Some(member) = state.get_member(&store_key, &session_id, &address) {
+                        if member.idle {
+                            return Response::PresenceEnded;
+                        }
+                        if member.lease_epoch != current.lease_epoch
+                            || member.owner_instance_id != current.owner_instance_id
+                        {
+                            continue 'wait;
+                        }
+                    }
+                    self_demote_member(
+                        &state,
+                        &current,
+                        "wait delivery proof: epoch heartbeat returned 0 rows",
+                    );
+                    waiter_guard.suppress_abnormal_on_drop();
+                    return needs_attach_for_missing_member(
+                        &state,
+                        &backend,
+                        &store_key,
+                        &session_id,
+                        &address,
+                        "wait delivery proof",
+                    )
+                    .await;
+                }
+                backend_recovery_deadline = None;
+                backend_recovery_backoff = BACKOFF_INITIAL;
+                rows
+            }
+            Err(e) if is_retryable_backend_error(&e) => {
+                let detail = format!("{e:#}");
+                let now = Instant::now();
+                if deadline.is_some_and(|wait_deadline| now >= wait_deadline) {
+                    continue;
+                }
+                let recovery_deadline = *backend_recovery_deadline.get_or_insert_with(|| {
+                    state.push_recent_error(
+                        "BackendDegraded",
+                        format!(
+                            "transient backend failure while fetching wait candidates for {address}; retrying: {detail}"
+                        ),
+                    );
+                    attempt_started + WAIT_BACKEND_RECOVERY_GRACE
+                });
+                if now >= recovery_deadline {
+                    let detail = format!(
+                        "backend recovery grace expired while fetching wait candidates for {address}: {detail}"
+                    );
+                    let Some(response) = state.record_backend_exhaustion_if_current(
+                        &current,
+                        deadline,
+                        detail,
+                        waiter_pid_for_status,
+                    ) else {
+                        continue;
+                    };
+                    waiter_guard.suppress_abnormal_on_drop();
+                    return response;
+                }
+                let retry_until = deadline.map_or(recovery_deadline, |wait_deadline| {
+                    recovery_deadline.min(wait_deadline)
+                });
+                tokio::time::sleep(
+                    backend_recovery_backoff
+                        .min(retry_until.saturating_duration_since(Instant::now())),
+                )
+                .await;
+                backend_recovery_backoff = (backend_recovery_backoff * 2).min(BACKOFF_MAX);
+                continue;
+            }
             Err(e) => {
                 let detail = format!("{e:#}");
                 waiter_guard.suppress_abnormal_on_drop();
@@ -5197,6 +5400,8 @@ async fn wait_for_message_with_idle_ttl(
                 return Response::PresenceEnded;
             }
         }
+        let proved_epoch = current.lease_epoch;
+        let proved_owner = current.owner_instance_id.clone();
         for candidate in candidates.into_iter().filter(|candidate| {
             wait_attention_matches(
                 candidate.message.attention.as_str(),
@@ -5234,11 +5439,8 @@ async fn wait_for_message_with_idle_ttl(
             if current.idle {
                 return Response::PresenceEnded;
             }
-            if let Err(response) =
-                prove_current_owner(&state, &backend, &current, "wait delivery proof").await
-            {
-                waiter_guard.suppress_abnormal_on_drop();
-                return response;
+            if current.lease_epoch != proved_epoch || current.owner_instance_id != proved_owner {
+                continue 'wait;
             }
             let cc = cc_recipients(row.cc.as_deref());
             let delivery_role =
@@ -5434,11 +5636,13 @@ async fn wait_for_message_with_idle_ttl(
             }
             let remaining = deadline.saturating_duration_since(now);
             let ttl_remaining = idle_deadline.saturating_duration_since(now);
-            sleep_until_next_poll_or_notify(
-                store_notification,
-                remaining.min(ttl_remaining).min(Duration::from_millis(100)),
-            )
-            .await;
+            let duration = match poll_mode
+                .sleep_duration(remaining.min(ttl_remaining), Duration::from_millis(100))
+            {
+                Ok(duration) => duration,
+                Err(response) => return response,
+            };
+            sleep_until_next_poll_or_notify(store_notification, duration).await;
         } else {
             let now = Instant::now();
             if now >= idle_deadline {
@@ -5460,13 +5664,14 @@ async fn wait_for_message_with_idle_ttl(
                 );
                 return Response::PresenceEnded;
             }
-            sleep_until_next_poll_or_notify(
-                store_notification,
-                idle_deadline
-                    .saturating_duration_since(now)
-                    .min(Duration::from_millis(250)),
-            )
-            .await;
+            let duration = match poll_mode.sleep_duration(
+                idle_deadline.saturating_duration_since(now),
+                Duration::from_millis(250),
+            ) {
+                Ok(duration) => duration,
+                Err(response) => return response,
+            };
+            sleep_until_next_poll_or_notify(store_notification, duration).await;
         }
     }
 }
@@ -6160,6 +6365,10 @@ mod p3_tests {
             delivery_admissions: Mutex::new(HashMap::new()),
             #[cfg(test)]
             delivery_admission_control: Mutex::new(None),
+            #[cfg(test)]
+            wait_fetch_failures: AtomicU64::new(0),
+            #[cfg(test)]
+            wait_fetch_delay_ms: AtomicU64::new(0),
             next_waiter_id: AtomicU64::new(1),
             recent_errors: Arc::new(Mutex::new(VecDeque::new())),
             ended_sessions: Mutex::new(BTreeMap::new()),
@@ -10907,6 +11116,7 @@ mod p3_tests {
             (WaiterOutcome::DeliveryQuarantined, "delivery-quarantined"),
             (WaiterOutcome::IdleTimeout, "idle-timeout"),
             (WaiterOutcome::PresenceEnded, "presence-ended"),
+            (WaiterOutcome::BackendUnavailable, "backend-unavailable"),
             (WaiterOutcome::AbnormalExit, "abnormal-exit"),
         ];
         for (outcome, expected) in values {
@@ -10963,6 +11173,448 @@ mod p3_tests {
         let status = state.status().await;
         assert_eq!(status.members[0].last_waiter_outcome, None);
         assert_eq!(status.members[0].last_waiter_pid, None);
+    }
+
+    #[tokio::test]
+    async fn wait_retries_transient_backend_fetch_without_dropping_presence() {
+        let state = test_state("wait-backend-recovery");
+        let store = store_key("wait-backend-recovery");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        let message_id = insert_to(&state, &store, "addr:a").await;
+        state.inject_wait_fetch_failures(1);
+
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 1_000)).await;
+        assert!(matches!(wait, Response::Message { id, .. } if id == message_id));
+
+        let status = state.status().await;
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::Message)
+        );
+        assert!(status
+            .recent_errors
+            .iter()
+            .any(|error| error.kind == "BackendDegraded"));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn notification_wakes_before_poll_deadline_without_using_wall_clock_latency() {
+        let notify = Arc::new(Notify::new());
+        let started = tokio::time::Instant::now();
+        let waiting = sleep_until_next_poll_or_notify(
+            Some(notify.clone().notified_owned()),
+            Duration::from_millis(100),
+        );
+        tokio::pin!(waiting);
+        tokio::select! {
+            _ = &mut waiting => panic!("wait woke without notification or poll deadline"),
+            _ = tokio::time::sleep(Duration::from_millis(20)) => {},
+        }
+        let before_notify = tokio::time::Instant::now();
+        assert!(before_notify.duration_since(started) < Duration::from_millis(100));
+        notify.notify_waiters();
+        tokio::time::timeout(Duration::from_millis(1), &mut waiting)
+            .await
+            .expect("notification must wake without advancing to the polling deadline");
+        assert_eq!(tokio::time::Instant::now(), before_notify);
+    }
+
+    #[tokio::test]
+    async fn exhausted_backend_recovery_is_an_actionable_wait_outcome() {
+        let state = test_state("wait-backend-unavailable");
+        let store = store_key("wait-backend-unavailable");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        state.inject_wait_fetch_failures(10);
+
+        let wait = request(state.clone(), wait_req(&store, "s1", "addr:a", 5_000)).await;
+        assert!(matches!(
+            wait,
+            Response::Error { ref code, .. } if code == proto::ERROR_BACKEND_UNAVAILABLE
+        ));
+
+        let status = state.status().await;
+        assert_eq!(
+            status.members[0].last_waiter_outcome,
+            Some(WaiterOutcome::BackendUnavailable)
+        );
+        assert_eq!(status.members[0].last_waiter_exit_code, Some(7));
+        assert!(status.members[0]
+            .last_waiter_detail
+            .as_deref()
+            .is_some_and(|detail| detail.contains("backend recovery grace expired")));
+    }
+
+    async fn backend_recovery_wire_request(
+        state: Arc<DaemonState>,
+        hello: proto::Hello,
+        request: Request,
+    ) -> (HelloAck, Option<serde_json::Value>) {
+        let (client, server) = tokio::io::duplex(64 * 1024);
+        let serving = tokio::spawn(handle_authenticated_client(server, state));
+        let (read, mut write) = tokio::io::split(client);
+        let mut read = BufReader::new(read);
+        write_json_line(&mut write, &hello).await.unwrap();
+        let ack: HelloAck = read_json_line(&mut read).await.unwrap();
+        let response = if ack.accepted {
+            write_json_line(&mut write, &request).await.unwrap();
+            Some(read_json_line(&mut read).await.unwrap())
+        } else {
+            None
+        };
+        serving.await.unwrap().unwrap();
+        (ack, response)
+    }
+
+    // Closed vocabulary from 7ed886b07620e8ab8adba68249ab84f96ea26013.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+    #[serde(rename_all = "kebab-case")]
+    enum LegacyWaiterOutcome {
+        Message,
+        DeliveryQuarantined,
+        IdleTimeout,
+        PresenceEnded,
+        AbnormalExit,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct LegacyMemberWaiterStatus {
+        #[serde(default)]
+        last_waiter_outcome: Option<LegacyWaiterOutcome>,
+        last_waiter_exit_code: Option<i32>,
+        last_waiter_detail: Option<String>,
+        last_waiter_exit_at_ms: Option<i64>,
+        last_waiter_pid: Option<u32>,
+    }
+
+    #[derive(serde::Deserialize)]
+    struct LegacyWaiterStatus {
+        members: Vec<LegacyMemberWaiterStatus>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(tag = "type", rename_all = "snake_case")]
+    enum LegacyStatusResponse {
+        StatusReport { status: LegacyWaiterStatus },
+    }
+
+    #[tokio::test]
+    async fn backend_recovery_status_uses_current_requester_hello_without_mutating_state() {
+        let state = test_state("backend-recovery-status-wire");
+        let store = store_key("backend-recovery-status-wire");
+        let outcomes = [
+            WaiterOutcome::BackendUnavailable,
+            WaiterOutcome::Message,
+            WaiterOutcome::DeliveryQuarantined,
+            WaiterOutcome::IdleTimeout,
+            WaiterOutcome::PresenceEnded,
+            WaiterOutcome::AbnormalExit,
+        ];
+        for (index, outcome) in outcomes.iter().enumerate() {
+            let address = format!("addr:{index}");
+            registered_epoch(state.clone(), &store, "s1", &address).await;
+            state.record_waiter_exit(
+                &store,
+                "s1",
+                &address,
+                *outcome,
+                Some(7),
+                Some("retained detail".into()),
+                Some(std::process::id()),
+            );
+        }
+        let stored = state.status().await.members;
+        let status_request = Request::Status {
+            store_key: Some(store.clone()),
+            detail: true,
+            proof: Some(state.admin_cap.clone()),
+        };
+        for offered in [false, true, false] {
+            let mut hello = proto::client_hello(&store);
+            if !offered {
+                hello
+                    .capabilities
+                    .retain(|cap| cap != proto::CAP_WAIT_BACKEND_RECOVERY);
+                hello
+                    .capabilities
+                    .push("unrelated-optional-capability".into());
+            }
+            let (ack, wire) =
+                backend_recovery_wire_request(state.clone(), hello, status_request.clone()).await;
+            assert!(ack.accepted);
+            assert!(ack
+                .capabilities
+                .iter()
+                .any(|cap| cap == proto::CAP_WAIT_BACKEND_RECOVERY));
+            assert!(!ack
+                .required_capabilities
+                .iter()
+                .any(|cap| cap == proto::CAP_WAIT_BACKEND_RECOVERY));
+            let wire = wire.unwrap();
+            if offered {
+                assert!(serde_json::from_value::<LegacyStatusResponse>(wire.clone()).is_err());
+                let Response::StatusReport { status } =
+                    serde_json::from_value::<Response>(wire).unwrap()
+                else {
+                    panic!("status")
+                };
+                assert_eq!(
+                    status.members[0].last_waiter_outcome,
+                    Some(WaiterOutcome::BackendUnavailable)
+                );
+            } else {
+                assert!(wire["status"]["members"][0]
+                    .get("last_waiter_outcome")
+                    .is_none());
+                let LegacyStatusResponse::StatusReport { status } =
+                    serde_json::from_value::<LegacyStatusResponse>(wire).unwrap();
+                assert_eq!(status.members[0].last_waiter_outcome, None);
+                for (index, member) in status.members.iter().enumerate() {
+                    assert_eq!(
+                        member.last_waiter_exit_code,
+                        stored[index].last_waiter_exit_code
+                    );
+                    assert_eq!(member.last_waiter_detail, stored[index].last_waiter_detail);
+                    assert_eq!(
+                        member.last_waiter_exit_at_ms,
+                        stored[index].last_waiter_exit_at_ms
+                    );
+                    assert_eq!(member.last_waiter_pid, stored[index].last_waiter_pid);
+                    if index > 0 {
+                        assert_eq!(
+                            serde_json::to_value(member.last_waiter_outcome).unwrap(),
+                            serde_json::to_value(stored[index].last_waiter_outcome).unwrap(),
+                        );
+                    }
+                }
+            }
+            assert_eq!(
+                state.status().await.members[0].last_waiter_outcome,
+                Some(WaiterOutcome::BackendUnavailable)
+            );
+        }
+        let (_, minimal) = backend_recovery_wire_request(
+            state.clone(),
+            proto::client_hello(&store),
+            Request::Status {
+                store_key: Some(store.clone()),
+                detail: false,
+                proof: None,
+            },
+        )
+        .await;
+        assert_eq!(minimal.unwrap()["status"]["members"], serde_json::json!([]));
+        let (_, unauthorized) = backend_recovery_wire_request(
+            state.clone(),
+            proto::client_hello(&store),
+            Request::Status {
+                store_key: Some(store.clone()),
+                detail: true,
+                proof: None,
+            },
+        )
+        .await;
+        assert_eq!(unauthorized.unwrap()["code"], proto::ERROR_UNAUTHORIZED);
+        let mut hello = proto::client_hello(&store);
+        hello.required_capabilities.push("future-required".into());
+        let (ack, response) = backend_recovery_wire_request(state, hello, status_request).await;
+        assert!(!ack.accepted);
+        assert!(response.is_none());
+    }
+
+    #[tokio::test]
+    async fn backend_recovery_applies_to_waiters_without_optional_capability() {
+        let state = test_state("backend-recovery-legacy-wait");
+        let store = store_key("backend-recovery-legacy-wait");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        state.inject_wait_fetch_failures(10);
+        let mut hello = proto::client_hello(&store);
+        hello
+            .capabilities
+            .retain(|cap| cap != proto::CAP_WAIT_BACKEND_RECOVERY);
+        let (ack, response) = backend_recovery_wire_request(
+            state.clone(),
+            hello,
+            wait_req(&store, "s1", "addr:a", 5_000),
+        )
+        .await;
+        assert!(ack.accepted);
+        let response = response.unwrap();
+        assert_eq!(response["type"], "error");
+        assert_eq!(response["code"], proto::ERROR_BACKEND_UNAVAILABLE);
+        assert!(response["message"]
+            .as_str()
+            .unwrap()
+            .contains("recovery grace expired"));
+        let status = state.status().await;
+        assert_eq!(status.members.len(), 1);
+        assert!(!status.members[0].idle);
+        assert_eq!(status.members[0].last_waiter_exit_code, Some(7));
+    }
+
+    #[tokio::test]
+    async fn wait_backend_recovery_preserves_finite_deadline() {
+        let state = test_state("wait-backend-deadline");
+        let store = store_key("wait-backend-deadline");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        state.inject_wait_fetch_failures(10);
+
+        let response = request(state.clone(), wait_req(&store, "s1", "addr:a", 20)).await;
+        assert!(matches!(response, Response::Timeout));
+        let status = state.status().await;
+        assert_eq!(status.members.len(), 1);
+        assert!(!status.members[0].idle);
+        assert_eq!(status.members[0].live_waiters_count, 0);
+        assert_eq!(status.members[0].last_waiter_exit_code, Some(2));
+    }
+
+    #[tokio::test]
+    async fn wait_backend_attempt_observes_liveness_before_demoting_released_epoch() {
+        let state = test_state("wait-backend-liveness");
+        let store = store_key("wait-backend-liveness");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        insert_to(&state, &store, "addr:a").await;
+        state.wait_fetch_delay_ms.store(100, Ordering::SeqCst);
+        let waiter_state = state.clone();
+        let waiter_request = wait_req(&store, "s1", "addr:a", 5_000);
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_request).await });
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while !state.has_live_waiter_for(&store, "s1", "addr:a") {
+            assert!(Instant::now() < deadline);
+            tokio::task::yield_now().await;
+        }
+        let member = state.get_member(&store, "s1", "addr:a").unwrap();
+        state.mark_member_idle(&store, "s1", "addr:a", "SessionEnd", "test end");
+        let backend = state.backend_for(&store).await.unwrap();
+        assert!(backend
+            .release_epoch_lease("addr:a", &member.owner_instance_id, member.lease_epoch,)
+            .await
+            .unwrap());
+        assert!(matches!(waiter.await.unwrap(), Response::PresenceEnded));
+        assert!(state.get_member(&store, "s1", "addr:a").unwrap().idle);
+    }
+
+    #[tokio::test]
+    async fn backend_exhaustion_preserves_station_stop_during_drain() {
+        let state = test_state("wait-backend-stop-exhaustion");
+        let store = store_key("wait-backend-stop-exhaustion");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        state.wait_fetch_delay_ms.store(10_000, Ordering::SeqCst);
+        let waiter_state = state.clone();
+        let waiter_request = wait_req(&store, "s1", "addr:a", 8_000);
+        let waiter = tokio::spawn(async move { request(waiter_state, waiter_request).await });
+        let admitted_by = Instant::now() + Duration::from_secs(1);
+        while !state.has_live_waiter_for(&store, "s1", "addr:a") {
+            assert!(Instant::now() < admitted_by);
+            tokio::task::yield_now().await;
+        }
+        let stop = request(
+            state.clone(),
+            Request::StationStop {
+                store_key: store.clone(),
+                session_id: "s1".into(),
+                address: "addr:a".into(),
+                wait_grace_ms: 5_000,
+            },
+        );
+        tokio::pin!(stop);
+        assert!(tokio::time::timeout(Duration::from_millis(10), &mut stop)
+            .await
+            .is_err());
+        let stopped = state.get_member(&store, "s1", "addr:a").unwrap();
+        assert!(stopped.idle);
+        assert_eq!(
+            stopped.last_waiter_outcome,
+            Some(WaiterOutcome::PresenceEnded)
+        );
+        assert_eq!(stopped.last_waiter_exit_code, Some(5));
+        assert_eq!(stopped.last_waiter_detail.as_deref(), Some("station-stop"));
+
+        // Keep the stop future in its drain phase until the terminal record is inspected.
+        let response = waiter.await.unwrap();
+        let terminal = state.get_member(&store, "s1", "addr:a").unwrap();
+        assert!(matches!(response, Response::PresenceEnded), "{response:?}");
+        assert_eq!(terminal.last_waiter_outcome, stopped.last_waiter_outcome);
+        assert_eq!(
+            terminal.last_waiter_exit_code,
+            stopped.last_waiter_exit_code
+        );
+        assert_eq!(terminal.last_waiter_detail, stopped.last_waiter_detail);
+        assert_eq!(
+            terminal.last_waiter_exit_at_ms,
+            stopped.last_waiter_exit_at_ms
+        );
+        assert!(matches!(
+            stop.await,
+            Response::StationStopped { detached: true, .. }
+        ));
+        assert!(state.get_member(&store, "s1", "addr:a").is_none());
+    }
+
+    #[tokio::test]
+    async fn wait_backend_recovery_timeout_wins_at_equal_budget() {
+        let state = test_state("wait-backend-equal-deadline");
+        let store = store_key("wait-backend-equal-deadline");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        state.wait_fetch_delay_ms.store(10_000, Ordering::SeqCst);
+        let response = request(
+            state.clone(),
+            wait_req(
+                &store,
+                "s1",
+                "addr:a",
+                WAIT_BACKEND_RECOVERY_GRACE.as_millis() as u64,
+            ),
+        )
+        .await;
+        assert!(matches!(response, Response::Timeout));
+        assert_eq!(
+            state.status().await.members[0].last_waiter_exit_code,
+            Some(2)
+        );
+    }
+
+    #[tokio::test]
+    async fn first_stalled_backend_fetch_cannot_extend_finite_wait() {
+        let state = test_state("wait-first-stall-deadline");
+        let store = store_key("wait-first-stall-deadline");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        insert_to(&state, &store, "addr:a").await;
+        state.wait_fetch_delay_ms.store(1_000, Ordering::SeqCst);
+
+        let started = Instant::now();
+        let response = request(state.clone(), wait_req(&store, "s1", "addr:a", 20)).await;
+        assert!(matches!(response, Response::Timeout));
+        assert!(started.elapsed() < Duration::from_millis(500));
+        assert_eq!(
+            state.status().await.members[0].last_waiter_exit_code,
+            Some(2)
+        );
+    }
+
+    #[tokio::test]
+    async fn first_stalled_backend_fetch_exhausts_recovery() {
+        let state = test_state("wait-first-stall-exhausted");
+        let store = store_key("wait-first-stall-exhausted");
+        registered_epoch(state.clone(), &store, "s1", "addr:a").await;
+        state.wait_fetch_delay_ms.store(10_000, Ordering::SeqCst);
+
+        let started = Instant::now();
+        let mut wait = wait_req(&store, "s1", "addr:a", 0);
+        if let Request::Wait { timeout_ms, .. } = &mut wait {
+            *timeout_ms = None;
+        }
+        let response = request(state.clone(), wait).await;
+        assert!(matches!(
+            response,
+            Response::Error { ref code, .. } if code == proto::ERROR_BACKEND_UNAVAILABLE
+        ));
+        assert!(started.elapsed() >= WAIT_BACKEND_RECOVERY_GRACE);
+        assert!(started.elapsed() < Duration::from_secs(5));
+        let status = state.status().await;
+        assert_eq!(status.members.len(), 1);
+        assert!(!status.members[0].idle);
+        assert_eq!(status.members[0].live_waiters_count, 0);
+        assert_eq!(status.members[0].last_waiter_exit_code, Some(7));
     }
 
     #[tokio::test]
@@ -11510,6 +12162,7 @@ mod p3_tests {
             crate::session_watch::capture_process_start_time(std::process::id()),
             true,
             Duration::from_millis(20),
+            WaitPollMode::Normal,
         )
         .await;
         assert!(matches!(response, Response::PresenceEnded));
@@ -11736,6 +12389,18 @@ pub mod test_support {
 
     static TEST_SEQ: AtomicU64 = AtomicU64::new(1);
 
+    pub async fn connect_with_hello(hello: &proto::Hello) -> Result<DaemonClient> {
+        super::connect_existing_with_hello(hello).await
+    }
+
+    pub async fn request_wire(
+        client: &mut DaemonClient,
+        request: &Request,
+    ) -> Result<serde_json::Value> {
+        write_json_line(&mut client.writer, request).await?;
+        Ok(read_json_line(&mut client.reader).await?)
+    }
+
     #[derive(Clone)]
     pub struct TestDaemon {
         state: Arc<DaemonState>,
@@ -11783,6 +12448,10 @@ pub mod test_support {
                 delivery_admissions: Mutex::new(HashMap::new()),
                 #[cfg(test)]
                 delivery_admission_control: Mutex::new(None),
+                #[cfg(test)]
+                wait_fetch_failures: AtomicU64::new(0),
+                #[cfg(test)]
+                wait_fetch_delay_ms: AtomicU64::new(0),
                 next_waiter_id: AtomicU64::new(1),
                 recent_errors: Arc::new(Mutex::new(VecDeque::new())),
                 ended_sessions: Mutex::new(BTreeMap::new()),
@@ -11914,6 +12583,34 @@ pub mod test_support {
                 crate::session_watch::capture_process_start_time(std::process::id()),
                 true,
                 idle_ttl,
+                WaitPollMode::Normal,
+            )
+            .await
+        }
+
+        /// Reports readiness after the empty fetch, then permits only notification/deadline wakes.
+        pub async fn wait_without_polling(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+            timeout_ms: u64,
+            ready: tokio::sync::oneshot::Sender<()>,
+        ) -> Response {
+            wait_for_message_with_idle_ttl(
+                self.state.clone(),
+                store_key.to_string(),
+                session_id.to_string(),
+                address.to_string(),
+                None,
+                None,
+                false,
+                Some(timeout_ms),
+                Some(std::process::id()),
+                crate::session_watch::capture_process_start_time(std::process::id()),
+                true,
+                DEFAULT_IDLE_TTL,
+                WaitPollMode::NotificationOnly(Some(ready)),
             )
             .await
         }
