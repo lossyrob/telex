@@ -218,19 +218,34 @@ commits, the worker acknowledged the grant before editing at local head
 phases P1-P7. The intentionally red credential regression may now become an
 actual regression test; its original negative evidence is retained.
 
-Two platform receipt axes were held for adjudication. On Windows,
-worker-supplied runtime evidence shows the current job accounting can report
-zero active processes while a retained helper process
-handle is still unsignaled. The steward's consolidated review of the frozen
-packet found no code error that explains this away and kept the verdict
-design-feasibility-blocked: job accounting reaching zero is not a documented
-completion fence for every member, and no supported replacement is justified yet.
-A final documentation-only `DEBUG_PROCESS` assessment found a documented
-per-process exit fence, but a child can start a new debugging chain inside the
-job, so debug inventory does not cover the complete scope; debugger-visible
-behavior would also be new semantics. Campaign rejected that candidate within
-current authority on 2026-09-25. Windows receipt work remains held, and no
-further Windows research is authorized.
+The operator selected the Windows job-terminal receipt on
+2026-09-28T09:47:17-04:00:
+`Approve Windows job-terminal completion with the documented limits
+(Recommended)`. Before eligible atomic credential-result publication and
+source/admission release, Telex must successfully terminate the exact owned
+private single-use job, observe zero active job processes, observe the exact
+launched leader process handle signaled, finish or close owned I/O and handles
+with checked results, and join the native owner. Failure, cancellation, and
+`FAILED_HELD` use the same final arbitration; no close or join error is ignored
+and no closed handle is reconstructed.
+
+This selection expressly replaces the stronger current Windows requirement that
+every former descendant process handle be signaled. Former descendant handles
+may remain nonsignaled during kernel or driver rundown. The receipt does not
+prove that all former process objects are signaled, all kernel, driver, or
+previously issued external I/O has finished, all external references have
+disappeared, or residual objects have a finite bound. `C=2` bounds Telex
+invocation owners and reservations, not descendant count or all residual
+Windows resources.
+
+The original stronger red observations remain historical negative evidence:
+job accounting reached zero while retained process handles were nonsignaled in
+the recorded A and B cases. They are not retroactive passes, measured harm, or
+proof of continued user-mode work. The advisory review also requires checked
+finalization/publication arbitration and a separately owned diagnostic channel
+for any fresh post-publication challenge. A positive fresh reply falsifies the
+operational interpretation for that run; nonresponse cannot prove universal
+quiescence. No new runtime proof is recorded by this artifact update.
 
 On macOS, the frozen Unix code confirms a
 conditional source defect: a final group `SIGKILL` that fails with `EPERM` on a
@@ -242,19 +257,21 @@ acknowledged at 2026-09-25T15:20:59-04:00 before editing. No macOS program has
 run, and all Linux and macOS runtime proof remains unrun. Any material change to
 intended authority requires reviewed Tier B reconciliation.
 
-M2 is not implemented, measured, runtime-proven, reviewed, or merged. PR #156
-remains published at `25aea118`, and all new M2 work is uncommitted and
-unpushed. The #154 candidate `f8363be` is complete, but publication remains
-blocked by the actual App EMU 403 and the latest same-worker quota result. Any
-retry requires restored credit, deduplication, and explicit authority. Issue #157
-is not launched.
+The same #155 implementer now owns autonomous design, isolated experiments,
+code, tests, ordinary pushes, and review fixes. This artifact proposal and its
+review or reconciliation do not gate that routine work. Material new guarantee
+choices still go directly to the operator. M2 remains unproven, unreviewed at a
+new exact head, unmerged, and unreleased. The #154 candidate `f8363be` is
+complete, but publication remains blocked by the actual App EMU 403 and the
+latest same-worker quota result. Any retry requires restored credit,
+deduplication, and explicit authority. Issue #157 is not launched.
 
-On 2026-09-28 the operator answered "Keep #155 required; hold until a reviewed
-Windows solution exists", and campaign confirmed it. The schema-3 recovery release
-stays held: it does not accept the PostgreSQL-reset limitation, PR #156 may not
-merge partially, and #157 stays unlaunched until both #154 and #155 merge. This
-decision selects no Windows mechanism and grants no new research or write
-authority.
+On 2026-09-28 the operator also answered "Keep #155 required; hold until a
+reviewed Windows solution exists", and campaign confirmed it. The later
+job-terminal choice supplies that intended Windows receipt but does not complete
+implementation or proof. The schema-3 recovery release stays held: it does not
+accept the PostgreSQL-reset limitation, PR #156 may not merge partially, and
+#157 stays unlaunched until both #154 and #155 merge.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the

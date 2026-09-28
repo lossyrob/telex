@@ -3,13 +3,14 @@
 - **Workstream:** `local-daemon`
 - **Node:** `postgres-wait-reset-recovery`
 - **Type:** implementation
-- **Status:** in progress; source-quiet pending finalized Tier B landing,
-  independent landing verification, and separate M2 write authority
+- **Status:** in progress; autonomous implementation and proof active, with
+  final independent review, required CI, merge, and publication still gated
 - **Attention:** focus
 - **Depends on:** none
 - **Blocks:** `schema3-release-preparation`
-- **Owner:** known worker `38d183fb-df5d-4e65-88f3-e27b62e3c92f`,
-  source-quiet until separate campaign M2 write authority
+- **Owner:** worker `38d183fb-df5d-4e65-88f3-e27b62e3c92f` under direct
+  end-to-end solution, experiment, implementation, test, push, and review-fix
+  authority
 - **Tracker:** [lossyrob/telex#155](https://github.com/lossyrob/telex/issues/155)
 - **Adopted PR:** [lossyrob/telex#156](https://github.com/lossyrob/telex/pull/156)
 - **Published branch/head:** `copilot/fix-postgres-connection-reset` at `25aea118e04c4e93eb4e748fe7c1989338931ac2`
@@ -32,10 +33,12 @@ limitation.
 - Issue #155 incident sequence and expected recovery behavior.
 - PR #156 at published head
   `25aea118e04c4e93eb4e748fe7c1989338931ac2`.
-- Preserved source-quiet worker checkpoint
+- Historical source-quiet worker checkpoint
   `5d9566182429066ee8b51cd8dd569065f9abdb5a`, with unpublished M1, C1, and C2
   commits and intentionally red untracked M2 evidence in
-  `tests/credential_command.rs`. No M2 production mechanism exists.
+  `tests/credential_command.rs`. At that checkpoint no M2 production mechanism
+  existed; current mutable implementation and experiment results are not proof
+  in this artifact.
 - Existing daemon reconnect, watchdog, finite-deadline, status, and exit-code
   contracts.
 
@@ -61,9 +64,11 @@ merge path.
 ## Accepted M2 intended technical design
 
 Campaign accepted the exact reviewed intended model on
-2026-09-25T13:41:31-04:00. This acceptance selects the engineering design and
-numeric limits for later product promotion. It does not mean the design is
-implemented, measured, runtime-proven, or authorized for product writes.
+2026-09-25T13:41:31-04:00. The operator selected the Windows job-terminal
+receipt on 2026-09-28T09:47:17-04:00. These decisions select the intended
+engineering design and limits. They do not mean the design is fully
+implemented, measured, runtime-proven, reviewed at a new exact head, merged, or
+released.
 
 - Use one credential-specific, process-local admission and ownership registry
   across all password-command calls and Tokio runtimes in that host. Do not add a
@@ -101,13 +106,83 @@ implemented, measured, runtime-proven, or authorized for product writes.
 
 ### Accepted intended Windows receipt
 
-Use an invocation-private noninheritable kill-on-close job. Retain documented
-process and primary-thread handles, create suspended, assign before resume, allow
-no breakaway fallback, and clean up setup failures explicitly. Assignment or
-containment failure must not resume an uncontained shell. Normal receipt
-requires observed process termination, zero active job processes, completed or
-closed owned I/O, and worker-thread completion. A termination request or job
-close alone is not receipt.
+The operator answered the following question through the designated worker at
+2026-09-28T09:47:17-04:00:
+
+> May I adopt the explicit Windows job-terminal completion contract described
+> above, accepting its residual kernel/driver/I/O limitations instead of
+> requiring every former descendant process handle to be signaled before
+> completion?
+
+Exact choice:
+`Approve Windows job-terminal completion with the documented limits
+(Recommended)`.
+
+Use an invocation-private noninheritable single-use kill-on-close job. Retain
+documented process and primary-thread handles, create suspended, assign before
+resume, allow no breakaway or uncontained fallback, and clean up setup failures
+explicitly. Before eligible atomic credential-result publication and
+source/admission release, require:
+
+1. successful checked termination of the exact owned private job;
+2. a successful checked query reporting zero active job processes;
+3. `WAIT_OBJECT_0` for the exact launched leader process handle;
+4. checked completion or closure of owned I/O and handles; and
+5. native owner completion and join.
+
+Finalization yields an explicit success or named failure before publication and
+release. Pending, cancellation, receipt-ready, and `FAILED_HELD` arbitration is
+consistent: cancellation or failure prevents credential eligibility, close or
+join failure retains the still-valid obligation, and no closed handle is
+reconstructed, retried, or resurrected. A termination request, job close, or
+zero active count alone is not receipt. No debugger is used.
+
+Normal credential success still requires the original successful shell status,
+complete stdout and stderr through EOF, full UTF-8 decoding, and the existing
+trim. A finite inherited helper that still writes keeps the invocation
+collecting. Cancellation or error may close owned I/O but cannot publish a
+partial or post-cancellation credential.
+
+This is an explicit weakening of the earlier all-descendant-signaled condition.
+Former descendant handles may remain nonsignaled during kernel or driver
+rundown. Receipt does not prove every former process object signaled, every
+kernel or driver operation or previously issued external I/O finished, every
+external reference disappeared, or a finite bound on those residual objects.
+`C=2` bounds Telex invocation owners and reservations, not descendant count or
+all residual Windows resources. Preserve the original stronger A/B observations
+as historical red evidence; they are not retroactive passes or measured harm.
+
+For the advisory diagnostic, an external observer or guardian owns a separate
+challenge channel and retained observation handles. Before cancellation, that
+controller or guardian, outside the invocation job, must complete a successful
+round trip over the separate diagnostic channel, not credential stdout, with
+the same ready, membership-verified ordinary child inside the job; no external
+proxy may answer. Channel setup or round-trip failure is failure or inconclusive
+evidence, and the guardian retains exact known fixture cleanup ownership.
+Generate a fresh unpredictable challenge only after actual publication
+following join and invocation-owned handle finalization. A valid fresh reply
+falsifies the operational interpretation for that run. Nonresponse supports no
+universal quiescence claim. An observer-retained job handle means the
+invocation closes its last owned handle, not the last system handle; explicit
+job termination drives receipt.
+
+Canonical Windows receipt references:
+
+- [Job objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+  and [nested jobs](https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs)
+  define association, inheritance, accounting, and termination scope.
+- [`TerminateJobObject`](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-terminatejobobject)
+  defines scoped termination; it is not a synchronous wait for every former
+  descendant handle.
+- [`QueryInformationJobObject`](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-queryinformationjobobject)
+  and
+  [`JOBOBJECT_BASIC_ACCOUNTING_INFORMATION`](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information)
+  define the checked exact-job active-process observation.
+- [`WaitForSingleObject`](https://learn.microsoft.com/en-us/windows/win32/api/synchapi/nf-synchapi-waitforsingleobject)
+  and [terminating a process](https://learn.microsoft.com/en-us/windows/win32/procthread/terminating-a-process)
+  define exact leader signaling separately from object lifetime.
+- [`CloseHandle`](https://learn.microsoft.com/en-us/windows/win32/api/handleapi/nf-handleapi-closehandle)
+  supplies the checked Telex-owned handle-release result.
 
 ### Accepted intended Unix receipt sequence
 
@@ -234,13 +309,13 @@ unconditional three-second OS process-exit bound.
 
 Campaign technical acceptance selects `C=2`, the native owner and registry,
 admission behavior, internal `B=3s` observation target, runtime-shutdown
-ownership, `FAILED_HELD`, and receipt design with all conditions above. The
-process-local owner must survive Tokio runtime drop while its embedding process
-stays alive, but it cannot outlive host process exit. M2 product writes remain
-held pending mechanical delta review, campaign exact-blob landing authority,
-independent landing verification, and separate same-worker write authority. No
-runtime validation, M2 closure, thread resolution, merge, or release authority
-follows from technical acceptance.
+ownership, `FAILED_HELD`, and the receipt designs with all conditions above.
+The process-local owner must survive Tokio runtime drop while its embedding
+process stays alive, but it cannot outlive host process exit. The same worker
+now proceeds autonomously with design, isolated experiments, implementation,
+tests, ordinary pushes, and review fixes. This artifact proposal, advisory
+review, and reconciliation do not gate that ordinary work. Runtime validation,
+M2 closure, thread resolution, merge, release, and publication remain pending.
 
 ## Required M2 proof after implementation
 
@@ -248,8 +323,10 @@ follows from technical acceptance.
   target. Compile-only or skipped coverage is not runtime proof.
 - Cover ordinary helper and shell completion with inherited and redirected
   pipes. Observe helper liveness before cleanup and production receipt before
-  independent fixture fallback. Never issue receipt while an ordinary helper
-  remains.
+  independent fixture fallback. On Unix, never issue receipt while an ordinary
+  in-scope group member remains. On Windows, apply the selected job-terminal
+  predicate and continue to report independently retained descendant-handle
+  signaling as a separate oracle.
 - For finite-deadline and recovery-grace cancellation, use a readiness barrier
   and measure response, cancellation signal, cleanup receipt, and process exit
   separately.
@@ -265,9 +342,12 @@ follows from technical acceptance.
   conservative holds. Use a safe labeled observation seam for deterministic
   identifier-reuse behavior; do not churn host PIDs or signal guessed
   replacements.
-- Cover Windows setup and nested-job failures, actual process and job completion,
-  I/O and thread completion, and the rule that close or termination request alone
-  is not receipt.
+- Cover Windows setup and nested-job failures, checked exact-job termination,
+  zero active accounting, exact leader signaling, checked I/O and handle
+  finalization, native join, and atomic publication/release ordering. Preserve
+  the stronger A/B all-descendant-signaled failures as historical negative
+  evidence. Record retained-handle lag independently, and use the external
+  fresh-challenge oracle without treating nonresponse as universal proof.
 - Under saturation and repeated cancellation, prove active owners never exceed
   the campaign-accepted capacity, one source cannot occupy both slots, no task,
   handle, reader, or cleanup-queue growth occurs, healthy established stores
@@ -327,15 +407,15 @@ This artifact role runs none of these product tests.
 
 ## Engagement
 
-- Product launch is conditional on campaign-approved Tier B landing and exact
-  verification. Before resuming PR #156, establish one writer and verify that no
-  cloud or legacy writer overlaps.
-- The Local Daemon orchestrator prepares the external repair session through
-  Streamliner, registers the exact prepared checkout path in branch mode, verifies
-  `session-online`, grants standalone write authority, and obtains acknowledgement
-  before product writes.
-- This is one of exactly three new delivery sessions in the packet: two repair
-  sessions and one later release worker. Do not create dormant placeholders.
+- The existing #155 worker owns autonomous end-to-end solution selection,
+  bounded isolated experiments, code, documentation, tests, ordinary pushes,
+  and review fixes. Do not require another plan, acknowledgement, preparation,
+  artifact landing, or per-experiment permission for ordinary work.
+- Material new user-visible guarantees or risk choices go directly to the
+  operator. Advisory design review and Local artifact reconciliation proceed in
+  parallel and do not suspend the worker.
+- Final independent product review, required CI, design inspection, campaign
+  merge authorization, and explicit operator publication approval still apply.
 - Every new session or delegated agent must explicitly set
   `model=gpt-6-astra`, `reasoning_effort=high`, and
   `context_tier=long_context`; silent downgrade is not authorized. This artifact
