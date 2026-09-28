@@ -41,6 +41,8 @@ jobs:
 
   build:
     name: Build ${{ matrix.target }}
+    permissions:
+      contents: read
     runs-on: ${{ matrix.os }}
     # Runs in parallel with verify-version (and on workflow_dispatch, where
     # verify-version is skipped). A mismatched tag still cannot publish because the
@@ -171,6 +173,8 @@ jobs:
 
       - name: Prove genuine v0.1.2 upgrade and fresh installation
         shell: pwsh
+        env:
+          TELEX_PROOF_GITHUB_TOKEN: ${{ github.token }}
         run: |
           python tests/release_candidate.py `
             --archive "dist/telex-${{ steps.ver.outputs.v }}-${{ matrix.target }}.${{ matrix.archive }}" `
@@ -196,6 +200,8 @@ jobs:
 
   postgres-proof:
     name: Genuine release upgrade (PostgreSQL, Linux x64)
+    permissions:
+      contents: read
     needs: build
     runs-on: ubuntu-latest
     services:
@@ -223,6 +229,8 @@ jobs:
       - name: Install PostgreSQL assertion client
         run: sudo apt-get update && sudo apt-get install -y postgresql-client
       - name: Prove both disposable PostgreSQL schema paths
+        env:
+          TELEX_PROOF_GITHUB_TOKEN: ${{ github.token }}
         run: |
           python tests/release_candidate.py \
             --archive "$(find dist -name '*.tar.gz' -print -quit)" \

@@ -2,6 +2,7 @@
 
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,24 @@ spec.loader.exec_module(proof)
 
 
 class ReleaseProofTests(unittest.TestCase):
+    def test_upstream_token_is_neither_redirected_nor_used_for_assets(self):
+        url = f"https://api.github.com/repos/{proof.REPO}/releases/tags/{proof.BASELINE_TAG}"
+        with patch.dict(os.environ, {"TELEX_PROOF_GITHUB_TOKEN": "sentinel"}, clear=True):
+            with patch.object(proof.urllib.request, "urlopen", return_value=io.BytesIO(b"{}")) as open:
+                proof.download(url, github_metadata=True)
+                request = open.call_args.args[0]
+                self.assertEqual(request.get_header("Authorization"), "Bearer sentinel")
+                redirected = urllib.request.HTTPRedirectHandler().redirect_request(
+                    request, None, 302, "redirect", {}, "https://example.invalid/asset")
+                self.assertIsNone(redirected.get_header("Authorization"))
+            with patch.object(proof.urllib.request, "urlopen", return_value=io.BytesIO(b"asset")) as open:
+                proof.download("http://127.0.0.1:12345/candidate")
+                self.assertIsNone(open.call_args.args[0].get_header("Authorization"))
+            with patch.object(proof.urllib.request, "urlopen") as open:
+                with self.assertRaisesRegex(RuntimeError, "unexpected upstream metadata"):
+                    proof.download("https://example.invalid/metadata", github_metadata=True)
+                open.assert_not_called()
+
     def test_readiness_waits_for_new_publication_including_reused_pid(self):
         old = {"server_pid": 42, "server_start_time": 100, "instance_id": "old"}
         new = {"server_pid": 42, "server_start_time": 200, "instance_id": "new"}
@@ -69,13 +88,14 @@ class ReleaseProofTests(unittest.TestCase):
     def test_child_environment_is_isolated_without_modifying_parent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
-            ambient = {"GITHUB_TOKEN": "sentinel", "TELEX_BACKEND": "real",
+            ambient = {"GITHUB_TOKEN": "sentinel", "TELEX_PROOF_GITHUB_TOKEN": "sentinel",
+                       "TELEX_BACKEND": "real",
                        "HTTPS_PROXY": "http://example.invalid", "PATH": os.environ["PATH"]}
             with patch.dict(os.environ, ambient, clear=True):
                 before = dict(os.environ)
                 env = proof.clean_environment(root)
                 self.assertEqual(dict(os.environ), before)
-                for key in ("GITHUB_TOKEN", "TELEX_BACKEND", "HTTPS_PROXY"):
+                for key in ("GITHUB_TOKEN", "TELEX_PROOF_GITHUB_TOKEN", "TELEX_BACKEND", "HTTPS_PROXY"):
                     self.assertNotIn(key, env)
                 for key in ("TELEX_HOME", "TELEX_CONFIG", "TELEX_DB", "TELEX_INSTALL_ROOT",
                             "TELEX_RUN_DIR", "LOCALAPPDATA", "HOME", "TEMP", "TMPDIR"):

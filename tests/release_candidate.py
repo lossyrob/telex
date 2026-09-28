@@ -41,8 +41,17 @@ def digest(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def download(url):
+def download(url, github_metadata=False):
     request = urllib.request.Request(url, headers={"User-Agent": "telex-release-proof"})
+    if github_metadata:
+        require(url in (
+            f"https://api.github.com/repos/{REPO}/releases/tags/{BASELINE_TAG}",
+            f"https://api.github.com/repos/{REPO}/git/ref/tags/{BASELINE_TAG}",
+        ), "unexpected upstream metadata URL")
+        token = os.environ.get("TELEX_PROOF_GITHUB_TOKEN")
+        if token:
+            # urllib does not copy unredirected headers to redirected requests.
+            request.add_unredirected_header("Authorization", f"Bearer {token}")
     with urllib.request.urlopen(request, timeout=90) as response:
         return response.read()
 
@@ -544,8 +553,10 @@ def main():
         proof.metadata(candidate, env, args.tag[1:], args.source_sha, 5, 3)
         report["candidate"]["binary_sha256"] = digest(candidate.read_bytes())
         release_url = f"https://api.github.com/repos/{REPO}/releases/tags/{BASELINE_TAG}"
-        release = json.loads(download(release_url))
-        ref = json.loads(download(f"https://api.github.com/repos/{REPO}/git/ref/tags/{BASELINE_TAG}"))
+        release = json.loads(download(release_url, github_metadata=True))
+        ref = json.loads(download(
+            f"https://api.github.com/repos/{REPO}/git/ref/tags/{BASELINE_TAG}",
+            github_metadata=True))
         require(ref["object"]["type"] == "commit" and ref["object"]["sha"] == BASELINE_SHA,
                 "released baseline tag identity moved")
         require(release["tag_name"] == BASELINE_TAG and not release["draft"]

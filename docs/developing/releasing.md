@@ -75,6 +75,14 @@ published sidecars against downloaded bytes, and executes the old payload.
 It records the old and candidate executable hashes, commands, results, loopback
 requests, installed manifest, daemon identities, and cleanup receipts.
 
+The proof step uses the workflow's read-only token as
+`TELEX_PROOF_GITHUB_TOKEN` to avoid shared-runner anonymous API limits. It is
+sent only on the two fixed upstream GitHub metadata requests, never forwarded
+on redirects or used for archive/mirror requests. The child environment
+whitelist removes it before executing any old or candidate binary, installer,
+or daemon. Local proof can omit this optional token; an API rate-limit failure
+remains a failed proof, not permission to skip provenance checks.
+
 The real old upgrader performs release discovery, download/checksum validation,
 metadata probing, authenticated drain, installation and selector switch.
 Predecessor exit is observed before successor startup. The proof preserves
