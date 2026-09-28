@@ -253,18 +253,29 @@ zombie-only group is latched as failure before the exact reap and independent
 absence check. Campaign then authorized the steward's narrow correction as an
 ordinary implementation fix: record the attempt, seal signals, reap the exact
 leader, and require independent absence. `EPERM` is never absence. The worker
-acknowledged at 2026-09-25T15:20:59-04:00 before editing. No macOS program has
-run, and all Linux and macOS runtime proof remains unrun. Any material change to
-intended authority requires reviewed Tier B reconciliation.
+acknowledged at 2026-09-25T15:20:59-04:00 before editing. At that 2026-09-25
+checkpoint no macOS program had run, and Linux and macOS runtime proof was
+unrun; later worker runtime evidence belongs to Local's proof intake, and macOS
+runtime proof is still pending. Any material change to intended authority
+requires reviewed Tier B reconciliation.
 
-The same #155 implementer now owns autonomous design, isolated experiments,
+Since the operator's delegation at 2026-09-28T09:20:35-04:00, the same #155
+implementer owns autonomous design, isolated experiments,
 code, tests, ordinary pushes, and review fixes. This artifact proposal and its
 review or reconciliation do not gate that routine work. Material new guarantee
 choices still go directly to the operator. M2 remains unproven, unreviewed at a
-new exact head, unmerged, and unreleased. The #154 candidate `f8363be` is
-complete, but publication remains blocked by the actual App EMU 403 and the
-latest same-worker quota result. Any retry requires restored credit,
-deduplication, and explicit authority. Issue #157 is not launched.
+new exact head, unmerged, and unreleased. Issue #157 is not launched.
+
+The #154 publication hold is resolved. The earlier App EMU 403 and quota
+results remain historical evidence. On 2026-09-28 one authorized retry by the
+same worker (`d13b474e`) opened
+[PR #158](https://github.com/lossyrob/telex/pull/158) from the original
+`feature/windows-token-buffer-alignment` branch at unchanged head `f8363be`.
+Local and campaign verified that it is open, not a draft, and mergeable, with
+`lossyrob` as author, `lossyrob/telex` as both head and base repository, and base
+main `0c3d199f`. The PR body matches the reviewed artifact. Initial full review
+`fcd33ef6` and exact-head CI run 36436608976 are in progress; design inspection
+and merge are pending. The node remains in progress.
 
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later

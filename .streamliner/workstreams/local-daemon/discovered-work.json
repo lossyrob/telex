@@ -169,7 +169,21 @@
           "src/backend/sqlite.rs",
           "src/daemon.rs"
         ],
-        "details": "At exact main, both paths call GetTokenInformation(TokenUser) into Vec<u8> and dereference that byte-aligned storage as TOKEN_USER, which requires pointer alignment. The daemon-only aligned repair exists on unmerged PR #138 and is not main authority. The corrected live tracker covers both sites and does not claim that alignment caused the intermittent heap corruption observed during PR #138 validation."
+        "details": "At exact main, both paths call GetTokenInformation(TokenUser) into Vec<u8> and dereference that byte-aligned storage as TOKEN_USER, which requires pointer alignment. The daemon-only aligned repair exists on unmerged PR #138 and is not main authority. The corrected live tracker covers both sites and does not claim that alignment caused the intermittent heap corruption observed during PR #138 validation.",
+        "publication": {
+          "resolvedAt": "2026-09-28",
+          "pullRequest": "https://github.com/lossyrob/telex/pull/158",
+          "worker": "d13b474e-e729-491b-a466-1b9c1110bb6c",
+          "branch": "feature/windows-token-buffer-alignment",
+          "head": "f8363be368c4785314ce36bd11f2bd4c74644793",
+          "baseMain": "0c3d199f135c7c8cea786c06a3897b320d9b0ab2",
+          "bodyNormalizedSha256": "a7b0f37bd01b938cc3d2f4a6462fcc7cf96d154d657b44ac7c7cbb2996fbeb98",
+          "verification": "Local and campaign independently verified author lossyrob, head and base repository lossyrob/telex, and an open, non-draft, mergeable PR whose body matches the reviewed artifact. The head was not changed, revalidated, or pushed during the retry.",
+          "history": "The earlier App EMU 403 and same-worker quota results remain historical evidence. One authorized retry by the owning worker resolved the publication block; this is not a claim about global credentials.",
+          "review": "Initial full review fcd33ef6 in progress.",
+          "ci": "Exact-head CI run 36436608976 on f8363be in progress.",
+          "remaining": "Review, required CI, design inspection, and campaign-authorized merge."
+        }
       },
       "description": "Repair both exact-main call sites with storage aligned for TOKEN_USER or a shared safe token-information helper, prove alignment before dereference across supported Windows platform/feature coverage, and audit all remaining GetTokenInformation call sites.",
       "affectedOutcome": "The Local Daemon hardening gate cannot be accepted while a supported Windows identity path contains undefined behavior.",
@@ -349,7 +363,8 @@
       "evidence": {
         "repositoryMain": "7ed886b07620e8ab8adba68249ab84f96ea26013",
         "candidateHead": "f8363be368c4785314ce36bd11f2bd4c74644793",
-        "details": "The touched Windows fixture in tests/daemon_process_sqlite.rs near line 308 passes &mut attrs to CreateDirectoryW, which triggers the unnecessary_mut_passed lint. Candidate f8363be is complete, pushed, and clean, but PR publication is blocked; it is not merged or externally reviewed."
+        "details": "The touched Windows fixture in tests/daemon_process_sqlite.rs near line 308 passes &mut attrs to CreateDirectoryW, which triggers the unnecessary_mut_passed lint. Candidate f8363be is complete, pushed, and clean, but PR publication is blocked; it is not merged or externally reviewed.",
+        "publication": "On 2026-09-28 candidate f8363be was published unchanged as PR #158 (https://github.com/lossyrob/telex/pull/158); the earlier blocked-publication note is historical. External review fcd33ef6 is in progress; not merged."
       },
       "description": "Pass the security attributes to CreateDirectoryW by immutable reference in the touched Windows fixture.",
       "affectedOutcome": "The issue #154 candidate must pass lint without weakening the owner-private fixture.",
@@ -773,6 +788,16 @@
           "prohibited": "EPERM is never absence or a successful kill, and post-reap EPERM means Present. Setup, identity, ECHILD, ABI, reap, and query errors are never ignored. No new privilege, post-reap kill, renewed budget, or partial credential. Other error, cancellation, and output rules are unchanged. Anything beyond this exact path requires a stop and reviewed Tier B reconciliation.",
           "workerAcknowledgement": "The worker acknowledged before editing; message timestamp 2026-09-25T15:20:59-04:00. Head 2e2f3b991bece6e0309b4efdd59a88cfb556e76b and Unix snapshot ec76a12e were verified.",
           "proofStatus": "macOS runtime is unrun. The correction is neither proven nor complete."
+        },
+        "correctionCheckpoint": {
+          "verifiedBy": "aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "verifiedOn": "2026-09-25",
+          "note": "C:\\Users\\robemanuele\\.copilot\\session-state\\38d183fb-df5d-4e65-88f3-e27b62e3c92f\\files\\macos-final-signal-correction-20260925.md",
+          "noteSha256": "46f9be576c67563f3fc052751de0cf384847946170c0672beb04665454237ce5",
+          "currentUnixSha256": "86ecd5eca6fa6b9d8038a1015db61dc51099537395f1b020956eec1c60aa484f",
+          "comparedAgainst": "Frozen negative Unix snapshot ec76a12e, held Windows module ca2527a9, and common module 49687122.",
+          "evidenceLevel": "Artifact and Git metadata verification only, not native proof. The delegate reported compile and static checks only. At this checkpoint no Linux or macOS runtime had run; the worker reported no new runtime cleanup obligation, which is not a host-wide absence claim.",
+          "laterEvidence": "Later worker-supplied Linux runtime evidence from 2026-09-28 belongs to Local's fresh proof intake and is not recorded here. macOS runtime proof remains pending."
         }
       },
       "description": "Resolve the ordering between the anchored final group signal, the exact leader reap, and the later read-only absence check so ordinary macOS completions are not held by a zombie-only group.",
