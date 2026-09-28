@@ -220,6 +220,91 @@ class ReleaseProofTests(unittest.TestCase):
             self.assertEqual(report["commands"], [])
             self.assertTrue(report["cleanup"][-1]["removed"])
 
+    def test_cleanup_failure_preserves_primary_error_logs_and_safe_root_disposition(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture_root = root / "fixture"
+            fixture_root.mkdir()
+            archive = root / "candidate.zip"
+            archive.write_bytes(b"invalid")
+            Path(str(archive) + ".sha256").write_text("0" * 64)
+            report_path = root / "report.json"
+            argv = ["proof", "--archive", str(archive), "--target", "x86_64-pc-windows-msvc",
+                    "--source-sha", "fixture", "--report", str(report_path)]
+            original = proof.Proof
+            child = Mock(pid=42)
+            child.returncode = None
+            child.poll.side_effect = lambda: child.returncode
+            child.kill.side_effect = lambda: setattr(child, "returncode", -9)
+            child.wait.return_value = -9
+
+            def owned_fixture(args, path, report):
+                fixture = original(args, path, report)
+                log = (path / "daemon-0.log").open("wb")
+                log.write(b"owned cleanup diagnostic")
+                log.flush()
+                fixture.daemons.append((child, path / "telex", {}, log))
+                fixture.stop_daemon = Mock(side_effect=RuntimeError("drain sentinel"))
+                return fixture
+
+            with patch("sys.argv", argv), \
+                    patch.object(proof.tempfile, "mkdtemp", return_value=str(fixture_root)), \
+                    patch.object(proof, "Proof", side_effect=owned_fixture):
+                with self.assertRaisesRegex(RuntimeError, "candidate archive checksum mismatch"):
+                    proof.main()
+            report = json.loads(report_path.read_text())
+            self.assertEqual(report["status"], "failed")
+            self.assertIn("candidate archive checksum mismatch", report["error"])
+            self.assertIn("drain sentinel", report["cleanup_error"])
+            self.assertEqual(report["daemon_logs"]["daemon-0.log"], "owned cleanup diagnostic")
+            self.assertTrue(report["cleanup"][-1]["removed"])
+            self.assertFalse(fixture_root.exists())
+            child.kill.assert_called_once()
+            child.wait.assert_called_once_with(timeout=10)
+
+    def test_cleanup_failure_remains_nonzero_after_logs_and_safe_removal(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture_root = root / "fixture"
+            fixture_root.mkdir()
+            (fixture_root / "daemon-0.log").write_text("cleanup evidence")
+            child = SimpleNamespace(pid=42, poll=lambda: -9)
+            fixture = SimpleNamespace(
+                daemons=[(child, None, None, None)],
+                cleanup=Mock(side_effect=RuntimeError("cleanup sentinel")),
+            )
+            report = {"status": "passed", "cleanup": [], "daemons": []}
+            output = root / "report.json"
+            with self.assertRaisesRegex(RuntimeError, "cleanup sentinel"):
+                proof.finish_report(fixture, fixture_root, report, output)
+            saved = json.loads(output.read_text())
+            self.assertEqual(saved["status"], "failed")
+            self.assertEqual(saved["daemon_logs"]["daemon-0.log"], "cleanup evidence")
+            self.assertTrue(saved["cleanup"][-1]["removed"])
+            self.assertFalse(fixture_root.exists())
+
+    def test_unready_owned_process_retains_root_even_without_readiness_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            fixture_root = root / "fixture"
+            fixture_root.mkdir()
+            (fixture_root / "daemon-0.log").write_text("unready process evidence")
+            child = SimpleNamespace(pid=42, poll=lambda: None)
+            fixture = SimpleNamespace(
+                daemons=[(child, None, None, None)],
+                cleanup=Mock(side_effect=RuntimeError("owned process stop failed")),
+            )
+            report = {"status": "passed", "cleanup": [], "daemons": []}
+            output = root / "report.json"
+            with self.assertRaisesRegex(RuntimeError, "owned process stop failed"):
+                proof.finish_report(fixture, fixture_root, report, output)
+            saved = json.loads(output.read_text())
+            self.assertEqual(saved["status"], "failed")
+            self.assertEqual(saved["daemon_logs"]["daemon-0.log"], "unready process evidence")
+            self.assertFalse(saved["cleanup"][-1]["removed"])
+            self.assertEqual(saved["cleanup"][-1]["owned_pids"], [42])
+            self.assertTrue(fixture_root.exists())
+
     def test_nonlocal_postgres_is_rejected_before_access_and_root_is_removed(self):
         with tempfile.TemporaryDirectory() as directory:
             report_path = Path(directory) / "report.json"

@@ -529,6 +529,56 @@ class Proof:
         require(not failures, "fixture cleanup failed: " + "; ".join(failures))
 
 
+def finish_report(proof, root, report, output):
+    errors = []
+    try:
+        if proof is not None:
+            proof.cleanup()
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as error:
+        errors.append(error)
+
+    try:
+        for path in root.glob("daemon-*.log"):
+            try:
+                report.setdefault("daemon_logs", {})[path.name] = path.read_text(errors="replace")
+            except OSError as error:
+                errors.append(error)
+    except OSError as error:
+        errors.append(error)
+
+    unproven = []
+    if proof is not None:
+        # Include processes that failed before publishing a readiness receipt.
+        for process, _, _, _ in proof.daemons:
+            try:
+                if process.poll() is None:
+                    unproven.append(process.pid)
+            except OSError as error:
+                unproven.append(process.pid)
+                errors.append(error)
+    disposition = {"fixture_root": str(root), "removed": False}
+    if unproven:
+        disposition.update(retained_reason="owned process exit unproven", owned_pids=unproven)
+        errors.append(RuntimeError("fixture root retained: owned process exit unproven"))
+    else:
+        try:
+            shutil.rmtree(root)
+            require(not root.exists(), "fixture root remains after removal")
+            disposition["removed"] = True
+        except (RuntimeError, OSError) as error:
+            disposition["retained_reason"] = str(error)
+            errors.append(error)
+    report["cleanup"].append(disposition)
+    if errors:
+        report["status"] = "failed"
+        report["cleanup_error"] = "; ".join(str(error) for error in errors)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+    # main is already re-raising a primary error when this field is present.
+    if errors and "error" not in report:
+        raise errors[0]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--archive", type=Path, required=True)
@@ -611,20 +661,7 @@ def main():
         report["error"] = str(error)
         raise
     finally:
-        try:
-            if proof is not None:
-                proof.cleanup()
-            for path in root.glob("daemon-*.log"):
-                report.setdefault("daemon_logs", {})[path.name] = path.read_text(errors="replace")
-            shutil.rmtree(root)
-            report["cleanup"].append({"fixture_root": str(root), "removed": not root.exists()})
-        except Exception as error:
-            report["status"] = "failed"
-            report["cleanup_error"] = str(error)
-            raise
-        finally:
-            args.report.parent.mkdir(parents=True, exist_ok=True)
-            args.report.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
+        finish_report(proof, root, report, args.report)
     print(f"Release proof passed: {args.report}")
 
 
