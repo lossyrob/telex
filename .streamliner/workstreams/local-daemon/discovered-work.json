@@ -325,6 +325,23 @@
           "verifiedOn": "2026-09-28, after the PR #156 merge",
           "facts": "Campaign independently verified both actual repair merges (PR #158 as afda9460af4ee7d5af8e30edce8dafcfdbc757b7, PR #156 as 62291a788f33c948ecfa6cca8e3fdb2b9374b7fd), both closed issues (#154 and #155), and their ancestry in 62291a78. It directed Local to launch exactly one #157 worker under the already accepted scope, with no new Tier B, schema, or scope vote.",
           "launchState": "Dependency closure is verified. The schema3-release-preparation node stays planned, and this item stays routed, until an actual worker identity launches. Tagging and publication still require explicit operator approval at schema3-release-gate."
+        },
+        "launch": {
+          "launchedAt": "2026-09-28T19:52:59.528Z",
+          "worker": "ebfd215b-2229-4075-84af-4a4d6de2be7c",
+          "projectSessionAlias": "def4fb1c-941e-4cf1-875c-ebad976b4ba0",
+          "project": "3e514289-d3ac-432b-8ee7-f5b13758c039",
+          "checkout": "C:\\Users\\robemanuele\\proj\\utils\\copilot-worktrees\\telex\\feature-schema3-release-preparation-157",
+          "branch": "feature/schema3-release-preparation",
+          "workspaceType": "branch",
+          "creator": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c created the App session (immutable creator); Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 is the controller. No reparenting is needed.",
+          "profile": "Creator receipt explicitly sets gpt-6-astra, reasoning effort high, and long_context; notify_on_idle omitted. Runtime reasoning and context tier are not independently exposed.",
+          "preparation": "Supported preparation run d824d107-13b2-49d9-8bbc-e75ba08cde90 succeeded. The kickoff (18653 characters, SHA-256 b93497dbdb7a8dea1224bb53f11156b25da426b215a13d19d3c1de304e4372b8) was delivered unchanged.",
+          "identity": "Local verified session-online at clean 246db8251302afbd1f9fa7b5753737dcd22ad6a1, then sent standalone bounded write authority and received a durable worker acknowledgement before any repository mutation.",
+          "integration": "Worker reported an ordinary fast-forward to 008f3363e8cd926604a1d54fae6190902a330af1 (the one-path C0 repair) with a clean checkout, no history rewrite, and both generated-context hashes preserved: workflow 7162aebe49bae0010b9dfbd13c369ead7000e30d91ee434d48020de9d247e9f5, Streamliner context 3583ee79d350fb9647840bae3a2d3f64ea28a7671ace71d5b4af22cdcf2f8643.",
+          "state": "Implementation is active under full routine autonomy with no plan approval gate. The item stays routed (not completed); schema3-release-gate remains planned and unaccepted.",
+          "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\release157-launch-receipt-20260928.json",
+          "receiptSha256": "dbea04e4f8d4199f2a78601372b3433d3e10f8ec96b2fa0f0a8516ddde308115"
         }
       },
       "description": "Prepare one bounded v0.2.0 schema-3 recovery candidate after issues #154 and #155 merge, then submit its immutable evidence to a separate operator publication gate.",
@@ -1110,6 +1127,26 @@
       },
       "decisionState": "accepted",
       "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope; resolved in the same PR."
+    },
+    {
+      "id": "local-daemon-release-installer-path-isolation",
+      "sourceNode": "schema3-release-preparation",
+      "source": "Issue #157 worker read-only installer audit",
+      "evidence": {
+        "auditedHead": "008f3363e8cd926604a1d54fae6190902a330af1",
+        "details": "install.ps1 unconditionally mutates the user PATH even when an isolated install root is given. Disposable fresh-install proof therefore cannot run without touching the operator PATH."
+      },
+      "description": "Add a minimal explicit PATH opt-out or test seam to install.ps1 so fresh-install proof can run in disposable roots without mutating the user PATH.",
+      "affectedOutcome": "Required safe fresh PowerShell installer proof for the v0.2.0 candidate without operator PATH mutation.",
+      "requiredness": "Required for the #157 fresh-install proof.",
+      "sequencing": "Absorb into the same #157 node, branch, and PR before candidate review.",
+      "selectedDisposition": "Default-preserving minimal explicit opt-out or test seam, with targeted tests and documentation. The default installer behavior and the release proof requirements are not relaxed.",
+      "target": "schema3-release-preparation / issue #157",
+      "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "The seam, targeted tests, and documentation land in the #157 PR and pass exact-head review, required CI, and design inspection; fresh install.ps1 proof then runs from controlled candidate assets in disposable roots.",
+      "status": "absorbed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; no new node or policy vote. Implementation and proof are pending."
     }
   ]
 }
