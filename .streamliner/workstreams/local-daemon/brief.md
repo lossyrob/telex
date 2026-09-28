@@ -266,16 +266,20 @@ review or reconciliation do not gate that routine work. Material new guarantee
 choices still go directly to the operator. M2 remains unproven, unreviewed at a
 new exact head, unmerged, and unreleased. Issue #157 is not launched.
 
-The #154 publication hold is resolved. The earlier App EMU 403 and quota
-results remain historical evidence. On 2026-09-28 one authorized retry by the
-same worker (`d13b474e`) opened
-[PR #158](https://github.com/lossyrob/telex/pull/158) from the original
-`feature/windows-token-buffer-alignment` branch at unchanged head `f8363be`.
-Local and campaign verified that it is open, not a draft, and mergeable, with
-`lossyrob` as author, `lossyrob/telex` as both head and base repository, and base
-main `0c3d199f`. The PR body matches the reviewed artifact. Initial full review
-`fcd33ef6` and exact-head CI run 36436608976 are in progress; design inspection
-and merge are pending. The node remains in progress.
+Issue #154 is complete. The earlier App EMU 403 and quota results remain
+historical evidence. On 2026-09-28 one authorized retry by the same worker
+(`d13b474e`) opened [PR #158](https://github.com/lossyrob/telex/pull/158) from
+`feature/windows-token-buffer-alignment` at `f8363be`. Its first CI run failed
+only in the postgres and entra jobs because SQLite-only test symbols were unused
+under the CI warning policy; the same PR fixed this at `74b5041` without
+weakening CI. Full review 5340941652 found no blockers or warnings, CI run
+36439483760 passed all 14 required jobs, and design inspection passed. After
+campaign authorization, PR #158 merged at 2026-09-28T15:43:41Z as `afda9460`,
+and issue #154 closed as completed. This satisfies only the #154 dependency of
+release preparation.
+
+Issue #155 remains required and in progress, and #157 stays unlaunched until
+#155 also merges and campaign verifies both dependencies.
 
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later

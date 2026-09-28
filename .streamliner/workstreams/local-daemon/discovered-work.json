@@ -193,9 +193,32 @@
       "target": "windows-token-buffer-alignment / issue #154",
       "owner": "Local Daemon workstream orchestrator until an authorized implementer is assigned",
       "terminalPath": "Issue #154 repairs both exact-main TOKEN_USER paths, preserves SID identity, authentication, owner-private storage, and fallback behavior, proves alignment before dereference across supported Windows platform/feature coverage, audits the remaining GetTokenInformation call sites, and completes exact-head review, required CI, and campaign-authorized merge before hardening-gate acceptance or schema3-release-preparation.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Prior proposal bcfe3d12 preserved; exact-main correction and recovery release packet explicitly approved by the operator on 2026-09-24. Product launch remains conditional on Tier B landing and exact verification."
+      "dispositionAuthority": "Prior proposal bcfe3d12 preserved; exact-main correction and recovery release packet explicitly approved by the operator on 2026-09-24. Product launch remains conditional on Tier B landing and exact verification.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/158",
+        "prState": "MERGED",
+        "mergedAt": "2026-09-28T15:43:41Z",
+        "mergeCommit": "afda9460af4ee7d5af8e30edce8dafcfdbc757b7",
+        "mergeParents": [
+          "99d3e1a538db542746e6055ff070399337ac188a",
+          "74b504110e30c5cd00f2d857d047088fcc9b9fae"
+        ],
+        "mergeTree": "cda89829edb790771321ca0bc5c34bf2702e2f52",
+        "mergedHead": "74b504110e30c5cd00f2d857d047088fcc9b9fae",
+        "productRange": "7ed886b07620e8ab8adba68249ab84f96ea26013..74b5041: 6 files, 186 insertions and 10 deletions (.github/workflows/ci.yml, CONTRIBUTING.md, src/application_client.rs, src/backend/sqlite.rs, src/daemon.rs, tests/daemon_process_sqlite.rs).",
+        "review": "Full cumulative PAW COMMENT review 5340941652 by lossyrob at 74b5041: 0 blockers, 0 warnings, 0 inline findings, covering the f8363be baseline and the test-cfg correction. https://github.com/lossyrob/telex/pull/158#pullrequestreview-5340941652",
+        "ci": "Run 36439483760 on 74b5041: all 14 required jobs succeeded, rechecked in the pre-merge guard. The earlier run 36436608976 on f8363be failed and remains historical.",
+        "design": "Existing steward af271672-5d33-418c-bb9c-0f4d4570c7d7 design inspection PASS with 0 blockers and 0 warnings; report SHA-256 de96d149530a8a1ac86779803d772c5421ac26c5e816d0b2090b557ea943e65b.",
+        "prBodyNormalizedSha256": "6320c1513231a4911c2019c2e3d2ba5d4462f14bebd5b00011dca5d3aba7f547",
+        "issueState": "Issue #154 closed as completed at 2026-09-28T15:43:43Z by lossyrob.",
+        "authorization": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c authorized the exact head; Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 performed the guarded ordinary merge.",
+        "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\pr158-merge-receipt-20260928.json",
+        "receiptSha256": "28a2ea63e6ccc7e72b3a7f3560405ee4d91a1a37ec49fb670a677b1c9ae65c43",
+        "sourceBranch": "feature/windows-token-buffer-alignment retained at 74b5041.",
+        "limits": "This merge satisfies only the #154 dependency of schema3-release-preparation. Issue #155 remains required and in progress, and #157 is not ready. No hardening, closure, release, or publication approval follows. The cause of the historical PR #138 heap corruption remains unproven."
+      }
     },
     {
       "id": "local-daemon-postgres-wait-reset-recovery",
@@ -374,9 +397,15 @@
       "target": "windows-token-buffer-alignment / issue #154",
       "owner": "Issue #154 worker d13b474e-e729-491b-a466-1b9c1110bb6c under Local Daemon workstream orchestrator authorization",
       "terminalPath": "Targeted lint proof, then external review of the issue #154 candidate.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #154 repair scope. Pending external review; not completed."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #154 repair scope. Pending external review; not completed.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/158",
+        "mergeCommit": "afda9460af4ee7d5af8e30edce8dafcfdbc757b7",
+        "mergedHead": "74b504110e30c5cd00f2d857d047088fcc9b9fae",
+        "outcome": "The immutable-reference fixture cleanup merged unchanged in PR #158 after full review 5340941652 and CI run 36439483760."
+      }
     },
     {
       "id": "local-daemon-postgres-reset-stop-precedence",
@@ -811,6 +840,40 @@
       "status": "routed",
       "decisionState": "accepted",
       "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 routed this within the issue #155 repair scope. Pending adjudication; no correction accepted. Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c then authorized the narrow correction; the worker acknowledged at 2026-09-25T15:20:59-04:00. Pending implementation and real macOS runtime proof; not completed."
+    },
+    {
+      "id": "local-daemon-token-matrix-test-cfg",
+      "sourceNode": "windows-token-buffer-alignment",
+      "source": "PR #158 initial CI run 36436608976 and issue #154 worker strict reproduction",
+      "evidence": {
+        "failedHead": "f8363be368c4785314ce36bd11f2bd4c74644793",
+        "failedRun": "36436608976",
+        "failedJobs": [
+          "postgres 108976051548",
+          "entra 108976051619"
+        ],
+        "details": "Only the postgres and entra jobs failed; the other 12 succeeded. Under the actions-rust-lang/setup-rust-toolchain default RUSTFLAGS=-Dwarnings, SQLite-only test imports in src/daemon.rs, a test helper in src/application_client.rs, and a daemon lane constructor and control methods were unused when SQLite was off. The worker reproduced this exactly with strict local flags.",
+        "correction": "The earlier eight-profile local proof ran with RUSTFLAGS unset, so the prior claim that it followed the ordinary warning policy was inaccurate. The claim is kept as history and corrected here.",
+        "workerProof": "Worker-reported: all eight strict profiles and 22 tests, the six helper callers, fmt, and strict clippy passed. A local temporary LOCALAPPDATA parent setup failure was fixed in the fresh fixture only and is not a product defect."
+      },
+      "description": "Gate SQLite-only test symbols to the configurations that use them so non-SQLite profiles compile under the CI warning policy.",
+      "affectedOutcome": "The issue #154 PR must pass every required CI profile without weakening CI.",
+      "requiredness": "Required for PR #158 CI.",
+      "sequencing": "Absorb into the same issue #154 node, branch, and PR #158 before re-review.",
+      "selectedDisposition": "Gate only actual SQLite-only test symbols to their caller cfg, including one application_client test-helper attribute. No workflow, action, or flag change, warning suppression, runtime or Application Client contract change, removed assertion, or disabled token test.",
+      "target": "windows-token-buffer-alignment / issue #154 / PR #158",
+      "owner": "Issue #154 worker d13b474e-e729-491b-a466-1b9c1110bb6c under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Review of the exact new head against the full baseline plus the bounded delta, fresh required CI on all 14 axes, design inspection, and campaign exact-head merge.",
+      "status": "completed",
+      "completionEvidence": {
+        "correctedHead": "74b504110e30c5cd00f2d857d047088fcc9b9fae",
+        "delta": "3 paths, 23 insertions and 2 deletions: src/daemon.rs, src/application_client.rs, CONTRIBUTING.md.",
+        "ci": "Run 36439483760 on 74b5041: all 14 required jobs succeeded, with no CI weakening.",
+        "review": "Full review 5340941652: 0 blockers, 0 warnings.",
+        "mergeCommit": "afda9460af4ee7d5af8e30edce8dafcfdbc757b7"
+      },
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #154 repair scope; resolved in the same PR."
     }
   ]
 }

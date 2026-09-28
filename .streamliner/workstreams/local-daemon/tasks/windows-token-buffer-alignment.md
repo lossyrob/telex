@@ -3,8 +3,8 @@
 - **Workstream:** `local-daemon`
 - **Node:** `windows-token-buffer-alignment`
 - **Type:** implementation
-- **Status:** in progress; PR #158 is open for independent review and CI, with
-  design inspection and merge still gated
+- **Status:** completed; PR #158 merged exact head `74b5041` at
+  2026-09-28T15:43:41Z as `afda9460`, and issue #154 closed as completed
 - **Attention:** focus
 - **Depends on:** none
 - **Blocks:** `hardening-gate`, `schema3-release-preparation`
@@ -12,7 +12,8 @@
   workstream orchestrator authorization
 - **Tracker:** [lossyrob/telex#154](https://github.com/lossyrob/telex/issues/154)
 - **PR:** [lossyrob/telex#158](https://github.com/lossyrob/telex/pull/158)
-- **Published branch/head:** `feature/windows-token-buffer-alignment` at `f8363be368c4785314ce36bd11f2bd4c74644793`
+- **Merged branch/head:** `feature/windows-token-buffer-alignment` at `74b504110e30c5cd00f2d857d047088fcc9b9fae` (branch retained)
+- **Merge commit:** `afda9460af4ee7d5af8e30edce8dafcfdbc757b7`
 - **Parent workstream:** [lossyrob/telex#32](https://github.com/lossyrob/telex/issues/32)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
@@ -95,3 +96,22 @@ alignment caused the reported heap corruption.
   `2a4bc4c8-1211-49d4-ba68-9d05d5d7530d`.
 - Merge only the exact reviewed, green, inspected head after campaign
   merge authorization.
+
+## Terminal evidence
+
+- Full cumulative PAW COMMENT review
+  [5340941652](https://github.com/lossyrob/telex/pull/158#pullrequestreview-5340941652)
+  at `74b5041` found 0 blockers, 0 warnings, and 0 inline findings. It covered
+  the `f8363be` baseline and the narrow test-cfg correction.
+- CI run 36439483760 on `74b5041` passed all 14 required jobs. The earlier run
+  36436608976 on `f8363be` failed in the postgres and entra jobs; that failure
+  and the earlier unset-flags local proof remain historical and are corrected by
+  `local-daemon-token-matrix-test-cfg`.
+- Design inspection by steward `af271672` passed with 0 blockers and 0 warnings
+  (report SHA-256
+  `de96d149530a8a1ac86779803d772c5421ac26c5e816d0b2090b557ea943e65b`).
+- Campaign authorized the exact head, and the Local orchestrator merged it with
+  an ordinary guarded merge. The merge changed six product, test, CI, and docs
+  paths (186 insertions, 10 deletions).
+- This satisfies only the #154 dependency of `schema3-release-preparation`. The
+  cause of the historical PR #138 heap corruption remains unproven.
