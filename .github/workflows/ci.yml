@@ -71,6 +71,41 @@ jobs:
       - name: Exercise generated fallback launcher
         run: cargo test --no-default-features --features sqlite --test daemon_process_sqlite copilot_fallback
 
+  windows-token-user:
+    name: Windows token-user alignment (${{ matrix.profile }})
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: default
+            flags: ""
+          - profile: sqlite
+            flags: --no-default-features --features sqlite
+          - profile: postgres
+            flags: --no-default-features --features postgres
+          - profile: entra
+            flags: --no-default-features --features entra
+          - profile: sqlite-postgres
+            flags: --no-default-features --features sqlite,postgres
+          - profile: sqlite-entra
+            flags: --no-default-features --features sqlite,entra
+          - profile: sqlite-self-update
+            flags: --no-default-features --features sqlite,self-update
+          - profile: all
+            flags: --all-features
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Prove token-user alignment and identity before dereference
+        run: cargo test --lib ${{ matrix.flags }} windows_token_user_alignment
+
   feature-check:
     name: Feature combinations build
     runs-on: ubuntu-latest

@@ -3735,6 +3735,7 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "sqlite")]
     fn reply_request(operation: &str, body: &str) -> ReplyRequest {
         ReplyRequest {
             operation_id: OperationId(operation.to_string()),
