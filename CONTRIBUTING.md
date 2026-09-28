@@ -63,10 +63,13 @@ cargo test --no-default-features --features postgres --lib profiles::password_co
 
 These tests use non-secret fixture commands and disposable roots, not operator
 credential commands or a shared database. The macOS credential job is separate
-from SQLite Copilot fallback coverage. The ignored subprocess entrypoint is
-invoked by its parent proof; an ignored or filtered target alone is not runtime
-evidence. Deterministic error/identity seams supplement, rather than replace,
-real platform scope/termination/reap and pipe tests.
+from SQLite Copilot fallback coverage. Ignored subprocess entrypoints are
+invoked by their parent proofs; an ignored or filtered target alone is not runtime
+evidence. Delayed credential fixtures publish their native host/owned-child
+identities only after a child-ready barrier, without CIM or parent-process
+discovery. Acquisition errors are observed directly instead of being reported
+as an indistinguishable readiness timeout. Deterministic error/identity seams
+supplement, rather than replace, real platform scope/termination/reap and pipe tests.
 
 ## Windows token-user regression coverage
 

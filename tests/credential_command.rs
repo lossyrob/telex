@@ -8,6 +8,9 @@ use telex::session_watch::capture_process_start_time;
 use telex::session_watch::process_alive_with_start_time;
 
 static TEST_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+const FIXTURE_ROOT: &str = "TELEX_CREDENTIAL_FIXTURE_ROOT";
+const HOST_FIXTURE: &str = "credential_native_host_fixture";
+const LEAF_FIXTURE: &str = "credential_native_leaf_fixture";
 
 #[path = "fixtures/credential_command_helpers.rs"]
 mod credential_helpers;
@@ -24,45 +27,37 @@ struct DelayedCommand {
 
 impl DelayedCommand {
     fn new(label: &str) -> Self {
-        let root = std::env::temp_dir().join(format!(
-            "telex-credential-{label}-{}-{}",
-            std::process::id(),
-            telex::model::now_ms(),
-        ));
-        std::fs::create_dir(&root).unwrap();
+        assert!(label
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'));
+        let relative = PathBuf::from("target")
+            .join("credential-command-fixtures")
+            .join(format!(
+                "telex-credential-{label}-{}-{}",
+                std::process::id(),
+                telex::model::now_ms(),
+            ));
+        let root = std::env::current_dir().unwrap().join(&relative);
+        std::fs::create_dir_all(&root).unwrap();
         std::fs::write(root.join("keep-running"), "").unwrap();
+        let executable_name = format!("helper{}", std::env::consts::EXE_SUFFIX);
+        std::fs::copy(
+            std::env::current_exe().unwrap(),
+            root.join(&executable_name),
+        )
+        .unwrap();
+        let executable = relative.join(executable_name);
         #[cfg(windows)]
-        let command = {
-            let script = root.join("helper.ps1");
-            let pids = root.join("pids").to_string_lossy().replace('\'', "''");
-            std::fs::write(&script, format!(
-                "$ErrorActionPreference = 'Stop'\n\
-                 $parentId = (Get-CimInstance Win32_Process -Filter \"ProcessId=$PID\").ParentProcessId\n\
-                 [IO.File]::WriteAllText('{pids}', \"$PID`n$parentId\")\n\
-                 Start-Sleep -Seconds 30\n\
-                 'non-secret-test-placeholder'\n"
-            )).unwrap();
-            let expression = format!("& '{}'", script.display().to_string().replace('\'', "''"));
-            encoded_powershell(&expression)
-        };
+        let command = format!(
+            "set {FIXTURE_ROOT}={}&& .\\{} --exact {HOST_FIXTURE} --ignored --nocapture --test-threads=1",
+            relative.display(), executable.display(),
+        );
         #[cfg(unix)]
-        let command = {
-            let script = root.join("helper.sh");
-            let pids = root.join("pids");
-            let keep_running = root.join("keep-running");
-            std::fs::write(
-                &script,
-                format!(
-                    "echo \"$$ $PPID\" > '{}'\n\
-                 while test -f '{}'; do sleep 0.05; done\n\
-                 printf non-secret-test-placeholder\n",
-                    pids.display(),
-                    keep_running.display(),
-                ),
-            )
-            .unwrap();
-            format!("sh '{}'; result=$?; exit \"$result\"", script.display())
-        };
+        let command = format!(
+            "{FIXTURE_ROOT}={} ./{} --exact {HOST_FIXTURE} --ignored --nocapture --test-threads=1",
+            relative.display(),
+            executable.display(),
+        );
         Self {
             root,
             command,
@@ -80,9 +75,11 @@ impl DelayedCommand {
             .split_whitespace()
             .map(|pid| pid.parse().unwrap())
             .collect();
-        if pids.len() < 2 {
-            return false;
-        }
+        assert_eq!(
+            pids.len(),
+            2,
+            "native host must publish one complete host/leaf identity record"
+        );
         assert!(pids.iter().all(|pid| *pid != std::process::id()));
         #[cfg(windows)]
         {
@@ -141,6 +138,8 @@ impl DelayedCommand {
 
 impl Drop for DelayedCommand {
     fn drop(&mut self) {
+        // The guardian can release the native leaf even if startup failed before PID handoff.
+        let _ = std::fs::remove_file(self.root.join("keep-running"));
         #[cfg(windows)]
         {
             use std::os::windows::io::AsRawHandle;
@@ -156,6 +155,7 @@ impl Drop for DelayedCommand {
                     }
                 }
             }
+            self.handles.clear();
         }
         #[cfg(unix)]
         {
@@ -174,6 +174,61 @@ impl Drop for DelayedCommand {
             std::fs::remove_dir_all(&self.root).unwrap();
         }
     }
+}
+
+#[test]
+#[ignore = "native credential fixture host, invoked by production command execution"]
+fn credential_native_host_fixture() {
+    let root = PathBuf::from(std::env::var_os(FIXTURE_ROOT).expect("fixture root"));
+    std::fs::write(root.join("host-started"), "started").unwrap();
+    if root.join("fail-before-ready").exists() {
+        std::process::exit(23);
+    }
+    let mut child = std::process::Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            LEAF_FIXTURE,
+            "--ignored",
+            "--nocapture",
+            "--test-threads=1",
+        ])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn owned fixture leaf");
+    let ready_by = Instant::now() + Duration::from_secs(4);
+    while !root.join("leaf-ready").exists() {
+        if child.try_wait().unwrap().is_some() || Instant::now() >= ready_by {
+            if child.try_wait().unwrap().is_none() {
+                child.kill().unwrap();
+            }
+            child.wait().unwrap();
+            panic!("native fixture leaf did not establish readiness");
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let temporary = root.join("pids.tmp");
+    std::fs::write(
+        &temporary,
+        format!("{}\n{}\n", std::process::id(), child.id()),
+    )
+    .unwrap();
+    std::fs::rename(temporary, root.join("pids")).unwrap();
+    let status = child.wait().unwrap();
+    std::process::exit(if status.success() { 0 } else { 24 });
+}
+
+#[test]
+#[ignore = "native credential leaf, owned and awaited by the fixture host"]
+fn credential_native_leaf_fixture() {
+    let root = PathBuf::from(std::env::var_os(FIXTURE_ROOT).expect("fixture root"));
+    std::fs::write(root.join("leaf-ready"), "ready").unwrap();
+    let safety_deadline = Instant::now() + Duration::from_secs(30);
+    while root.join("keep-running").exists() && Instant::now() < safety_deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::process::exit(0);
 }
 
 fn profile(command: &str) -> BackendProfile {
@@ -311,11 +366,57 @@ async fn credential_invalid_utf8_is_an_error_without_exposing_output() {
     assert!(telex::profiles::credential_command_obligations().is_empty());
 }
 
-async fn wait_for_helper(fixture: &mut DelayedCommand) {
+struct CredentialCall(
+    tokio::task::JoinHandle<anyhow::Result<(tokio_postgres::Config, Option<String>)>>,
+);
+
+impl CredentialCall {
+    fn start(command: &str) -> Self {
+        let p = profile(command);
+        Self(tokio::spawn(async move { pg_connect_config(&p).await }))
+    }
+
+    async fn cancel(mut self) {
+        self.0.abort();
+        assert!((&mut self.0).await.unwrap_err().is_cancelled());
+    }
+}
+
+impl Drop for CredentialCall {
+    fn drop(&mut self) {
+        self.0.abort();
+    }
+}
+
+async fn wait_for_helper(
+    fixture: &mut DelayedCommand,
+    call: &mut CredentialCall,
+) -> Result<(), String> {
     let deadline = Instant::now() + Duration::from_secs(4);
-    while !fixture.capture() {
-        assert!(Instant::now() < deadline, "owned helper failed readiness");
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    loop {
+        if fixture.capture() {
+            return Ok(());
+        }
+        tokio::select! {
+            result = &mut call.0 => {
+                return Err(match result {
+                    Ok(Ok(_)) => "credential command completed before fixture readiness".into(),
+                    Ok(Err(error)) => format!("credential command failed before fixture readiness: {error:#}"),
+                    Err(error) => format!("credential task ended before fixture readiness: {error}"),
+                });
+            }
+            _ = tokio::time::sleep(Duration::from_millis(10)) => {
+                if Instant::now() >= deadline {
+                    return Err(format!(
+                        "owned helper failed readiness: host_started={}, leaf_ready={}, record_present={}, obligations={:?}",
+                        fixture.root.join("host-started").exists(),
+                        fixture.root.join("leaf-ready").exists(),
+                        fixture.root.join("pids").exists(),
+                        telex::profiles::credential_command_obligations(),
+                    ));
+                }
+            }
+        }
     }
 }
 
@@ -349,12 +450,12 @@ async fn credential_command_capacity_and_same_source_queue_launch_nothing() {
     let mut first = DelayedCommand::new("capacity-first");
     let mut second = DelayedCommand::new("capacity-second");
     let third = DelayedCommand::new("capacity-queued");
-    let first_profile = profile(&first.command);
-    let second_profile = profile(&second.command);
-    let first_call = tokio::spawn(async move { pg_connect_config(&first_profile).await });
-    let second_call = tokio::spawn(async move { pg_connect_config(&second_profile).await });
-    wait_for_helper(&mut first).await;
-    wait_for_helper(&mut second).await;
+    let mut first_call = CredentialCall::start(&first.command);
+    let mut second_call = CredentialCall::start(&second.command);
+    wait_for_helper(&mut first, &mut first_call).await.unwrap();
+    wait_for_helper(&mut second, &mut second_call)
+        .await
+        .unwrap();
     let occupied = telex::profiles::credential_command_obligations();
     assert_eq!(occupied.len(), 2);
     let duplicate_profile = profile(&first.command);
@@ -375,10 +476,16 @@ async fn credential_command_capacity_and_same_source_queue_launch_nothing() {
         !third.root.join("pids").exists(),
         "queued command launched a helper"
     );
-    first_call.abort();
-    second_call.abort();
-    assert!(first_call.await.unwrap_err().is_cancelled());
-    assert!(second_call.await.unwrap_err().is_cancelled());
+    assert!(
+        !third.root.join("host-started").exists(),
+        "queued command executed its host"
+    );
+    assert!(
+        !third.root.join("leaf-ready").exists(),
+        "queued command created its leaf"
+    );
+    first_call.cancel().await;
+    second_call.cancel().await;
     wait_for_receipts().await;
     eprintln!(
         "job-terminal receipt: independent fixture handle liveness first={:?}, second={:?}",
@@ -443,12 +550,10 @@ async fn credential_command_repeated_cancellation_releases_all_owned_records() {
     let _guard = TEST_LOCK.lock().await;
     for attempt in 0..3 {
         let mut fixture = DelayedCommand::new(&format!("repeat-{attempt}"));
-        let p = profile(&fixture.command);
-        let call = tokio::spawn(async move { pg_connect_config(&p).await });
-        wait_for_helper(&mut fixture).await;
+        let mut call = CredentialCall::start(&fixture.command);
+        wait_for_helper(&mut fixture, &mut call).await.unwrap();
         assert_eq!(telex::profiles::credential_command_obligations().len(), 1);
-        call.abort();
-        assert!(call.await.unwrap_err().is_cancelled());
+        call.cancel().await;
         wait_for_receipts().await;
         eprintln!(
             "job-terminal receipt iteration {attempt}: independent fixture handle liveness={:?}",
@@ -498,16 +603,37 @@ async fn credential_cancellation_does_not_terminate_a_preexisting_outside_proces
             .unwrap(),
     );
     let mut fixture = DelayedCommand::new("outside-process");
-    let p = profile(&fixture.command);
-    let call = tokio::spawn(async move { pg_connect_config(&p).await });
-    wait_for_helper(&mut fixture).await;
+    let mut call = CredentialCall::start(&fixture.command);
+    wait_for_helper(&mut fixture, &mut call).await.unwrap();
     assert!(outside.0.try_wait().unwrap().is_none());
-    call.abort();
-    assert!(call.await.unwrap_err().is_cancelled());
+    call.cancel().await;
     wait_for_receipts().await;
     wait_for_fixture_process_completion(&fixture).await;
     assert!(
         outside.0.try_wait().unwrap().is_none(),
         "credential cleanup affected a process outside its invocation"
     );
+}
+
+#[tokio::test]
+async fn credential_helper_early_exit_is_reported_without_a_readiness_timeout() {
+    let _guard = TEST_LOCK.lock().await;
+    let mut fixture = DelayedCommand::new("early-exit");
+    std::fs::write(fixture.root.join("fail-before-ready"), "").unwrap();
+    let mut call = CredentialCall::start(&fixture.command);
+    let started = Instant::now();
+    let error = wait_for_helper(&mut fixture, &mut call).await.unwrap_err();
+    assert!(
+        error.contains("credential command failed before fixture readiness"),
+        "{error}"
+    );
+    assert!(
+        error.contains("exited unsuccessfully") && error.contains("23"),
+        "{error}"
+    );
+    assert!(started.elapsed() < Duration::from_secs(4));
+    assert!(fixture.root.join("host-started").exists());
+    assert!(!fixture.root.join("pids").exists());
+    assert!(!fixture.root.join("leaf-ready").exists());
+    assert!(telex::profiles::credential_command_obligations().is_empty());
 }
