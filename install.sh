@@ -7,10 +7,14 @@
 #   TELEX_INSTALL_ROOT versioned install root (default: $HOME/.local/share/telex)
 #   TELEX_INSTALL_DIR  legacy override; if it ends in /bin, its parent is used as TELEX_INSTALL_ROOT
 #   TELEX_VERSION      version tag to install (default: latest)
+#   TELEX_UPGRADE_API_BASE / TELEX_UPGRADE_DOWNLOAD_BASE
+#                      trusted release mirror overrides (default: GitHub)
 #   GITHUB_TOKEN       optional, raises GitHub API rate limits
 set -eu
 
 REPO="lossyrob/telex"
+api_base="${TELEX_UPGRADE_API_BASE:-https://api.github.com}"
+download_base="${TELEX_UPGRADE_DOWNLOAD_BASE:-https://github.com}"
 if [ -n "${TELEX_INSTALL_ROOT:-}" ]; then
   install_root="${TELEX_INSTALL_ROOT}"
 elif [ -n "${TELEX_INSTALL_DIR:-}" ]; then
@@ -58,13 +62,13 @@ esac
 # Resolve the version tag.
 tag="${TELEX_VERSION:-}"
 if [ -z "${tag}" ]; then
-  tag="$(gh_curl "https://api.github.com/repos/${REPO}/releases/latest" \
+  tag="$(gh_curl "${api_base%/}/repos/${REPO}/releases/latest" \
     | grep '"tag_name"' | head -n1 | sed 's/.*"tag_name": *"\([^"]*\)".*/\1/')"
   [ -n "${tag}" ] || err "could not determine the latest release tag (is a release published?)"
 fi
 
 asset="telex-${tag}-${target}.tar.gz"
-url="https://github.com/${REPO}/releases/download/${tag}/${asset}"
+url="${download_base%/}/${REPO}/releases/download/${tag}/${asset}"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "${tmp}"' EXIT
