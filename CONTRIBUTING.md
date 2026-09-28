@@ -44,6 +44,14 @@ TELEX_PG_URL='postgresql://user@host:5432/telex?sslmode=disable' \
 - `TELEX_PG_REQUIRE=1` — fail instead of skipping when `TELEX_PG_URL` is unset/empty, so a CI
   job that intends to exercise the Postgres leg can't pass by silently skipping it.
 
+The live LISTEN/NOTIFY proof observes subscription and waiter readiness, then
+disables only the test waiter's polling fallback. A committed row without a
+notification must time out; a real notification must deliver the exact row even
+when its epoch proof is deliberately delayed. This distinguishes the wake path
+from end-to-end SQL/scheduler latency. A separate virtual-time test proves that
+notification selection does not wait for the normal polling deadline. Production
+poll intervals remain unchanged.
+
 ## Credential-command lifecycle tests
 
 Run the real OS lifecycle targets on Windows, Linux, and macOS:

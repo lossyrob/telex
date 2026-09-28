@@ -4996,8 +4996,37 @@ async fn wait_for_message(
         waiter_start_time,
         supports_delivery_quarantine,
         idle_ttl_duration(),
+        WaitPollMode::Normal,
     )
     .await
+}
+
+enum WaitPollMode {
+    Normal,
+    // Integration proof only; IPC wait requests always select Normal.
+    #[cfg(feature = "sqlite")]
+    NotificationOnly(Option<tokio::sync::oneshot::Sender<()>>),
+}
+
+impl WaitPollMode {
+    fn sleep_duration(
+        &mut self,
+        remaining: Duration,
+        poll_interval: Duration,
+    ) -> std::result::Result<Duration, Response> {
+        match self {
+            Self::Normal => Ok(remaining.min(poll_interval)),
+            #[cfg(feature = "sqlite")]
+            Self::NotificationOnly(ready) => {
+                if let Some(ready) = ready.take() {
+                    ready.send(()).map_err(|_| {
+                        proto::internal("notification-only test waiter lost its ready observer")
+                    })?;
+                }
+                Ok(remaining)
+            }
+        }
+    }
 }
 
 async fn wait_for_message_with_idle_ttl(
@@ -5013,6 +5042,7 @@ async fn wait_for_message_with_idle_ttl(
     waiter_start_time: Option<u64>,
     supports_delivery_quarantine: bool,
     idle_ttl: Duration,
+    mut poll_mode: WaitPollMode,
 ) -> Response {
     if state.is_draining() {
         return proto::error_response(proto::ERROR_NOT_RUNNING, "daemon is draining");
@@ -5606,11 +5636,13 @@ async fn wait_for_message_with_idle_ttl(
             }
             let remaining = deadline.saturating_duration_since(now);
             let ttl_remaining = idle_deadline.saturating_duration_since(now);
-            sleep_until_next_poll_or_notify(
-                store_notification,
-                remaining.min(ttl_remaining).min(Duration::from_millis(100)),
-            )
-            .await;
+            let duration = match poll_mode
+                .sleep_duration(remaining.min(ttl_remaining), Duration::from_millis(100))
+            {
+                Ok(duration) => duration,
+                Err(response) => return response,
+            };
+            sleep_until_next_poll_or_notify(store_notification, duration).await;
         } else {
             let now = Instant::now();
             if now >= idle_deadline {
@@ -5632,13 +5664,14 @@ async fn wait_for_message_with_idle_ttl(
                 );
                 return Response::PresenceEnded;
             }
-            sleep_until_next_poll_or_notify(
-                store_notification,
-                idle_deadline
-                    .saturating_duration_since(now)
-                    .min(Duration::from_millis(250)),
-            )
-            .await;
+            let duration = match poll_mode.sleep_duration(
+                idle_deadline.saturating_duration_since(now),
+                Duration::from_millis(250),
+            ) {
+                Ok(duration) => duration,
+                Err(response) => return response,
+            };
+            sleep_until_next_poll_or_notify(store_notification, duration).await;
         }
     }
 }
@@ -11164,6 +11197,28 @@ mod p3_tests {
             .any(|error| error.kind == "BackendDegraded"));
     }
 
+    #[tokio::test(start_paused = true)]
+    async fn notification_wakes_before_poll_deadline_without_using_wall_clock_latency() {
+        let notify = Arc::new(Notify::new());
+        let started = tokio::time::Instant::now();
+        let waiting = sleep_until_next_poll_or_notify(
+            Some(notify.clone().notified_owned()),
+            Duration::from_millis(100),
+        );
+        tokio::pin!(waiting);
+        tokio::select! {
+            _ = &mut waiting => panic!("wait woke without notification or poll deadline"),
+            _ = tokio::time::sleep(Duration::from_millis(20)) => {},
+        }
+        let before_notify = tokio::time::Instant::now();
+        assert!(before_notify.duration_since(started) < Duration::from_millis(100));
+        notify.notify_waiters();
+        tokio::time::timeout(Duration::from_millis(1), &mut waiting)
+            .await
+            .expect("notification must wake without advancing to the polling deadline");
+        assert_eq!(tokio::time::Instant::now(), before_notify);
+    }
+
     #[tokio::test]
     async fn exhausted_backend_recovery_is_an_actionable_wait_outcome() {
         let state = test_state("wait-backend-unavailable");
@@ -12107,6 +12162,7 @@ mod p3_tests {
             crate::session_watch::capture_process_start_time(std::process::id()),
             true,
             Duration::from_millis(20),
+            WaitPollMode::Normal,
         )
         .await;
         assert!(matches!(response, Response::PresenceEnded));
@@ -12527,6 +12583,34 @@ pub mod test_support {
                 crate::session_watch::capture_process_start_time(std::process::id()),
                 true,
                 idle_ttl,
+                WaitPollMode::Normal,
+            )
+            .await
+        }
+
+        /// Reports readiness after the empty fetch, then permits only notification/deadline wakes.
+        pub async fn wait_without_polling(
+            &self,
+            store_key: &str,
+            session_id: &str,
+            address: &str,
+            timeout_ms: u64,
+            ready: tokio::sync::oneshot::Sender<()>,
+        ) -> Response {
+            wait_for_message_with_idle_ttl(
+                self.state.clone(),
+                store_key.to_string(),
+                session_id.to_string(),
+                address.to_string(),
+                None,
+                None,
+                false,
+                Some(timeout_ms),
+                Some(std::process::id()),
+                crate::session_watch::capture_process_start_time(std::process::id()),
+                true,
+                DEFAULT_IDLE_TTL,
+                WaitPollMode::NotificationOnly(Some(ready)),
             )
             .await
         }

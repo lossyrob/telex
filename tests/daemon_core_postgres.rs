@@ -1777,13 +1777,20 @@ async fn postgres_listen_notify_wakes_blocked_waiter() {
         return;
     };
 
-    let prior_config = std::env::var_os("TELEX_CONFIG");
+    struct RestoreConfig(Option<std::ffi::OsString>);
+    impl Drop for RestoreConfig {
+        fn drop(&mut self) {
+            restore_env("TELEX_CONFIG", self.0.take());
+        }
+    }
+    let _restore_config = RestoreConfig(std::env::var_os("TELEX_CONFIG"));
     let schema = sanitize_ident(&format!(
         "telex_daemon_pg_notify_{}_{}",
         std::process::id(),
         now_ms()
     ))
     .expect("derived schema");
+    let application_name = format!("telex_notify_{}_{}", std::process::id(), now_ms());
     let cfg = pg_config(&url);
     admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
         .await
@@ -1792,7 +1799,7 @@ async fn postgres_listen_notify_wakes_blocked_waiter() {
     let profile = BackendProfile {
         kind: "postgres".to_string(),
         path: None,
-        url: Some(url.clone()),
+        url: Some(pg_url_with_application_name(&url, &application_name)),
         auth: Some("password".to_string()),
         password_env: std::env::var("TELEX_PG_PASSWORD")
             .ok()
@@ -1826,55 +1833,164 @@ async fn postgres_listen_notify_wakes_blocked_waiter() {
 
     let daemon = TestDaemon::new("pg-notify");
     registered_epoch(&daemon, &store_key, "receiver", "addr:receiver").await;
-    registered_epoch(&daemon, &store_key, "sender", "addr:sender").await;
-    tokio::time::sleep(Duration::from_millis(250)).await;
+    registered_epoch(&daemon, &store_key, "without-notify", "addr:without-notify").await;
+    let (control, connection) = cfg.connect(make_tls().unwrap()).await.unwrap();
+    tokio::spawn(async move {
+        connection
+            .await
+            .expect("notification test control connection")
+    });
+    let listener_deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let listeners = control
+            .query(
+                "SELECT pid FROM pg_stat_activity WHERE application_name=$1 \
+             AND query LIKE 'LISTEN telex_messages_%' AND state='idle'",
+                &[&application_name],
+            )
+            .await
+            .unwrap();
+        if !listeners.is_empty() {
+            assert_eq!(listeners.len(), 1, "one subscribed daemon listener");
+            break;
+        }
+        assert!(
+            Instant::now() < listener_deadline,
+            "LISTEN did not finish subscribing"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    let publisher = PgBackend::connect_with(cfg.clone(), Some(&schema))
+        .await
+        .unwrap();
 
+    let (negative_ready, negative_armed) = tokio::sync::oneshot::channel();
+    let no_notification = {
+        let daemon = daemon.clone();
+        let store_key = store_key.clone();
+        tokio::spawn(async move {
+            daemon
+                .wait_without_polling(
+                    &store_key,
+                    "without-notify",
+                    "addr:without-notify",
+                    1_000,
+                    negative_ready,
+                )
+                .await
+        })
+    };
+    tokio::time::timeout(Duration::from_secs(5), negative_armed)
+        .await
+        .unwrap()
+        .unwrap();
+    publisher
+        .insert_message(&NewMessage {
+            from_addr: Some("sender".into()),
+            to_addr: "addr:without-notify".into(),
+            kind: "note".into(),
+            attention: Attention::Background,
+            body: "durable row without notification".into(),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(
+        matches!(
+            tokio::time::timeout(Duration::from_secs(5), no_notification)
+                .await
+                .unwrap()
+                .unwrap(),
+            Response::Timeout
+        ),
+        "durable insertion alone must not wake a notification-only waiter"
+    );
+
+    let (ready, armed) = tokio::sync::oneshot::channel();
     let waiter = {
         let daemon = daemon.clone();
         let store_key = store_key.clone();
         tokio::spawn(async move {
             let start = Instant::now();
             let response = daemon
-                .wait(&store_key, "receiver", "addr:receiver", 1_000)
+                .wait_without_polling(&store_key, "receiver", "addr:receiver", 5_000, ready)
                 .await;
             (start.elapsed(), response)
         })
     };
-    tokio::time::sleep(Duration::from_millis(25)).await;
-    let sent = daemon
-        .request(send_request(
-            &store_key,
-            "sender",
-            Some("addr:sender"),
-            "addr:receiver",
-            None,
-            "notify wake",
-        ))
-        .await;
-    assert!(
-        matches!(sent, Response::Sent { .. }),
-        "send failed: {sent:?}"
-    );
+    tokio::time::timeout(Duration::from_secs(5), armed)
+        .await
+        .unwrap()
+        .unwrap();
+    let sent = publisher
+        .insert_message(&NewMessage {
+            from_addr: Some("sender".into()),
+            to_addr: "addr:receiver".into(),
+            kind: "note".into(),
+            attention: Attention::Background,
+            body: "notify wake".into(),
+            sent_at_ms: now_ms(),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    control
+        .batch_execute(&format!("BEGIN; LOCK TABLE {schema}.leases IN SHARE MODE"))
+        .await
+        .unwrap();
+    publisher
+        .notify_new("addr:receiver", sent.id, sent.sent_at_ms)
+        .await
+        .unwrap();
+    let proof_deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        control
+            .batch_execute("SELECT pg_stat_clear_snapshot()")
+            .await
+            .unwrap();
+        let blocked = control
+            .query(
+                "SELECT pid FROM pg_stat_activity WHERE application_name=$1 \
+             AND wait_event_type='Lock' AND query LIKE 'UPDATE leases%'",
+                &[&application_name],
+            )
+            .await
+            .unwrap();
+        if !blocked.is_empty() {
+            break;
+        }
+        assert!(
+            Instant::now() < proof_deadline,
+            "notification did not reach the epoch proof"
+        );
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    tokio::time::sleep(Duration::from_millis(150)).await;
+    control.batch_execute("ROLLBACK").await.unwrap();
     let (elapsed, response) = waiter.await.expect("waiter task");
     let delivery_latency_ms = match &response {
         Response::Message {
+            id,
             body,
             sent_at_ms,
             buffered_at_ms,
             ..
-        } if body == "notify wake" => (*buffered_at_ms).saturating_sub(*sent_at_ms),
+        } if *id == sent.id && body == "notify wake" => {
+            (*buffered_at_ms).saturating_sub(*sent_at_ms)
+        }
         _ => panic!("waiter should receive message, got {response:?}"),
     };
-    assert!(
-        delivery_latency_ms < 100,
-        "LISTEN/NOTIFY should wake before the 100ms polling fallback; waiter_elapsed={elapsed:?}, delivery_latency_ms={delivery_latency_ms}"
-    );
-
+    drop(publisher);
+    drop(control);
     admin_exec(&cfg, &format!("DROP SCHEMA IF EXISTS {schema} CASCADE"))
         .await
         .expect("post-test schema cleanup");
     let _ = std::fs::remove_dir_all(&root);
-    restore_env("TELEX_CONFIG", prior_config);
+    eprintln!(
+        "notification-only delivery after controlled epoch-proof delay: \
+         waiter_elapsed={elapsed:?}, delivery_latency_ms={delivery_latency_ms}"
+    );
 }
 
 #[tokio::test]
