@@ -94,6 +94,27 @@ def clean_environment(root):
     return env
 
 
+def read_fixture_identity(run_dir):
+    caps = list(run_dir.glob("daemon-*.cap"))
+    require(len(caps) <= 1, "multiple capability files in isolated fixture")
+    if not caps:
+        return None
+    try:
+        return json.loads(caps[0].read_text())
+    except FileNotFoundError:
+        # Windows replacement can briefly remove the previous publication.
+        return None
+
+
+def successor_identity(identity, pid, predecessor):
+    if identity is None or identity == predecessor:
+        return None
+    require(identity.get("server_pid") == pid, "unexpected fixture daemon publication")
+    require(identity.get("server_start_time") is not None, "missing daemon start identity")
+    require(identity.get("instance_id"), "missing daemon instance identity")
+    return identity
+
+
 class CandidateServer:
     def __init__(self, archive, tag, target):
         extension = "zip" if target.endswith("windows-msvc") else "tar.gz"
@@ -233,6 +254,18 @@ class Proof:
         require(actual == str(expected), f"schema version {actual}, expected {expected}")
 
     def start_daemon(self, binary, env, minor):
+        run_dir = Path(env["TELEX_RUN_DIR"])
+        predecessor = read_fixture_identity(run_dir)
+        if predecessor is not None:
+            require(any(
+                row["pid"] == predecessor.get("server_pid")
+                and row["start_time"] == predecessor.get("server_start_time")
+                and row["instance_id"] == predecessor.get("instance_id")
+                for row in self.report["daemons"]
+            ) and any(
+                process.pid == predecessor.get("server_pid") and process.poll() is not None
+                for process, _, _, _ in self.daemons
+            ), "preexisting publication is not an exited owned fixture daemon")
         log = (self.root / f"daemon-{len(self.daemons)}.log").open("wb")
         process = subprocess.Popen([str(binary), "--json", "daemon", "serve"],
                                    env=env, cwd=self.root, stdin=subprocess.DEVNULL,
@@ -241,17 +274,17 @@ class Proof:
         deadline = time.monotonic() + 15
         while time.monotonic() < deadline:
             require(process.poll() is None, f"fixture daemon exited: {binary}")
+            identity = successor_identity(read_fixture_identity(run_dir), process.pid, predecessor)
+            if identity is None:
+                time.sleep(0.05)
+                continue
             result = self.telex(binary, env, "daemon", "status")
             status = json.loads(result.stdout)
             if "instance_id" in status:
                 require(status["protocol_version"] == {"major": 1, "minor": minor},
                         "live daemon protocol mismatch")
-                caps = list(Path(env["TELEX_RUN_DIR"]).glob("daemon-*.cap"))
-                require(len(caps) == 1, "expected exactly one isolated capability file")
-                identity = json.loads(caps[0].read_text())
-                require(identity["server_pid"] == process.pid,
-                        "daemon status is not from the owned fixture process")
-                require(identity["server_start_time"] is not None, "missing daemon start identity")
+                require(status["instance_id"] == identity["instance_id"],
+                        "authenticated status differs from owned daemon publication")
                 self.report["daemons"].append({
                     "pid": process.pid, "binary": str(binary), "protocol_minor": minor,
                     "start_time": identity["server_start_time"],

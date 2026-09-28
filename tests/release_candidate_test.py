@@ -6,8 +6,9 @@ import json
 import os
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 import urllib.error
 import urllib.request
 import zipfile
@@ -20,6 +21,51 @@ spec.loader.exec_module(proof)
 
 
 class ReleaseProofTests(unittest.TestCase):
+    def test_readiness_waits_for_new_publication_including_reused_pid(self):
+        old = {"server_pid": 42, "server_start_time": 100, "instance_id": "old"}
+        new = {"server_pid": 42, "server_start_time": 200, "instance_id": "new"}
+        self.assertIsNone(proof.successor_identity(None, 42, old))
+        self.assertIsNone(proof.successor_identity(dict(old), 42, old))
+        self.assertEqual(proof.successor_identity(new, 42, old), new)
+        different_pid = {**new, "server_pid": 43}
+        self.assertEqual(proof.successor_identity(different_pid, 43, old), different_pid)
+
+    def test_readiness_rejects_foreign_or_incomplete_identity(self):
+        old = {"server_pid": 42, "server_start_time": 100, "instance_id": "old"}
+        with self.assertRaisesRegex(RuntimeError, "unexpected fixture daemon"):
+            proof.successor_identity({**old, "server_pid": 99}, 43, old)
+        with self.assertRaisesRegex(RuntimeError, "missing daemon start"):
+            proof.successor_identity({"server_pid": 43, "instance_id": "new"}, 43, old)
+        with self.assertRaisesRegex(RuntimeError, "missing daemon instance"):
+            proof.successor_identity({"server_pid": 43, "server_start_time": 200}, 43, old)
+
+    def test_status_is_not_requested_until_successor_publication(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = {"server_pid": 42, "server_start_time": 100, "instance_id": "old"}
+            new = {"server_pid": 43, "server_start_time": 200, "instance_id": "new"}
+            report = {"daemons": [{"pid": 42, "start_time": 100, "instance_id": "old"}]}
+            fixture = proof.Proof(SimpleNamespace(postgres_url=None), root, report)
+            env = proof.clean_environment(root / "env")
+            binary = root / "telex"
+            fixture.daemons.append((SimpleNamespace(pid=42, poll=lambda: 0), binary, env, None))
+            child = Mock(pid=43)
+            child.poll.return_value = None
+            with patch.object(proof, "read_fixture_identity", side_effect=[old, old, new]) as read:
+                def authenticated_status(*_args):
+                    self.assertEqual(read.call_count, 3, "status raced the known stale publication")
+                    return SimpleNamespace(stdout=json.dumps({
+                        "instance_id": "new", "protocol_version": {"major": 1, "minor": 5},
+                    }))
+                with patch.object(proof.subprocess, "Popen", return_value=child), \
+                        patch.object(proof.time, "sleep"), \
+                        patch.object(fixture, "telex", side_effect=authenticated_status) as status:
+                    try:
+                        self.assertIs(fixture.start_daemon(binary, env, 5), child)
+                        status.assert_called_once()
+                    finally:
+                        fixture.daemons[-1][3].close()
+
     def test_child_environment_is_isolated_without_modifying_parent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
