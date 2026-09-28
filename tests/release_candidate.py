@@ -232,6 +232,14 @@ class Proof:
                 "protocol mismatch")
         return value
 
+    def acknowledge(self, binary, env, message_id, recipient):
+        receipt = json.loads(self.telex(binary, env, "--address", recipient,
+                                        "ack", "--id", str(message_id)).stdout)
+        require(receipt.get("message_id") == int(message_id), "Ack message identity mismatch")
+        require(receipt.get("recipient") == recipient, "Ack recipient identity mismatch")
+        require(receipt.get("delivery_outcome") == "marked", "Ack did not mark first consumption")
+        return receipt
+
     def environment(self, name, postgres=False):
         root = self.root / name
         root.mkdir()
@@ -394,7 +402,7 @@ class Proof:
         require("preserve-through-schema3" in delivered.stdout, "old delivery not recoverable")
         require(json.loads(self.telex(current, env, "read", "--id", message_id).stdout)
                 ["dispositions"] == [], "delivery incorrectly created a disposition")
-        self.telex(current, env, "--address", "proof:inbox", "ack", "--id", message_id)
+        ack = self.acknowledge(current, env, message_id, "proof:inbox")
         self.stop_daemon(successor, current, env)
         # An older executable must still reject the migrated store. No downgrade bypass.
         rejected = self.telex(old_installed, env, "init", expected=1)
@@ -409,6 +417,7 @@ class Proof:
             "old_daemon_exit_before_new_start": True, "message_id": message_id,
             "manifest": manifest, "requests": server.requests[request_start:],
             "schema": "2 -> 3", "old_store_and_rollback_guards": "rejected",
+            "ack": ack,
         })
 
     def preexisting(self, old, candidate, server, postgres=False):

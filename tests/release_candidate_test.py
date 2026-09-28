@@ -139,6 +139,26 @@ class ReleaseProofTests(unittest.TestCase):
                 fixture.telex(Path(directory) / "telex", {}, "daemon", "status", timeout=0.25)
                 self.assertEqual(run.call_args.kwargs["timeout"], 0.25)
 
+    def test_acknowledge_requires_exact_first_marked_consumption(self):
+        with tempfile.TemporaryDirectory() as directory:
+            binary = Path(directory) / "telex"
+            fixture = proof.Proof(SimpleNamespace(postgres_url=None), Path(directory), {})
+            receipt = {"message_id": 7, "recipient": "proof:inbox", "delivery_outcome": "marked"}
+            with patch.object(fixture, "telex", return_value=SimpleNamespace(
+                    stdout=json.dumps(receipt))) as command:
+                self.assertEqual(fixture.acknowledge(binary, {}, "7", "proof:inbox"), receipt)
+                command.assert_called_once_with(
+                    binary, {}, "--address", "proof:inbox", "ack", "--id", "7")
+            invalid = [{**receipt, "delivery_outcome": outcome} for outcome in (
+                "no-delivery", "not-owner", "already-consumed", "ack-no-op", "delivery-mismatch",
+            )] + [{**receipt, "message_id": 8}, {**receipt, "message_id": "7"},
+                  {**receipt, "recipient": "proof:other"}, {}]
+            for result in invalid:
+                with self.subTest(result=result), patch.object(
+                        fixture, "telex", return_value=SimpleNamespace(stdout=json.dumps(result))):
+                    with self.assertRaisesRegex(RuntimeError, "Ack"):
+                        fixture.acknowledge(binary, {}, "7", "proof:inbox")
+
     def test_child_environment_is_isolated_without_modifying_parent(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
