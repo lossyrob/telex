@@ -315,6 +315,15 @@ install, schema-2 and schema-3, native and Linux PostgreSQL coverage, cleanup,
 and the immutable gate packet. Later artifact-only main movement does not
 change that target.
 
+Release preparation is complete; the two in-progress paragraphs above are dated
+history. On 2026-09-28 Local accepted the preparation delivery at `1b9fc8f0`
+after independently verifying the sealed packet (SHA-256 `720cd397...`) and
+the posted field report. Final CI and the build-only Release matrix, including
+hosted Linux PostgreSQL, passed at that commit with newly built artifacts.
+`schema3-release-gate` stays planned: its dependency is met, but publishing
+v0.2.0 still needs explicit operator approval, and issue #157 stays open until
+campaign decides its disposition.
+
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later
 job-terminal choice supplied that intended Windows receipt but did not by itself

@@ -367,6 +367,48 @@
           "review": "Cumulative full review over 950767c6..e60a8562, a1648475, and e286b9f9 (initial COMMENT 5344963526, Changes Requested, preserved as history), then a clean delta at efc30214 (2 files, 227 insertions and 19 deletions). All 3 findings are resolved in source with 0 new remaining. Clean delta report SHA-256 30d254e27e3d72c9131e8faa7d1a33d67cc509efe04b9069b138e58b44b9d278; final review report SHA-256 2994e38d7488ea74aa91f5f32f876b6d9edaadbda8c8c1b4ba3ba2ee06d83404. The reviewer ran 15 offline passes independently; running the old harness against the new tests produced 5 semantic assertion failures and 4 API-shape errors, which are not 9 bugs.",
           "branchProof": "Branch-only proof at efc30214: CI 36487907750 all 15 jobs SUCCESS; Release 36488194435 all 5 native jobs plus Linux PostgreSQL job 109152890363 SUCCESS, with the tag check and publish skipped and no release created. Worker files: inventory SHA-256 98610f9ee464c51a3573397c449256e1fa54019a822f76addea1fce812839062, API metadata 442f4acc8ad6b0fa9df794535dd106c15c6ca95794fd565ab71412f3399732f9, provenance 37410db8073f8cacfedce621f7f2dc693a7978cb3a174dc444b5b8d2123aa422. Covered: 5 archives and sidecars, 6 runtime sets, 11 unexpired source-bound artifacts, baseline 359082164 from source 636ecce3, 7 Ack receipts, owned cleanup, and 2 PostgreSQL schema drops. Worker actual bytes and native workflow executions are distinct from Local, reviewer, and steward record audits. The identical merged tree supports coverage but does not allow binary SHA reuse for 1b9fc8f0.",
           "limits": "Earlier pre-commit, debug, e60a8562, a1648475, and e286b9f9 reports and the macOS log EOF are not proof for 1b9fc8f0. Live Entra, PostgreSQL on all platforms, universal cleanup, and signing provenance are not claimed. The selected job-terminal, one-shot, and FAILED_HELD limits and the distinction between a genuine old binary and a legacy fixture remain."
+        },
+        "finalPreparationDelivery": {
+          "stage": "The schema3-release-preparation component is complete. The overarching release item stays routed until the operator publication gate; nothing is tagged or published.",
+          "acceptedBy": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57, after independent final packet and provider verification.",
+          "candidateSource": "1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe",
+          "candidateTree": "914cffafcc3c9d05ed0ea183417ecbe9735dcd72",
+          "proposedVersion": "v0.2.0",
+          "finalCi": "CI run 36492188842 at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe: all 15 jobs succeeded.",
+          "finalRelease": "Build-only Release run 36492651420 at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe: all 5 native jobs and hosted Linux PostgreSQL 16 job 109168401232 succeeded.",
+          "noRelabeling": "Every new executable hash differs from the efc30214 branch build, verified by the worker and by Local nested-byte audit.",
+          "packet": {
+            "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\ebfd215b-2229-4075-84af-4a4d6de2be7c\\files\\telex-v0.2.0-readiness-1b9fc8f.zip",
+            "bytes": 37033829,
+            "sha256": "720cd397b71eccb445dad19096f5f47b03af14adeb33ba1823ae0322f638cced",
+            "manifestSha256": "ed0bebf25e254652b7de86b12037366065752ced64e6c04346a2e9543bd8ca18",
+            "members": "54 files plus the manifest, 55 members.",
+            "payloadsSha256": "bb8e686e01e603a750d3b51236e44580987f5252413223b38e3411905340088d",
+            "verifiedInventorySha256": "4c26647234e2bdb333de165c4434ae6cde2a2cb5ad1720d5f4fe2cc57b66b64a",
+            "sealSha256": "0bb5be1c5b79528b497f2c1de32e3e613df1e624998023e734905f07f617cea3"
+          },
+          "localVerification": {
+            "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\release157-final-packet-independent-verification.json",
+            "receiptSha256": "07b344efcd1f0e072c2620db83dbfda3620b6187a02edb295096a826c9c58683",
+            "note": "This dated receipt still says the field report is pending; the final delivery receipt supersedes that statement.",
+            "scope": "Local verified every ZIP member and disk copy, the 5 archives, sidecars, and nested executables, final record associations, and 11 unexpired API bindings (earliest expiry 2026-12-27T22:29:04Z)."
+          },
+          "deliveryReceipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\release157-final-delivery-receipt-20260928.json",
+          "deliveryReceiptSha256": "3a477087f55d55e7e89421356051c24d33c147f9cc1f4d7e5a47e3cb5deaa9bb",
+          "runtimeTotals": "6 reports, 308 commands, 50 scenarios, 28 owned daemon exit-0 records, 6 roots removed, 2 PostgreSQL schema drops, and 7 marked Acks. Workflow and worker execution produced these; the Local byte and record audit is not another native execution or cleanup attestation.",
+          "fieldReport": {
+            "url": "https://github.com/lossyrob/telex/issues/157#issuecomment-5880528161",
+            "comment": 5880528161,
+            "author": "lossyrob",
+            "postedAt": "2026-09-28T23:21:50Z",
+            "rawProviderSha256": "862855f74e67ee67ee321ad4b928e6add006534629d39fafd1b35cafb2313166",
+            "lfFinalLfSha256": "d0efd3168640749fa3375aaed1267881e7e3b8ec05a8d44aaea618314e73a44c",
+            "workerProviderReceiptSha256": "c7de9e3dd10f87c7884565c94f29757b47297a9711b3dd9cbf7ab51ba6fd8025",
+            "verification": "Local independently read it back as string-exact ASCII."
+          },
+          "liveState": "Worker branch feature/schema3-release-preparation is clean at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe. Main c4d897f9 is artifact-only and does not retarget the candidate. Issue #157 is open, the latest release is v0.1.2, and no v0.2.0 tag exists.",
+          "gate": "schema3-release-gate stays planned and unaccepted; its dependency is now met. Campaign and operator own the decision to approve or defer publication at the pinned source and sealed packet. Do not close shared tracker #157 without a separate campaign issue disposition. The same worker, checkout, and evidence are retained quiescent, not archived.",
+          "limits": "The exclusions, one-shot and FAILED_HELD, Windows job-terminal, downgrade, coverage, no-signing, and no-universal-cleanup limits are unchanged. No gate pass, tag, publication, installed fleet, shared database, hardening, or closure claim."
         }
       },
       "description": "Prepare one bounded v0.2.0 schema-3 recovery candidate after issues #154 and #155 merge, then submit its immutable evidence to a separate operator publication gate.",
@@ -1173,9 +1215,16 @@
       "target": "schema3-release-preparation / issue #157",
       "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
       "terminalPath": "The seam, targeted tests, and documentation land in the #157 PR and pass exact-head review, required CI, and design inspection; fresh install.ps1 proof then runs from controlled candidate assets in disposable roots.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; no new node or policy vote. Implementation and proof are pending."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; no new node or policy vote. Implementation and proof are pending.",
+      "completionEvidence": {
+        "finalSource": "1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe",
+        "staticReview": "Full review 5344963526 plus the clean efc30214 delta (report SHA-256 30d254e27e3d72c9131e8faa7d1a33d67cc509efe04b9069b138e58b44b9d278) and design inspection PASS (report SHA-256 b6cb4a3750ea1d4830d9d1ce56e08cad628660f2ec045b9936bb7246e68d6941); the merged tree is identical to the reviewed source.",
+        "finalProof": "CI run 36492188842 (all 15 jobs) and build-only Release run 36492651420 (5 native jobs plus hosted Linux PostgreSQL 16 job 109168401232) at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe close the pending runtime obligation.",
+        "packet": "Sealed packet SHA-256 720cd397b71eccb445dad19096f5f47b03af14adeb33ba1823ae0322f638cced, independently verified by Local.",
+        "fieldReport": "https://github.com/lossyrob/telex/issues/157#issuecomment-5880528161"
+      }
     },
     {
       "id": "local-daemon-release-native-proof-failures",
@@ -1197,9 +1246,16 @@
       "target": "schema3-release-preparation / issue #157 / PR #159",
       "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
       "terminalPath": "Source fix merged in PR #159 as 1b9fc8f0; then exact final proof at 1b9fc8f0, independent coverage, and the immutable gate packet.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending.",
+      "completionEvidence": {
+        "finalSource": "1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe",
+        "staticReview": "Full review 5344963526 plus the clean efc30214 delta (report SHA-256 30d254e27e3d72c9131e8faa7d1a33d67cc509efe04b9069b138e58b44b9d278) and design inspection PASS (report SHA-256 b6cb4a3750ea1d4830d9d1ce56e08cad628660f2ec045b9936bb7246e68d6941); the merged tree is identical to the reviewed source.",
+        "finalProof": "CI run 36492188842 (all 15 jobs) and build-only Release run 36492651420 (5 native jobs plus hosted Linux PostgreSQL 16 job 109168401232) at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe close the pending runtime obligation.",
+        "packet": "Sealed packet SHA-256 720cd397b71eccb445dad19096f5f47b03af14adeb33ba1823ae0322f638cced, independently verified by Local.",
+        "fieldReport": "https://github.com/lossyrob/telex/issues/157#issuecomment-5880528161"
+      }
     },
     {
       "id": "local-daemon-release-metadata-rate-limit",
@@ -1220,9 +1276,16 @@
       "target": "schema3-release-preparation / issue #157 / PR #159",
       "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
       "terminalPath": "Source fix merged in PR #159 as 1b9fc8f0; then exact final proof at 1b9fc8f0, independent coverage, and the immutable gate packet.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending.",
+      "completionEvidence": {
+        "finalSource": "1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe",
+        "staticReview": "Full review 5344963526 plus the clean efc30214 delta (report SHA-256 30d254e27e3d72c9131e8faa7d1a33d67cc509efe04b9069b138e58b44b9d278) and design inspection PASS (report SHA-256 b6cb4a3750ea1d4830d9d1ce56e08cad628660f2ec045b9936bb7246e68d6941); the merged tree is identical to the reviewed source.",
+        "finalProof": "CI run 36492188842 (all 15 jobs) and build-only Release run 36492651420 (5 native jobs plus hosted Linux PostgreSQL 16 job 109168401232) at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe close the pending runtime obligation.",
+        "packet": "Sealed packet SHA-256 720cd397b71eccb445dad19096f5f47b03af14adeb33ba1823ae0322f638cced, independently verified by Local.",
+        "fieldReport": "https://github.com/lossyrob/telex/issues/157#issuecomment-5880528161"
+      }
     },
     {
       "id": "local-daemon-release-readiness-deadline-proof",
@@ -1243,9 +1306,16 @@
       "target": "schema3-release-preparation / issue #157 / PR #159",
       "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
       "terminalPath": "Source fix merged in PR #159 as 1b9fc8f0; then exact final proof at 1b9fc8f0, independent coverage, and the immutable gate packet.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending.",
+      "completionEvidence": {
+        "finalSource": "1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe",
+        "staticReview": "Full review 5344963526 plus the clean efc30214 delta (report SHA-256 30d254e27e3d72c9131e8faa7d1a33d67cc509efe04b9069b138e58b44b9d278) and design inspection PASS (report SHA-256 b6cb4a3750ea1d4830d9d1ce56e08cad628660f2ec045b9936bb7246e68d6941); the merged tree is identical to the reviewed source.",
+        "finalProof": "CI run 36492188842 (all 15 jobs) and build-only Release run 36492651420 (5 native jobs plus hosted Linux PostgreSQL 16 job 109168401232) at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe close the pending runtime obligation.",
+        "packet": "Sealed packet SHA-256 720cd397b71eccb445dad19096f5f47b03af14adeb33ba1823ae0322f638cced, independently verified by Local.",
+        "fieldReport": "https://github.com/lossyrob/telex/issues/157#issuecomment-5880528161"
+      }
     },
     {
       "id": "local-daemon-release-consumption-attestation",
@@ -1267,9 +1337,17 @@
       "target": "schema3-release-preparation / issue #157 / PR #159",
       "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
       "terminalPath": "Source fix merged in PR #159 as 1b9fc8f0; then exact final proof at 1b9fc8f0, independent coverage, and the immutable gate packet.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending.",
+      "completionEvidence": {
+        "finalSource": "1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe",
+        "staticReview": "Full review 5344963526 plus the clean efc30214 delta (report SHA-256 30d254e27e3d72c9131e8faa7d1a33d67cc509efe04b9069b138e58b44b9d278) and design inspection PASS (report SHA-256 b6cb4a3750ea1d4830d9d1ce56e08cad628660f2ec045b9936bb7246e68d6941); the merged tree is identical to the reviewed source.",
+        "finalProof": "CI run 36492188842 (all 15 jobs) and build-only Release run 36492651420 (5 native jobs plus hosted Linux PostgreSQL 16 job 109168401232) at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe close the pending runtime obligation.",
+        "packet": "Sealed packet SHA-256 720cd397b71eccb445dad19096f5f47b03af14adeb33ba1823ae0322f638cced, independently verified by Local.",
+        "fieldReport": "https://github.com/lossyrob/telex/issues/157#issuecomment-5880528161",
+        "finalResult": "The final runtime totals include 7 marked Acks."
+      }
     },
     {
       "id": "local-daemon-release-cleanup-failure-evidence",
@@ -1290,9 +1368,17 @@
       "target": "schema3-release-preparation / issue #157 / PR #159",
       "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
       "terminalPath": "Source fix merged in PR #159 as 1b9fc8f0; then exact final proof at 1b9fc8f0, independent coverage, and the immutable gate packet.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the accepted #157 scope; absorbed in the same PR. Source review and branch proof are complete; final 1b9fc8f0 runtime and asset proof is pending.",
+      "completionEvidence": {
+        "finalSource": "1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe",
+        "staticReview": "Full review 5344963526 plus the clean efc30214 delta (report SHA-256 30d254e27e3d72c9131e8faa7d1a33d67cc509efe04b9069b138e58b44b9d278) and design inspection PASS (report SHA-256 b6cb4a3750ea1d4830d9d1ce56e08cad628660f2ec045b9936bb7246e68d6941); the merged tree is identical to the reviewed source.",
+        "finalProof": "CI run 36492188842 (all 15 jobs) and build-only Release run 36492651420 (5 native jobs plus hosted Linux PostgreSQL 16 job 109168401232) at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe close the pending runtime obligation.",
+        "packet": "Sealed packet SHA-256 720cd397b71eccb445dad19096f5f47b03af14adeb33ba1823ae0322f638cced, independently verified by Local.",
+        "fieldReport": "https://github.com/lossyrob/telex/issues/157#issuecomment-5880528161",
+        "finalResult": "The final runtime totals include 6 removed roots and 28 owned daemon exit-0 records. No universal Drop or report-persistence claim."
+      }
     }
   ]
 }

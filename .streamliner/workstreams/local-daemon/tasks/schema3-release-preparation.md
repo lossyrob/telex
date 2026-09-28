@@ -3,11 +3,11 @@
 - **Workstream:** `local-daemon`
 - **Node:** `schema3-release-preparation`
 - **Type:** implementation
-- **Status:** in progress; both repairs merged (`afda9460` and `62291a78`),
-  campaign verified dependency closure, and the release worker launched on
-  2026-09-28
+- **Status:** completed; the preparation delivery at `1b9fc8f0` was accepted on
+  2026-09-28. Publication awaits the separate operator gate
 - **Preparation PR:** [lossyrob/telex#159](https://github.com/lossyrob/telex/pull/159),
-  merged 2026-09-28T22:24:23Z as `1b9fc8f0`; final merged-source proof pending
+  merged 2026-09-28T22:24:23Z as `1b9fc8f0`
+- **Candidate source:** `1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe`
 - **Attention:** focus
 - **Depends on:** completed `windows-token-buffer-alignment`, completed `postgres-wait-reset-recovery`
 - **Blocks:** `schema3-release-gate`
@@ -189,3 +189,33 @@ node, gate acceptance, a tag, or publication. The full record is on ledger item
   coverage, cleanup, the immutable gate packet, and a field report.
   `schema3-release-gate` remains planned, and no tag or publication is
   authorized.
+
+## Terminal evidence
+
+The pending statements in the Launch evidence and Preparation merge sections
+above are dated history; the facts below supersede them. The full record is on
+ledger item `local-daemon-schema3-recovery-release`
+(`evidence.finalPreparationDelivery`).
+
+- Local accepted the complete preparation delivery after independent final
+  packet and provider verification. The candidate source is `1b9fc8f0`
+  (tree `914cffaf`).
+- Final CI run 36492188842 passed all 15 jobs, and build-only Release run
+  36492651420 passed all 5 native jobs and hosted Linux PostgreSQL 16 job
+  109168401232, both at `1b9fc8f0`. Every new executable hash differs from the
+  `efc30214` branch build; no branch artifact was relabeled.
+- Sealed packet `telex-v0.2.0-readiness-1b9fc8f.zip` (37,033,829 bytes, SHA-256
+  `720cd397b71eccb445dad19096f5f47b03af14adeb33ba1823ae0322f638cced`; 55
+  members). Local verified every member, the archives, sidecars, and nested
+  executables, and the record associations.
+- Runtime totals from workflow and worker execution: 6 reports, 308 commands,
+  50 scenarios, 28 owned daemon exit-0 records, 6 roots removed, 2 PostgreSQL
+  schema drops, and 7 marked Acks.
+- The field report was posted as
+  [comment 5880528161](https://github.com/lossyrob/telex/issues/157#issuecomment-5880528161)
+  and read back string-exact.
+- The six same-PR discoveries are completed.
+- Issue #157 stays open; it also hosts `schema3-release-gate`, and closure
+  needs a separate campaign disposition. The gate stays planned, and no tag
+  or publication is authorized. The same worker, checkout, and evidence are
+  retained quiescent.
