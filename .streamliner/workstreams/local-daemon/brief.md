@@ -255,16 +255,15 @@ ordinary implementation fix: record the attempt, seal signals, reap the exact
 leader, and require independent absence. `EPERM` is never absence. The worker
 acknowledged at 2026-09-25T15:20:59-04:00 before editing. At that 2026-09-25
 checkpoint no macOS program had run, and Linux and macOS runtime proof was
-unrun; later worker runtime evidence belongs to Local's proof intake, and macOS
-runtime proof is still pending. Any material change to intended authority
-requires reviewed Tier B reconciliation.
+unrun; later worker runtime evidence belongs to Local's proof intake. Hosted
+macOS runtime proof later ran in PR #156 CI, recorded below. Any material change
+to intended authority requires reviewed Tier B reconciliation.
 
 Since the operator's delegation at 2026-09-28T09:20:35-04:00, the same #155
-implementer owns autonomous design, isolated experiments,
+implementer owned autonomous design, isolated experiments,
 code, tests, ordinary pushes, and review fixes. This artifact proposal and its
-review or reconciliation do not gate that routine work. Material new guarantee
-choices still go directly to the operator. M2 remains unproven, unreviewed at a
-new exact head, unmerged, and unreleased. Issue #157 is not launched.
+review or reconciliation did not gate that routine work. Material new guarantee
+choices still went directly to the operator.
 
 Issue #154 is complete. The earlier App EMU 403 and quota results remain
 historical evidence. On 2026-09-28 one authorized retry by the same worker
@@ -278,15 +277,32 @@ campaign authorization, PR #158 merged at 2026-09-28T15:43:41Z as `afda9460`,
 and issue #154 closed as completed. This satisfies only the #154 dependency of
 release preparation.
 
-Issue #155 remains required and in progress, and #157 stays unlaunched until
-#155 also merges and campaign verifies both dependencies.
+Issue #155 is complete. After campaign authorization, PR #156 merged exact head
+`eda9ac24` at 2026-09-28T19:32:21Z as `62291a78`, and issue #155 closed as
+completed. Full review 5342232604 rebaselined M2 at `836efbc` and the causal
+notify fix at `c71befc`; its one LOW proof warning was resolved by an actual
+nested-job proof at `038eb102`, and the final readiness-fixture delta at
+`eda9ac24` kept the cumulative result at 0 blockers and 0 warnings. CI run
+36470043028 passed all 15 jobs on the exact head, including Live PostgreSQL,
+Windows, and macOS credential jobs, and design inspection passed. Earlier CI
+failures at `836efbc` (Live PostgreSQL latency oracle) and `038eb102` (Windows
+readiness) were fixed in the same PR and remain historical. The selected limits
+remain: `FAILED_HELD` may hold beyond three seconds, the Windows job-terminal
+residual limits apply, macOS `EPERM` is never absence, and legacy-process proof
+is same-image rather than a genuine v0.1.2 deployment.
+
+Campaign has independently verified both repair merges, both closed issues, and
+their ancestry in `62291a78`, closing the dependencies of release preparation.
+It directed Local to launch exactly one #157 worker under the accepted scope.
+The `schema3-release-preparation` node stays planned until that worker actually
+launches. Tagging and publication still require explicit operator approval.
 
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later
-job-terminal choice supplies that intended Windows receipt but does not complete
-implementation or proof. The schema-3 recovery release stays held: it does not
-accept the PostgreSQL-reset limitation, PR #156 may not merge partially, and
-#157 stays unlaunched until both #154 and #155 merge.
+job-terminal choice supplied that intended Windows receipt but did not by itself
+complete implementation or proof. The schema-3 recovery release did not accept
+the PostgreSQL-reset limitation, PR #156 could not merge partially, and #157
+stayed unlaunched until both #154 and #155 merged.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the

@@ -240,9 +240,76 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "Local Daemon workstream orchestrator until one authorized PR #156 implementer is verified online",
       "terminalPath": "PR #156 proves transient query and LISTEN reset recovery with shared-daemon pull and push coverage, preserves finite deadlines, bounds retry, surfaces actionable exhaustion, completes compatibility/design inspection and exact-head CI/review, and merges only after exact-head campaign authorization.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Operator decision to fix issue #155 and adopt existing draft PR #156; no limitation-only disposition and no replacement branch are authorized."
+      "dispositionAuthority": "Operator decision to fix issue #155 and adopt existing draft PR #156; no limitation-only disposition and no replacement branch are authorized.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "prState": "MERGED",
+        "mergedAt": "2026-09-28T19:32:21Z",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergeParents": [
+          "4eb95b491092963b096727ee5fc9b1ccf9a51025",
+          "eda9ac24ddbad29251f1141c68c5cd687ebd3599"
+        ],
+        "mergeTree": "950f42d31c639a6a45dda02a953377e15dcab911",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "productRange": "First-parent diff 4eb95b4..62291a78: exactly 33 paths, 9326 insertions and 229 deletions, with no .streamliner paths.",
+        "identities": "Original PR author Copilot (app/copilot-swe-agent); acting and merging identity lossyrob.",
+        "issueState": "Issue #155 closed as completed at 2026-09-28T19:32:23Z by lossyrob.",
+        "authorization": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c authorized the exact head; Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 performed the guarded ordinary merge. The pre-merge guard at 2026-09-28T19:32:18Z rechecked the exact head, clean writer and upstream, all 15 jobs and current checks, resolved threads, review and design hashes, main 4eb95b4, and the body hash. There was no body edit, rerun, delete, rewrite, or archive.",
+        "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\pr156-merge-receipt-20260928.json",
+        "receiptSha256": "1ed0b7292cd8a455b530ef63c5926f9c8433a4316ccafc28d88c0ca3b3bc46f6",
+        "sourceBranch": "copilot/fix-postgres-connection-reset retained at eda9ac24; worktree and evidence preserved.",
+        "review": {
+          "original": "COMMENT review 5311857915 at 25aea118 is preserved.",
+          "fullRebaseline": "COMMENT review 5342232604 covered a full M2 rebaseline at 836efbc plus the causal notify delta at c71befc5bb70c7dfdf35a9dd97c0c2b45c516c70. It initially reported one LOW Should proof warning (S1) and no product-correctness blockers.",
+          "deltas": "The clean delta review at 038eb102 (actual nested-hierarchy proof) resolved S1. The clean delta review at eda9ac24 (readiness fixture) preserved cumulative 0 blockers and 0 warnings; no duplicate clean provider comment was posted.",
+          "reports": [
+            {
+              "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\8cda7626-12d2-415e-af2e-b5fa4f249c32\\files\\PR-156-836efbc\\FinalReport-c71befc.md",
+              "sha256": "d1d2ee080440929d14a6550aeb6792b34694a03e0171a7d5ad7bb53ec1e3cee0"
+            },
+            {
+              "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\8cda7626-12d2-415e-af2e-b5fa4f249c32\\files\\PR-156-836efbc\\DeltaReview-038eb102.md",
+              "sha256": "c2d65a0ba360cde166d1c47ba67a9f2e4f01b19e3f679e592811d2fcf759649c"
+            },
+            {
+              "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\8cda7626-12d2-415e-af2e-b5fa4f249c32\\files\\PR-156-836efbc\\DeltaReview-eda9ac24.md",
+              "sha256": "402b41a88d4daf67890a4621e06e241ff7b25e8b242091191b67593607f68a82"
+            }
+          ],
+          "threads": "All four original review threads were replied to directly and resolved. The M2 reply 4125682881 is directly under 4099847843. No actionable thread remains. Empty COMMENT review records that accompany replies are not additional review opinions.",
+          "reviewerRuntime": "Reviewer-independent runtime was scoped: at 836efbc, 32 owner, 10 credential, 4 host, and two M1/C2 tests; at c71befc, one virtual-clock test; at 038eb102, one nested test plus a production check. The eda9ac24 review was source-only."
+        },
+        "ci": {
+          "finalRun": "Run 36470043028 on exact head eda9ac24: SUCCESS on all 15 jobs, and the current 15 checks were reverified immediately before merge. The jobs include Live PostgreSQL, Ubuntu and Windows build-test, feature combinations, macOS credential, both fallback E2Es, and eight alignment profiles.",
+          "windowsJob": "Windows job 109089701758: the capacity and same-source control and the startup-error 23 control each passed in both the workspace and the explicit lifecycle runs. Credentials: 11 passed, 0 failed, 2 parent-invoked fixture entry points ignored. Host: 4 passed, 0 failed, 1 parent-invoked entry point ignored. No pass count is extrapolated for ignored entries.",
+          "historicalRuns": "Run 36448934676 at 836efbc failed only Live PostgreSQL job 109018355363. Its hosted macOS credential job 109018355750 ran 45 lib, 10 credential, and 4 host tests plus the named same-user denial guardian; that is historical actual runtime proof, not compile-only. Run 36464472486 at 038eb102 failed only Windows job 109070951846. These failures remain historical; the final dedicated macOS job success does not relabel the old counts.",
+          "authority": "Final exact-head CI is authoritative. Local and reviewer counts are attributed separately and are not relabeled as exact-head CI."
+        },
+        "design": "Existing steward af271672-5d33-418c-bb9c-0f4d4570c7d7 design inspection at exact eda9ac24 against canonical 4eb95b4: PASS with 0 blockers and 0 warnings. The accepted policies are accurately promoted, with no missing ADR or new guarantee choice, and #154 is preserved. Report C:\\Users\\robemanuele\\.copilot\\session-state\\af271672-5d33-418c-bb9c-0f4d4570c7d7\\files\\pr156-design-inspection-eda9ac24-20260928.md, SHA-256 170696e70ec1685c8a6c769f2c44fc3aea7dbcd0310a79f816ad080e0efe5c4e.",
+        "prBody": {
+          "rawSha256": "50fb2a6f2760ba188e1617629fc5de2edaed568c4a378ae206f0564f209fa86a",
+          "normalizedSha256": "c9d1397f10edd6eccb652475174a4e96664a91420f9ace10032e2b3fc60a0e72",
+          "note": "The final body is unchanged. Its design-in-progress phrase is a retained publication checkpoint superseded by the final design PASS above, not an unresolved gate."
+        },
+        "workerProof": {
+          "attribution": "Worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f reported these results. Local and campaign did not rerun them.",
+          "linuxSourcePinned": "On 2026-09-28 (reported 09:50:35-04:00), a final current-frozen-input Linux run passed 42 and failed 0 in 0.22s: 29 Unix module, 11 common registry and failure-hold, and 2 real Registry.execute native owner, finalize, and join success and readiness-cancel cases. It was source-pinned before and after execution: common SHA-256 2347b067eca45abd12a35b75a7fbcb88f752d9b34cefaebaea1e6d837a09c478, Unix SHA-256 f29243eb398fe336619e76dc62a680efc59fe9ed018c5dab3c9351e60e5d9fde, executable SHA-256 acb063d58b1ad75778376108ca43e65a1153c71354844dd83ceb9ff9f63d36f1. It is historical and does not cover the final head, full Profiles, PostgreSQL, or macOS. How it maps to CI is unknown.",
+          "postgresLocal": "Local PostgreSQL: 12 conformance, 15 daemon, and 2 legacy-current tests, and a full query reset to delayed credential Wait with finite grace, registry receipt, member epoch, healthy store, and later delivery.",
+          "cleanup": "The worker reported the owned PostgreSQL clusters on ports 55456 and 55457 stopped, their roots cleaned, and no active fixture cleanup obligations. No installed or shared daemon or database action occurred."
+        },
+        "limits": [
+          "Completion means the selected implementation and proof merged. It does not mean the historical stronger criteria passed or that any missing release proof is waived.",
+          "The operator-approved one-shot lifecycle and one absolute concurrent 3s host drain apply. A missing receipt yields FAILED_HELD, which may hold longer; there is no unconditional 3s exit.",
+          "The Windows job-terminal residual limits remain: kernel and driver rundown, previously issued I/O, and unsignaled former descendant handles. C=2 bounds Telex owners only.",
+          "R2 transport was inconclusive and is not universal quiescence proof. The eight-child creation window does not prove actual syscall overlap.",
+          "The old A and B strong red packets remain red with their original provenance limits.",
+          "Legacy-process proof remains same-image and source-pinned, not a genuine v0.1.2 deployment.",
+          "This merge satisfies the #155 dependency of schema3-release-preparation. Issue #154 is also complete, but #157 is not launched until campaign independently verifies both dependencies and hands off. No release gate, publication, hardening, or closure claim follows."
+        ]
+      }
     },
     {
       "id": "local-daemon-schema3-recovery-release",
@@ -252,7 +319,13 @@
         "repositoryMain": "ed417c6b938f92fe3bfb84f3b0cc0bea719fbbd0",
         "issue": "https://github.com/lossyrob/telex/issues/157",
         "incidentEvidence": "C:\\Users\\robemanuele\\.copilot\\session-state\\b737a932-c687-4b95-b273-8335a59f6e89\\files\\schema3-release-incident-evidence.md",
-        "details": "Released v0.1.2 supports schema 2 and protocol 1.4. Exact main supports schema 2..3 and protocol 1.5, while a schema-3 shared store already exists. Code reading suggests a 2..3 manifest remains parseable by v0.1.2, but compatibility remains inference until a genuine isolated old-binary upgrade exercises the real manifest and checksum path."
+        "details": "Released v0.1.2 supports schema 2 and protocol 1.4. Exact main supports schema 2..3 and protocol 1.5, while a schema-3 shared store already exists. Code reading suggests a 2..3 manifest remains parseable by v0.1.2, but compatibility remains inference until a genuine isolated old-binary upgrade exercises the real manifest and checksum path.",
+        "dependencyClosure": {
+          "verifiedBy": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c, relayed by Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
+          "verifiedOn": "2026-09-28, after the PR #156 merge",
+          "facts": "Campaign independently verified both actual repair merges (PR #158 as afda9460af4ee7d5af8e30edce8dafcfdbc757b7, PR #156 as 62291a788f33c948ecfa6cca8e3fdb2b9374b7fd), both closed issues (#154 and #155), and their ancestry in 62291a78. It directed Local to launch exactly one #157 worker under the already accepted scope, with no new Tier B, schema, or scope vote.",
+          "launchState": "Dependency closure is verified. The schema3-release-preparation node stays planned, and this item stays routed, until an actual worker identity launches. Tagging and publication still require explicit operator approval at schema3-release-gate."
+        }
       },
       "description": "Prepare one bounded v0.2.0 schema-3 recovery candidate after issues #154 and #155 merge, then submit its immutable evidence to a separate operator publication gate.",
       "affectedOutcome": "Users need a release that can connect to schema 3 and includes both recovery repairs without risking the operator installation, daemon, configuration, or shared database.",
@@ -288,9 +361,16 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
       "terminalPath": "PR #156 adds tests for a stalled first attempt under a finite deadline and for permanent authentication and configuration classification, then completes required review, exact-head CI, and design inspection before exact-head campaign merge authorization.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "outcome": "The finite-deadline first-attempt bound and permanent authentication and configuration classification merged in PR #156 after full review 5342232604 with clean deltas at 038eb102 and eda9ac24, CI run 36470043028 on all 15 jobs, and design PASS.",
+        "reference": "Full terminal merge, review, CI, design, and proof-attribution evidence is recorded on local-daemon-postgres-wait-reset-recovery."
+      }
     },
     {
       "id": "local-daemon-postgres-reset-status-compatibility",
@@ -311,9 +391,16 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
       "terminalPath": "PR #156 adds tests from exact main 7ed886b for the legacy decoder, the old and new Hello matrix, STATUS state preservation, WAIT outdir, the deadline tie, permanent errors, and mixed query and LISTEN resets across pull and push. It promotes normative documentation and completes full review, exact-head CI, and final design inspection before exact-head campaign merge authorization.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 accepted the design in-node. It is pending product promotion in PR #156 and is not merged or current product authority."
+      "dispositionAuthority": "Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 accepted the design in-node. It is pending product promotion in PR #156 and is not merged or current product authority.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "outcome": "Legacy-decodable STATUS with the new backend-unavailable waiter outcome, and the promoted normative documentation, merged in PR #156 after full review, final exact-head CI, and design PASS.",
+        "reference": "Full terminal merge, review, CI, design, and proof-attribution evidence is recorded on local-daemon-postgres-wait-reset-recovery."
+      }
     },
     {
       "id": "local-daemon-postgres-reset-fault-proof",
@@ -332,9 +419,16 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
       "terminalPath": "Each intended fault is observed to occur. After each fault, the test proves reconnect and resubscription and verifies pull and push payload, message ID, registration, owner, and epoch. PostgreSQL is required with no skip, synchronization is bounded, and only the owned cluster is cleaned up. Full review, exact-head CI, and final design inspection then precede exact-head campaign merge authorization.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending product proof; not completed."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending product proof; not completed.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "outcome": "Waiter query and LISTEN fault proof with required PostgreSQL merged in PR #156; the final Live PostgreSQL job passed in CI run 36470043028.",
+        "reference": "Full terminal merge, review, CI, design, and proof-attribution evidence is recorded on local-daemon-postgres-wait-reset-recovery."
+      }
     },
     {
       "id": "local-daemon-postgres-reset-legacy-process-proof",
@@ -354,9 +448,17 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
       "terminalPath": "PR #156 carries the tested and documented evidence, then completes full review, exact-head CI, and final design inspection before exact-head campaign merge authorization. This acceptance is only the issue #155 evidence strategy; issue #157 still requires genuine v0.1.2 ordered upgrade, daemon replacement, and fresh install in disposable roots.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 accepted strategy A, and the campaign confirmed it. Pending product proof; not completed."
+      "dispositionAuthority": "Local Daemon design steward af271672-5d33-418c-bb9c-0f4d4570c7d7 accepted strategy A, and the campaign confirmed it. Pending product proof; not completed.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "outcome": "The selected same-image, source-pinned legacy-client WAIT and STATUS evidence merged in PR #156 after full review, final exact-head CI, and design PASS.",
+        "limits": "This remains same-image and source-pinned evidence, not a genuine v0.1.2 deployment. Issue #157 still requires genuine v0.1.2 ordered upgrade, daemon replacement, and fresh install in disposable roots.",
+        "reference": "Full terminal merge, review, CI, design, and proof-attribution evidence is recorded on local-daemon-postgres-wait-reset-recovery."
+      }
     },
     {
       "id": "local-daemon-postgres-numeric-counter-encoding",
@@ -375,9 +477,16 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
       "terminalPath": "Rerun the full required-PostgreSQL parity suite, then complete full review, exact-head CI, and final design inspection in PR #156.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending external gates; not completed."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending external gates; not completed.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "outcome": "The plain-ASCII numeric counter fixture merged in PR #156; the final PostgreSQL parity jobs passed in CI run 36470043028.",
+        "reference": "Full terminal merge, review, CI, design, and proof-attribution evidence is recorded on local-daemon-postgres-wait-reset-recovery."
+      }
     },
     {
       "id": "local-daemon-token-fixture-immutable-attrs",
@@ -426,9 +535,16 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
       "terminalPath": "A deterministic regression stops the station during a stalled attempt and shows that PresenceEnded code 5 and the station-stop reason are retained before detach. The worker replies to and resolves the review thread directly. A reviewed, green new head and design inspection then precede exact-head campaign merge authorization.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending repair and proof; not completed."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending repair and proof; not completed.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "outcome": "Station-stop precedence over later backend exhaustion merged in PR #156; its original review thread was replied to directly and resolved, followed by full review, final exact-head CI, and design PASS.",
+        "reference": "Full terminal merge, review, CI, design, and proof-attribution evidence is recorded on local-daemon-postgres-wait-reset-recovery."
+      }
     },
     {
       "id": "local-daemon-postgres-credential-cancellation",
@@ -449,9 +565,16 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
       "terminalPath": "Regressions with finite-grace and delayed non-secret helpers check helper liveness before failure cleanup and prove owned cleanup with platform coverage. The worker replies to and resolves the review thread directly. Review, CI, and design inspection then precede exact-head campaign merge authorization.",
-      "status": "absorbed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending repair and proof; not completed."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope. Pending repair and proof; not completed.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "outcome": "Cancellation-safe credential helper handling merged in PR #156; its original review thread was replied to directly and resolved, followed by full review, final exact-head CI including the macOS credential and Windows jobs, and design PASS.",
+        "reference": "Full terminal merge, review, CI, design, and proof-attribution evidence is recorded on local-daemon-postgres-wait-reset-recovery."
+      }
     },
     {
       "id": "local-daemon-postgres-credential-lifecycle-contract",
@@ -658,9 +781,17 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "The operator owns consequential guarantee choices; campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c owns merge and release authority; PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f autonomously owns current solution, experiment, implementation, test, push, and review-fix work.",
       "terminalPath": "The existing worker implements both selected policies, the accepted bounded mechanism, and the selected Windows job-terminal receipt; executes genuine Windows, Linux, and macOS runtime proof including capacity, cancellation, complete output, platform receipt, failure-hold, runtime-drop, orderly exit, and unsupported escape and broker cases; preserves historical negative evidence; and completes same-PR responses, new exact-head independent review, required CI, and design inspection before campaign merge authorization and explicit operator publication approval. This parallel artifact proposal is not an implementation prerequisite.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "The operator selected `Approve the one-shot invocation contract (Recommended)` through designated worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f at 2026-09-24T21:30:50-04:00, then selected `Approve bounded orderly-exit drain and explicit failure hold (Recommended)` through the same worker at 2026-09-25T13:11:15-04:00; campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c confirmed both scopes. Campaign accepted the reviewed intended mechanism at 2026-09-25T13:41:31-04:00, authorized landing at a6eabbaeb87775f208d3d3facb6b1ab97447fa27, and granted M2 product writes at 2026-09-25T14:27:39-04:00. The operator then selected `Approve Windows job-terminal completion with the documented limits (Recommended)` through the same worker at 2026-09-28T09:47:17-04:00, and campaign confirmed the actual choice. Current direct delegation permits autonomous ordinary solution and implementation work without an artifact prerequisite. Runtime proof, M2 resolution, thread resolution, merge, and release remain incomplete or unauthorized."
+      "dispositionAuthority": "The operator selected `Approve the one-shot invocation contract (Recommended)` through designated worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f at 2026-09-24T21:30:50-04:00, then selected `Approve bounded orderly-exit drain and explicit failure hold (Recommended)` through the same worker at 2026-09-25T13:11:15-04:00; campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c confirmed both scopes. Campaign accepted the reviewed intended mechanism at 2026-09-25T13:41:31-04:00, authorized landing at a6eabbaeb87775f208d3d3facb6b1ab97447fa27, and granted M2 product writes at 2026-09-25T14:27:39-04:00. The operator then selected `Approve Windows job-terminal completion with the documented limits (Recommended)` through the same worker at 2026-09-28T09:47:17-04:00, and campaign confirmed the actual choice. Current direct delegation permits autonomous ordinary solution and implementation work without an artifact prerequisite. Runtime proof, M2 resolution, thread resolution, merge, and release remain incomplete or unauthorized.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "outcome": "Both selected policies (one-shot lifecycle and bounded orderly-exit drain with FAILED_HELD) and the accepted mechanism merged in PR #156 with promoted normative documentation. The M2 reply 4125682881 under thread 4099847843 resolved the thread after cumulative review with 0 blockers and 0 warnings, final exact-head CI, and design PASS.",
+        "limits": "No unconditional 3s exit; FAILED_HELD may hold longer. C=2 and B=3s remain approved but unmeasured engineering limits. No universal all-descendant containment or fail-closed Unix escape detection is claimed.",
+        "reference": "Full terminal merge, review, CI, design, and proof-attribution evidence is recorded on local-daemon-postgres-wait-reset-recovery."
+      }
     },
     {
       "id": "local-daemon-credential-windows-job-receipt",
@@ -781,9 +912,17 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f owns autonomous solution, experiment, implementation, test, push, and review-fix work; the operator owns new material guarantee choices; campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c owns merge and release authority.",
       "terminalPath": "The worker implements the selected receipt and clarifications, preserves the historical stronger failures, produces actual Windows and complete three-platform runtime proof, responds in the same PR, and completes new exact-head independent review, required CI, and design inspection before campaign merge authorization and explicit operator publication approval. #155 remains mandatory for the schema-3 recovery release; no partial PR merge or accepted PostgreSQL-reset limitation follows.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "The operator kept #155 required at 2026-09-28T09:02:17-04:00, then selected `Approve Windows job-terminal completion with the documented limits (Recommended)` through designated worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f at 2026-09-28T09:47:17-04:00. Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c independently confirmed the actual choice and current autonomous worker delegation. The selection changes the intended Windows receipt, not the historical evidence, runtime-proof state, M2 completion, merge authority, or release authority."
+      "dispositionAuthority": "The operator kept #155 required at 2026-09-28T09:02:17-04:00, then selected `Approve Windows job-terminal completion with the documented limits (Recommended)` through designated worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f at 2026-09-28T09:47:17-04:00. Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c independently confirmed the actual choice and current autonomous worker delegation. The selection changes the intended Windows receipt, not the historical evidence, runtime-proof state, M2 completion, merge authority, or release authority.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "outcome": "The operator-selected Windows job-terminal receipt merged in PR #156. The final Windows job 109089701758 passed its credential, host, capacity and same-source, and startup-error 23 controls as recorded on the parent item.",
+        "limits": "The operator explicitly selected this weaker contract. Kernel and driver rundown, previously issued I/O, and unsignaled former descendant handle limits remain, and C=2 bounds Telex owners only. R2 transport was inconclusive and is not universal quiescence proof. The historical stronger A and B failures remain red; the DEBUG_PROCESS rejection and the release-prerequisite decision remain dated history.",
+        "reference": "Full terminal merge, review, CI, design, and proof-attribution evidence is recorded on local-daemon-postgres-wait-reset-recovery."
+      }
     },
     {
       "id": "local-daemon-credential-macos-final-signal-ordering",
@@ -837,9 +976,17 @@
       "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
       "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f holds the evidence; existing steward af271672-5d33-418c-bb9c-0f4d4570c7d7 and campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c adjudicate",
       "terminalPath": "The steward answers the bounded ordering question and campaign classifies authority; any material change to intended authority passes reviewed Tier B reconciliation. The selected correction is implemented and proven by real macOS runtime evidence, including permission denial and zombie cases within the permitted ownership boundary, as part of the three-platform bundle before independent review, CI, design inspection, and campaign merge.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 routed this within the issue #155 repair scope. Pending adjudication; no correction accepted. Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c then authorized the narrow correction; the worker acknowledged at 2026-09-25T15:20:59-04:00. Pending implementation and real macOS runtime proof; not completed."
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 routed this within the issue #155 repair scope. Pending adjudication; no correction accepted. Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c then authorized the narrow correction; the worker acknowledged at 2026-09-25T15:20:59-04:00. Pending implementation and real macOS runtime proof; not completed.",
+      "completionEvidence": {
+        "pullRequest": "https://github.com/lossyrob/telex/pull/156",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "mergedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "outcome": "The narrow correction (record the final attempt, seal signals, reap the exact leader, then require independent absence) merged in PR #156. Hosted macOS runtime proof exists: job 109018355750 at 836efbc (historical counts) and the dedicated macOS job in final run 36470043028 succeeded.",
+        "limits": "A final-attempt EPERM is never absence. The 2026-09-25 compile-only checkpoint remains dated history and is superseded by the hosted runtime evidence.",
+        "reference": "Full terminal merge, review, CI, design, and proof-attribution evidence is recorded on local-daemon-postgres-wait-reset-recovery."
+      }
     },
     {
       "id": "local-daemon-token-matrix-test-cfg",
@@ -874,6 +1021,95 @@
       },
       "decisionState": "accepted",
       "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #154 repair scope; resolved in the same PR."
+    },
+    {
+      "id": "local-daemon-postgres-listen-ci-proof",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "PR #156 CI run 36448934676 at 836efbc, Live PostgreSQL job 109018355363",
+      "evidence": {
+        "failedHead": "836efbc796f8a6e0e83a0251c1f8e61a5443f9fe",
+        "failedRun": "36448934676",
+        "failedJob": "Live PostgreSQL 109018355363",
+        "details": "The LISTEN-wake-before-poll assertion observed 169.914638ms (latency 144) against a 100ms oracle; daemon PostgreSQL tests were 14 passed and 1 failed. A controlled run of the old oracle turned RED at 201ms with an actual NOTIFY and delayed-epoch proof. This establishes that the old oracle could produce a false negative; it does not establish the cause of the historical CI failure.",
+        "correction": "Causal controls at c71befc5bb70c7dfdf35a9dd97c0c2b45c516c70 and a 20ms virtual-clock proof replace the wall-clock oracle. Normal production 100-250ms cadence is unchanged. The bounded 1s negative window is not proof against mutation under all schedules."
+      },
+      "description": "Replace the wall-clock LISTEN latency oracle with causal proof that the notify path wakes a waiter before polling.",
+      "affectedOutcome": "PR #156 must pass Live PostgreSQL CI without weakening proof or assuming a flake.",
+      "requiredness": "Required for PR #156 CI.",
+      "sequencing": "Absorb into the same issue #155 node, branch, and PR #156 before final review.",
+      "selectedDisposition": "Bounded cause-specific test repair by the same writer. No flake assumption, waived proof, or production cadence change.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Contiguous review of the causal delta, current CI on all 15 jobs, and overall PR #156 merge.",
+      "status": "completed",
+      "completionEvidence": {
+        "reviewedIn": "COMMENT review 5342232604 (c71befc delta) with clean later deltas at 038eb102 and eda9ac24.",
+        "ci": "Run 36454036959 at c71befc and final run 36470043028 at eda9ac24: all 15 jobs succeeded.",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "limits": "The historical CI latency cause remains unknown. The negative window is bounded to 1s."
+      },
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope; resolved in the same PR."
+    },
+    {
+      "id": "local-daemon-credential-nested-job-proof",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "PR #156 full review 5342232604, LOW Should proof warning S1",
+      "evidence": {
+        "reviewedHead": "c71befc5bb70c7dfdf35a9dd97c0c2b45c516c70",
+        "review": "5342232604",
+        "reportSha256": "d1d2ee080440929d14a6550aeb6792b34694a03e0171a7d5ad7bb53ec1e3cee0",
+        "details": "The handle-0 generic assignment failure seam does not establish failure coverage for an actual nested job policy in an accepted task. The writer confirmed the coverage was absent. No product bug, stronger Windows criterion, or new operator choice was inferred."
+      },
+      "description": "Prove the accepted-scope failure path when job assignment meets an actual incompatible nested job hierarchy.",
+      "affectedOutcome": "The Windows job-terminal receipt must fail closed, without executing the helper, under a real nested-job policy.",
+      "requiredness": "Required to resolve review warning S1 in PR #156.",
+      "sequencing": "Absorb into the same issue #155 node, branch, and PR #156 before final review.",
+      "selectedDisposition": "The same writer adds a bounded fixture with an actual nested policy. Green CI alone is not completion.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Actual fixture proof, clean bounded delta review, final CI, and merge.",
+      "status": "completed",
+      "completionEvidence": {
+        "provingHead": "038eb102",
+        "proof": "A real valid handle in an incompatible populated hierarchy returned error 5, with suspend count 1, A1 B0, no execution, and checked production cleanup before the guardian, matched by a valid control.",
+        "attribution": "The reviewer independently ran the fixture once plus a non-test build. The worker reported 21 module passes. The hosted guardian at 038eb102 passed.",
+        "limits": "UI-restriction attempts did not reject and remain negative; no all-policies claim is made.",
+        "review": "Clean delta review at 038eb102 (report SHA-256 c2d65a0ba360cde166d1c47ba67a9f2e4f01b19e3f679e592811d2fcf759649c) resolved S1.",
+        "ci": "Final run 36470043028 at eda9ac24: all 15 jobs succeeded.",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd"
+      },
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope; resolved in the same PR."
+    },
+    {
+      "id": "local-daemon-credential-helper-readiness-ci",
+      "sourceNode": "postgres-wait-reset-recovery",
+      "source": "PR #156 CI run 36464472486 at 038eb102, Windows job 109070951846",
+      "evidence": {
+        "failedHead": "038eb102",
+        "failedRun": "36464472486",
+        "failedJob": "Windows 109070951846",
+        "details": "The credential capacity and same-source readiness test at line 317 failed (9 passed, 1 failed), while the S1 guardian passed and the other 14 axes were green. The retained log has no task result or artifact, so the historical cause is UNKNOWN. Earlier local passes at 1.43s and 1.76s are not proof of a flake."
+      },
+      "description": "Replace the external CIM ancestry readiness check in the Windows credential capacity and same-source test with a native owned barrier.",
+      "affectedOutcome": "PR #156 must pass the Windows credential job without weakening proof.",
+      "requiredness": "Required for PR #156 CI.",
+      "sequencing": "Absorb into the same issue #155 node, branch, and PR #156 before final review.",
+      "selectedDisposition": "At eda9ac24, change only tests/credential_command.rs and CONTRIBUTING.md (196 insertions, 67 deletions). Use a native owned host, a leaf barrier, an atomic self-PID plus Child.id, a completion-aware wait, and a real exit-23 control. Keep 4s readiness and 1.5-3s logical budgets, C=2 no-launch, and receipt behavior.",
+      "target": "postgres-wait-reset-recovery / issue #155 / PR #156",
+      "owner": "PR #156 worker 38d183fb-df5d-4e65-88f3-e27b62e3c92f under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Clean eda9ac24 review, current Windows control passes, all 15 CI jobs, and merge.",
+      "status": "completed",
+      "completionEvidence": {
+        "correctedHead": "eda9ac24ddbad29251f1141c68c5cd687ebd3599",
+        "review": "Clean delta review at eda9ac24 (report SHA-256 402b41a88d4daf67890a4621e06e241ff7b25e8b242091191b67593607f68a82).",
+        "ci": "Run 36470043028: all 15 jobs succeeded. Windows job 109089701758 passed the capacity and same-source control and the startup-error 23 control in both the workspace and the explicit lifecycle runs.",
+        "mergeCommit": "62291a788f33c948ecfa6cca8e3fdb2b9374b7fd",
+        "limits": "The guard and rescue path is not universal Drop cleanup, and the 30s safety bound is not a receipt. The historical failure cause remains unknown."
+      },
+      "decisionState": "accepted",
+      "dispositionAuthority": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 within the operator-approved issue #155 repair scope; resolved in the same PR."
     }
   ]
 }

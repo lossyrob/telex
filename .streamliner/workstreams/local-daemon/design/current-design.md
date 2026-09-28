@@ -316,10 +316,10 @@ Postgres recovery behavior.
 
 **Promotion boundary:** the operator accepted the intended
 `--password-command` descendant-lifecycle policy for issue #155 and PR #156 on
-2026-09-24. Current normative product documentation and code do not yet provide
-the accepted cleanup contract. PR #156 must promote the matching contract,
-implementation, review, and supported-platform evidence before clients may rely
-on it.
+2026-09-24. PR #156 merged the matching contract, implementation, review, and
+supported-platform CI evidence on 2026-09-28 as `62291a78`, promoting it into
+`docs/design/daemon.md` and product code. This section keeps the accepted
+design summary; release publication remains a separate operator gate.
 
 `--password-command` is one invocation. Normal, error, and cancellation
 completion clean up helpers that Telex owns and that remain within the supported
@@ -351,7 +351,7 @@ failure-hold behavior, runtime-shutdown ownership, and platform receipt
 conditions below. It does not establish measured performance, a universal
 finite OS cleanup guarantee, product implementation, or runtime correctness.
 
-### Accepted intended mechanism under implementation
+### Accepted mechanism, merged in PR #156
 
 Use a credential-local process registry with finite aggregate admission,
 capacity `C=2`, a same-source barrier, a native owner, nonblocking owned pipes,
@@ -422,12 +422,10 @@ processes alone is not receipt. No debugger is part of the design.
 
 The accepted intended design excludes a generic manager or service, subreaper,
 cgroup, PID, name, or ancestry scan, unrelated waits, post-reap mutating
-signals, debugger supervision, and a coverage waiver. The same implementer owns
-autonomous solution work, isolated experiments, code, tests, ordinary pushes,
-and review fixes. Artifact review and reconciliation proceed in parallel and do
-not gate ordinary implementation. Genuine Windows, Linux, and macOS runtime
-proof, final independent product review, required CI, merge authorization, and
-explicit operator publication approval remain pending.
+signals, debugger supervision, and a coverage waiver. PR #156 merged this
+mechanism at exact head `eda9ac24` after full independent review, required CI
+on all 15 jobs including hosted Windows, Linux, and macOS, and design
+inspection. Explicit operator publication approval remains pending.
 
 ## Remaining questions and confidence
 
@@ -456,12 +454,12 @@ explicit operator publication approval remain pending.
 - **Downstream design detail:** the transactional node owns the exact local
   storage, migration, cutover, rollback, corruption, and old-writer refusal
   design needed to restore unconditional authority.
-- **Accepted policy and intended mechanism, proof pending:** issue #155 uses a
+- **Accepted policy and mechanism, merged:** issue #155 uses a
   one-shot `--password-command` contract, the reviewed credential-local owner,
   admission, shutdown, and failure design, and the selected Windows job-terminal
-  receipt with its explicit residual limits. Product correctness, runtime proof,
-  thread resolution, merge, and release remain pending.
-- **Selected shutdown policy, pending implementation:** the owning host may use
+  receipt with its explicit residual limits. PR #156 merged them as `62291a78`
+  after review, CI, and design inspection; release publication remains pending.
+- **Selected shutdown policy, merged:** the owning host may use
   one bounded concurrent drain of up to three seconds after logical completion,
   followed by an explicit ownership failure hold when receipt is absent.
 - **Selected engineering limits:** the process-local registry uses aggregate

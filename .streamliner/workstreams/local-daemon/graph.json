@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-09-28T15:47:32.423Z",
+  "updatedAt": "2026-09-28T19:39:34.551Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -339,7 +339,7 @@
       "type": "task",
       "title": "Recover PostgreSQL waiters after connection resets",
       "summary": "Adopt open draft PR #156 and its published branch copilot/fix-postgres-connection-reset at 5c302dac without replacing or rewriting them. Before launch, establish one writer and verify that no cloud or legacy writer overlaps. Recover transient query and LISTEN resets for shared-daemon pull and push delivery, preserve finite wait deadlines, bound retry, surface actionable exhaustion, and complete exact-head CI, review, compatibility/design inspection, and fault-injection proof. The operator chose repair, not an accepted limitation.",
-      "status": "in-progress",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"

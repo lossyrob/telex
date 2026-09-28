@@ -3,7 +3,9 @@
 - **Workstream:** `local-daemon`
 - **Node:** `schema3-release-preparation`
 - **Type:** implementation
-- **Status:** planned; launch only after both repair merges and campaign-verified dependency closure
+- **Status:** planned; both repairs merged (`afda9460` and `62291a78`), and
+  campaign verified dependency closure on 2026-09-28. Launch pending an actual
+  worker identity
 - **Attention:** focus
 - **Depends on:** completed `windows-token-buffer-alignment`, completed `postgres-wait-reset-recovery`
 - **Blocks:** `schema3-release-gate`

@@ -3,8 +3,9 @@
 - **Workstream:** `local-daemon`
 - **Node:** `postgres-wait-reset-recovery`
 - **Type:** implementation
-- **Status:** in progress; autonomous implementation and proof active, with
-  final independent review, required CI, merge, and publication still gated
+- **Status:** completed; PR #156 merged exact head `eda9ac24` at
+  2026-09-28T19:32:21Z as `62291a78`, and issue #155 closed as completed.
+  Release publication remains a separate operator gate
 - **Attention:** focus
 - **Depends on:** none
 - **Blocks:** `schema3-release-preparation`
@@ -13,7 +14,8 @@
   authority
 - **Tracker:** [lossyrob/telex#155](https://github.com/lossyrob/telex/issues/155)
 - **Adopted PR:** [lossyrob/telex#156](https://github.com/lossyrob/telex/pull/156)
-- **Published branch/head:** `copilot/fix-postgres-connection-reset` at `25aea118e04c4e93eb4e748fe7c1989338931ac2`
+- **Merged branch/head:** `copilot/fix-postgres-connection-reset` at `eda9ac24ddbad29251f1141c68c5cd687ebd3599` (branch retained)
+- **Merge commit:** `62291a788f33c948ecfa6cca8e3fdb2b9374b7fd`
 - **Parent workstream:** [lossyrob/telex#32](https://github.com/lossyrob/telex/issues/32)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
@@ -426,3 +428,46 @@ This artifact role runs none of these product tests.
   `2a4bc4c8-1211-49d4-ba68-9d05d5d7530d`.
 - Merge only the exact reviewed, green, inspected PR #156 head after campaign
   merge authorization.
+
+## Terminal evidence
+
+Statements above that describe implementation, proof, review, or merge as
+pending or active are the contract as written before merge. The facts below
+supersede them. The full record is on ledger item
+local-daemon-postgres-wait-reset-recovery.
+
+- Campaign authorized exact head da9ac24, and the Local orchestrator merged
+  it with an ordinary guarded merge at 2026-09-28T19:32:21Z as 62291a78
+  (parents 4eb95b4 and da9ac24). The first-parent diff is exactly 33
+  paths (9326 insertions, 229 deletions) with no .streamliner paths. Issue
+  #155 closed as completed at 19:32:23Z.
+- Review: the original COMMENT review 5311857915 at 25aea118 is preserved.
+  COMMENT review 5342232604 covered a full M2 rebaseline at 836efbc plus the
+  causal notify delta at c71befc, with one LOW proof warning (S1). The clean
+  delta at  38eb102 resolved S1 with an actual nested-hierarchy proof, and
+  the clean delta at da9ac24 kept the cumulative result at 0 blockers and 0
+  warnings. All four original threads were replied to directly and resolved.
+- CI run 36470043028 on da9ac24 passed all 15 jobs, including Live
+  PostgreSQL, Windows, macOS credential, feature combinations, both fallback
+  E2Es, and eight alignment profiles. Earlier failures in runs 36448934676
+  (836efbc, Live PostgreSQL) and 36464472486 ( 38eb102, Windows readiness)
+  remain historical and are recorded as
+  local-daemon-postgres-listen-ci-proof and
+  local-daemon-credential-helper-readiness-ci.
+- Design inspection by steward f271672 at da9ac24 passed with 0 blockers
+  and 0 warnings (report SHA-256
+  170696e70ec1685c8a6c769f2c44fc3aea7dbcd0310a79f816ad080e0efe5c4e).
+- Hosted macOS runtime proof exists: job 109018355750 at 836efbc and the
+  dedicated macOS job in the final run. The 2026-09-25 compile-only checkpoint
+  remains dated history. Worker-reported Linux 42/0 evidence is source-pinned
+  and historical, not final-head proof.
+- Limits that remain: no unconditional three-second exit, since FAILED_HELD
+  may hold longer; the selected Windows job-terminal residual limits; macOS
+  EPERM is never absence; R2 transport was inconclusive; legacy-process proof
+  is same-image and source-pinned, not a genuine v0.1.2 deployment; and the old
+  A and B strong red packets remain red.
+- Campaign independently verified both repair merges, both closed issues, and
+  their ancestry in 62291a78, closing the dependencies of
+  schema3-release-preparation. That node stays planned until an actual
+  worker launches. No release gate, publication, hardening, or closure claim
+  follows.
