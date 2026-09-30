@@ -22,6 +22,117 @@ spec.loader.exec_module(proof)
 
 
 class ReleaseProofTests(unittest.TestCase):
+    def test_native_sharing_retry_is_exact_owned_bounded_and_fail_closed(self):
+        for code, operation, result in (
+            (32, "CreateFileW", "recover"), (32, "CreateFileW", "expire"),
+            (32, "CreateFileW", "foreign"),
+            (5, "CreateFileW", "fatal"), (None, None, "fatal"),
+            (303, "CreateFileW", "fatal"), (32, "ReadFile", "fatal"),
+            (32, "CloseHandle", "fatal"),
+        ):
+            with self.subTest(code=code, operation=operation, result=result), \
+                    tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                fixture = proof.Proof(SimpleNamespace(postgres_url=None), root, {"daemons": []})
+                fixture.windows = True
+                env = proof.clean_environment(root / "env")
+                child = Mock(pid=43)
+                child.poll.return_value = None
+                clock = SimpleNamespace(now=0)
+                error = PermissionError(13, "fixture native error", str(root / "daemon-test.cap"))
+                error.winerror = code
+                error.operation = operation
+                publication = {"server_pid": 43, "server_start_time": 200,
+                               "instance_id": "new", "admin_cap": "must-not-log"}
+                calls = 0
+
+                def read(_path):
+                    nonlocal calls
+                    calls += 1
+                    if calls == 1:
+                        return None
+                    if calls == 2 or result not in ("recover", "foreign"):
+                        raise error
+                    if result == "foreign":
+                        return {**publication, "server_pid": 99}
+                    return publication
+
+                def advance(_delay):
+                    clock.now += 15 if result == "expire" else 0.05
+
+                with patch.object(proof, "read_fixture_identity", side_effect=read), \
+                        patch.object(proof.subprocess, "Popen", return_value=child), \
+                        patch.object(proof.time, "monotonic", side_effect=lambda: clock.now), \
+                        patch.object(proof.time, "sleep", side_effect=advance), \
+                        patch.object(fixture, "telex", return_value=SimpleNamespace(stdout=json.dumps({
+                            "instance_id": "new", "protocol_version": {"major": 1, "minor": 5},
+                        }))) as status:
+                    try:
+                        if result == "recover":
+                            self.assertIs(fixture.start_daemon(root / "telex", env, 5), child)
+                            status.assert_called_once()
+                        elif result == "expire":
+                            with self.assertRaisesRegex(RuntimeError, "deadline expired.*winerror=32"):
+                                fixture.start_daemon(root / "telex", env, 5)
+                            status.assert_not_called()
+                        elif result == "foreign":
+                            with self.assertRaisesRegex(RuntimeError, "unexpected fixture daemon"):
+                                fixture.start_daemon(root / "telex", env, 5)
+                            status.assert_not_called()
+                        else:
+                            with self.assertRaises(PermissionError) as raised:
+                                fixture.start_daemon(root / "telex", env, 5)
+                            self.assertIs(raised.exception, error)
+                            self.assertEqual(calls, 2)
+                            status.assert_not_called()
+                        records = fixture.report["readiness_observations"]
+                        record = next(r for r in records if r["event"] == "read-error")
+                        self.assertEqual(record["winerror"], code)
+                        self.assertEqual(record["operation"], operation)
+                        self.assertEqual(record["retryable"], result != "fatal")
+                        self.assertNotIn("must-not-log", json.dumps(records))
+                        self.assertEqual(len(fixture.report["daemons"]), int(result == "recover"))
+                    finally:
+                        fixture.daemons[-1][3].close()
+
+    def test_pre_spawn_sharing_error_does_not_create_a_process(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = proof.Proof(SimpleNamespace(postgres_url=None), Path(directory), {"daemons": []})
+            error = PermissionError(13, "sharing before owned spawn")
+            error.winerror = 32
+            error.operation = "CreateFileW"
+            with patch.object(proof, "read_fixture_identity", side_effect=error), \
+                    patch.object(proof.subprocess, "Popen") as spawn:
+                with self.assertRaises(PermissionError):
+                    fixture.start_daemon(Path(directory) / "telex",
+                                         proof.clean_environment(Path(directory) / "env"), 5)
+                spawn.assert_not_called()
+            self.assertEqual(fixture.report["readiness_observations"][0]["event"], "pre-spawn-read-failed")
+
+    def test_known_stale_publication_does_not_extend_readiness_deadline(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            old = {"server_pid": 42, "server_start_time": 100, "instance_id": "old"}
+            fixture = proof.Proof(SimpleNamespace(postgres_url=None), root, {
+                "daemons": [{"pid": 42, "start_time": 100, "instance_id": "old"}],
+            })
+            env = proof.clean_environment(root / "env")
+            fixture.daemons.append((SimpleNamespace(pid=42, poll=lambda: 0), root / "old", env, None))
+            child, clock = Mock(pid=43), SimpleNamespace(now=0)
+            child.poll.return_value = None
+            with patch.object(proof, "read_fixture_identity", return_value=old), \
+                    patch.object(proof.subprocess, "Popen", return_value=child), \
+                    patch.object(proof.time, "monotonic", side_effect=lambda: clock.now), \
+                    patch.object(proof.time, "sleep", side_effect=lambda _: setattr(clock, "now", 15)), \
+                    patch.object(fixture, "telex") as status:
+                try:
+                    with self.assertRaisesRegex(RuntimeError, "readiness deadline expired"):
+                        fixture.start_daemon(root / "candidate", env, 5)
+                    status.assert_not_called()
+                    self.assertEqual(len(fixture.report["daemons"]), 1)
+                finally:
+                    fixture.daemons[-1][3].close()
+
     def test_upstream_token_is_neither_redirected_nor_used_for_assets(self):
         url = f"https://api.github.com/repos/{proof.REPO}/releases/tags/{proof.BASELINE_TAG}"
         with patch.dict(os.environ, {"TELEX_PROOF_GITHUB_TOKEN": "sentinel"}, clear=True):

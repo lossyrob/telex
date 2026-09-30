@@ -62,7 +62,7 @@ to the matrix and an install.sh case arm is a self-contained follow-up.
 
 ## Immutable candidate proof
 
-For the [v0.2.0 schema-3 candidate](../releases/v0.2.0.md), preparation and
+For the [v0.2.1 corrective schema-3 candidate](../releases/v0.2.1.md), preparation and
 publication have separate authority. Do not push a tag or publish merely because
 a preparation PR, CI, or build-only Release run succeeds.
 
@@ -104,7 +104,7 @@ For a local isolated proof on Windows, use an absolute candidate archive path:
 python tests\release_candidate.py `
   --archive C:\candidate\telex-candidate-x86_64-pc-windows-msvc.zip `
   --target x86_64-pc-windows-msvc --source-sha <exact-build-source-sha> `
-  --tag v0.2.0 --report C:\candidate\release-proof.json
+  --tag v0.2.1 --report C:\candidate\release-proof.json
 ```
 
 The archive needs its real `.sha256` sidecar. On Unix use the corresponding
@@ -135,6 +135,28 @@ proof again at the actual final tag target. Do not relabel PR-head binaries as
 merged-source evidence or assume archive reproducibility. Head movement invalidates
 the prior exact-head claim. Preserve earlier evidence as history and bind the
 publication decision to the final immutable packet.
+
+### Unpublished v0.2.0 and Windows observer diagnostics
+
+The immutable v0.2.0 tag at `1b9fc8f` had a failed publication proof and no GitHub
+release object. Do not move/recreate it or treat it as a released upgrade
+baseline. The operator selected corrective v0.2.1 preparation; neither candidate
+version selection nor a later green preparation run authorizes its tag push.
+
+The proof now preserves native Windows capability-read errors and a sanitized
+`readiness_observations` chronology. Only open-time WinError 32 inside an owned
+successor's existing 15-second budget can retry. WinError 5, unknown/errno-only
+denial, read/close errors, foreign identity and persistent sharing remain
+failures. The original hosted errno13 does not identify which native cause
+occurred.
+
+Run `python tests/release_windows_publication_test.py` on Windows for the
+discriminating native file/ACL/publication controls. Both Windows Release targets
+also upload `evidence/native-file-observer.json`; that control report does not
+replace the separate genuine-binary runtime report. Recheck original packet
+hashes and preserve failed-attempt evidence when assembling the new readiness
+packet. Never count a generic permission exception as transient or remove
+authentication/identity checks to make a release proof pass.
 
 ## Pre-cut checklist
 

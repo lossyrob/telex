@@ -24,6 +24,24 @@ import urllib.request
 import uuid
 import zipfile
 
+if os.name == "nt":
+    import ctypes
+    from ctypes import wintypes
+
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.CreateFileW.argtypes = [
+        wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD, wintypes.LPVOID,
+        wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE,
+    ]
+    _kernel32.CreateFileW.restype = wintypes.HANDLE
+    _kernel32.ReadFile.argtypes = [
+        wintypes.HANDLE, wintypes.LPVOID, wintypes.DWORD,
+        ctypes.POINTER(wintypes.DWORD), wintypes.LPVOID,
+    ]
+    _kernel32.ReadFile.restype = wintypes.BOOL
+    _kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    _kernel32.CloseHandle.restype = wintypes.BOOL
+
 
 BASELINE_TAG = "v0.1.2"
 BASELINE_SHA = "636ecce360de80bbcbc0d18a61d6d6cdbbcf23f3"
@@ -103,13 +121,47 @@ def clean_environment(root):
     return env
 
 
+def read_identity_text(path):
+    if os.name != "nt":
+        return path.read_text(encoding="utf-8")
+    # CRT read_text collapses sharing violations and denied ACLs to errno13.
+    generic_read, share_read_write_delete = 0x80000000, 0x1 | 0x2 | 0x4
+    open_existing, normal_attributes = 3, 0x80
+    handle = _kernel32.CreateFileW(
+        str(path), generic_read, share_read_write_delete, None, open_existing, normal_attributes, None)
+    if handle == ctypes.c_void_p(-1).value:
+        error = ctypes.WinError(ctypes.get_last_error())
+        error.filename = str(path)
+        error.operation = "CreateFileW"
+        raise error
+    try:
+        chunks = []
+        while True:
+            buffer = ctypes.create_string_buffer(4096)
+            count = wintypes.DWORD()
+            if not _kernel32.ReadFile(handle, buffer, len(buffer), ctypes.byref(count), None):
+                error = ctypes.WinError(ctypes.get_last_error())
+                error.filename = str(path)
+                error.operation = "ReadFile"
+                raise error
+            if not count.value:
+                return b"".join(chunks).decode("utf-8")
+            chunks.append(buffer.raw[:count.value])
+    finally:
+        if not _kernel32.CloseHandle(handle):
+            error = ctypes.WinError(ctypes.get_last_error())
+            error.filename = str(path)
+            error.operation = "CloseHandle"
+            raise error
+
+
 def read_fixture_identity(run_dir):
     caps = list(run_dir.glob("daemon-*.cap"))
     require(len(caps) <= 1, "multiple capability files in isolated fixture")
     if not caps:
         return None
     try:
-        return json.loads(caps[0].read_text())
+        return json.loads(read_identity_text(caps[0]))
     except FileNotFoundError:
         # Windows replacement can briefly remove the previous publication.
         return None
@@ -272,7 +324,22 @@ class Proof:
 
     def start_daemon(self, binary, env, minor):
         run_dir = Path(env["TELEX_RUN_DIR"])
-        predecessor = read_fixture_identity(run_dir)
+        started = time.monotonic()
+        observations = self.report.setdefault("readiness_observations", [])
+
+        def observe(event, **fields):
+            observations.append({
+                "event": event, "elapsed_seconds": round(time.monotonic() - started, 6),
+                "run_dir": str(run_dir), "binary": str(binary), **fields,
+            })
+
+        try:
+            predecessor = read_fixture_identity(run_dir)
+        except OSError as error:
+            observe("pre-spawn-read-failed", errno=error.errno,
+                    winerror=getattr(error, "winerror", None), path=error.filename,
+                    operation=getattr(error, "operation", None))
+            raise
         if predecessor is not None:
             require(any(
                 row["pid"] == predecessor.get("server_pid")
@@ -288,12 +355,31 @@ class Proof:
                                    env=env, cwd=self.root, stdin=subprocess.DEVNULL,
                                    stdout=log, stderr=log)
         self.daemons.append((process, binary, env, log))
+        observe("spawned", pid=process.pid)
         deadline = time.monotonic() + 15
+        last_read_error = None
         while time.monotonic() < deadline:
             require(process.poll() is None, f"fixture daemon exited: {binary}")
-            identity = successor_identity(read_fixture_identity(run_dir), process.pid, predecessor)
+            try:
+                publication = read_fixture_identity(run_dir)
+            except OSError as error:
+                winerror = getattr(error, "winerror", None)
+                operation = getattr(error, "operation", None)
+                retryable = self.windows and operation == "CreateFileW" and winerror == 32
+                last_read_error = f"winerror={winerror}, errno={error.errno}, path={error.filename}"
+                observe("read-error", pid=process.pid, winerror=winerror, errno=error.errno,
+                        path=error.filename, operation=operation, retryable=retryable)
+                if not retryable:
+                    raise
+                time.sleep(min(0.05, max(0, deadline - time.monotonic())))
+                continue
+            observe("publication-observed", pid=process.pid,
+                    published_pid=publication.get("server_pid") if publication else None,
+                    published_start=publication.get("server_start_time") if publication else None,
+                    published_instance=publication.get("instance_id") if publication else None)
+            identity = successor_identity(publication, process.pid, predecessor)
             if identity is None:
-                time.sleep(0.05)
+                time.sleep(min(0.05, max(0, deadline - time.monotonic())))
                 continue
             remaining = deadline - time.monotonic()
             require(remaining > 0, "fixture daemon readiness deadline expired")
@@ -305,6 +391,7 @@ class Proof:
                 require(status["instance_id"] == identity["instance_id"],
                         "authenticated status differs from owned daemon publication")
                 require(time.monotonic() < deadline, "fixture daemon readiness deadline expired")
+                observe("accepted", pid=process.pid, instance_id=status["instance_id"])
                 self.report["daemons"].append({
                     "pid": process.pid, "binary": str(binary), "protocol_minor": minor,
                     "start_time": identity["server_start_time"],
@@ -312,7 +399,7 @@ class Proof:
                 })
                 return process
             time.sleep(0.05)
-        raise RuntimeError("fixture daemon readiness deadline expired")
+        raise RuntimeError(f"fixture daemon readiness deadline expired; last read error: {last_read_error}")
 
     def stop_daemon(self, process, binary, env):
         self.telex(binary, env, "daemon", "stop", "--drain")
@@ -584,7 +671,7 @@ def main():
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--source-sha", required=True)
-    parser.add_argument("--tag", default="v0.2.0")
+    parser.add_argument("--tag", default="v0.2.1")
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--postgres-url")
     parser.add_argument("--disposable-postgres", action="store_true")
