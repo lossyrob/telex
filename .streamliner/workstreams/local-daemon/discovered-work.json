@@ -472,6 +472,48 @@
           },
           "pending": "Existing reviewer bc412947 is scoped to a full review of PR #160. CI and one dispatched Release run 36743984783 at 4b097171 (in progress at this record) are watched only by WATCHER. Then authorized merge, actual final merged-source proof, and a new sealed packet.",
           "boundaries": "The held v0.2.0 tag remains at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe; the failed tag run and earlier packets remain history. The genuine old-binary baseline is published v0.1.2. PR #160 does not authorize v0.2.1 publication; schema3-release-gate stays planned and requires a new explicit operator decision. Issue #157 stays open."
+        },
+        "trackerProviderRepair": {
+          "stage": "Provider history only; not release or node completion.",
+          "unintendedClosure": "Artifact commit 6dcaf045c56866d8c3122f989dc861815d880c2d quoted closing-directive syntax in its message body. Pushing it to main closed tracker 157 as completed at 2026-09-30T16:30:22Z; closed event 32182855058 (16:30:23Z) cites that commit. The commit is preserved unchanged.",
+          "restoration": "Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 guarded the exact closure event, then reopened tracker 157 once under current operator authority: reopened event 32183059364 at 2026-09-30T16:33:23Z by lossyrob. Readback at 16:33:24Z showed open with closed_at null.",
+          "pullRequestBody": "The PR #160 writer replaced only the triggering body sentence through a supported tool; the source was unchanged. At 2026-09-30T16:34:53.7470743Z Local verified tracker 157 open and PR #160 at 4b097171ee13caad8c5ea2ecf61469b2798a4e54 with zero closing issue references (totalCount 0, pagination complete). Body raw SHA-256 78a522b30007e2ce3b58ece3ecef31af772a167c75ad681690a46f2231135e11; LF without final LF 9c5170febfee98576a98f78027af11e3c4fd87bd95f474d926dfee11d0b58e15.",
+          "state": "Both provider defects are repaired. This supersedes the provider hazard noted in evidence.correctiveCandidate.closingReference.",
+          "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\pr160-tracker157-provider-repair-20260930.json",
+          "receiptSha256": "c97b07f59c73718b94f08d9a0ad82c72af9e6af81b9f7a623736df9b9dc29cb0",
+          "guard": "The artifact reconciler now scans the entire commit message, and any PR title or body, for closing-directive syntax regardless of negation, quotation, or history, and refers to the issue as tracker 157 or by event ID."
+        },
+        "correctivePreparationMerge": {
+          "stage": "Corrective source merge only. This is not final v0.2.1 preparation completion, gate acceptance, a tag, or publication.",
+          "pullRequest": "https://github.com/lossyrob/telex/pull/160",
+          "mergedAt": "2026-09-30T17:21:06Z",
+          "mergeCommit": "212b76a4c586101bdc2a53264e2a4c3e2326671a",
+          "mergeParents": [
+            "6dcaf045c56866d8c3122f989dc861815d880c2d",
+            "4b097171ee13caad8c5ea2ecf61469b2798a4e54"
+          ],
+          "mergeTree": "033242b47c3bb6f7a198f205b693c771c3372d5a",
+          "treeRelation": "Product source is unchanged from reviewed head 4b097171ee13caad8c5ea2ecf61469b2798a4e54. The merge differs from that head only in the four existing artifact paths landed by 6dcaf045c56866d8c3122f989dc861815d880c2d; the full merge tree does not equal the reviewed head tree 409b480ffb593292adc018b91138432ddb1063da. First-parent range: 14 paths, 573 insertions and 14 deletions.",
+          "authorization": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c authorized exact head 4b097171ee13caad8c5ea2ecf61469b2798a4e54. The Local Daemon orchestrator merged with an ordinary merge.",
+          "premergeGuards": "Fresh guards passed: actor lossyrob, clean writer, current CI 15 jobs, Release 5 native plus PostgreSQL, both Windows controls, review 0 findings, design 0 findings, zero closing references, zero open threads, tracker 157 open, body 3823dbb, main 6dcaf045, held v0.2.0 tag at 1b9fc8f0.",
+          "mergeMessage": "The full explicit merge commit subject and body were free of closing-directive syntax. After the merge tracker 157 remained open (closed_at null) and the v0.2.0 tag was unchanged.",
+          "sourceBranch": "feature/schema3-release-corrective-v021 retained at 4b097171ee13caad8c5ea2ecf61469b2798a4e54; no history rewrite.",
+          "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\pr160-corrective-preparation-merge-receipt-20260930.json",
+          "receiptSha256": "0e9e4fd472cfae910f7e5708be22a66999e7f14a4d02282a082389ce75c14baa",
+          "branchFloor": {
+            "scope": "Branch evidence at 4b097171ee13caad8c5ea2ecf61469b2798a4e54. It is not final-source or runtime proof for 212b76a4c586101bdc2a53264e2a4c3e2326671a.",
+            "review": "Full COMMENT review 5369458958 plus one follow-up at 4b097171ee13caad8c5ea2ecf61469b2798a4e54, 0 findings. Final review report SHA-256 4457444c1be53cf4787ea00dbe396208fc4bfa97052475c0bca15197fddb005d; provider record 4dfd520ceba5baf54a3f91aea3ddfb7d024b4f7895821ef07c280903068f9ad6; manifest dca65cbb77d6c74d01402f7a9e3d3e575ded0d7b9f15f16c30e5a262dd7f0e85 (22 files).",
+            "design": "Design inspection PASS 0/0, report SHA-256 d8a58e8750e2578cf26d13057b8baa4ab93c4a6a4a3d0f3da5cb3933fbd45ed0.",
+            "ci": "CI run 36743919402: all 15 jobs succeeded.",
+            "release": "Build-only Release run 36743984783: all 5 native jobs, hosted Linux PostgreSQL job 109987249136, and both Windows native controls succeeded; manual tag and Publish jobs skipped.",
+            "workerRecords": "Worker inventory SHA-256 ab313c8fb9a1283b92bbd4578d06cd72b28f47024e7a7ca8456bb1a2acea1ad1, API metadata f2b95199fcb995b0881e1a94a44f3738e7d3ae3616e5e9f276ebb56ad6eb0fbe, audit 8edb8fa129a1ff313e1cad50c1c5e348c511f33ee433828a939208a43328ecc2, attributed to the worker.",
+            "runtime": "Six genuine reports: 308 commands, 50 scenarios, 28 exit-0 records, 6 roots removed, 2 PostgreSQL schema drops, 7 marked Acks, and 116 observations with zero read errors. Separate Windows controls (4 plus 4) and the synthetic Status control are not causal proof.",
+            "cause": "The original tag-run Errno 13 cause remains unknown; native 5 stays fatal."
+          },
+          "explicitProofTarget": "212b76a4c586101bdc2a53264e2a4c3e2326671a (tree 033242b47c3bb6f7a198f205b693c771c3372d5a). Later artifact-only main movement does not retarget the candidate.",
+          "observedAtRecord": "Push CI run 36750756776 and workflow_dispatch Release run 36750976165 at 212b76a4c586101bdc2a53264e2a4c3e2326671a were in progress when this was recorded (read-only observation by the artifact reconciler).",
+          "remainingWork": "The same worker ebfd215b-2229-4075-84af-4a4d6de2be7c owns ordinary integration, rebuild, merged-source CI, one build-only Release run with all 5 native jobs, both Windows controls, and hosted Linux PostgreSQL, a new actual inventory, and the immutable v0.2.1 packet and field report.",
+          "boundaries": "The v0.2.0 tag stays immutable and unpublished at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe. The genuine baseline is published v0.1.2. Publishing v0.2.1 needs a new operator decision at schema3-release-gate. Tracker 157 stays open. No new node, worker, policy, installed or shared target, or hardening claim."
         }
       },
       "description": "Prepare one bounded v0.2.0 schema-3 recovery candidate after issues #154 and #155 merge, then submit its immutable evidence to a separate operator publication gate.",
@@ -1461,7 +1503,12 @@
           "localVerificationSha256": "705ad9b4ed905468ab4de8a54a73dfae97691bf075b0dcc1659d662cb1993855",
           "verificationScope": "Local independently audited the ZIP, its members, the report, and log hashes. No runtime replay."
         },
-        "workerRecommendation": "Hold the tag unpublished and prepare a bounded diagnostic and corrective candidate. An unchanged-source full gate retry could publish automatically and would require the operator to accept the uncertainty."
+        "workerRecommendation": "Hold the tag unpublished and prepare a bounded diagnostic and corrective candidate. An unchanged-source full gate retry could publish automatically and would require the operator to accept the uncertainty.",
+        "sourceCorrectionMerge": {
+          "mergeCommit": "212b76a4c586101bdc2a53264e2a4c3e2326671a",
+          "pullRequest": "https://github.com/lossyrob/telex/pull/160",
+          "state": "The reviewed corrective source (proof-only native Windows reader and diagnostics, retrying only a post-spawn sharing violation within the existing budget) merged on 2026-09-30. Final proof at 212b76a4c586101bdc2a53264e2a4c3e2326671a is pending, so the item stays routed. The original hosted Errno 13 cause remains unknown, and nothing is published."
+        }
       },
       "description": "Find bounded causal evidence for the Windows x64 proof failure in the v0.2.0 tag Release run and correct it in a reviewed v0.2.1 candidate.",
       "affectedOutcome": "A usable schema-3 recovery release: v0.2.0 is held unpublished, so released clients still cannot connect to the schema-3 shared store.",

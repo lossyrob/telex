@@ -10,7 +10,8 @@
   merged 2026-09-28T22:24:23Z as `1b9fc8f0`
 - **v0.2.0 candidate source (tagged, unpublished):** `1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe`
 - **Corrective v0.2.1 PR:** [lossyrob/telex#160](https://github.com/lossyrob/telex/pull/160),
-  open, head `4b097171ee13caad8c5ea2ecf61469b2798a4e54`; review and proof pending
+  merged 2026-09-30T17:21:06Z as `212b76a4` from reviewed head `4b097171`; final
+  proof at `212b76a4` pending
 - **Attention:** focus
 - **Depends on:** completed `windows-token-buffer-alignment`, completed `postgres-wait-reset-recovery`
 - **Blocks:** `schema3-release-gate`
@@ -306,3 +307,35 @@ ledger item `local-daemon-schema3-recovery-release`
 - The `v0.2.0` tag stays at `1b9fc8f0`, and the baseline remains published
   v0.1.2. PR #160 does not authorize v0.2.1 publication; that needs a new
   operator decision at `schema3-release-gate`. Issue #157 stays open.
+
+## Corrective source merge
+
+This records the corrective source merge only. It is not final v0.2.1
+preparation completion, gate acceptance, a tag, or publication. The full record
+is on ledger item `local-daemon-schema3-recovery-release`
+(`evidence.correctivePreparationMerge` and `evidence.trackerProviderRepair`).
+
+- Campaign authorized exact head `4b097171`. PR #160 merged at
+  2026-09-30T17:21:06Z as `212b76a4c586101bdc2a53264e2a4c3e2326671a` (parents
+  `6dcaf045` and `4b097171`, tree `033242b4`). Product source is unchanged
+  from the reviewed head; the merge differs from it only in four existing
+  artifact paths, so the full tree does not equal the reviewed tree.
+- Branch floor at `4b097171`: full review 5369458958 plus one follow-up with 0
+  findings, design inspection PASS, CI run 36743919402 on all 15 jobs, and
+  build-only Release run 36743984783 on all 5 native jobs, hosted Linux
+  PostgreSQL, and both Windows controls. This is not proof for `212b76a4`.
+- The original tag-run Errno 13 cause remains unknown, and native 5 stays
+  fatal.
+- The explicit proof target is `212b76a4`. Later artifact-only main movement
+  does not retarget the candidate.
+- Pending, owned by the same worker: merged-source CI, one build-only Release
+  run with all 5 native jobs, both Windows controls, and hosted Linux
+  PostgreSQL, a new inventory, and the immutable v0.2.1 packet and field
+  report.
+- Provider history: artifact commit `6dcaf045` unintentionally closed tracker
+  157 (event 32182855058). Local reopened it (event 32183059364, 16:33:23Z),
+  and the PR #160 body was corrected to zero closing references before merge.
+  The earlier note about that hazard in the section above is superseded.
+- The `v0.2.0` tag stays at `1b9fc8f0`, unpublished; the baseline remains
+  published v0.1.2. Publishing v0.2.1 needs a new operator decision at
+  `schema3-release-gate`. Tracker 157 stays open.

@@ -354,6 +354,18 @@ cause remains unknown. Independent review, hosted CI and Release proof, merge,
 and final merged-source proof are pending. GitHub currently lists #157 as a
 closing reference of PR #160, although its body says it does not close #157.
 
+That provider history is now repaired and dated. Artifact commit `6dcaf045`
+unintentionally closed tracker 157 (event 32182855058); Local reopened it
+(event 32183059364), and the PR #160 body was corrected to zero closing
+references. After campaign authorized the reviewed head `4b097171`, PR #160
+merged on 2026-09-30 as `212b76a4`, with product source unchanged from that
+head. This is a source merge only. The same worker now owns final proof at
+`212b76a4`: merged-source CI, one build-only Release run with all native jobs,
+both Windows controls, and hosted Linux PostgreSQL, a new inventory, and the
+v0.2.1 packet and field report. The original Errno 13 cause remains unknown.
+Tracker 157 stays open, and publishing v0.2.1 still needs a new operator
+decision.
+
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later
 job-terminal choice supplied that intended Windows receipt but did not by itself
