@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-09-28T23:30:35.064Z",
+  "updatedAt": "2026-09-30T16:06:17.167Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -357,7 +357,7 @@
       "type": "task",
       "title": "Prepare the v0.2.0 schema-3 recovery release candidate",
       "summary": "After campaign verifies that issues #154 and #155 have merged, launch one new isolated release worker to prepare an immutable reviewed v0.2.0 candidate. Align every release-coupled version surface; audit historical/current upgrade fixtures; write truthful notes and exclusions; prove genuine v0.1.2 upgrade and fresh install through controlled manifest/checksum assets in disposable isolated install, config, and database roots; exercise protocol 1.4-to-1.5 transition plus representative schema-2 migration and preexisting schema-3 connection; run exact-head CI and the build-only Release matrix; and bind all assets, checksums, executable build identities, and evidence to one source head. Preparation does not authorize publication.",
-      "status": "completed",
+      "status": "in-progress",
       "attention": "focus",
       "repoIds": [
         "telex"

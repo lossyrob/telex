@@ -409,6 +409,35 @@
           "liveState": "Worker branch feature/schema3-release-preparation is clean at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe. Main c4d897f9 is artifact-only and does not retarget the candidate. Issue #157 is open, the latest release is v0.1.2, and no v0.2.0 tag exists.",
           "gate": "schema3-release-gate stays planned and unaccepted; its dependency is now met. Campaign and operator own the decision to approve or defer publication at the pinned source and sealed packet. Do not close shared tracker #157 without a separate campaign issue disposition. The same worker, checkout, and evidence are retained quiescent, not archived.",
           "limits": "The exclusions, one-shot and FAILED_HELD, Windows job-terminal, downgrade, coverage, no-signing, and no-universal-cleanup limits are unchanged. No gate pass, tag, publication, installed fleet, shared database, hardening, or closure claim."
+        },
+        "publicationAttempt1": {
+          "authorization": "On 2026-09-30 the operator authorized v0.2.0 publication only for source 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe.",
+          "tag": "The same worker ebfd215b-2229-4075-84af-4a4d6de2be7c pushed one immutable lightweight tag v0.2.0 at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe.",
+          "releaseRun": "Tag Release run 36734022444, attempt 1 (event push, created 2026-09-30T15:05:08Z): terminal FAILURE. The tag-version check and 4 native builds succeeded; Windows x64 job 109950859494 failed; Linux PostgreSQL job 109954236674 and Publish job 109954237735 were skipped.",
+          "publicationState": "No published v0.2.0 release was observed (release GET 404), and no partial published assets exist. The latest release remains v0.1.2.",
+          "windowsFailure": "The Windows proof observer read of the isolated preexisting schema-3 successor cap failed with a local-file PermissionError (Errno 13). The native WinError is absent, and the underlying cause is unknown; a transient sharing or delete hypothesis is not proven. The run recorded 38 commands, 5 scenarios, and 3 readiness records; 4 owned daemons exited 0 with roots removed and no cleanup_error. Preexisting-root restart and fresh-installer proof are incomplete.",
+          "incidentFiles": {
+            "zip": "C:\\Users\\robemanuele\\.copilot\\session-state\\ebfd215b-2229-4075-84af-4a4d6de2be7c\\files\\publication-v0.2.0\\incident-run36734022444-attempt1.zip",
+            "zipSha256": "f79704442e5d1fc80a4109fd2021be9ed208cf8976b20672a541a51d48f4d7ad",
+            "zipMembers": 7,
+            "briefSha256": "428755c8241c0a5b25658d5ee4b91fc402192318b67894eaac213c4ebf6358f7",
+            "machineJsonSha256": "4096e1caa8060011782089d239d36f22386530d4589cd35512f7f486910dcd29",
+            "localVerification": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\v020-publication-attempt1-incident-verification.json",
+            "localVerificationSha256": "705ad9b4ed905468ab4de8a54a73dfae97691bf075b0dcc1659d662cb1993855",
+            "verificationScope": "Local independently audited the ZIP, its members, the report, and log hashes. No runtime replay."
+          },
+          "tagState": "The tag has not been moved or removed, no rerun occurred, and no source changed. No retry, tag move, deletion, recreation, or withdrawal is authorized.",
+          "priorPacket": "The sealed 1b9fc8f0 preparation packet remains valid historical evidence. It is not proof for the tag run or for any v0.2.1 candidate."
+        },
+        "correctiveReopen": {
+          "decision": "The operator chose \"Hold v0.2.0 and prepare a reviewed corrective v0.2.1 candidate (Recommended)\", relayed by campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c through Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57 on 2026-09-30.",
+          "scope": "The decision reopens the same schema3-release-preparation node and issue #157 for corrective v0.2.1 work by the existing worker ebfd215b-2229-4075-84af-4a4d6de2be7c. No new node, issue, worker, or scope vote, and no artifact-before-code gate.",
+          "currentVersion": "v0.2.1. The v0.2.0 wording in this item's description, requiredness, selectedDisposition, and terminalPath records the original disposition; the same bounded scope, exclusions, and evidence requirements now apply to the corrective v0.2.1 candidate.",
+          "candidateSource": "Not yet known. No v0.2.1 source, PR, or tag exists at this record.",
+          "baseline": "Genuine old-binary upgrade proof still uses the published v0.1.2 release, not the unpublished v0.2.0 tag.",
+          "gate": "schema3-release-gate stays planned and unaccepted. Publishing v0.2.1 requires a new explicit operator decision for its reviewed, merged, and proven final source. The v0.2.0 authorization does not carry over.",
+          "issueState": "Issue #157 stays open.",
+          "limits": "Exclusions and the safety, deadline, authentication, schema, and installer-default constraints are unchanged, as are the final evidence requirements. No gate pass, publication, installed fleet, shared database, hardening, or closure claim."
         }
       },
       "description": "Prepare one bounded v0.2.0 schema-3 recovery candidate after issues #154 and #155 merge, then submit its immutable evidence to a separate operator publication gate.",
@@ -1379,6 +1408,38 @@
         "fieldReport": "https://github.com/lossyrob/telex/issues/157#issuecomment-5880528161",
         "finalResult": "The final runtime totals include 6 removed roots and 28 owned daemon exit-0 records. No universal Drop or report-persistence claim."
       }
+    },
+    {
+      "id": "local-daemon-v020-tag-Windows-proof-failure",
+      "sourceNode": "schema3-release-gate",
+      "source": "v0.2.0 tag Release run 36734022444 attempt 1, reported by release worker ebfd215b-2229-4075-84af-4a4d6de2be7c",
+      "evidence": {
+        "tag": "v0.2.0 at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe (immutable lightweight tag, unpublished).",
+        "run": "Release run 36734022444 attempt 1: FAILURE. Windows x64 job 109950859494 failed; the tag-version check and 4 native builds succeeded; Linux PostgreSQL job 109954236674 and Publish job 109954237735 were skipped.",
+        "details": "The observer read of the isolated preexisting schema-3 successor cap failed with a local-file PermissionError (Errno 13). The native WinError is absent, and the underlying cause is unknown; a transient sharing or delete hypothesis is not proven. 38 commands, 5 scenarios, 3 readiness records; 4 owned daemons exited 0 with roots removed and no cleanup_error. Preexisting-root restart and fresh-installer proof are incomplete.",
+        "incidentFiles": {
+          "zip": "C:\\Users\\robemanuele\\.copilot\\session-state\\ebfd215b-2229-4075-84af-4a4d6de2be7c\\files\\publication-v0.2.0\\incident-run36734022444-attempt1.zip",
+          "zipSha256": "f79704442e5d1fc80a4109fd2021be9ed208cf8976b20672a541a51d48f4d7ad",
+          "zipMembers": 7,
+          "briefSha256": "428755c8241c0a5b25658d5ee4b91fc402192318b67894eaac213c4ebf6358f7",
+          "machineJsonSha256": "4096e1caa8060011782089d239d36f22386530d4589cd35512f7f486910dcd29",
+          "localVerification": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\v020-publication-attempt1-incident-verification.json",
+          "localVerificationSha256": "705ad9b4ed905468ab4de8a54a73dfae97691bf075b0dcc1659d662cb1993855",
+          "verificationScope": "Local independently audited the ZIP, its members, the report, and log hashes. No runtime replay."
+        },
+        "workerRecommendation": "Hold the tag unpublished and prepare a bounded diagnostic and corrective candidate. An unchanged-source full gate retry could publish automatically and would require the operator to accept the uncertainty."
+      },
+      "description": "Find bounded causal evidence for the Windows x64 proof failure in the v0.2.0 tag Release run and correct it in a reviewed v0.2.1 candidate.",
+      "affectedOutcome": "A usable schema-3 recovery release: v0.2.0 is held unpublished, so released clients still cannot connect to the schema-3 shared store.",
+      "requiredness": "Required before any recovery release publication.",
+      "sequencing": "Routed to the reopened schema3-release-preparation node under issue #157, without a new node or graph edge. schema3-release-gate follows the proven v0.2.1 source.",
+      "selectedDisposition": "Operator-selected: hold v0.2.0 unpublished and prepare a reviewed corrective v0.2.1 candidate. No retry, tag move, deletion, recreation, or withdrawal.",
+      "target": "schema3-release-preparation / schema3-release-gate / issue #157",
+      "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
+      "terminalPath": "Bounded causal evidence, then a reviewed corrective v0.2.1 source and PR, then exact CI with the 5 native and Linux PostgreSQL jobs and artifact proof, then authorized merge, then actual final merged-source proof, then a new operator publication decision at schema3-release-gate. The 1b9fc8f0 preparation evidence is historical, not v0.2.1 proof, and the genuine old-binary baseline remains published v0.1.2.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Operator choice \"Hold v0.2.0 and prepare a reviewed corrective v0.2.1 candidate (Recommended)\" on 2026-09-30, relayed by campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c and Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57."
     }
   ]
 }

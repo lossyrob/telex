@@ -3,11 +3,13 @@
 - **Workstream:** `local-daemon`
 - **Node:** `schema3-release-preparation`
 - **Type:** implementation
-- **Status:** completed; the preparation delivery at `1b9fc8f0` was accepted on
-  2026-09-28. Publication awaits the separate operator gate
-- **Preparation PR:** [lossyrob/telex#159](https://github.com/lossyrob/telex/pull/159),
+- **Status:** in-progress; reopened on 2026-09-30 by operator decision for a
+  corrective v0.2.1 candidate after the v0.2.0 tag Release run failed. The v0.2.0
+  preparation, accepted on 2026-09-28 at `1b9fc8f0`, is dated history
+- **v0.2.0 preparation PR:** [lossyrob/telex#159](https://github.com/lossyrob/telex/pull/159),
   merged 2026-09-28T22:24:23Z as `1b9fc8f0`
-- **Candidate source:** `1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe`
+- **v0.2.0 candidate source (tagged, unpublished):** `1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe`
+- **Corrective v0.2.1 source and PR:** not yet known
 - **Attention:** focus
 - **Depends on:** completed `windows-token-buffer-alignment`, completed `postgres-wait-reset-recovery`
 - **Blocks:** `schema3-release-gate`
@@ -19,6 +21,12 @@
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
 ## Outcome
+
+Current cycle, from 2026-09-30: prepare one immutable, reviewed corrective v0.2.1
+candidate that addresses the v0.2.0 tag-run Windows proof failure, and submit it
+to `schema3-release-gate` for a new explicit publication decision. The
+requirements below apply to v0.2.1 unchanged except for the version. The
+original v0.2.0 outcome follows as history.
 
 Prepare one immutable, reviewed v0.2.0 schema-3 recovery release candidate after
 issues #154 and #155 merge and the campaign verifies dependency closure.
@@ -41,7 +49,8 @@ Do not repeat the shared-database investigation or read the shared database.
 
 ### Version and metadata
 
-- Set v0.2.0 in `Cargo.toml` and refresh `Cargo.lock`.
+- Set the candidate version in `Cargo.toml` and refresh `Cargo.lock`: v0.2.0 at
+  `1b9fc8f0`; v0.2.1 for the corrective candidate.
 - Update both version values in `.github/plugin/marketplace.json`.
 - Update `copilot/plugin/plugin.json`.
 - Update the `--plugin-version` value in
@@ -66,6 +75,8 @@ Do not repeat the shared-database investigation or read the shared database.
   assets.
 - Treat manifest schema range 2..3 as inference until the old-binary upgrade
   exercise succeeds.
+- The genuine old-binary baseline remains the published v0.1.2 release, not the
+  unpublished v0.2.0 tag.
 
 ### Candidate and evidence
 
@@ -97,7 +108,8 @@ Do not repeat the shared-database investigation or read the shared database.
 
 - Both prerequisite repair merges and campaign dependency verification are
   recorded before release work starts.
-- All release-coupled metadata agrees on v0.2.0.
+- All release-coupled metadata agrees on the candidate version (v0.2.1 for the
+  corrective candidate).
 - A genuine isolated v0.1.2 binary completes the real controlled upgrade path,
   including manifest and checksum handling and protocol 1.4-to-1.5 transition.
 - Fresh PowerShell and shell installs succeed from controlled candidate assets.
@@ -219,3 +231,37 @@ ledger item `local-daemon-schema3-recovery-release`
   needs a separate campaign disposition. The gate stays planned, and no tag
   or publication is authorized. The same worker, checkout, and evidence are
   retained quiescent.
+
+## Corrective v0.2.1 reopening
+
+The Terminal evidence above is the dated v0.2.0 preparation record. The full
+record is on ledger item `local-daemon-schema3-recovery-release`
+(`evidence.publicationAttempt1` and `evidence.correctiveReopen`) and on
+discovery `local-daemon-v020-tag-Windows-proof-failure`.
+
+- On 2026-09-30 the operator authorized v0.2.0 publication from `1b9fc8f0`
+  only. The same worker pushed the immutable lightweight tag `v0.2.0` at that
+  commit.
+- Tag Release run 36734022444 (attempt 1) failed. The tag-version check and four
+  native builds passed; Windows x64 job 109950859494 failed; Linux PostgreSQL
+  job 109954236674 and Publish job 109954237735 were skipped. No release was
+  published, no partial assets exist, and v0.1.2 remains the latest release.
+- The Windows proof observer read of the isolated preexisting schema-3
+  successor cap failed with a local-file PermissionError (Errno 13). The native
+  WinError is absent, and the underlying cause is unknown; a transient sharing
+  or delete hypothesis is not proven. Four owned daemons exited 0 with roots
+  removed. Preexisting-root restart and fresh-installer proof are incomplete.
+- Frozen incident ZIP SHA-256
+  `f79704442e5d1fc80a4109fd2021be9ed208cf8976b20672a541a51d48f4d7ad`
+  (7 members), verified independently by Local without runtime replay.
+- The operator chose "Hold v0.2.0 and prepare a reviewed corrective v0.2.1
+  candidate (Recommended)". This node and issue #157 are reopened for the same
+  worker, `ebfd215b`, with no new node, issue, worker, or scope vote.
+- Terminal path: bounded causal evidence, then a reviewed corrective v0.2.1
+  source and PR, then exact CI with the 5 native and Linux PostgreSQL jobs and
+  artifact proof, then authorized merge, then actual final merged-source proof,
+  then a new operator publication decision at `schema3-release-gate`.
+- The `1b9fc8f0` evidence is historical and is not v0.2.1 proof. No retry, tag
+  move, deletion, recreation, or withdrawal of `v0.2.0` is authorized.
+  Exclusions, safety constraints, the installer default, and final evidence
+  requirements are unchanged. Issue #157 stays open.
