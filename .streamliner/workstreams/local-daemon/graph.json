@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-09-30T16:30:02.059Z",
+  "updatedAt": "2026-09-30T17:43:35.301Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -357,7 +357,7 @@
       "type": "task",
       "title": "Prepare the corrective v0.2.1 schema-3 recovery release candidate",
       "summary": "Continue the existing issue #157 release worker under the operator-selected corrective v0.2.1 scope after the v0.2.0 publication attempt failed. Preserve the immutable unpublished v0.2.0 tag and require bounded causal evidence for the corrective proof-observer change. Align every release-coupled version surface; audit historical/current upgrade fixtures; write truthful notes and exclusions; prove genuine v0.1.2 upgrade and fresh install through controlled manifest/checksum assets in disposable isolated install, config, and database roots; exercise protocol 1.4-to-1.5 transition plus representative schema-2 migration and preexisting schema-3 connection; run exact-head CI and the build-only Release matrix; and bind all assets, checksums, executable build identities, and evidence to one source head. Preparation does not authorize publication.",
-      "status": "in-progress",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"

@@ -3,15 +3,18 @@
 - **Workstream:** `local-daemon`
 - **Node:** `schema3-release-preparation`
 - **Type:** implementation
-- **Status:** in-progress; reopened on 2026-09-30 by operator decision for a
-  corrective v0.2.1 candidate after the v0.2.0 tag Release run failed. The v0.2.0
-  preparation, accepted on 2026-09-28 at `1b9fc8f0`, is dated history
+- **Status:** completed; the corrective v0.2.1 preparation at `212b76a4` was
+  accepted on 2026-09-30. Publication awaits a new operator decision at the
+  separate gate. The node was reopened on 2026-09-30 after the v0.2.0 tag
+  Release run failed; the v0.2.0 preparation, accepted on 2026-09-28 at
+  `1b9fc8f0`, is dated history
 - **v0.2.0 preparation PR:** [lossyrob/telex#159](https://github.com/lossyrob/telex/pull/159),
   merged 2026-09-28T22:24:23Z as `1b9fc8f0`
 - **v0.2.0 candidate source (tagged, unpublished):** `1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe`
 - **Corrective v0.2.1 PR:** [lossyrob/telex#160](https://github.com/lossyrob/telex/pull/160),
-  merged 2026-09-30T17:21:06Z as `212b76a4` from reviewed head `4b097171`; final
-  proof at `212b76a4` pending
+  merged 2026-09-30T17:21:06Z as `212b76a4` from reviewed head `4b097171`
+- **Corrective v0.2.1 candidate source:** `212b76a4c586101bdc2a53264e2a4c3e2326671a`
+  (tree `033242b4`)
 - **Attention:** focus
 - **Depends on:** completed `windows-token-buffer-alignment`, completed `postgres-wait-reset-recovery`
 - **Blocks:** `schema3-release-gate`
@@ -339,3 +342,36 @@ is on ledger item `local-daemon-schema3-recovery-release`
 - The `v0.2.0` tag stays at `1b9fc8f0`, unpublished; the baseline remains
   published v0.1.2. Publishing v0.2.1 needs a new operator decision at
   `schema3-release-gate`. Tracker 157 stays open.
+
+## Corrective terminal evidence
+
+The pending statements in the Corrective v0.2.1 candidate and Corrective source
+merge sections above are dated history; the facts below supersede them. The
+full record is on ledger item `local-daemon-schema3-recovery-release`
+(`evidence.correctiveFinalPreparationDelivery`).
+
+- Local accepted the complete corrective delivery after independent final
+  packet and provider verification. The candidate source is `212b76a4` (tree
+  `033242b4`). Product, test, workflow, and docs content equals reviewed head
+  `4b097171`; only four artifact paths differ.
+- Final CI run 36750756776 passed all 15 jobs, and build-only Release run
+  36750976165 passed all 5 native jobs, both Windows native controls, and
+  hosted Linux PostgreSQL job 110011253376, both at `212b76a4`. Every new
+  binary hash differs from the `4b097171` branch build.
+- Sealed packet `telex-v0.2.1-readiness-212b76a.zip` (37,235,224 bytes,
+  SHA-256 `b74c923202f0427d9d01484d79312ad18468bac1327048b4aff3cb6ee7ac5492`;
+  75 members). Local verified every member, the archives, sidecars, nested
+  executables, source blobs, and review files.
+- Runtime totals: 6 reports, 308 commands, 50 scenarios, 28 owned exit-0
+  records, 6 product roots removed, 2 PostgreSQL schema drops, 7 marked Acks,
+  and 112 observations with zero genuine process read errors, plus 8 real-file
+  Windows controls.
+- The original hosted Errno 13 cause is not identified; native 5 and unknown
+  errors stay fatal. The genuine baseline remains published v0.1.2, and the
+  `v0.2.0` tag stays at `1b9fc8f0`, unpublished.
+- The field report was posted as
+  [comment 5916440735](https://github.com/lossyrob/telex/issues/157#issuecomment-5916440735)
+  and read back string-exact.
+- Tracker 157 stays open pending a campaign disposition. The gate stays
+  planned; publishing v0.2.1 needs a new explicit operator decision. The same
+  worker stands down, preserved quiescent.

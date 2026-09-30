@@ -514,6 +514,54 @@
           "observedAtRecord": "Push CI run 36750756776 and workflow_dispatch Release run 36750976165 at 212b76a4c586101bdc2a53264e2a4c3e2326671a were in progress when this was recorded (read-only observation by the artifact reconciler).",
           "remainingWork": "The same worker ebfd215b-2229-4075-84af-4a4d6de2be7c owns ordinary integration, rebuild, merged-source CI, one build-only Release run with all 5 native jobs, both Windows controls, and hosted Linux PostgreSQL, a new actual inventory, and the immutable v0.2.1 packet and field report.",
           "boundaries": "The v0.2.0 tag stays immutable and unpublished at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe. The genuine baseline is published v0.1.2. Publishing v0.2.1 needs a new operator decision at schema3-release-gate. Tracker 157 stays open. No new node, worker, policy, installed or shared target, or hardening claim."
+        },
+        "correctiveFinalPreparationDelivery": {
+          "stage": "The corrective v0.2.1 schema3-release-preparation component is complete. The overarching release item stays routed until a new operator publication decision; nothing is tagged or published.",
+          "acceptedBy": "Local Daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57, after independent final packet and provider verification. No node-owned implementation or proof is deferred.",
+          "candidateSource": "212b76a4c586101bdc2a53264e2a4c3e2326671a",
+          "candidateTree": "033242b47c3bb6f7a198f205b693c771c3372d5a",
+          "proposedVersion": "v0.2.1",
+          "sourceRelation": "Product, test, workflow, and docs content is unchanged from reviewed head 4b097171ee13caad8c5ea2ecf61469b2798a4e54; only four canonical artifact paths differ, so full-tree equality is false.",
+          "staticReview": "One initial full COMMENT review 5369458958 at 4b097171 with 0 findings, and design inspection PASS (report SHA-256 d8a58e8750e2578cf26d13057b8baa4ab93c4a6a4a3d0f3da5cb3933fbd45ed0).",
+          "finalCi": "CI run 36750756776 at 212b76a4c586101bdc2a53264e2a4c3e2326671a: all 15 jobs succeeded.",
+          "finalRelease": "Build-only Release run 36750976165 at 212b76a4c586101bdc2a53264e2a4c3e2326671a: all 5 native jobs, both Windows native controls, and hosted Linux PostgreSQL job 110011253376 succeeded; the tag check and Publish jobs were skipped.",
+          "noRelabeling": "Every new binary hash differs from the 4b097171 branch build.",
+          "baseline": "Genuine old-binary baseline: published v0.1.2 (release 359082164, source 636ecce3). The held v0.2.0 tag at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe remains unpublished history.",
+          "packet": {
+            "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\ebfd215b-2229-4075-84af-4a4d6de2be7c\\files\\corrective-v0.2.1\\telex-v0.2.1-readiness-212b76a.zip",
+            "bytes": 37235224,
+            "sha256": "b74c923202f0427d9d01484d79312ad18468bac1327048b4aff3cb6ee7ac5492",
+            "manifestSha256": "8e6e47fb97d5923c664d594c11202d7f5d3899a1a5c906fe8360a3f858293dd7",
+            "members": "74 hashed files plus the manifest, 75 members.",
+            "payloadManifestSha256": "d8beea08c1f5afbe7d423cb23f71127b42edc020d20e6f6f8eaed4afbcae4c04",
+            "packetInventorySha256": "8c61a56e11c77f3883992b936c1bc9d63cd1286b9150a124f505c7607f86151d",
+            "sealReceiptSha256": "e6fbf95d246825f3a88b8cab1c96d4943160922917259bc3c3ac45609bf16096",
+            "finalInventorySha256": "54909cb569c8df0fa20a3fcee6196e2ab8717f439af5842c62f85ed684ae1e77",
+            "apiMetadataSha256": "bc9de62d8f06ad8a43df9e64a8163002d457db68cdd3c35c81432ef88ccdd9b4",
+            "fullAuditSha256": "2e7c4e20f5162d3ef38d165bdd999c440ad329ed3c828face9697b6505b86284",
+            "artifacts": "11 artifacts with actual bytes preserved; earliest API expiry 2026-12-29T17:23:03Z."
+          },
+          "localVerification": {
+            "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\release157-v021-final-delivery-verification-20260930.json",
+            "receiptSha256": "768b2883962a8fc97a0be3b90b3304845d032a07b11fe704f52f01b50527f765",
+            "scope": "Local independently checked all 75 ZIP members and disk copies, the 5 archives with sidecars and nested executables, 20 source-file Git blobs, the 22 review-manifest files, and the frozen run, runtime, and native-control records. This is not native execution or a fresh OS cleanup attestation."
+          },
+          "runtimeTotals": "6 reports, 308 commands, 50 scenarios, 28 owned exit-0 records, 6 product roots removed, 2 PostgreSQL schema drops, 7 marked Acks, and 112 observations with zero genuine process read errors. Separately, 8 real-file controls (4 per Windows architecture) and a synthetic Status ordering control; per leg, 3 retained handles closed and 4 roots removed.",
+          "cause": "The original hosted Errno 13 cause of tag run 36734022444 is not identified. Native 5 and unknown errors remain fatal.",
+          "fieldReport": {
+            "url": "https://github.com/lossyrob/telex/issues/157#issuecomment-5916440735",
+            "comment": 5916440735,
+            "author": "lossyrob",
+            "postedAt": "2026-09-30T17:35:57Z",
+            "rawSha256": "95c83594ea96dbfd399f6e6ecb81817580ecc288e738aaa12b31d19eb0a2397f",
+            "lfFinalLfSha256": "431c068b2f4d2c655477e3720475c2dc5b3ec1d0fa90c8e1ab0a990acca027d0",
+            "workerProviderReceiptSha256": "6d2e441557fb14f69558565027e093de2cbca7a526644b5a5284eac72f881e9a",
+            "verification": "Local independently read it back string-exact."
+          },
+          "liveState": "At 2026-09-30T17:38:20Z (Local): the worker is clean at 212b76a4 on the corrective branch, tracker 157 is open, main is 6a449513, no v0.2.1 tag exists, v0.2.0 and v0.2.1 releases return 404, and the latest release is v0.1.2.",
+          "explicitProofTarget": "212b76a4c586101bdc2a53264e2a4c3e2326671a. Later artifact-only main movement does not retarget the candidate.",
+          "gate": "schema3-release-gate stays planned and unaccepted; its dependency is now met. Publishing v0.2.1 requires a new explicit operator decision at this pinned source and packet. Shared tracker 157 stays open pending a campaign disposition. The same worker stands down, preserved quiescent and not archived.",
+          "limits": "Exclusions and the safety, deadline, authentication, schema, installer-default, downgrade, coverage, no-signing, and no-universal-cleanup limits are unchanged. No gate pass, tag, publication, installed fleet, shared database, hardening, or closure claim."
         }
       },
       "description": "Prepare one bounded v0.2.0 schema-3 recovery candidate after issues #154 and #155 merge, then submit its immutable evidence to a separate operator publication gate.",
@@ -1508,6 +1556,13 @@
           "mergeCommit": "212b76a4c586101bdc2a53264e2a4c3e2326671a",
           "pullRequest": "https://github.com/lossyrob/telex/pull/160",
           "state": "The reviewed corrective source (proof-only native Windows reader and diagnostics, retrying only a post-spawn sharing violation within the existing budget) merged on 2026-09-30. Final proof at 212b76a4c586101bdc2a53264e2a4c3e2326671a is pending, so the item stays routed. The original hosted Errno 13 cause remains unknown, and nothing is published."
+        },
+        "correctivePreparationEvidence": {
+          "review": "One initial full COMMENT review 5369458958 at 4b097171 with 0 findings; design inspection PASS (report SHA-256 d8a58e8750e2578cf26d13057b8baa4ab93c4a6a4a3d0f3da5cb3933fbd45ed0).",
+          "finalProof": "At 212b76a4c586101bdc2a53264e2a4c3e2326671a: CI run 36750756776 (15 of 15) and build-only Release run 36750976165 (5 native jobs, both Windows native controls, hosted Linux PostgreSQL job 110011253376) succeeded.",
+          "packet": "Sealed v0.2.1 packet SHA-256 b74c923202f0427d9d01484d79312ad18468bac1327048b4aff3cb6ee7ac5492, independently verified by Local.",
+          "fieldReport": "https://github.com/lossyrob/telex/issues/157#issuecomment-5916440735",
+          "state": "The source and preparation correction is complete. The item stays routed because its terminal path ends at a new operator publication decision. The original hosted Errno 13 cause remains unidentified, and nothing is published."
         }
       },
       "description": "Find bounded causal evidence for the Windows x64 proof failure in the v0.2.0 tag Release run and correct it in a reviewed v0.2.1 candidate.",

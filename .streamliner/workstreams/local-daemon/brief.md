@@ -366,6 +366,16 @@ v0.2.1 packet and field report. The original Errno 13 cause remains unknown.
 Tracker 157 stays open, and publishing v0.2.1 still needs a new operator
 decision.
 
+Corrective v0.2.1 preparation is complete; the pending-proof sentences above
+are dated history. On 2026-09-30 Local accepted the delivery at `212b76a4`
+after independently verifying the sealed packet (SHA-256 `b74c9232...`) and the
+posted field report. Final CI and the build-only Release matrix, including
+both Windows native controls and hosted Linux PostgreSQL, passed at that commit
+with newly built artifacts. The original Errno 13 cause is still not
+identified. `schema3-release-gate` stays planned: its dependency is met, but
+publishing v0.2.1 needs a new explicit operator decision, and tracker 157 stays
+open until campaign decides its disposition.
+
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later
 job-terminal choice supplied that intended Windows receipt but did not by itself
