@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-09-28T23:30:35.064Z",
+  "updatedAt": "2026-09-30T16:10:51.030Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -355,9 +355,9 @@
     {
       "id": "schema3-release-preparation",
       "type": "task",
-      "title": "Prepare the v0.2.0 schema-3 recovery release candidate",
-      "summary": "After campaign verifies that issues #154 and #155 have merged, launch one new isolated release worker to prepare an immutable reviewed v0.2.0 candidate. Align every release-coupled version surface; audit historical/current upgrade fixtures; write truthful notes and exclusions; prove genuine v0.1.2 upgrade and fresh install through controlled manifest/checksum assets in disposable isolated install, config, and database roots; exercise protocol 1.4-to-1.5 transition plus representative schema-2 migration and preexisting schema-3 connection; run exact-head CI and the build-only Release matrix; and bind all assets, checksums, executable build identities, and evidence to one source head. Preparation does not authorize publication.",
-      "status": "completed",
+      "title": "Prepare the corrective v0.2.1 schema-3 recovery release candidate",
+      "summary": "Continue the existing issue #157 release worker under the operator-selected corrective v0.2.1 scope after the v0.2.0 publication attempt failed. Preserve the immutable unpublished v0.2.0 tag and require bounded causal evidence for the corrective proof-observer change. Align every release-coupled version surface; audit historical/current upgrade fixtures; write truthful notes and exclusions; prove genuine v0.1.2 upgrade and fresh install through controlled manifest/checksum assets in disposable isolated install, config, and database roots; exercise protocol 1.4-to-1.5 transition plus representative schema-2 migration and preexisting schema-3 connection; run exact-head CI and the build-only Release matrix; and bind all assets, checksums, executable build identities, and evidence to one source head. Preparation does not authorize publication.",
+      "status": "in-progress",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -376,8 +376,8 @@
     {
       "id": "schema3-release-gate",
       "type": "gate",
-      "title": "Operator publication decision for the v0.2.0 recovery candidate",
-      "summary": "Campaign and operator inspect the immutable reviewed candidate and its exact-head compatibility, install, upgrade, CI, Release-matrix, asset, checksum, build-identity, source-association, limitation, and design evidence. Tagging and publication require explicit operator approval. Green checks do not imply approval, and this gate does not accept Local Daemon hardening or closure. After approval, the same release worker owns publication and installation verification; no additional permanent session is created.",
+      "title": "Operator publication decision for the corrective v0.2.1 recovery candidate",
+      "summary": "The current candidate is the corrective v0.2.1, which needs a new explicit operator decision; the earlier v0.2.0 approval does not carry over. Campaign and operator inspect the immutable reviewed candidate and its exact-head compatibility, install, upgrade, CI, Release-matrix, asset, checksum, build-identity, source-association, limitation, and design evidence. Tagging and publication require explicit operator approval. Green checks do not imply approval, and this gate does not accept Local Daemon hardening or closure. After approval, the same release worker owns publication and installation verification; no additional permanent session is created.",
       "status": "planned",
       "attention": "focus",
       "repoIds": [

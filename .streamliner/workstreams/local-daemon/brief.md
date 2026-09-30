@@ -50,8 +50,10 @@ The schema-3 recovery release is a separate, bounded chain. Issue #154 covers
 the two unsafe Windows `TOKEN_USER` reads on exact main. Issue #155 adopts draft
 PR #156 for PostgreSQL query and `LISTEN` reset recovery. After both repairs merge
 and the campaign verifies dependency closure, one isolated worker prepares an
-immutable v0.2.0 candidate for the campaign/operator-owned
-`schema3-release-gate`. This chain does not reopen the completed release nodes and
+immutable candidate for the campaign/operator-owned
+`schema3-release-gate`. The v0.2.0 tag run failed on Windows, so v0.2.0 is held
+unpublished and the same preparation node now prepares a corrective v0.2.1
+candidate. This chain does not reopen the earlier completed release nodes and
 does not accept hardening or closure.
 
 The richer design rationale and the full decision ledger that led here live in
@@ -100,8 +102,8 @@ The authoritative design layer (merged from `design-foundation`) lives under
   OS-lock safety and a degraded partial-scan contract; and the downstream
   transactional-authority closure. The bounded recovery-release addition covers
   issue #154 Windows token-buffer alignment, issue #155 PostgreSQL wait-reset
-  recovery, and isolated v0.2.0 schema-3 candidate preparation and publication
-  gating after both repairs merge.
+  recovery, and isolated schema-3 candidate preparation and publication gating
+  after both repairs merge (v0.2.0, then corrective v0.2.1).
 - **Out of scope:** the embeddable SDK client (#12) - it shares the
   collapse-into-one-process theme and should reuse the stabilized Layer-1 IPC, but
   is a separate solve; response windows / TTL deadlines (#2); the `store_key` helper
@@ -324,6 +326,23 @@ hosted Linux PostgreSQL, passed at that commit with newly built artifacts.
 v0.2.0 still needs explicit operator approval, and issue #157 stays open until
 campaign decides its disposition.
 
+On 2026-09-30 the operator authorized publishing v0.2.0 from `1b9fc8f0` only.
+The same worker pushed tag `v0.2.0` at that commit, and tag Release run
+36734022444 (attempt 1) failed. The tag-version check and four native builds
+passed, the Windows x64 job failed, and the Linux PostgreSQL and Publish jobs
+were skipped. No release was published; v0.1.2 remains the latest release. The
+Windows proof hit a local-file PermissionError (Errno 13) reading the successor
+cap for a preexisting schema-3 root. The native Windows error and the underlying
+cause are unknown. The tag stays in place, and no retry, tag move, deletion, or
+withdrawal is authorized.
+
+The operator then chose to hold v0.2.0 and prepare a reviewed corrective v0.2.1
+candidate. Release preparation is reopened and in progress under the same
+worker (`ebfd215b`). The completion paragraph above is dated v0.2.0 history,
+and the `1b9fc8f0` packet is not v0.2.1 proof. No v0.2.1 source or PR exists
+yet. Publishing v0.2.1 needs a new explicit operator decision at
+`schema3-release-gate`, which stays planned, and issue #157 stays open.
+
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later
 job-terminal choice supplied that intended Windows receipt but did not by itself
@@ -384,7 +403,8 @@ packet directly to `main`.
   complete, useful PR #138 outcome while keeping the accepted gap durable.
 - **Recovery release is an isolated confidence chain:** Repair #154 and adopted
   PR #156/#155 first. After both merge, one isolated worker prepares one immutable
-  v0.2.0 candidate and evidence packet. The campaign/operator publication gate is
+  candidate and evidence packet (v0.2.0, then corrective v0.2.1 after the v0.2.0
+  tag run failed). The campaign/operator publication gate is
   distinct from hardening and closure; green evidence never implies publication
   approval.
 - **Docs/SKILL cutover with `daemon-core` (council):** keep the verb names; update
