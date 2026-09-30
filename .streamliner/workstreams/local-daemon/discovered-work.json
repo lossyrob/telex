@@ -502,7 +502,7 @@
           "receiptSha256": "0e9e4fd472cfae910f7e5708be22a66999e7f14a4d02282a082389ce75c14baa",
           "branchFloor": {
             "scope": "Branch evidence at 4b097171ee13caad8c5ea2ecf61469b2798a4e54. It is not final-source or runtime proof for 212b76a4c586101bdc2a53264e2a4c3e2326671a.",
-            "review": "Full COMMENT review 5369458958 plus one follow-up at 4b097171ee13caad8c5ea2ecf61469b2798a4e54, 0 findings. Final review report SHA-256 4457444c1be53cf4787ea00dbe396208fc4bfa97052475c0bca15197fddb005d; provider record 4dfd520ceba5baf54a3f91aea3ddfb7d024b4f7895821ef07c280903068f9ad6; manifest dca65cbb77d6c74d01402f7a9e3d3e575ded0d7b9f15f16c30e5a262dd7f0e85 (22 files).",
+            "review": "One initial full COMMENT review 5369458958 at 4b097171ee13caad8c5ea2ecf61469b2798a4e54, with 0 findings. Final review report SHA-256 4457444c1be53cf4787ea00dbe396208fc4bfa97052475c0bca15197fddb005d; provider record 4dfd520ceba5baf54a3f91aea3ddfb7d024b4f7895821ef07c280903068f9ad6; manifest dca65cbb77d6c74d01402f7a9e3d3e575ded0d7b9f15f16c30e5a262dd7f0e85 (22 files).",
             "design": "Design inspection PASS 0/0, report SHA-256 d8a58e8750e2578cf26d13057b8baa4ab93c4a6a4a3d0f3da5cb3933fbd45ed0.",
             "ci": "CI run 36743919402: all 15 jobs succeeded.",
             "release": "Build-only Release run 36743984783: all 5 native jobs, hosted Linux PostgreSQL job 109987249136, and both Windows native controls succeeded; manual tag and Publish jobs skipped.",

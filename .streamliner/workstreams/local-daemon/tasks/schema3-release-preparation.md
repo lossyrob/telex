@@ -320,7 +320,7 @@ is on ledger item `local-daemon-schema3-recovery-release`
   `6dcaf045` and `4b097171`, tree `033242b4`). Product source is unchanged
   from the reviewed head; the merge differs from it only in four existing
   artifact paths, so the full tree does not equal the reviewed tree.
-- Branch floor at `4b097171`: full review 5369458958 plus one follow-up with 0
+- Branch floor at `4b097171`: one initial full COMMENT review 5369458958 with 0
   findings, design inspection PASS, CI run 36743919402 on all 15 jobs, and
   build-only Release run 36743984783 on all 5 native jobs, hosted Linux
   PostgreSQL, and both Windows controls. This is not proof for `212b76a4`.
