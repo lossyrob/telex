@@ -3,11 +3,11 @@
   "id": "local-daemon",
   "projectKey": "telex",
   "title": "Local presence/transport daemon (eliminate the per-session holder)",
-  "summary": "The local exchange, both backends, Copilot push bridge, upgrade path, and release-confidence validation are complete. The active recovery packet tracks Windows TOKEN_USER alignment and PostgreSQL wait-reset repairs, then prepares an isolated schema-3 release candidate for a separate operator publication decision. The v0.2.0 tag run failed and v0.2.0 is held unpublished; the same release worker now prepares a corrective v0.2.1 candidate. Historical release nodes remain complete. PR #138 and issues #152/#153 retain their existing independent authority and geometry.",
+  "summary": "The local exchange, both backends, Copilot push bridge, upgrade path, and release-confidence validation are complete. The active recovery packet tracks Windows TOKEN_USER alignment and PostgreSQL wait-reset repairs, then prepares an isolated schema-3 release candidate for a separate operator publication decision. The v0.2.0 tag run failed and v0.2.0 is held unpublished; after a new operator decision, the corrective v0.2.1 was published on 2026-09-30. Historical release nodes remain complete. PR #138 and issues #152/#153 retain their existing independent authority and geometry.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-09-30T17:43:35.301Z",
+  "updatedAt": "2026-09-30T18:18:25.725Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -378,7 +378,7 @@
       "type": "gate",
       "title": "Operator publication decision for the corrective v0.2.1 recovery candidate",
       "summary": "The current candidate is the corrective v0.2.1, which needs a new explicit operator decision; the earlier v0.2.0 approval does not carry over. Campaign and operator inspect the immutable reviewed candidate and its exact-head compatibility, install, upgrade, CI, Release-matrix, asset, checksum, build-identity, source-association, limitation, and design evidence. Tagging and publication require explicit operator approval. Green checks do not imply approval, and this gate does not accept Local Daemon hardening or closure. After approval, the same release worker owns publication and installation verification; no additional permanent session is created.",
-      "status": "planned",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"

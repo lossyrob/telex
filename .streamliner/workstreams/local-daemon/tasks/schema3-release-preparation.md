@@ -4,8 +4,8 @@
 - **Node:** `schema3-release-preparation`
 - **Type:** implementation
 - **Status:** completed; the corrective v0.2.1 preparation at `212b76a4` was
-  accepted on 2026-09-30. Publication awaits a new operator decision at the
-  separate gate. The node was reopened on 2026-09-30 after the v0.2.0 tag
+  accepted on 2026-09-30. After a new operator decision, v0.2.1 was published
+  on 2026-09-30 (see `schema3-release-gate`). The node was reopened on 2026-09-30 after the v0.2.0 tag
   Release run failed; the v0.2.0 preparation, accepted on 2026-09-28 at
   `1b9fc8f0`, is dated history
 - **v0.2.0 preparation PR:** [lossyrob/telex#159](https://github.com/lossyrob/telex/pull/159),
@@ -375,3 +375,12 @@ full record is on ledger item `local-daemon-schema3-recovery-release`
 - Tracker 157 stays open pending a campaign disposition. The gate stays
   planned; publishing v0.2.1 needs a new explicit operator decision. The same
   worker stands down, preserved quiescent.
+
+## Publication
+
+After a new operator decision, the same worker tagged `v0.2.1` at `212b76a4`,
+and [Release v0.2.1](https://github.com/lossyrob/telex/releases/tag/v0.2.1) was published on 2026-09-30T17:57:24Z after
+tag run 36754203801 passed all 8 jobs. Local verified the live assets and the
+isolated post-publication install and upgrade proof. Campaign accepted only this bounded gate completion, and Local then set tracker 157 to closed as completed at 2026-09-30T18:16:08Z (event 32189988997) by an explicit provider action, not a commit directive. The worker is
+retained quiescent. The full record is on the gate task and ledger item
+`local-daemon-schema3-recovery-release`.

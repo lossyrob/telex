@@ -3,11 +3,11 @@
 - **Workstream:** `local-daemon`
 - **Node:** `schema3-release-gate`
 - **Type:** gate
-- **Status:** planned; a new explicit operator publication decision is required
-  for the corrective v0.2.1 candidate
+- **Status:** completed; the operator approved v0.2.1 publication from
+  `212b76a4` on 2026-09-30, and it was published and verified. The earlier
+  planned wording below is dated history
 - **Attention:** focus
-- **Depends on:** `schema3-release-preparation`, reopened and in progress for
-  v0.2.1
+- **Depends on:** completed `schema3-release-preparation`
 - **Owner:** campaign and operator
 - **Evidence tracker:** [lossyrob/telex#157](https://github.com/lossyrob/telex/issues/157)
 - **Parent workstream:** [lossyrob/telex#32](https://github.com/lossyrob/telex/issues/32)
@@ -79,3 +79,28 @@ No additional permanent release session is authorized.
 - If the operator approves publication, the same isolated release worker resumes
   only after exact-path verification and explicit acknowledgement. No fourth
   delivery session is created.
+
+## Gate outcome
+
+The full record is on ledger item `local-daemon-schema3-recovery-release`
+(`evidence.v021Publication` and `completionEvidence`).
+
+- The operator chose "Authorize exact-source v0.2.1 tag and publication
+  (Recommended)" only for source `212b76a4` and its sealed readiness packet.
+  This was new authority; the v0.2.0 approval did not carry over.
+- The same worker pushed lightweight tag `v0.2.1` at `212b76a4`. Tag Release
+  run 36754203801 (attempt 1) passed all 8 jobs, including the tag check, 5
+  native builds with both Windows native controls, Linux PostgreSQL, and
+  Publish. No rerun, tag move, or withdrawal.
+- [Release v0.2.1](https://github.com/lossyrob/telex/releases/tag/v0.2.1) (ID 400301560) was published at
+  2026-09-30T17:57:24Z as stable and Latest, with 10 live assets.
+- Local independently hashed the live assets. Isolated post-publication runs on
+  Windows x64 and Ubuntu WSL x64 used the tagged installers against live
+  endpoints and upgraded a real published v0.1.2 install.
+- Publication packet SHA-256 `2f6d35836e9564cad3cc0a356e39c6081bd6825a780912476e93d2a0ad81f562`
+  (49 members). Field report:
+  [comment 5916978763](https://github.com/lossyrob/telex/issues/157#issuecomment-5916978763).
+- Campaign accepted only this bounded gate completion, and Local then set tracker 157 to closed as completed at 2026-09-30T18:16:08Z (event 32189988997) by an explicit provider action, not a commit directive.
+- The `v0.2.0` tag stays at `1b9fc8f0`, unpublished history, and the original
+  Errno 13 cause remains unknown. This gate does not accept hardening or
+  closure.

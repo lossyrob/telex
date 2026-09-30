@@ -562,6 +562,57 @@
           "explicitProofTarget": "212b76a4c586101bdc2a53264e2a4c3e2326671a. Later artifact-only main movement does not retarget the candidate.",
           "gate": "schema3-release-gate stays planned and unaccepted; its dependency is now met. Publishing v0.2.1 requires a new explicit operator decision at this pinned source and packet. Shared tracker 157 stays open pending a campaign disposition. The same worker stands down, preserved quiescent and not archived.",
           "limits": "Exclusions and the safety, deadline, authentication, schema, installer-default, downgrade, coverage, no-signing, and no-universal-cleanup limits are unchanged. No gate pass, tag, publication, installed fleet, shared database, hardening, or closure claim."
+        },
+        "v021Publication": {
+          "authority": {
+            "decision": "Operator choice \"Authorize exact-source v0.2.1 tag and publication (Recommended)\", only for source 212b76a4c586101bdc2a53264e2a4c3e2326671a and sealed readiness packet b74c923202f0427d9d01484d79312ad18468bac1327048b4aff3cb6ee7ac5492. This is new authority; the v0.2.0 approval did not carry over.",
+            "receipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\e06813c4-1db2-4d77-b8d3-3addc6a1824c\\files\\release157-v021-operator-publication-authority-20260930.json",
+            "receiptSha256": "de0facde68a74e21382ad5f419ab054107f4d47ef6620ee235a468b8b0628d85",
+            "execution": "The same worker ebfd215b-2229-4075-84af-4a4d6de2be7c acknowledged before mutation and pushed one lightweight tag."
+          },
+          "tag": "v0.2.1 (lightweight) at 212b76a4c586101bdc2a53264e2a4c3e2326671a, tree 033242b47c3bb6f7a198f205b693c771c3372d5a.",
+          "release": "GitHub Release 400301560 (https://github.com/lossyrob/telex/releases/tag/v0.2.1), published 2026-09-30T17:57:24Z: stable, not draft, not prerelease, and Latest. 10 live assets.",
+          "tagRun": "Release run 36754203801 attempt 1 (push, v0.2.1, source 212b76a4): all 8 jobs succeeded. Tag check 110020174181; native builds 110020174175, 110020174232, 110020174280, 110020174339, and 110020174375 with both Windows native control steps; Linux PostgreSQL 110022739533; Publish 110023145504. No rerun, manual dispatch, tag move, or withdrawal.",
+          "liveBytes": "The worker downloaded all 10 live assets. Local independently hashed the 5 archives, sidecars, and nested executables against the live API IDs, names, sizes, and digests and against the tag-run build and native records. Every published archive differs from the build-only preparation archives. The Windows x64, Windows ARM64, and Linux executable hashes differ; the 2 macOS executable hashes match. This is measured, not assumed reproducibility. Inventory SHA-256 76778354a5b29f5f3ba0660f6d4c3d161b0994ddc3915d2de2315eb1cac9b389; final audit 8750e9ed957431bf8b9dfd28a1174309944e54485b40b2a5bd438f023ee16e1c.",
+          "tagRunRuntime": "6 reports, 308 commands, 50 scenarios, 28 owned exit-0 records, 6 roots removed, 2 PostgreSQL schema drops, 7 marked Acks, and 113 observations with zero errors; 8 separate native controls and the synthetic Status control retained.",
+          "postPublication": {
+            "scope": "Representative Windows x64 and Ubuntu WSL x64 SQLite runs, each 20 commands, 2 scenarios, 2 owned exit-0 records, 1 root removed, 1 marked Ack, and 8 observations with 0 errors. The actual tagged installers were checked against Git 212b76a4 and used the default live endpoints with no mirror, version override, or credential environment. A real published v0.1.2 installed image drove the live upgrade; the old process exited before the candidate, and the installed bytes matched the published payload.",
+            "windowsReportSha256": "36ea4ff2538da006b78614b353077450e6037616e7949bb4afba0947d45ccb60",
+            "linuxReportSha256": "b561e1d5db03e3184d0f2c772926c1ba4c7ad542007e6829638e2d62dad464a2",
+            "linuxPreflightNote": "The first Ubuntu run stopped at a git 128 preflight before any network, product, or root creation. It was Windows gitdir interop, not a product failure: a native git reader in the same directory returned 212b76a4, and a session-only explicit reader kept the source, harness, and tagged-installer byte guards. No .git, global config, trust, or source change; Windows was not replayed."
+          },
+          "publicationPacket": {
+            "path": "C:\\Users\\robemanuele\\.copilot\\session-state\\ebfd215b-2229-4075-84af-4a4d6de2be7c\\files\\publication-v0.2.1\\telex-v0.2.1-publication-212b76a.zip",
+            "bytes": 36985529,
+            "sha256": "2f6d35836e9564cad3cc0a356e39c6081bd6825a780912476e93d2a0ad81f562",
+            "manifestSha256": "4e65302e95946d7f4c35c8e569c0aed98e2d2306a57bdaa115ff3c575fae2565",
+            "members": "48 hashed files plus the manifest, 49 members, all independently hashed by Local with an expanded-copy comparison.",
+            "sealReceiptSha256": "2805faa611220250ca972cdad3807c80c887469a01967be616ff4e66f440fc21",
+            "note": "Earlier readiness and incident seals are unchanged history and are not publication bytes."
+          },
+          "localVerification": {
+            "publishedBytesReceipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\v021-published-bytes-and-live-proof-independent-verification-20260930.json",
+            "publishedBytesReceiptSha256": "8f9f7977065a4fa1746f2da6628eadc83037d776241dd04c15b929970af69c7c",
+            "sealReceipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\v021-publication-seal-independent-verification-20260930.json",
+            "sealReceiptSha256": "a4b912c8110e871bbbaef6d0886a3ceba8f03a64ec43e8713cb2cf755470ff07",
+            "finalDeliveryReceipt": "C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\v021-final-publication-delivery-receipt-20260930.json",
+            "finalDeliveryReceiptSha256": "05c17bb241d37d93cffa3e28098b443cfaa9c3c64db8c9fb90711b8f32bbd25f",
+            "note": "The final delivery receipt supersedes earlier field-report-pending notes. Local byte and record audits are not additional native execution or fresh OS cleanup attestation."
+          },
+          "fieldReport": {
+            "url": "https://github.com/lossyrob/telex/issues/157#issuecomment-5916978763",
+            "comment": 5916978763,
+            "author": "lossyrob",
+            "postedAt": "2026-09-30T18:10:00Z",
+            "rawSha256": "ec1ded6b689187cef673d02d18bc6f81e7c7db18a04166aa85593ea27820b1d7",
+            "lfFinalLfSha256": "eaad9630dddeb39cef84042f592078cab4224ca119c6a3eac6d5ba36f742c76b",
+            "workerProviderReceiptSha256": "ac9c3d67c3a9627638c700e578fc25f305d43d76a038f02fd30cc757be26f86c",
+            "verification": "Local read it back string-exact ASCII."
+          },
+          "releaseNotes": "Curated release-body-only notes (raw SHA-256 prefix c4329a5f; live LF without final LF prefix f21ea80d), verified exact. They clarify the published v0.1.2 baseline and the held unpublished v0.2.0. Asset IDs and hashes, tag, release, visibility, and published time were unchanged by the notes edit.",
+          "history": "The v0.2.0 tag stays at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe, unpublished; tag run 36734022444 attempt 1 and all earlier packets and receipts remain dated history. No retrospective cause claim for the original Errno 13.",
+          "trackerDisposition": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c explicitly accepted only the bounded schema3-release-gate completion and authorized tracker 157 as completed (authority C:\\Users\\robemanuele\\.copilot\\session-state\\e06813c4-1db2-4d77-b8d3-3addc6a1824c\\files\\release157-v021-terminal-acceptance-20260930.json, SHA-256 b3b8188024c079af317954d6234227759ba2435eb5cdac6dc787b6bb178426da). After a fresh guard at 2026-09-30T18:16:07.991Z (issue open, latest lifecycle event 32183059364, tags and Release 400301560 with its 10 audited assets, packet, and field report unchanged), Local made one explicit REST state change to closed with reason completed at 2026-09-30T18:16:08Z: closed event 32189988997, actor lossyrob, commit_id null. Readback at 18:16:10.2925448Z showed closed as completed. No commit closing directive was used. Local close receipt C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\tracker157-v021-terminal-close-receipt-20260930.json, SHA-256 12abad68620eda8f758ece00095cdcacc9426c9e8a30a13a623ac4e3e8d9e03c; it supersedes the open-tracker statement in the sealed final delivery receipt, which is not edited. WATCHER 2a4bc4c8-1211-49d4-ba68-9d05d5d7530d reports wait wait-pr160-release36754203801-tag-v021-212b76a done, zero active external waits, and no session automation. The worker, branch, worktree, and evidence are retained quiescent, not archived.",
+          "limits": "The zero genuine process read errors and conditional diagnostic, FAILED_HELD, Windows job-terminal, downgrade, coverage, and no-signing limits are unchanged. No hardening, closure gate, campaign completion, PR #138, issues #152/#153, Watcher or Station runtime, fleet, shared database, or PATH action or claim. The same worker is retained quiescent."
         }
       },
       "description": "Prepare one bounded v0.2.0 schema-3 recovery candidate after issues #154 and #155 merge, then submit its immutable evidence to a separate operator publication gate.",
@@ -572,9 +623,17 @@
       "target": "schema3-release-preparation / schema3-release-gate / issue #157",
       "owner": "Local Daemon orchestrator for preparation; campaign and operator for publication approval",
       "terminalPath": "After both repairs merge, one isolated worker aligns v0.2.0 metadata, proves genuine v0.1.2 upgrade and fresh installs with controlled candidate assets, exercises schema-2 migration and preexisting schema-3 connection in disposable databases, completes exact-head CI and the build-only Release matrix, and binds all assets, checksums, build identities, source association, notes, exclusions, and limitations to one reviewed candidate. The operator then explicitly approves or declines publication; approval returns publication and installation verification to the same worker.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Explicit operator approval for the Tier B recovery release packet on 2026-09-24. Preparation authority does not authorize tag or publication."
+      "dispositionAuthority": "Explicit operator approval for the Tier B recovery release packet on 2026-09-24. Preparation authority does not authorize tag or publication.",
+      "completionEvidence": {
+        "outcome": "The bounded schema-3 recovery release is published as v0.2.1 (GitHub Release 400301560, tag at 212b76a4c586101bdc2a53264e2a4c3e2326671a) after a new explicit operator decision, with successful tag-run proof, live-asset verification, and isolated post-publication install and upgrade proof, independently audited by Local.",
+        "evidence": "evidence.v021Publication",
+        "packetSha256": "2f6d35836e9564cad3cc0a356e39c6081bd6825a780912476e93d2a0ad81f562",
+        "fieldReport": "https://github.com/lossyrob/telex/issues/157#issuecomment-5916978763",
+        "tracker": "Campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c explicitly accepted only the bounded schema3-release-gate completion and authorized tracker 157 as completed (authority C:\\Users\\robemanuele\\.copilot\\session-state\\e06813c4-1db2-4d77-b8d3-3addc6a1824c\\files\\release157-v021-terminal-acceptance-20260930.json, SHA-256 b3b8188024c079af317954d6234227759ba2435eb5cdac6dc787b6bb178426da). After a fresh guard at 2026-09-30T18:16:07.991Z (issue open, latest lifecycle event 32183059364, tags and Release 400301560 with its 10 audited assets, packet, and field report unchanged), Local made one explicit REST state change to closed with reason completed at 2026-09-30T18:16:08Z: closed event 32189988997, actor lossyrob, commit_id null. Readback at 18:16:10.2925448Z showed closed as completed. No commit closing directive was used. Local close receipt C:\\Users\\robemanuele\\.copilot\\session-state\\aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57\\files\\tracker157-v021-terminal-close-receipt-20260930.json, SHA-256 12abad68620eda8f758ece00095cdcacc9426c9e8a30a13a623ac4e3e8d9e03c; it supersedes the open-tracker statement in the sealed final delivery receipt, which is not edited. WATCHER 2a4bc4c8-1211-49d4-ba68-9d05d5d7530d reports wait wait-pr160-release36754203801-tag-v021-212b76a done, zero active external waits, and no session automation. The worker, branch, worktree, and evidence are retained quiescent, not archived.",
+        "limits": "v0.2.0 remains an unpublished tag; the original Errno 13 cause is unknown. No hardening or closure acceptance."
+      }
     },
     {
       "id": "local-daemon-postgres-reset-deadline-classification",
@@ -1573,9 +1632,14 @@
       "target": "schema3-release-preparation / schema3-release-gate / issue #157",
       "owner": "Issue #157 release worker ebfd215b-2229-4075-84af-4a4d6de2be7c under Local Daemon workstream orchestrator authorization",
       "terminalPath": "Bounded causal evidence, then a reviewed corrective v0.2.1 source and PR, then exact CI with the 5 native and Linux PostgreSQL jobs and artifact proof, then authorized merge, then actual final merged-source proof, then a new operator publication decision at schema3-release-gate. The 1b9fc8f0 preparation evidence is historical, not v0.2.1 proof, and the genuine old-binary baseline remains published v0.1.2.",
-      "status": "routed",
+      "status": "completed",
       "decisionState": "accepted",
-      "dispositionAuthority": "Operator choice \"Hold v0.2.0 and prepare a reviewed corrective v0.2.1 candidate (Recommended)\" on 2026-09-30, relayed by campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c and Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57."
+      "dispositionAuthority": "Operator choice \"Hold v0.2.0 and prepare a reviewed corrective v0.2.1 candidate (Recommended)\" on 2026-09-30, relayed by campaign e06813c4-1db2-4d77-b8d3-3addc6a1824c and Local Daemon orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57.",
+      "completionEvidence": {
+        "outcome": "The operator-selected corrective path is complete: reviewed v0.2.1 source 212b76a4 was proven and then published as Release 400301560 after a new operator decision.",
+        "publication": "Tag run 36754203801 attempt 1 succeeded on all 8 jobs, including both Windows native controls; publication packet SHA-256 2f6d35836e9564cad3cc0a356e39c6081bd6825a780912476e93d2a0ad81f562; field report https://github.com/lossyrob/telex/issues/157#issuecomment-5916978763.",
+        "cause": "The original hosted Errno 13 cause of run 36734022444 remains unknown and is not claimed retrospectively. The v0.2.0 tag stays unpublished history."
+      }
     }
   ]
 }

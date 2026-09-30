@@ -52,8 +52,9 @@ PR #156 for PostgreSQL query and `LISTEN` reset recovery. After both repairs mer
 and the campaign verifies dependency closure, one isolated worker prepares an
 immutable candidate for the campaign/operator-owned
 `schema3-release-gate`. The v0.2.0 tag run failed on Windows, so v0.2.0 is held
-unpublished and the same preparation node now prepares a corrective v0.2.1
-candidate. This chain does not reopen the earlier completed release nodes and
+unpublished; the corrective v0.2.1 was prepared by the same node and published
+on 2026-09-30 after a new operator decision. This chain does not reopen the
+earlier completed release nodes and
 does not accept hardening or closure.
 
 The richer design rationale and the full decision ledger that led here live in
@@ -375,6 +376,17 @@ with newly built artifacts. The original Errno 13 cause is still not
 identified. `schema3-release-gate` stays planned: its dependency is met, but
 publishing v0.2.1 needs a new explicit operator decision, and tracker 157 stays
 open until campaign decides its disposition.
+
+v0.2.1 is published; the paragraph above is dated history. The operator
+authorized publishing exactly `212b76a4` and its sealed packet. The same
+worker tagged `v0.2.1`, and tag run 36754203801 passed all 8 jobs, including
+both Windows native controls and Linux PostgreSQL. Release v0.2.1 (ID
+400301560) was published at 2026-09-30T17:57:24Z as Latest. Local verified
+the live asset bytes, and isolated Windows and Ubuntu runs upgraded a real
+published v0.1.2 install through the live installers. `schema3-release-gate`
+is complete. Campaign accepted only this bounded gate completion, and Local then set tracker 157 to closed as completed at 2026-09-30T18:16:08Z (event 32189988997) by an explicit provider action, not a commit directive. The `v0.2.0` tag stays unpublished history, and
+the original Errno 13 cause remains unknown. This does not accept hardening
+or closure.
 
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later
