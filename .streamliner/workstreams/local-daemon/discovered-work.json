@@ -438,6 +438,40 @@
           "gate": "schema3-release-gate stays planned and unaccepted. Publishing v0.2.1 requires a new explicit operator decision for its reviewed, merged, and proven final source. The v0.2.0 authorization does not carry over.",
           "issueState": "Issue #157 stays open.",
           "limits": "Exclusions and the safety, deadline, authentication, schema, and installer-default constraints are unchanged, as are the final evidence requirements. No gate pass, publication, installed fleet, shared database, hardening, or closure claim."
+        },
+        "correctiveCandidate": {
+          "stage": "Corrective v0.2.1 source candidate published for review. The source bundle is complete; independent review, hosted proof, merge, and the final merged-source packet are pending. This is not final proof, incident completion, gate acceptance, or publication.",
+          "operatorDecisionComment": {
+            "url": "https://github.com/lossyrob/telex/issues/157#issuecomment-5914989191",
+            "author": "lossyrob",
+            "postedAt": "2026-09-30T16:03:23Z",
+            "note": "Records the operator choice to hold the unpublished v0.2.0 tag against the published v0.1.2 baseline and to require a new v0.2.1 gate decision. Read independently by Local; author, time, and issue rechecked by the artifact reconciler."
+          },
+          "pullRequest": "https://github.com/lossyrob/telex/pull/160",
+          "pullRequestState": "Open, not draft. Created 2026-09-30T16:24:02Z by the same worker through the App.",
+          "branch": "feature/schema3-release-corrective-v021",
+          "worker": "ebfd215b-2229-4075-84af-4a4d6de2be7c, in the unchanged feature-schema3-release-preparation-157 checkout.",
+          "headCommit": "4b097171ee13caad8c5ea2ecf61469b2798a4e54",
+          "headTree": "409b480ffb593292adc018b91138432ddb1063da",
+          "base": "e2582f01feefadec23e3edb5602c6a0051bfd7e8",
+          "productRange": "14 paths, 573 insertions and 14 deletions, with no authored .streamliner paths.",
+          "closingReference": "The PR body says it does not close #157 or authorize a v0.2.1 tag or publication. At this record, however, GitHub lists #157 in the PR closing references because it parses the phrase \"close #157\" as a closing keyword, so an unedited merge could close #157.",
+          "sourceScope": "Version metadata 0.2.1. A proof-only Windows reader using CreateFileW, ReadFile, and CloseHandle retains the native error, operation, and path. Only a CreateFileW sharing violation (32) after an owned successor spawn is retried, within the existing 15-second readiness budget. Native 5, native 303, errno-only 13, other native errors, read or close failures, pre-spawn errors, foreign identity, and deadline exhaustion stay fatal. New Windows native controls are wired into CI and both Release Windows architectures, in addition to the full 5-native and Linux PostgreSQL proof.",
+          "causalEvidence": {
+            "report": "C:\\Users\\robemanuele\\.copilot\\session-state\\ebfd215b-2229-4075-84af-4a4d6de2be7c\\files\\corrective-v0.2.1\\native-file-lab-results.json",
+            "reportSha256": "ba766db298e5a1c4b1a83214f11ab6e5257dd2c79eb4bbe629dce60d1f472158",
+            "attribution": "Worker native-control diagnostics; file located and hash matched by the artifact reconciler.",
+            "findings": "Real native controls show that Python errno 13 can conflate Win32 sharing violation 32 with ACL access denied 5; a delete-pending case returned 2 locally. The synthetic daemon and Status sharing-order control is not genuine old-binary runtime.",
+            "limit": "The original hosted Errno 13 cause remains unknown. The incident is not recorded as a proven race, and the 32-only retry is not credited as a correction until review and hosted proof complete."
+          },
+          "workerLocalDiagnostics": {
+            "summary": "Worker reported 18 offline and 4 OS controls, 16 contract and 8 upgrade checks, and exact build, lint, and format passes. A genuine published v0.1.2 to 4b097171 v0.2.1 Windows debug run covered 8 scenarios with 4 exit-0 records and root removal.",
+            "report": "C:\\Users\\robemanuele\\.copilot\\session-state\\ebfd215b-2229-4075-84af-4a4d6de2be7c\\files\\corrective-v0.2.1\\4b09717-windows-proof.json",
+            "reportSha256": "829adb93aed35908a2420d5a65ef477daa92e4232c333bcfb99a8cf0693be310",
+            "limit": "Worker-local diagnostics only; not the hosted matrix or final merged-candidate proof."
+          },
+          "pending": "Existing reviewer bc412947 is scoped to a full review of PR #160. CI and one dispatched Release run 36743984783 at 4b097171 (in progress at this record) are watched only by WATCHER. Then authorized merge, actual final merged-source proof, and a new sealed packet.",
+          "boundaries": "The held v0.2.0 tag remains at 1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe; the failed tag run and earlier packets remain history. The genuine old-binary baseline is published v0.1.2. PR #160 does not authorize v0.2.1 publication; schema3-release-gate stays planned and requires a new explicit operator decision. Issue #157 stays open."
         }
       },
       "description": "Prepare one bounded v0.2.0 schema-3 recovery candidate after issues #154 and #155 merge, then submit its immutable evidence to a separate operator publication gate.",

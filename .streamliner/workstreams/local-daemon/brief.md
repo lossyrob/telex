@@ -343,6 +343,17 @@ and the `1b9fc8f0` packet is not v0.2.1 proof. No v0.2.1 source or PR exists
 yet. Publishing v0.2.1 needs a new explicit operator decision at
 `schema3-release-gate`, which stays planned, and issue #157 stays open.
 
+The operator decision is also recorded on #157 as comment 5914989191. The same
+worker has since opened [PR #160](https://github.com/lossyrob/telex/pull/160)
+with the corrective v0.2.1 source at `4b097171`, so the sentence above about no
+v0.2.1 source or PR is now dated. The PR sets version 0.2.1 and adds proof-only
+Windows diagnostics that retry only a native sharing violation within the
+existing readiness budget. Worker native controls show that the original
+Errno 13 could mean either a sharing violation or access denied; the hosted
+cause remains unknown. Independent review, hosted CI and Release proof, merge,
+and final merged-source proof are pending. GitHub currently lists #157 as a
+closing reference of PR #160, although its body says it does not close #157.
+
 On 2026-09-28 the operator also answered "Keep #155 required; hold until a
 reviewed Windows solution exists", and campaign confirmed it. The later
 job-terminal choice supplied that intended Windows receipt but did not by itself

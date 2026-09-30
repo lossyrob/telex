@@ -9,7 +9,8 @@
 - **v0.2.0 preparation PR:** [lossyrob/telex#159](https://github.com/lossyrob/telex/pull/159),
   merged 2026-09-28T22:24:23Z as `1b9fc8f0`
 - **v0.2.0 candidate source (tagged, unpublished):** `1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe`
-- **Corrective v0.2.1 source and PR:** not yet known
+- **Corrective v0.2.1 PR:** [lossyrob/telex#160](https://github.com/lossyrob/telex/pull/160),
+  open, head `4b097171ee13caad8c5ea2ecf61469b2798a4e54`; review and proof pending
 - **Attention:** focus
 - **Depends on:** completed `windows-token-buffer-alignment`, completed `postgres-wait-reset-recovery`
 - **Blocks:** `schema3-release-gate`
@@ -268,3 +269,40 @@ discovery `local-daemon-v020-tag-Windows-proof-failure`.
   move, deletion, recreation, or withdrawal of `v0.2.0` is authorized.
   Exclusions, safety constraints, the installer default, and final evidence
   requirements are unchanged. Issue #157 stays open.
+
+## Corrective v0.2.1 candidate
+
+This records the published corrective source candidate. It is not final proof,
+incident completion, gate acceptance, or publication. The full record is on
+ledger item `local-daemon-schema3-recovery-release`
+(`evidence.correctiveCandidate`).
+
+- The operator decision is recorded on #157 as
+  [comment 5914989191](https://github.com/lossyrob/telex/issues/157#issuecomment-5914989191)
+  (lossyrob, 2026-09-30T16:03:23Z).
+- The same worker, `ebfd215b`, opened
+  [PR #160](https://github.com/lossyrob/telex/pull/160) from
+  `feature/schema3-release-corrective-v021` at head `4b097171` (tree
+  `409b480f`, base `e2582f01`): 14 paths, 573 insertions and 14 deletions,
+  with no authored `.streamliner` paths.
+- Source scope: version metadata 0.2.1 and a proof-only Windows reader that
+  keeps native error details. Only a CreateFileW sharing violation (32) after
+  an owned successor spawn is retried, within the existing 15-second readiness
+  budget; native 5, 303, errno-only 13, other errors, pre-spawn errors,
+  foreign identity, and deadline exhaustion stay fatal. New Windows native
+  controls run in CI and both Release Windows architectures.
+- Worker native controls (report SHA-256 `ba766db2...2158`) show that Python
+  errno 13 can mean Win32 32 or 5. The original hosted cause remains unknown,
+  and the incident is not recorded as a proven race.
+- Worker-local checks and a genuine v0.1.2-to-v0.2.1 Windows debug run (report
+  SHA-256 `829adb93...e310`) passed. They are not hosted or final
+  merged-source proof.
+- Pending: full review by the existing reviewer, CI and Release run
+  36743984783 at `4b097171`, authorized merge, final merged-source proof, and
+  a new sealed packet.
+- The PR body says it does not close #157, but GitHub currently lists #157 as a
+  closing reference because it parses "close #157" as a closing keyword. An
+  unedited merge could close #157.
+- The `v0.2.0` tag stays at `1b9fc8f0`, and the baseline remains published
+  v0.1.2. PR #160 does not authorize v0.2.1 publication; that needs a new
+  operator decision at `schema3-release-gate`. Issue #157 stays open.
