@@ -183,6 +183,12 @@ jobs:
             --report evidence/release-proof.json
           if ($LASTEXITCODE -ne 0) { throw "native release proof failed" }
 
+      - name: Prove native Windows observation error classification
+        if: runner.os == 'Windows'
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python tests/release_windows_publication_test.py --report evidence/native-file-observer.json
+
       - name: Upload native release evidence
         if: always()
         uses: actions/upload-artifact@v4

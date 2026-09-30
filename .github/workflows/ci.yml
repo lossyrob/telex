@@ -32,6 +32,12 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python tests/release_candidate_test.py
 
+      - name: Test native Windows capability publication observation
+        if: runner.os == 'Windows'
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: python tests/release_windows_publication_test.py
+
       - name: Install Rust stable
         uses: actions-rust-lang/setup-rust-toolchain@v1
         with:

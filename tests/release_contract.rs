@@ -113,6 +113,12 @@ fn release_coupled_versions_match_the_package() {
         .find(|p| p["name"].as_str() == Some("telex"))
         .unwrap();
     assert_eq!(package["version"].as_str(), Some(expected));
+    assert!(
+        read("tests/release_candidate.py").contains(&format!(
+            "parser.add_argument(\"--tag\", default=\"v{expected}\")"
+        )),
+        "the explicit proof default must follow the current release candidate"
+    );
 }
 
 #[test]
