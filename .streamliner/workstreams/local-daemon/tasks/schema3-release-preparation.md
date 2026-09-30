@@ -16,7 +16,8 @@
 - **Owner:** release worker `ebfd215b-2229-4075-84af-4a4d6de2be7c` under Local Daemon
   workstream orchestrator authorization
 - **Tracker:** [lossyrob/telex#157](https://github.com/lossyrob/telex/issues/157)
-- **Branch:** `feature/schema3-release-preparation`
+- **Branch:** `feature/schema3-release-corrective-v021` (current); the v0.2.0
+  preparation used `feature/schema3-release-preparation`
 - **Parent workstream:** [lossyrob/telex#32](https://github.com/lossyrob/telex/issues/32)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
 
@@ -25,8 +26,10 @@
 Current cycle, from 2026-09-30: prepare one immutable, reviewed corrective v0.2.1
 candidate that addresses the v0.2.0 tag-run Windows proof failure, and submit it
 to `schema3-release-gate` for a new explicit publication decision. The
-requirements below apply to v0.2.1 unchanged except for the version. The
-original v0.2.0 outcome follows as history.
+requirements below apply to v0.2.1 unchanged except for the version. The same
+already-active worker (`ebfd215b`) and checkout continue this work; the initial
+launch instructions under Engagement are historical and do not permit creating
+another worker. The original v0.2.0 outcome follows as history.
 
 Prepare one immutable, reviewed v0.2.0 schema-3 recovery release candidate after
 issues #154 and #155 merge and the campaign verifies dependency closure.
