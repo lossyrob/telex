@@ -2376,7 +2376,7 @@ explicit teardown routes through it:
 | `Detach` (no member) | one binding | admission taken first and held; withdrawal after `record_detach_tombstone` |
 | `telex copilot detach` (CLI) | one binding | after the daemon call, so it still runs when no daemon is reachable |
 | `SessionEnd` / watch-pid death / definite end | every binding of the session | per binding, under that binding's admission: lease release, idle marking, then withdrawal |
-| `Reset` | every binding of the **address**, in any session | after `reset_epoch_lease`; then per binding, under that binding's admission: idle marking, then withdrawal |
+| `Reset` | every binding of the **address**, in any session | enumerate durable and live bindings; then per binding, under that binding's admission: idle marking, withdrawal, and a second idle sweep; only after every binding operation succeeds, `reset_epoch_lease` releases the durable fence |
 | push→pull fallback (`telex copilot fallback run`) | one binding | inside the daemon's `Register { on_deliver: None, replace_on_deliver: true }`, under the same admission that installs the pull-only member |
 | reconcile projecting `revoked` | one binding, generation-conditional | inside `apply_outcome` |
 
