@@ -437,6 +437,26 @@ against canonical design revision `233d46af`. That result and campaign merge
 authorization are pending, and the node stays in progress until PR #138
 merges.
 
+Design reinspection of `975f10ef` found one documentation error, D1
+(`pr138-design-D1-reset-order`). The `Reset` row in `docs/design/daemon.md`
+placed `reset_epoch_lease` before the per-binding work. The runtime does the
+reverse: it enumerates durable and live bindings, then for each binding,
+under that binding's admission, marks it idle, withdraws its intent, and runs
+a second idle sweep. Only after every binding succeeds does it reset the
+epoch. The same wrong row was present at `6315c24a`, so D1 is an omission in
+the earlier design pass, not a regression from integration. The same writer
+corrected only that row at `286251b6de93b2e84ccd4547b6e16b8b2472c36a` (tree
+`56fa6e1155cefc832720b201f0448f2e2d5122ae`); `src/daemon.rs` is unchanged.
+CI run 37844195350 passed all 15 jobs on that exact head. Local reports a
+clean internal review of the 975f10ef to 286251b6 delta by `41c2eef9` with
+zero findings. Steward `af271672` passed the design with D1 resolved and
+zero blockers or warnings. Neither design result was posted to the PR.
+PR #138 is open, non-draft, and mergeable at that head. The exact-head
+review, CI, and design evidence is therefore in place, and ledger item
+`local-daemon-pr138-exact-head-ci-failures` is complete. Campaign merge
+authorization is still pending, and the node stays in progress until PR #138
+merges.
+
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
 campaign's sole artifact reconciler applying the reviewed, operator-authorized

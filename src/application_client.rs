@@ -3628,6 +3628,9 @@ fn project_membership_loss(
         Some(NeedsAttachReason::RestartLost) => MembershipLossReason::DaemonRestart,
         Some(NeedsAttachReason::DeliberatelyDetached) => MembershipLossReason::DeliberateDetach,
         Some(NeedsAttachReason::PredicateDeath) => MembershipLossReason::PredicateDeath,
+        Some(NeedsAttachReason::PushIntentPending | NeedsAttachReason::PushIntentUnrecoverable) => {
+            MembershipLossReason::NeedsAttach
+        }
         Some(NeedsAttachReason::Unknown(raw_reason)) => MembershipLossReason::Unknown {
             raw_reason: Some(raw_reason),
         },

@@ -83,22 +83,22 @@ pub enum SendResult {
 
 #[async_trait]
 pub trait TelexAdapter: Send + Sync {
-    #[must_use = "attach must complete before the watcher sends"]
+    #[must_use = "attachment failures must be handled"]
     async fn attach(&self, sender: &str, runtime_session_id: &str, watcher_pid: u32) -> Result<()>;
-    #[must_use = "attachment verification must be observed"]
+    #[must_use = "attachment verification failures must be handled"]
     async fn verify_attached(
         &self,
         sender: &str,
         runtime_session_id: &str,
         watcher_pid: u32,
     ) -> Result<()>;
-    #[must_use = "send acceptance or rejection must be handled"]
+    #[must_use = "send results must be handled"]
     async fn strict_send(
         &self,
         runtime_session_id: &str,
         request: &SendRequest,
     ) -> Result<SendResult>;
-    #[must_use = "detach completion must be observed"]
+    #[must_use = "detach failures must be handled"]
     async fn detach(&self, sender: &str, runtime_session_id: &str) -> Result<()>;
 }
 
