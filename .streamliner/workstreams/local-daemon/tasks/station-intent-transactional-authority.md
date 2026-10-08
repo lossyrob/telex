@@ -3,8 +3,8 @@
 - **Workstream:** `local-daemon`
 - **Node:** `station-intent-transactional-authority`
 - **Type:** implementation
-- **Status:** ready for one supported preparation (2026-10-08); no worker
-  exists and preparation has not started
+- **Status:** blocked (2026-10-08) on Streamliner preparation long-context
+  propagation; the worker exists but is not write-authorized
 - **Attention:** focus
 - **Depends on:** completed `station-intent-reconciliation` (PR #138 merged as
   `6ab6143a`)
@@ -36,6 +36,35 @@ operator; ordinary implementation choices are not. Preparation comes before
 any writer launch, and new sessions explicitly request `gpt-6-astra`, high
 reasoning effort, and long context. Builder hardening and closure gates stay
 separate decisions.
+
+### Current blocker (2026-10-08)
+
+Supported preparation `beb72642` completed normally from clean source
+`43d5e43f` and created one isolated worktree on local branch
+`feature/station-intent-transactional-authority`. Worker session `62bbe494`
+was created at 2026-10-08T22:13:52Z and correctly recorded the requested
+`gpt-6-astra`, high reasoning, `long_context` profile. The preparation
+initializer did not meet that profile: it ran with high reasoning but no
+context tier and a 272,000-token prompt limit across 22 calls. The cause is in
+Streamliner preparation, not in this task. Its SDK 0.3.0 session
+configuration and create/resume calls have no context-tier field, and the
+adapter passes long context only as a startup CLI argument. The
+1,050,000-token catalog figure is model capability, not the effective
+setting. The worker has never been write-authorized; its worktree is clean at
+`43d5e43f`, and it is held before any product write.
+
+The graph records this as external condition
+`streamliner-preparation-long-context-propagation`, owned by Streamliner
+service `79bfffa9`, with campaign authority over any repair or restart. It
+clears after a reviewed and merged preparation-only adapter repair that sets
+the context tier explicitly on session create and resume, a controlled
+restart of the owned API, and one new initializer run on the same checkout
+that proves long context on the wire, at start, and in usage, with normal
+context loading and PAW initialization once. The earlier run stays frozen as
+evidence, and no silent downgrade is accepted. The campaign has not yet
+authorized the repair. A global SDK migration, a duplicate server, or a
+`node_modules` patch is not part of the fix. The task outcome, scope, success
+criteria, single worker, and prepared branch are unchanged.
 
 ## Outcome
 

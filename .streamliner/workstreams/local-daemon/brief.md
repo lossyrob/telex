@@ -140,7 +140,7 @@ PR merged later that day as `6ab6143a` after campaign authorization. The
 presented with isolated restart/drain/upgrade and push-recovery evidence.
 
 Unconditional transactional generation authority, seekable fair discovery and
-garbage collection, exact counts, and exact over-cap recovery belong to the ready
+garbage collection, exact counts, and exact over-cap recovery belong to the
 XL `station-intent-transactional-authority` node
 ([#153](https://github.com/lossyrob/telex/issues/153)). That node follows PR #138 and
 blocks the final **closure gate**, not PR #138 or the hardening gate.
@@ -477,6 +477,20 @@ accepted. Design steward `af271672` then
 found the issue #153 task ready for one supported preparation against the
 merged source, so `station-intent-transactional-authority` is ready. No worker
 exists and preparation has not started.
+
+Local then applied the reviewed issue #153 body correction once (readback at
+2026-10-08T22:03:07Z). Supported preparation `beb72642` completed from
+`43d5e43f`, and worker session `62bbe494` correctly recorded the requested
+`gpt-6-astra`, high reasoning, `long_context` profile. The preparation
+initializer, however, ran without the long-context tier and with a
+272,000-token prompt limit, because Streamliner preparation does not pass
+the context tier when it creates or resumes the session. The node is
+therefore blocked on external condition
+`streamliner-preparation-long-context-propagation`, owned by the Streamliner
+service with campaign authority over the repair, and the worker is held
+before any product write. No #153 implementation has started. The task
+outcome, single worker, prepared branch, and completed issue #106 / PR #138
+record are unchanged.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the

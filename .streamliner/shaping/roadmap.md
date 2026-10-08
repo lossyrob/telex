@@ -226,7 +226,7 @@ corrective v0.2.1 was published on 2026-09-30.
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | The builder accepted the direct contract and downstream geometry at `direct-station-direction-gate`, closing the design checkpoint. `station-app` remains planned and unlaunched with direct `client-conformance` and `consumer-integration-gate` holds; launch still requires separate preparation and authorization. |
 | Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on completed Application Client `client-conformance` and the pre-integration `consumer-integration-gate` over the same exact public revision; the gate does not require Watcher runtime implementation. |
 | Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Issue #152 `client-conformance` is the campaign main effort and is in progress; its existing writer is integrating current main before full validation, exact-head review, and the single delivery PR. The consumer gate remains planned until both product authorities attest the same reviewed and green conformance head without product implementation evidence. |
-| Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | The schema-3 recovery release is complete (v0.2.1). Issue #106 / PR #138 `station-intent-reconciliation` merged on 2026-10-08 and is complete. Isolated both-backend evidence goes to the separate hardening gate, and issue #153 is ready for one supported preparation and must complete before Local Daemon closure. |
+| Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | The schema-3 recovery release is complete (v0.2.1). Issue #106 / PR #138 `station-intent-reconciliation` merged on 2026-10-08 and is complete. Isolated both-backend evidence goes to the separate hardening gate, and issue #153 must complete before Local Daemon closure; its prepared worker is held until Streamliner preparation passes the long-context tier to its initializer. |
 
 ## Shared seam
 
@@ -406,9 +406,10 @@ collapse into noise, and no session-bound polling task is required.
 2. Local Daemon PR #138 for issue #106 merged on 2026-10-08 as `6ab6143a`.
    Keep the hardening gate a separate builder decision that needs isolated
    restart, drain, upgrade, and push-recovery evidence.
-3. Issue #153 `station-intent-transactional-authority` is ready from the
-   merged authority at `6ab6143a`. Run one supported preparation before any
-   writer launch.
+3. Issue #153 `station-intent-transactional-authority` was prepared from the
+   merged authority at `6ab6143a`, but its worker is held before any product
+   write until Streamliner preparation passes the required long-context tier
+   to its initializer.
 4. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
    after separate campaign authorization.
 5. Keep `watcher-runtime-core` planned until `client-conformance` uses the
