@@ -1158,6 +1158,7 @@ mod tests {
         // first-hop uncertainty explicitly rather than inventing build identity.
         let metadata = parse_source_metadata(&value).unwrap();
         assert_eq!(metadata.build_id, install::UNKNOWN_BUILD_ID);
+        assert_eq!((metadata.schema_min, metadata.schema_max), (2, 2));
 
         let mut current = value;
         current["version"]["build_id"] = serde_json::json!("candidate-build");

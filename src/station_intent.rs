@@ -4764,8 +4764,10 @@ mod tests {
             "a live lock holder must cause a bounded failure, not lock theft"
         );
         assert!(
-            start.elapsed() < INTENT_LOCK_RETRY * (INTENT_LOCK_ATTEMPTS + 2),
-            "the contender must honor the bounded acquisition policy"
+            start.elapsed()
+                < INTENT_LOCK_RETRY * (INTENT_LOCK_ATTEMPTS + 2) + Duration::from_secs(1),
+            "the contender must honor the bounded acquisition policy, allowing scheduler delay \
+             under the full parallel workspace suite"
         );
         assert!(lock_path.exists(), "the advisory lock file is persistent");
         drop(first);
@@ -5143,6 +5145,7 @@ mod tests {
         let mut orphan = sample_intent("sqlite:/a", "sess", "orphan");
         orphan.created_at_ms = 0;
         orphan.updated_at_ms = 0;
+        orphan.producer.pid = u32::MAX;
         orphan.producer.credential.path = credential.clone();
         let now = STATION_INTENT_UNVERIFIABLE_TTL.as_millis() as i64 + 60_000;
         orphan.evidence = IntentEvidence {

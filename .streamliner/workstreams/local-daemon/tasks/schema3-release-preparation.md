@@ -1,0 +1,386 @@
+# Schema-3 recovery release preparation
+
+- **Workstream:** `local-daemon`
+- **Node:** `schema3-release-preparation`
+- **Type:** implementation
+- **Status:** completed; the corrective v0.2.1 preparation at `212b76a4` was
+  accepted on 2026-09-30. After a new operator decision, v0.2.1 was published
+  on 2026-09-30 (see `schema3-release-gate`). The node was reopened on 2026-09-30 after the v0.2.0 tag
+  Release run failed; the v0.2.0 preparation, accepted on 2026-09-28 at
+  `1b9fc8f0`, is dated history
+- **v0.2.0 preparation PR:** [lossyrob/telex#159](https://github.com/lossyrob/telex/pull/159),
+  merged 2026-09-28T22:24:23Z as `1b9fc8f0`
+- **v0.2.0 candidate source (tagged, unpublished):** `1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe`
+- **Corrective v0.2.1 PR:** [lossyrob/telex#160](https://github.com/lossyrob/telex/pull/160),
+  merged 2026-09-30T17:21:06Z as `212b76a4` from reviewed head `4b097171`
+- **Corrective v0.2.1 candidate source:** `212b76a4c586101bdc2a53264e2a4c3e2326671a`
+  (tree `033242b4`)
+- **Attention:** focus
+- **Depends on:** completed `windows-token-buffer-alignment`, completed `postgres-wait-reset-recovery`
+- **Blocks:** `schema3-release-gate`
+- **Owner:** release worker `ebfd215b-2229-4075-84af-4a4d6de2be7c` under Local Daemon
+  workstream orchestrator authorization
+- **Tracker:** [lossyrob/telex#157](https://github.com/lossyrob/telex/issues/157)
+- **Branch:** `feature/schema3-release-corrective-v021` (current); the v0.2.0
+  preparation used `feature/schema3-release-preparation`
+- **Parent workstream:** [lossyrob/telex#32](https://github.com/lossyrob/telex/issues/32)
+- **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
+
+## Outcome
+
+Current cycle, from 2026-09-30: prepare one immutable, reviewed corrective v0.2.1
+candidate that addresses the v0.2.0 tag-run Windows proof failure, and submit it
+to `schema3-release-gate` for a new explicit publication decision. The
+requirements below apply to v0.2.1 unchanged except for the version. The same
+already-active worker (`ebfd215b`) and checkout continue this work; the initial
+launch instructions under Engagement are historical and do not permit creating
+another worker. The original v0.2.0 outcome follows as history.
+
+Prepare one immutable, reviewed v0.2.0 schema-3 recovery release candidate after
+issues #154 and #155 merge and the campaign verifies dependency closure.
+Preparation does not authorize a tag or publication.
+
+The candidate must include both repairs, schema-3 compatibility, truthful release
+notes and exclusions, genuine isolated upgrade and fresh-install proof, exact-head
+CI, the build-only Release workflow matrix, and concrete asset-to-source evidence.
+Submit the immutable candidate and evidence to `schema3-release-gate`.
+
+## Preserved incident evidence
+
+Use the existing read-only incident assessment:
+
+`C:\Users\robemanuele\.copilot\session-state\b737a932-c687-4b95-b273-8335a59f6e89\files\schema3-release-incident-evidence.md`
+
+Do not repeat the shared-database investigation or read the shared database.
+
+## Required work
+
+### Version and metadata
+
+- Set the candidate version in `Cargo.toml` and refresh `Cargo.lock`: v0.2.0 at
+  `1b9fc8f0`; v0.2.1 for the corrective candidate.
+- Update both version values in `.github/plugin/marketplace.json`.
+- Update `copilot/plugin/plugin.json`.
+- Update the `--plugin-version` value in
+  `copilot/plugin/skills/telex/SKILL.md`.
+- Audit and align every other release-coupled metadata surface.
+- Audit the schema-2 fixture in `src/commands/upgrade.rs` for historical versus
+  current meaning. Preserve historical schema-2 semantics where intended; do not
+  replace `2` mechanically or weaken the old schema guard.
+
+### Compatibility and install proof
+
+- Install a genuine v0.1.2 binary in disposable, isolated install, config, and
+  database roots. Never use the operator's actual binary, installed-user daemon,
+  shared configuration, or shared database.
+- Exercise the v0.1.2 binary's real `telex upgrade` path against controlled
+  candidate release, manifest, asset, and checksum endpoints.
+- Prove the protocol 1.4-to-1.5 daemon transition without touching an
+  installed-user daemon.
+- Exercise a representative schema-2 migration and a preexisting schema-3
+  connection using disposable databases.
+- Exercise fresh `install.ps1` and `install.sh` installs from controlled candidate
+  assets.
+- Treat manifest schema range 2..3 as inference until the old-binary upgrade
+  exercise succeeds.
+- The genuine old-binary baseline remains the published v0.1.2 release, not the
+  unpublished v0.2.0 tag.
+
+### Candidate and evidence
+
+- Write release notes that identify schema-3 support, both repairs, supported
+  upgrade behavior, downgrade limits, and explicit exclusions.
+- Exclude PR #138 station-intent restoration, issue #152 Application Client
+  consumer bootstrap, issue #153 transactional authority, Watcher/Station
+  runtimes, and campaign closure.
+- Run required exact-head CI and the build-only Release workflow matrix.
+- Verify every platform asset, checksum, executable build identity, and
+  candidate/source association.
+- Obtain exact-head implementation review plus compatibility and design
+  inspection.
+- Bind exact commands, outcomes, artifact identities, coverage, limitations, and
+  uncertainty to one immutable candidate.
+
+## Boundaries
+
+- Keep completed release nodes historical; do not reopen or reset them.
+- Do not relax the old schema guard, redesign automatic schema policy, or add
+  unrelated features.
+- Do not use or mutate production/shared databases, shared configuration, the
+  operator installation, or the installed-user daemon.
+- Do not merge or depend on PR #138. Do not revive writers for PR #138, issue
+  #152, issue #153, Watcher/Station runtimes, or campaign closure.
+- Do not tag, publish, or install for the operator under preparation authority.
+
+## Success criteria
+
+- Both prerequisite repair merges and campaign dependency verification are
+  recorded before release work starts.
+- All release-coupled metadata agrees on the candidate version (v0.2.1 for the
+  corrective candidate).
+- A genuine isolated v0.1.2 binary completes the real controlled upgrade path,
+  including manifest and checksum handling and protocol 1.4-to-1.5 transition.
+- Fresh PowerShell and shell installs succeed from controlled candidate assets.
+- Disposable tests prove representative schema-2 migration and preexisting
+  schema-3 connection behavior.
+- Exact-head CI and the build-only Release matrix pass.
+- Every platform asset and checksum resolves to the reviewed source head and
+  reports the expected executable build identity.
+- The immutable candidate packet states tested compatibility, inference,
+  exclusions, downgrade limits, and remaining uncertainty without overclaiming.
+
+## Engagement
+
+- Launch one new isolated release worker only after both repair merges and
+  campaign-verified dependency closure. This is the third and final new delivery
+  session in the packet; do not create a dormant placeholder.
+- The Local Daemon orchestrator prepares the worker through Streamliner, registers
+  the exact prepared checkout path in branch mode, verifies `session-online`,
+  grants standalone write authority, and obtains acknowledgement before product
+  writes.
+- Every new session or delegated agent must explicitly set
+  `model=gpt-6-astra`, `reasoning_effort=high`, and
+  `context_tier=long_context`; silent downgrade is not authorized. This artifact
+  role creates or delegates none.
+- Review checkouts must be physically distinct and read-only. Never use
+  `open_pr_session` for a reviewer.
+- Register external waits only through WATCHER
+  `2a4bc4c8-1211-49d4-ba68-9d05d5d7530d`.
+- Product merge requires exact-head campaign merge authorization.
+- After separate operator approval at `schema3-release-gate`, the same release
+  worker owns tagging, publication, and installation verification. Do not create
+  another permanent release session.
+
+## Launch evidence
+
+The Engagement steps above are the launch contract. The facts below record
+their completion. The full record is on ledger item
+`local-daemon-schema3-recovery-release`.
+
+- Campaign created exactly one branch-mode App worker, `ebfd215b-2229-4075-84af-4a4d6de2be7c`, at
+  2026-09-28T19:52:59Z in
+  `C:\Users\robemanuele\proj\utils\copilot-worktrees\telex\feature-schema3-release-preparation-157`
+  on `feature/schema3-release-preparation`, with gpt-6-astra, high, and
+  long_context set explicitly. Campaign is the immutable App creator; the Local
+  orchestrator is the controller.
+- Supported preparation run `d824d107` succeeded, and the kickoff was delivered
+  unchanged (SHA-256
+  `b93497dbdb7a8dea1224bb53f11156b25da426b215a13d19d3c1de304e4372b8`).
+- Local verified `session-online` at clean `246db825`, granted standalone
+  write authority, and received the worker acknowledgement before any
+  repository write. The worker then fast-forwarded to `008f3363` and began
+  implementation under routine autonomy.
+- Accepted same-node discovery `local-daemon-release-installer-path-isolation`:
+  `install.ps1` mutates the user PATH even with an isolated install root. A
+  default-preserving explicit opt-out or test seam with targeted tests and
+  documentation is pending implementation and proof.
+- All required compatibility, install, CI, asset, review, and inspection proof
+  above remains pending. `schema3-release-gate` remains planned, and no tag or
+  publication is authorized.
+
+## Preparation merge
+
+This records the preparation source merge only. It is not completion of this
+node, gate acceptance, a tag, or publication. The full record is on ledger item
+`local-daemon-schema3-recovery-release` (`evidence.preparationMerge`).
+
+- Campaign authorized exact head `efc30214`. PR #159 merged at
+  2026-09-28T22:24:23Z as `1b9fc8f0891d6aaa620e6a40dcb0109cb8c31bbe` (parents
+  `950767c6` and `efc30214`). The merge tree equals the reviewed source tree;
+  17 paths changed with no `.streamliner` paths. The source branch is
+  preserved, and issue #157 remains open.
+- At `efc30214`: full review 5344963526 plus a clean delta review with 0
+  cumulative findings, CI run 36487907750 on all 15 jobs, build-only Release
+  run 36488194435 on the 5 native and Linux PostgreSQL jobs, and design
+  inspection PASS. Branch artifacts and inventories are historical evidence,
+  not proof for the merged commit.
+- Same-PR discoveries, each absorbed with its source fix merged and final proof
+  at `1b9fc8f0` pending: `local-daemon-release-installer-path-isolation`,
+  `local-daemon-release-native-proof-failures`,
+  `local-daemon-release-metadata-rate-limit`,
+  `local-daemon-release-readiness-deadline-proof`,
+  `local-daemon-release-consumption-attestation`, and
+  `local-daemon-release-cleanup-failure-evidence`.
+- The explicit proof target is `1b9fc8f0`. Later artifact-only main movement
+  does not retarget the candidate.
+- Pending, owned by the same worker: final merged-source CI, one build-only
+  Release run at `1b9fc8f0`, newly built artifacts, genuine v0.1.2 upgrade and
+  install proof, schema-2 and schema-3 proof, native and Linux PostgreSQL
+  coverage, cleanup, the immutable gate packet, and a field report.
+  `schema3-release-gate` remains planned, and no tag or publication is
+  authorized.
+
+## Terminal evidence
+
+The pending statements in the Launch evidence and Preparation merge sections
+above are dated history; the facts below supersede them. The full record is on
+ledger item `local-daemon-schema3-recovery-release`
+(`evidence.finalPreparationDelivery`).
+
+- Local accepted the complete preparation delivery after independent final
+  packet and provider verification. The candidate source is `1b9fc8f0`
+  (tree `914cffaf`).
+- Final CI run 36492188842 passed all 15 jobs, and build-only Release run
+  36492651420 passed all 5 native jobs and hosted Linux PostgreSQL 16 job
+  109168401232, both at `1b9fc8f0`. Every new executable hash differs from the
+  `efc30214` branch build; no branch artifact was relabeled.
+- Sealed packet `telex-v0.2.0-readiness-1b9fc8f.zip` (37,033,829 bytes, SHA-256
+  `720cd397b71eccb445dad19096f5f47b03af14adeb33ba1823ae0322f638cced`; 55
+  members). Local verified every member, the archives, sidecars, and nested
+  executables, and the record associations.
+- Runtime totals from workflow and worker execution: 6 reports, 308 commands,
+  50 scenarios, 28 owned daemon exit-0 records, 6 roots removed, 2 PostgreSQL
+  schema drops, and 7 marked Acks.
+- The field report was posted as
+  [comment 5880528161](https://github.com/lossyrob/telex/issues/157#issuecomment-5880528161)
+  and read back string-exact.
+- The six same-PR discoveries are completed.
+- Issue #157 stays open; it also hosts `schema3-release-gate`, and closure
+  needs a separate campaign disposition. The gate stays planned, and no tag
+  or publication is authorized. The same worker, checkout, and evidence are
+  retained quiescent.
+
+## Corrective v0.2.1 reopening
+
+The Terminal evidence above is the dated v0.2.0 preparation record. The full
+record is on ledger item `local-daemon-schema3-recovery-release`
+(`evidence.publicationAttempt1` and `evidence.correctiveReopen`) and on
+discovery `local-daemon-v020-tag-Windows-proof-failure`.
+
+- On 2026-09-30 the operator authorized v0.2.0 publication from `1b9fc8f0`
+  only. The same worker pushed the immutable lightweight tag `v0.2.0` at that
+  commit.
+- Tag Release run 36734022444 (attempt 1) failed. The tag-version check and four
+  native builds passed; Windows x64 job 109950859494 failed; Linux PostgreSQL
+  job 109954236674 and Publish job 109954237735 were skipped. No release was
+  published, no partial assets exist, and v0.1.2 remains the latest release.
+- The Windows proof observer read of the isolated preexisting schema-3
+  successor cap failed with a local-file PermissionError (Errno 13). The native
+  WinError is absent, and the underlying cause is unknown; a transient sharing
+  or delete hypothesis is not proven. Four owned daemons exited 0 with roots
+  removed. Preexisting-root restart and fresh-installer proof are incomplete.
+- Frozen incident ZIP SHA-256
+  `f79704442e5d1fc80a4109fd2021be9ed208cf8976b20672a541a51d48f4d7ad`
+  (7 members), verified independently by Local without runtime replay.
+- The operator chose "Hold v0.2.0 and prepare a reviewed corrective v0.2.1
+  candidate (Recommended)". This node and issue #157 are reopened for the same
+  worker, `ebfd215b`, with no new node, issue, worker, or scope vote.
+- Terminal path: bounded causal evidence, then a reviewed corrective v0.2.1
+  source and PR, then exact CI with the 5 native and Linux PostgreSQL jobs and
+  artifact proof, then authorized merge, then actual final merged-source proof,
+  then a new operator publication decision at `schema3-release-gate`.
+- The `1b9fc8f0` evidence is historical and is not v0.2.1 proof. No retry, tag
+  move, deletion, recreation, or withdrawal of `v0.2.0` is authorized.
+  Exclusions, safety constraints, the installer default, and final evidence
+  requirements are unchanged. Issue #157 stays open.
+
+## Corrective v0.2.1 candidate
+
+This records the published corrective source candidate. It is not final proof,
+incident completion, gate acceptance, or publication. The full record is on
+ledger item `local-daemon-schema3-recovery-release`
+(`evidence.correctiveCandidate`).
+
+- The operator decision is recorded on #157 as
+  [comment 5914989191](https://github.com/lossyrob/telex/issues/157#issuecomment-5914989191)
+  (lossyrob, 2026-09-30T16:03:23Z).
+- The same worker, `ebfd215b`, opened
+  [PR #160](https://github.com/lossyrob/telex/pull/160) from
+  `feature/schema3-release-corrective-v021` at head `4b097171` (tree
+  `409b480f`, base `e2582f01`): 14 paths, 573 insertions and 14 deletions,
+  with no authored `.streamliner` paths.
+- Source scope: version metadata 0.2.1 and a proof-only Windows reader that
+  keeps native error details. Only a CreateFileW sharing violation (32) after
+  an owned successor spawn is retried, within the existing 15-second readiness
+  budget; native 5, 303, errno-only 13, other errors, pre-spawn errors,
+  foreign identity, and deadline exhaustion stay fatal. New Windows native
+  controls run in CI and both Release Windows architectures.
+- Worker native controls (report SHA-256 `ba766db2...2158`) show that Python
+  errno 13 can mean Win32 32 or 5. The original hosted cause remains unknown,
+  and the incident is not recorded as a proven race.
+- Worker-local checks and a genuine v0.1.2-to-v0.2.1 Windows debug run (report
+  SHA-256 `829adb93...e310`) passed. They are not hosted or final
+  merged-source proof.
+- Pending: full review by the existing reviewer, CI and Release run
+  36743984783 at `4b097171`, authorized merge, final merged-source proof, and
+  a new sealed packet.
+- The PR body says it does not close #157, but GitHub currently lists #157 as a
+  closing reference because it parses "close #157" as a closing keyword. An
+  unedited merge could close #157.
+- The `v0.2.0` tag stays at `1b9fc8f0`, and the baseline remains published
+  v0.1.2. PR #160 does not authorize v0.2.1 publication; that needs a new
+  operator decision at `schema3-release-gate`. Issue #157 stays open.
+
+## Corrective source merge
+
+This records the corrective source merge only. It is not final v0.2.1
+preparation completion, gate acceptance, a tag, or publication. The full record
+is on ledger item `local-daemon-schema3-recovery-release`
+(`evidence.correctivePreparationMerge` and `evidence.trackerProviderRepair`).
+
+- Campaign authorized exact head `4b097171`. PR #160 merged at
+  2026-09-30T17:21:06Z as `212b76a4c586101bdc2a53264e2a4c3e2326671a` (parents
+  `6dcaf045` and `4b097171`, tree `033242b4`). Product source is unchanged
+  from the reviewed head; the merge differs from it only in four existing
+  artifact paths, so the full tree does not equal the reviewed tree.
+- Branch floor at `4b097171`: one initial full COMMENT review 5369458958 with 0
+  findings, design inspection PASS, CI run 36743919402 on all 15 jobs, and
+  build-only Release run 36743984783 on all 5 native jobs, hosted Linux
+  PostgreSQL, and both Windows controls. This is not proof for `212b76a4`.
+- The original tag-run Errno 13 cause remains unknown, and native 5 stays
+  fatal.
+- The explicit proof target is `212b76a4`. Later artifact-only main movement
+  does not retarget the candidate.
+- Pending, owned by the same worker: merged-source CI, one build-only Release
+  run with all 5 native jobs, both Windows controls, and hosted Linux
+  PostgreSQL, a new inventory, and the immutable v0.2.1 packet and field
+  report.
+- Provider history: artifact commit `6dcaf045` unintentionally closed tracker
+  157 (event 32182855058). Local reopened it (event 32183059364, 16:33:23Z),
+  and the PR #160 body was corrected to zero closing references before merge.
+  The earlier note about that hazard in the section above is superseded.
+- The `v0.2.0` tag stays at `1b9fc8f0`, unpublished; the baseline remains
+  published v0.1.2. Publishing v0.2.1 needs a new operator decision at
+  `schema3-release-gate`. Tracker 157 stays open.
+
+## Corrective terminal evidence
+
+The pending statements in the Corrective v0.2.1 candidate and Corrective source
+merge sections above are dated history; the facts below supersede them. The
+full record is on ledger item `local-daemon-schema3-recovery-release`
+(`evidence.correctiveFinalPreparationDelivery`).
+
+- Local accepted the complete corrective delivery after independent final
+  packet and provider verification. The candidate source is `212b76a4` (tree
+  `033242b4`). Product, test, workflow, and docs content equals reviewed head
+  `4b097171`; only four artifact paths differ.
+- Final CI run 36750756776 passed all 15 jobs, and build-only Release run
+  36750976165 passed all 5 native jobs, both Windows native controls, and
+  hosted Linux PostgreSQL job 110011253376, both at `212b76a4`. Every new
+  binary hash differs from the `4b097171` branch build.
+- Sealed packet `telex-v0.2.1-readiness-212b76a.zip` (37,235,224 bytes,
+  SHA-256 `b74c923202f0427d9d01484d79312ad18468bac1327048b4aff3cb6ee7ac5492`;
+  75 members). Local verified every member, the archives, sidecars, nested
+  executables, source blobs, and review files.
+- Runtime totals: 6 reports, 308 commands, 50 scenarios, 28 owned exit-0
+  records, 6 product roots removed, 2 PostgreSQL schema drops, 7 marked Acks,
+  and 112 observations with zero genuine process read errors, plus 8 real-file
+  Windows controls.
+- The original hosted Errno 13 cause is not identified; native 5 and unknown
+  errors stay fatal. The genuine baseline remains published v0.1.2, and the
+  `v0.2.0` tag stays at `1b9fc8f0`, unpublished.
+- The field report was posted as
+  [comment 5916440735](https://github.com/lossyrob/telex/issues/157#issuecomment-5916440735)
+  and read back string-exact.
+- Tracker 157 stays open pending a campaign disposition. The gate stays
+  planned; publishing v0.2.1 needs a new explicit operator decision. The same
+  worker stands down, preserved quiescent.
+
+## Publication
+
+After a new operator decision, the same worker tagged `v0.2.1` at `212b76a4`,
+and [Release v0.2.1](https://github.com/lossyrob/telex/releases/tag/v0.2.1) was published on 2026-09-30T17:57:24Z after
+tag run 36754203801 passed all 8 jobs. Local verified the live assets and the
+isolated post-publication install and upgrade proof. Campaign accepted only this bounded gate completion, and Local then set tracker 157 to closed as completed at 2026-09-30T18:16:08Z (event 32189988997) by an explicit provider action, not a commit directive. The worker is
+retained quiescent. The full record is on the gate task and ledger item
+`local-daemon-schema3-recovery-release`.

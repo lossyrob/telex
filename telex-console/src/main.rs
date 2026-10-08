@@ -52,6 +52,12 @@ struct Args {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    let result = run().await;
+    telex::profiles::drain_password_commands_before_exit();
+    result
+}
+
+async fn run() -> Result<()> {
     let args = Args::parse();
 
     ui::theme::init_time_zone(args.utc);

@@ -31,6 +31,41 @@ telex backend add prod \
 it. On a build without it, supply the token with `--password-command` (for
 example `az account get-access-token ...`).
 
+### Credential commands are one-shot
+
+Use `--password-command` for a command that prints a complete UTF-8 password or
+token and finishes. Telex trims that output. If `--password-env` is also set,
+the environment reference takes precedence.
+
+Telex owns the invocation and its supported in-scope helpers. It cleans up
+remaining owned helpers after successful status plus complete output, or on
+error/cancellation. A shell that exits before a finite helper finishes writing
+does not cause partial credential output to be returned. Do not use this option
+to start a persistent refresh daemon or detached/broker-owned background job.
+Querying an existing credential agent is supported without making that agent a
+cleanup target. Windows jobs and Unix process groups have different escape
+limits; Telex does not claim universal descendant containment.
+
+On Windows, completion means checked termination of the private job, zero active
+job processes, completed launched-shell wait, and completion of Telex's own I/O,
+handle release, and worker. It does not promise that every former helper's
+process handle is already signaled or all kernel/driver rundown and prior external
+I/O has finished. The invocation limit below bounds Telex-owned work, not every
+residual Windows kernel object. Cleanup API failures are still failures, not
+successful receipts.
+
+Each owning process admits at most two credential invocations, and equal
+configured command sources do not overlap during cleanup. Waiting for admission
+spends the original caller budget. Cancellation returns control on that budget
+while the native owner finishes cleanup independently of the async runtime.
+
+Normal owning-host exit can add up to three seconds for one concurrent cleanup
+drain. If cleanup cannot be confirmed, Telex reports a named `FAILED_HELD`
+obligation and holds the host rather than silently leaking ownership or claiming
+clean exit. The exceptional hold can exceed three seconds and requires operator
+intervention. A waiter client does not drain work owned by its daemon. Cleanup
+errors report lifecycle stage/status without echoing the command or helper stderr.
+
 ## Select a backend
 
 ```sh

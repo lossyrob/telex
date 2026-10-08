@@ -21,7 +21,10 @@ reference, never embedded in the config:
   `--entra-cred managed` on a devbox or VM with a managed identity). Requires a
   build with the `entra` feature, which the release binaries include.
 - `--password-env <VAR>`: read the password from an environment variable.
-- `--password-command <cmd>`: run a command that prints the password.
+- `--password-command <cmd>`: run a one-shot command that prints the password.
+  Telex owns supported invocation helpers through completion/cancellation and
+  cleanup; persistent or escaped background work is outside this contract.
+  See the [credential lifecycle](../guides/postgres.md#credential-commands-are-one-shot).
 
 ```sh
 # Postgres with a password from an env var:

@@ -36,6 +36,18 @@ Linux (Raspberry Pi, Graviton, ARM WSL) — install from source with `cargo inst
 
 ## Verify
 
+For an installation that must not change the Windows user PATH, set
+`$env:TELEX_NO_MODIFY_PATH = '1'` before running `install.ps1`. The default still
+adds the install's `bin` directory to user PATH when absent.
+
+Both installers accept the same trusted mirror overrides as `telex upgrade`:
+`TELEX_UPGRADE_API_BASE` (default `https://api.github.com`) and
+`TELEX_UPGRADE_DOWNLOAD_BASE` (default `https://github.com`). These are intended
+for controlled release validation or an explicitly trusted mirror, not a new
+authentication boundary. Do not send a real `GITHUB_TOKEN` to a fixture or
+untrusted endpoint. An isolated install root alone does not isolate the daemon,
+configuration, or database.
+
 ```sh
 telex --version
 ```
@@ -54,6 +66,11 @@ for `telex rollback`). Pin an explicit release with `telex upgrade --version vX.
 install a local build with `telex upgrade --from <binary>`. See
 [Operating telex](../guides/operating.md) for details, including the fail-closed behavior and
 `GITHUB_TOKEN` for higher API rate limits.
+
+Retaining a previous executable does not guarantee a safe downgrade. In
+particular, schema-3 migration is not reversed by rollback: v0.1.2 supports only
+schema 2 and refuses schema-3 stores. Back up before upgrading and reattach
+wanted addresses after ordered daemon replacement.
 
 ## Initialize (optional)
 
