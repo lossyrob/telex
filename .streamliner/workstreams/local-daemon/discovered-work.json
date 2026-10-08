@@ -118,6 +118,14 @@
           "requiredCi": "https://github.com/lossyrob/telex/actions/runs/37841292797: pull_request run attempt 1 at 975f10ef, all 15 jobs succeeded.",
           "review": "Provider reviews 5095418333 (750415a0), 5095588119 (6315c24a), and 5462370793 (9893c638). Local reports zero findings from 5462370793 and from internal reviews at 21b37f9e and 975f10ef.",
           "pending": "Design reinspection by af271672 (correlation local-daemon-pr138-postrelease-design-975f10e-20261008, canonical design revision 233d46af) and campaign merge authorization."
+        },
+        "postReleaseDesignD1": {
+          "id": "pr138-design-D1-reset-order",
+          "foundAt": "975f10efe907bb1959129a21962324b70bc00e15",
+          "finding": "Steward af271672 returned design changes required (correlation local-daemon-pr138-postrelease-design-975f10e-20261008; canonical revision 44c2a5ca, code comparison 233d46af). The Reset row in docs/design/daemon.md put reset_epoch_lease before per-binding idle marking and withdrawal. The accepted M1 runtime in src/daemon.rs enumerates durable and live bindings, then per binding under its admission marks idle, withdraws, and runs a second idle sweep, and resets the epoch only after every binding succeeds.",
+          "origin": "The same row was present at 6315c24a; the earlier design pass missed it. It is not a runtime or integration regression.",
+          "disposition": "Absorbed by the same PR 138 writer dccdd7bc as a one-row normative documentation fix; no new mechanism, operator choice, node, or issue.",
+          "priorDesignResults": "The 6315c24a design pass and the current D1 result were both read-only with no provider submission or thread. The earlier pass and its five warning resolutions remain history."
         }
       },
       "description": "Repair the deterministic exact-head CI failures and rerun required checks after the complete M3/M5 implementation bundle is pushed.",
@@ -128,7 +136,17 @@
       "target": "station-intent-reconciliation / PR #138",
       "owner": "sole writer session 8e856315-9ff3-4b45-851d-0cce4284b8b8 under local-daemon orchestrator authorization",
       "terminalPath": "Required CI passes on the same exact head that receives final implementation review and design inspection.",
-      "status": "absorbed",
+      "status": "completed",
+      "completionEvidence": {
+        "exactHead": "286251b6de93b2e84ccd4547b6e16b8b2472c36a",
+        "exactTree": "56fa6e1155cefc832720b201f0448f2e2d5122ae",
+        "delta": "One line in docs/design/daemon.md (the Reset row) corrects D1; src/daemon.rs blob cde74fe1 is unchanged from 975f10ef.",
+        "ci": "https://github.com/lossyrob/telex/actions/runs/37844195350: pull_request run attempt 1 at 286251b6, all 15 jobs succeeded. Earlier runs keep their own head provenance.",
+        "review": "Provider reviews 5095418333, 5095588119, and 5462370793; Local reports zero findings from internal reviews at 21b37f9e and 975f10ef and from the 975f10ef to 286251b6 delta review by 41c2eef9 (no provider submission).",
+        "design": "Steward af271672 design pass with D1 resolved, 0 blockers and 0 warnings (correlation local-daemon-pr138-postrelease-D1-design-286251b-20261008; canonical revision 44c2a5ca; no provider submission).",
+        "remaining": "Campaign merge authorization and the PR 138 merge are still pending; the station-intent-reconciliation node stays in progress until merge."
+      },
+      "decisionState": "accepted",
       "dispositionAuthority": "Original node acceptance, CI evidence, and planning protocol 50dfd62."
     },
     {
