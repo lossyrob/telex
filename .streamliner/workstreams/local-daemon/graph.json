@@ -3,11 +3,11 @@
   "id": "local-daemon",
   "projectKey": "telex",
   "title": "Local presence/transport daemon (eliminate the per-session holder)",
-  "summary": "The local exchange, both backends, Copilot push bridge, upgrade path, and release-confidence validation are complete. The bounded schema-3 recovery release is complete: the Windows TOKEN_USER alignment and PostgreSQL wait-reset repairs merged, the v0.2.0 tag run failed and v0.2.0 is held unpublished, and after a new operator decision the corrective v0.2.1 was published on 2026-09-30. Historical release nodes remain complete. Issue #106 / PR #138 station-intent-reconciliation resumed on 2026-10-08 in parallel with Application Client issue #152; issue #153 follows PR #138 with its existing geometry.",
+  "summary": "The local exchange, both backends, Copilot push bridge, upgrade path, and release-confidence validation are complete. The bounded schema-3 recovery release is complete: the Windows TOKEN_USER alignment and PostgreSQL wait-reset repairs merged, the v0.2.0 tag run failed and v0.2.0 is held unpublished, and after a new operator decision the corrective v0.2.1 was published on 2026-09-30. Historical release nodes remain complete. Issue #106 / PR #138 station-intent-reconciliation merged on 2026-10-08 and is complete; issue #153 station-intent-transactional-authority keeps its existing geometry but is blocked before any product write because the worker's initializer did not receive the required long-context profile, and the hardening and closure gates are not accepted.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-10-08T19:41:39.177Z",
+  "updatedAt": "2026-10-08T22:20:05.561Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -301,7 +301,7 @@
       "type": "task",
       "title": "Durable station intent reconciliation after daemon replacement",
       "summary": "Adopt issue #106 and existing PR #138 rather than replacing them. Preserve merged PR #139 Copilot App lifecycle semantics and desired-state-only station intent. Replace age-stealable intent locks with persistent owner-private OS advisory locks that fail closed on unsupported semantics. Keep the four-second response, expose truncated discovery and lower-bound counts, and claim eventual discovery, GC, and over-cap recovery only when required enumeration and reads eventually complete. Promote ADR 0052 and the normative contract, repair all review and CI findings, and prove the complete narrowed outcome on SQLite and Postgres.",
-      "status": "in-progress",
+      "status": "completed",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -398,7 +398,7 @@
       "type": "task",
       "title": "Transactional station-intent authority and fair maintenance",
       "summary": "Close the accepted PR #138 degraded-enumeration gap with one transactional station-intent authority per daemon singleton scope. Provide atomic generation mutation, seekable fair discovery and GC, exact counts and over-cap recovery, and a versioned crash-safe migration that prevents old and new writers from splitting authority. This mandatory XL follow-up begins after station-intent-reconciliation and blocks Local Daemon closure, not PR #138 or its hardening gate.",
-      "status": "planned",
+      "status": "blocked",
       "attention": "focus",
       "repoIds": [
         "telex"
@@ -411,6 +411,13 @@
       },
       "dependsOn": [
         "station-intent-reconciliation"
+      ],
+      "externalDependsOn": [
+        {
+          "id": "streamliner-preparation-long-context-propagation",
+          "label": "Streamliner preparation passes the long_context tier to the initializer session: a reviewed, merged, preparation-only adapter repair sets contextTier explicitly on session create and resume, followed by a controlled restart of the owned API and one new initializer run on the same checkout that proves long context on the wire, at start, and in usage; owner Streamliner service 79bfffa9, with campaign authority for the repair and restart",
+          "status": "pending"
+        }
       ]
     },
     {

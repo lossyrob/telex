@@ -40,6 +40,11 @@ conflicts with main. Each writer is merging current main
 `2c084873719080b812e0d0c4bf92125afa751499` into its branch by ordinary merge.
 No new source commit, proof, review, or merge is recorded here.
 
+Later on 2026-10-08, after exact-head review, required CI, design inspection,
+and campaign authorization, PR #138 merged as `6ab6143a` and issue #106 was
+closed as completed. The merge is source only: it publishes nothing and does
+not accept the hardening gate.
+
 The operator later authorized a source-only 0.3.0 transition inside the same
 issue #152 PR. Published v0.2.1 exposes an exhaustive `ApplicationClientError`,
 so the accepted typed bootstrap failure is a breaking Rust source change. The
@@ -206,11 +211,12 @@ Operator Station issue #146 separately preserves
 as completed, non-gating evidence. The report does not promote spike mechanisms,
 change direct-Station authority, or advance any production node or dependency.
 Local Daemon release-confidence validation completed, but issue #106 exposed a
-daemon-replacement push-intent gap. Existing PR #138 is adopted as the
-in-progress repair ahead of the still-unaccepted hardening gate; its proposed
-station-intent contract is not current authority until repaired, reviewed, and
-merged. Its existing writer resumed on 2026-10-08, in parallel with issue #152,
-and is integrating current main. The schema-3 recovery release is complete:
+daemon-replacement push-intent gap. Existing PR #138 was adopted as the repair
+ahead of the still-unaccepted hardening gate. Its writer resumed on 2026-10-08
+in parallel with issue #152, and the PR merged that day after exact-head
+review, CI, design inspection, and campaign authorization, so its
+station-intent contract is now merged authority.
+The schema-3 recovery release is complete:
 corrective v0.2.1 was published on 2026-09-30.
 
 ## Covering workstreams
@@ -220,7 +226,7 @@ corrective v0.2.1 was published on 2026-09-30.
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | The builder accepted the direct contract and downstream geometry at `direct-station-direction-gate`, closing the design checkpoint. `station-app` remains planned and unlaunched with direct `client-conformance` and `consumer-integration-gate` holds; launch still requires separate preparation and authorization. |
 | Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on completed Application Client `client-conformance` and the pre-integration `consumer-integration-gate` over the same exact public revision; the gate does not require Watcher runtime implementation. |
 | Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Issue #152 `client-conformance` is the campaign main effort and is in progress; its existing writer is integrating current main before full validation, exact-head review, and the single delivery PR. The consumer gate remains planned until both product authorities attest the same reviewed and green conformance head without product implementation evidence. |
-| Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | The schema-3 recovery release is complete (v0.2.1). Issue #106 / PR #138 `station-intent-reconciliation` resumed in parallel; its existing writer is integrating current `main`. Merge needs fresh exact-head review, CI, design inspection, and campaign authorization; isolated both-backend evidence then goes to the separate hardening gate. |
+| Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | The schema-3 recovery release is complete (v0.2.1). Issue #106 / PR #138 `station-intent-reconciliation` merged on 2026-10-08 and is complete. Isolated both-backend evidence goes to the separate hardening gate, and issue #153 must complete before Local Daemon closure; its prepared worker is held until Streamliner preparation passes the long-context tier to its initializer. |
 
 ## Shared seam
 
@@ -397,13 +403,13 @@ collapse into noise, and no session-bound polling task is required.
    SQLite and credentialed PostgreSQL, then pass exact-head review, required CI,
    and design inspection in one delivery PR. Keep the consumer gate and
    `supported-client` checkpoint planned.
-2. In parallel, integrate current main into adopted Local Daemon PR #138 for
-   issue #106 without weakening explicit membership, fencing, the accepted M3
-   and M5 outcome, or merged Copilot App lifecycle semantics. Merge needs fresh
-   exact-head review, CI, design inspection, and campaign authorization; keep
-   the hardening gate separate from merge.
-3. After PR #138 merges, promote issue #153 from the actual landed authority
-   with a complete task specification.
+2. Local Daemon PR #138 for issue #106 merged on 2026-10-08 as `6ab6143a`.
+   Keep the hardening gate a separate builder decision that needs isolated
+   restart, drain, upgrade, and push-recovery evidence.
+3. Issue #153 `station-intent-transactional-authority` was prepared from the
+   merged authority at `6ab6143a`, but its worker is held before any product
+   write until Streamliner preparation passes the required long-context tier
+   to its initializer.
 4. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
    after separate campaign authorization.
 5. Keep `watcher-runtime-core` planned until `client-conformance` uses the

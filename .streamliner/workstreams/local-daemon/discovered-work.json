@@ -19,7 +19,17 @@
       "target": "station-intent-reconciliation / issue #106 / PR #138",
       "owner": "PR #138 implementer under Local Daemon workstream orchestrator authorization",
       "terminalPath": "PR #138 removes age-stealable lock ownership, proves stale generation N cannot delete or replace N+1 on supported Windows and Unix local filesystems, and completes exact-head implementation review, required CI, and design inspection.",
-      "status": "absorbed",
+      "status": "completed",
+      "completionEvidence": {
+        "technicalEvidence": "Exact head 286251b6 carries persistent owner-private OS advisory locking with no age takeover or lock-path deletion. Its review, required CI run 37844195350 (15/15), and design inspection are recorded in the completionEvidence of local-daemon-pr138-exact-head-ci-failures.",
+        "mergeCommit": "6ab6143ad0d0e8b9832df41e4e180c4acd1204c4",
+        "mergeParents": "9166fce00d8e3fd0de5d0aaa736083ed4595d057 (main) and 286251b6de93b2e84ccd4547b6e16b8b2472c36a (reviewed exact head)",
+        "mergeTree": "a9bd5f0dc4a8867b3dc04b7358d0d2fdd3eef902, equal to the tree computed before the merge",
+        "mergedAt": "2026-10-08T21:48:41Z by lossyrob, executed by Local aeae4fa9",
+        "mergeAuthority": "Campaign pr138-campaign-merge-authority-286251b-20261008.json, SHA-256 59d658109d05078d35133f261edc9255971d490b9f4270412fd9d00ec672fb63",
+        "tracker": "Issue #106 closed as completed at 2026-10-08T21:50:45Z by an explicit provider action (event 32828313724, no closing commit) after field report 6069716718."
+      },
+      "decisionState": "accepted",
       "dispositionAuthority": "Operator Option A decision at 2026-09-02T14:34-04:00, relayed by the campaign orchestrator."
     },
     {
@@ -28,7 +38,13 @@
       "source": "lossyrob/telex#106 and lossyrob/telex#138",
       "evidence": {
         "prHeadLineage": "c1a2afb652947a4630bd28392840f83680519f25 through 1f5b398e36b8d02942999ed1a66db3c69ccb4878",
-        "details": "Each bounded read_dir scan restarts at the root head, while persisted cursors operate only within that invocation's discovered prefix. A stable over-cap prefix can therefore prevent eventual discovery and GC of tail entries."
+        "details": "Each bounded read_dir scan restarts at the root head, while persisted cursors operate only within that invocation's discovered prefix. A stable over-cap prefix can therefore prevent eventual discovery and GC of tail entries.",
+        "pr138DegradedSliceDelivered": {
+          "mergeCommit": "6ab6143ad0d0e8b9832df41e4e180c4acd1204c4",
+          "exactHead": "286251b6de93b2e84ccd4547b6e16b8b2472c36a",
+          "summary": "PR #138 promoted and proved the narrowed contract (observable truncation, lower-bound counts, conditional eventual coverage, and offline or supported-local-storage recovery) on the reviewed and green exact head 286251b6 and merged it as 6ab6143a. That completes the PR #138 slice of the terminal path only.",
+          "remaining": "Issue #153 still has to land transactional generation authority, seekable fair maintenance, exact counts, migration and rollback safety, and exact over-cap recovery before the Local Daemon closure gate. It does not retroactively block PR #138 or the hardening gate."
+        }
       },
       "description": "Choose a scope-correct eventual discovery and GC fairness contract that remains compatible with the four-second response bound.",
       "affectedOutcome": "PR #138 must provide accepted eventual discovery, GC coverage, and over-cap recovery for the original station-intent outcome unless the operator explicitly accepts a narrowed degraded-mode contract.",
@@ -61,7 +77,18 @@
       "target": "station-intent-reconciliation / PR #138",
       "owner": "local-daemon workstream orchestrator aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57",
       "terminalPath": "Preserve the draft body as review history, remove the stale pending review without submitting it, and obtain final implementation review on the complete exact head.",
-      "status": "absorbed",
+      "status": "completed",
+      "completionEvidence": {
+        "staleReview": "Pending review 5045956337 was retired without submitting its obsolete body; the provider review list shows no pending review at merge time. Its history is preserved in this item.",
+        "finalReview": "Provider reviews 5095418333, 5095588119, and 5462370793, plus the Local-reported internal delta review of 286251b6 by 41c2eef9 (no provider submission), cover the merged exact head.",
+        "mergeCommit": "6ab6143ad0d0e8b9832df41e4e180c4acd1204c4",
+        "mergeParents": "9166fce00d8e3fd0de5d0aaa736083ed4595d057 (main) and 286251b6de93b2e84ccd4547b6e16b8b2472c36a (reviewed exact head)",
+        "mergeTree": "a9bd5f0dc4a8867b3dc04b7358d0d2fdd3eef902, equal to the tree computed before the merge",
+        "mergedAt": "2026-10-08T21:48:41Z by lossyrob, executed by Local aeae4fa9",
+        "mergeAuthority": "Campaign pr138-campaign-merge-authority-286251b-20261008.json, SHA-256 59d658109d05078d35133f261edc9255971d490b9f4270412fd9d00ec672fb63",
+        "tracker": "Issue #106 closed as completed at 2026-10-08T21:50:45Z by an explicit provider action (event 32828313724, no closing commit) after field report 6069716718."
+      },
+      "decisionState": "accepted",
       "dispositionAuthority": "Planning protocol 50dfd62 and campaign protocol-follow-through."
     },
     {
