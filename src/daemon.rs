@@ -574,7 +574,7 @@ impl DaemonState {
     #[cfg(test)]
     fn take_wait_fetch_failure(&self) -> bool {
         self.wait_fetch_failures
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
                 if remaining > 0 {
                     Some(remaining - 1)
                 } else {
