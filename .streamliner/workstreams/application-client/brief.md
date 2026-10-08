@@ -136,9 +136,10 @@ remained unresolved. The
 records the implementation and validation evidence. Issue #149 closed as
 completed at `2026-09-02T13:56:22Z`.
 
-`client-conformance` is now tracked by
-[#152](https://github.com/lossyrob/telex/issues/152), fully specified, ready,
-and unlaunched. One node, tracker, and delivery PR must prove all ten conformance
+`client-conformance` is tracked by
+[#152](https://github.com/lossyrob/telex/issues/152) and is in progress as the
+campaign main effort. One node, tracker, and delivery PR must prove all ten
+conformance
 families through the public Rust surface across SQLite and credentialed
 Postgres. The same PR owns public-only Watcher send-only and Operator Station
 bidirectional fixtures, any missing shared-semantic repair, and guidance for
@@ -154,6 +155,22 @@ seam is required. Product implementation, usability, packaging, and operational
 evidence remain downstream. Watcher runtime and Station app retain direct
 conformance dependencies and also wait on the consumer gate. No checkpoint or
 gate advances with this shaping reconciliation.
+
+On 2026-10-08 the operator approved issue #152 as the campaign main effort,
+recorded in campaign directive
+`campaign-postrelease-execution-directive-20261008.json` (SHA-256
+`a4d98af7d891efe7164839c79b4431d07acfc1ceef606c54e46b82ab7eb5613d`). The
+schema-3 recovery release that had excluded this node is complete, so that
+exclusion has ended. The same issue #152 writer resumed on
+`feature/client-conformance` at preserved clean head
+`5fdd95c2c32cde08a6c936171b208bbf14f6677c`. That head holds the 2026-09-02
+implementation and review-fix commits and merges main `ed417c6b`. No PR exists
+yet. The writer is merging current main
+`2c084873719080b812e0d0c4bf92125afa751499` into the branch; full validation,
+exact-head review, required CI, and design inspection follow on the integrated
+head. The accepted trusted `InstalledCurrent` policy is unchanged and gains no
+executable-digest requirement or unsafe fallback. This records activation only;
+no new source, proof, review, or merge evidence is claimed.
 
 ## Decisions
 
@@ -301,8 +318,8 @@ gate advances with this shaping reconciliation.
 - W-05 taxonomy wording from issue #124 completed within client-core issue #129
   and merged through PR #132.
 - The Rust-first `first-binding` completed through issue #149 and PR #151.
-  Issue #152 and its bundle-first task make `client-conformance` ready but
-  unlaunched; the consumer gate and `supported-client` remain planned.
+  Issue #152 `client-conformance` is in progress as the campaign main effort;
+  the consumer gate and `supported-client` remain planned.
 - Polluted PR #123 and its dirty worktree are deferred with rationale for
   protocol forensics; cleanup requires explicit operator authorization.
 - The clean #118 implementation worktree is also deferred for cleanup until the

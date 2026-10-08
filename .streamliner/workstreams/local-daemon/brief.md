@@ -108,7 +108,8 @@ The authoritative design layer (merged from `design-foundation`) lives under
 - **Out of scope:** the embeddable SDK client (#12) - it shares the
   collapse-into-one-process theme and should reuse the stabilized Layer-1 IPC, but
   is a separate solve; response windows / TTL deadlines (#2); the `store_key` helper
-  (#25). The recovery-release packet also excludes PR #138, issues #152/#153,
+  (#25). The completed recovery-release packet also excluded PR #138, issues
+  #152/#153,
   Watcher and Operator Station runtimes, campaign closure, schema-policy redesign,
   shared or production database mutation, and operator-installed daemon operations.
 - **Deferred:** a richer non-binary occupant status policy beyond the accepted
@@ -130,9 +131,11 @@ Dogfooding then exposed issue #106: daemon replacement can preserve durable mess
 while losing a still-live bridge's desired push registration. Existing PR #138 is the
 adopted `station-intent-reconciliation` repair. The operator selected persistent
 owner-private OS advisory locking to prevent stale pathname mutation and accepted a
-degraded contract for bounded partial directory scans. PR #138 remains open,
-merge-unapproved, and excluded from this recovery packet; this authority does not
-revive its worker. The **hardening gate is not ready** until that narrowed repair is
+degraded contract for bounded partial directory scans. PR #138 was
+excluded from the completed schema-3 recovery release. On 2026-10-08 its existing
+writer resumed in parallel with Application Client issue #152; the PR remains
+open and merge-unapproved. The **hardening gate is not ready** until that
+narrowed repair is
 merged and presented with isolated restart/drain/upgrade and push-recovery evidence.
 
 Unconditional transactional generation authority, seekable fair discovery and
@@ -394,6 +397,26 @@ job-terminal choice supplied that intended Windows receipt but did not by itself
 complete implementation or proof. The schema-3 recovery release did not accept
 the PostgreSQL-reset limitation, PR #156 could not merge partially, and #157
 stayed unlaunched until both #154 and #155 merged.
+
+On 2026-10-08 the operator approved the post-release direction: Application
+Client issue #152 is the campaign main effort, and issue #106 / PR #138 proceeds
+in parallel. Campaign directive
+`campaign-postrelease-execution-directive-20261008.json` (SHA-256
+`a4d98af7d891efe7164839c79b4431d07acfc1ceef606c54e46b82ab7eb5613d`) records
+this direction. The same PR #138 writer resumed at clean head
+`6315c24a5b36989f3f9dac916458f8ea9e752e60` on
+`feature/station-intent-reconciliation-106` and is merging current main
+`2c084873719080b812e0d0c4bf92125afa751499` into the branch. The PR is open and
+non-draft but conflicts with main; from merge base `ed417c6b` the branch is 58
+commits ahead and 57 behind. No new candidate exists yet. The accepted Option A
+M3 and M5 outcome is unchanged. The 2026-09-02 technical floor is not current
+merge authority: merge needs fresh exact-head review, CI, design inspection,
+and campaign authorization. Review sessions `41c2eef9` (Option A) and
+`e5e3bc0c` (full PAW review) and design steward `af271672` are retained.
+After PR #138 merges, issue #153 is promoted from the actual landed authority
+with a complete task specification; it remains mandatory for closure and does
+not block PR #138 or the hardening gate. Hardening and closure stay separate
+builder decisions.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
