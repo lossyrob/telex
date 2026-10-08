@@ -588,39 +588,6 @@ impl Drop for EnvRestore {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    #[ignore = "subprocess role used by the pipe-drain regression"]
-    fn large_output_fixture() {
-        if std::env::var_os("TELEX_LARGE_OUTPUT_FIXTURE").is_some() {
-            println!("{}", "x".repeat(131_072));
-            eprintln!("{}", "y".repeat(131_072));
-        }
-    }
-
-    #[test]
-    fn run_with_timeout_drains_large_piped_output() {
-        let mut command = Command::new(std::env::current_exe().expect("current test executable"));
-        command
-            .env("TELEX_LARGE_OUTPUT_FIXTURE", "1")
-            .args([
-                "--ignored",
-                "--exact",
-                "isolation::tests::large_output_fixture",
-                "--nocapture",
-            ])
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped());
-        let output = run_with_timeout(command, Duration::from_secs(30));
-        output.assert_success("large piped output fixture");
-        assert!(output.stdout.contains(&"x".repeat(1024)));
-        assert!(output.stderr.contains(&"y".repeat(1024)));
-    }
-}
-
 /// Create a directory owned by the current principal with an explicit,
 /// non-inherited authority DACL on Windows (and 0o700 on Unix), matching what
 /// the production install-authority and owner-private runtime checks demand.
@@ -772,5 +739,38 @@ pub fn postgres_url_or_fail_closed(context: &str) -> Option<String> {
             eprintln!("[{context}] TELEX_PG_URL not set; Postgres leg not executed here.");
             None
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "subprocess role used by the pipe-drain regression"]
+    fn large_output_fixture() {
+        if std::env::var_os("TELEX_LARGE_OUTPUT_FIXTURE").is_some() {
+            println!("{}", "x".repeat(131_072));
+            eprintln!("{}", "y".repeat(131_072));
+        }
+    }
+
+    #[test]
+    fn run_with_timeout_drains_large_piped_output() {
+        let mut command = Command::new(std::env::current_exe().expect("current test executable"));
+        command
+            .env("TELEX_LARGE_OUTPUT_FIXTURE", "1")
+            .args([
+                "--ignored",
+                "--exact",
+                "isolation::tests::large_output_fixture",
+                "--nocapture",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let output = run_with_timeout(command, Duration::from_secs(30));
+        output.assert_success("large piped output fixture");
+        assert!(output.stdout.contains(&"x".repeat(1024)));
+        assert!(output.stderr.contains(&"y".repeat(1024)));
     }
 }

@@ -518,7 +518,8 @@ and validate one immutable target that includes:
 - selected tag and versioned executable;
 - selected manifest bound to that tag and executable, with validated
   build identity, package version, supported schema range, protocol
-  version, and required security and Application Client capabilities;
+  version, required security and Application Client capabilities, and
+  explicit support for child-side bootstrap admission before readiness;
 - canonical containment of the selected version directory and executable
   beneath the canonical trusted root;
 - current-OS-user ownership of the root and the authority chain, denying

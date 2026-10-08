@@ -88,6 +88,13 @@ fn config(responsibility: &str, db: &Path) -> ApplicationClientConfig {
             };
         }
     }
+    let require_postgres = std::env::var("TELEX_PG_REQUIRE")
+        .is_ok_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+    assert!(
+        !require_postgres,
+        "TELEX_PG_REQUIRE is set but TELEX_PROCESS_PG_URL is unset/empty; \
+         refusing to run InstalledCurrent process proofs on SQLite"
+    );
     ApplicationClientConfig {
         responsibility: ApplicationResponsibility(responsibility.to_string()),
         backend: None,
@@ -249,18 +256,17 @@ async fn installed_current_concurrent_first_use_converges_on_one_daemon() {
     let iso = Isolation::new("ic-concurrent");
     let _restore = iso.apply_env();
     let db = iso.root.join("concurrent.db");
+    let initialized = connect(&iso, "proof-initializer", &db).await;
+    drop(initialized);
 
     let mut tasks = Vec::new();
     for index in 0..4 {
         let root = iso.trusted_root();
         let db = db.clone();
         tasks.push(tokio::spawn(async move {
+            let client_config = config(&format!("proof-{index}"), &db);
             let client = ApplicationClient::connect_with_daemon(
-                ApplicationClientConfig {
-                    responsibility: ApplicationResponsibility(format!("proof-{index}")),
-                    backend: None,
-                    db_override: Some(db.to_string_lossy().into_owned()),
-                },
+                client_config,
                 ApplicationDaemonBootstrap::InstalledCurrent { trusted_root: root },
             )
             .await
@@ -986,6 +992,11 @@ async fn installed_current_child_rejects_mismatched_build_before_readiness() {
         !outcome.ready,
         "a child whose compiled build does not match the manifest must fail"
     );
+    assert_eq!(
+        attach_failure(&outcome),
+        DaemonBootstrapFailure::IncompatibleManifest,
+        "child admission rejection must preserve its typed bootstrap failure"
+    );
     assert!(
         iso.cap_path().is_none(),
         "a mismatched child must not publish capability or readiness"
@@ -993,6 +1004,34 @@ async fn installed_current_child_rejects_mismatched_build_before_readiness() {
     assert!(
         !iso.daemon_running(),
         "a mismatched child must not remain serving"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn installed_current_rejects_legacy_daemon_without_admission_support() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("ic-legacy-admission");
+    let _restore = iso.apply_env();
+    let db = iso.root.join("legacy-admission.db");
+    let tag = iso.tag.clone();
+
+    write_manifest(&iso, &tag, |manifest| {
+        manifest.application_bootstrap_admission_version = 0;
+    });
+    let client = connect(&iso, "proof", &db).await;
+    let outcome = client
+        .attach(&[spec(
+            "ic:legacy-admission:a",
+            ApplicationCapability::SendOnly,
+        )])
+        .await;
+    assert_eq!(
+        attach_failure(&outcome),
+        DaemonBootstrapFailure::IncompatibleManifest
+    );
+    assert!(
+        iso.cap_path().is_none(),
+        "a legacy daemon must be refused before capability publication"
     );
 }
 

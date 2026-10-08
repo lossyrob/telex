@@ -4,7 +4,7 @@ use std::path::Path;
 
 const EXPECTED_MANIFEST_BYTE_LENGTH: usize = 2_423;
 const EXPECTED_MANIFEST_SHA256: &str =
-    "23af4f331aed82480cb41da9ef827328d4d1a0ea65183f5c27f4cac59157c286";
+    "f34ff3f159fb230e62c16eee6d1ff95bad9d1e17257afa9243794fcf18347ba7";
 const EXPECTED_PATHS: [&str; 5] = [
     "docs/design/DECISIONS.md",
     "docs/design/application-client.md",

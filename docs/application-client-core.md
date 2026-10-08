@@ -184,7 +184,8 @@ Every connect-or-spawn cycle:
    `LockFileEx` range lock);
 2. reads `current`, resolves `<root>/versions/<tag>/telex[.exe]`, and
    validates the manifest's tag, build, package version, protocol
-   version, supported schema range, and required capabilities;
+version, supported schema range, required capabilities, and
+Application Client bootstrap-admission version;
 3. freezes one immutable target and uses it for both spawn and
    pre-`Hello` peer authentication;
 4. holds the shared lease through reuse-safe process identity checks,

@@ -15,6 +15,7 @@ pub const UNKNOWN_BUILD_ID: &str = "unknown";
 pub const BUILD_ID: &str = env!("TELEX_BUILD_ID");
 pub const SUPPORTED_SCHEMA_MIN: i64 = 2;
 pub const SUPPORTED_SCHEMA_MAX: i64 = 3;
+pub const APPLICATION_BOOTSTRAP_ADMISSION_VERSION: u16 = 1;
 #[cfg(feature = "sqlite")]
 const _: () = assert!(SUPPORTED_SCHEMA_MAX == crate::backend::sqlite::CURRENT_SCHEMA_VERSION);
 #[cfg(feature = "postgres")]
@@ -43,6 +44,8 @@ pub struct VersionManifest {
     pub protocol_major: u16,
     pub protocol_minor: u16,
     pub required_capabilities: Vec<String>,
+    #[serde(default)]
+    pub application_bootstrap_admission_version: u16,
     pub copilot_bridge_protocol: u32,
     pub min_compatible_plugin_version: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -58,6 +61,7 @@ pub struct SourceMetadata {
     pub protocol_major: u16,
     pub protocol_minor: u16,
     pub required_capabilities: Vec<String>,
+    pub application_bootstrap_admission_version: u16,
     pub copilot_bridge_protocol: u32,
     pub min_compatible_plugin_version: String,
 }
@@ -70,6 +74,7 @@ pub struct VersionInfo {
     pub launcher_guard_env: &'static str,
     pub supported_schema_min: i64,
     pub supported_schema_max: i64,
+    pub application_bootstrap_admission_version: u16,
     pub install: InstallInfo,
 }
 
@@ -272,6 +277,7 @@ pub fn version_info(root: Option<PathBuf>) -> Result<VersionInfo> {
         launcher_guard_env: LAUNCHER_GUARD_ENV,
         supported_schema_min: SUPPORTED_SCHEMA_MIN,
         supported_schema_max: SUPPORTED_SCHEMA_MAX,
+        application_bootstrap_admission_version: APPLICATION_BOOTSTRAP_ADMISSION_VERSION,
         install: InstallInfo {
             root: layout.root.to_string_lossy().into_owned(),
             bin: layout
@@ -589,6 +595,7 @@ fn current_manifest(
             .iter()
             .map(|cap| (*cap).to_string())
             .collect(),
+        application_bootstrap_admission_version: APPLICATION_BOOTSTRAP_ADMISSION_VERSION,
         copilot_bridge_protocol: crate::commands::copilot::COPILOT_BRIDGE_PROTOCOL,
         min_compatible_plugin_version: crate::commands::copilot::MIN_COMPATIBLE_PLUGIN_VERSION
             .to_string(),
@@ -605,6 +612,8 @@ fn current_manifest(
         protocol_major: source_metadata.protocol_major,
         protocol_minor: source_metadata.protocol_minor,
         required_capabilities: source_metadata.required_capabilities,
+        application_bootstrap_admission_version: source_metadata
+            .application_bootstrap_admission_version,
         copilot_bridge_protocol: source_metadata.copilot_bridge_protocol,
         min_compatible_plugin_version: source_metadata.min_compatible_plugin_version,
         previous_tag,
@@ -814,6 +823,7 @@ mod tests {
             protocol_major: crate::daemon_ipc::PROTOCOL_MAJOR,
             protocol_minor: crate::daemon_ipc::PROTOCOL_MINOR,
             required_capabilities: Vec::new(),
+            application_bootstrap_admission_version: APPLICATION_BOOTSTRAP_ADMISSION_VERSION,
             copilot_bridge_protocol: crate::commands::copilot::COPILOT_BRIDGE_PROTOCOL,
             min_compatible_plugin_version: crate::commands::copilot::MIN_COMPATIBLE_PLUGIN_VERSION
                 .to_string(),

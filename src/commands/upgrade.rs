@@ -599,6 +599,11 @@ fn parse_source_metadata(value: &serde_json::Value) -> Result<install::SourceMet
                     .ok_or_else(|| anyhow!("required_capabilities must be strings"))
             })
             .collect::<Result<Vec<_>>>()?,
+        application_bootstrap_admission_version: version
+            .get("application_bootstrap_admission_version")
+            .and_then(|value| value.as_u64())
+            .and_then(|value| u16::try_from(value).ok())
+            .unwrap_or(0),
         copilot_bridge_protocol: required_u32(copilot, "bridge_protocol")?,
         min_compatible_plugin_version: required_str(copilot, "min_compatible_plugin_version")?
             .to_string(),

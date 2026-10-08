@@ -2089,9 +2089,22 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
         // manifest movement is caught within the same shared-admission
         // window; the admission guard is held through spawn.
         let resolved = resolve_bootstrap_expected(policy).await?;
+        let bootstrap_result = if resolved.selection.is_some() {
+            let paths = DaemonPaths::current()?;
+            Some(
+                paths
+                    .run_dir
+                    .join(format!("{}.json", random_token("bootstrap-result")?)),
+            )
+        } else {
+            None
+        };
+        if let Some(path) = &bootstrap_result {
+            let _ = std::fs::remove_file(path);
+        }
         spawn_daemon_process_bootstrap(
             resolved.spawn_executable(),
-            &bootstrap_spawn_env(resolved.selection.as_ref()),
+            &bootstrap_spawn_env(resolved.selection.as_ref(), bootstrap_result.as_deref()),
             #[cfg(windows)]
             Some(&resolved.exe_witness),
         )?;
@@ -2104,6 +2117,12 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
             if Instant::now() >= deadline {
                 break;
             }
+            if let Some(failure) = bootstrap_result
+                .as_deref()
+                .and_then(crate::daemon_bootstrap::take_child_bootstrap_failure)
+            {
+                return Err(DaemonError::Bootstrap(failure));
+            }
             match tokio::time::timeout(
                 CONNECT_ATTEMPT_TIMEOUT,
                 connect_existing_against_resolved(store_key, &resolved),
@@ -2111,6 +2130,9 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
             .await
             {
                 Ok(Ok(client)) => {
+                    if let Some(path) = &bootstrap_result {
+                        let _ = std::fs::remove_file(path);
+                    }
                     drop(resolved);
                     return Ok(client);
                 }
@@ -2120,6 +2142,12 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
             }
             tokio::time::sleep(backoff).await;
             backoff = std::cmp::min(backoff.saturating_mul(2), BACKOFF_MAX);
+        }
+        if let Some(failure) = bootstrap_result
+            .as_deref()
+            .and_then(crate::daemon_bootstrap::take_child_bootstrap_failure)
+        {
+            return Err(DaemonError::Bootstrap(failure));
         }
     }
 
@@ -2302,10 +2330,12 @@ fn bootstrap_error_from_peer(error: DaemonError) -> DaemonError {
 
 fn bootstrap_spawn_env(
     selection: Option<&crate::daemon_bootstrap::SelectionToken>,
+    result_path: Option<&Path>,
 ) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
-    match selection {
-        Some(token) => crate::daemon_bootstrap::spawn_env(token),
-        None => Vec::new(),
+    match (selection, result_path) {
+        (Some(token), Some(result_path)) => crate::daemon_bootstrap::spawn_env(token, result_path),
+        (None, _) => Vec::new(),
+        (Some(_), None) => Vec::new(),
     }
 }
 
@@ -2656,9 +2686,13 @@ pub async fn serve() -> Result<()> {
     // child exits without binding an endpoint, publishing capability, or
     // signalling readiness. Legacy CLI-driven `daemon serve` invocations
     // (no env) skip this admission entirely and preserve current behavior.
-    let bootstrap_admission = crate::daemon_bootstrap::child_validate_bootstrap_env()
-        .await
-        .map_err(DaemonError::Bootstrap)?;
+    let bootstrap_admission = match crate::daemon_bootstrap::child_validate_bootstrap_env().await {
+        Ok(admission) => admission,
+        Err(error) => {
+            crate::daemon_bootstrap::publish_child_bootstrap_failure(error);
+            return Err(DaemonError::Bootstrap(error));
+        }
+    };
     let paths = DaemonPaths::current()?;
     let mut listener = platform::Listener::bind(&paths.endpoint)?;
     let state = Arc::new(new_state(paths)?);
@@ -16813,6 +16847,8 @@ mod tests {
             protocol_major: crate::daemon_ipc::PROTOCOL_MAJOR,
             protocol_minor: crate::daemon_ipc::PROTOCOL_MINOR,
             required_capabilities: Vec::new(),
+            application_bootstrap_admission_version:
+                crate::install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION,
             target_exe: PathBuf::from("/tmp/telex-test-root/exe"),
             file_identity: crate::daemon_bootstrap::FileIdentity {
                 kind: crate::daemon_bootstrap::FileIdentityKind::UnixDevIno,

@@ -2015,7 +2015,9 @@ are unsupported and MUST fail closed. `current` is the sole trust source;
 **Selected manifest.** The selected manifest MUST bind its tag and
 executable and MUST supply validated build identity, package version,
 protocol major/minor, supported schema range, and required daemon
-capabilities. These fields are compatibility and selection metadata. They
+capabilities, plus an explicit bootstrap-admission version proving the
+selected daemon performs child-side validation before readiness. These
+fields are compatibility and selection metadata. They
 do not provide an executable-content digest or hash, an executable-content
 migration or missing-digest rule, a signature, publisher or package
 provenance, protection from malicious same-user administration, or

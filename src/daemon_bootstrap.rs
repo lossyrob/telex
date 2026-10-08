@@ -36,6 +36,7 @@ const SELECTOR_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(25);
 /// independently against a fresh resolution and its own process image before
 /// serving.
 pub(crate) const BOOTSTRAP_TOKEN_ENV: &str = "TELEX_DAEMON_SELECTION_TOKEN";
+pub(crate) const BOOTSTRAP_RESULT_ENV: &str = "TELEX_DAEMON_SELECTION_RESULT";
 
 /// Public typed enumeration of installed-current / exact bootstrap failures.
 ///
@@ -197,6 +198,7 @@ pub(crate) struct SelectionToken {
     pub protocol_major: u16,
     pub protocol_minor: u16,
     pub required_capabilities: Vec<String>,
+    pub application_bootstrap_admission_version: u16,
     pub target_exe: PathBuf,
     pub file_identity: FileIdentity,
 }
@@ -373,6 +375,7 @@ fn validate_installed_target(
         protocol_major,
         protocol_minor,
         required_capabilities,
+        application_bootstrap_admission_version: manifest.application_bootstrap_admission_version,
         target_exe: canonical_target,
         file_identity: identity,
     })
@@ -426,6 +429,11 @@ fn read_and_validate_manifest(
     }
     if manifest.package_version.is_empty() {
         return Err(DaemonBootstrapFailure::InvalidManifest);
+    }
+    if manifest.application_bootstrap_admission_version
+        != install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
+    {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
     if manifest.protocol_major != crate::daemon_ipc::PROTOCOL_MAJOR {
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
@@ -1376,6 +1384,8 @@ pub(crate) async fn child_validate_bootstrap_env(
         || token.schema_max != install::SUPPORTED_SCHEMA_MAX
         || token.protocol_major != crate::daemon_ipc::PROTOCOL_MAJOR
         || token.protocol_minor != crate::daemon_ipc::PROTOCOL_MINOR
+        || token.application_bootstrap_admission_version
+            != install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
         || selected_capabilities != compiled_capabilities
     {
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
@@ -1391,6 +1401,8 @@ pub(crate) async fn child_validate_bootstrap_env(
         || fresh.protocol_major != token.protocol_major
         || fresh.protocol_minor != token.protocol_minor
         || fresh.required_capabilities != token.required_capabilities
+        || fresh.application_bootstrap_admission_version
+            != token.application_bootstrap_admission_version
         || fresh.target_exe != token.target_exe
         || fresh.file_identity != token.file_identity
     {
@@ -1410,6 +1422,7 @@ pub(crate) async fn child_validate_bootstrap_env(
     if own_identity != token.file_identity {
         return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
     }
+    std::env::remove_var(BOOTSTRAP_RESULT_ENV);
     Ok(Some(guard))
 }
 
@@ -1428,11 +1441,33 @@ pub(crate) fn release_after_readiness_publication(guard: Option<SelectorAdmissio
 ///
 /// The parent uses this when spawning the resolved InstalledCurrent daemon
 /// target so the child can independently re-verify before serving.
-pub(crate) fn spawn_env(token: &SelectionToken) -> Vec<(OsString, OsString)> {
-    vec![(
-        OsString::from(BOOTSTRAP_TOKEN_ENV),
-        OsString::from(token.to_env_value()),
-    )]
+pub(crate) fn spawn_env(token: &SelectionToken, result_path: &Path) -> Vec<(OsString, OsString)> {
+    vec![
+        (
+            OsString::from(BOOTSTRAP_TOKEN_ENV),
+            OsString::from(token.to_env_value()),
+        ),
+        (
+            OsString::from(BOOTSTRAP_RESULT_ENV),
+            result_path.as_os_str().to_os_string(),
+        ),
+    ]
+}
+
+pub(crate) fn publish_child_bootstrap_failure(error: DaemonBootstrapFailure) {
+    let Some(path) = std::env::var_os(BOOTSTRAP_RESULT_ENV).map(PathBuf::from) else {
+        return;
+    };
+    std::env::remove_var(BOOTSTRAP_RESULT_ENV);
+    if let Ok(encoded) = serde_json::to_vec(&error) {
+        let _ = std::fs::write(path, encoded);
+    }
+}
+
+pub(crate) fn take_child_bootstrap_failure(path: &Path) -> Option<DaemonBootstrapFailure> {
+    let encoded = std::fs::read(path).ok()?;
+    let _ = std::fs::remove_file(path);
+    serde_json::from_slice(&encoded).ok()
 }
 
 #[cfg(test)]
@@ -1489,6 +1524,8 @@ mod tests {
                 .iter()
                 .map(|s| (*s).to_string())
                 .collect(),
+            application_bootstrap_admission_version:
+                install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION,
             copilot_bridge_protocol: 0,
             min_compatible_plugin_version: "0.0.0".to_string(),
             previous_tag: None,
@@ -1602,6 +1639,20 @@ mod tests {
         write_manifest(&layout, "v1", &manifest);
         write_current(&layout, "v1");
         let err = resolve_installed_current(&root).expect_err("bad schema should fail");
+        assert_eq!(err, DaemonBootstrapFailure::IncompatibleManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn resolve_reports_incompatible_manifest_without_child_admission_support() {
+        let root = temp_dir("legacy-admission");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.application_bootstrap_admission_version = 0;
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let err = resolve_installed_current(&root)
+            .expect_err("legacy admission should fail before spawn");
         assert_eq!(err, DaemonBootstrapFailure::IncompatibleManifest);
         fs::remove_dir_all(root).ok();
     }

@@ -369,15 +369,19 @@ jobs:
           }
           $pgBin.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           $data = Join-Path $env:RUNNER_TEMP "telex-postgres"
-          & (Join-Path $pgBin.FullName "initdb.exe") -D $data -A trust -U postgres
+          $passwordFile = Join-Path $env:RUNNER_TEMP "telex-postgres-password"
+          "postgres" | Set-Content -Path $passwordFile -Encoding ascii -NoNewline
+          & (Join-Path $pgBin.FullName "initdb.exe") -D $data -A scram-sha-256 -U postgres --pwfile=$passwordFile
+          Remove-Item $passwordFile -Force
           & (Join-Path $pgBin.FullName "pg_ctl.exe") -D $data -o "-p 55432 -h 127.0.0.1" -w start
           "TELEX_PG_DATA=$data" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Run public fixtures and InstalledCurrent process proofs
         env:
           TELEX_PG_REQUIRE: "1"
-          TELEX_PG_URL: postgresql://postgres@127.0.0.1:55432/postgres?sslmode=disable
-          TELEX_PROCESS_PG_URL: postgresql://postgres@127.0.0.1:55432/postgres?sslmode=disable
+          TELEX_PG_URL: postgresql://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable
+          TELEX_PROCESS_PG_URL: postgresql://postgres:postgres@127.0.0.1:55432/postgres?sslmode=disable
+          TELEX_PG_PASSWORD: postgres
         run: >-
           cargo test --all-features
           --test application_client_fixture

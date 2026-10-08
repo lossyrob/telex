@@ -2452,8 +2452,8 @@ validates one immutable target:
 
 - selected tag, versioned executable, build identity, package version,
   supported schema range, protocol version, and required security and
-  Application Client capabilities read from the selected manifest bound to
-  its tag and executable;
+  Application Client capabilities, plus explicit child bootstrap-admission
+  support, read from the selected manifest bound to its tag and executable;
 - canonical containment of the selected version directory and executable
   beneath the canonical trusted root;
 - current-OS-user ownership of the root and the authority chain, denying
