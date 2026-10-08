@@ -40,6 +40,13 @@ conflicts with main. Each writer is merging current main
 `2c084873719080b812e0d0c4bf92125afa751499` into its branch by ordinary merge.
 No new source commit, proof, review, or merge is recorded here.
 
+The operator later authorized a source-only 0.3.0 transition inside the same
+issue #152 PR. Published v0.2.1 exposes an exhaustive `ApplicationClientError`,
+so the accepted typed bootstrap failure is a breaking Rust source change. The
+root package moves to unpublished 0.3.0 with coupled metadata and migration
+guidance. This grants no tag or publication, changes no protocol or schema
+version, and adds no node.
+
 Writers may inspect, integrate, implement, test, commit, and push within
 accepted scope. Workstream orchestrators coordinate existing reviewers,
 stewards, external waits, and merge handoffs. Only material new contract,
