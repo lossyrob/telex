@@ -3,11 +3,11 @@
   "id": "local-daemon",
   "projectKey": "telex",
   "title": "Local presence/transport daemon (eliminate the per-session holder)",
-  "summary": "The local exchange, both backends, Copilot push bridge, upgrade path, and release-confidence validation are complete. The active recovery packet tracks Windows TOKEN_USER alignment and PostgreSQL wait-reset repairs, then prepares an isolated schema-3 release candidate for a separate operator publication decision. The v0.2.0 tag run failed and v0.2.0 is held unpublished; after a new operator decision, the corrective v0.2.1 was published on 2026-09-30. Historical release nodes remain complete. PR #138 and issues #152/#153 retain their existing independent authority and geometry.",
+  "summary": "The local exchange, both backends, Copilot push bridge, upgrade path, and release-confidence validation are complete. The bounded schema-3 recovery release is complete: the Windows TOKEN_USER alignment and PostgreSQL wait-reset repairs merged, the v0.2.0 tag run failed and v0.2.0 is held unpublished, and after a new operator decision the corrective v0.2.1 was published on 2026-09-30. Historical release nodes remain complete. Issue #106 / PR #138 station-intent-reconciliation resumed on 2026-10-08 in parallel with Application Client issue #152; issue #153 follows PR #138 with its existing geometry.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-09-30T18:18:25.725Z",
+  "updatedAt": "2026-10-08T19:41:39.177Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
