@@ -56,8 +56,107 @@ to the matrix and an install.sh case arm is a self-contained follow-up.
   - `copilot/plugin/plugin.json` (`version`)
   - the `--plugin-version` example in `copilot/plugin/skills/telex/SKILL.md`
 
-  (The plugin/binary compatibility check is version-matched, so drift here surfaces
-  to users. A future improvement is to derive these from a single source.)
+  `tests/release_contract.rs` checks this coupled set, including the root
+  package's lockfile entry. Independent workspace packages, dependencies, minimum
+  compatible versions, and historical fixtures are not mechanically bumped.
+
+## Immutable candidate proof
+
+For the [v0.2.1 corrective schema-3 candidate](../releases/v0.2.1.md), preparation and
+publication have separate authority. Do not push a tag or publish merely because
+a preparation PR, CI, or build-only Release run succeeds.
+
+Each native Release job packages its actual binary, records checkout SHA/tree,
+toolchain, target, features, and executable metadata, then runs
+`tests/release_candidate.py`. The proof downloads genuine v0.1.2 assets from
+release ID 359082164, pins tag source
+`636ecce360de80bbcbc0d18a61d6d6cdbbcf23f3`, checks GitHub asset digests and
+published sidecars against downloaded bytes, and executes the old payload.
+It records the old and candidate executable hashes, commands, results, loopback
+requests, installed manifest, daemon identities, and cleanup receipts.
+
+The proof step uses the workflow's read-only token as
+`TELEX_PROOF_GITHUB_TOKEN` to avoid shared-runner anonymous API limits. It is
+sent only on the two fixed upstream GitHub metadata requests, never forwarded
+on redirects or used for archive/mirror requests. The child environment
+whitelist removes it before executing any old or candidate binary, installer,
+or daemon. Local proof can omit this optional token; an API rate-limit failure
+remains a failed proof, not permission to skip provenance checks.
+
+The real old upgrader performs release discovery, download/checksum validation,
+metadata probing, authenticated drain, installation and selector switch.
+Predecessor exit is observed before successor startup. The proof preserves
+representative data through schema-2 migration and preexisting schema-3
+connection, exercises the platform's fresh installer, and checks invalid
+archive/sidecar/target/tag rejection plus downgrade guards. Release has a
+separate Linux/PostgreSQL 16 service leg; do not infer PostgreSQL or credential
+provider runtime coverage from the native platform count.
+
+Build-only archives retain the slash-sanitized branch/ref name. The loopback
+server serves those *identical bytes* under the candidate version's asset name;
+the report records that alias and its hashes. No tag or GitHub release is
+created. Installed `manifest.json` is generated from the downloaded binary's
+metadata; it is not fabricated release-server data.
+
+For a local isolated proof on Windows, use an absolute candidate archive path:
+
+```powershell
+python tests\release_candidate.py `
+  --archive C:\candidate\telex-candidate-x86_64-pc-windows-msvc.zip `
+  --target x86_64-pc-windows-msvc --source-sha <exact-build-source-sha> `
+  --tag v0.2.1 --report C:\candidate\release-proof.json
+```
+
+The archive needs its real `.sha256` sidecar. On Unix use the corresponding
+native target/archive and `python3`. PostgreSQL proof additionally requires
+`psql`, an explicitly disposable loopback server, `--postgres-url`, and
+`--disposable-postgres`. Never supply a shared server or operator credential
+command. All commands run in disposable child-scoped config, home, runtime,
+database, install, temporary, and local-state roots with ambient credentials and
+backend selections removed. Successful cleanup includes server/thread joins,
+owned-daemon completion, exact fixture-schema removal, and fixture-root removal.
+Failed cleanup is a failed proof, not a successful run with an ignored warning.
+
+Download and retain `release-evidence-*` and all five `telex-*` archive artifacts
+from the exact workflow run. Evidence artifacts are separate from public assets;
+the publish job downloads only `telex-*`. Assemble one immutable readiness packet:
+
+- PR base/head, review coverage and findings dispositions, design inspection,
+  required CI, build-only Release run/attempt and artifact IDs.
+- Candidate and final merge/tag-target SHA/tree; baseline release/tag/asset
+  provenance; toolchain/features; each archive, sidecar, and executable digest.
+- Executed commands/results, schema and install evidence, backend/platform
+  coverage, limitations, exclusions, and complete cleanup receipts.
+- A hash inventory for the packet and its evidence files, with the tracker field
+  report and the separate operator publication decision.
+
+When the preparation merge changes source SHA, run CI and the build-only Release
+proof again at the actual final tag target. Do not relabel PR-head binaries as
+merged-source evidence or assume archive reproducibility. Head movement invalidates
+the prior exact-head claim. Preserve earlier evidence as history and bind the
+publication decision to the final immutable packet.
+
+### Unpublished v0.2.0 and Windows observer diagnostics
+
+The immutable v0.2.0 tag at `1b9fc8f` had a failed publication proof and no GitHub
+release object. Do not move/recreate it or treat it as a released upgrade
+baseline. The operator selected corrective v0.2.1 preparation; neither candidate
+version selection nor a later green preparation run authorizes its tag push.
+
+The proof now preserves native Windows capability-read errors and a sanitized
+`readiness_observations` chronology. Only open-time WinError 32 inside an owned
+successor's existing 15-second budget can retry. WinError 5, unknown/errno-only
+denial, read/close errors, foreign identity and persistent sharing remain
+failures. The original hosted errno13 does not identify which native cause
+occurred.
+
+Run `python tests/release_windows_publication_test.py` on Windows for the
+discriminating native file/ACL/publication controls. Both Windows Release targets
+also upload `evidence/native-file-observer.json`; that control report does not
+replace the separate genuine-binary runtime report. Recheck original packet
+hashes and preserve failed-attempt evidence when assembling the new readiness
+packet. Never count a generic permission exception as transient or remove
+authentication/identity checks to make a release proof pass.
 
 ## Pre-cut checklist
 

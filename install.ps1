@@ -8,11 +8,16 @@
     TELEX_INSTALL_ROOT versioned install root (default: $env:LOCALAPPDATA\telex)
     TELEX_INSTALL_DIR  legacy override; if it ends in \bin, its parent is used as TELEX_INSTALL_ROOT
     TELEX_VERSION      version tag to install (default: latest)
+    TELEX_NO_MODIFY_PATH set to 1 to leave the persistent user PATH unchanged
+    TELEX_UPGRADE_API_BASE / TELEX_UPGRADE_DOWNLOAD_BASE
+                       trusted release mirror overrides (default: GitHub)
     GITHUB_TOKEN       optional, raises GitHub API rate limits
 #>
 $ErrorActionPreference = 'Stop'
 
 $repo = 'lossyrob/telex'
+$apiBase = if ($env:TELEX_UPGRADE_API_BASE) { $env:TELEX_UPGRADE_API_BASE.TrimEnd('/') } else { 'https://api.github.com' }
+$downloadBase = if ($env:TELEX_UPGRADE_DOWNLOAD_BASE) { $env:TELEX_UPGRADE_DOWNLOAD_BASE.TrimEnd('/') } else { 'https://github.com' }
 $installRoot = if ($env:TELEX_INSTALL_ROOT) {
     $env:TELEX_INSTALL_ROOT
 } elseif ($env:TELEX_INSTALL_DIR) {
@@ -41,13 +46,13 @@ if ($env:GITHUB_TOKEN) { $headers['Authorization'] = "Bearer $($env:GITHUB_TOKEN
 # Resolve the version tag.
 $tag = $env:TELEX_VERSION
 if (-not $tag) {
-    $rel = Invoke-RestMethod -Headers $headers "https://api.github.com/repos/$repo/releases/latest"
+    $rel = Invoke-RestMethod -Headers $headers "$apiBase/repos/$repo/releases/latest"
     $tag = $rel.tag_name
     if (-not $tag) { throw 'could not determine the latest release tag (is a release published?)' }
 }
 
 $asset = "telex-$tag-$target.zip"
-$url = "https://github.com/$repo/releases/download/$tag/$asset"
+$url = "$downloadBase/$repo/releases/download/$tag/$asset"
 
 $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("telex-install-" + [System.Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Force -Path $tmp | Out-Null
@@ -78,10 +83,14 @@ try {
     Write-Host "Launcher: $binDir\telex.exe"
 
     # Add to the user PATH if it is not already there.
-    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
-    if (($userPath -split ';') -notcontains $binDir) {
-        [Environment]::SetEnvironmentVariable('Path', "$userPath;$binDir", 'User')
-        Write-Host "Added $binDir to your user PATH (restart your terminal to pick it up)."
+    if ($env:TELEX_NO_MODIFY_PATH -ne '1') {
+        $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+        if (($userPath -split ';') -notcontains $binDir) {
+            [Environment]::SetEnvironmentVariable('Path', "$userPath;$binDir", 'User')
+            Write-Host "Added $binDir to your user PATH (restart your terminal to pick it up)."
+        }
+    } else {
+        Write-Host "User PATH unchanged (TELEX_NO_MODIFY_PATH=1)."
     }
     Write-Host "Next:  telex skill"
     Write-Host "Copilot plugin marketplace:"

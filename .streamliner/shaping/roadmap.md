@@ -4,6 +4,49 @@
 > Streamliner's `CAMPAIGNS.md`; this document is the project-local instance and is
 > revised as workstreams pass gates or seams change.
 
+## Execution override: schema-3 recovery release (2026-09-24)
+
+The operator authorized a bounded v0.2.0 recovery release so released clients can
+use schema-3 stores. This directive takes precedence over the historical status
+and next-action text below for this effort; it does not replace the broader
+campaign intent, stages, or workstream closure criteria.
+
+The delivery path is owned by Local Daemon:
+
+1. `windows-token-buffer-alignment`
+   ([#154](https://github.com/lossyrob/telex/issues/154)) repairs both current-main
+   SQLite and daemon peer-authentication token buffers and audits the remaining
+   call sites. The unmerged PR #138 fix is not baseline authority.
+2. `postgres-wait-reset-recovery`
+   ([#155](https://github.com/lossyrob/telex/issues/155)) adopts and completes
+   existing [PR #156](https://github.com/lossyrob/telex/pull/156).
+3. `schema3-release-preparation`
+   ([#157](https://github.com/lossyrob/telex/issues/157)) begins only after both
+   repair merges and campaign verification. One isolated release worker owns
+   consistent version metadata, release notes, genuine v0.1.2 upgrade and fresh
+   installation proof, and exact-candidate CI and build-only release validation.
+4. `schema3-release-gate` is campaign/operator-owned. Tagging and publication
+   require separate explicit operator approval for the immutable candidate;
+   the same release worker then owns publication and installation verification.
+
+PR #138 remains merge-unapproved and excluded. Issue #152 conformance, #153
+transactional authority, Watcher/Station runtime expansion, and campaign closure
+are also excluded; their preserved workers must not be revived for this effort.
+The release gate does not accept Local Daemon hardening or campaign closure,
+and historical next actions below grant no launch authority for this release.
+
+All new sessions and delegated agents must explicitly request `gpt-6-astra`,
+`reasoning_effort=high`, and `context_tier=long_context` (the operator requested
+1.2M context), with no silent downgrade. Product launch requires reviewed Tier B
+authority on main, exact-path Streamliner preparation, verified `session-online`,
+standalone `write-authorized`, and acknowledgement. Every product merge requires
+exact-head campaign authorization after review, CI, and design inspection.
+
+Schema guards remain intact. All upgrade, database, and daemon proof uses
+disposable isolated roots, stores, and binaries, never the operator's installed
+daemon or shared database. Genuine old-binary compatibility must be demonstrated,
+not inferred from the manifest range.
+
 ## Current main effort
 
 **Campaign — [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102).**

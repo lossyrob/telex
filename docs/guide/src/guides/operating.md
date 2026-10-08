@@ -104,6 +104,16 @@ or truncated download, and the trust root is the GitHub repository the asset com
 `telex upgrade` and `telex rollback` drain the current local daemon before
 switching `current`, unless `--skip-drain` is passed. Rollback refuses installed
 versions whose manifest is incompatible with this build's protocol/schema floor.
+For the schema-3 upgrade, v0.1.2's retained executable is not a downgrade path:
+the new binary rejects its schema-2 manifest, and v0.1.2 itself refuses the
+migrated store. There is no automatic reverse schema migration.
+
+Use the old daemon's owning binary for drain and let that process finish before
+starting the selected new image. A `draining` acknowledgement alone does not
+prove exit. Protocol 1.4 and 1.5 share a singleton major; avoid mixed explicit
+binary paths and do not treat `--skip-drain` as ordinary upgrade coordination.
+Reattach addresses still wanted after replacement; durable messages survive,
+but this does not promise automatic push-intent restoration.
 
 For a manual in-place replacement, drain and replace in this order:
 

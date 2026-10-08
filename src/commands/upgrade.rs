@@ -390,6 +390,9 @@ fn sweep_stale_staging(base: &Path) {
 
 pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     let layout = install::layout_from_optional_root(args.root)?;
+    if args.version.is_none() && !layout.root.exists() {
+        bail!("no previous installed version recorded; pass --version");
+    }
     let canonical_root = crate::daemon_bootstrap::validate_install_root_for_switch(&layout.root)
         .map_err(|error| anyhow!("validate install root before rollback: {error}"))?;
     let layout = install::layout_for_root(canonical_root);
@@ -759,6 +762,7 @@ mod tests {
         // first-hop uncertainty explicitly rather than inventing build identity.
         let metadata = parse_source_metadata(&value).unwrap();
         assert_eq!(metadata.build_id, install::UNKNOWN_BUILD_ID);
+        assert_eq!((metadata.schema_min, metadata.schema_max), (2, 2));
 
         let mut current = value;
         current["version"]["build_id"] = serde_json::json!("candidate-build");

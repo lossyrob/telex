@@ -924,12 +924,17 @@ mod tests {
     #[test]
     fn daemon_subcommand_is_hidden_from_top_level_help() {
         let help = Cli::command().render_long_help().to_string();
+        let commands = help
+            .split_once("Commands:")
+            .and_then(|(_, rest)| rest.split_once("Options:"))
+            .map(|(commands, _)| commands)
+            .expect("top-level help command section");
         assert!(
-            !help.contains("daemon"),
+            !commands.contains("daemon"),
             "top-level help leaked daemon:\n{help}"
         );
         assert!(
-            !help.contains("copilot"),
+            !commands.contains("copilot"),
             "top-level help leaked copilot adapter:\n{help}"
         );
     }

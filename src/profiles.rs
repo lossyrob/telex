@@ -14,6 +14,29 @@ use std::sync::Arc;
 
 use crate::backend::Backend;
 
+#[cfg(feature = "postgres")]
+mod password_command;
+
+/// Drain only credential invocations owned by this process before orderly host exit.
+///
+/// Logical operation deadlines are unchanged. Cleanup uses one three-second
+/// observation budget; missing receipt visibly holds the host rather than
+/// discarding ownership and reporting clean exit.
+pub fn drain_password_commands_before_exit() {
+    #[cfg(feature = "postgres")]
+    password_command::drain_before_exit();
+}
+
+#[cfg(feature = "postgres")]
+#[doc(hidden)]
+pub use password_command::Obligation as CredentialCommandObligation;
+
+#[cfg(feature = "postgres")]
+#[doc(hidden)]
+pub fn credential_command_obligations() -> Vec<CredentialCommandObligation> {
+    password_command::pending()
+}
+
 /// The on-disk `config.toml`.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct ConfigFile {
@@ -300,27 +323,7 @@ async fn resolve_password(profile: &BackendProfile) -> Result<Option<String>> {
 
 #[cfg(feature = "postgres")]
 async fn run_command(cmd: &str) -> Result<String> {
-    let output = if cfg!(windows) {
-        tokio::process::Command::new("cmd")
-            .arg("/C")
-            .arg(cmd)
-            .output()
-            .await
-    } else {
-        tokio::process::Command::new("sh")
-            .arg("-c")
-            .arg(cmd)
-            .output()
-            .await
-    }
-    .with_context(|| format!("running password_command: {cmd}"))?;
-    if !output.status.success() {
-        bail!(
-            "password_command failed: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        );
-    }
-    Ok(String::from_utf8(output.stdout)?.trim().to_string())
+    password_command::execute(cmd).await
 }
 
 fn default_sqlite_path() -> String {

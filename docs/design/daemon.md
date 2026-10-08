@@ -159,6 +159,129 @@ A client's connect-or-spawn uses bounded exponential backoff (jittered) and a
 (below) rather than fork-bombing. The window/threshold are configurable; defaults frozen
 in `daemon-core` acceptance.
 
+Active waits recover from structurally identified transient PostgreSQL connection
+failures without unregistering the station. Candidate fetch and the epoch
+heartbeat immediately before delivery share a bounded attempt. A stalled initial
+acquisition/query is bounded too. Recovery has a fixed 3,000 ms budget, with
+exponential delays starting at 50 ms and capped at 500 ms; failed attempts do not
+restart that budget. A successful attempt resets it for a later independent
+failure. The original finite wait deadline bounds every attempt and retry delay.
+If that deadline expires before or at the recovery deadline, the outcome is
+`Timeout`; otherwise exhausted recovery returns `BackendUnavailable`.
+
+Authentication, configuration, schema, and other permanent errors retain their
+ordinary error path. Recovery never bypasses membership, liveness, or epoch
+checks, and does not consume a message. The independent PostgreSQL `LISTEN` loop
+reconnects with backoff; polling remains the delivery correctness path while the
+listener is unavailable. Listener loss alone does not end an otherwise working
+wait or disrupt a registered push station.
+
+This backend budget is independent of the CLI's `--reconnect-grace-ms`, which
+controls reconnecting to an existing daemon after IPC loss.
+
+#### Credential-command ownership during recovery
+
+`--password-command` is a one-shot invocation. Its normal completion, error, and
+cancellation paths clean up Telex-owned helpers within the supported invocation
+scope. Intentionally persistent, escaped, or broker-launched background work is
+outside that contract. Querying an already-running external credential agent
+does not make it Telex-owned and does not authorize its termination. A Windows
+job or Unix process group is not a universal all-descendant containment claim.
+
+One credential-specific registry in the owning process spans calls and Tokio
+runtimes. Its aggregate occupied capacity is two. A configured command source
+cannot overlap itself; its reservation remains held during setup, execution,
+collection, cancellation, completed-but-unjoined work, and `FAILED_HELD`.
+Admission waiting creates no process, native worker, or reader, and spends the
+caller's existing budget without classifying capacity pressure as bad credentials.
+The registry is not a service, a general process manager, or a second retry layer.
+
+A native owner retains the scope, pipes, cancellation state, output, and thread
+obligation independently of Tokio. stdout and stderr are drained by that owner,
+without detached readers or an output truncation policy. Successful shell exit
+while inherited writers remain is still collection. Normal-success cleanup
+requires successful status and complete output/EOF; it must not kill a finite
+helper still producing the credential and publish truncated valid UTF-8.
+Cancellation, timeout, command error, and read failure may stop collection, but
+cannot publish partial or post-cancellation credentials. The environment source
+still takes precedence over the command; shell syntax, inherited environment and
+working directory, full UTF-8 output, and trimming remain the command contract.
+
+Cleanup has an internal three-second observation target, not a universal OS
+termination guarantee. A receipt requires supported-scope completion, exact
+owned-child reap or process wait, completed or closed owned I/O, and native
+owner completion and join. Own-resource finalization has an explicit checked
+result; returning from a destructor is not a success-shaped close receipt.
+Finalization runs under native ownership, outside registry locks, before
+worker completion. The collector joins that worker before atomically selecting
+an eligible result and releasing its source/slot. An established failure hold
+is not erased by a later cleaned result. Partial release retains only still-valid
+ownership and its named failure; closed raw handles/descriptors are never
+reconstructed or blindly retried. A kill request, elapsed time, shell exit,
+EOF, or helper PID probe alone is not receipt.
+
+Windows uses documented suspended creation with actual process and primary
+thread handles. A private noninheritable kill-on-close job is assigned before
+resume; no breakaway or uncontained fallback is permitted. Each job is single-use
+with no later assignment by Telex. The Windows **job-terminal** receipt requires
+checked termination of the exact job, checked zero active job processes, the
+exact launched leader's process handle signaled, completed or closed owned I/O,
+checked release of Telex's own handles, and native owner completion/join before
+eligible publication or admission release. Setup failures retain and clean up
+their exact resources; a created but unassigned suspended leader is not an
+empty-job success.
+
+This is a job-scoped operational receipt, not an all-descendant-kernel-completion
+fence. A former descendant's independently retained process handle may remain
+unsignaled while Windows completes kernel/driver rundown. Telex does not promise
+that all former process handles are signaled, all kernel objects have disappeared,
+or previously issued external I/O has finished at its receipt. Capacity two
+bounds Telex's occupied invocation owners and retained resources, not all residual
+Windows kernel objects across invocations. The earlier stronger-signaling
+counterexamples remain valid evidence of that distinction. Termination/query
+errors, positive active counts, missing leader wait, I/O/finalization failures,
+and missing native join still prohibit receipt. No elapsed-time grace or debugger
+substitutes for the conjunction.
+
+Unix establishes a dedicated group before exec. Its exclusive owner retains the
+waitable unreaped leader through every nonzero group signal, then irreversibly
+seals signal authority before exact leader reap. The former PGID is subsequently
+only a read-only observation key: no normal, error, cancellation, Drop, retry, or
+recheck path may send a nonzero signal after reap. Linux uses
+`getpriority(PRIO_PGRP, P)` with cleared thread-local errno; only `-1/ESRCH`
+establishes absence, while `-1/errno 0` is valid presence. macOS uses the actual
+supported libc POSIX/UNIX03 `kill(-P, 0)` binding: zero is presence, ESRCH is
+absence, and EPERM is presence or inconclusive. Unknown, denied, or ambiguous
+observations retain the obligation. There is no Linux null-signal substitute,
+macOS raw/legacy binding, competing child reaper, or grandchild-reap claim.
+
+On macOS, the final anchored nonzero termination attempt can return EPERM for
+a zombie-only group. That failed attempt is retained as evidence, not called a
+successful kill or absence. After sealing signal authority, exact leader reap
+and independent read-only absence may still establish the remaining receipt
+conditions. This exception does not turn ownership, ECHILD, setup, reap, or
+query failures into success, and post-reap null-query EPERM still prevents receipt.
+
+Missing receipt becomes visible `FAILED_HELD`. The owning host retains the
+invocation ID, source reservation, slot, phase-appropriate resources and native
+thread obligation. After Unix reap it retains read-only observation data, never
+restored signal authority. It cannot discard ownership, restart automatically,
+release capacity on a timer, or claim clean exit. Diagnostics identify the
+obligation, lifecycle stage, and sanitized status; they must not disclose command
+text, credentials, environment, DSNs, or helper stderr.
+
+Only a host that owns credential work drains it before orderly exit. Logical
+command/Wait results retain their deadlines; normal host exit may add up to
+three seconds for concurrent cancellation, receipt, and join under one absolute
+current budget, not a renewed budget per worker. The root CLI and the existing
+in-process console use the same owning-host seam. Embedders call
+`profiles::drain_password_commands_before_exit` before orderly process exit.
+Dropping a Tokio runtime while its process lives does not discard native owners.
+On a missing shutdown receipt, the host reports and retains a named failure hold
+for operator intervention, potentially beyond three seconds. This is not an
+unconditional process-exit bound, and a remote client does not drain daemon-owned
+credential work.
+
 ### 3.2 Exit codes (client-observable)
 
 `telex wait` keeps its existing contract (grounded in `src/commands/wait.rs`), extended
@@ -171,6 +294,13 @@ for the daemon:
 | `3` | daemon gone (connect/read failed or EOF) **after** the reconnect-on-EOF grace expired |
 | `4` | daemon hung (no frame within the hang window, or heartbeat observed stale) |
 | `5` | **presence ended** — the exchange **reaped** this blocked `wait` (a `PresenceEnded` frame: sessionEnd hook, loader-pid death, **or the idle-TTL backstop** — [§9](#9-liveness-model)/[§10](#10-reaping-and-the-idle-ttl-backstop)). **Non-destructive**: the station persists; a still-live agent **re-attaches + re-waits** (handled like reconnect-on-EOF), and a new message still wakes it. |
+| `7` | backend unavailable after transient recovery exhausted its budget; requires the recovery-aware CLI and the daemon's `wait-backend-recovery` offer; the station remains registered |
+
+These are actual CLI process/out-dir codes. An older CLI still receives the
+decodable `Error { code: "BackendUnavailable", message, ... }`, but uses its
+existing generic error path: process and out-dir exit `1`, with the error detail.
+The daemon's recorded terminal classification `7` is not evidence that a legacy
+client process exited `7`. See the compatibility matrix in section 6.1.
 
 One-shot verbs (`attach`/`detach`/`send`/`reply`/`status`) return `0` on success and a
 documented non-zero on a daemon-down or protocol error; the exact non-zero set is frozen
@@ -346,7 +476,8 @@ Frozen Status fields:
   `deaf_for_ms`, `deaf_warn`),
   daemon-authored terminal waiter fields (`last_waiter_exit_at_ms`, `last_waiter_outcome`,
   `last_waiter_exit_code`, `last_waiter_detail`, `last_waiter_pid`) whose outcome vocabulary is
-  `message` / `idle-timeout` / `presence-ended` / `abnormal-exit`, and
+  `message` / `delivery-quarantined` / `idle-timeout` / `presence-ended` /
+  `backend-unavailable` / `abnormal-exit`, and
   `watch_pids` (pid + role + **alive**) so a live-but-quiet station is distinguishable from an
   unattended one with queued work,
   `backend`/`store_key`, `host`. (Membership is in-memory and explicit-only — see
@@ -400,6 +531,16 @@ store (optionally narrowed by `--address`) and marks rows owned by another sessi
 When no current session id is available, all rows in the widened view are treated as foreign.
 Address-scoped `status` / `address show` / `address list` expose the same deaf/foreign state in
 JSON; their text output is a human operator aid, while JSON is the stable machine contract.
+
+The daemon always retains the full `backend-unavailable` terminal outcome,
+classification `7`, detail, timestamp, and PID. For a Status requester whose
+authenticated `Hello` lacks `wait-backend-recovery`, it omits only
+`last_waiter_outcome` when that value is `backend-unavailable`. The field is absent
+on the wire; a legacy CLI may render it as `null` after decoding. All other
+outcomes, code/detail/time/PID, membership, and health fields remain unchanged.
+This projection does not mutate stored state and uses the current Status
+requester's offer, not the earlier waiter's offer. Detail/proof checks remain
+unchanged, and minimal Status remains minimal.
 
 ## 5. Membership model and record shapes
 
@@ -514,7 +655,7 @@ client (or vice versa) detect skew deterministically instead of mis-framing, and
 → Hello    { protocol_version, client_version, store_key, capabilities: [..],
              required_capabilities: [..] }
 ← HelloAck { protocol_version, daemon_version, auth_policy_version,
-             accepted: bool, required_capabilities: [..], reason?: string }
+             accepted: bool, capabilities: [..], required_capabilities: [..], reason?: string }
 ```
 
 - If `protocol_major` differs, the client and daemon belong to different singletons
@@ -537,6 +678,32 @@ downgrade error code — is **owned and frozen as part of `daemon-core` acceptan
 freezes the frame *shapes* and the fail-closed capability *policy*; `daemon-core` fills and
 freezes the version/min-version *table*), with **N/N-1 and N+1/N tests** for attach, wait
 reconnect/re-attach, Drain, Detach, and Status.
+
+#### Optional wait-backend-recovery capability
+
+Recovery-aware clients advertise the exact optional token
+`wait-backend-recovery` in `Hello`; recovery-aware daemons advertise it in
+`HelloAck`. Neither required-capability set changes. Protocol remains 1.5, auth
+policy remains unchanged, and store schema remains 3.
+
+Handshake success or protocol-minor equality alone does not select this
+capability. The daemon uses the current requester's `Hello` to protect the closed
+Status outcome vocabulary. The client checks the actual daemon `HelloAck` offer
+before interpreting exhausted recovery as CLI exit `7`. A daemon offer does not
+prove that a client supports the new Status value.
+
+| Client / daemon | Wait behavior | Status behavior |
+|---|---|---|
+| Legacy 1.5 / recovery-aware | Daemon recovery still applies. Exhaustion uses the legacy CLI's generic exit `1` with `BackendUnavailable` detail. | Unsupported `backend-unavailable` outcome is omitted; code `7`, detail, timestamp, and other evidence remain. |
+| Recovery-aware / recovery-aware | Both advertise support; exhaustion produces process/out-dir exit `7` and `backend-unavailable`. | Typed outcome is present. |
+| Recovery-aware / legacy 1.5 | Unknown optional offer is ignored. Existing operations and outcomes work, without a recovery or exit-7 guarantee. Old Internal/transport errors are not relabelled as recovery exhaustion. | Existing vocabulary is unchanged. |
+
+Unknown optional tokens do not authorize new closed-enum values. Missing or
+unknown required capabilities still fail closed. The optional capability is
+neither authorization nor a retry-policy switch: new daemons recover legacy and
+new waiters identically. This matrix describes wire-compatible peers; existing
+OS peer/executable authentication must also succeed and is not relaxed for
+cross-build testing.
 
 ### 6.2 Request / response frames
 
@@ -569,7 +736,7 @@ Responses:
 
 | Response | Carries |
 |---|---|
-| `HelloAck` | protocol/daemon version, `auth_policy_version`, `required_capabilities`, accepted |
+| `HelloAck` | protocol/daemon version, `auth_policy_version`, offered `capabilities`, `required_capabilities`, accepted |
 | `Registered` | `lease_epoch`, `owner_instance_id` (the attach succeeded; membership established) |
 | `Message` | `id, thread_id, parent_id, from_addr, to_addr, delivered_to, primary_to, cc, delivery_role, kind, attention, requires_disposition, requires_disposition_for_current_recipient, subject, body, sent_at_ms, buffered_at_ms, lease_epoch` |
 | `DeliveryQuarantined` | structured post-acceptance progress evidence for one historical delivery that cannot fit unchanged in the current frame: `message_id, recipient, serialized_bytes, max_bytes, may_continue`. The daemon first records durable exact-recipient quarantine evidence; clients re-arm receive when `may_continue` is true. |
@@ -584,6 +751,11 @@ Responses:
 `delivery_quarantine_v1` is optional and advertised. The daemon emits
 `DeliveryQuarantined` only when the peer advertised it; older peers receive a
 decodable `Incompatible` error after the same durable quarantine action.
+
+Exhausted backend recovery uses the existing `Error` frame with string code
+`BackendUnavailable` and actionable detail, never a new Response variant.
+`wait-backend-recovery` gates only the typed Status outcome and advertises the
+client-visible recovery contract described above.
 
 The `Message` frame carries `lease_epoch` (the delivery-ownership fence —
 [§11](#11-lease-epoch-fence-the-spine)). Delivery is **at-least-once**: the daemon EMITs the

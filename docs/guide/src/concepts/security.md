@@ -22,6 +22,12 @@ Postgres passwords are referenced, never written to the config file: use
 `--entra`, `--password-env`, or `--password-command`. `telex backend show`
 redacts secrets.
 
+Credential-command diagnostics do not repeat command text, credential output,
+environment, DSNs, or helper stderr. Commands run with the current user's
+environment and working directory; invocation ownership is cleanup, not a
+sandbox or an authorization boundary. Preexisting credential agents and
+broker-created work are not owned termination targets.
+
 ## Message content
 
 Message bodies, subjects, metadata, and disposition history are stored in the

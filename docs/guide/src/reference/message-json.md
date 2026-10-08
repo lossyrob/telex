@@ -78,7 +78,14 @@ telex ack --address <addr> --id <id> --session <session-id>
 - `delivery.json`: the envelope `{ message, delivery, status }` (exit 0 only).
 - `status.json`: `{ outcome, exit_code, detail, quarantine?, ... }` (always).
   Exit 6 stores its structured evidence in `quarantine` and removes any stale
-  `message.json`/`delivery.json`; it is not a delivered-message artifact.
+  `message.json`/`delivery.json`; it is not a delivered-message artifact. Exit 7
+  reports exhausted backend recovery as `backend-unavailable`.
 - `exit.code`: the integer exit code, written last as the completion marker.
+
+Exit 7 applies when both the CLI and daemon support `wait-backend-recovery`.
+Legacy CLI artifacts instead contain `outcome: "error"`, `exit_code: 1`, and
+`BackendUnavailable` detail. Daemon Status retains classification `7`, but omits
+the new typed `last_waiter_outcome` for a requester that lacks the optional
+capability. That omission does not remove the detail or change the stored outcome.
 
 See [Exit codes](exit-codes.md).
