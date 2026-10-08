@@ -244,10 +244,11 @@ review, and conformance evidence before external consumers may rely on it.
 ## Accepted intended change: daemon-replacement station intent
 
 **Promotion boundary:** the operator accepted this workstream direction for
-issue #106 and PR #138 on 2026-09-02. The current implementation does not
-provide station intent. PR #138 must promote the matching normative design,
-implementation, review, and conformance evidence before clients may rely on
-this behavior.
+issue #106 and PR #138 on 2026-09-02. PR #138 fulfilled this promotion when it
+merged on 2026-10-08 as `6ab6143a` with the matching normative design,
+implementation, review, and conformance evidence, so clients may rely on the
+behavior below, including its degraded discovery contract. The issue #153
+replacement obligation described below remains.
 
 The accepted design intentionally clears in-memory membership, including its
 `on_deliver` handler, when the daemon is replaced. Durable messages survive,

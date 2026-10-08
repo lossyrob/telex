@@ -3,13 +3,39 @@
 - **Workstream:** `local-daemon`
 - **Node:** `station-intent-transactional-authority`
 - **Type:** implementation
-- **Status:** planned; launch requires separate authorization
+- **Status:** ready for one supported preparation (2026-10-08); no worker
+  exists and preparation has not started
 - **Attention:** focus
-- **Depends on:** completed `station-intent-reconciliation`
+- **Depends on:** completed `station-intent-reconciliation` (PR #138 merged as
+  `6ab6143a`)
 - **Owner:** Local Daemon workstream orchestrator until an authorized implementer is assigned
 - **Tracker:** [lossyrob/telex#153](https://github.com/lossyrob/telex/issues/153)
 - **Parent workstream:** [lossyrob/telex#32](https://github.com/lossyrob/telex/issues/32)
 - **Campaign:** [Addressable Attention #102](https://github.com/lossyrob/telex/issues/102)
+
+## Readiness (2026-10-08)
+
+The prerequisite is met. PR #138 merged as
+`6ab6143ad0d0e8b9832df41e4e180c4acd1204c4` (tree
+`a9bd5f0dc4a8867b3dc04b7358d0d2fdd3eef902`) under campaign merge authority,
+and issue #106 was closed as completed at 2026-10-08T21:50:45Z by an explicit
+provider action (event 32828313724). The campaign's 2026-10-08 post-release
+direction promotes this node after that merge from the landed authority with a
+complete task specification. Design steward `af271672` found this
+specification ready for one supported preparation, with no missing outcome,
+acceptance criterion, or operator choice. Preparation starts from source
+`6ab6143a` and the canonical task revision that records this section.
+
+The worker chooses the exact store, layout, and cutover mechanism as node
+research; that choice is not an upfront operator vote. Accepted contracts
+cannot be weakened: no split writers, no discarding newer data, no manual
+reattachment in place of fair or exact maintenance, no weaker fencing, no
+longer response deadline, and no promise of transparent downgrade to
+unsupported versions. Any such departure is a material decision for the
+operator; ordinary implementation choices are not. Preparation comes before
+any writer launch, and new sessions explicitly request `gpt-6-astra`, high
+reasoning effort, and long context. Builder hardening and closure gates stay
+separate decisions.
 
 ## Outcome
 
@@ -42,7 +68,8 @@ ownership, positive liveness, or permission to deliver.
 
 ## Inputs
 
-- The merged `station-intent-reconciliation` outcome: desired-state semantics,
+- The merged `station-intent-reconciliation` outcome at `6ab6143a`:
+  desired-state semantics,
   producer proof, detach/reset precedence, four-second response, persistent OS
   lock containment, observable partial-scan degradation, and both-backend
   behavior.
@@ -124,9 +151,13 @@ consistent with the append-only decision log.
 
 ## Engagement
 
-- Review the worker plan before repository mutation, with specific attention to
-  authority selection, migration, rollback, and old-writer refusal.
-- Review the proposed persistent-layout and product-design change before
-  implementation is treated as stable.
+- The worker owns routine research, planning, implementation and validation
+  within the accepted task. Consult the design steward on persistent layout,
+  migration/cutover, rollback and old-writer-refusal coherence; no per-plan or
+  per-test acknowledgement gate applies.
+- Route any new material contract, trust/support, compatibility or
+  accepted-gap decision through Local to the operator before encoding it.
+  Preserve the existing exact-head review, CI, design-inspection and
+  merge-authority requirements.
 - Require an end-to-end migration, restart, fairness, and over-cap recovery
   demonstration before merge readiness.

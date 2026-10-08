@@ -36,8 +36,9 @@ reclaim (competing daemons); **seamless upgrade** (#6) lands
 **last**, after Postgres and the plugin, so the full upgrade platform never blocks
 the unblock. The original large validation-harness and AKS-scale shape was later
 replaced by a practical **release-confidence-validation** node, which is complete.
-Issue #106 / PR #138 is the active hardening repair discovered after that
-validation. The operator accepted persistent OS-lock containment and a truthful
+Issue #106 / PR #138 is the hardening repair discovered after that
+validation; it merged on 2026-10-08. The operator accepted persistent
+OS-lock containment and a truthful
 degraded-enumeration contract for that PR. The mandatory downstream
 **station-intent-transactional-authority** node
 ([#153](https://github.com/lossyrob/telex/issues/153)) closes the accepted gap before
@@ -132,14 +133,14 @@ while losing a still-live bridge's desired push registration. Existing PR #138 i
 adopted `station-intent-reconciliation` repair. The operator selected persistent
 owner-private OS advisory locking to prevent stale pathname mutation and accepted a
 degraded contract for bounded partial directory scans. PR #138 was
-excluded from the completed schema-3 recovery release. On 2026-10-08 its existing
-writer resumed in parallel with Application Client issue #152; the PR remains
-open and merge-unapproved. The **hardening gate is not ready** until that
-narrowed repair is
-merged and presented with isolated restart/drain/upgrade and push-recovery evidence.
+excluded from the completed schema-3 recovery release. Its existing writer
+resumed on 2026-10-08 in parallel with Application Client issue #152, and the
+PR merged later that day as `6ab6143a` after campaign authorization. The
+**hardening gate is not accepted**: the merged narrowed repair still has to be
+presented with isolated restart/drain/upgrade and push-recovery evidence.
 
 Unconditional transactional generation authority, seekable fair discovery and
-garbage collection, exact counts, and exact over-cap recovery belong to the planned
+garbage collection, exact counts, and exact over-cap recovery belong to the ready
 XL `station-intent-transactional-authority` node
 ([#153](https://github.com/lossyrob/telex/issues/153)). That node follows PR #138 and
 blocks the final **closure gate**, not PR #138 or the hardening gate.
@@ -456,6 +457,26 @@ review, CI, and design evidence is therefore in place, and ledger item
 `local-daemon-pr138-exact-head-ci-failures` is complete. Campaign merge
 authorization is still pending, and the node stays in progress until PR #138
 merges.
+
+The campaign then authorized a guarded ordinary merge of exact head
+`286251b6` (authority `pr138-campaign-merge-authority-286251b-20261008.json`,
+SHA-256 `59d658109d05078d35133f261edc9255971d490b9f4270412fd9d00ec672fb63`).
+Local merged PR #138 at 2026-10-08T21:48:41Z as
+`6ab6143ad0d0e8b9832df41e4e180c4acd1204c4`, with parents `9166fce0` (main) and
+`286251b6` and tree `a9bd5f0dc4a8867b3dc04b7358d0d2fdd3eef902`. That tree
+matches the one computed before the merge. Local posted field report
+6069716718 on issue #106, then closed the issue as completed at 21:50:45Z by
+an explicit provider action (event 32828313724, no closing commit).
+`station-intent-reconciliation` is complete. The ledger items for the M3 lock
+repair and the stale pending review are complete. The M5 item stays routed:
+PR #138 delivered the degraded-contract slice, and issue #153 still owns
+unconditional transactional authority. The post-merge CI and Docs runs on
+`6ab6143a` are post-merge checks, not candidate proof. The merge is source
+only. No tag or release changed, and the hardening and closure gates are not
+accepted. Design steward `af271672` then
+found the issue #153 task ready for one supported preparation against the
+merged source, so `station-intent-transactional-authority` is ready. No worker
+exists and preparation has not started.
 
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
