@@ -4,7 +4,88 @@
 > Streamliner's `CAMPAIGNS.md`; this document is the project-local instance and is
 > revised as workstreams pass gates or seams change.
 
-## Execution override: schema-3 recovery release (2026-09-24)
+## Post-release execution direction (2026-10-08)
+
+On 2026-10-08 the operator approved the campaign's post-release recommendation,
+recorded in campaign directive
+`campaign-postrelease-execution-directive-20261008.json` (SHA-256
+`a4d98af7d891efe7164839c79b4431d07acfc1ceef606c54e46b82ab7eb5613d`). Two lanes
+run with their existing writers on their original branches. No new worker,
+replacement, PAW reinitialization, or node split is introduced.
+
+- **Main effort: Application Client `client-conformance`
+  ([#152](https://github.com/lossyrob/telex/issues/152)).** Finish the accepted
+  trusted `InstalledCurrent` bootstrap and all ten public Rust conformance
+  families across isolated SQLite and credentialed PostgreSQL, with public-only
+  Watcher send-only and Station bidirectional fixtures, shared-semantic repairs,
+  and migration guidance, in one delivery PR. The direction adds no
+  executable-digest requirement or unsafe fallback.
+- **Parallel: Local Daemon `station-intent-reconciliation`
+  ([#106](https://github.com/lossyrob/telex/issues/106) / PR #138).** Integrate
+  current main into the adopted PR and prove the accepted outcome: persistent
+  owner-private OS advisory locking with no age takeover or lock-path deletion
+  or replacement (M3), and honest degraded enumeration, truncation, and
+  lower-bound counts with conditional eventual coverage (M5). Merged Copilot App
+  lifecycle, Windows token-buffer alignment, PostgreSQL recovery, credential
+  lifecycle, and schema-3 behavior are conserved. The 2026-09-02 technical
+  floor is not current merge authority; merge needs fresh exact-head review,
+  CI, design inspection, and campaign authorization.
+
+Both writers resumed on 2026-10-08. The issue #152 writer is on
+`feature/client-conformance` at preserved clean head
+`5fdd95c2c32cde08a6c936171b208bbf14f6677c`, with no PR yet. The PR #138 writer
+is on `feature/station-intent-reconciliation-106` at clean head
+`6315c24a5b36989f3f9dac916458f8ea9e752e60`; the PR is open and non-draft but
+conflicts with main. Each writer is merging current main
+`2c084873719080b812e0d0c4bf92125afa751499` into its branch by ordinary merge.
+No new source commit, proof, review, or merge is recorded here.
+
+Writers may inspect, integrate, implement, test, commit, and push within
+accepted scope. Workstream orchestrators coordinate existing reviewers,
+stewards, external waits, and merge handoffs. Only material new contract,
+trust, migration, ownership, accepted-gap, or destructive-action choices are
+escalated. Artifact reconciliation does not gate product work, and product
+writers do not edit `.streamliner/**`.
+
+Conditional follow-through, each after its own prerequisites:
+
+1. After `client-conformance` completes, Watcher and Operator Station
+   independently attest the same exact reviewed public client revision at
+   `consumer-integration-gate`.
+2. After both complete, the accepted Watcher runtime and CLI and the direct
+   Windows Station implementation are promoted and prepared, without a
+   premature product launch.
+3. After PR #138 merges, `station-intent-transactional-authority`
+   ([#153](https://github.com/lossyrob/telex/issues/153)) is promoted from the
+   actual landed authority with a complete task specification. It remains
+   mandatory for Local Daemon closure and does not retroactively block PR #138
+   or the hardening gate.
+
+Builder-owned usability, hardening, and closure gates remain separate
+decisions. The optional example pack
+([#144](https://github.com/lossyrob/telex/issues/144)) is not launched by this
+direction. All daemon, upgrade, credential, and database proof stays isolated;
+there is no operator installation, shared store, fleet, or persistent PATH
+action. The direction grants no release, tag, or publication authority, does
+not change v0.2.0 or v0.2.1, and does not close the campaign. New sessions and
+delegates explicitly request `gpt-6-astra`, `reasoning_effort=high`, and
+`context_tier=long_context` with no silent downgrade. The operator requested
+1.2M context; the last verified catalog showed 1,050,000, so actual support is
+reverified before any new preparation.
+
+## Completed execution override: schema-3 recovery release (2026-09-24)
+
+This override is complete and kept as dated history. Issues #154 and #155
+merged through PRs #158 and #156. The v0.2.0 tag at `1b9fc8f0` failed its
+Windows proof and remains unpublished; its original Errno 13 cause is unknown.
+After a new operator decision, corrective v0.2.1 from
+`212b76a4c586101bdc2a53264e2a4c3e2326671a` was published on 2026-09-30 as the
+Latest release. Tracker 157 was set to closed as completed by an explicit
+provider action, and `schema3-release-gate` is complete. The
+recovery-release-specific exclusions and serial launch mechanics below ended or
+were superseded with the release; durable isolation, model, review, merge,
+product-launch, and campaign-closure boundaries remain as restated in the
+2026-10-08 direction above.
 
 The operator authorized a bounded v0.2.0 recovery release so released clients can
 use schema-3 stores. This directive takes precedence over the historical status
@@ -81,9 +162,11 @@ supported Rust binding completed through issue
 head `c03db454781164f47a20e997665fe1251e07bd15`, merged as
 `ddedfab57cc305a1e91a81d7e49e712bb36d32fd`. Issue #12 publication revision 4
 records that binding publication. Application Client `client-conformance` is
-tracked by [#152](https://github.com/lossyrob/telex/issues/152), fully specified,
-ready, and unlaunched. One bundle must prove the ten accepted semantic families
-through the public Rust surface across SQLite and credentialed Postgres, provide
+tracked by [#152](https://github.com/lossyrob/telex/issues/152) and is in progress
+as the campaign main effort; its existing writer resumed on 2026-10-08 and is
+integrating current main. One bundle must prove the ten accepted semantic
+families through the public Rust surface across SQLite and credentialed
+Postgres, provide
 public-only send-only and bidirectional consumer fixtures, and repair any
 missing shared semantic without splitting by backend or test family.
 `consumer-integration-gate` remains planned until the same reviewed and green
@@ -119,7 +202,9 @@ Local Daemon release-confidence validation completed, but issue #106 exposed a
 daemon-replacement push-intent gap. Existing PR #138 is adopted as the
 in-progress repair ahead of the still-unaccepted hardening gate; its proposed
 station-intent contract is not current authority until repaired, reviewed, and
-merged.
+merged. Its existing writer resumed on 2026-10-08, in parallel with issue #152,
+and is integrating current main. The schema-3 recovery release is complete:
+corrective v0.2.1 was published on 2026-09-30.
 
 ## Covering workstreams
 
@@ -127,8 +212,8 @@ merged.
 |---|---|---|---|
 | Operator Station | [#92](https://github.com/lossyrob/telex/issues/92) | Direct human-attended Telex desktop endpoint for inbox, notification, reply, disposition, health, and recovery. | The builder accepted the direct contract and downstream geometry at `direct-station-direction-gate`, closing the design checkpoint. `station-app` remains planned and unlaunched with direct `client-conformance` and `consumer-integration-gate` holds; launch still requires separate preparation and authorization. |
 | Telex Watcher | [#100](https://github.com/lossyrob/telex/issues/100) | Headless, provider-neutral execution of trusted agent-authored observations with fixed Telex delivery and no session-owned background tasks. | Issue #144 and its task specification prepare the ready optional example pack; launch still requires separate campaign authorization. Runtime remains planned and waits on completed Application Client `client-conformance` and the pre-integration `consumer-integration-gate` over the same exact public revision; the gate does not require Watcher runtime implementation. |
-| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Issue #152 and its bundle-first task make `client-conformance` ready but unlaunched. The consumer gate remains planned until both product authorities attest the same reviewed and green conformance head without product implementation evidence. |
-| Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | Adopt issue #106 / PR #138 as `station-intent-reconciliation`; integrate current `main`, resolve blocking review, and present isolated both-backend evidence before the hardening gate. |
+| Telex Application Client | [#117](https://github.com/lossyrob/telex/issues/117) | One supported semantic client contract and implementation for long-lived applications, without product-private forks. | Issue #152 `client-conformance` is the campaign main effort and is in progress; its existing writer is integrating current main before full validation, exact-head review, and the single delivery PR. The consumer gate remains planned until both product authorities attest the same reviewed and green conformance head without product implementation evidence. |
+| Local Daemon | [#32](https://github.com/lossyrob/telex/issues/32) | Reliable local presence and transport across SQLite/Postgres, Copilot push delivery, daemon replacement, upgrade, and restart. | The schema-3 recovery release is complete (v0.2.1). Issue #106 / PR #138 `station-intent-reconciliation` resumed in parallel; its existing writer is integrating current `main`. Merge needs fresh exact-head review, CI, design inspection, and campaign authorization; isolated both-backend evidence then goes to the separate hardening gate. |
 
 ## Shared seam
 
@@ -206,8 +291,9 @@ checkpoint is complete.
 Application Client convergence, client-core implementation, and the Rust-first
 binding are complete. Issue #149 and PR #151 landed the binding at
 `telex::application_client`; issue #12 publication revision 4 records the
-transition. Issue #152 and its reviewed bundle-first task make
-`client-conformance` ready but unlaunched. The node must deliver all ten
+transition. Issue #152 and its reviewed bundle-first task govern
+`client-conformance`, which is in progress as the campaign main effort. The node
+must deliver all ten
 conformance families, public-only Watcher and Station fixtures, and
 temporary-seam replacement guidance in one PR. The planned
 `consumer-integration-gate` then requires independent exact-head attestations
@@ -299,20 +385,27 @@ collapse into noise, and no session-bound polling task is required.
 
 ## Current next actions
 
-1. Reconcile and repair adopted Local Daemon PR #138 for issue #106 without
-   weakening explicit membership, fencing, or merged Copilot App lifecycle
-   semantics; keep the hardening gate separate from merge.
-2. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
+1. Complete issue #152 `client-conformance` on its existing branch: integrate
+   current main, finish the accepted bootstrap and all ten families across
+   SQLite and credentialed PostgreSQL, then pass exact-head review, required CI,
+   and design inspection in one delivery PR. Keep the consumer gate and
+   `supported-client` checkpoint planned.
+2. In parallel, integrate current main into adopted Local Daemon PR #138 for
+   issue #106 without weakening explicit membership, fencing, the accepted M3
+   and M5 outcome, or merged Copilot App lifecycle semantics. Merge needs fresh
+   exact-head review, CI, design inspection, and campaign authorization; keep
+   the hardening gate separate from merge.
+3. After PR #138 merges, promote issue #153 from the actual landed authority
+   with a complete task specification.
+4. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
    after separate campaign authorization.
-3. Prepare issue #152's ready but unlaunched `client-conformance` node for one
-   bundle-first implementation PR. Keep the consumer gate and `supported-client`
-   checkpoint planned; reconciliation does not launch the node.
-4. Keep `watcher-runtime-core` planned until `client-conformance` uses the
+5. Keep `watcher-runtime-core` planned until `client-conformance` uses the
    completed first binding to prove merged exact-store/exact-operation
    `NotRecorded`, exact-same-operation retry, and retention-boundary failure
    across both backends, and `consumer-integration-gate` accepts the same exact
    public revision for Watcher without a private seam. The gate requires no
    Watcher runtime implementation; recovery remains reconciliation-first and
-   query-only under uncertainty.
-5. Keep `five-minute-custom-watch-gate` planned for later operational proof, and
+   query-only under uncertainty. After both holds complete, promote and prepare
+   Watcher runtime and CLI and the direct Station app without a premature launch.
+6. Keep `five-minute-custom-watch-gate` planned for later operational proof, and
    preserve the campaign integration exercise and no-private-client boundary.

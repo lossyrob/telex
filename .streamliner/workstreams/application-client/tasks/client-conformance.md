@@ -3,7 +3,7 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** ready; implementation worker frozen before bootstrap-dependent mutation
+- **Status:** in progress; the existing writer resumed on 2026-10-08
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -392,6 +392,17 @@ frozen issue #152 implementation worker on its existing branch and PR. Do not
 launch a replacement worker or split the node. Consumer work remains blocked
 until conformance merges, both exact-head attestations are accepted, and
 `consumer-integration-gate` is separately passed and reconciled.
+
+On 2026-10-08, under the operator-approved post-release direction recorded in
+campaign directive `campaign-postrelease-execution-directive-20261008.json`
+(SHA-256 `a4d98af7d891efe7164839c79b4431d07acfc1ceef606c54e46b82ab7eb5613d`),
+the Application Client orchestrator resumed the same writer on the existing
+`feature/client-conformance` branch at preserved clean head
+`5fdd95c2c32cde08a6c936171b208bbf14f6677c`. No PR existed. The writer is
+merging current main `2c084873719080b812e0d0c4bf92125afa751499` by ordinary
+merge before full validation, exact-head review, and publication of the sole
+delivery PR. Scope, invalidation conditions, and the accepted trusted
+`InstalledCurrent` policy are unchanged.
 
 ## Invalidation conditions
 

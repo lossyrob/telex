@@ -3,11 +3,11 @@
   "id": "application-client",
   "projectKey": "telex",
   "title": "Telex Application Client (supported long-lived application integration)",
-  "summary": "The supported Application Client core and Rust-first binding are complete. Issue #152 and its bundle-first task make client-conformance ready but unlaunched to prove the ten accepted families across SQLite and credentialed Postgres through the public Rust surface. The consumer-integration gate and supported-client checkpoint remain planned; Watcher and Operator Station retain direct conformance holds and also wait for exact-head consumer attestations.",
+  "summary": "The supported Application Client core and Rust-first binding are complete. Issue #152 client-conformance is in progress as the campaign main effort: its existing writer resumed on 2026-10-08 to prove the ten accepted families across SQLite and credentialed Postgres through the public Rust surface. The consumer-integration gate and supported-client checkpoint remain planned; Watcher and Operator Station retain direct conformance holds and also wait for exact-head consumer attestations.",
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-07-22T10:05:00Z",
-  "updatedAt": "2026-09-02T14:27:17Z",
+  "updatedAt": "2026-10-08T19:41:39.177Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -148,8 +148,8 @@
       "id": "client-conformance",
       "type": "task",
       "title": "Application Client conformance and migration",
-      "summary": "Ready but unlaunched under issue #152. One node and PR must prove all ten accepted semantic families through the public Rust surface across isolated SQLite and credentialed Postgres, include public-only Watcher send-only and Station bidirectional fixtures, repair missing shared semantics in the same PR, and provide temporary-seam replacement guidance without introducing a duplicate framework or product implementation.",
-      "status": "ready",
+      "summary": "In progress under issue #152 as the campaign main effort. The existing writer resumed on 2026-10-08 on feature/client-conformance at preserved head 5fdd95c2c32cde08a6c936171b208bbf14f6677c and is integrating current main; no PR exists yet. One node and PR must prove all ten accepted semantic families through the public Rust surface across isolated SQLite and credentialed Postgres, include public-only Watcher send-only and Station bidirectional fixtures, repair missing shared semantics in the same PR, and provide temporary-seam replacement guidance without introducing a duplicate framework or product implementation.",
+      "status": "in-progress",
       "attention": "focus",
       "repoIds": [
         "telex"
