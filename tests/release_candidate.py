@@ -671,7 +671,7 @@ def main():
     parser.add_argument("--archive", type=Path, required=True)
     parser.add_argument("--target", required=True)
     parser.add_argument("--source-sha", required=True)
-    parser.add_argument("--tag", default="v0.2.1")
+    parser.add_argument("--tag", default="v0.3.0")
     parser.add_argument("--report", type=Path, required=True)
     parser.add_argument("--postgres-url")
     parser.add_argument("--disposable-postgres", action="store_true")

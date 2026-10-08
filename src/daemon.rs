@@ -547,7 +547,7 @@ impl DaemonState {
     #[cfg(test)]
     fn take_wait_fetch_failure(&self) -> bool {
         self.wait_fetch_failures
-            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |remaining| {
                 if remaining > 0 {
                     Some(remaining - 1)
                 } else {
@@ -2450,10 +2450,25 @@ fn spawn_daemon_process_with_env(
         command.env(k, v);
     }
     configure_daemon_spawn(&mut command);
-    command
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| io_err("spawning daemon", e))
+    let child = command.spawn().map_err(|e| io_err("spawning daemon", e))?;
+    let owned = Arc::new(Mutex::new(Some(child)));
+    let reaper = owned.clone();
+    match std::thread::Builder::new()
+        .name("telex-daemon-reaper".to_string())
+        .spawn(move || {
+            if let Some(mut child) = reaper.lock().unwrap().take() {
+                let _ = child.wait();
+            }
+        }) {
+        Ok(_) => Ok(()),
+        Err(error) => {
+            if let Some(mut child) = owned.lock().unwrap().take() {
+                let _ = child.kill();
+                let _ = child.wait();
+            }
+            Err(io_err("starting daemon reaper", error))
+        }
+    }
 }
 
 #[cfg(not(windows))]

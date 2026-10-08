@@ -860,6 +860,8 @@ mod windows_authority {
     }
 
     fn current_user_sid() -> Result<SidBuf, DaemonBootstrapFailure> {
+        use std::mem::{size_of, MaybeUninit};
+
         let mut token: isize = 0;
         let ok = unsafe { OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) };
         if ok == 0 {
@@ -873,12 +875,15 @@ mod windows_authority {
         if needed == 0 {
             return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
         }
-        let mut buf = vec![0u8; needed as usize];
+        let mut buf = vec![
+            MaybeUninit::<TOKEN_USER>::uninit();
+            (needed as usize).div_ceil(size_of::<TOKEN_USER>())
+        ];
         let ok = unsafe {
             GetTokenInformation(
                 token,
                 TokenUser,
-                buf.as_mut_ptr() as *mut c_void,
+                buf.as_mut_ptr().cast::<c_void>(),
                 needed,
                 &mut needed,
             )
@@ -886,7 +891,10 @@ mod windows_authority {
         if ok == 0 {
             return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
         }
-        let user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+        let user = buf.as_ptr().cast::<TOKEN_USER>();
+        #[cfg(test)]
+        assert!(user.is_aligned(), "TOKEN_USER pointer before dereference");
+        let user = unsafe { &*user };
         SidBuf::from_str(&sid_to_string(user.User.Sid)?)
     }
 
@@ -929,6 +937,12 @@ mod windows_authority {
                 }
             }
         }
+    }
+
+    #[cfg(test)]
+    #[test]
+    fn windows_token_user_alignment_bootstrap_authority() {
+        current_user_sid().expect("aligned bootstrap authority token reader");
     }
 
     /// Owned SID buffer allocated by `ConvertStringSidToSidW`.
@@ -1241,7 +1255,7 @@ pub(crate) fn open_windows_witness(
     path: &Path,
 ) -> Result<WindowsExecutableWitness, DaemonBootstrapFailure> {
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Foundation::{GENERIC_READ, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_ATTRIBUTE_NORMAL,
         FILE_SHARE_READ, OPEN_EXISTING,
@@ -1254,7 +1268,7 @@ pub(crate) fn open_windows_witness(
     let handle = unsafe {
         CreateFileW(
             wide.as_ptr(),
-            0,
+            GENERIC_READ,
             FILE_SHARE_READ,
             std::ptr::null(),
             OPEN_EXISTING,
@@ -1647,6 +1661,45 @@ mod tests {
         let err = BootstrapPolicy::exact_executable(PathBuf::from("telex"))
             .expect_err("relative exact exe should fail");
         assert_eq!(err, DaemonBootstrapFailure::MissingExecutable);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn windows_executable_witness_blocks_write_and_delete_replacement() {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_WRITE, INVALID_HANDLE_VALUE};
+        use windows_sys::Win32::Storage::FileSystem::{
+            CreateFileW, FILE_ATTRIBUTE_NORMAL, FILE_SHARE_DELETE, FILE_SHARE_READ,
+            FILE_SHARE_WRITE, OPEN_EXISTING,
+        };
+
+        let executable = std::env::current_exe().expect("current test executable");
+        let _witness = open_windows_witness(&executable).expect("open executable witness");
+        let wide: Vec<u16> = executable
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect();
+        const DELETE_ACCESS: u32 = 0x0001_0000;
+        for access in [GENERIC_WRITE, DELETE_ACCESS] {
+            let handle = unsafe {
+                CreateFileW(
+                    wide.as_ptr(),
+                    access,
+                    FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                    std::ptr::null(),
+                    OPEN_EXISTING,
+                    FILE_ATTRIBUTE_NORMAL,
+                    0,
+                )
+            };
+            if handle != INVALID_HANDLE_VALUE {
+                unsafe {
+                    CloseHandle(handle);
+                }
+                panic!("executable witness allowed replacement access {access:#x}");
+            }
+        }
     }
 
     #[test]

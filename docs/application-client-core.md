@@ -35,11 +35,11 @@ telex = { git = "https://github.com/lossyrob/telex", rev = "<full-commit-sha>", 
 None of these profiles enables `self-update`. A single-backend profile does not
 enable the other backend.
 
-No published Telex release contains this binding yet. Source consumers must
-replace the placeholder with the full commit ID of a reviewed revision. The
-compatibility promise applies to that pinned source revision and subsequent
-documented version transitions; an unpinned Git dependency follows a moving
-branch and is outside the promise.
+Telex v0.2.1 is the published Application Client baseline. Package consumers
+remain on v0.2.1 until a separate release authorization publishes a later
+version. Source consumers evaluating the issue #152 conformance revision must
+replace the placeholder with its full reviewed commit ID; an unpinned Git
+dependency follows a moving branch and is outside the compatibility promise.
 
 ## Compatibility boundary
 
@@ -60,13 +60,14 @@ promise stable JSON, a C ABI, a cross-language serialization format, or a public
 daemon protocol. Backend rows not already used by the binding, daemon frames,
 CLI types, private helpers, and product DTOs are not supported binding surfaces.
 
-No published release contains the binding yet. Issue #152 is therefore a
-documented pre-release source transition from the first-binding commit:
-`ApplicationClientError` is now `#[non_exhaustive]` and includes the
-authority-required `DaemonBootstrap` variant. Source consumers pinned to the
-earlier commit must add a wildcard arm to exhaustive error matches when moving
-to this conformance revision. The first published version that contains the
-binding will establish the release-level compatibility baseline.
+Published v0.2.1 exposes `ApplicationClientError` as an exhaustive public enum.
+Issue #152 is an unpublished 0.3.0 source transition:
+`ApplicationClientError` becomes `#[non_exhaustive]` and adds the
+authority-required `DaemonBootstrap(DaemonBootstrapFailure)` variant. Consumers
+moving from 0.2.x must update their dependency intent, add a wildcard arm to
+error matches for future variants, and handle typed daemon-bootstrap failures.
+Package consumers remain on published v0.2.1 until a separate release is
+authorized; source consumers must pin the exact reviewed 0.3.0 head.
 
 ## Runtime and cancellation
 

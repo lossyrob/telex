@@ -574,6 +574,7 @@ pub fn create_owner_private_dir(path: &Path) {
     #[cfg(windows)]
     {
         use std::ffi::{c_void, OsStr};
+        use std::mem::{size_of, MaybeUninit};
         use std::os::windows::ffi::OsStrExt;
         use windows_sys::Win32::Foundation::{
             CloseHandle, GetLastError, LocalFree, ERROR_ALREADY_EXISTS,
@@ -613,18 +614,26 @@ pub fn create_owner_private_dir(path: &Path) {
                 GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
             }
             assert!(needed > 0, "querying token user buffer length");
-            let mut buf = vec![0u8; needed as usize];
+            let mut buf = vec![
+                MaybeUninit::<TOKEN_USER>::uninit();
+                (needed as usize).div_ceil(size_of::<TOKEN_USER>())
+            ];
             let ok = unsafe {
                 GetTokenInformation(
                     token,
                     TokenUser,
-                    buf.as_mut_ptr() as *mut c_void,
+                    buf.as_mut_ptr().cast::<c_void>(),
                     needed,
                     &mut needed,
                 )
             };
             assert_ne!(ok, 0, "reading current token user");
-            let token_user = unsafe { &*(buf.as_ptr() as *const TOKEN_USER) };
+            let token_user = buf.as_ptr().cast::<TOKEN_USER>();
+            assert!(
+                token_user.is_aligned(),
+                "TOKEN_USER pointer before dereference"
+            );
+            let token_user = unsafe { &*token_user };
             let mut sid_ptr: *mut u16 = std::ptr::null_mut();
             let ok = unsafe { ConvertSidToStringSidW(token_user.User.Sid, &mut sid_ptr) };
             unsafe {

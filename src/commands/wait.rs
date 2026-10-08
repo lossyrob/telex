@@ -102,11 +102,13 @@ enum WaitTerminal {
 #[async_trait(?Send)]
 trait WaitClient {
     fn supports_backend_recovery(&self) -> bool;
+    #[must_use = "wait response must be awaited and handled"]
     async fn request(&mut self, request: Request) -> crate::daemon::Result<Response>;
 }
 
 #[async_trait(?Send)]
 trait WaitConnector {
+    #[must_use = "wait connection result must be awaited and handled"]
     async fn connect_or_spawn(
         &mut self,
         store_key: &str,

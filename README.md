@@ -32,9 +32,10 @@ telex = { git = "https://github.com/lossyrob/telex", rev = "<full-commit-sha>", 
 
 Supported profiles are `sqlite`, `postgres`, `entra`, `sqlite,postgres`, and
 `sqlite,entra`; none implicitly enables `self-update`.
-No published Telex release contains this binding yet. Replace the placeholder
-with the full commit ID of a reviewed source revision; unpinned Git dependencies
-are outside the compatibility promise.
+Telex v0.2.1 is the published binding baseline. The issue #152 conformance work
+is an unpublished 0.3.0 source transition; evaluate it by replacing the
+placeholder with the full reviewed commit ID. Unpinned Git dependencies are
+outside the compatibility promise.
 
 ## Install
 
