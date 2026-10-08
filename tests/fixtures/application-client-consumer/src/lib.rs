@@ -233,7 +233,30 @@ pub async fn run_watcher_probe(config: &ProbeConfig) -> Result<ProbeReport, Stri
         other => return Err(format!("expected a recorded operation, got {other:?}")),
     }
 
-    // A send-only membership must never gain inbound attendance.
+    // A peer targeting the send-only membership must observe that it is not an
+    // inbound-attended destination.
+    let inbound = target_client
+        .send(SendRequest {
+            operation_id: OperationId(format!("watcher-inbound-{}", config.run_id)),
+            sender: station.address.clone(),
+            to: watcher.address.clone(),
+            cc: Vec::new(),
+            kind: "note".to_string(),
+            attention: "background".to_string(),
+            requires_disposition: false,
+            subject: Some("send-only attendance probe".to_string()),
+            body: "must not fabricate Watcher attendance".to_string(),
+            metadata: None,
+            retry_budget: 1,
+        })
+        .await
+        .map_err(|e| format!("send to Watcher address: {e}"))?;
+    require(
+        inbound.axes.occupied_at_acceptance == Some(false),
+        "a send-only Watcher must be unoccupied for inbound delivery",
+    )?;
+
+    // A send-only membership must never gain inbound APIs or health.
     match client.receive(&watcher.address, Some(50)).await {
         Err(ApplicationClientError::UnsupportedCapability(_)) => {}
         other => return Err(format!("send-only receive must be refused, got {other:?}")),

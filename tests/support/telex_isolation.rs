@@ -21,7 +21,8 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use telex::install::{self, InstallLayout};
@@ -481,6 +482,8 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CliOutput {
             }
         }
     };
+    let stdout = child.stdout.take().map(drain_pipe);
+    let stderr = child.stderr.take().map(drain_pipe);
     let deadline = Instant::now() + timeout;
     loop {
         match child.try_wait() {
@@ -488,17 +491,11 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CliOutput {
             Ok(None) => {
                 if Instant::now() >= deadline {
                     let _ = child.kill();
-                    let output = child.wait_with_output().ok();
+                    let _ = child.wait();
                     return CliOutput {
                         code: None,
-                        stdout: output
-                            .as_ref()
-                            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                            .unwrap_or_default(),
-                        stderr: output
-                            .as_ref()
-                            .map(|o| String::from_utf8_lossy(&o.stderr).trim().to_string())
-                            .unwrap_or_default(),
+                        stdout: drained_text(&stdout),
+                        stderr: drained_text(&stderr),
                         timed_out: true,
                     };
                 }
@@ -514,13 +511,52 @@ pub fn run_with_timeout(mut cmd: Command, timeout: Duration) -> CliOutput {
             }
         }
     }
-    let output = child.wait_with_output().expect("collect child output");
+    let status = child.wait().expect("collect child status");
     CliOutput {
-        code: output.status.code(),
-        stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
-        stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        code: status.code(),
+        stdout: drained_text(&stdout),
+        stderr: drained_text(&stderr),
         timed_out: false,
     }
+}
+
+struct DrainedPipe {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    done: Arc<AtomicBool>,
+}
+
+fn drain_pipe<R: std::io::Read + Send + 'static>(mut pipe: R) -> DrainedPipe {
+    let bytes = Arc::new(Mutex::new(Vec::new()));
+    let sink = bytes.clone();
+    let done = Arc::new(AtomicBool::new(false));
+    let finished = done.clone();
+    std::thread::spawn(move || {
+        let mut chunk = [0u8; 8192];
+        loop {
+            match pipe.read(&mut chunk) {
+                Ok(0) => break,
+                Ok(read) => sink.lock().unwrap().extend_from_slice(&chunk[..read]),
+                Err(_) => break,
+            }
+        }
+        finished.store(true, Ordering::Release);
+    });
+    DrainedPipe { bytes, done }
+}
+
+fn drained_text(output: &Option<DrainedPipe>) -> String {
+    output
+        .as_ref()
+        .map(|output| {
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while !output.done.load(Ordering::Acquire) && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            String::from_utf8_lossy(&output.bytes.lock().unwrap())
+                .trim()
+                .to_string()
+        })
+        .unwrap_or_default()
 }
 
 /// Restores every environment variable this harness changed.
@@ -549,6 +585,39 @@ impl Drop for EnvRestore {
                 None => std::env::remove_var(&key),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "subprocess role used by the pipe-drain regression"]
+    fn large_output_fixture() {
+        if std::env::var_os("TELEX_LARGE_OUTPUT_FIXTURE").is_some() {
+            println!("{}", "x".repeat(131_072));
+            eprintln!("{}", "y".repeat(131_072));
+        }
+    }
+
+    #[test]
+    fn run_with_timeout_drains_large_piped_output() {
+        let mut command = Command::new(std::env::current_exe().expect("current test executable"));
+        command
+            .env("TELEX_LARGE_OUTPUT_FIXTURE", "1")
+            .args([
+                "--ignored",
+                "--exact",
+                "isolation::tests::large_output_fixture",
+                "--nocapture",
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let output = run_with_timeout(command, Duration::from_secs(30));
+        output.assert_success("large piped output fixture");
+        assert!(output.stdout.contains(&"x".repeat(1024)));
+        assert!(output.stderr.contains(&"y".repeat(1024)));
     }
 }
 

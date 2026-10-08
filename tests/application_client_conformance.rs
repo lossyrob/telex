@@ -968,8 +968,25 @@ async fn send_only_membership_has_no_inbound_attendance(ctx: &Ctx<'_>) {
         .expect("send-only membership can send");
     assert_eq!(result.recipient, station.address);
 
-    // ... and refuses every inbound seam, so it can never create false
-    // attendance for its own address.
+    // A peer sending *to* the send-only membership must not observe inbound
+    // attendance. Durable acceptance remains independent from occupancy.
+    let inbound = peer
+        .send(send_request(
+            "sendonly-inbound-op",
+            &station.address,
+            &watcher.address,
+            "must not fabricate Watcher attendance",
+        ))
+        .await
+        .expect("send to send-only address remains durably accepted");
+    assert_eq!(inbound.recipient, watcher.address);
+    assert_eq!(
+        inbound.axes.occupied_at_acceptance,
+        Some(false),
+        "send-only membership must not count as an occupied inbound destination"
+    );
+
+    // The send-only client also refuses every inbound seam.
     assert!(matches!(
         client.receive(&watcher.address, Some(100)).await,
         Err(ApplicationClientError::UnsupportedCapability(_))
@@ -1680,28 +1697,46 @@ async fn history_filters_apply_before_bounds_and_require_attachment(ctx: &Ctx<'_
             Some(sent[1].thread_id),
             None,
             None,
-            50,
+            1,
         )
         .await
         .expect("thread history");
-    assert!(!threaded.is_empty());
-    assert!(threaded
-        .iter()
-        .all(|item| item.message.thread_id == sent[1].thread_id));
+    assert_eq!(threaded.len(), 1);
+    assert_eq!(
+        threaded[0].message.id, sent[1].message_id,
+        "the thread filter must be applied before the bound"
+    );
 
-    // A recent-only window excludes older traffic.
+    // Put one recent matching record after several older records. With limit=1,
+    // applying the bound before the time filter would return an empty page.
+    tokio::time::sleep(Duration::from_millis(5)).await;
+    let recent_floor = now_ms();
+    tokio::time::sleep(Duration::from_millis(2)).await;
+    let recent_sent = client
+        .send(send_request(
+            "hist-recent-op",
+            &sender.address,
+            &station.address,
+            "recent message",
+        ))
+        .await
+        .expect("send recent message");
     let recent = client
         .history(
             Some(station.address.clone()),
             false,
             None,
-            Some(now_ms() + 60_000),
+            Some(recent_floor),
             None,
-            50,
+            1,
         )
         .await
         .expect("recent history");
-    assert!(recent.is_empty(), "a future since-bound returns nothing");
+    assert_eq!(recent.len(), 1);
+    assert_eq!(
+        recent[0].message.id, recent_sent.message_id,
+        "the recent filter must be applied before the bound"
+    );
 
     // Fail closed on inexact or unbounded requests.
     assert!(matches!(

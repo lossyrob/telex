@@ -1361,6 +1361,25 @@ pub(crate) async fn child_validate_bootstrap_env(
     std::env::remove_var(BOOTSTRAP_TOKEN_ENV);
     let token = SelectionToken::from_env_value(&raw)
         .ok_or(DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    let compiled_capabilities: BTreeSet<&str> = crate::daemon_ipc::REQUIRED_CAPABILITIES
+        .iter()
+        .copied()
+        .collect();
+    let selected_capabilities: BTreeSet<&str> = token
+        .required_capabilities
+        .iter()
+        .map(String::as_str)
+        .collect();
+    if token.build_id != install::BUILD_ID
+        || token.package_version != env!("CARGO_PKG_VERSION")
+        || token.schema_min != install::SUPPORTED_SCHEMA_MIN
+        || token.schema_max != install::SUPPORTED_SCHEMA_MAX
+        || token.protocol_major != crate::daemon_ipc::PROTOCOL_MAJOR
+        || token.protocol_minor != crate::daemon_ipc::PROTOCOL_MINOR
+        || selected_capabilities != compiled_capabilities
+    {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
     let guard = SelectorAdmission::shared_async(token.trusted_root.clone()).await?;
     let fresh = resolve_installed_current(&token.trusted_root)?;
     if fresh.tag != token.tag

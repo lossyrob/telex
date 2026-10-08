@@ -30,8 +30,10 @@
 mod isolation;
 
 use std::collections::BTreeMap;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
 use std::time::Duration;
 
 use telex::application_client::{
@@ -49,8 +51,43 @@ use isolation::{Isolation, ENV_LOCK};
 /// constant so a spawned daemon can be driven into readiness refusal; the
 /// production constant stays crate-private.
 const BOOTSTRAP_TOKEN_ENV: &str = "TELEX_DAEMON_SELECTION_TOKEN";
+static PROCESS_PROFILE_LOCK: Mutex<()> = Mutex::new(());
 
 fn config(responsibility: &str, db: &Path) -> ApplicationClientConfig {
+    if let Ok(url) = std::env::var("TELEX_PROCESS_PG_URL") {
+        if !url.trim().is_empty() {
+            let _guard = PROCESS_PROFILE_LOCK.lock().unwrap();
+            let profile_name = "installed_current_process_pg";
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            db.hash(&mut hasher);
+            let schema = format!("telex_ic_{:016x}", hasher.finish());
+            let mut profile = telex::profiles::implicit_sqlite(None);
+            profile.kind = "postgres".to_string();
+            profile.path = None;
+            profile.url = Some(url);
+            profile.schema = Some(schema);
+            profile.auth = Some("password".to_string());
+            if std::env::var("TELEX_PG_PASSWORD").is_ok() {
+                profile.password_env = Some("TELEX_PG_PASSWORD".to_string());
+            }
+            let config_path =
+                PathBuf::from(std::env::var_os("TELEX_CONFIG").expect("isolated TELEX_CONFIG"));
+            std::fs::write(
+                config_path,
+                toml::to_string_pretty(&ConfigFile {
+                    default: None,
+                    backends: BTreeMap::from([(profile_name.to_string(), profile)]),
+                })
+                .expect("serialize process Postgres profile"),
+            )
+            .expect("write process Postgres profile");
+            return ApplicationClientConfig {
+                responsibility: ApplicationResponsibility(responsibility.to_string()),
+                backend: Some(profile_name.to_string()),
+                db_override: None,
+            };
+        }
+    }
     ApplicationClientConfig {
         responsibility: ApplicationResponsibility(responsibility.to_string()),
         backend: None,
@@ -125,7 +162,11 @@ fn build_public_fixture() -> PathBuf {
         .arg(fixture.join("Cargo.toml"))
         .arg("--no-default-features")
         .arg("--features")
-        .arg("sqlite")
+        .arg(if process_postgres_enabled() {
+            "postgres"
+        } else {
+            "sqlite"
+        })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     isolation::run_with_timeout(command, Duration::from_secs(900))
@@ -136,10 +177,31 @@ fn build_public_fixture() -> PathBuf {
     ))
 }
 
-fn write_sqlite_fixture_profile(iso: &Isolation, profile_name: &str) {
+fn process_postgres_enabled() -> bool {
+    std::env::var("TELEX_PROCESS_PG_URL").is_ok_and(|url| !url.trim().is_empty())
+}
+
+fn write_fixture_profile(iso: &Isolation, profile_name: &str) {
     let db = iso.root.join("selector-client.db");
     let mut profile = telex::profiles::implicit_sqlite(None);
-    profile.path = Some(db.to_string_lossy().into_owned());
+    if let Ok(url) = std::env::var("TELEX_PROCESS_PG_URL") {
+        if !url.trim().is_empty() {
+            let mut hasher = std::collections::hash_map::DefaultHasher::new();
+            db.hash(&mut hasher);
+            profile.kind = "postgres".to_string();
+            profile.path = None;
+            profile.url = Some(url);
+            profile.schema = Some(format!("telex_ic_fixture_{:016x}", hasher.finish()));
+            profile.auth = Some("password".to_string());
+            if std::env::var("TELEX_PG_PASSWORD").is_ok() {
+                profile.password_env = Some("TELEX_PG_PASSWORD".to_string());
+            }
+        } else {
+            profile.path = Some(db.to_string_lossy().into_owned());
+        }
+    } else {
+        profile.path = Some(db.to_string_lossy().into_owned());
+    }
     iso.write_config(&ConfigFile {
         default: None,
         backends: BTreeMap::from([(profile_name.to_string(), profile)]),
@@ -495,7 +557,7 @@ async fn installed_current_killed_selector_client_releases_shared_admission() {
     let _restore = iso.apply_env();
     let fixture = build_public_fixture();
     let profile = "selector_client";
-    write_sqlite_fixture_profile(&iso, profile);
+    write_fixture_profile(&iso, profile);
     let delayed_marker = iso.root.join("hello-delayed");
     let admission_marker = iso.root.join("parent-admission-held");
 
@@ -899,6 +961,38 @@ async fn installed_current_incompatible_manifest_metadata_is_refused() {
             .await
             .ready,
         "a strict, matching manifest must serve"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn installed_current_child_rejects_mismatched_build_before_readiness() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("ic-child-build-mismatch");
+    let _restore = iso.apply_env();
+    let db = iso.root.join("child-build-mismatch.db");
+    let tag = iso.tag.clone();
+
+    write_manifest(&iso, &tag, |manifest| {
+        manifest.build_id = "different-nonempty-build".to_string();
+    });
+    let client = connect(&iso, "proof", &db).await;
+    let outcome = client
+        .attach(&[spec(
+            "ic:child-build-mismatch:a",
+            ApplicationCapability::SendOnly,
+        )])
+        .await;
+    assert!(
+        !outcome.ready,
+        "a child whose compiled build does not match the manifest must fail"
+    );
+    assert!(
+        iso.cap_path().is_none(),
+        "a mismatched child must not publish capability or readiness"
+    );
+    assert!(
+        !iso.daemon_running(),
+        "a mismatched child must not remain serving"
     );
 }
 

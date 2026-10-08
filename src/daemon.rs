@@ -2285,7 +2285,10 @@ fn verify_helloack_against_selection(
         !selection.build_id.is_empty(),
         "manifest binding must reject empty build_id before this point"
     );
-    if ack.build_id.is_empty() || ack.build_id != selection.build_id {
+    if ack.build_id.is_empty()
+        || ack.build_id != selection.build_id
+        || ack.daemon_version != selection.package_version
+    {
         return Err(DaemonError::Bootstrap(
             crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
         ));
@@ -15115,7 +15118,7 @@ mod tests {
                 low: 0,
             },
             tag: "v1".to_string(),
-            package_version: "9.9.9".to_string(),
+            package_version: env!("CARGO_PKG_VERSION").to_string(),
             build_id: "expected-build".to_string(),
             schema_min: 2,
             schema_max: 3,
@@ -15137,7 +15140,7 @@ mod tests {
                 major: crate::daemon_ipc::PROTOCOL_MAJOR,
                 minor: crate::daemon_ipc::PROTOCOL_MINOR,
             },
-            daemon_version: "d".to_string(),
+            daemon_version: env!("CARGO_PKG_VERSION").to_string(),
             auth_policy_version: 1,
             accepted: true,
             required_capabilities: Vec::new(),
@@ -15165,7 +15168,20 @@ mod tests {
             other => panic!("expected ForeignDaemon for wrong ack build_id, got {other:?}"),
         }
 
-        // Matching build id accepts.
+        // Package version is also bound by the selected manifest.
+        let ack_wrong_version = crate::daemon_ipc::HelloAck {
+            build_id: "expected-build".to_string(),
+            daemon_version: "different-version".to_string(),
+            ..ack_empty.clone()
+        };
+        match verify_helloack_against_selection(&ack_wrong_version, &selection) {
+            Err(DaemonError::Bootstrap(
+                crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
+            )) => {}
+            other => panic!("expected ForeignDaemon for wrong package version, got {other:?}"),
+        }
+
+        // Matching build and package version accept.
         let ack_ok = crate::daemon_ipc::HelloAck {
             build_id: "expected-build".to_string(),
             ..ack_empty

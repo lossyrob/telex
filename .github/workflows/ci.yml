@@ -298,6 +298,13 @@ jobs:
             --test application_client_fixture \
             -- --test-threads=1
 
+      - name: Run InstalledCurrent process proofs on live Postgres
+        env:
+          TELEX_PG_REQUIRE: "1"
+          TELEX_PROCESS_PG_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          TELEX_PG_PASSWORD: postgres
+        run: cargo test --all-features --test installed_current_process -- --test-threads=1
+
       - name: Missing Postgres URL fails closed under TELEX_PG_REQUIRE
         # Proves the fail-closed guard itself: with TELEX_PG_REQUIRE=1 and no
         # URL the Postgres legs must fail rather than skip.
@@ -311,3 +318,55 @@ jobs:
             exit 1
           fi
           echo "ok: the Postgres Application Client leg fails closed without credentials"
+
+  installed-current-postgres-windows:
+    name: InstalledCurrent Postgres process proofs (Windows)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Locate or install PostgreSQL
+        shell: pwsh
+        run: |
+          $pgBin = Get-ChildItem "C:\Program Files\PostgreSQL\*\bin" -Directory -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+          if (-not $pgBin) {
+            choco install postgresql16 --params "/Password:postgres" --no-progress -y
+            $pgBin = Get-ChildItem "C:\Program Files\PostgreSQL\*\bin" -Directory |
+              Sort-Object FullName -Descending |
+              Select-Object -First 1
+          }
+          if (-not $pgBin) {
+            throw "PostgreSQL binaries were not found"
+          }
+          $pgBin.FullName | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $data = Join-Path $env:RUNNER_TEMP "telex-postgres"
+          & (Join-Path $pgBin.FullName "initdb.exe") -D $data -A trust -U postgres
+          & (Join-Path $pgBin.FullName "pg_ctl.exe") -D $data -o "-p 55432 -h 127.0.0.1" -w start
+          "TELEX_PG_DATA=$data" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Run public fixtures and InstalledCurrent process proofs
+        env:
+          TELEX_PG_REQUIRE: "1"
+          TELEX_PG_URL: postgresql://postgres@127.0.0.1:55432/postgres?sslmode=disable
+          TELEX_PROCESS_PG_URL: postgresql://postgres@127.0.0.1:55432/postgres?sslmode=disable
+        run: >-
+          cargo test --all-features
+          --test application_client_fixture
+          --test installed_current_process
+          -- --test-threads=1
+
+      - name: Stop PostgreSQL
+        if: always()
+        shell: pwsh
+        run: |
+          if ($env:TELEX_PG_DATA) {
+            pg_ctl -D $env:TELEX_PG_DATA -m immediate stop
+          }
