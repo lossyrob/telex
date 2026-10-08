@@ -189,6 +189,15 @@ transition and migration guidance; exact versioning and deprecation mechanics
 remain implementation choices. The Rust surface does not promise a stable C ABI,
 JSON wire protocol, or cross-language serialization contract.
 
+Published v0.2.1 is the released compatibility baseline for the binding; its
+`ApplicationClientError` is exhaustive. The typed `DaemonBootstrap` outer
+failure below, together with marking `ApplicationClientError`
+`#[non_exhaustive]`, is a breaking source change. On 2026-10-08 the operator
+accepted a source-only transition of the root package to 0.3.0 in the PR for
+issue #152, with coupled metadata and migration guidance. Package versioning
+does not change daemon protocol or schema versions, and the transition is not
+a publication.
+
 ## Installed-current daemon bootstrap
 
 Production consumers select the shared Telex daemon through an explicitly

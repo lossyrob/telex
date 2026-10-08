@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "workstreamId": "application-client",
-  "updatedAt": "2026-09-02T16:24:08Z",
+  "updatedAt": "2026-10-08T20:28:47.310Z",
   "items": [
     {
       "id": "application-client-daemon-bootstrap-gap-v1",
@@ -133,6 +133,45 @@
       },
       "decisionState": "accepted",
       "dispositionAuthority": "Joint consumer-gate adjudication, Operator Station evidence, campaign acceptance, and issue #152."
+    },
+    {
+      "id": "client-conformance-source-semver-transition-v1",
+      "sourceNodeId": "client-conformance",
+      "source": "Issue #152 source integration after the published v0.2.1 baseline, campaign verification, and operator decision",
+      "evidence": {
+        "issue": "https://github.com/lossyrob/telex/issues/152",
+        "publishedRelease": "v0.2.1",
+        "publishedSource": "212b76a4c586101bdc2a53264e2a4c3e2326671a",
+        "publishedCargoBlob": "69221c7b2e492fd42dd8ebb6167a34aec162bb9d",
+        "publishedApplicationClientBlob": "9816c34b2cd3cfdf966a9aef9297664f7dbb2ed6",
+        "publishedCompatibilityDocumentBlob": "41196dd4052437628660f0057c64a08fb98e8ebf",
+        "decisionRecord": "C:\\Users\\robemanuele\\.copilot\\session-state\\e06813c4-1db2-4d77-b8d3-3addc6a1824c\\files\\client-conformance-semver-decision-20261008.json",
+        "decisionRecordSha256": "ec6fadc0a99628bd6bcedee912bf2c15ed7d20768d6c17bd2c72117913d0a8fc",
+        "repositoryMain": "6b6ebec8457defcd1d86f191f4264cbd1eeef278",
+        "details": "Published v0.2.1 has root package version 0.2.1 and an exhaustive public ApplicationClientError, and its docs/application-client-core.md says no published release contains the binding. The accepted issue #152 surface adds ApplicationClientError::DaemonBootstrap(DaemonBootstrapFailure) and marks the enum non-exhaustive, which breaks Rust source compatibility against that published baseline.",
+        "exclusions": [
+          "No tag creation or movement, Release workflow dispatch, or GitHub, crates.io, or plugin publication.",
+          "No change to published v0.2.1 or held v0.2.0 source, assets, or history.",
+          "No daemon protocol or schema version change from package versioning.",
+          "No installed-fleet, shared-store, operator daemon, or persistent PATH action, and no automatic gate, hardening, or campaign closure."
+        ]
+      },
+      "description": "Move the root package to unpublished source version 0.3.0 in the issue #152 PR, with genuinely coupled metadata and source-consumer migration guidance, instead of shipping a breaking source change under 0.2.x.",
+      "affectedOutcome": "The conformance bundle's public Rust surface follows the root-crate source compatibility policy against the released v0.2.1 baseline.",
+      "requiredness": "Required in the current client-conformance PR.",
+      "sequencing": "Parallel with implementation in the same PR; no new node, worker, acknowledgement, or artifact-before-code hold. Exact-head review, CI, design inspection, and campaign merge authorization still apply.",
+      "disposition": "Absorb in client-conformance. Change the root Cargo.toml version and its Cargo.lock entry to 0.3.0. Update every plugin, marketplace, bootstrap, proof-default, and version-fixture surface that existing lockstep tests couple to it. Correct public documentation to name v0.2.1 as the released baseline and 0.3.0 as unpublished source. Document migration for typed bootstrap errors and non-exhaustive matching. Independent versions and historical fixtures stay unchanged unless genuinely coupled; decoupling or weakening tests needs a separate policy decision.",
+      "target": {
+        "workstreamId": "application-client",
+        "nodeId": "client-conformance",
+        "issue": 152,
+        "owner": "Application Client workstream orchestrator"
+      },
+      "owner": "Application Client workstream orchestrator",
+      "terminalPath": "The issue #152 PR merges with the coupled 0.3.0 source version and migration documentation after exact-head review, required CI, consumer attestations, design inspection, and campaign authorization. Any later tag or publication requires a separate operator decision.",
+      "status": "routed",
+      "decisionState": "accepted",
+      "dispositionAuthority": "Operator response 'Authorize source-only 0.3.0 transition in #152 (Recommended)' on 2026-10-08, recorded by campaign session e06813c4-1db2-4d77-b8d3-3addc6a1824c."
     }
   ]
 }

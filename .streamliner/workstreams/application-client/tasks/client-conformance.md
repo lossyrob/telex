@@ -381,6 +381,36 @@ Daemon `current-design.md` files before the implementation worker resumes. The
 implementation branch does not edit `.streamliner/**`. The sole reconciler later
 records completion evidence after the product design and implementation land.
 
+## Source compatibility transition
+
+Published v0.2.1 (source `212b76a4c586101bdc2a53264e2a4c3e2326671a`) contains
+the Rust binding with an exhaustive `ApplicationClientError`. Adding
+`DaemonBootstrap(DaemonBootstrapFailure)` and marking the enum
+`#[non_exhaustive]` is a breaking source change. On 2026-10-08 the operator
+authorized a source-only transition to 0.3.0 in this PR (campaign decision
+`client-conformance-semver-decision-20261008.json`, SHA-256
+`ec6fadc0a99628bd6bcedee912bf2c15ed7d20768d6c17bd2c72117913d0a8fc`).
+
+The same PR:
+
+- moves the root package `Cargo.toml` version and its `Cargo.lock` entry from
+  0.2.1 to 0.3.0;
+- updates every plugin, marketplace, bootstrap, proof-default, and version
+  fixture surface that existing lockstep metadata and release-contract tests
+  couple to that version, without weakening or decoupling those tests;
+- keeps independent workspace and dependency versions, minimum supported
+  versions, and historical or generic fixtures unchanged unless genuinely
+  coupled;
+- corrects public documentation to name v0.2.1 as the released baseline and
+  0.3.0 as an unpublished source version; and
+- documents source-consumer migration for typed bootstrap errors and
+  non-exhaustive matching.
+
+Decoupling versions or weakening those tests needs a separate policy
+decision. The transition does not change daemon protocol or schema versions,
+add a node, or split the bundle. It grants no tag, Release workflow dispatch,
+GitHub, crates.io, or plugin publication, and does not alter v0.2.0 or v0.2.1.
+
 ## Dependency and promotion
 
 `client-core` and `first-binding` are complete. Issue #152 alone does not make

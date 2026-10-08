@@ -172,6 +172,23 @@ head. The accepted trusted `InstalledCurrent` policy is unchanged and gains no
 executable-digest requirement or unsafe fallback. This records activation only;
 no new source, proof, review, or merge evidence is claimed.
 
+Later on 2026-10-08 the operator chose "Authorize source-only 0.3.0
+transition in #152 (Recommended)", recorded in campaign decision
+`client-conformance-semver-decision-20261008.json` (SHA-256
+`ec6fadc0a99628bd6bcedee912bf2c15ed7d20768d6c17bd2c72117913d0a8fc`).
+Campaign verified that published v0.2.1 source
+`212b76a4c586101bdc2a53264e2a4c3e2326671a` has root
+package version 0.2.1, an exhaustive `ApplicationClientError` in
+`src/application_client.rs`, and a `docs/application-client-core.md` that
+still says no published release contains the binding. The issue #152 PR
+therefore moves the root package and its lockfile entry to 0.3.0, updates
+every surface that existing lockstep tests couple to that version, corrects
+the public documentation to name v0.2.1 as the released baseline, and
+documents migration for typed bootstrap errors and non-exhaustive matching.
+This records authorization, not completion: no final 0.3.0 source head, PR,
+merge, tag, or release is established or claimed here. No node, dependency,
+gate, or protocol or schema version changes.
+
 ## Decisions
 
 - **Issue #12 remains the sole contract owner:** the workstream executes and
@@ -252,9 +269,19 @@ no new source, proof, review, or merge evidence is claimed.
 - **Only semantic Rust types stabilize:** compatibility commitments cover public
   types and behavior that carry the accepted Application Client contract. They
   do not promote backend records, daemon frames, CLI types, or consumer DTOs into
-  the supported surface. Until a release contains the binding, supported source
-  consumption uses an exact full commit SHA; unpinned Git dependencies remain
+  the supported surface. Published v0.2.1 contains the binding and is the
+  released compatibility baseline, superseding the earlier rationale that no
+  release contained it. Consumers of unpublished source, including 0.3.0 before
+  any release, use an exact full commit SHA; unpinned Git dependencies remain
   outside the compatibility promise.
+- **Issue #152 makes a source-only 0.3.0 transition:** published v0.2.1
+  (source `212b76a4`) exposes an exhaustive `ApplicationClientError`. Adding
+  `DaemonBootstrap(DaemonBootstrapFailure)` and marking the enum
+  `#[non_exhaustive]` breaks Rust source compatibility, so the operator
+  authorized the root package to move to unpublished 0.3.0 within the same
+  PR, with genuinely release-coupled metadata and source-consumer migration
+  guidance. This is not a release, tag, or publication, and it changes no
+  daemon protocol or schema version.
 - **External boundaries remain deferred:** napi-rs/TypeScript, a separate client
   crate, C ABI, public socket or sidecar protocols, and product DTOs require
   later decisions. This deferral does not permit a private consumer fallback.
