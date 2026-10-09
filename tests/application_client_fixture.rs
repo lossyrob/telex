@@ -41,6 +41,10 @@ fn cargo() -> String {
 /// this never contends with the parent target directory lock.
 fn build_fixture(features: &str) -> PathBuf {
     let dir = fixture_dir();
+    let target_dir = dir.join(format!(
+        "target-{}",
+        features.replace(',', "-").replace(' ', "")
+    ));
     let mut command = Command::new(cargo());
     command
         .arg("build")
@@ -49,11 +53,12 @@ fn build_fixture(features: &str) -> PathBuf {
         .arg("--no-default-features")
         .arg("--features")
         .arg(features)
+        .env("CARGO_TARGET_DIR", &target_dir)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped());
     let output = run_with_timeout(command, Duration::from_secs(900));
     output.assert_success(&format!("building the consumer fixture with [{features}]"));
-    let binary = dir.join("target").join("debug").join(format!(
+    let binary = target_dir.join("debug").join(format!(
         "telex-application-client-consumer{}",
         std::env::consts::EXE_SUFFIX
     ));
