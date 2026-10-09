@@ -6,7 +6,9 @@ use std::time::{Duration, Instant};
 
 use crate::cli::{Ctx, GcArgs, RollbackArgs, UpgradeArgs, VersionArgs};
 use crate::daemon::DaemonError;
-use crate::daemon_ipc::{Request, Response, ERROR_NOT_RUNNING, ERROR_UNAUTHORIZED};
+use crate::daemon_ipc::{
+    IntentRecoveryState, Request, Response, ERROR_NOT_RUNNING, ERROR_UNAUTHORIZED,
+};
 use crate::install;
 use crate::output::emit;
 
@@ -768,12 +770,6 @@ const SUCCESSOR_DIAGNOSTIC_CHARS: usize = 512;
 
 /// Number of recoverable intents at drain time, or `None` when the daemon did not report any.
 fn recoverable_intent_count(drain: &serde_json::Value) -> Option<u64> {
-    #[cfg(debug_assertions)]
-    if let Ok(raw) = std::env::var("TELEX_TEST_RECOVERABLE_INTENTS") {
-        if let Ok(value) = raw.parse::<u64>() {
-            return Some(value);
-        }
-    }
     drain.get("station_intents")?.get("recoverable")?.as_u64()
 }
 
@@ -863,36 +859,94 @@ async fn verify_successor_reconcile(
             let paths = crate::daemon::DaemonPaths::current().map_err(|error| error.to_string())?;
             let cap =
                 crate::daemon::read_cap_file(&paths.cap_path).map_err(|error| error.to_string())?;
-            client
+            let proof = cap.admin_cap;
+            let response = client
                 .request(&Request::ReconcileIntents {
-                    proof: Some(cap.admin_cap),
+                    proof: Some(proof),
                     scope: None,
                 })
                 .await
-                .map_err(|error| error.to_string())
+                .map_err(|error| error.to_string())?;
+            let status = if matches!(
+                &response,
+                Response::Reconciled { report } if report.ran && report.restored == 0
+            ) {
+                drop(client);
+                let mut status_client =
+                    crate::daemon::connect_existing_with_bootstrap(&store_key, policy.as_ref())
+                        .await
+                        .map_err(|error| error.to_string())?;
+                let paths =
+                    crate::daemon::DaemonPaths::current().map_err(|error| error.to_string())?;
+                let status_cap = crate::daemon::read_cap_file(&paths.cap_path)
+                    .map_err(|error| error.to_string())?;
+                match status_client
+                    .request(&Request::Status {
+                        store_key: Some(store_key.clone()),
+                        detail: true,
+                        proof: Some(status_cap.admin_cap),
+                    })
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    Response::StatusReport { status } => Some(status),
+                    _ => None,
+                }
+            } else {
+                None
+            };
+            Ok((response, status))
         };
         let remaining = deadline.saturating_duration_since(Instant::now());
         if remaining.is_zero() {
             break;
         }
-        match tokio::time::timeout(remaining.min(SUCCESSOR_RECONCILE_TIMEOUT), attempt).await {
-            Ok(Ok(Response::Reconciled { report })) => {
+        match tokio::time::timeout(remaining, attempt).await {
+            Ok(Ok((Response::Reconciled { report }, status))) if report.ran => {
+                let observed_restored = status
+                    .as_ref()
+                    .map(|status| {
+                        status
+                            .intents
+                            .iter()
+                            .filter(|intent| {
+                                intent.has_member
+                                    && matches!(
+                                        intent.state,
+                                        IntentRecoveryState::Live | IntentRecoveryState::Restored
+                                    )
+                            })
+                            .count()
+                    })
+                    .unwrap_or_default();
+                let restored = report
+                    .restored
+                    .max(observed_restored.min(recoverable as usize));
                 return json!({
                     "attempted": true,
                     "successor_binary": successor_binary.to_string_lossy(),
                     "recoverable_at_drain": recoverable,
                     "reconciled": true,
-                    "restored": report.restored,
+                    "restored": restored,
                     "refreshed_no_op": report.refreshed_no_op,
                     "deferred_lease": report.deferred_lease,
                     "failed": report.failed,
                     "pass_seq": report.pass_seq,
                 });
             }
-            Ok(Ok(Response::Error { code, message, .. })) => {
+            Ok(Ok((Response::Reconciled { report }, _))) => {
+                last_error = Some(format!(
+                    "successor reconcile skipped: {}",
+                    report
+                        .skipped_reason
+                        .as_deref()
+                        .unwrap_or("no pass completed")
+                ));
+            }
+            Ok(Ok((Response::Error { code, message, .. }, _))) => {
                 last_error = Some(format!("{code}: {message}"));
             }
-            Ok(Ok(other)) => {
+            Ok(Ok((other, _))) => {
                 last_error = Some(format!("unexpected daemon reconcile response: {other:?}"));
             }
             Ok(Err(error)) => last_error = Some(error),

@@ -404,8 +404,7 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
 async fn installed_current_upgrade_and_rollback_move_the_selector() {
     let _env = ENV_LOCK.lock().await;
     let iso = Isolation::new("ic-upgrade");
-    let mut restore = iso.apply_env();
-    restore.set("TELEX_TEST_RECOVERABLE_INTENTS", "1");
+    let _restore = iso.apply_env();
     let db = iso.root.join("upgrade.db");
     let first_tag = iso.tag.clone();
 
@@ -989,6 +988,7 @@ async fn installed_current_stale_prestarted_image_is_refused() {
             .await
             .ready
     );
+    let stale_pid = iso.daemon_pid().expect("prestarted daemon pid");
 
     // Replace the selected target in place. The running daemon keeps the old
     // image, so its platform file identity no longer matches the selection.
@@ -1004,6 +1004,11 @@ async fn installed_current_stale_prestarted_image_is_refused() {
         attach_failure(&outcome),
         DaemonBootstrapFailure::ForeignDaemon,
         "a prestarted daemon running a stale image must be refused"
+    );
+    assert_eq!(
+        iso.daemon_pid(),
+        Some(stale_pid),
+        "authentication failure must not launch another daemon beside the stale peer"
     );
 }
 

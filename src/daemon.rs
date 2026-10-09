@@ -2376,16 +2376,12 @@ fn verify_helloack_against_selection(
 }
 
 fn bootstrap_error_from_peer(error: DaemonError) -> DaemonError {
-    // A peer that authenticates as the current user but fails canonical-image
-    // or file-identity match is a foreign daemon on the shared endpoint. Non
-    // peer-verification errors (transport, protocol, JSON) pass through
-    // unchanged so their existing projections remain intact.
-    match &error {
-        DaemonError::Unauthorized(_) => {
-            DaemonError::Bootstrap(crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon)
-        }
-        _ => error,
-    }
+    let _ = error;
+    // Once the OS endpoint is connected, every failure in the peer-verifier
+    // or capability-evidence check means the peer is foreign or
+    // unverifiable. It is never permission to launch another daemon beside
+    // the connected process.
+    DaemonError::Bootstrap(crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon)
 }
 
 fn bootstrap_spawn_env(
@@ -15778,6 +15774,16 @@ mod platform {
                 "server uid {uid} does not match client uid {current}"
             )));
         }
+        if let Some(expected) = expected_identity {
+            // On Linux this reads /proc/<pid>/exe which is TOCTOU-safe:
+            // the kernel captures the image inode at exec time.
+            let peer_identity = peer_process_file_identity(pid, expected_exe)?;
+            if peer_identity != *expected {
+                return Err(DaemonError::Unauthorized(
+                    "server executable file identity does not match selection".into(),
+                ));
+            }
+        }
         let exe = server_executable(pid)?;
         if !same_canonical_path(&exe, expected_exe) {
             return Err(DaemonError::Unauthorized(format!(
@@ -15785,16 +15791,6 @@ mod platform {
                 exe.display(),
                 expected_exe.display()
             )));
-        }
-        if let Some(expected) = expected_identity {
-            // On Linux this reads /proc/<pid>/exe which is TOCTOU-safe:
-            // the kernel captures the image inode at exec time.
-            let peer_identity = peer_process_file_identity(pid, &exe)?;
-            if peer_identity != *expected {
-                return Err(DaemonError::Unauthorized(
-                    "server executable file identity does not match selection".into(),
-                ));
-            }
         }
         let start_time = server_process_start_time(pid)?;
         verify_expected_peer_identity(pid, Some(start_time), expected_pid, expected_start_time)?;
