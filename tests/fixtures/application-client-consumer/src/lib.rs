@@ -17,7 +17,7 @@
 //! Both connect through the production seam
 //! `ApplicationDaemonBootstrap::InstalledCurrent { trusted_root }`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use telex::application_client::{
     AckResult, AddressSpec, ApplicationCapability, ApplicationClient, ApplicationClientConfig,
@@ -113,9 +113,60 @@ fn require(condition: bool, message: &str) -> Result<(), String> {
     }
 }
 
+fn checkpoint_path() -> Result<PathBuf, String> {
+    std::env::var("TELEX_FIXTURE_CHECKPOINT")
+        .map(PathBuf::from)
+        .map_err(|_| "TELEX_FIXTURE_CHECKPOINT is required".to_string())
+}
+
+fn write_checkpoint(path: &Path, value: &serde_json::Value) -> Result<(), String> {
+    let temporary = path.with_extension("tmp");
+    let bytes =
+        serde_json::to_vec(value).map_err(|error| format!("serialize checkpoint: {error}"))?;
+    std::fs::write(&temporary, bytes)
+        .map_err(|error| format!("write checkpoint {}: {error}", temporary.display()))?;
+    std::fs::rename(&temporary, path)
+        .map_err(|error| format!("publish checkpoint {}: {error}", path.display()))
+}
+
+fn read_checkpoint(path: &Path) -> Result<serde_json::Value, String> {
+    let bytes = std::fs::read(path)
+        .map_err(|error| format!("read checkpoint {}: {error}", path.display()))?;
+    serde_json::from_slice(&bytes)
+        .map_err(|error| format!("parse checkpoint {}: {error}", path.display()))
+}
+
 // ----------------------------------------------------------------------------------------
 // Watcher-shaped send-only probe
 // ----------------------------------------------------------------------------------------
+
+/// Minimal existing-daemon operation used to prove that pre-Hello admission is
+/// bounded when a matching peer accepts but never completes `HelloAck`.
+pub async fn run_health_probe(config: &ProbeConfig) -> Result<ProbeReport, String> {
+    let mut report = ProbeReport::default();
+    let client = config.connect("fixture-health").await?;
+    client
+        .health()
+        .await
+        .map_err(|error| format!("health: {error}"))?;
+    report.record("health=ready");
+    Ok(report)
+}
+
+/// Minimal public attach used by process-level bootstrap race proofs.
+pub async fn run_attach_probe(config: &ProbeConfig) -> Result<ProbeReport, String> {
+    let mut report = ProbeReport::default();
+    let client = config.connect("fixture-attach").await?;
+    let address = spec(
+        &config.address("attach"),
+        ApplicationCapability::SendOnly,
+        "minimal bootstrap attach",
+    );
+    let outcome = client.attach(std::slice::from_ref(&address)).await;
+    require(outcome.ready, "minimal attach must be ready")?;
+    report.record("attach=ready");
+    Ok(report)
+}
 
 /// A long-lived Watcher: it emits observations and must never look attended.
 pub async fn run_watcher_probe(config: &ProbeConfig) -> Result<ProbeReport, String> {
@@ -348,6 +399,179 @@ pub async fn run_watcher_probe(config: &ProbeConfig) -> Result<ProbeReport, Stri
 // ----------------------------------------------------------------------------------------
 // Operator Station-shaped bidirectional probe
 // ----------------------------------------------------------------------------------------
+
+/// Receive one delivery, persist caller-owned ingest evidence, and exit
+/// without acknowledging. A separate process completes the proof with
+/// [`run_operator_station_recovery_probe`].
+pub async fn run_operator_station_ingest_probe(
+    config: &ProbeConfig,
+) -> Result<ProbeReport, String> {
+    let mut report = ProbeReport::default();
+    let checkpoint = checkpoint_path()?;
+    let client = config.connect("fixture-station-restart").await?;
+    let sender = spec(
+        &config.address("restart-sender"),
+        ApplicationCapability::SendOnly,
+        "station restart sender",
+    );
+    let station = spec(
+        &config.address("restart-station"),
+        ApplicationCapability::Bidirectional,
+        "station restart target",
+    );
+    let attached = client.attach(&[sender.clone(), station.clone()]).await;
+    require(attached.ready, "restart fixture attach must be ready")?;
+
+    let sent = client
+        .send(SendRequest {
+            operation_id: OperationId(format!("station-restart-{}", config.run_id)),
+            sender: sender.address,
+            to: station.address.clone(),
+            cc: Vec::new(),
+            kind: "request".to_string(),
+            attention: "background".to_string(),
+            requires_disposition: true,
+            subject: Some("durable restart proof".to_string()),
+            body: "persist before acknowledgment".to_string(),
+            metadata: Some(r#"{"fixture":"station-restart"}"#.to_string()),
+            retry_budget: 1,
+        })
+        .await
+        .map_err(|error| format!("restart fixture send: {error}"))?;
+    let delivery = client
+        .receive(&station.address, Some(3000))
+        .await
+        .map_err(|error| format!("restart fixture receive: {error}"))?
+        .ok_or_else(|| "restart fixture delivery must be available".to_string())?;
+    require(
+        delivery.delivery.message_id == sent.message_id,
+        "restart fixture must receive the exact sent message",
+    )?;
+    let ingest_key = format!(
+        "{}:{}:{}",
+        delivery.delivery.message_id,
+        delivery.delivery.delivery_id,
+        delivery.delivery.recipient
+    );
+    write_checkpoint(
+        &checkpoint,
+        &serde_json::json!({
+            "message_id": delivery.delivery.message_id,
+            "delivery_id": delivery.delivery.delivery_id,
+            "recipient": delivery.delivery.recipient,
+            "ingest_events": [ingest_key],
+            "acknowledged": false,
+        }),
+    )?;
+    report.record("restart-ingest=durable");
+    report.record("restart-ack=pending");
+    Ok(report)
+}
+
+/// Start a fresh runtime, repair membership, recover the exact pending
+/// delivery, and acknowledge only after recognizing the durable ingest
+/// checkpoint written by [`run_operator_station_ingest_probe`].
+pub async fn run_operator_station_recovery_probe(
+    config: &ProbeConfig,
+) -> Result<ProbeReport, String> {
+    let mut report = ProbeReport::default();
+    let checkpoint = checkpoint_path()?;
+    let mut persisted = read_checkpoint(&checkpoint)?;
+    let message_id = persisted
+        .get("message_id")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| "checkpoint message_id is missing".to_string())?;
+    let delivery_id = persisted
+        .get("delivery_id")
+        .and_then(serde_json::Value::as_i64)
+        .ok_or_else(|| "checkpoint delivery_id is missing".to_string())?;
+    let recipient = persisted
+        .get("recipient")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "checkpoint recipient is missing".to_string())?
+        .to_string();
+    let ingest_events = persisted
+        .get("ingest_events")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "checkpoint ingest_events is missing".to_string())?;
+    require(
+        ingest_events.len() == 1,
+        "exactly one durable ingest event must exist before recovery",
+    )?;
+
+    let client = config.connect("fixture-station-restart").await?;
+    let station = spec(
+        &config.address("restart-station"),
+        ApplicationCapability::Bidirectional,
+        "station restart target",
+    );
+    let mut reconciliation_error = None;
+    for _ in 0..20 {
+        match client
+            .reconcile(&station, RecoveryPolicy::BoundedRepair { retries: 3 })
+            .await
+        {
+            Ok(_) => {
+                reconciliation_error = None;
+                break;
+            }
+            Err(error @ ApplicationClientError::Collision(_)) => {
+                reconciliation_error = Some(error);
+                tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            }
+            Err(error) => return Err(format!("restart fixture reconcile: {error}")),
+        }
+    }
+    if let Some(error) = reconciliation_error {
+        return Err(format!("restart fixture reconcile: {error}"));
+    }
+    let delivery = client
+        .receive(&station.address, Some(3000))
+        .await
+        .map_err(|error| format!("restart fixture recovery receive: {error}"))?
+        .ok_or_else(|| "pending delivery must be available after process restart".to_string())?;
+    require(
+        delivery.delivery.message_id == message_id
+            && delivery.delivery.delivery_id == delivery_id
+            && delivery.delivery.recipient == recipient,
+        "recovery must return the exact durably ingested delivery",
+    )?;
+    let recovered_key = format!(
+        "{}:{}:{}",
+        delivery.delivery.message_id,
+        delivery.delivery.delivery_id,
+        delivery.delivery.recipient
+    );
+    require(
+        ingest_events[0].as_str() == Some(recovered_key.as_str()),
+        "recovery must recognize existing ingest instead of duplicating it",
+    )?;
+    require(
+        client
+            .acknowledge(&delivery.ack)
+            .await
+            .map_err(|error| format!("restart fixture acknowledge: {error}"))?
+            == AckResult::Marked,
+        "the recovered delivery acknowledgment must mark consumption",
+    )?;
+    let history = client
+        .history(Some(station.address), false, None, None, None, 50)
+        .await
+        .map_err(|error| format!("restart fixture history: {error}"))?;
+    require(
+        history
+            .iter()
+            .filter(|item| item.message.id == message_id)
+            .count()
+            == 1,
+        "restart recovery must preserve exactly one message",
+    )?;
+    persisted["acknowledged"] = serde_json::Value::Bool(true);
+    write_checkpoint(&checkpoint, &persisted)?;
+    report.record("restart-ingest=recovered-without-duplicate");
+    report.record("restart-ack=marked");
+    Ok(report)
+}
 
 /// A bidirectional Operator Station: attends addresses, replies, dispositions,
 /// reconciles operations, follows deltas, and maintains its own store.

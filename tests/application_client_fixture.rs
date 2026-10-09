@@ -81,6 +81,24 @@ fn run_probe(
     run_with_timeout(command, Duration::from_secs(180))
 }
 
+fn run_probe_with_checkpoint(
+    iso: &Isolation,
+    binary: &Path,
+    backend: &str,
+    probe: &str,
+    run_id: &str,
+    checkpoint: &Path,
+) -> CliOutput {
+    let mut command = iso.command_for(binary);
+    command
+        .env("TELEX_FIXTURE_TRUSTED_ROOT", iso.trusted_root())
+        .env("TELEX_FIXTURE_BACKEND", backend)
+        .env("TELEX_FIXTURE_RUN_ID", run_id)
+        .env("TELEX_FIXTURE_CHECKPOINT", checkpoint)
+        .arg(probe);
+    run_with_timeout(command, Duration::from_secs(180))
+}
+
 fn assert_probe_evidence(output: &CliOutput, probe: &str, expected: &[&str]) {
     output.assert_success(&format!("consumer fixture probe '{probe}'"));
     assert!(
@@ -120,6 +138,45 @@ const STATION_EVIDENCE: &[&str] = &[
     "cleanup_deleted=",
 ];
 
+fn assert_station_restart_evidence(iso: &Isolation, binary: &Path, backend: &str, run_id: &str) {
+    let checkpoint = iso.root.join(format!("{run_id}-ingest.json"));
+    let ingest =
+        run_probe_with_checkpoint(iso, binary, backend, "station-ingest", run_id, &checkpoint);
+    assert_probe_evidence(
+        &ingest,
+        "station-ingest",
+        &["restart-ingest=durable", "restart-ack=pending"],
+    );
+    let recovered =
+        run_probe_with_checkpoint(iso, binary, backend, "station-recover", run_id, &checkpoint);
+    assert_probe_evidence(
+        &recovered,
+        "station-recover",
+        &[
+            "restart-ingest=recovered-without-duplicate",
+            "restart-ack=marked",
+        ],
+    );
+    let persisted: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&checkpoint).expect("read ingest checkpoint"))
+            .expect("parse ingest checkpoint");
+    assert_eq!(
+        persisted
+            .get("ingest_events")
+            .and_then(serde_json::Value::as_array)
+            .map(Vec::len),
+        Some(1),
+        "consumer restart must not duplicate caller-owned ingest"
+    );
+    assert_eq!(
+        persisted
+            .get("acknowledged")
+            .and_then(serde_json::Value::as_bool),
+        Some(true),
+        "fresh consumer process must acknowledge after recovering durable ingest"
+    );
+}
+
 fn write_profile_config(iso: &Isolation, name: &str, profile: BackendProfile) {
     let mut backends = BTreeMap::new();
     backends.insert(name.to_string(), profile);
@@ -144,6 +201,7 @@ async fn sqlite_consumer_fixture_probes_execute_against_installed_current() {
 
     let station = run_probe(&iso, &binary, "fixture_sqlite", "station", "sqlite-station");
     assert_probe_evidence(&station, "station", STATION_EVIDENCE);
+    assert_station_restart_evidence(&iso, &binary, "fixture_sqlite", "sqlite-station-restart");
 
     // The fixture reached the store through the production InstalledCurrent
     // seam, so an installed daemon must exist for this isolated environment.
@@ -210,6 +268,7 @@ async fn postgres_consumer_fixture_probes_execute_against_installed_current() {
 
     let watcher = run_probe(&iso, &binary, "fixture_pg", "watcher", "pg-watcher");
     let station = run_probe(&iso, &binary, "fixture_pg", "station", "pg-station");
+    assert_station_restart_evidence(&iso, &binary, "fixture_pg", "pg-station-restart");
     let cap_present = iso.cap_path().is_some();
     admin_exec(format!("DROP SCHEMA IF EXISTS {schema} CASCADE")).await;
 

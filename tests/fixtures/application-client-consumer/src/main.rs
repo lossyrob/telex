@@ -6,7 +6,9 @@
 //! failure. No Telex CLI parsing, no daemon serving, no sidecar.
 
 use telex_application_client_consumer::{
-    run_operator_station_probe, run_watcher_probe, ProbeConfig,
+    run_attach_probe, run_health_probe, run_operator_station_ingest_probe,
+    run_operator_station_probe,
+    run_operator_station_recovery_probe, run_watcher_probe, ProbeConfig,
 };
 
 fn main() -> std::process::ExitCode {
@@ -33,9 +35,15 @@ fn main() -> std::process::ExitCode {
 
     let result = runtime.block_on(async {
         match probe.as_str() {
+            "attach" => run_attach_probe(&config).await,
+            "health" => run_health_probe(&config).await,
             "watcher" => run_watcher_probe(&config).await,
             "station" | "operator-station" => run_operator_station_probe(&config).await,
-            other => Err(format!("unknown probe '{other}' (expected watcher|station)")),
+            "station-ingest" => run_operator_station_ingest_probe(&config).await,
+            "station-recover" => run_operator_station_recovery_probe(&config).await,
+            other => Err(format!(
+                "unknown probe '{other}' (expected attach|health|watcher|station|station-ingest|station-recover)"
+            )),
         }
     });
 

@@ -469,6 +469,15 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
 
 pub async fn gc(ctx: &Ctx, args: GcArgs) -> Result<i32> {
     let layout = install::layout_from_optional_root(args.root)?;
+    install::prepare_install_root(&layout.root)
+        .map_err(|error| anyhow!("create install root before selector admission: {error}"))?;
+    let canonical_root = crate::daemon_bootstrap::validate_install_root_for_switch(&layout.root)
+        .map_err(|error| anyhow!("validate install root before gc: {error}"))?;
+    let layout = install::layout_for_root(canonical_root);
+    let _selector_admission =
+        crate::daemon_bootstrap::SelectorAdmission::exclusive_async(layout.root.clone())
+            .await
+            .map_err(|error| anyhow!("acquire exclusive selector admission before gc: {error}"))?;
     let report = install::gc(&layout, args.dry_run, args.force)?;
     emit(ctx.fmt, &report, || {
         println!("install_root {}", report.root);

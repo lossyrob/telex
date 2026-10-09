@@ -332,18 +332,31 @@ pub struct CapFile {
     pub server_pid: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub server_start_time: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bootstrap_admission_version: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub startup_executable_file_identity: Option<CapFileIdentity>,
 }
 
-impl CapFile {
-    pub fn redacted(&self) -> serde_json::Value {
-        serde_json::json!({
-            "instance_id": self.instance_id,
-            "admin_cap": proto::REDACTED_SECRET,
-            "singleton_hash": self.singleton_hash,
-            "protocol_major": self.protocol_major,
-            "server_pid": self.server_pid,
-            "server_start_time": self.server_start_time,
-        })
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CapFileIdentity {
+    pub kind: String,
+    pub high: u64,
+    pub low: u64,
+}
+
+impl From<crate::daemon_bootstrap::FileIdentity> for CapFileIdentity {
+    fn from(identity: crate::daemon_bootstrap::FileIdentity) -> Self {
+        Self {
+            kind: match identity.kind {
+                crate::daemon_bootstrap::FileIdentityKind::UnixDevIno => "unix-dev-ino".to_string(),
+                crate::daemon_bootstrap::FileIdentityKind::WindowsVolumeFileId => {
+                    "windows-volume-file-id".to_string()
+                }
+            },
+            high: identity.high,
+            low: identity.low,
+        }
     }
 }
 
@@ -355,6 +368,31 @@ fn cap_required_peer_identity(cap: &CapFile) -> Result<(u32, u64)> {
         DaemonError::Unauthorized("daemon capability file is missing server_start_time".to_string())
     })?;
     Ok((pid, start_time))
+}
+
+fn verify_cap_bootstrap_evidence(
+    cap: &CapFile,
+    paths: &DaemonPaths,
+    resolved: &ResolvedBootstrap,
+) -> Result<()> {
+    if cap.singleton_hash != paths.singleton_hash || cap.instance_id.is_empty() {
+        return Err(DaemonError::Unauthorized(
+            "daemon capability record does not match the selected singleton".to_string(),
+        ));
+    }
+    if resolved.selection.is_none() {
+        return Ok(());
+    }
+    if cap.bootstrap_admission_version
+        != Some(crate::install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION)
+        || cap.startup_executable_file_identity
+            != Some(CapFileIdentity::from(resolved.expected_identity))
+    {
+        return Err(DaemonError::Unauthorized(
+            "daemon capability record lacks matching bootstrap admission evidence".to_string(),
+        ));
+    }
+    Ok(())
 }
 
 pub struct DaemonState {
@@ -1980,8 +2018,18 @@ pub(crate) async fn connect_existing_with_bootstrap(
     store_key: &str,
     policy: &crate::daemon_bootstrap::BootstrapPolicy,
 ) -> Result<DaemonClient> {
-    let (client, _selection) = connect_existing_bootstrap_with_selection(store_key, policy).await?;
-    Ok(client)
+    match tokio::time::timeout(
+        CONNECT_ATTEMPT_TIMEOUT,
+        connect_existing_bootstrap_with_selection(store_key, policy),
+    )
+    .await
+    {
+        Ok(Ok((client, _selection))) => Ok(client),
+        Ok(Err(error)) => Err(error),
+        Err(_) => Err(DaemonError::Timeout(
+            "existing daemon bootstrap handshake timed out".to_string(),
+        )),
+    }
 }
 
 async fn connect_existing_bootstrap_with_selection(
@@ -2024,6 +2072,7 @@ async fn connect_existing_against_resolved(
         Some(&resolved.expected_identity),
     )
     .map_err(bootstrap_error_from_peer)?;
+    verify_cap_bootstrap_evidence(&cap, &paths, resolved).map_err(bootstrap_error_from_peer)?;
     let hello = proto::client_hello(store_key);
     let client = handshake_connected(conn, paths, &hello).await?;
     if let Some(sel) = resolved.selection.as_ref() {
@@ -2193,17 +2242,16 @@ impl ResolvedBootstrap {
 async fn resolve_bootstrap_expected(
     policy: &crate::daemon_bootstrap::BootstrapPolicy,
 ) -> Result<ResolvedBootstrap> {
-    use crate::daemon_bootstrap::{BootstrapPolicy, SelectorAdmission};
+    use crate::daemon_bootstrap::BootstrapPolicy;
     match policy {
         BootstrapPolicy::InstalledCurrent {
             trusted_root,
             root_identity,
         } => {
-            let admission = SelectorAdmission::shared_async(trusted_root.clone())
-                .await
-                .map_err(DaemonError::Bootstrap)?;
-            let token = crate::daemon_bootstrap::resolve_installed_current(trusted_root)
-                .map_err(DaemonError::Bootstrap)?;
+            let (token, admission) =
+                crate::daemon_bootstrap::resolve_installed_current_admitted(trusted_root)
+                    .await
+                    .map_err(DaemonError::Bootstrap)?;
             if token.trusted_root != *trusted_root || token.root_identity != *root_identity {
                 return Err(DaemonError::Bootstrap(
                     crate::daemon_bootstrap::DaemonBootstrapFailure::SelectionUnstable,
@@ -2244,6 +2292,8 @@ async fn resolve_bootstrap_expected(
             executable,
             file_identity,
         } => {
+            crate::daemon_bootstrap::validate_exact_executable_authority(executable)
+                .map_err(DaemonError::Bootstrap)?;
             #[cfg(windows)]
             let exe_witness = crate::daemon_bootstrap::open_windows_witness(executable)
                 .map_err(DaemonError::Bootstrap)?;
@@ -2298,6 +2348,7 @@ fn verify_helloack_against_selection(
     }
     if ack.protocol_version.major != selection.protocol_major
         || ack.protocol_version.minor != selection.protocol_minor
+        || ack.auth_policy_version != crate::daemon_ipc::AUTH_POLICY_VERSION
     {
         return Err(DaemonError::Bootstrap(
             crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
@@ -2484,7 +2535,7 @@ fn configure_daemon_spawn(_command: &mut std::process::Command) {}
 
 #[cfg(windows)]
 fn spawn_daemon_process(exe: &Path) -> Result<()> {
-    spawn_daemon_process_windows_native(exe, &[], None)
+    spawn_daemon_process_windows_native(exe, &[], None, false)
 }
 
 #[cfg(windows)]
@@ -2496,20 +2547,28 @@ fn spawn_daemon_process_bootstrap(
     // The bootstrap path holds an executable-file witness handle across
     // `CreateProcessW`. The witness is passed by borrow so it is dropped
     // strictly after the child process is created, not during the spawn.
-    spawn_daemon_process_windows_native(exe, env, witness)
+    let inherit_witness = env
+        .iter()
+        .any(|(key, _)| key == std::ffi::OsStr::new(crate::daemon_bootstrap::BOOTSTRAP_TOKEN_ENV));
+    spawn_daemon_process_windows_native(exe, env, witness, inherit_witness)
 }
 
 #[cfg(windows)]
 fn spawn_daemon_process_windows_native(
     exe: &Path,
     env: &[(std::ffi::OsString, std::ffi::OsString)],
-    _witness: Option<&crate::daemon_bootstrap::WindowsExecutableWitness>,
+    witness: Option<&crate::daemon_bootstrap::WindowsExecutableWitness>,
+    inherit_witness: bool,
 ) -> Result<()> {
     use std::mem::zeroed;
     use std::os::windows::ffi::OsStrExt;
-    use windows_sys::Win32::Foundation::{CloseHandle, FALSE};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, SetHandleInformation, FALSE, HANDLE_FLAG_INHERIT, TRUE,
+    };
     use windows_sys::Win32::System::Threading::{
-        CreateProcessW, PROCESS_INFORMATION, STARTUPINFOW,
+        CreateProcessW, DeleteProcThreadAttributeList, InitializeProcThreadAttributeList,
+        UpdateProcThreadAttribute, EXTENDED_STARTUPINFO_PRESENT, PROCESS_INFORMATION,
+        PROC_THREAD_ATTRIBUTE_HANDLE_LIST, STARTUPINFOEXW,
     };
 
     const DETACHED_PROCESS: u32 = 0x0000_0008;
@@ -2522,16 +2581,26 @@ fn spawn_daemon_process_windows_native(
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
-    let mut startup: STARTUPINFOW = unsafe { zeroed() };
-    startup.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let mut startup: STARTUPINFOEXW = unsafe { zeroed() };
+    startup.StartupInfo.cb = std::mem::size_of::<STARTUPINFOEXW>() as u32;
     let mut process_info: PROCESS_INFORMATION = unsafe { zeroed() };
 
     // Build an explicit per-child Unicode environment block, layering the
     // requested overrides on top of the parent's environment without any
     // process-global mutation. Passing `CREATE_UNICODE_ENVIRONMENT` tells the
     // loader the block is UTF-16, matching the encoding we produce.
-    let mut env_block = build_windows_env_block(env);
-    let (env_ptr, env_flag) = if env.is_empty() {
+    let mut effective_env = env.to_vec();
+    let mut inherited_handle = inherit_witness
+        .then(|| witness.map(|witness| witness.raw_handle()))
+        .flatten();
+    if let Some(handle) = inherited_handle {
+        effective_env.push((
+            std::ffi::OsString::from(crate::daemon_bootstrap::BOOTSTRAP_WITNESS_HANDLE_ENV),
+            std::ffi::OsString::from(handle.to_string()),
+        ));
+    }
+    let mut env_block = build_windows_env_block(&effective_env);
+    let (env_ptr, env_flag) = if effective_env.is_empty() {
         (std::ptr::null::<std::ffi::c_void>(), 0u32)
     } else {
         (
@@ -2539,28 +2608,93 @@ fn spawn_daemon_process_windows_native(
             CREATE_UNICODE_ENVIRONMENT,
         )
     };
-    let creation_flags = env_flag | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
+    let mut creation_flags =
+        env_flag | DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW;
+
+    // Restrict inheritance to the one selected executable witness. Holding
+    // that exact no-write/no-delete-sharing handle across CreateProcessW
+    // proves the pathname could not move to another file between selection
+    // and image mapping; the inherited handle carries the same object identity
+    // into the child through independent admission and readiness publication.
+    let mut attribute_storage: Vec<usize> = Vec::new();
+    if let Some(handle) = inherited_handle.as_mut() {
+        if unsafe { SetHandleInformation(*handle, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT) } == 0 {
+            return Err(io_err(
+                "marking executable witness inheritable",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        let mut attribute_bytes = 0usize;
+        unsafe {
+            InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut attribute_bytes);
+        }
+        let words = attribute_bytes.div_ceil(std::mem::size_of::<usize>());
+        attribute_storage.resize(words, 0);
+        startup.lpAttributeList = attribute_storage.as_mut_ptr() as *mut std::ffi::c_void;
+        if unsafe {
+            InitializeProcThreadAttributeList(startup.lpAttributeList, 1, 0, &mut attribute_bytes)
+        } == 0
+        {
+            unsafe {
+                SetHandleInformation(*handle, HANDLE_FLAG_INHERIT, 0);
+            }
+            return Err(io_err(
+                "initializing executable witness inheritance",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        if unsafe {
+            UpdateProcThreadAttribute(
+                startup.lpAttributeList,
+                0,
+                PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
+                handle as *mut isize as *const std::ffi::c_void,
+                std::mem::size_of::<isize>(),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            )
+        } == 0
+        {
+            unsafe {
+                DeleteProcThreadAttributeList(startup.lpAttributeList);
+                SetHandleInformation(*handle, HANDLE_FLAG_INHERIT, 0);
+            }
+            return Err(io_err(
+                "restricting executable witness inheritance",
+                std::io::Error::last_os_error(),
+            ));
+        }
+        creation_flags |= EXTENDED_STARTUPINFO_PRESENT;
+    }
 
     // SAFETY: `command_line_wide` is a mutable, null-terminated buffer as required by
-    // CreateProcessW. `inherit_handles=FALSE` is the critical bit: daemon auto-spawn must not keep
-    // a caller's redirected stdout/stderr pipes or job wait alive after the one-shot client exits.
+    // CreateProcessW. When a bootstrap witness is present, the extended
+    // attribute list permits only that one handle despite `inherit_handles=TRUE`;
+    // ordinary auto-spawn continues with inheritance disabled.
     let ok = unsafe {
         CreateProcessW(
             std::ptr::null(),
             command_line_wide.as_mut_ptr(),
             std::ptr::null(),
             std::ptr::null(),
-            FALSE,
+            if inherited_handle.is_some() {
+                TRUE
+            } else {
+                FALSE
+            },
             creation_flags,
             env_ptr,
             std::ptr::null(),
-            &startup,
+            &startup.StartupInfo,
             &mut process_info,
         )
     };
-    // Keep the witness alive until CreateProcessW has published the child's
-    // image mapping. Rebinding here defeats any drop-earlier optimization.
-    let _witness_kept = _witness;
+    if let Some(handle) = inherited_handle {
+        unsafe {
+            DeleteProcThreadAttributeList(startup.lpAttributeList);
+            SetHandleInformation(handle, HANDLE_FLAG_INHERIT, 0);
+        }
+    }
     if ok == 0 {
         return Err(io_err("spawning daemon", std::io::Error::last_os_error()));
     }
@@ -2693,9 +2827,12 @@ pub async fn serve() -> Result<()> {
             return Err(DaemonError::Bootstrap(error));
         }
     };
+    let bootstrap_evidence = bootstrap_admission
+        .as_ref()
+        .map(crate::daemon_bootstrap::ChildBootstrapAdmission::evidence);
     let paths = DaemonPaths::current()?;
     let mut listener = platform::Listener::bind(&paths.endpoint)?;
-    let state = Arc::new(new_state(paths)?);
+    let state = Arc::new(new_state(paths, bootstrap_evidence)?);
     let (drain_tx, mut drain_rx) = tokio::sync::mpsc::unbounded_channel::<()>();
     let heartbeat_task = tokio::spawn(heartbeat_loop(state.clone()));
     // Readiness is now published: endpoint is bound, capability file is
@@ -2733,7 +2870,10 @@ pub async fn serve() -> Result<()> {
     Ok(())
 }
 
-fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
+fn new_state(
+    paths: DaemonPaths,
+    bootstrap_evidence: Option<crate::daemon_bootstrap::ChildBootstrapEvidence>,
+) -> Result<DaemonState> {
     let instance_id = random_token("inst")?;
     let admin_cap = random_token("cap")?;
     let server_start_time = current_process_start_time_for_cap()?;
@@ -2744,6 +2884,9 @@ fn new_state(paths: DaemonPaths) -> Result<DaemonState> {
         protocol_major: paths.singleton.protocol_major,
         server_pid: Some(std::process::id()),
         server_start_time,
+        bootstrap_admission_version: bootstrap_evidence.map(|evidence| evidence.admission_version),
+        startup_executable_file_identity: bootstrap_evidence
+            .map(|evidence| evidence.startup_executable_file_identity.into()),
     };
     write_cap_file(&paths.cap_path, &cap)?;
     Ok(DaemonState {
@@ -15972,11 +16115,11 @@ mod platform {
         verify_server_peer_bootstrap(conn, expected_exe, expected_pid, expected_start_time, None)
     }
 
-    /// Extended peer verification that additionally checks the peer image's
-    /// platform file identity when the caller supplies one. Used by the
-    /// InstalledCurrent connect path so a peer whose canonical exe path
-    /// matches the selection but whose file identity does not (a replaced
-    /// on-disk binary) is refused as a foreign daemon.
+    /// Extended peer verification for InstalledCurrent. Windows proves the
+    /// named-pipe PID, owner SID, start time, and canonical process-image path
+    /// here. Startup file identity is admission-backed evidence in the
+    /// owner-private capability record; reopening this pathname cannot prove
+    /// which file the already-running process mapped.
     pub fn verify_server_peer_bootstrap(
         conn: &ClientConn,
         expected_exe: &Path,
@@ -15984,6 +16127,7 @@ mod platform {
         expected_start_time: Option<u64>,
         expected_identity: Option<&crate::daemon_bootstrap::FileIdentity>,
     ) -> Result<()> {
+        let _ = expected_identity;
         let mut pid = 0u32;
         let ok = unsafe { GetNamedPipeServerProcessId(conn.as_raw_handle() as HANDLE, &mut pid) };
         if ok == 0 {
@@ -15993,20 +16137,6 @@ mod platform {
             ));
         }
         let info = verify_process_owner_and_exe(pid, expected_exe)?;
-        if let Some(expected) = expected_identity {
-            let peer_identity =
-                crate::daemon_bootstrap::file_identity(info.exe.as_deref().unwrap_or(expected_exe))
-                    .map_err(|_| {
-                        DaemonError::Unauthorized(
-                            "peer executable file identity could not be read".into(),
-                        )
-                    })?;
-            if peer_identity != *expected {
-                return Err(DaemonError::Unauthorized(
-                    "server executable file identity does not match selection".into(),
-                ));
-            }
-        }
         verify_expected_peer_identity(
             pid,
             Some(info.start_time_100ns),
@@ -16810,6 +16940,8 @@ mod tests {
             protocol_major: proto::PROTOCOL_MAJOR,
             server_pid: None,
             server_start_time: Some(1),
+            bootstrap_admission_version: None,
+            startup_executable_file_identity: None,
         };
         assert!(matches!(
             cap_required_peer_identity(&missing_pid),
@@ -16855,6 +16987,7 @@ mod tests {
                 high: 0,
                 low: 0,
             },
+            admission_completion: None,
         };
 
         // Legacy/empty ack build id is now rejected as ForeignDaemon rather
@@ -16903,6 +17036,20 @@ mod tests {
                 crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
             )) => {}
             other => panic!("expected ForeignDaemon for wrong package version, got {other:?}"),
+        }
+
+        let ack_wrong_auth_policy = crate::daemon_ipc::HelloAck {
+            build_id: "expected-build".to_string(),
+            auth_policy_version: crate::daemon_ipc::AUTH_POLICY_VERSION.wrapping_add(1),
+            ..ack_empty.clone()
+        };
+        match verify_helloack_against_selection(&ack_wrong_auth_policy, &selection) {
+            Err(DaemonError::Bootstrap(
+                crate::daemon_bootstrap::DaemonBootstrapFailure::ForeignDaemon,
+            )) => {}
+            other => {
+                panic!("expected ForeignDaemon for wrong authentication policy, got {other:?}")
+            }
         }
 
         // Matching build and package version accept.

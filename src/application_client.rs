@@ -2829,6 +2829,7 @@ impl ApplicationClient {
         let status = match self.store_status().await {
             Ok(status) => Some(status),
             Err(error @ ApplicationClientError::DaemonBootstrap(_)) => return Err(error),
+            Err(error) if self.bootstrap.is_some() => return Err(error),
             Err(_) => None,
         };
         let memberships = self.memberships.lock().unwrap().clone();

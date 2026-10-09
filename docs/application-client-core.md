@@ -184,21 +184,45 @@ Every connect-or-spawn cycle:
    `LockFileEx` range lock);
 2. reads `current`, resolves `<root>/versions/<tag>/telex[.exe]`, and
    validates the manifest's tag, build, package version, protocol
-version, supported schema range, required capabilities, and
-Application Client bootstrap-admission version;
+   version, supported schema range, required capabilities, and
+   Application Client bootstrap-admission version;
 3. freezes one immutable target and uses it for both spawn and
    pre-`Hello` peer authentication;
 4. holds the shared lease through reuse-safe process identity checks,
    version and capability negotiation, and a successful `HelloAck`; and
 5. releases only after the connection is established.
 
+The admission field is normally explicit. One compatibility case is
+recognized for a published v0.2.1 updater that installed the 0.3.x
+binary but wrote the older manifest shape: the raw key must be absent,
+not zero, malformed, duplicated, or set to another value. The client
+drops shared admission, takes exclusive selector admission, holds the
+exact selected executable, and runs a bounded credential-stripped
+`--json version` probe. Only an exact admission-version-1 and
+build/protocol/schema/capability match creates an in-memory completion.
+Nothing is written to the immutable manifest. The client then
+reacquires shared admission and revalidates the full selector,
+manifest, target path, and file identities. An exact-key process cache
+may skip only the probe, never fresh shared validation.
+
 The daemon spawned into this policy independently acquires a shared
 selector lease before publishing its endpoint, capability, or
-readiness. Upgrade and rollback hold the same selector lock exclusively
-across drain, predecessor exit, atomic `previous`/`current` switch, and
-publication. Selector admission always precedes daemon singleton or
-spawn admission. Callers do not manage or observe the lock file
-directly.
+readiness. On Windows the parent narrowly inherits the exact executable
+witness held across process creation. The child validates and retains
+that handle through admission and atomically binds its handle-derived
+identity and admission version to the owner-private capability record,
+PID, start time, instance, and singleton scope before readiness.
+Pre-`Hello` authentication checks that evidence with the named-pipe
+PID, SID, start time, and canonical process-image path. Reopening the
+pathname is not authoritative.
+
+Upgrade, rollback, and install garbage collection hold the selector
+lock exclusively across their selector snapshot and mutation.
+Existing-peer authentication and `HelloAck` are bounded; the final
+acknowledgment must match the selected build, package, protocol,
+authentication-policy version, and required capabilities. Selector
+admission always precedes daemon singleton or spawn admission. Callers
+do not manage or observe the lock file directly.
 
 ### Typed failures
 
@@ -308,7 +332,10 @@ touches only the shared `telex::application_client` surface. The
 Watcher-shaped probe exercises send-only lifecycle, and the Operator
 Station-shaped probe exercises bidirectional lifecycle,
 acknowledgment, ordinary reply, source resolution, and compound
-operations.
+operations. A two-process Station phase also persists caller-owned
+ingest evidence, exits before acknowledgment, repairs membership in a
+fresh runtime, recovers the exact pending delivery without duplicate
+ingest, and then acknowledges on both backend legs.
 
 Additional `InstalledCurrent` process-level coverage lives in
 `tests/installed_current_process.rs`.

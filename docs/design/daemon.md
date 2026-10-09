@@ -2016,8 +2016,24 @@ are unsupported and MUST fail closed. `current` is the sole trust source;
 executable and MUST supply validated build identity, package version,
 protocol major/minor, supported schema range, and required daemon
 capabilities, plus an explicit bootstrap-admission version proving the
-selected daemon performs child-side validation before readiness. These
-fields are compatibility and selection metadata. They
+selected daemon performs child-side validation before readiness.
+
+The sole exception is the raw manifest shape produced when the
+published v0.2.1 updater installs a 0.3.x binary: the admission key is
+absent, not explicit zero, null, malformed, duplicated, or
+future-valued. Shared admission MUST be released before taking
+exclusive admission for a bounded non-serving probe of the exact held
+executable with credentials and store/session environment removed. The
+probe MUST report admission version 1 and exact build, protocol, schema,
+and capability metadata. The selector, raw manifest bytes and file
+identity, canonical target, and target file identity MUST be unchanged
+before and after the probe and again under a fresh shared resolution.
+The resulting completion is process-local and in-memory only; it MUST
+NOT rewrite the immutable manifest or act as a selection token. The
+spawned child still performs independent admission and runtime proof.
+All other absent or explicit values fail closed.
+
+These fields are compatibility and selection metadata. They
 do not provide an executable-content digest or hash, an executable-content
 migration or missing-digest rule, a signature, publisher or package
 provenance, protection from malicious same-user administration, or
@@ -2057,16 +2073,26 @@ install root itself.
   writing `daemon-<H>.cap`, or emitting readiness, independently acquire
   a shared admission lease. Verify a fresh `InstalledCurrent` resolution
   against the captured selection token and validate the child's own
-  process image (canonical process-image path plus platform file
-  identity). Hold the shared lease through endpoint, capability, and
-  readiness publication, then release. If either process dies, the
-  remaining or next admission still prevents stale-child publication.
+  process image. On Windows, the parent holds the exact selected
+  executable witness with replacement/deletion denied across
+  `CreateProcessW`, restricts inheritance to that handle, and the child
+  validates and retains the inherited handle through admission and
+  readiness. The child atomically records the handle-derived file
+  identity and admission version with capability instance, singleton
+  scope, PID, and start time. Reopening `current_exe` is supplementary,
+  never the authoritative startup identity. Hold the shared lease
+  through endpoint, capability, and readiness publication, then release.
+  If either process dies, the remaining or next admission still
+  prevents stale-child publication.
 - **Upgrade and rollback (exclusive).** Acquire the exclusive lease
   before resolving the old selection. Hold it across candidate
   validation, authenticated matching-daemon drain, predecessor exit,
   atomic `previous`/`current` switch, and selector publication. The
   drain operates inside that exclusive lease and MUST NOT reacquire the
   shared lease.
+- **Install garbage collection (exclusive).** Acquire the same exclusive
+  lease before reading `current` and `previous`, and hold it through the
+  protected-version snapshot and every deletion.
 
 **Lock order.** Selector admission MUST precede the daemon singleton or
 spawn admission described in [§2.2](#22-auto-spawn-connect-or-spawn-and-the-spawn-lock).
@@ -2090,15 +2116,21 @@ identity match the frozen selection token and that reuse-safe
 PID/start-time, UID or SID, and OS peer credentials are consistent with
 the same-user, same-selection target. Linux uses open process-image
 descriptor plus device/inode identity. Windows captures canonical final
-path and volume/file identity from held executable handles and preserves
-compatible sharing through process creation. A different image is a
-foreign daemon; the client refuses it before metadata leaves the client.
+path from the named-pipe server process and compares the capability
+record's admission-backed startup identity to the frozen witness
+identity. The record is owner-private and atomically binds identity to
+the actual server PID, start time, instance, and singleton scope.
+Reopening the path is not file-identity proof. Missing or mismatched
+runtime evidence is a foreign daemon; the client refuses it before
+metadata leaves the client.
 
 **`HelloAck` build/protocol/capability proof.** `HelloAck`
 ([§6.1](#61-version-handshake--capability-negotiation-hello--helloack-sf2))
 is the final authoritative check that the peer serves the selected
-build, protocol, and required security and Application Client
-capabilities. The daemon MUST project the manifest-declared build
+build, protocol, authentication-policy version, and required security
+and Application Client capabilities. The handshake is bounded so a
+peer cannot retain shared selector admission indefinitely. The daemon
+MUST project the manifest-declared build
 identity, protocol major/minor, and required capabilities through
 `HelloAck` so an image that matches path and file identity but exposes
 an unexpected build or capability set fails closed. `admin_cap` and

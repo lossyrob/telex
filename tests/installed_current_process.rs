@@ -157,6 +157,71 @@ fn write_manifest(iso: &Isolation, tag: &str, mutate: impl FnOnce(&mut VersionMa
     .expect("write manifest");
 }
 
+fn remove_manifest_admission_field(iso: &Isolation, tag: &str) -> PathBuf {
+    let path = iso.layout().versions_dir.join(tag).join("manifest.json");
+    let mut value: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&path).expect("read manifest JSON"))
+            .expect("parse manifest JSON");
+    value
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("application_bootstrap_admission_version")
+        .expect("manifest admission field");
+    std::fs::write(
+        &path,
+        serde_json::to_vec_pretty(&value).expect("serialize v0.2.1-shaped manifest"),
+    )
+    .expect("write v0.2.1-shaped manifest");
+    path
+}
+
+#[cfg(unix)]
+fn platform_file_identity(path: &Path) -> (u64, u64) {
+    use std::os::unix::fs::MetadataExt;
+    let metadata = std::fs::metadata(path).expect("manifest metadata");
+    (metadata.dev(), metadata.ino())
+}
+
+#[cfg(windows)]
+fn platform_file_identity(path: &Path) -> (u64, u64) {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, GENERIC_READ, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileW, GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_SHARE_READ,
+        OPEN_EXISTING,
+    };
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let handle = unsafe {
+        CreateFileW(
+            wide.as_ptr(),
+            GENERIC_READ,
+            FILE_SHARE_READ,
+            std::ptr::null(),
+            OPEN_EXISTING,
+            0,
+            0,
+        )
+    };
+    assert_ne!(handle, INVALID_HANDLE_VALUE, "open manifest identity");
+    let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+    assert_ne!(
+        unsafe { GetFileInformationByHandle(handle, &mut info) },
+        0,
+        "read manifest identity"
+    );
+    unsafe {
+        CloseHandle(handle);
+    }
+    (
+        u64::from(info.dwVolumeSerialNumber),
+        (u64::from(info.nFileIndexHigh) << 32) | u64::from(info.nFileIndexLow),
+    )
+}
+
 fn build_public_fixture() -> PathBuf {
     let fixture = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("tests")
@@ -641,15 +706,277 @@ async fn installed_current_killed_selector_client_releases_shared_admission() {
     );
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn installed_current_gc_obeys_exclusive_selector_admission() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("ic-gc-admission");
+    let _restore = iso.apply_env();
+    let fixture = build_public_fixture();
+    let profile = "gc_admission";
+    write_fixture_profile(&iso, profile);
+    let stale_tag = format!("{}-stale", iso.tag);
+    iso.install_tag(&stale_tag, false);
+    let delayed_marker = iso.root.join("gc-hello-delayed");
+    let admission_marker = iso.root.join("gc-parent-admission");
+
+    let mut command = iso.command_for(&fixture);
+    command
+        .env("TELEX_FIXTURE_TRUSTED_ROOT", iso.trusted_root())
+        .env("TELEX_FIXTURE_BACKEND", profile)
+        .env("TELEX_FIXTURE_RUN_ID", "gc-admission")
+        .env("TELEX_TEST_HELLO_ACK_DELAY_MS", "30000")
+        .env("TELEX_TEST_HELLO_ACK_DELAY_MARKER", &delayed_marker)
+        .env("TELEX_TEST_PARENT_ADMISSION_MARKER", &admission_marker)
+        .arg("watcher")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut client = command.spawn().expect("spawn selector client");
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while (!delayed_marker.is_file() || !admission_marker.is_file())
+        && std::time::Instant::now() < deadline
+    {
+        assert!(
+            client.try_wait().expect("poll selector client").is_none(),
+            "selector client exited before holding admission"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(delayed_marker.is_file() && admission_marker.is_file());
+
+    let mut gc = iso.command();
+    gc.args(["--json", "gc"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut exclusive_gc = gc.spawn().expect("start gc exclusive waiter");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        exclusive_gc.try_wait().expect("poll blocked gc").is_none(),
+        "gc must not snapshot/delete versions while shared selection admission is live"
+    );
+
+    client.kill().expect("kill selector client");
+    let _ = client.wait();
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    let status = loop {
+        if let Some(status) = exclusive_gc.try_wait().expect("poll gc") {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            exclusive_gc.kill().expect("kill wedged gc");
+            panic!("gc did not recover after shared admission released");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(status.success(), "gc must complete after admission release");
+    assert!(
+        !iso.layout().versions_dir.join(stale_tag).exists(),
+        "gc must remove only the stale version after taking its protected selector snapshot"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn installed_current_child_lease_survives_parent_death_until_readiness() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("ic-child-lease");
+    let _restore = iso.apply_env();
+    let fixture = build_public_fixture();
+    let profile = "child_lease";
+    write_fixture_profile(&iso, profile);
+    let prior_tag = format!("{}-prior", iso.tag);
+    iso.install_tag(&prior_tag, false);
+    let child_marker = iso.root.join("child-admission-held");
+
+    let mut command = iso.command_for(&fixture);
+    command
+        .env("TELEX_FIXTURE_TRUSTED_ROOT", iso.trusted_root())
+        .env("TELEX_FIXTURE_BACKEND", profile)
+        .env("TELEX_FIXTURE_RUN_ID", "child-lease-parent-death")
+        .env("TELEX_TEST_CHILD_ADMISSION_HELD_DELAY_MS", "2000")
+        .env("TELEX_TEST_CHILD_ADMISSION_HELD_MARKER", &child_marker)
+        .arg("watcher")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut parent = command.spawn().expect("spawn public selector client");
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while !child_marker.is_file() && std::time::Instant::now() < deadline {
+        assert!(
+            parent.try_wait().expect("poll selector parent").is_none(),
+            "selector parent exited before the child acquired admission"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        child_marker.is_file(),
+        "spawned child must report independently held selector admission"
+    );
+
+    parent.kill().expect("kill selector parent");
+    let _ = parent.wait();
+
+    let mut rollback = iso.command();
+    rollback
+        .args(["--json", "rollback", "--version", &prior_tag])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut exclusive = rollback
+        .spawn()
+        .expect("start rollback while child admission is held");
+    std::thread::sleep(Duration::from_millis(300));
+    assert!(
+        exclusive
+            .try_wait()
+            .expect("poll rollback blocked by child")
+            .is_none(),
+        "parent death must not release the child's readiness admission"
+    );
+
+    let deadline = std::time::Instant::now() + Duration::from_secs(90);
+    let status = loop {
+        if let Some(status) = exclusive.try_wait().expect("poll rollback completion") {
+            break status;
+        }
+        if std::time::Instant::now() >= deadline {
+            exclusive.kill().expect("kill wedged rollback");
+            panic!("rollback did not proceed after child readiness publication");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    assert!(
+        status.success(),
+        "exclusive rollback must complete after the child publishes readiness: {status}"
+    );
+    assert_eq!(
+        std::fs::read_to_string(iso.layout().current_path)
+            .expect("read current selector")
+            .trim(),
+        prior_tag
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn installed_current_existing_peer_handshake_is_bounded() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("ic-existing-timeout");
+    let _restore = iso.apply_env();
+    let fixture = build_public_fixture();
+    let profile = "existing_timeout";
+    write_fixture_profile(&iso, profile);
+    let delayed_marker = iso.root.join("existing-hello-delayed");
+
+    let mut starter_command = iso.command_for(&fixture);
+    starter_command
+        .env("TELEX_FIXTURE_TRUSTED_ROOT", iso.trusted_root())
+        .env("TELEX_FIXTURE_BACKEND", profile)
+        .env("TELEX_FIXTURE_RUN_ID", "existing-timeout-starter")
+        .env("TELEX_TEST_HELLO_ACK_DELAY_MS", "30000")
+        .env("TELEX_TEST_HELLO_ACK_DELAY_MARKER", &delayed_marker)
+        .arg("watcher")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut starter = starter_command
+        .spawn()
+        .expect("start token-backed installed daemon");
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while (iso.cap_path().is_none() || !delayed_marker.is_file())
+        && std::time::Instant::now() < deadline
+    {
+        assert!(
+            starter.try_wait().expect("poll starter client").is_none(),
+            "starter client exited before the daemon published admitted capability"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(
+        iso.cap_path().is_some() && delayed_marker.is_file(),
+        "token-backed daemon must publish capability and delay HelloAck"
+    );
+    starter.kill().expect("stop starter client");
+    let _ = starter.wait();
+    std::fs::remove_file(&delayed_marker).expect("reset delayed-Hello marker");
+
+    let mut probe = iso.command_for(&fixture);
+    probe
+        .env("TELEX_FIXTURE_TRUSTED_ROOT", iso.trusted_root())
+        .env("TELEX_FIXTURE_BACKEND", profile)
+        .env("TELEX_FIXTURE_RUN_ID", "existing-timeout")
+        .arg("health");
+    let started = std::time::Instant::now();
+    let output = isolation::run_with_timeout(probe, Duration::from_secs(10));
+    let elapsed = started.elapsed();
+    output.assert_failure("existing-daemon delayed HelloAck");
+    assert!(
+        !output.timed_out,
+        "the fixture process must return its bounded handshake failure"
+    );
+    assert!(
+        elapsed < Duration::from_secs(5),
+        "existing-peer handshake held admission too long: {elapsed:?}"
+    );
+    assert!(
+        delayed_marker.is_file(),
+        "the matching daemon must have accepted the connection and delayed HelloAck"
+    );
+    assert!(
+        output.stderr.contains("timeout"),
+        "the public health operation must report the bounded handshake timeout: {}",
+        output.stderr
+    );
+
+    iso.stop_daemon();
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn installed_current_prestarted_peer_without_admission_evidence_is_refused_before_hello() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("ic-missing-cap-evidence");
+    let _restore = iso.apply_env();
+    let db = iso.root.join("missing-cap-evidence.db");
+    let hello_marker = iso.root.join("unexpected-hello");
+
+    let mut daemon_command = iso.command_for(&iso.current_binary());
+    daemon_command
+        .env("TELEX_TEST_HELLO_ACK_DELAY_MS", "1")
+        .env("TELEX_TEST_HELLO_ACK_DELAY_MARKER", &hello_marker)
+        .args(["daemon", "serve"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let mut daemon = daemon_command
+        .spawn()
+        .expect("start matching path without bootstrap token");
+    let deadline = std::time::Instant::now() + Duration::from_secs(30);
+    while iso.cap_path().is_none() && std::time::Instant::now() < deadline {
+        assert!(
+            daemon.try_wait().expect("poll manual daemon").is_none(),
+            "manual daemon exited before publishing capability"
+        );
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(iso.cap_path().is_some(), "manual daemon must publish cap");
+
+    let client = connect(&iso, "proof", &db).await;
+    let outcome = client
+        .attach(&[spec(
+            "ic:missing-cap-evidence:a",
+            ApplicationCapability::SendOnly,
+        )])
+        .await;
+    assert_eq!(
+        attach_failure(&outcome),
+        DaemonBootstrapFailure::ForeignDaemon
+    );
+    assert!(
+        !hello_marker.exists(),
+        "missing token-backed cap evidence must fail before any Hello reaches the daemon"
+    );
+
+    daemon.kill().expect("stop manual daemon");
+    let _ = daemon.wait();
+}
+
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn installed_current_stale_prestarted_image_is_refused() {
-    // Unix only: a running image can be unlinked and replaced in place, which
-    // is the sharpest form of "the prestarted daemon is stale". On Windows a
-    // running image cannot be replaced at the same path, so the equivalent
-    // staleness is proven by
-    // `installed_current_upgrade_and_rollback_move_the_selector`, where the
-    // selector moves to another version while the predecessor still serves.
     let _env = ENV_LOCK.lock().await;
     let iso = Isolation::new("ic-stale");
     let _restore = iso.apply_env();
@@ -679,6 +1006,42 @@ async fn installed_current_stale_prestarted_image_is_refused() {
     );
 }
 
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn installed_current_stale_prestarted_image_is_refused() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("ic-stale");
+    let _restore = iso.apply_env();
+    let db = iso.root.join("stale.db");
+    let client = connect(&iso, "proof", &db).await;
+    assert!(
+        client
+            .attach(&[spec("ic:stale:a", ApplicationCapability::SendOnly)])
+            .await
+            .ready
+    );
+
+    // Windows can keep the mapped image alive after its directory entry is
+    // renamed. Replace the original pathname with another copy of the same
+    // build: canonical path and HelloAck still match, so only the
+    // token-backed startup file identity can reject the stale process before
+    // Hello.
+    let target = iso.current_binary();
+    let displaced = target.with_extension("running-image");
+    std::fs::rename(&target, &displaced).expect("rename the running image");
+    std::fs::copy(isolation::branch_binary(), &target)
+        .expect("replace the original executable pathname");
+
+    let outcome = client
+        .attach(&[spec("ic:stale:b", ApplicationCapability::SendOnly)])
+        .await;
+    assert_eq!(
+        attach_failure(&outcome),
+        DaemonBootstrapFailure::ForeignDaemon,
+        "a replacement at the running image pathname must be refused before Hello"
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn installed_current_capability_record_carries_pid_reuse_evidence() {
     let _env = ENV_LOCK.lock().await;
@@ -701,14 +1064,54 @@ async fn installed_current_capability_record_carries_pid_reuse_evidence() {
         "the capability record must carry both pid and start time so a reused \
          pid can never be mistaken for the same daemon: {cap}"
     );
+    assert_eq!(
+        cap.get("bootstrap_admission_version")
+            .and_then(|value| value.as_u64()),
+        Some(u64::from(
+            telex::install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
+        )),
+        "InstalledCurrent child capability must record successful admission"
+    );
+    assert!(
+        cap.get("startup_executable_file_identity").is_some(),
+        "InstalledCurrent child capability must bind startup file identity"
+    );
+
+    let cap_path = iso
+        .cap_path()
+        .unwrap_or_else(|| iso.run_dir.join("daemon-tampered.cap"));
+    let mut identity_tampered = cap.clone();
+    let original_low = identity_tampered["startup_executable_file_identity"]["low"]
+        .as_u64()
+        .expect("startup identity low");
+    identity_tampered["startup_executable_file_identity"]["low"] =
+        serde_json::json!(original_low.wrapping_add(1));
+    std::fs::write(
+        &cap_path,
+        serde_json::to_string(&identity_tampered).expect("serialize identity-tampered cap"),
+    )
+    .expect("write identity-tampered cap");
+    let outcome = client
+        .attach(&[spec(
+            "ic:pid:identity-tamper",
+            ApplicationCapability::SendOnly,
+        )])
+        .await;
+    assert_eq!(
+        attach_failure(&outcome),
+        DaemonBootstrapFailure::ForeignDaemon,
+        "cap startup identity mismatch must fail before Hello"
+    );
+    std::fs::write(
+        &cap_path,
+        serde_json::to_string(&cap).expect("serialize original cap"),
+    )
+    .expect("restore original cap");
 
     // Tamper the record so it names *this* live process with an impossible
     // start time -- a reused pid. The client must not accept it as the daemon;
     // it must fail closed or replace it, never bind to the impostor.
     iso.stop_daemon();
-    let cap_path = iso
-        .cap_path()
-        .unwrap_or_else(|| iso.run_dir.join("daemon-tampered.cap"));
     let mut tampered = cap;
     tampered["server_pid"] = serde_json::json!(std::process::id());
     tampered["server_start_time"] = serde_json::json!(1u64);
@@ -823,10 +1226,6 @@ async fn installed_current_foreign_writable_authority_is_refused() {
     let _restore = iso.apply_env();
     let db = iso.root.join("writable.db");
 
-    let tag_dir = iso.layout().versions_dir.join(&iso.tag);
-    std::fs::set_permissions(&tag_dir, std::fs::Permissions::from_mode(0o777))
-        .expect("make the version directory world-writable");
-
     let client = ApplicationClient::connect_with_daemon(
         config("proof", &db),
         ApplicationDaemonBootstrap::InstalledCurrent {
@@ -834,7 +1233,9 @@ async fn installed_current_foreign_writable_authority_is_refused() {
         },
     )
     .await
-    .expect("configuration succeeds; the unsafe component is found at resolution");
+    .expect("configuration succeeds while the authority chain is safe");
+    std::fs::set_permissions(&iso.root, std::fs::Permissions::from_mode(0o777))
+        .expect("make a frozen-policy ancestor world-writable");
     let outcome = client
         .attach(&[spec("ic:writable:a", ApplicationCapability::SendOnly)])
         .await;
@@ -852,19 +1253,6 @@ async fn installed_current_foreign_writable_authority_is_refused() {
     let _restore = iso.apply_env();
     let db = iso.root.join("writable.db");
 
-    // Grant the world-scoped `Everyone` SID write access on the version
-    // directory, so a foreign principal could replace the selected image.
-    let tag_dir = iso.layout().versions_dir.join(&iso.tag);
-    let mut command = std::process::Command::new("icacls");
-    command
-        .arg(&tag_dir)
-        .arg("/grant")
-        .arg("*S-1-1-0:(OI)(CI)(W)")
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::piped());
-    let granted = isolation::run_with_timeout(command, Duration::from_secs(30));
-    granted.assert_success("granting Everyone write on the version directory");
-
     let client = ApplicationClient::connect_with_daemon(
         config("proof", &db),
         ApplicationDaemonBootstrap::InstalledCurrent {
@@ -872,7 +1260,21 @@ async fn installed_current_foreign_writable_authority_is_refused() {
         },
     )
     .await
-    .expect("configuration succeeds; the unsafe component is found at resolution");
+    .expect("configuration succeeds while the authority chain is safe");
+
+    // Grant the world-scoped `Everyone` SID write access on the version
+    // directory's parent after the policy is frozen, so per-connection
+    // resolution must revalidate the complete authority chain.
+    let mut command = std::process::Command::new("icacls");
+    command
+        .arg(&iso.root)
+        .arg("/grant")
+        .arg("*S-1-1-0:(OI)(CI)(F)")
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    let granted = isolation::run_with_timeout(command, Duration::from_secs(30));
+    granted.assert_success("granting Everyone write on the version directory");
+
     let outcome = client
         .attach(&[spec("ic:writable:a", ApplicationCapability::SendOnly)])
         .await;
@@ -1008,6 +1410,121 @@ async fn installed_current_child_rejects_mismatched_build_before_readiness() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn installed_current_accepts_v021_writer_missing_admission_after_exact_probe() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("ic-v021-manifest");
+    let mut restore = iso.apply_env();
+    let db = iso.root.join("v021-manifest.db");
+    let tag = iso.tag.clone();
+    let manifest_path = remove_manifest_admission_field(&iso, &tag);
+    let bytes_before = std::fs::read(&manifest_path).expect("read legacy-shaped manifest");
+    let metadata_before = std::fs::metadata(&manifest_path).expect("legacy manifest metadata");
+    let modified_before = metadata_before.modified().expect("legacy manifest mtime");
+    let identity_before = platform_file_identity(&manifest_path);
+    let probe_counter = iso.root.join("admission-probes");
+    restore.set("TELEX_TEST_ADMISSION_PROBE_COUNTER", &probe_counter);
+
+    let first = connect(&iso, "proof", &db).await;
+    assert!(
+        first
+            .attach(&[spec("ic:v021-manifest:a", ApplicationCapability::SendOnly,)])
+            .await
+            .ready,
+        "the exact 0.3 binary probe must complete an absent v0.2.1-written field in memory"
+    );
+    let first_pid = iso.daemon_pid().expect("first admitted daemon pid");
+    let second = connect(&iso, "proof", &db).await;
+    assert!(
+        second
+            .attach(&[spec("ic:v021-manifest:b", ApplicationCapability::SendOnly,)])
+            .await
+            .ready
+    );
+    assert_eq!(
+        iso.daemon_pid(),
+        Some(first_pid),
+        "matching prestarted reuse must retain complete runtime admission evidence"
+    );
+
+    assert_eq!(
+        std::fs::read_to_string(&probe_counter)
+            .expect("probe counter")
+            .lines()
+            .count(),
+        1,
+        "one process must singleflight/cache the exact successful probe"
+    );
+    assert_eq!(
+        std::fs::read(&manifest_path).expect("manifest after compatibility completion"),
+        bytes_before,
+        "compatibility completion must never rewrite the immutable manifest"
+    );
+    assert_eq!(
+        std::fs::metadata(&manifest_path)
+            .expect("manifest metadata after completion")
+            .modified()
+            .expect("manifest mtime after completion"),
+        modified_before,
+        "compatibility completion must preserve manifest mtime"
+    );
+    assert_eq!(
+        platform_file_identity(&manifest_path),
+        identity_before,
+        "compatibility completion must preserve manifest file identity"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn installed_current_missing_admission_probe_is_cross_process_serialized() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("ic-v021-cross-process");
+    let _restore = iso.apply_env();
+    let tag = iso.tag.clone();
+    let manifest_path = remove_manifest_admission_field(&iso, &tag);
+    let manifest_before = std::fs::read(&manifest_path).expect("legacy-shaped manifest");
+    let fixture = build_public_fixture();
+    let profile = "v021_cross_process";
+    write_fixture_profile(&iso, profile);
+    let (_, backend_profile) =
+        telex::profiles::resolve(Some(profile), None).expect("resolve fixture profile");
+    drop(
+        telex::profiles::build(&backend_profile, None)
+            .await
+            .expect("initialize fixture store before concurrent processes"),
+    );
+
+    let mut first = iso.command_for(&fixture);
+    first
+        .env("TELEX_FIXTURE_TRUSTED_ROOT", iso.trusted_root())
+        .env("TELEX_FIXTURE_BACKEND", profile)
+        .env("TELEX_FIXTURE_RUN_ID", "v021-cross-process-a")
+        .arg("attach");
+    let mut second = iso.command_for(&fixture);
+    second
+        .env("TELEX_FIXTURE_TRUSTED_ROOT", iso.trusted_root())
+        .env("TELEX_FIXTURE_BACKEND", profile)
+        .env("TELEX_FIXTURE_RUN_ID", "v021-cross-process-b")
+        .arg("attach");
+    let first_run =
+        std::thread::spawn(move || isolation::run_with_timeout(first, Duration::from_secs(180)));
+    let second_run =
+        std::thread::spawn(move || isolation::run_with_timeout(second, Duration::from_secs(180)));
+    first_run
+        .join()
+        .expect("join first compatibility process")
+        .assert_success("first compatibility process");
+    second_run
+        .join()
+        .expect("join second compatibility process")
+        .assert_success("second compatibility process");
+    assert_eq!(
+        std::fs::read(&manifest_path).expect("manifest after concurrent probes"),
+        manifest_before,
+        "cross-process compatibility probes must leave the manifest byte-identical"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn installed_current_rejects_legacy_daemon_without_admission_support() {
     let _env = ENV_LOCK.lock().await;
     let iso = Isolation::new("ic-legacy-admission");
@@ -1080,6 +1597,52 @@ async fn exact_executable_file_identity_change_is_refused() {
                 | DaemonBootstrapFailure::ForeignDaemon
         ),
         "a replaced pinned target must fail closed: {outcome:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exact_executable_authority_change_is_refused_on_reconnect() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("exact-authority");
+    let _restore = iso.apply_env();
+    let db = iso.root.join("exact-authority.db");
+    let pinned_dir = iso.root.join("pinned-authority");
+    isolation::create_owner_private_dir(&pinned_dir);
+    let pinned = pinned_dir.join(install::exe_name());
+    std::fs::copy(isolation::branch_binary(), &pinned).expect("stage pinned target");
+    let client = ApplicationClient::connect_with_daemon(
+        config("proof", &db),
+        ApplicationDaemonBootstrap::ExactExecutable { executable: pinned },
+    )
+    .await
+    .expect("freeze safe exact executable");
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&pinned_dir, std::fs::Permissions::from_mode(0o777))
+            .expect("make pinned parent foreign-writable");
+    }
+    #[cfg(windows)]
+    {
+        let mut command = std::process::Command::new("icacls");
+        command
+            .arg(&pinned_dir)
+            .arg("/grant")
+            .arg("*S-1-1-0:(OI)(CI)(W)");
+        isolation::run_with_timeout(command, Duration::from_secs(30))
+            .assert_success("make pinned parent foreign-writable");
+    }
+
+    let outcome = client
+        .attach(&[spec(
+            "ic:exact-authority:a",
+            ApplicationCapability::SendOnly,
+        )])
+        .await;
+    assert_eq!(
+        attach_failure(&outcome),
+        DaemonBootstrapFailure::UnsafeInstallAuthority
     );
 }
 

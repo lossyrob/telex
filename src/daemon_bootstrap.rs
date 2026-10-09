@@ -13,10 +13,11 @@
 #![allow(clippy::result_large_err)]
 
 use crate::install::{self, InstallLayout, VersionManifest};
-use std::collections::BTreeSet;
+use serde::de::{IgnoredAny, MapAccess, Visitor};
+use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsString;
 use std::path::{Component, Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Bounded selector-admission acquisition deadline. Callers (parent connect
@@ -37,6 +38,8 @@ const SELECTOR_LOCK_RETRY_INTERVAL: Duration = Duration::from_millis(25);
 /// serving.
 pub(crate) const BOOTSTRAP_TOKEN_ENV: &str = "TELEX_DAEMON_SELECTION_TOKEN";
 pub(crate) const BOOTSTRAP_RESULT_ENV: &str = "TELEX_DAEMON_SELECTION_RESULT";
+#[cfg(windows)]
+pub(crate) const BOOTSTRAP_WITNESS_HANDLE_ENV: &str = "TELEX_DAEMON_EXECUTABLE_WITNESS_HANDLE";
 
 /// Public typed enumeration of installed-current / exact bootstrap failures.
 ///
@@ -201,6 +204,8 @@ pub(crate) struct SelectionToken {
     pub application_bootstrap_admission_version: u16,
     pub target_exe: PathBuf,
     pub file_identity: FileIdentity,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub admission_completion: Option<AdmissionCompletionBinding>,
 }
 
 impl SelectionToken {
@@ -215,6 +220,91 @@ impl SelectionToken {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+pub(crate) struct AdmissionCompletionBinding {
+    trusted_root: PathBuf,
+    root_identity: FileIdentity,
+    tag: String,
+    package_version: String,
+    build_id: String,
+    schema_min: i64,
+    schema_max: i64,
+    protocol_major: u16,
+    protocol_minor: u16,
+    required_capabilities: Vec<String>,
+    selector_file_identity: Option<FileIdentity>,
+    manifest_bytes: Vec<u8>,
+    manifest_file_identity: FileIdentity,
+    target_exe: PathBuf,
+    target_file_identity: FileIdentity,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct AdmissionCompletionCacheKey {
+    trusted_root: PathBuf,
+    root_identity: FileIdentity,
+    tag: String,
+    package_version: String,
+    build_id: String,
+    schema_min: i64,
+    schema_max: i64,
+    protocol_major: u16,
+    protocol_minor: u16,
+    required_capabilities: Vec<String>,
+    target_exe: PathBuf,
+    file_identity: FileIdentity,
+    completion: AdmissionCompletionBinding,
+}
+
+impl AdmissionCompletionCacheKey {
+    fn from_candidate(candidate: &LegacyAdmissionProbeCandidate) -> Self {
+        let token = &candidate.token;
+        Self {
+            trusted_root: token.trusted_root.clone(),
+            root_identity: token.root_identity,
+            tag: token.tag.clone(),
+            package_version: token.package_version.clone(),
+            build_id: token.build_id.clone(),
+            schema_min: token.schema_min,
+            schema_max: token.schema_max,
+            protocol_major: token.protocol_major,
+            protocol_minor: token.protocol_minor,
+            required_capabilities: token.required_capabilities.clone(),
+            target_exe: token.target_exe.clone(),
+            file_identity: token.file_identity,
+            completion: candidate.completion.clone(),
+        }
+    }
+}
+
+fn admission_completion_cache(
+) -> &'static Mutex<HashMap<AdmissionCompletionCacheKey, AdmissionCompletionBinding>> {
+    static CACHE: OnceLock<
+        Mutex<HashMap<AdmissionCompletionCacheKey, AdmissionCompletionBinding>>,
+    > = OnceLock::new();
+    CACHE.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct LegacyAdmissionProbeCandidate {
+    token: SelectionToken,
+    completion: AdmissionCompletionBinding,
+    require_current_selector: bool,
+}
+
+enum AdmissionValidation<'a> {
+    Strict,
+    ProbeCandidate,
+    Apply(&'a AdmissionCompletionBinding),
+}
+
+struct ValidatedManifest {
+    manifest: VersionManifest,
+    admission_present: bool,
+    manifest_bytes: Vec<u8>,
+    manifest_file_identity: FileIdentity,
+}
+
 /// Platform file identity captured with the resolved target executable.
 ///
 /// On Unix this is `(dev, ino)`; on Windows this is
@@ -222,14 +312,14 @@ impl SelectionToken {
 /// witness that a later replacement of the same path yields a different
 /// identity, closing selector movement races without claiming
 /// executable-content integrity.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub(crate) struct FileIdentity {
     pub kind: FileIdentityKind,
     pub high: u64,
     pub low: u64,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum FileIdentityKind {
     UnixDevIno,
@@ -288,6 +378,108 @@ fn path_identity(_path: &Path) -> Option<FileIdentity> {
 pub(crate) fn resolve_installed_current(
     trusted_root: &Path,
 ) -> Result<SelectionToken, DaemonBootstrapFailure> {
+    resolve_installed_current_with_admission(trusted_root, AdmissionValidation::Strict)
+        .map(|candidate| candidate.token)
+}
+
+pub(crate) async fn resolve_installed_current_admitted(
+    trusted_root: &Path,
+) -> Result<(SelectionToken, SelectorAdmission), DaemonBootstrapFailure> {
+    let deadline = Instant::now() + SELECTOR_LOCK_DEADLINE;
+    loop {
+        let admission = SelectorAdmission::shared_async(trusted_root.to_path_buf()).await?;
+        match resolve_installed_current_with_admission(trusted_root, AdmissionValidation::Strict) {
+            Ok(candidate) => return Ok((candidate.token, admission)),
+            Err(DaemonBootstrapFailure::IncompatibleManifest) => {
+                let missing = resolve_installed_current_with_admission(
+                    trusted_root,
+                    AdmissionValidation::ProbeCandidate,
+                )?;
+                let key = AdmissionCompletionCacheKey::from_candidate(&missing);
+                let cached = admission_completion_cache()
+                    .lock()
+                    .unwrap()
+                    .get(&key)
+                    .cloned();
+                if let Some(completion) = cached {
+                    match resolve_installed_current_with_admission(
+                        trusted_root,
+                        AdmissionValidation::Apply(&completion),
+                    ) {
+                        Ok(candidate) => return Ok((candidate.token, admission)),
+                        Err(_) => {
+                            admission_completion_cache().lock().unwrap().remove(&key);
+                        }
+                    }
+                }
+            }
+            Err(error) => return Err(error),
+        }
+        drop(admission);
+
+        let root = trusted_root.to_path_buf();
+        let completion =
+            tokio::task::spawn_blocking(move || complete_missing_admission_under_exclusive(&root))
+                .await
+                .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)??;
+
+        let admission = SelectorAdmission::shared_async(trusted_root.to_path_buf()).await?;
+        match resolve_installed_current_with_admission(
+            trusted_root,
+            AdmissionValidation::Apply(&completion),
+        ) {
+            Ok(candidate) => return Ok((candidate.token, admission)),
+            Err(error)
+                if Instant::now() < deadline
+                    && matches!(
+                        error,
+                        DaemonBootstrapFailure::SelectionUnstable
+                            | DaemonBootstrapFailure::IncompatibleManifest
+                    ) =>
+            {
+                drop(admission);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+fn complete_missing_admission_under_exclusive(
+    trusted_root: &Path,
+) -> Result<AdmissionCompletionBinding, DaemonBootstrapFailure> {
+    let _exclusive = SelectorAdmission::exclusive(trusted_root)?;
+    let before = resolve_installed_current_with_admission(
+        trusted_root,
+        AdmissionValidation::ProbeCandidate,
+    )?;
+    let key = AdmissionCompletionCacheKey::from_candidate(&before);
+    if let Some(completion) = admission_completion_cache()
+        .lock()
+        .unwrap()
+        .get(&key)
+        .cloned()
+    {
+        return Ok(completion);
+    }
+    probe_legacy_admission_candidate(&before, trusted_root)?;
+    let after = resolve_installed_current_with_admission(
+        trusted_root,
+        AdmissionValidation::ProbeCandidate,
+    )?;
+    if after != before {
+        return Err(DaemonBootstrapFailure::SelectionUnstable);
+    }
+    admission_completion_cache()
+        .lock()
+        .unwrap()
+        .insert(key, before.completion.clone());
+    Ok(before.completion)
+}
+
+fn resolve_installed_current_with_admission(
+    trusted_root: &Path,
+    admission: AdmissionValidation<'_>,
+) -> Result<LegacyAdmissionProbeCandidate, DaemonBootstrapFailure> {
     // Re-canonicalize each connect cycle so any selector-authority movement is
     // observed immediately. If the root disappeared or became unsafe, fail
     // closed rather than reusing a stale resolution.
@@ -299,9 +491,27 @@ pub(crate) fn resolve_installed_current(
     let canonical_root = std::fs::canonicalize(trusted_root)
         .map_err(|_| DaemonBootstrapFailure::InvalidTrustedRoot)?;
     check_authority_dir(&canonical_root)?;
+    check_parent_authority_chain(&canonical_root)?;
     let layout = install::layout_for_root(&canonical_root);
     let tag = read_current_tag(&layout)?;
-    validate_installed_target(&layout, &canonical_root, &tag, true)
+    validate_installed_target(&layout, &canonical_root, &tag, true, admission)
+}
+
+pub(crate) fn validate_exact_executable_authority(
+    executable: &Path,
+) -> Result<(), DaemonBootstrapFailure> {
+    let supplied = std::fs::symlink_metadata(executable)
+        .map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+    if supplied.file_type().is_symlink() || is_reparse_point(&supplied) || !supplied.is_file() {
+        return Err(DaemonBootstrapFailure::UnsafeInstallAuthority);
+    }
+    let canonical =
+        std::fs::canonicalize(executable).map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
+    if !same_path(&canonical, executable) {
+        return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+    }
+    check_authority_file(&canonical)?;
+    check_parent_authority_chain(&canonical)
 }
 
 /// Validate one versioned target before publishing it as `current`.
@@ -317,7 +527,34 @@ pub(crate) fn validate_installed_target_for_switch(
 ) -> Result<(), DaemonBootstrapFailure> {
     let canonical_root = validate_install_root_for_switch(&layout.root)?;
     let canonical_layout = install::layout_for_root(&canonical_root);
-    validate_installed_target(&canonical_layout, &canonical_root, tag, false).map(|_| ())
+    match validate_installed_target(
+        &canonical_layout,
+        &canonical_root,
+        tag,
+        false,
+        AdmissionValidation::Strict,
+    ) {
+        Ok(_) => Ok(()),
+        Err(DaemonBootstrapFailure::IncompatibleManifest) => {
+            let candidate = validate_installed_target(
+                &canonical_layout,
+                &canonical_root,
+                tag,
+                false,
+                AdmissionValidation::ProbeCandidate,
+            )?;
+            probe_legacy_admission_candidate(&candidate, &canonical_root)?;
+            validate_installed_target(
+                &canonical_layout,
+                &canonical_root,
+                tag,
+                false,
+                AdmissionValidation::Apply(&candidate.completion),
+            )
+            .map(|_| ())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 pub(crate) fn validate_install_root_for_switch(
@@ -335,7 +572,8 @@ fn validate_installed_target(
     canonical_root: &Path,
     tag: &str,
     require_current_selector: bool,
-) -> Result<SelectionToken, DaemonBootstrapFailure> {
+    admission: AdmissionValidation<'_>,
+) -> Result<LegacyAdmissionProbeCandidate, DaemonBootstrapFailure> {
     let root_identity =
         path_identity(canonical_root).ok_or(DaemonBootstrapFailure::InvalidTrustedRoot)?;
     // Enforce owner authority on every intermediate directory reachable from
@@ -348,10 +586,16 @@ fn validate_installed_target(
     if require_current_selector {
         check_authority_file(&layout.current_path)?;
     }
+    let selector_file_identity = if require_current_selector {
+        Some(file_identity(&layout.current_path)?)
+    } else {
+        None
+    };
     let manifest_path = tag_dir.join("manifest.json");
     check_authority_file(&manifest_path)?;
-    let manifest = read_and_validate_manifest(&manifest_path, tag)?;
-    let target_exe = derive_target_executable(layout, tag, &manifest)?;
+    let validated_manifest = read_and_validate_manifest(&manifest_path, tag)?;
+    let manifest = &validated_manifest.manifest;
+    let target_exe = derive_target_executable(layout, tag, manifest)?;
     let canonical_target = std::fs::canonicalize(&target_exe)
         .map_err(|_| DaemonBootstrapFailure::MissingExecutable)?;
     ensure_contained(canonical_root, &canonical_target)?;
@@ -364,7 +608,7 @@ fn validate_installed_target(
         manifest.protocol_minor,
         manifest.required_capabilities.clone(),
     );
-    Ok(SelectionToken {
+    let completion = AdmissionCompletionBinding {
         trusted_root: canonical_root.to_path_buf(),
         root_identity,
         tag: manifest.tag.clone(),
@@ -374,10 +618,58 @@ fn validate_installed_target(
         schema_max,
         protocol_major,
         protocol_minor,
-        required_capabilities,
-        application_bootstrap_admission_version: manifest.application_bootstrap_admission_version,
-        target_exe: canonical_target,
-        file_identity: identity,
+        required_capabilities: required_capabilities.clone(),
+        selector_file_identity,
+        manifest_bytes: validated_manifest.manifest_bytes.clone(),
+        manifest_file_identity: validated_manifest.manifest_file_identity,
+        target_exe: canonical_target.clone(),
+        target_file_identity: identity,
+    };
+    let (application_bootstrap_admission_version, admission_completion) = match admission {
+        AdmissionValidation::Strict if validated_manifest.admission_present => {
+            (manifest.application_bootstrap_admission_version, None)
+        }
+        AdmissionValidation::Strict => return Err(DaemonBootstrapFailure::IncompatibleManifest),
+        AdmissionValidation::ProbeCandidate
+            if !validated_manifest.admission_present
+                && is_v0_3_lineage(&manifest.package_version) =>
+        {
+            (0, None)
+        }
+        AdmissionValidation::ProbeCandidate => {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest)
+        }
+        AdmissionValidation::Apply(expected)
+            if !validated_manifest.admission_present
+                && is_v0_3_lineage(&manifest.package_version)
+                && *expected == completion =>
+        {
+            (
+                install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION,
+                Some(completion.clone()),
+            )
+        }
+        AdmissionValidation::Apply(_) => return Err(DaemonBootstrapFailure::IncompatibleManifest),
+    };
+    Ok(LegacyAdmissionProbeCandidate {
+        token: SelectionToken {
+            trusted_root: canonical_root.to_path_buf(),
+            root_identity,
+            tag: manifest.tag.clone(),
+            package_version: manifest.package_version.clone(),
+            build_id: manifest.build_id.clone(),
+            schema_min,
+            schema_max,
+            protocol_major,
+            protocol_minor,
+            required_capabilities,
+            application_bootstrap_admission_version,
+            target_exe: canonical_target,
+            file_identity: identity,
+            admission_completion,
+        },
+        completion,
+        require_current_selector,
     })
 }
 
@@ -408,14 +700,46 @@ fn read_current_tag(layout: &InstallLayout) -> Result<String, DaemonBootstrapFai
     Ok(tag.to_string())
 }
 
+struct UniqueManifestKeys;
+
+impl<'de> Visitor<'de> for UniqueManifestKeys {
+    type Value = BTreeSet<String>;
+
+    fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("a manifest object with unique top-level keys")
+    }
+
+    fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+    where
+        A: MapAccess<'de>,
+    {
+        let mut keys = BTreeSet::new();
+        while let Some(key) = map.next_key::<String>()? {
+            if !keys.insert(key.clone()) {
+                return Err(serde::de::Error::custom(format!(
+                    "duplicate manifest key `{key}`"
+                )));
+            }
+            map.next_value::<IgnoredAny>()?;
+        }
+        Ok(keys)
+    }
+}
+
 fn read_and_validate_manifest(
     manifest_path: &Path,
     tag: &str,
-) -> Result<VersionManifest, DaemonBootstrapFailure> {
-    let raw = std::fs::read_to_string(manifest_path)
+) -> Result<ValidatedManifest, DaemonBootstrapFailure> {
+    let raw = std::fs::read(manifest_path).map_err(|_| DaemonBootstrapFailure::InvalidManifest)?;
+    let mut audit = serde_json::Deserializer::from_slice(&raw);
+    let keys = serde::de::Deserializer::deserialize_map(&mut audit, UniqueManifestKeys)
+        .map_err(|_| DaemonBootstrapFailure::InvalidManifest)?;
+    audit
+        .end()
         .map_err(|_| DaemonBootstrapFailure::InvalidManifest)?;
     let manifest: VersionManifest =
-        serde_json::from_str(&raw).map_err(|_| DaemonBootstrapFailure::InvalidManifest)?;
+        serde_json::from_slice(&raw).map_err(|_| DaemonBootstrapFailure::InvalidManifest)?;
+    let admission_present = keys.contains("application_bootstrap_admission_version");
     // The manifest must bind the selected tag; a mismatched tag is a foreign
     // manifest, not a compatibility skew.
     if manifest.tag != tag {
@@ -430,8 +754,9 @@ fn read_and_validate_manifest(
     if manifest.package_version.is_empty() {
         return Err(DaemonBootstrapFailure::InvalidManifest);
     }
-    if manifest.application_bootstrap_admission_version
-        != install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
+    if admission_present
+        && manifest.application_bootstrap_admission_version
+            != install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
     {
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
@@ -461,7 +786,233 @@ fn read_and_validate_manifest(
             return Err(DaemonBootstrapFailure::IncompatibleManifest);
         }
     }
-    Ok(manifest)
+    Ok(ValidatedManifest {
+        manifest,
+        admission_present,
+        manifest_bytes: raw,
+        manifest_file_identity: file_identity(manifest_path)?,
+    })
+}
+
+fn is_v0_3_lineage(version: &str) -> bool {
+    let core = version.split_once('+').map_or(version, |(core, _)| core);
+    let core = core.split_once('-').map_or(core, |(core, _)| core);
+    let mut parts = core.split('.');
+    matches!(
+        (parts.next(), parts.next(), parts.next(), parts.next()),
+        (Some("0"), Some("3"), Some(patch), None)
+            if !patch.is_empty() && patch.chars().all(|ch| ch.is_ascii_digit())
+    )
+}
+
+fn probe_legacy_admission_candidate(
+    candidate: &LegacyAdmissionProbeCandidate,
+    trusted_root: &Path,
+) -> Result<(), DaemonBootstrapFailure> {
+    #[cfg(windows)]
+    let executable_witness = open_windows_witness(&candidate.token.target_exe)?;
+    #[cfg(windows)]
+    let probe_executable = candidate.token.target_exe.clone();
+
+    #[cfg(target_os = "linux")]
+    let executable_witness = open_linux_witness(&candidate.token.target_exe)?;
+    #[cfg(target_os = "linux")]
+    let probe_executable = executable_witness.exec_path().to_path_buf();
+
+    #[cfg(not(any(windows, target_os = "linux")))]
+    {
+        let _ = candidate;
+        let _ = trusted_root;
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+
+    #[cfg(any(windows, target_os = "linux"))]
+    {
+        if executable_witness.identity != candidate.token.file_identity {
+            return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+        }
+        let metadata = run_admission_version_probe(&probe_executable, trusted_root)?;
+        if metadata.package_version != candidate.token.package_version
+            || metadata.build_id != candidate.token.build_id
+            || metadata.schema_min != candidate.token.schema_min
+            || metadata.schema_max != candidate.token.schema_max
+            || metadata.protocol_major != candidate.token.protocol_major
+            || metadata.protocol_minor != candidate.token.protocol_minor
+            || metadata.required_capabilities != candidate.token.required_capabilities
+            || metadata.application_bootstrap_admission_version
+                != install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
+        {
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        let layout = install::layout_for_root(trusted_root);
+        let revalidated = validate_installed_target(
+            &layout,
+            trusted_root,
+            &candidate.token.tag,
+            candidate.require_current_selector,
+            AdmissionValidation::ProbeCandidate,
+        )?;
+        if revalidated != *candidate {
+            return Err(DaemonBootstrapFailure::SelectionUnstable);
+        }
+        #[cfg(debug_assertions)]
+        if let Some(marker) = std::env::var_os("TELEX_TEST_ADMISSION_PROBE_COUNTER") {
+            use std::io::Write;
+            if let Ok(mut file) = std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(marker)
+            {
+                let _ = file.write_all(b"probe\n");
+            }
+        }
+        Ok(())
+    }
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn run_admission_version_probe(
+    executable: &Path,
+    trusted_root: &Path,
+) -> Result<install::SourceMetadata, DaemonBootstrapFailure> {
+    use std::io::Read;
+    use std::process::{Command, Stdio};
+
+    const PROBE_TIMEOUT: Duration = Duration::from_secs(10);
+    const PROBE_OUTPUT_LIMIT: u64 = 1024 * 1024;
+
+    fn read_capped<R: Read + Send + 'static>(
+        mut reader: R,
+    ) -> std::thread::JoinHandle<Result<Vec<u8>, ()>> {
+        std::thread::spawn(move || {
+            let mut bytes = Vec::new();
+            reader
+                .by_ref()
+                .take(PROBE_OUTPUT_LIMIT + 1)
+                .read_to_end(&mut bytes)
+                .map_err(|_| ())?;
+            (bytes.len() as u64 <= PROBE_OUTPUT_LIMIT)
+                .then_some(bytes)
+                .ok_or(())
+        })
+    }
+
+    let mut command = Command::new(executable);
+    command
+        .env_clear()
+        .env(install::LAUNCHER_GUARD_ENV, "1")
+        .args(["--json", "version", "--root"])
+        .arg(trusted_root)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    for key in ["SYSTEMROOT", "WINDIR", "TEMP", "TMP", "TMPDIR"] {
+        if let Some(value) = std::env::var_os(key) {
+            command.env(key, value);
+        }
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    let stdout = read_capped(
+        child
+            .stdout
+            .take()
+            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?,
+    );
+    let stderr = read_capped(
+        child
+            .stderr
+            .take()
+            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?,
+    );
+    let deadline = Instant::now() + PROBE_TIMEOUT;
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() >= deadline => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(DaemonBootstrapFailure::IncompatibleManifest);
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(20)),
+            Err(_) => return Err(DaemonBootstrapFailure::IncompatibleManifest),
+        }
+    };
+    let stdout = stdout
+        .join()
+        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?
+        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    let _stderr = stderr
+        .join()
+        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?
+        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    if !status.success() {
+        return Err(DaemonBootstrapFailure::IncompatibleManifest);
+    }
+    let value: serde_json::Value = serde_json::from_slice(&stdout)
+        .map_err(|_| DaemonBootstrapFailure::IncompatibleManifest)?;
+    parse_probe_metadata(&value)
+}
+
+#[cfg(any(windows, target_os = "linux"))]
+fn parse_probe_metadata(
+    value: &serde_json::Value,
+) -> Result<install::SourceMetadata, DaemonBootstrapFailure> {
+    let version = value
+        .get("version")
+        .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?;
+    let daemon = value
+        .get("daemon_metadata")
+        .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?;
+    let protocol = daemon
+        .get("protocol_version")
+        .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?;
+    let required_str = |object: &serde_json::Value, key: &str| {
+        object
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)
+    };
+    let required_i64 = |object: &serde_json::Value, key: &str| {
+        object
+            .get(key)
+            .and_then(serde_json::Value::as_i64)
+            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)
+    };
+    let required_u16 = |object: &serde_json::Value, key: &str| {
+        object
+            .get(key)
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|raw| u16::try_from(raw).ok())
+            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)
+    };
+    Ok(install::SourceMetadata {
+        package_version: required_str(version, "package_version")?,
+        build_id: required_str(version, "build_id")?,
+        schema_min: required_i64(version, "supported_schema_min")?,
+        schema_max: required_i64(version, "supported_schema_max")?,
+        protocol_major: required_u16(protocol, "major")?,
+        protocol_minor: required_u16(protocol, "minor")?,
+        required_capabilities: daemon
+            .get("required_capabilities")
+            .and_then(serde_json::Value::as_array)
+            .ok_or(DaemonBootstrapFailure::IncompatibleManifest)?
+            .iter()
+            .map(|value| {
+                value
+                    .as_str()
+                    .map(str::to_string)
+                    .ok_or(DaemonBootstrapFailure::IncompatibleManifest)
+            })
+            .collect::<Result<Vec<_>, _>>()?,
+        application_bootstrap_admission_version: required_u16(
+            version,
+            "application_bootstrap_admission_version",
+        )?,
+        copilot_bridge_protocol: 0,
+        min_compatible_plugin_version: String::new(),
+    })
 }
 
 fn derive_target_executable(
@@ -1192,6 +1743,35 @@ pub(crate) struct WindowsExecutableWitness {
     handle: isize,
 }
 
+#[cfg(windows)]
+impl WindowsExecutableWitness {
+    pub(crate) fn raw_handle(&self) -> isize {
+        self.handle
+    }
+
+    fn from_inherited_handle(handle: isize) -> Result<Self, DaemonBootstrapFailure> {
+        use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION,
+        };
+        if handle == 0 || handle == INVALID_HANDLE_VALUE {
+            return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+        }
+        let mut info: BY_HANDLE_FILE_INFORMATION = unsafe { std::mem::zeroed() };
+        if unsafe { GetFileInformationByHandle(handle, &mut info) } == 0 {
+            return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+        }
+        Ok(Self {
+            identity: FileIdentity {
+                kind: FileIdentityKind::WindowsVolumeFileId,
+                high: info.dwVolumeSerialNumber as u64,
+                low: ((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64,
+            },
+            handle,
+        })
+    }
+}
+
 #[cfg(target_os = "linux")]
 pub(crate) struct LinuxExecutableWitness {
     #[allow(dead_code)]
@@ -1350,16 +1930,16 @@ fn windows_path_identity(path: &Path) -> Option<FileIdentity> {
 /// InstalledCurrent selection, and verify its own image against the token
 /// before serving.
 ///
-/// Returns `Ok(None)` when no bootstrap token is present (the daemon was
+/// Returns `(None, None)` when no bootstrap token is present (the daemon was
 /// started outside a bootstrap-controlled parent, which is the legacy CLI
-/// path). Returns `Ok(Some(guard))` when validation succeeded and the child
-/// must hold the guard through endpoint/capability/readiness publication.
+/// path). On success it returns the shared guard plus token-backed startup
+/// evidence that must be published atomically with the capability record.
 /// After successful publication, callers must invoke
 /// [`release_after_readiness_publication`] before serving drain so upgrade or
 /// rollback exclusive waiters can proceed. Returns `Err` when validation
 /// failed and the child must not serve.
 pub(crate) async fn child_validate_bootstrap_env(
-) -> Result<Option<SelectorAdmission>, DaemonBootstrapFailure> {
+) -> Result<Option<ChildBootstrapAdmission>, DaemonBootstrapFailure> {
     let raw = match std::env::var(BOOTSTRAP_TOKEN_ENV) {
         Ok(v) => v,
         Err(_) => return Ok(None),
@@ -1369,6 +1949,20 @@ pub(crate) async fn child_validate_bootstrap_env(
     std::env::remove_var(BOOTSTRAP_TOKEN_ENV);
     let token = SelectionToken::from_env_value(&raw)
         .ok_or(DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+    #[cfg(windows)]
+    let inherited_witness = {
+        let raw_handle = std::env::var(BOOTSTRAP_WITNESS_HANDLE_ENV)
+            .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+        std::env::remove_var(BOOTSTRAP_WITNESS_HANDLE_ENV);
+        let handle = raw_handle
+            .parse::<isize>()
+            .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+        let witness = WindowsExecutableWitness::from_inherited_handle(handle)?;
+        if witness.identity != token.file_identity {
+            return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+        }
+        witness
+    };
     let compiled_capabilities: BTreeSet<&str> = crate::daemon_ipc::REQUIRED_CAPABILITIES
         .iter()
         .copied()
@@ -1390,8 +1984,35 @@ pub(crate) async fn child_validate_bootstrap_env(
     {
         return Err(DaemonBootstrapFailure::IncompatibleManifest);
     }
+    #[cfg(debug_assertions)]
+    if let Ok(raw) = std::env::var("TELEX_TEST_CHILD_BEFORE_ADMISSION_DELAY_MS") {
+        if let Ok(marker) = std::env::var("TELEX_TEST_CHILD_BEFORE_ADMISSION_MARKER") {
+            let _ = std::fs::write(marker, b"waiting");
+        }
+        if let Ok(delay_ms) = raw.parse::<u64>() {
+            tokio::time::sleep(Duration::from_millis(delay_ms.min(30_000))).await;
+        }
+    }
     let guard = SelectorAdmission::shared_async(token.trusted_root.clone()).await?;
-    let fresh = resolve_installed_current(&token.trusted_root)?;
+    #[cfg(debug_assertions)]
+    if let Ok(raw) = std::env::var("TELEX_TEST_CHILD_ADMISSION_HELD_DELAY_MS") {
+        if let Ok(marker) = std::env::var("TELEX_TEST_CHILD_ADMISSION_HELD_MARKER") {
+            let _ = std::fs::write(marker, b"held");
+        }
+        if let Ok(delay_ms) = raw.parse::<u64>() {
+            tokio::time::sleep(Duration::from_millis(delay_ms.min(30_000))).await;
+        }
+    }
+    let fresh = match token.admission_completion.as_ref() {
+        Some(completion) => {
+            resolve_installed_current_with_admission(
+                &token.trusted_root,
+                AdmissionValidation::Apply(completion),
+            )?
+            .token
+        }
+        None => resolve_installed_current(&token.trusted_root)?,
+    };
     if fresh.tag != token.tag
         || fresh.root_identity != token.root_identity
         || fresh.build_id != token.build_id
@@ -1405,6 +2026,7 @@ pub(crate) async fn child_validate_bootstrap_env(
             != token.application_bootstrap_admission_version
         || fresh.target_exe != token.target_exe
         || fresh.file_identity != token.file_identity
+        || fresh.admission_completion != token.admission_completion
     {
         return Err(DaemonBootstrapFailure::SelectionUnstable);
     }
@@ -1423,7 +2045,43 @@ pub(crate) async fn child_validate_bootstrap_env(
         return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
     }
     std::env::remove_var(BOOTSTRAP_RESULT_ENV);
-    Ok(Some(guard))
+    Ok(Some(ChildBootstrapAdmission {
+        _guard: guard,
+        evidence: ChildBootstrapEvidence {
+            admission_version: token.application_bootstrap_admission_version,
+            startup_executable_file_identity: {
+                #[cfg(windows)]
+                {
+                    inherited_witness.identity
+                }
+                #[cfg(not(windows))]
+                {
+                    own_identity
+                }
+            },
+        },
+        #[cfg(windows)]
+        _inherited_witness: inherited_witness,
+    }))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChildBootstrapEvidence {
+    pub admission_version: u16,
+    pub startup_executable_file_identity: FileIdentity,
+}
+
+pub(crate) struct ChildBootstrapAdmission {
+    _guard: SelectorAdmission,
+    evidence: ChildBootstrapEvidence,
+    #[cfg(windows)]
+    _inherited_witness: WindowsExecutableWitness,
+}
+
+impl ChildBootstrapAdmission {
+    pub(crate) fn evidence(&self) -> ChildBootstrapEvidence {
+        self.evidence
+    }
 }
 
 /// Explicit readiness publication boundary.
@@ -1433,8 +2091,8 @@ pub(crate) async fn child_validate_bootstrap_env(
 /// next accept. Dropping the guard here releases the child's shared selector
 /// admission so upgrade or rollback exclusive waiters are not blocked for the
 /// remaining serve lifetime. The parent's own shared admission is unaffected.
-pub(crate) fn release_after_readiness_publication(guard: Option<SelectorAdmission>) {
-    drop(guard);
+pub(crate) fn release_after_readiness_publication(admission: Option<ChildBootstrapAdmission>) {
+    drop(admission);
 }
 
 /// Compose a `Command` spawn environment carrying the selection token.
@@ -1654,6 +2312,132 @@ mod tests {
         let err = resolve_installed_current(&root)
             .expect_err("legacy admission should fail before spawn");
         assert_eq!(err, DaemonBootstrapFailure::IncompatibleManifest);
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn admission_manifest_presence_and_lineage_are_fail_closed() {
+        for (label, value, expected) in [
+            (
+                "explicit-zero",
+                serde_json::json!(0),
+                DaemonBootstrapFailure::IncompatibleManifest,
+            ),
+            (
+                "explicit-future",
+                serde_json::json!(2),
+                DaemonBootstrapFailure::IncompatibleManifest,
+            ),
+            (
+                "explicit-null",
+                serde_json::Value::Null,
+                DaemonBootstrapFailure::InvalidManifest,
+            ),
+            (
+                "explicit-string",
+                serde_json::json!("1"),
+                DaemonBootstrapFailure::InvalidManifest,
+            ),
+        ] {
+            let root = temp_dir(label);
+            let layout = install::layout_for_root(&root);
+            let manifest = compat_manifest("v1");
+            write_manifest(&layout, "v1", &manifest);
+            write_current(&layout, "v1");
+            let path = layout.versions_dir.join("v1").join("manifest.json");
+            let mut json: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            json["application_bootstrap_admission_version"] = value;
+            fs::write(&path, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+            assert_eq!(
+                resolve_installed_current(&root).expect_err(label),
+                expected,
+                "{label}"
+            );
+            fs::remove_dir_all(root).ok();
+        }
+
+        for version in ["0.2.1", "0.4.0"] {
+            let root = temp_dir(&format!("missing-{}", version.replace('.', "-")));
+            let layout = install::layout_for_root(&root);
+            let mut manifest = compat_manifest("v1");
+            manifest.package_version = version.to_string();
+            write_manifest(&layout, "v1", &manifest);
+            write_current(&layout, "v1");
+            let path = layout.versions_dir.join("v1").join("manifest.json");
+            let mut json: serde_json::Value =
+                serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+            json.as_object_mut()
+                .unwrap()
+                .remove("application_bootstrap_admission_version");
+            fs::write(&path, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+            assert_eq!(
+                resolve_installed_current_with_admission(
+                    &root,
+                    AdmissionValidation::ProbeCandidate,
+                )
+                .expect_err("non-0.3 missing field must fail"),
+                DaemonBootstrapFailure::IncompatibleManifest
+            );
+            fs::remove_dir_all(root).ok();
+        }
+    }
+
+    #[test]
+    fn duplicate_admission_manifest_key_is_invalid() {
+        let root = temp_dir("duplicate-admission");
+        let layout = install::layout_for_root(&root);
+        let manifest = compat_manifest("v1");
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let path = layout.versions_dir.join("v1").join("manifest.json");
+        let raw = fs::read_to_string(&path).unwrap();
+        let needle = format!(
+            "\"application_bootstrap_admission_version\": {}",
+            install::APPLICATION_BOOTSTRAP_ADMISSION_VERSION
+        );
+        let duplicate = format!("{needle},\n  {needle}");
+        fs::write(&path, raw.replacen(&needle, &duplicate, 1)).unwrap();
+        assert_eq!(
+            resolve_installed_current(&root).expect_err("duplicate key"),
+            DaemonBootstrapFailure::InvalidManifest
+        );
+        fs::remove_dir_all(root).ok();
+    }
+
+    #[test]
+    fn admission_completion_is_bound_to_the_exact_target_identity() {
+        let root = temp_dir("admission-target-movement");
+        let layout = install::layout_for_root(&root);
+        let mut manifest = compat_manifest("v1");
+        manifest.package_version = "0.3.0".to_string();
+        write_manifest(&layout, "v1", &manifest);
+        write_current(&layout, "v1");
+        let manifest_path = layout.versions_dir.join("v1").join("manifest.json");
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+        json.as_object_mut()
+            .unwrap()
+            .remove("application_bootstrap_admission_version");
+        fs::write(&manifest_path, serde_json::to_vec_pretty(&json).unwrap()).unwrap();
+
+        let candidate =
+            resolve_installed_current_with_admission(&root, AdmissionValidation::ProbeCandidate)
+                .expect("0.3 missing field is probe-eligible");
+        let target = candidate.token.target_exe.clone();
+        let replacement = target.with_extension("replacement");
+        fs::copy(std::env::current_exe().unwrap(), &replacement).unwrap();
+        fs::remove_file(&target).unwrap();
+        fs::rename(&replacement, &target).unwrap();
+
+        assert_eq!(
+            resolve_installed_current_with_admission(
+                &root,
+                AdmissionValidation::Apply(&candidate.completion),
+            )
+            .expect_err("completion must not survive target replacement"),
+            DaemonBootstrapFailure::IncompatibleManifest
+        );
         fs::remove_dir_all(root).ok();
     }
 
@@ -1963,8 +2747,8 @@ mod tests {
         // upgrade/rollback exclusive acquisition succeeds while the daemon
         // is still serving.
         let root = temp_dir("child-release-boundary");
-        let guard = Some(SelectorAdmission::shared(&root).expect("child shared admission"));
-        release_after_readiness_publication(guard);
+        let guard = SelectorAdmission::shared(&root).expect("child shared admission");
+        drop(guard);
         // After the child releases, upgrade's exclusive must succeed.
         let excl = acquire_with_deadline_sync(&root, true, Duration::from_millis(500))
             .expect("exclusive after child release");

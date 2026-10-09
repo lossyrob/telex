@@ -519,7 +519,13 @@ and validate one immutable target that includes:
 - selected manifest bound to that tag and executable, with validated
   build identity, package version, supported schema range, protocol
   version, required security and Application Client capabilities, and
-  explicit support for child-side bootstrap admission before readiness;
+  explicit support for child-side bootstrap admission before readiness.
+  The sole compatibility exception is a raw-absent admission key written
+  by the v0.2.1 updater for a 0.3.x target: an exclusive, exact-image,
+  credential-stripped version probe must prove admission version 1 and
+  exact load-bearing metadata, after which a fresh shared resolution may
+  apply only an in-memory completion bound to unchanged manifest and file
+  identity. No manifest is rewritten;
 - canonical containment of the selected version directory and executable
   beneath the canonical trusted root;
 - current-OS-user ownership of the root and the authority chain, denying
@@ -568,6 +574,9 @@ Lock behavior MUST distinguish:
   predecessor exit, atomic `previous`/`current` switch, and selector
   publication. The drain operates inside that exclusive context and
   MUST NOT reacquire the shared lease.
+- **Install garbage collection exclusive.** Garbage collection takes the
+  same exclusive lease before reading the selectors and holds it through
+  the protected-version snapshot and deletion.
 - **Lock order.** Selector admission MUST precede daemon singleton or
   spawn admission.
 - **Bounded fail-closed movement.** Selector movement and admission
@@ -575,9 +584,14 @@ Lock behavior MUST distinguish:
   fail closed on exhaustion as a typed unstable-selection outcome.
 - **Matching-only prestarted reuse.** A prestarted daemon is reusable
   only when reuse-safe process identity, canonical process-image path,
-  and platform file identity match the frozen target. A foreign peer
-  MUST be refused before the client sends any store or session metadata
-  or its version and capability handshake.
+  and platform file identity match the frozen target. On Windows the
+  authoritative startup identity comes from the exact launch witness
+  narrowly inherited by an admitted child and atomically bound into the
+  owner-private capability record with PID, start time, instance,
+  singleton scope, and admission version. Reopening the pathname is not
+  authoritative. A foreign or evidence-incomplete peer MUST be refused
+  before the client sends any store or session metadata or its version
+  and capability handshake.
 
 Bootstrap failures MUST be typed and MUST NOT expose the raw authority
 path or manifest binding as durable public evidence. The taxonomy MUST

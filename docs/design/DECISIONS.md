@@ -2468,6 +2468,18 @@ validates one immutable target:
   device/inode; Windows canonical final path plus volume/file identity held
   through process creation with compatible sharing).
 
+One compatibility exception applies to the raw manifest shape produced
+when the published v0.2.1 updater installs a 0.3.x binary. The admission
+key must be absent, not explicit zero, malformed, duplicated, or set to
+another value. After releasing shared admission, the client takes
+exclusive admission, holds the exact executable, and runs a bounded
+credential-stripped non-serving version probe. Exact admission-version-1
+and load-bearing metadata create only an in-memory completion. The
+client writes no manifest, releases exclusive admission, reacquires
+shared admission, and revalidates unchanged selector, manifest bytes and
+identity, target path, and target identity. The child still performs
+independent admission and runtime proof.
+
 These fields are compatibility and selection metadata. They do **not**
 provide an executable-content digest or hash, an executable-content
 migration or missing-digest rule, a signature, publisher or package
@@ -2494,11 +2506,19 @@ lock semantics are unsupported and fail closed.
   installed-current resolution, the selected manifest and build metadata,
   and its own process image; it releases only after publishing endpoint,
   capability, and readiness.
+- On Windows the parent restricts inheritance to the exact executable
+  witness held across process creation. The child validates and retains
+  that handle through admission, then atomically binds its handle-derived
+  identity and admission version to the owner-private capability record,
+  server PID/start time, instance, and singleton scope before readiness.
+  Path reopening is supplementary, not authoritative identity evidence.
 - Upgrade and rollback acquire the exclusive lease across candidate
   validation, matching-daemon drain, predecessor exit, atomic
   `previous`/`current` switch, and selector publication. The drain
   operates inside that exclusive context and does not reacquire the
   shared lock.
+- Install garbage collection takes the same exclusive admission before
+  its protected-selector snapshot and holds it through deletion.
 - Lock order is selector admission before daemon singleton or spawn
   admission.
 - Selector movement and admission contention retries are bounded and
@@ -2506,8 +2526,10 @@ lock semantics are unsupported and fail closed.
   `SelectionUnstable`.
 - A prestarted daemon is reusable only when reuse-safe PID/start-time,
   UID or SID, canonical process-image path, and platform file identity
-  match the frozen target. A foreign peer is refused before the client
-  sends `Hello` or any store or session metadata.
+  match the frozen target. Missing or mismatched admission-backed
+  capability evidence is refused before the client sends `Hello` or any
+  store or session metadata. `HelloAck` is bounded and must also match
+  the authentication-policy version.
 
 Bootstrap failures project as `ApplicationClientError::DaemonBootstrap(
 DaemonBootstrapFailure)` with typed reasons `InvalidTrustedRoot`,
