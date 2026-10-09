@@ -147,7 +147,10 @@ variants:
 - `ExactExecutable { executable }` pins one canonical Telex executable
   for development and tests. It applies the same canonical
   process-image and untrusted-writability checks, has no installed
-  manifest authority, and does not follow upgrade or rollback.
+  manifest authority, and does not follow upgrade or rollback. On
+  Windows, spawned exact targets inherit the same restricted launch
+  witness and publish its startup identity; a fresh exact policy refuses
+  a prestarted peer whose mapped image no longer matches the pinned file.
 
 `ApplicationClient::connect(config)` retains source-compatible
 current-executable behavior for legacy and internal callers. It is
@@ -218,6 +221,9 @@ pathname is not authoritative.
 
 Upgrade, rollback, and install garbage collection hold the selector
 lock exclusively across their selector snapshot and mutation.
+After upgrade or rollback publishes `current`, it releases exclusive
+admission before starting any station-intent successor through the same
+admitted InstalledCurrent spawn path.
 Existing-peer authentication and `HelloAck` are bounded; the final
 acknowledgment must match the selected build, package, protocol,
 authentication-policy version, and required capabilities. Selector

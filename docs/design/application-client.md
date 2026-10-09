@@ -574,6 +574,9 @@ Lock behavior MUST distinguish:
   predecessor exit, atomic `previous`/`current` switch, and selector
   publication. The drain operates inside that exclusive context and
   MUST NOT reacquire the shared lease.
+  After publication they release exclusive admission before
+  station-intent reconciliation starts the successor through the
+  admitted InstalledCurrent path.
 - **Install garbage collection exclusive.** Garbage collection takes the
   same exclusive lease before reading the selectors and holds it through
   the protected-version snapshot and deletion.
@@ -619,6 +622,11 @@ carrying the typed failure reasons. These names are Rust implementation
 guidance for this binding. Other bindings MAY choose different names;
 they MUST preserve the semantic contract stated above and MUST NOT
 expose raw daemon IPC as a supported application API.
+
+On Windows, ExactExecutable spawn also carries the restricted launch
+witness through capability publication. A fresh exact policy refuses a
+prestarted peer whose mapped image identity does not match the newly
+pinned file, even when the canonical pathname and build strings match.
 
 ## Product boundary and prohibited fallback seams
 

@@ -2151,6 +2151,12 @@ action rather than supported installed-current evidence. Neither
 accepting `current` plus `previous` nor cleaning up a stale spawn after
 readiness publication is permitted.
 
+After selector publication, upgrade or rollback releases exclusive
+admission before station-intent reconciliation starts. That successor
+MUST use the admitted InstalledCurrent spawn path, including child
+shared admission and Windows launch-witness capability evidence; the
+legacy current-process spawn path is not valid successor evidence.
+
 **Current-only trust.** Only `current` authorizes a running daemon.
 `previous` exists solely to support validated rollback and MUST NOT be
 substituted when `current` is missing, unstable, or fails validation.
@@ -2162,8 +2168,12 @@ fall back to `previous`.
 subordinate pinned-target policy (Rust `ApplicationDaemonBootstrap::
 ExactExecutable`) shares the canonical process-image and
 untrusted-writability checks and reuses the same daemon endpoint and
-IPC. It has no installed-manifest authority, does not follow upgrade or
-rollback, and is not a supported production seam. The root Telex CLI MAY
+IPC. On Windows, its spawned child narrowly inherits the exact held
+launch witness and publishes the handle-derived startup identity. A
+token-absent manual peer or stale mapped image without matching evidence
+is not reusable by a fresh exact policy. ExactExecutable has no
+installed-manifest authority, does not follow upgrade or rollback, and
+is not a supported production seam. The root Telex CLI MAY
 use the same installed-current resolver where an `InstalledCurrent`
 policy is in force.
 

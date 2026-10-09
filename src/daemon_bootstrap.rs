@@ -1663,6 +1663,8 @@ fn try_acquire_nonblocking(
         .map_err(|_| NonBlockingLockError::Unsafe)?;
     let metadata = file.metadata().map_err(|_| NonBlockingLockError::Unsafe)?;
     check_authority_component(&path, &metadata).map_err(|_| NonBlockingLockError::Unsafe)?;
+    crate::platform_fs::require_supported_local_filesystem(&path)
+        .map_err(|_| NonBlockingLockError::Unsafe)?;
     let result = if exclusive {
         fs2::FileExt::try_lock_exclusive(&file)
     } else {
@@ -1704,6 +1706,8 @@ fn try_acquire_nonblocking(
         return Err(NonBlockingLockError::Unsafe);
     }
     check_authority_component(&path, &metadata).map_err(|_| NonBlockingLockError::Unsafe)?;
+    crate::platform_fs::require_supported_local_filesystem(&path)
+        .map_err(|_| NonBlockingLockError::Unsafe)?;
     let result = if exclusive {
         fs2::FileExt::try_lock_exclusive(&file)
     } else {
@@ -1942,7 +1946,37 @@ pub(crate) async fn child_validate_bootstrap_env(
 ) -> Result<Option<ChildBootstrapAdmission>, DaemonBootstrapFailure> {
     let raw = match std::env::var(BOOTSTRAP_TOKEN_ENV) {
         Ok(v) => v,
-        Err(_) => return Ok(None),
+        Err(_) => {
+            #[cfg(windows)]
+            {
+                let Ok(raw_handle) = std::env::var(BOOTSTRAP_WITNESS_HANDLE_ENV) else {
+                    return Ok(None);
+                };
+                std::env::remove_var(BOOTSTRAP_WITNESS_HANDLE_ENV);
+                let handle = raw_handle
+                    .parse::<isize>()
+                    .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+                let inherited_witness = WindowsExecutableWitness::from_inherited_handle(handle)?;
+                let own_exe = std::env::current_exe()
+                    .and_then(std::fs::canonicalize)
+                    .map_err(|_| DaemonBootstrapFailure::ExecutableIdentityMismatch)?;
+                if file_identity(&own_exe)? != inherited_witness.identity {
+                    return Err(DaemonBootstrapFailure::ExecutableIdentityMismatch);
+                }
+                return Ok(Some(ChildBootstrapAdmission {
+                    _guard: None,
+                    evidence: ChildBootstrapEvidence {
+                        admission_version: None,
+                        startup_executable_file_identity: inherited_witness.identity,
+                    },
+                    _inherited_witness: inherited_witness,
+                }));
+            }
+            #[cfg(not(windows))]
+            {
+                return Ok(None);
+            }
+        }
     };
     // Consume the env var immediately so any child of this daemon does not
     // inherit a stale token that could re-run this validation elsewhere.
@@ -2046,9 +2080,9 @@ pub(crate) async fn child_validate_bootstrap_env(
     }
     std::env::remove_var(BOOTSTRAP_RESULT_ENV);
     Ok(Some(ChildBootstrapAdmission {
-        _guard: guard,
+        _guard: Some(guard),
         evidence: ChildBootstrapEvidence {
-            admission_version: token.application_bootstrap_admission_version,
+            admission_version: Some(token.application_bootstrap_admission_version),
             startup_executable_file_identity: {
                 #[cfg(windows)]
                 {
@@ -2067,12 +2101,12 @@ pub(crate) async fn child_validate_bootstrap_env(
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ChildBootstrapEvidence {
-    pub admission_version: u16,
+    pub admission_version: Option<u16>,
     pub startup_executable_file_identity: FileIdentity,
 }
 
 pub(crate) struct ChildBootstrapAdmission {
-    _guard: SelectorAdmission,
+    _guard: Option<SelectorAdmission>,
     evidence: ChildBootstrapEvidence,
     #[cfg(windows)]
     _inherited_witness: WindowsExecutableWitness,

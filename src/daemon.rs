@@ -381,6 +381,15 @@ fn verify_cap_bootstrap_evidence(
         ));
     }
     if resolved.selection.is_none() {
+        #[cfg(windows)]
+        if cap.startup_executable_file_identity
+            != Some(CapFileIdentity::from(resolved.expected_identity))
+        {
+            return Err(DaemonError::Unauthorized(
+                "daemon capability record lacks matching exact-executable startup evidence"
+                    .to_string(),
+            ));
+        }
         return Ok(());
     }
     if cap.bootstrap_admission_version
@@ -2547,9 +2556,7 @@ fn spawn_daemon_process_bootstrap(
     // The bootstrap path holds an executable-file witness handle across
     // `CreateProcessW`. The witness is passed by borrow so it is dropped
     // strictly after the child process is created, not during the spawn.
-    let inherit_witness = env
-        .iter()
-        .any(|(key, _)| key == std::ffi::OsStr::new(crate::daemon_bootstrap::BOOTSTRAP_TOKEN_ENV));
+    let inherit_witness = witness.is_some();
     spawn_daemon_process_windows_native(exe, env, witness, inherit_witness)
 }
 
@@ -2884,7 +2891,8 @@ fn new_state(
         protocol_major: paths.singleton.protocol_major,
         server_pid: Some(std::process::id()),
         server_start_time,
-        bootstrap_admission_version: bootstrap_evidence.map(|evidence| evidence.admission_version),
+        bootstrap_admission_version: bootstrap_evidence
+            .and_then(|evidence| evidence.admission_version),
         startup_executable_file_identity: bootstrap_evidence
             .map(|evidence| evidence.startup_executable_file_identity.into()),
     };

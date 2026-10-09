@@ -404,7 +404,8 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
 async fn installed_current_upgrade_and_rollback_move_the_selector() {
     let _env = ENV_LOCK.lock().await;
     let iso = Isolation::new("ic-upgrade");
-    let _restore = iso.apply_env();
+    let mut restore = iso.apply_env();
+    restore.set("TELEX_TEST_RECOVERABLE_INTENTS", "1");
     let db = iso.root.join("upgrade.db");
     let first_tag = iso.tag.clone();
 
@@ -1597,6 +1598,52 @@ async fn exact_executable_file_identity_change_is_refused() {
                 | DaemonBootstrapFailure::ForeignDaemon
         ),
         "a replaced pinned target must fail closed: {outcome:?}"
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn exact_executable_fresh_policy_refuses_stale_running_image() {
+    let _env = ENV_LOCK.lock().await;
+    let iso = Isolation::new("exact-stale-running");
+    let _restore = iso.apply_env();
+    let db = iso.root.join("exact-stale-running.db");
+    let pinned_dir = iso.root.join("pinned-stale-running");
+    isolation::create_owner_private_dir(&pinned_dir);
+    let pinned = pinned_dir.join(install::exe_name());
+    std::fs::copy(isolation::branch_binary(), &pinned).expect("stage pinned target");
+
+    let first = ApplicationClient::connect_with_daemon(
+        config("proof", &db),
+        ApplicationDaemonBootstrap::ExactExecutable {
+            executable: pinned.clone(),
+        },
+    )
+    .await
+    .expect("first exact policy");
+    assert!(
+        first
+            .attach(&[spec("ic:exact-stale:a", ApplicationCapability::SendOnly,)])
+            .await
+            .ready
+    );
+
+    let displaced = pinned.with_extension("running-image");
+    std::fs::rename(&pinned, &displaced).expect("rename running exact image");
+    std::fs::copy(isolation::branch_binary(), &pinned).expect("replace exact executable pathname");
+    let fresh = ApplicationClient::connect_with_daemon(
+        config("proof", &db),
+        ApplicationDaemonBootstrap::ExactExecutable { executable: pinned },
+    )
+    .await
+    .expect("fresh exact policy over replacement");
+    let outcome = fresh
+        .attach(&[spec("ic:exact-stale:b", ApplicationCapability::SendOnly)])
+        .await;
+    assert_eq!(
+        attach_failure(&outcome),
+        DaemonBootstrapFailure::ForeignDaemon,
+        "fresh exact policy must reject the stale mapped peer before Hello"
     );
 }
 

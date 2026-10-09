@@ -2436,7 +2436,10 @@ Application Client surface:
 - `ApplicationDaemonBootstrap::ExactExecutable { executable }` is a
   subordinate, pinned development-and-test seam. It applies the same
   canonical process-image and untrusted-writability checks, has no installed
-  manifest authority, and does not follow upgrade or rollback.
+  manifest authority, and does not follow upgrade or rollback. On
+  Windows, its spawned child inherits the exact launch witness and
+  publishes handle-derived startup identity, so a fresh exact policy
+  cannot reuse a stale mapped image at a replaced pathname.
 - The existing `ApplicationClient::connect(config)` retains source-compatible
   current-executable behavior for legacy and development callers. It is
   never an automatic fallback from `InstalledCurrent`.
@@ -2516,7 +2519,9 @@ lock semantics are unsupported and fail closed.
   validation, matching-daemon drain, predecessor exit, atomic
   `previous`/`current` switch, and selector publication. The drain
   operates inside that exclusive context and does not reacquire the
-  shared lock.
+  shared lock. After publication they release exclusive admission before
+  station-intent reconciliation starts the successor through the
+  admitted InstalledCurrent path.
 - Install garbage collection takes the same exclusive admission before
   its protected-selector snapshot and holds it through deletion.
 - Lock order is selector admission before daemon singleton or spawn

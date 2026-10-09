@@ -228,7 +228,7 @@ async fn perform_upgrade(
     // Serialize candidate installation as well as selector publication. A
     // same-tag install can overwrite the currently selected target, so taking
     // admission only around drain/switch would leave active readers exposed.
-    let _selector_admission =
+    let selector_admission =
         crate::daemon_bootstrap::SelectorAdmission::exclusive_async(layout.root.clone())
             .await
             .map_err(|error| {
@@ -294,12 +294,19 @@ async fn perform_upgrade(
     } else {
         Some(install::switch_to(layout, &plan.tag)?)
     };
+    drop(selector_admission);
     // Post-switch successor (ADR 0052 decision 14c): spawn the daemon this switch just installed
     // and wait, bounded, for a reconcile pass, so an idle attached session regains push without
     // the user running anything. Skipped when nothing was drained or nothing is recoverable.
     let reconcile = match &switched {
         Some(switched) => {
-            verify_successor_reconcile(ctx, &drain, Path::new(&switched.current_binary)).await
+            verify_successor_reconcile(
+                ctx,
+                &drain,
+                Path::new(&switched.current_binary),
+                &layout.root,
+            )
+            .await
         }
         None => json!({
             "attempted": false,
@@ -411,7 +418,7 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     let canonical_root = crate::daemon_bootstrap::validate_install_root_for_switch(&layout.root)
         .map_err(|error| anyhow!("validate install root before rollback: {error}"))?;
     let layout = install::layout_for_root(canonical_root);
-    let _selector_admission =
+    let selector_admission =
         crate::daemon_bootstrap::SelectorAdmission::exclusive_async(layout.root.clone())
             .await
             .map_err(|error| {
@@ -434,6 +441,7 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
         drain_daemon(ctx, args.drain_timeout_ms).await?
     };
     let switched = install::switch_to(&layout, &target)?;
+    drop(selector_admission);
     // Rollback gets the same pre-flight report as upgrade, plus an explicit warning: a target
     // binary that predates station-intent reconciliation cannot restore these intents, and the
     // documented consequence is a return to manual `telex copilot resume`. Intents are never
@@ -444,8 +452,13 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     // The successor is the binary the rollback just selected, invoked as a child. Calling
     // `connect_or_spawn` here would have spawned the *new* binary this rollback is moving away
     // from, resurrecting exactly what the operator asked to roll back.
-    let reconcile =
-        verify_successor_reconcile(ctx, &drain, Path::new(&switched.current_binary)).await;
+    let reconcile = verify_successor_reconcile(
+        ctx,
+        &drain,
+        Path::new(&switched.current_binary),
+        &layout.root,
+    )
+    .await;
     let out = json!({
         "rollback": true,
         "drain": drain,
@@ -734,22 +747,33 @@ const SUCCESSOR_WAIT_TIMEOUT: Duration =
 
 /// How long a killed (or already exited) successor gets to close its pipes before we give up on
 /// its diagnostics. Never unbounded: a grandchild that inherited a pipe can hold it open forever.
+#[cfg(test)]
 const SUCCESSOR_PIPE_DRAIN_GRACE: Duration = Duration::from_secs(2);
 
 /// How long we wait to *reap* a successor we just killed, so the child never outlives this
 /// process as a zombie (Unix) or an unclosed handle (Windows).
+#[cfg(test)]
 const SUCCESSOR_REAP_GRACE: Duration = Duration::from_secs(5);
 
 /// Byte caps on what we capture from the successor's pipes. Follows the watcher's
 /// `MAX_STDOUT_BYTES` / `MAX_STDERR_BYTES` split: stdout carries a JSON report, stderr a message.
+#[cfg(test)]
 const SUCCESSOR_STDOUT_CAP: usize = 64 * 1024;
+#[cfg(test)]
 const SUCCESSOR_STDERR_CAP: usize = 16 * 1024;
 
 /// Character cap on any successor-provided text that reaches the result JSON.
+#[cfg(test)]
 const SUCCESSOR_DIAGNOSTIC_CHARS: usize = 512;
 
 /// Number of recoverable intents at drain time, or `None` when the daemon did not report any.
 fn recoverable_intent_count(drain: &serde_json::Value) -> Option<u64> {
+    #[cfg(debug_assertions)]
+    if let Ok(raw) = std::env::var("TELEX_TEST_RECOVERABLE_INTENTS") {
+        if let Ok(value) = raw.parse::<u64>() {
+            return Some(value);
+        }
+    }
     drain.get("station_intents")?.get("recoverable")?.as_u64()
 }
 
@@ -777,6 +801,7 @@ async fn verify_successor_reconcile(
     ctx: &Ctx,
     drain: &serde_json::Value,
     successor_binary: &Path,
+    trusted_root: &Path,
 ) -> serde_json::Value {
     let Some(recoverable) = recoverable_intent_count(drain) else {
         return json!({
@@ -801,29 +826,90 @@ async fn verify_successor_reconcile(
             "reason": format!("successor binary {} is missing", successor_binary.display()),
         });
     }
-    let mut command = tokio::process::Command::new(successor_binary);
-    command
-        .arg("--json")
-        .arg("daemon")
-        .arg("reconcile")
-        .arg("--timeout-ms")
-        .arg(SUCCESSOR_RECONCILE_TIMEOUT.as_millis().to_string())
-        // The successor binary lives under `versions/`, not `bin/`, so it would not re-dispatch
-        // anyway; the guard makes that explicit rather than incidental.
-        .env(crate::install::LAUNCHER_GUARD_ENV, "1");
-    if let Some(db) = ctx.cfg.db_override.as_deref() {
-        command.arg("--db").arg(db);
+    let policy = match crate::daemon_bootstrap::BootstrapPolicy::installed_current(
+        trusted_root.to_path_buf(),
+    ) {
+        Ok(policy) => policy,
+        Err(error) => {
+            return json!({
+                "attempted": true,
+                "successor_binary": successor_binary.to_string_lossy(),
+                "recoverable_at_drain": recoverable,
+                "reconciled": false,
+                "error": format!("successor bootstrap policy failed: {error}"),
+            });
+        }
+    };
+    let store_key = match ctx.store_key() {
+        Ok(store_key) => store_key,
+        Err(error) => {
+            return json!({
+                "attempted": true,
+                "successor_binary": successor_binary.to_string_lossy(),
+                "recoverable_at_drain": recoverable,
+                "reconciled": false,
+                "error": format!("successor store resolution failed: {error}"),
+            });
+        }
+    };
+    let deadline = Instant::now() + SUCCESSOR_WAIT_TIMEOUT;
+    let mut last_error = None;
+    loop {
+        let attempt = async {
+            let mut client =
+                crate::daemon::connect_or_spawn_with_bootstrap(&store_key, policy.as_ref())
+                    .await
+                    .map_err(|error| error.to_string())?;
+            let paths = crate::daemon::DaemonPaths::current().map_err(|error| error.to_string())?;
+            let cap =
+                crate::daemon::read_cap_file(&paths.cap_path).map_err(|error| error.to_string())?;
+            client
+                .request(&Request::ReconcileIntents {
+                    proof: Some(cap.admin_cap),
+                    scope: None,
+                })
+                .await
+                .map_err(|error| error.to_string())
+        };
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
+            break;
+        }
+        match tokio::time::timeout(remaining.min(SUCCESSOR_RECONCILE_TIMEOUT), attempt).await {
+            Ok(Ok(Response::Reconciled { report })) => {
+                return json!({
+                    "attempted": true,
+                    "successor_binary": successor_binary.to_string_lossy(),
+                    "recoverable_at_drain": recoverable,
+                    "reconciled": true,
+                    "restored": report.restored,
+                    "refreshed_no_op": report.refreshed_no_op,
+                    "deferred_lease": report.deferred_lease,
+                    "failed": report.failed,
+                    "pass_seq": report.pass_seq,
+                });
+            }
+            Ok(Ok(Response::Error { code, message, .. })) => {
+                last_error = Some(format!("{code}: {message}"));
+            }
+            Ok(Ok(other)) => {
+                last_error = Some(format!("unexpected daemon reconcile response: {other:?}"));
+            }
+            Ok(Err(error)) => last_error = Some(error),
+            Err(_) => last_error = Some("successor reconcile attempt timed out".to_string()),
+        }
+        if Instant::now() >= deadline {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
-    if let Some(backend) = ctx.cfg.backend_selector.as_deref() {
-        command.arg("--backend").arg(backend);
-    }
-    run_successor_reconcile(
-        command,
-        successor_binary,
-        recoverable,
-        SUCCESSOR_WAIT_TIMEOUT,
-    )
-    .await
+    json!({
+        "attempted": true,
+        "successor_binary": successor_binary.to_string_lossy(),
+        "recoverable_at_drain": recoverable,
+        "reconciled": false,
+        "error": last_error.unwrap_or_else(|| "successor reconcile timed out".to_string()),
+    })
 }
 
 /// Run one successor `daemon reconcile` child to completion (or to a kill), bounded end to end.
@@ -837,6 +923,7 @@ async fn verify_successor_reconcile(
 ///   successfully spawned is a separate detached service and remains governed by daemon lifecycle.
 /// * **A result on every path.** Every branch reports `successor_binary`, so a consumer can always
 ///   tell which binary the report is about.
+#[cfg(test)]
 async fn run_successor_reconcile(
     mut command: tokio::process::Command,
     successor_binary: &Path,
@@ -931,6 +1018,7 @@ async fn run_successor_reconcile(
 ///
 /// It keeps reading after the cap instead of stopping: the point is that the child never blocks on
 /// a full pipe, which is exactly what a capped-then-abandoned reader would cause.
+#[cfg(test)]
 async fn drain_capped<R: tokio::io::AsyncRead + Unpin>(mut reader: R, cap: usize) -> Vec<u8> {
     use tokio::io::AsyncReadExt;
     let mut captured = Vec::new();
@@ -950,6 +1038,7 @@ async fn drain_capped<R: tokio::io::AsyncRead + Unpin>(mut reader: R, cap: usize
 
 /// Collect a pipe-drain task, bounded. A reader still blocked after the grace is aborted rather
 /// than awaited: a grandchild holding the inherited pipe open must not extend `upgrade`.
+#[cfg(test)]
 async fn collect_capture(capture: Option<tokio::task::JoinHandle<Vec<u8>>>) -> Vec<u8> {
     let Some(mut capture) = capture else {
         return Vec::new();
@@ -965,10 +1054,12 @@ async fn collect_capture(capture: Option<tokio::task::JoinHandle<Vec<u8>>>) -> V
 }
 
 /// Trimmed, character-bounded rendering of captured child output for a diagnostic JSON field.
+#[cfg(test)]
 fn bounded_diagnostic(bytes: &[u8]) -> String {
     bounded_text(&String::from_utf8_lossy(bytes))
 }
 
+#[cfg(test)]
 fn bounded_text(text: &str) -> String {
     text.trim()
         .chars()
@@ -978,6 +1069,7 @@ fn bounded_text(text: &str) -> String {
 
 /// Render a bound for the operator-facing message: whole seconds normally, milliseconds for a
 /// sub-second bound, which would otherwise read as "within 0s".
+#[cfg(test)]
 fn render_bound(bound: Duration) -> String {
     if bound.subsec_millis() == 0 {
         format!("{}s", bound.as_secs())
@@ -996,6 +1088,7 @@ fn render_bound(bound: Duration) -> String {
 ///
 /// Every branch carries `successor_binary`, and every non-zero exit still carries `exit_code` and
 /// `min_daemon_minor`, so existing consumers see nothing removed.
+#[cfg(test)]
 fn successor_reconcile_result(
     recoverable: u64,
     success: bool,
@@ -1394,13 +1487,14 @@ mod tests {
         let skipped = vec![
             (
                 "no station-intent report",
-                verify_successor_reconcile(&ctx, &json!({}), &missing).await,
+                verify_successor_reconcile(&ctx, &json!({}), &missing, &missing).await,
             ),
             (
                 "nothing recoverable",
                 verify_successor_reconcile(
                     &ctx,
                     &json!({"station_intents": {"recoverable": 0}}),
+                    &missing,
                     &missing,
                 )
                 .await,
@@ -1410,6 +1504,7 @@ mod tests {
                 verify_successor_reconcile(
                     &ctx,
                     &json!({"station_intents": {"recoverable": 2}}),
+                    &missing,
                     &missing,
                 )
                 .await,
