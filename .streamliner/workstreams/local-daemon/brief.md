@@ -492,6 +492,18 @@ before any product write. No #153 implementation has started. The task
 outcome, single worker, prepared branch, and completed issue #106 / PR #138
 record are unchanged.
 
+On 2026-10-08 the operator authorized the recovery (campaign authority
+`153-preparation-sdk-recovery-authority-20261008.json`, SHA-256
+`20a8eb1f7b76f773955af752759699041227c38d93bb315678ec25ed8bc6968d`): one
+reviewed preparation-only SDK adapter repair in the Streamliner repository,
+one guarded restart of the owned API after it merges, and one replacement
+initializer for the same held worker on the same checkout. No exception for
+the 272,000-token run was granted. The Streamliner repair session started on
+2026-10-12, but no repair has merged or been deployed, and no restart,
+replacement initializer, or admission has occurred. The external condition
+stays pending and the node stays blocked until the new initializer proves
+long context and Local admits the worker.
+
 Workstream and design-steward branches are proposal/integration workspaces, not
 silent authority. Streamliner artifact changes become durable only through the
 campaign's sole artifact reconciler applying the reviewed, operator-authorized

@@ -409,7 +409,9 @@ collapse into noise, and no session-bound polling task is required.
 3. Issue #153 `station-intent-transactional-authority` was prepared from the
    merged authority at `6ab6143a`, but its worker is held before any product
    write until Streamliner preparation passes the required long-context tier
-   to its initializer.
+   to its initializer. The operator authorized the bounded repair, one API
+   restart, and one replacement initializer. The repair session started on
+   2026-10-12; no repair has merged, and no restart or initializer has run.
 4. Keep issue #144's `minimal-example-pack` ready but unlaunched; launch only
    after separate campaign authorization.
 5. Keep `watcher-runtime-core` planned until `client-conformance` uses the

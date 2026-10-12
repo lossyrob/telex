@@ -4,7 +4,8 @@
 - **Node:** `station-intent-transactional-authority`
 - **Type:** implementation
 - **Status:** blocked (2026-10-08) on Streamliner preparation long-context
-  propagation; the worker exists but is not write-authorized
+  propagation; recovery is authorized and its repair session has started, but
+  no repair has merged and the worker exists but is not write-authorized
 - **Attention:** focus
 - **Depends on:** completed `station-intent-reconciliation` (PR #138 merged as
   `6ab6143a`)
@@ -61,10 +62,34 @@ the context tier explicitly on session create and resume, a controlled
 restart of the owned API, and one new initializer run on the same checkout
 that proves long context on the wire, at start, and in usage, with normal
 context loading and PAW initialization once. The earlier run stays frozen as
-evidence, and no silent downgrade is accepted. The campaign has not yet
-authorized the repair. A global SDK migration, a duplicate server, or a
-`node_modules` patch is not part of the fix. The task outcome, scope, success
-criteria, single worker, and prepared branch are unchanged.
+evidence, and no silent downgrade is accepted. A global SDK migration, a
+duplicate server, or a `node_modules` patch is not part of the fix. The task
+outcome, scope, success criteria, single worker, and prepared branch are
+unchanged.
+
+The operator authorized this recovery on 2026-10-08 by explicit selection,
+recorded in campaign authority
+`153-preparation-sdk-recovery-authority-20261008.json` (SHA-256
+`20a8eb1f7b76f773955af752759699041227c38d93bb315678ec25ed8bc6968d`).
+It covers three bounded steps. First, a reviewed repair in the Streamliner
+repository adds an isolated, preparation-only SDK 1.0.x adapter that passes
+`gpt-6-astra`, high reasoning, and `long_context` explicitly on session create
+and resume; unrelated SDK 0.3 consumers stay unchanged. Second, after that
+repair merges, service owner `79bfffa9` performs one guarded restart of the
+owned API. Third, Local runs one replacement initializer: a new run on the
+same checkout for the same held worker `62bbe494`, with no product source
+write. The condition is met only when the create call carries the full
+profile, the session start records it, request usage shows a prompt budget
+well above 272,000 tokens, no fallback occurred, and context save and PAW
+initialization each succeed exactly once with a complete new handoff. A
+failed attempt stops without retry or fallback. The earlier run `beb72642`
+(initializer `7a775728`) stays frozen and is classified as default-tier, not
+long-context. The operator granted no exception for the 272,000-token run.
+The Streamliner repair session started on 2026-10-12, but no repair has
+merged or been deployed, and no restart, replacement initializer, or
+admission has occurred. The condition stays pending and the worker stays
+held. Product writes begin only after Local validates the new handoff and
+activates the accepted task authority.
 
 ## Outcome
 

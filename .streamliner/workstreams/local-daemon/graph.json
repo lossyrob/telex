@@ -7,7 +7,7 @@
   "status": "active",
   "attention": "focus",
   "createdAt": "2026-06-22T16:05:00Z",
-  "updatedAt": "2026-10-08T22:20:05.561Z",
+  "updatedAt": "2026-10-12T13:31:30.491Z",
   "trackingIssue": {
     "owner": "lossyrob",
     "repo": "telex",
@@ -415,7 +415,7 @@
       "externalDependsOn": [
         {
           "id": "streamliner-preparation-long-context-propagation",
-          "label": "Streamliner preparation passes the long_context tier to the initializer session: a reviewed, merged, preparation-only adapter repair sets contextTier explicitly on session create and resume, followed by a controlled restart of the owned API and one new initializer run on the same checkout that proves long context on the wire, at start, and in usage; owner Streamliner service 79bfffa9, with campaign authority for the repair and restart",
+          "label": "Streamliner preparation passes the long_context tier to the initializer session: a reviewed, merged, preparation-only adapter repair sets contextTier explicitly on session create and resume, followed by a controlled restart of the owned API and one new initializer run on the same checkout that proves long context on the wire, at start, and in usage; owner Streamliner service 79bfffa9; the operator authorized the repair, one restart, and one replacement initializer on 2026-10-08; the repair session started on 2026-10-12, but no repair has merged or been deployed and no restart or replacement initializer has occurred",
           "status": "pending"
         }
       ]
