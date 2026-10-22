@@ -318,12 +318,13 @@ authorize consumer launch.
 
 The Application Client design inspection approved `7505568c` against merge base
 `e4f585a7` on 2026-10-22. It ran `gpt-5.6-sol` with high reasoning, and its
-context tier was not recorded. The task specifies a Claude Opus 4.8,
-high-reasoning, long-context inspector, so whether this inspection satisfies the
-fresh design inspection requirement needs a campaign disposition; it receives no
-design credit until then. The inspection judged that incident I161-1 does not
-block its design verdict, and it states that the incident remains unresolved,
-with isolation acceptance, causality, and closure withheld.
+context tier was not recorded. The task then specified a Claude Opus 4.8,
+high-reasoning, long-context inspector, so whether this inspection satisfied the
+fresh design inspection requirement needed a campaign disposition. The campaign
+later declined to credit it, as recorded below. The inspection judged that
+incident I161-1 does not block its design verdict, and it states that the
+incident remains unresolved, with isolation acceptance, causality, and closure
+withheld.
 
 The Local Daemon design inspection required changes at `7505568c` on 2026-10-22.
 It found four reachable design-boundary defects by static analysis; none was
@@ -704,21 +705,54 @@ design credit for this exact head only; any head movement invalidates it. The
 steward's last provider read after writing the verdict returned mergeability
 unknown, and the verdict carries no clean-merge claim forward; a later read for
 this record showed the PR mergeable and clean at the same head, but merge
-readiness still needs its own fresh guards. A fresh Application Client design
-inspection and the campaign's inspector-profile disposition remain pending, so
-`4cd34938` has no Application Client design credit and no merge or closure
-credit. I161-1 remains unresolved, E161-1 remains withheld, and the formal
-post-merge consumer gate remains planned.
+readiness still needs its own fresh guards. At that point the fresh Application
+Client design inspection and the campaign's inspector-profile disposition were
+pending, so `4cd34938` had no Application Client design credit and no merge or
+closure credit. I161-1 remains unresolved, E161-1 remains withheld, and the
+formal post-merge consumer gate remains planned.
+
+On 2026-10-22 the campaign resolved the Application Client inspector-profile
+disposition by enforcing an existing operator instruction, not by granting a
+waiver. On 2026-09-24 the operator directed that all new sessions use GPT-6
+Astra with high reasoning and 1.2M context, and a 2026-10-08 campaign directive
+applies that instruction to all new sessions and delegates as gpt-6-astra with
+high reasoning and the long-context tier, with no silent downgrade. That
+standing instruction governs new inspectors over the Claude Opus 4.8 profile
+this task previously named, and this record reconciles the task text; the
+substantive requirement for a fresh, independent, read-only design inspection is
+unchanged. The campaign's directive declines to credit the `7505568c`
+inspection, which ran gpt-5.6-sol without a recorded context tier, and assumes
+no equivalence between models. It assigns App's existing Application Client
+design steward to run one fresh, independent gpt-6-astra, high-reasoning,
+long-context inspection of the complete exact-head delta at `4cd34938`,
+recording the actual profile, head, tree, comparison base, and inspector
+identity. The operator asked for 1.2M context, but the last verified catalog
+limit was 1,050,000, which does not prove an actual execution budget; the
+inspection must record supported and observed context separately and report a
+provisioning blocker rather than substitute a profile. The inspection may
+proceed without waiting for this record. `4cd34938` has no Application Client
+design credit until that verdict returns. The directive grants no merge,
+closure, release, or consumer-launch authority, and the fresh design verdicts
+and a freshly guarded campaign merge floor remain required.
 
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access control
 list of the operator's real `AppData\Local` directory in several runs, and no
 prior descriptor or backup exists. That incident, I161-1, withholds isolation
-certification and awaits an operator-impact disposition. No restoration or
-cleanup is authorized, and local runtime and proof replay are frozen, so runtime
-validation relies on CI. Design inspection acceptance, merge authorization, and
-merge remain outstanding. The node stays in progress, and issue #152 stays open.
+certification. On 2026-10-22 the operator chose to preserve the current host
+access control lists and evidence and to have the existing owners continue a
+bounded read-only impact review. That choice resolves only the initial operator
+response. It authorizes no restoration, inferred default, inheritance change,
+recursive reset, other access-control change, proof rerun, or cleanup. Impact
+assessment and isolation acceptance remain open and E161-1 remains withheld; the
+choice does not establish an absence of impact, close the incident, or grant
+merge credit. Local runtime and proof replay remain frozen, so runtime
+validation relies on CI; ordinary source and CI work may continue within that
+freeze. It does not change the gate evidence for PR head `4cd34938`, which
+remains scoped to that exact head. A fresh gpt-6-astra Application Client design
+inspection, merge authorization, and merge remain outstanding. The node stays in
+progress, and issue #152 stays open.
 
 ## Decisions
 
