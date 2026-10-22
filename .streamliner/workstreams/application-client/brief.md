@@ -756,10 +756,10 @@ I161-1 open and E161-1 withheld under the operator's preservation and read-only
 review directive; it judges that they do not block this source-design acceptance
 because the accepted contract makes no intra-user isolation claim, and it grants
 no isolation acceptance, incident closure, or heap-corruption causal claim.
-`4cd34938` therefore has Application Client design credit for this exact head
-only; any head movement invalidates it. Source approval, required CI, both
-pre-merge consumer attestations, and both design inspections have now passed at
-`4cd34938`. The pre-merge obligations are not complete: E161-1 remains an
+`4cd34938` therefore had Application Client design credit for that exact head
+only; the later head movement invalidated it. Source approval, required CI, both
+pre-merge consumer attestations, and both design inspections had passed at
+`4cd34938`. The pre-merge obligations were not complete: E161-1 remains an
 outstanding validation obligation, not an accepted gap, and I161-1 impact
 assessment and isolation acceptance remain open. The verdict grants no merge,
 release, closure, or post-merge consumer gate credit, and the formal post-merge
@@ -785,6 +785,66 @@ I161-1 preservation and read-only review directive are unchanged. The correction
 grants no access-control restoration or reset, workstation proof replay,
 cleanup, release, tag, new worker, or new approval queue.
 
+On 2026-10-22 the implementer pushed successor head `5d21a63d` (tree `e435edf7`)
+to resolve E161-1. It is two commits over `4cd34938` (intermediate `669cb86e`)
+and changes four paths (+588): a Windows CI job, the proof script
+`tests/released_v021_upgrade_proof.ps1`, a release-candidate test, and
+Application Client documentation. On an ephemeral CI runner, the proof downloads
+the official v0.2.1 Windows release, verifies its pinned digest and build
+identity, and runs the released upgrade in a fresh disposable root directly
+under the volume root. It changes the access control list of that root only,
+never its parent, and runs nothing on the operator's workstation. The
+implementer reports static validation and fresh gpt-6-astra, high-reasoning,
+long-context approvals with no findings: one for the exact delta from `4cd34938`
+and one for the complete Application Client design at `5d21a63d`. An
+intermediate review found that a script parameter collided with the read-only
+PowerShell `$PID` variable; the final head renamed it, and the complete delta
+was reviewed again. Both reviews state their limits: the hosted proof must pass
+at this exact head before E161-1 receives runtime credit; the proof establishes
+compatibility of a fresh layout written by the released installer, not drain of
+a live v0.2.1 daemon; and neither review grants CI, consumer, merge, release, or
+I161-1 credit. The implementer has requested Local's source and design reviews
+and fresh Watcher and Operator Station attestations. Required CI run 39805183080
+completed with conclusion failure at 2026-10-22T15:39:42Z. Fifteen of its 17
+jobs passed, including Live Postgres parity and Windows InstalledCurrent
+Postgres process proofs, and two required Windows jobs failed. The new job
+`Released v0.2.1 upgrade proof (Windows)` failed in its proof step after
+checkout and the exact-head build succeeded; the script stopped with
+`PSMODULEPATH failed with exit code 1`, and its cleanup of the exact root and
+its evidence upload succeeded. `Build and test (windows-latest)` failed one
+test,
+`station_intent::tests::a_cooperatively_truncated_phase_still_returns_its_partial_page`,
+which panicked with "a cooperative stop must be returned to the caller, not
+abandoned"; `src\station_intent.rs` is unchanged from `4cd34938`. No cause is
+established beyond that output, and E161-1 receives no runtime credit. Local's
+source review returned CHANGES REQUIRED with two proof-script findings. L161-7:
+the command timeout bounds only direct process exit, not output-pipe completion
+or the wait after termination, and a timed-out command's output is discarded
+before it is saved. L161-8: cleanup is authorized before the script has
+exclusively created its root, so failing to create an already existing path can
+still authorize its recursive deletion. Local's design revalidation also
+returned CHANGES REQUIRED with P161-1, the same cleanup-before-ownership gap,
+and P161-2: a process lookup that fails without returning a process object is
+treated as confirmed exit. Watcher's pre-merge attestation returned CHANGES
+REQUIRED: its source consumability approval stands because the Watcher-facing
+files are byte-identical to `4cd34938`, but runtime qualification is withheld
+because required CI failed. Operator Station approved source consumability and
+returned runtime CHANGES REQUIRED for the two failed jobs; OS-PR161-0486BEE-1
+remains closed. Neither consumer grants runtime consumer credit. Neither Local
+review alleges an actual collision, deletion, or hang, and both confirm that
+production source and the accepted product design are unchanged from `4cd34938`.
+Local also qualifies the proof's scope. It installs the candidate into a fresh
+root with `--skip-drain` and then attaches through the public client, so it does
+not prove drain of a running v0.2.1 daemon or migration of an existing store. CI
+evidence, caches, and build output sit outside the disposable root, environment
+redirection is not registry virtualization, and the disposable hosted runner is
+the outer isolation boundary. Local treats CI run 39805183080 as diagnostic only
+for readiness. The implementer owns the repairs within the existing delivery
+flow, and no new approval layer is added. Because the head moved, no `4cd34938`
+evidence carries over, and `5d21a63d` has no gate credit. The I161-1 workstation
+preservation and freeze are unchanged, and no release, tag, or fleet action is
+authorized.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access control
@@ -801,8 +861,9 @@ merge credit. Local runtime and proof replay remain frozen, so runtime
 validation relies on CI; ordinary source and CI work may continue within that
 freeze. It does not change the gate evidence for PR head `4cd34938`, which
 remains scoped to that exact head. E161-1 validation and merge remain
-outstanding, and the implementer owns resolving the remaining evidence. The node
-stays in progress, and issue #152 stays open.
+outstanding; the implementer is resolving E161-1 through a hosted CI proof whose
+first run at `5d21a63d` failed and whose script needs the Local repairs. The
+node stays in progress, and issue #152 stays open.
 
 ## Decisions
 

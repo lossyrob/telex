@@ -3,13 +3,14 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at head `4cd34938`, which is intended
-  to address Operator Station finding OS-PR161-0486BEE-1 at `0486beeb`; Local's
-  source review and the retained delta review approved it, its required CI
-  passed, the Watcher and Operator Station pre-merge consumer attestations and
-  both design inspections approved it, E161-1 validation remains outstanding
-  under implementer ownership, and proof-isolation incident I161-1 is unresolved
-  while its user-directed read-only impact review continues
+- **Status:** in progress; PR #161 is open at head `5d21a63d`, which adds an
+  ephemeral Windows CI proof of the official v0.2.1 upgrade for E161-1 over
+  predecessor `4cd34938`; its required CI failed in the new proof job and the
+  Windows build-and-test job, Local's source and design reviews returned changes
+  required for proof-script findings, and both consumers withheld runtime
+  credit, so it has no gate credit and the implementer owns the repairs;
+  proof-isolation incident I161-1 is unresolved while its user-directed
+  read-only impact review continues
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -1097,10 +1098,10 @@ canonical owners. It keeps I161-1 open and E161-1 withheld under the operator's
 preservation and read-only review directive; it judges that they do not block
 this source-design acceptance because the accepted contract makes no intra-user
 isolation claim, and it grants no isolation acceptance, incident closure, or
-heap-corruption causal claim. `4cd34938` therefore has Application Client design
-credit for this exact head only; any head movement invalidates it. Source
+heap-corruption causal claim. `4cd34938` therefore had Application Client design
+credit for that exact head only; the later head movement invalidated it. Source
 approval, required CI, both pre-merge consumer attestations, and both design
-inspections have now passed at `4cd34938`. The pre-merge obligations are not
+inspections had passed at `4cd34938`. The pre-merge obligations were not
 complete: E161-1 remains an outstanding validation obligation, not an accepted
 gap, and I161-1 impact assessment and isolation acceptance remain open. The
 verdict grants no merge, release, closure, or post-merge consumer gate credit,
@@ -1128,6 +1129,95 @@ preservation and read-only review directive are unchanged. The correction grants
 no access-control restoration or reset, workstation proof replay, cleanup,
 release, tag, new worker, or new approval queue.
 
+On 2026-10-22 the implementer pushed successor head
+`5d21a63d856efbfb233a307baac840b4991affdb` (tree
+`e435edf7f454428bdb3f36a5937c007f43abbfba`) to resolve E161-1. It is two commits
+over `4cd34938` (intermediate `669cb86e`) and changes four paths (+588): a
+Windows CI job, the proof script `tests/released_v021_upgrade_proof.ps1`, a
+release-candidate test, and Application Client documentation. On an ephemeral CI
+runner, the proof downloads the official v0.2.1 Windows release, verifies its
+pinned digest and build identity, and runs the released upgrade in a fresh
+disposable root directly under the volume root. It changes the access control
+list of that root only, never its parent, and runs nothing on the operator's
+workstation. The implementer reports static validation and fresh gpt-6-astra,
+high-reasoning, long-context approvals with no findings: one for the exact delta
+from `4cd34938` and one for the complete Application Client design at `5d21a63d`
+(`REVIEW-PR161-5D21A63-E161-DELTA.md`, 1,884 bytes, SHA-256
+`232a30b9983ce7cebad2972ed44c85733cb6c7dd22e7faf264fc4dde12146b9d`;
+`REVIEW-PR161-5D21A63-DESIGN.md`, 1,765 bytes, SHA-256
+`5626006e1940fb7d91bc77ab35cb06bb7a40e01695c746267a2c7e1bd203b939`). An
+intermediate review found that a script parameter collided with the read-only
+PowerShell `$PID` variable; the final head renamed it, and the complete delta
+was reviewed again. Both reviews state their limits: the hosted proof must pass
+at this exact head before E161-1 receives runtime credit; the proof establishes
+compatibility of a fresh layout written by the released installer, not drain of
+a live v0.2.1 daemon; and neither review grants CI, consumer, merge, release, or
+I161-1 credit. The implementer has requested Local's source and design reviews
+and fresh Watcher and Operator Station attestations. Required CI run 39805183080
+completed with conclusion failure at 2026-10-22T15:39:42Z. Fifteen of its 17
+jobs passed, including Live Postgres parity (job 119916396356) and Windows
+InstalledCurrent Postgres process proofs (job 119916396358), and two required
+Windows jobs failed. The new job `Released v0.2.1 upgrade proof (Windows)` (job
+119916396934) failed at 15:31:59Z in its proof step, after checkout and the
+exact-head build succeeded; the script stopped with `PSMODULEPATH failed with
+exit code 1`, and its cleanup of the exact root and its evidence upload
+succeeded. `Build and test (windows-latest)` (job 119916396832) failed at
+15:37:46Z in its test step:
+`station_intent::tests::a_cooperatively_truncated_phase_still_returns_its_partial_page`
+panicked at `src\station_intent.rs:3848` with "a cooperative stop must be
+returned to the caller, not abandoned" (564 passed, 1 failed, 4 ignored). That
+source file is unchanged from `4cd34938`. App retained the failed-job log
+(`pr161-ci39805183080-5d21-failed.log` in session
+eaa99eef-33a6-40ff-8b8d-3168e6f2a805, 222,216 bytes, SHA-256
+`c17728c8f3d69c78109246465712efe934a82e21ba04f763c00afcf4eee6507e`). No cause is
+established beyond that output, and E161-1 receives no runtime credit. Local's
+source review returned CHANGES REQUIRED
+(`pr161-local-delta-5d21a63-20261022.json` in session
+aeae4fa9-c5fc-4da9-b60e-bcf5b1a98f57, 11,349 bytes, SHA-256
+`ad2cc9b0be435eb92ec38248ff9dc1a9b11c7e6df01ba7ec602321ae28286465`) with two
+proof-script findings. L161-7: the command timeout bounds only direct process
+exit, not output-pipe completion or the wait after termination, and a timed-out
+command's output is discarded before it is saved. L161-8: cleanup is authorized
+before the script has exclusively created its root, so failing to create an
+already existing path can still authorize its recursive deletion. Local's design
+revalidation also returned CHANGES REQUIRED
+(`pr161-local-design-inspection-5d21a63-20261022.md` in session
+af271672-5d33-418c-bb9c-0f4d4570c7d7, 14,413 bytes, SHA-256
+`39696746582c75108850f987cd23730b61b574a0e6be71a0c43d7eefa9b1c349`, correlation
+`local-daemon-pr161-proof-design-5d21a63-20261022`; steward gpt-6-astra, high
+reasoning, long context) with P161-1, the same cleanup-before-ownership gap, and
+P161-2: a process lookup that fails without returning a process object is
+treated as confirmed exit. Watcher's pre-merge attestation
+(`watcher-pr161-5d21a63-premerge-consumability-attestation.md` in session
+e00d296e-ffca-4477-b1c8-c4d340bd30be, 6,366 bytes, SHA-256
+`eda6eb5952964b95075475392058df0096085200c17d62bb1fa4be2e6293b98c`) returned
+CHANGES REQUIRED: its source consumability approval stands because the
+Watcher-facing public and runtime files are byte-identical to `4cd34938`, but
+runtime qualification is withheld because required CI failed. Operator Station
+approved source consumability
+(`operator-station-pr161-premerge-consumability-attestation-5d21a63d-source.json`
+in session 002c5122-fc0d-403c-8f87-625d87385d44, 12,671 bytes, SHA-256
+`55d19fe5c6842f8e6f312b79a528f5903d2bfb3bc07006350c73037c9b853538`) and returned
+runtime CHANGES REQUIRED
+(`operator-station-pr161-premerge-consumability-attestation-5d21a63d-runtime.json`,
+11,691 bytes, SHA-256
+`3e1d26010d731267d9a3eb5dff7ac8019b5110c0a829d0038f4296bb8c708e6a`) with open
+findings OS-PR161-5D21-E161-1 and OS-PR161-5D21-WIN-1 for the two failed jobs;
+OS-PR161-0486BEE-1 remains closed. Neither consumer grants runtime consumer
+credit. Neither Local review alleges an actual collision, deletion, or hang, and
+both confirm that production source and the accepted product design are
+unchanged from `4cd34938`. Local also qualifies the proof's scope. It installs
+the candidate into a fresh root with `--skip-drain` and then attaches through
+the public client, so it does not prove drain of a running v0.2.1 daemon or
+migration of an existing store. CI evidence, caches, and build output sit
+outside the disposable root, environment redirection is not registry
+virtualization, and the disposable hosted runner is the outer isolation
+boundary. Local treats CI run 39805183080 as diagnostic only for readiness. The
+implementer owns the repairs within the existing delivery flow, and no new
+approval layer is added. Because the head moved, no `4cd34938` evidence carries
+over, and `5d21a63d` has no gate credit. The I161-1 workstation preservation and
+freeze are unchanged, and no release, tag, or fleet action is authorized.
+
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the
 proof script rewrote the access control list of the operator's real
@@ -1149,9 +1239,10 @@ absence of impact, close the incident, or grant merge credit. Local runtime and
 proof replay remain frozen, so runtime validation relies on CI; ordinary source
 and CI work may continue within that freeze. It does not change the gate
 evidence for PR head `4cd34938`, which remains scoped to that exact head. E161-1
-validation and merge remain outstanding, and the implementer owns resolving the
-remaining evidence. Scope, invalidation conditions, and the accepted trusted
-`InstalledCurrent` policy are unchanged.
+validation and merge remain outstanding; the implementer is resolving E161-1
+through a hosted CI proof whose first run at `5d21a63d` failed and whose script
+needs the Local repairs. Scope, invalidation conditions, and the accepted
+trusted `InstalledCurrent` policy are unchanged.
 
 ## Invalidation conditions
 
