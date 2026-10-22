@@ -2049,6 +2049,74 @@ pub(crate) async fn connect_existing_with_bootstrap(
     }
 }
 
+/// Connect to an already-running selected predecessor while the caller holds
+/// exclusive selector admission for its trusted root.
+///
+/// This avoids reacquiring shared admission during upgrade/rollback drain while
+/// retaining the full selected-image and capability-evidence checks.
+pub(crate) async fn connect_existing_with_selection(
+    store_key: &str,
+    selection: &crate::daemon_bootstrap::SelectionToken,
+) -> Result<DaemonClient> {
+    ensure_bootstrap_mapped_identity_supported()?;
+    let expected_exe = selection.target_exe.clone();
+    let expected_identity = selection.file_identity;
+    #[cfg(windows)]
+    let exe_witness = crate::daemon_bootstrap::open_windows_witness(&expected_exe)
+        .map_err(DaemonError::Bootstrap)?;
+    #[cfg(windows)]
+    if exe_witness.identity != expected_identity {
+        return Err(DaemonError::Bootstrap(
+            crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
+        ));
+    }
+    #[cfg(target_os = "linux")]
+    let exe_witness = crate::daemon_bootstrap::open_linux_witness(&expected_exe)
+        .map_err(DaemonError::Bootstrap)?;
+    #[cfg(target_os = "linux")]
+    if exe_witness.identity != expected_identity {
+        return Err(DaemonError::Bootstrap(
+            crate::daemon_bootstrap::DaemonBootstrapFailure::ExecutableIdentityMismatch,
+        ));
+    }
+
+    let paths = DaemonPaths::current()?;
+    let conn = platform::connect(&paths.endpoint).await?;
+    platform::verify_server_peer_bootstrap(
+        &conn,
+        &expected_exe,
+        None,
+        None,
+        Some(&expected_identity),
+    )
+    .map_err(bootstrap_error_from_peer)?;
+    let cap = read_cap_file(&paths.cap_path)?;
+    let (server_pid, server_start_time) = cap_required_peer_identity(&cap)?;
+    platform::verify_server_peer_bootstrap(
+        &conn,
+        &expected_exe,
+        Some(server_pid),
+        Some(server_start_time),
+        Some(&expected_identity),
+    )
+    .map_err(bootstrap_error_from_peer)?;
+    let resolved = ResolvedBootstrap {
+        expected_exe,
+        expected_identity,
+        selection: Some(selection.clone()),
+        admission: None,
+        #[cfg(windows)]
+        exe_witness,
+        #[cfg(target_os = "linux")]
+        exe_witness,
+    };
+    verify_cap_bootstrap_evidence(&cap, &paths, &resolved).map_err(bootstrap_error_from_peer)?;
+    let hello = proto::client_hello(store_key);
+    let client = handshake_connected(conn, paths, &hello).await?;
+    verify_helloack_against_selection(&client.ack, selection)?;
+    Ok(client)
+}
+
 async fn connect_existing_bootstrap_with_selection(
     store_key: &str,
     policy: &crate::daemon_bootstrap::BootstrapPolicy,

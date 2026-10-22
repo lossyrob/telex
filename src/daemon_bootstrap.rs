@@ -390,16 +390,16 @@ pub(crate) fn resolve_installed_current(
 /// selector, containment, manifest, and executable checks still apply.
 pub(crate) fn resolve_selected_current_for_drain(
     trusted_root: &Path,
-) -> Result<Option<PathBuf>, DaemonBootstrapFailure> {
+) -> Result<Option<SelectionToken>, DaemonBootstrapFailure> {
     match resolve_installed_current_with_admission(trusted_root, AdmissionValidation::Strict) {
-        Ok(candidate) => Ok(Some(candidate.token.target_exe)),
+        Ok(candidate) => Ok(Some(candidate.token)),
         Err(DaemonBootstrapFailure::MissingCurrent) => Ok(None),
         Err(DaemonBootstrapFailure::IncompatibleManifest) => {
             resolve_installed_current_with_admission(
                 trusted_root,
                 AdmissionValidation::ProbeCandidate,
             )
-            .map(|candidate| Some(candidate.token.target_exe))
+            .map(|candidate| Some(candidate.token))
         }
         Err(error) => Err(error),
     }

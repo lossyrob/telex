@@ -291,7 +291,7 @@ async fn perform_upgrade(
     let drain = if args.no_switch || args.skip_drain {
         json!({"skipped": true})
     } else {
-        drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_deref()).await?
+        drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_ref()).await?
     };
     for warning in &installed.warnings {
         eprintln!("warning: {warning}");
@@ -450,7 +450,7 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     let drain = if args.skip_drain {
         json!({"skipped": true})
     } else {
-        drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_deref()).await?
+        drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_ref()).await?
     };
     let switched = install::switch_to(&layout, &target)?;
     drop(selector_admission);
@@ -719,11 +719,11 @@ fn validate_drain_caller(selected_executable: Option<&Path>) -> Result<()> {
 
 fn preflight_selected_predecessor_for_drain(
     layout: &install::InstallLayout,
-) -> Result<Option<PathBuf>> {
+) -> Result<Option<crate::daemon_bootstrap::SelectionToken>> {
     let selected = crate::daemon_bootstrap::resolve_selected_current_for_drain(&layout.root)
         .map_err(|error| anyhow!("validate selected predecessor before drain: {error}"))?;
     if let Some(selected) = selected {
-        validate_drain_caller(Some(&selected))?;
+        validate_drain_caller(Some(&selected.target_exe))?;
         return Ok(Some(selected));
     }
     let paths = crate::daemon::DaemonPaths::current()?;
@@ -740,7 +740,7 @@ fn preflight_selected_predecessor_for_drain(
 async fn drain_daemon(
     ctx: &Ctx,
     timeout_ms: u64,
-    selected_executable: Option<&Path>,
+    selected: Option<&crate::daemon_bootstrap::SelectionToken>,
 ) -> Result<serde_json::Value> {
     let store_key = ctx.store_key()?;
     let paths = crate::daemon::DaemonPaths::current()?;
@@ -751,12 +751,19 @@ async fn drain_daemon(
         }
         Err(e) => return Err(e.into()),
     };
-    validate_drain_caller(selected_executable)?;
+    let selected = selected.ok_or_else(|| {
+        anyhow!(
+            "refusing ordinary daemon drain because the target install root has no selected \
+             current image; pass --skip-drain for an explicit break-glass transition"
+        )
+    })?;
+    validate_drain_caller(Some(&selected.target_exe))?;
     let server_pid = cap.server_pid;
     let server_start_time = cap.server_start_time;
     let timeout = Duration::from_millis(timeout_ms.max(1));
     let response = match tokio::time::timeout(timeout, async {
-        let mut client = crate::daemon::connect_existing(&store_key).await?;
+        let mut client =
+            crate::daemon::connect_existing_with_selection(&store_key, selected).await?;
         client
             .request(&Request::Drain {
                 proof: Some(cap.admin_cap),
