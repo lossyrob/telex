@@ -30,7 +30,27 @@ struct PgReleaseClient {
     client: AsyncMutex<tokio_postgres::Client>,
     connection: AsyncMutex<(tokio_postgres::Config, Option<String>)>,
     profile: Option<crate::profiles::BackendProfile>,
-    repairing: AtomicBool,
+    repairing: Arc<AtomicBool>,
+}
+
+struct ReleaseRepairGate(Arc<AtomicBool>);
+
+impl Drop for ReleaseRepairGate {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::Release);
+    }
+}
+
+async fn run_bounded_release_repair<F, T>(
+    repairing: Arc<AtomicBool>,
+    budget: Duration,
+    repair: F,
+) -> Option<T>
+where
+    F: std::future::Future<Output = T>,
+{
+    let _gate = ReleaseRepairGate(repairing);
+    tokio::time::timeout(budget, repair).await.ok()
 }
 
 struct ConnectionTaskGuard(Option<tokio::task::JoinHandle<()>>);
@@ -955,7 +975,7 @@ impl PgBackend {
                 client: AsyncMutex::new(release_client),
                 connection: AsyncMutex::new((release_config, schema.map(str::to_string))),
                 profile: None,
-                repairing: AtomicBool::new(false),
+                repairing: Arc::new(AtomicBool::new(false)),
             }),
             notify_channel,
         })
@@ -975,7 +995,7 @@ impl PgBackend {
                 client: AsyncMutex::new(release_client),
                 connection: AsyncMutex::new((release_config, schema)),
                 profile: Some(release_profile),
-                repairing: AtomicBool::new(false),
+                repairing: Arc::new(AtomicBool::new(false)),
             }),
             notify_channel,
         })
@@ -1045,12 +1065,15 @@ impl PgBackend {
             return;
         }
         let release = self.release.clone();
+        let repairing = release.repairing.clone();
         tokio::spawn(async move {
-            if !release.client.lock().await.is_closed() {
-                release.repairing.store(false, Ordering::Release);
-                return;
-            }
             let repair = async {
+                {
+                    let client = release.client.lock().await;
+                    if !client.is_closed() {
+                        return Ok::<_, anyhow::Error>(());
+                    }
+                }
                 let (config, schema) = if let Some(profile) = &release.profile {
                     let (config, schema) = crate::profiles::pg_connect_config(profile)
                         .await
@@ -1061,18 +1084,14 @@ impl PgBackend {
                     (cached.0.clone(), cached.1.clone())
                 };
                 let replacement = PgBackend::open_client(&config, schema.as_deref()).await?;
-                Ok::<_, anyhow::Error>((replacement, config, schema))
-            };
-            if let Ok(Ok((replacement, config, schema))) =
-                tokio::time::timeout(Duration::from_secs(5), repair).await
-            {
                 let mut client = release.client.lock().await;
                 if client.is_closed() {
                     *client = replacement;
                     *release.connection.lock().await = (config, schema);
                 }
-            }
-            release.repairing.store(false, Ordering::Release);
+                Ok(())
+            };
+            let _ = run_bounded_release_repair(repairing, Duration::from_secs(5), repair).await;
         });
     }
 
@@ -3507,8 +3526,71 @@ impl Backend for PgBackend {
 
 #[cfg(test)]
 mod tests {
-    use super::{classify_wait_error, sanitize_ident};
+    use super::{classify_wait_error, run_bounded_release_repair, sanitize_ident};
     use crate::backend::is_retryable_backend_error;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::Mutex;
+
+    struct DropEvidence(Arc<AtomicBool>);
+
+    impl Drop for DropEvidence {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::Release);
+        }
+    }
+
+    #[tokio::test]
+    async fn release_repair_budget_includes_mutex_wait_and_clears_gate() {
+        let repairing = Arc::new(AtomicBool::new(true));
+        let mutex = Arc::new(Mutex::new(()));
+        let held = mutex.lock().await;
+        let waiting = mutex.clone();
+
+        let result =
+            run_bounded_release_repair(repairing.clone(), Duration::from_millis(10), async move {
+                let _guard = waiting.lock().await;
+            })
+            .await;
+
+        assert!(
+            result.is_none(),
+            "held mutex must exhaust the one repair budget"
+        );
+        assert!(
+            !repairing.load(Ordering::Acquire),
+            "timeout must clear the single-flight gate"
+        );
+        assert!(
+            !repairing.swap(true, Ordering::AcqRel),
+            "a subsequent repair must be schedulable"
+        );
+        repairing.store(false, Ordering::Release);
+        drop(held);
+    }
+
+    #[tokio::test]
+    async fn release_repair_timeout_drops_unpublished_replacement() {
+        let repairing = Arc::new(AtomicBool::new(true));
+        let unpublished_dropped = Arc::new(AtomicBool::new(false));
+        let publication = Arc::new(Mutex::new(()));
+        let held = publication.lock().await;
+        let delayed = publication.clone();
+        let evidence = unpublished_dropped.clone();
+
+        let result =
+            run_bounded_release_repair(repairing.clone(), Duration::from_millis(10), async move {
+                let _unpublished = DropEvidence(evidence);
+                let _publication = delayed.lock().await;
+            })
+            .await;
+
+        assert!(result.is_none());
+        assert!(unpublished_dropped.load(Ordering::Acquire));
+        assert!(!repairing.load(Ordering::Acquire));
+        drop(held);
+    }
 
     #[test]
     fn wait_classifies_structural_network_errors_through_context() {
