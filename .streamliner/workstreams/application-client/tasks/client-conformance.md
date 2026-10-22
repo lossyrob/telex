@@ -5,8 +5,9 @@
 - **Type:** implementation
 - **Status:** in progress; PR #161 is open at successor head `f02f0ee9`, which
   is intended to address the Local Daemon design findings at `7505568c`; Local's
-  source review and the retained delta review approved it, its required CI is
-  under way, and proof-isolation incident I161-1 is unresolved
+  source review and the retained delta review approved it, its required CI
+  failed, a further successor is assigned, and proof-isolation incident I161-1
+  is unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -667,6 +668,25 @@ validation. This is a source approval only. It gives no runtime, consumer,
 design, merge, or closure credit, and it does not accept the design findings as
 resolved. Required CI run 39755917809 is still in progress; its result is not
 recorded here. Incident I161-1 and the withholding of E161-1 are unchanged.
+
+Required CI run 39755917809 at `f02f0ee9` completed with failure at
+2026-10-22T09:48:54Z. Two of its 16 jobs failed. In the required Live Postgres
+parity job (119747762473), the PostgreSQL leg of the Application Client
+conformance battery panicked during the strict-recovery case: while restarting
+the daemon, the daemon for `appconf-postgres` did not stop within the deadline.
+The SQLite leg of the same battery passed. The non-required macOS Copilot
+fallback E2E job (119747762373) failed to compile a test under `-D warnings`
+because the method `set_daemon_executable` is never used. The other 14 jobs
+succeeded, including the required Windows InstalledCurrent Postgres process
+proofs (119747762498). The failure log is retained by the Application Client
+session (18,759 bytes, 103 lines, SHA-256
+`40b64b0ce92ed450979cc6ed142b294bf0cd1318955bd035c0992c78e2cd8ade`). Because a
+required job failed, `f02f0ee9` receives no CI credit, and the passing jobs give
+no readiness credit. The Local and retained delta-review approvals remain source
+approvals only, and Local's acceptance of the D161 source corrections is
+unchanged; neither is design acceptance. A further successor head is assigned to
+address these failures. Any head movement invalidates all `f02f0ee9` evidence.
+Incident I161-1 and the withholding of E161-1 are unchanged.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the

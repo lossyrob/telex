@@ -388,6 +388,23 @@ and it does not accept the design findings as resolved. Required CI run
 39755917809 is still in progress; its result is not recorded here. Incident
 I161-1 and the withholding of E161-1 are unchanged.
 
+Required CI run 39755917809 at `f02f0ee9` completed with failure at
+2026-10-22T09:48:54Z. Two of its 16 jobs failed. In the required Live Postgres
+parity job (119747762473), the PostgreSQL leg of the Application Client
+conformance battery panicked during the strict-recovery case: while restarting
+the daemon, the daemon for `appconf-postgres` did not stop within the deadline.
+The SQLite leg of the same battery passed. The non-required macOS Copilot
+fallback E2E job (119747762373) failed to compile a test under `-D warnings`
+because the method `set_daemon_executable` is never used. The other 14 jobs
+succeeded, including the required Windows InstalledCurrent Postgres process
+proofs (119747762498). Because a required job failed, `f02f0ee9` receives no CI
+credit, and the passing jobs give no readiness credit. The Local and retained
+delta-review approvals remain source approvals only, and Local's acceptance of
+the D161 source corrections is unchanged; neither is design acceptance. A
+further successor head is assigned to address these failures. Any head movement
+invalidates all `f02f0ee9` evidence. Incident I161-1 and the withholding of
+E161-1 are unchanged.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access control
