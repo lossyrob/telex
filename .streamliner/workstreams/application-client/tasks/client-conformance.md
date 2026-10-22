@@ -3,7 +3,8 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; the existing writer resumed on 2026-10-08
+- **Status:** in progress; PR #161 is open at head `9cc23e67` with
+  implementation review passed and required CI failed, needing repair
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -433,6 +434,16 @@ merging current main `2c084873719080b812e0d0c4bf92125afa751499` by ordinary
 merge before full validation, exact-head review, and publication of the sole
 delivery PR. Scope, invalidation conditions, and the accepted trusted
 `InstalledCurrent` policy are unchanged.
+
+On 2026-10-22 (UTC) the writer published the sole delivery PR, PR #161, at
+exact head `9cc23e67a99440ee51e7b60fcf8d68f6b84edef3` (tree
+`b678e0cc4eca2b598e5a7cae0fe02488523532b4`). Implementation review passed at
+that head: two retained independent reviews of the full diff from merge base
+`e4f585a7` report no actionable findings. Required CI run 39716184110 then
+completed with failure at that head, so CI repair and an exact-head rerun,
+consumer attestations, design inspection, and merge remain outstanding. Scope,
+invalidation conditions, and the accepted trusted `InstalledCurrent` policy
+are unchanged.
 
 ## Invalidation conditions
 

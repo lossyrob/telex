@@ -164,8 +164,8 @@ schema-3 recovery release that had excluded this node is complete, so that
 exclusion has ended. The same issue #152 writer resumed on
 `feature/client-conformance` at preserved clean head
 `5fdd95c2c32cde08a6c936171b208bbf14f6677c`. That head holds the 2026-09-02
-implementation and review-fix commits and merges main `ed417c6b`. No PR exists
-yet. The writer is merging current main
+implementation and review-fix commits and merges main `ed417c6b`. No PR existed
+then. The writer is merging current main
 `2c084873719080b812e0d0c4bf92125afa751499` into the branch; full validation,
 exact-head review, required CI, and design inspection follow on the integrated
 head. The accepted trusted `InstalledCurrent` policy is unchanged and gains no
@@ -188,6 +188,22 @@ documents migration for typed bootstrap errors and non-exhaustive matching.
 This records authorization, not completion: no final 0.3.0 source head, PR,
 merge, tag, or release is established or claimed here. No node, dependency,
 gate, or protocol or schema version changes.
+
+On 2026-10-22 (UTC) the issue #152 writer published PR #161 from
+`feature/client-conformance` at exact head
+`9cc23e67a99440ee51e7b60fcf8d68f6b84edef3` (tree
+`b678e0cc4eca2b598e5a7cae0fe02488523532b4`), based on main `2c2b9fb5`. The PR
+is open, non-draft, and mergeable, and its body has no closing reference.
+Implementation review passed at that exact head. Two retained independent
+reviews, each run with `gpt-6-astra`, high reasoning, and long context, cover
+the full diff from merge base `e4f585a7` and report no actionable findings; the
+review synthesis records all 14 earlier findings resolved. Main moved from
+`e4f585a7` to `2c2b9fb5` only in `.streamliner/**`. Required CI run
+39716184110 then completed with failure at that head: 11 jobs passed and 5
+failed, including both Build and test jobs and Live Postgres parity. CI repair
+and an exact-head rerun, Local's separate trust and spawn review, consumer
+attestations, design inspection, and merge remain outstanding. The node stays
+in progress and issue #152 stays open.
 
 ## Decisions
 
