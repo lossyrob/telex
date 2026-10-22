@@ -4394,6 +4394,27 @@ async fn needs_attach_for_missing_member(
     )
 }
 
+fn annotate_wait_ownership_loss(
+    response: Response,
+    lease_epoch: i64,
+    owner_instance_id: &str,
+) -> Response {
+    match response {
+        Response::Error {
+            message,
+            needs_attach_reason: Some(NeedsAttachReason::RestartLost),
+            ..
+        } => proto::needs_attach_with_reason(
+            format!(
+                "{message}; wait delivery proof lost ownership at epoch={lease_epoch} \
+                 owner={owner_instance_id}"
+            ),
+            NeedsAttachReason::RestartLost,
+        ),
+        other => other,
+    }
+}
+
 /// Bounded wait for in-flight `on_deliver` handlers before a graceful drain releases leases.
 ///
 /// Epoch advancement fences the *daemon*, not helper processes a dying one already spawned. On the
@@ -6846,13 +6867,19 @@ async fn wait_for_message_with_idle_ttl(
                         "wait delivery proof: epoch heartbeat returned 0 rows",
                     );
                     waiter_guard.suppress_abnormal_on_drop();
-                    return proto::needs_attach_with_reason(
-                        format!(
-                            "wait delivery proof lost ownership for session {session_id} \
-                             address {address} in {store_key} at epoch={} owner={}",
-                            current.lease_epoch, current.owner_instance_id
-                        ),
-                        NeedsAttachReason::RestartLost,
+                    let response = needs_attach_for_missing_member(
+                        &state,
+                        &backend,
+                        &store_key,
+                        &session_id,
+                        &address,
+                        "wait delivery proof",
+                    )
+                    .await;
+                    return annotate_wait_ownership_loss(
+                        response,
+                        current.lease_epoch,
+                        &current.owner_instance_id,
                     );
                 }
                 backend_recovery_deadline = None;
@@ -16949,6 +16976,49 @@ mod tests {
     use super::*;
     use crate::daemon_ipc::{ERROR_UNAUTHORIZED, REDACTED_SECRET};
     use crate::ipc::test_support::short_runtime_root;
+
+    #[test]
+    fn wait_ownership_detail_preserves_durable_membership_classification() {
+        for reason in [
+            NeedsAttachReason::DeliberatelyDetached,
+            NeedsAttachReason::PushIntentPending,
+        ] {
+            let original =
+                proto::needs_attach_with_reason("durable classification", reason.clone());
+            match annotate_wait_ownership_loss(original, 41, "owner-a") {
+                Response::Error {
+                    message,
+                    needs_attach_reason,
+                    ..
+                } => {
+                    assert_eq!(message, "durable classification");
+                    assert_eq!(needs_attach_reason, Some(reason));
+                }
+                other => panic!("expected needs-attach response, got {other:?}"),
+            }
+        }
+
+        match annotate_wait_ownership_loss(
+            proto::needs_attach_with_reason(
+                "session is not attached",
+                NeedsAttachReason::RestartLost,
+            ),
+            41,
+            "owner-a",
+        ) {
+            Response::Error {
+                message,
+                needs_attach_reason,
+                ..
+            } => {
+                assert_eq!(needs_attach_reason, Some(NeedsAttachReason::RestartLost));
+                assert!(message.contains("session is not attached"));
+                assert!(message.contains("epoch=41"));
+                assert!(message.contains("owner=owner-a"));
+            }
+            other => panic!("expected restart-lost response, got {other:?}"),
+        }
+    }
 
     #[test]
     fn singleton_hash_changes_with_protocol_major_and_config_root() {

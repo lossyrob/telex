@@ -945,6 +945,7 @@ fn configure_probe_command(command: &mut std::process::Command) {
 enum ProbeGroupOwnership {
     Anchored,
     Sealed,
+    Reaped,
 }
 
 #[cfg(target_os = "linux")]
@@ -952,6 +953,15 @@ impl ProbeGroupOwnership {
     fn seal(&mut self) -> bool {
         if *self == Self::Anchored {
             *self = Self::Sealed;
+            true
+        } else {
+            false
+        }
+    }
+
+    fn mark_reaped(&mut self) -> bool {
+        if *self == Self::Sealed {
+            *self = Self::Reaped;
             true
         } else {
             false
@@ -975,16 +985,42 @@ impl ProbeProcessGroup {
         })
     }
 
-    fn signal_and_seal(&mut self) {
-        if self.ownership.seal() {
-            unsafe {
-                libc::kill(-self.pid, libc::SIGKILL);
-            }
+    fn signal_and_seal(
+        &mut self,
+        child: &mut std::process::Child,
+    ) -> Result<(), DaemonBootstrapFailure> {
+        if self.ownership == ProbeGroupOwnership::Sealed {
+            return Ok(());
+        }
+        // A cached exit observation is not current wait authority. Recheck
+        // both process-wide SIGCHLD policy and exact unreaped-leader
+        // ownership immediately before the sole nonzero group signal.
+        if check_probe_wait_ownership().is_err() {
+            self.seal_without_signal();
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        let observed = observe_probe_leader(child);
+        if !probe_signal_authorized(&observed) {
+            self.seal_without_signal();
+            return Err(DaemonBootstrapFailure::IncompatibleManifest);
+        }
+        let signaled = unsafe { libc::kill(-self.pid, libc::SIGKILL) } == 0;
+        self.ownership.seal();
+        if signaled {
+            Ok(())
+        } else {
+            Err(DaemonBootstrapFailure::IncompatibleManifest)
         }
     }
 
     fn seal_without_signal(&mut self) {
-        self.ownership = ProbeGroupOwnership::Sealed;
+        if self.ownership == ProbeGroupOwnership::Anchored {
+            self.ownership = ProbeGroupOwnership::Sealed;
+        }
+    }
+
+    fn mark_reaped(&mut self) {
+        self.ownership.mark_reaped();
     }
 }
 
@@ -1037,7 +1073,9 @@ fn resume_probe_process(child: &std::process::Child) -> Result<(), DaemonBootstr
 impl Drop for ProbeProcessGroup {
     fn drop(&mut self) {
         if self.ownership == ProbeGroupOwnership::Anchored {
-            self.signal_and_seal();
+            // Drop has no fresh child-ownership witness. Seal without
+            // signaling rather than risk a recycled numeric PGID.
+            self.seal_without_signal();
         }
     }
 }
@@ -1084,7 +1122,10 @@ impl ProbeProcessGroup {
         Ok(Self { job, active: true })
     }
 
-    fn signal_and_seal(&mut self) {
+    fn signal_and_seal(
+        &mut self,
+        _child: &mut std::process::Child,
+    ) -> Result<(), DaemonBootstrapFailure> {
         use windows_sys::Win32::System::JobObjects::TerminateJobObject;
         if self.active {
             unsafe {
@@ -1092,7 +1133,10 @@ impl ProbeProcessGroup {
             }
             self.active = false;
         }
+        Ok(())
     }
+
+    fn mark_reaped(&mut self) {}
 }
 
 #[cfg(windows)]
@@ -1101,7 +1145,11 @@ impl Drop for ProbeProcessGroup {
         use windows_sys::Win32::Foundation::CloseHandle;
         if self.job != 0 {
             if self.active {
-                self.signal_and_seal();
+                use windows_sys::Win32::System::JobObjects::TerminateJobObject;
+                unsafe {
+                    TerminateJobObject(self.job, 1);
+                }
+                self.active = false;
             }
             unsafe {
                 CloseHandle(self.job);
@@ -1119,6 +1167,14 @@ enum ProbeObserveError {
     #[cfg(target_os = "linux")]
     OwnershipLost,
     Failure,
+}
+
+#[cfg(target_os = "linux")]
+fn probe_signal_authorized(observed: &Result<ProbeLeaderState, ProbeObserveError>) -> bool {
+    matches!(
+        observed,
+        Ok(ProbeLeaderState::Running | ProbeLeaderState::Exited(_))
+    )
 }
 
 #[cfg(target_os = "linux")]
@@ -1359,7 +1415,9 @@ fn run_bounded_probe_process(
         let now = Instant::now();
         if !timed_out && now >= cleanup_at {
             timed_out = true;
-            group.signal_and_seal();
+            if group.signal_and_seal(&mut child).is_err() {
+                return Err(DaemonBootstrapFailure::IncompatibleManifest);
+            }
             #[cfg(windows)]
             let _ = child.kill();
         }
@@ -1398,10 +1456,14 @@ fn terminate_probe_process(
     group: &mut ProbeProcessGroup,
     deadline: Instant,
 ) {
-    group.signal_and_seal();
+    if group.signal_and_seal(child).is_err() {
+        return;
+    }
     #[cfg(windows)]
     let _ = child.kill();
-    let _ = reap_probe_leader(child, deadline);
+    if reap_probe_leader(child, deadline).is_ok() {
+        group.mark_reaped();
+    }
 }
 
 #[cfg(any(windows, target_os = "linux"))]
@@ -1413,8 +1475,10 @@ fn finalize_probe_process(
     // Signal while the Linux leader remains an unreaped ownership anchor.
     // `signal_and_seal` makes every later Drop path incapable of signaling a
     // recycled numeric process-group id.
-    group.signal_and_seal();
-    reap_probe_leader(child, deadline)
+    group.signal_and_seal(child)?;
+    reap_probe_leader(child, deadline)?;
+    group.mark_reaped();
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]
@@ -3426,9 +3490,22 @@ mod tests {
         assert!(ownership.seal(), "the owned group may be signaled once");
         assert_eq!(ownership, ProbeGroupOwnership::Sealed);
         assert!(
+            ownership.mark_reaped(),
+            "sealed ownership may be reaped once"
+        );
+        assert_eq!(ownership, ProbeGroupOwnership::Reaped);
+        assert!(
             !ownership.seal(),
             "normal, timeout, error, and Drop paths must not signal after sealing/reap"
         );
+        assert!(!ownership.mark_reaped(), "exact reap is irreversible");
+
+        assert!(probe_signal_authorized(&Ok(ProbeLeaderState::Running)));
+        assert!(probe_signal_authorized(&Ok(ProbeLeaderState::Exited(true))));
+        assert!(!probe_signal_authorized(&Err(
+            ProbeObserveError::OwnershipLost
+        )));
+        assert!(!probe_signal_authorized(&Err(ProbeObserveError::Failure)));
     }
 
     #[cfg(any(windows, target_os = "linux"))]
