@@ -2634,7 +2634,8 @@ impl Drop for AdmittedSpawn {
 
 async fn spawn_daemon() -> Result<Option<AdmittedSpawn>> {
     let exe = canonical_current_exe()?;
-    let inferred_root = crate::install::infer_install_root_from_exe(&exe);
+    let inferred_root = crate::install::active_tag_from_exe(&exe)
+        .and_then(|_| crate::install::infer_install_root_from_exe(&exe));
     let explicit_root = std::env::var_os(crate::install::INSTALL_ROOT_ENV).map(PathBuf::from);
     let Some(root) = inferred_root.clone().or(explicit_root) else {
         spawn_daemon_process(&exe)?;
@@ -2663,6 +2664,11 @@ async fn spawn_daemon() -> Result<Option<AdmittedSpawn>> {
         };
     if !same_canonical_path(&exe, &selection.target_exe) {
         drop(admission);
+        if inferred_root.is_some() {
+            return Err(DaemonError::Bootstrap(
+                crate::daemon_bootstrap::DaemonBootstrapFailure::SelectionUnstable,
+            ));
+        }
         spawn_daemon_process(&exe)?;
         return Ok(None);
     };
