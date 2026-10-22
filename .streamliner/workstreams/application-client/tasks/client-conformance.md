@@ -7,9 +7,9 @@
   to address Operator Station finding OS-PR161-0486BEE-1 at `0486beeb`; Local's
   source review and the retained delta review approved it, its required CI
   passed, the Watcher and Operator Station pre-merge consumer attestations and
-  the Local Daemon design inspection approved it, a fresh gpt-6-astra
-  Application Client design inspection is pending, and proof-isolation incident
-  I161-1 is unresolved while its user-directed read-only impact review continues
+  both design inspections approved it, E161-1 validation remains outstanding
+  under implementer ownership, and proof-isolation incident I161-1 is unresolved
+  while its user-directed read-only impact review continues
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -1067,10 +1067,66 @@ and inspector identity. The operator asked for 1.2M context, but the last
 verified catalog limit was 1,050,000, which does not prove an actual execution
 budget; the inspection must record supported and observed context separately and
 report a provisioning blocker rather than substitute a profile. The inspection
-may proceed without waiting for this record. `4cd34938` has no Application
-Client design credit until that verdict returns. The directive grants no merge,
-closure, release, or consumer-launch authority, and the fresh design verdicts
-and a freshly guarded campaign merge floor remain required.
+could proceed without waiting for this record, and `4cd34938` had no Application
+Client design credit until its verdict returned; that verdict follows. The
+directive granted no merge, closure, release, or consumer-launch authority and
+required a freshly guarded campaign merge floor; a later user correction
+withdrew that floor as an added delivery gate.
+
+The fresh Application Client design inspection of `4cd34938` returned APPROVED
+on 2026-10-22 (artifact
+`application-client-pr161-design-inspection-4cd34938-20261022.md` in steward
+session 074125a5-2df8-47f9-a90c-859f1360e8c0, 22,260 bytes, SHA-256
+`b69c236dc1f56a5b316996a3c6c4e690283de5156ff704c5af10fc35d9bb5b1b`). Its fresh
+inspector (agent fb6b3042-b7b0-4ac0-b08a-515223f5fdda) ran gpt-6-astra with high
+reasoning and the long-context tier, as retained runtime events record, and no
+numeric context capacity is claimed. The steward session ran gpt-5.6-sol with
+high reasoning and no recorded context tier; the earlier `7505568c` inspection
+receives no credit. The read-only inspection covered the complete product range
+from merge base `e4f585a7` to `4cd34938` (39 files, +14,761/-397) against
+tracker issue #152, the accepted Application Client and Local Daemon designs,
+this task, ADR 0053, and the accepted source-only 0.3.0, raw-absent v0.2.1
+updater, and Windows causal launch-witness decisions. It found no blocking
+design finding: the public API and error taxonomy, the InstalledCurrent
+trusted-root model, the Windows causal launch witness, updater compatibility,
+the D161 and L161 repairs, the PostgreSQL lifecycle and final cleanup ordering,
+the ten-family SQLite and PostgreSQL battery, and the Watcher and Operator
+Station consumer boundary all conform to accepted authority. It does not certify
+final discovery-ledger or field-report completion, which remain with their
+canonical owners. It keeps I161-1 open and E161-1 withheld under the operator's
+preservation and read-only review directive; it judges that they do not block
+this source-design acceptance because the accepted contract makes no intra-user
+isolation claim, and it grants no isolation acceptance, incident closure, or
+heap-corruption causal claim. `4cd34938` therefore has Application Client design
+credit for this exact head only; any head movement invalidates it. Source
+approval, required CI, both pre-merge consumer attestations, and both design
+inspections have now passed at `4cd34938`. The pre-merge obligations are not
+complete: E161-1 remains an outstanding validation obligation, not an accepted
+gap, and I161-1 impact assessment and isolation acceptance remain open. The
+verdict grants no merge, release, closure, or post-merge consumer gate credit,
+and the formal post-merge consumer gate remains planned.
+
+On 2026-10-22 the user corrected the campaign operating model, as relayed by the
+campaign session and App and recorded in the campaign directive
+`campaign-implementer-ownership-directive-20261022.json` (3,570 bytes, SHA-256
+`7f1846447905c24b771e6de3cf18b9365877ac73402231f94af89e4a85d2ab60`). The
+retained implementer of PR #161 (`c0100c31-dbe2-413e-a3c5-21340afee541`),
+supported by App, owns seeing the work through completion: resolving outstanding
+evidence, including E161-1, through permitted engineering; obtaining the
+required independent review, CI, consumer, and design results; and completing
+the normal guarded delivery and merge flow. The campaign and workstream
+orchestrators unblock, inform, and coordinate design and dependencies, and
+escalate only a concrete material decision that cannot be resolved within
+accepted scope. The campaign's unanswered E161-1 options prompt and its added
+independent merge-floor certification are withdrawn; neither was answered or
+waived, and no campaign audit or readiness certificate replaces them. The
+correction infers no merge authorization and no E161-1 waiver: E161-1 remains an
+outstanding validation obligation, and the normal guarded merge authority
+applies only once the accepted requirements are met. Existing gates, exact-head
+rules, accepted design and dependencies, independent reviews, and the I161-1
+preservation and read-only review directive are unchanged. The correction grants
+no access-control restoration or reset, workstation proof replay, cleanup,
+release, tag, new worker, or new approval queue.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the
@@ -1092,10 +1148,10 @@ remain open and E161-1 remains withheld; the choice does not establish an
 absence of impact, close the incident, or grant merge credit. Local runtime and
 proof replay remain frozen, so runtime validation relies on CI; ordinary source
 and CI work may continue within that freeze. It does not change the gate
-evidence for PR head `4cd34938`, which remains scoped to that exact head. A
-fresh gpt-6-astra Application Client design inspection, merge authorization, and
-merge remain outstanding. Scope, invalidation conditions, and the accepted
-trusted `InstalledCurrent` policy are unchanged.
+evidence for PR head `4cd34938`, which remains scoped to that exact head. E161-1
+validation and merge remain outstanding, and the implementer owns resolving the
+remaining evidence. Scope, invalidation conditions, and the accepted trusted
+`InstalledCurrent` policy are unchanged.
 
 ## Invalidation conditions
 
