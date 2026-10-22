@@ -27,7 +27,7 @@ pub struct PgBackend {
 }
 
 struct PgReleaseClient {
-    client: AsyncMutex<tokio_postgres::Client>,
+    client: AsyncMutex<Option<tokio_postgres::Client>>,
     connection: AsyncMutex<(tokio_postgres::Config, Option<String>)>,
     profile: Option<crate::profiles::BackendProfile>,
     repairing: Arc<AtomicBool>,
@@ -962,7 +962,6 @@ impl PgBackend {
     ) -> Result<Self> {
         let client = Self::open_client(&config, schema).await?;
         let release_config = Self::release_config(&config);
-        let release_client = Self::open_client(&release_config, schema).await?;
         let notify_channel = notify_channel_for_schema(schema)?;
         Ok(Self {
             connector: PgConnector::Static {
@@ -971,7 +970,7 @@ impl PgBackend {
             },
             client: AsyncMutex::new(client),
             release: Arc::new(PgReleaseClient {
-                client: AsyncMutex::new(release_client),
+                client: AsyncMutex::new(None),
                 connection: AsyncMutex::new((release_config, schema.map(str::to_string))),
                 profile: None,
                 repairing: Arc::new(AtomicBool::new(false)),
@@ -984,14 +983,13 @@ impl PgBackend {
         let (config, schema) = crate::profiles::pg_connect_config(&profile).await?;
         let client = Self::open_client(&config, schema.as_deref()).await?;
         let release_config = Self::release_config(&config);
-        let release_client = Self::open_client(&release_config, schema.as_deref()).await?;
         let notify_channel = notify_channel_for_schema(schema.as_deref())?;
         let release_profile = profile.clone();
         Ok(Self {
             connector: PgConnector::Profile(profile),
             client: AsyncMutex::new(client),
             release: Arc::new(PgReleaseClient {
-                client: AsyncMutex::new(release_client),
+                client: AsyncMutex::new(None),
                 connection: AsyncMutex::new((release_config, schema)),
                 profile: Some(release_profile),
                 repairing: Arc::new(AtomicBool::new(false)),
@@ -1053,9 +1051,9 @@ impl PgBackend {
             *client = replacement;
             if let Some((config, schema)) = refreshed {
                 *self.release.connection.lock().await = (Self::release_config(&config), schema);
+                self.schedule_release_repair();
             }
         }
-        self.schedule_release_repair();
         Ok(client)
     }
 
@@ -1069,7 +1067,7 @@ impl PgBackend {
             let repair = async {
                 {
                     let client = release.client.lock().await;
-                    if !client.is_closed() {
+                    if client.as_ref().is_some_and(|client| !client.is_closed()) {
                         return Ok::<_, anyhow::Error>(());
                     }
                 }
@@ -1084,8 +1082,11 @@ impl PgBackend {
                 };
                 let replacement = PgBackend::open_client(&config, schema.as_deref()).await?;
                 let mut client = release.client.lock().await;
-                if client.is_closed() {
-                    *client = replacement;
+                if client
+                    .as_ref()
+                    .is_none_or(tokio_postgres::Client::is_closed)
+                {
+                    *client = Some(replacement);
                     *release.connection.lock().await = (config, schema);
                 }
                 Ok(())
@@ -1578,21 +1579,49 @@ impl Backend for PgBackend {
         owner_instance_id: &str,
         lease_epoch: i64,
     ) -> Result<bool> {
-        // Drain must not queue behind unrelated work holding the backend's
-        // ordinary client mutex or rerun credential discovery. The dedicated
-        // client is established with the backend and preserves the same schema,
-        // owner, and epoch checks. A broken release connection fails promptly;
-        // drain never starts an unbounded credential refresh.
-        let client = self.release.client.lock().await;
-        let n = client
-            .execute(
-                "UPDATE leases
-                    SET owner_instance_id = NULL
-                  WHERE address=$1 AND owner_instance_id=$2 AND lease_epoch=$3",
-                &[&address, &owner_instance_id, &lease_epoch],
-            )
-            .await?;
-        Ok(n > 0)
+        // Drain must not queue behind unrelated work holding the ordinary
+        // client mutex or perform credential discovery. Lazily open one
+        // release connection from the cached resolved config, then reuse it
+        // for the backend's remaining members. The full acquisition + fenced
+        // update shares one bound.
+        let release = async {
+            let mut client = self.release.client.lock().await;
+            if client
+                .as_ref()
+                .is_none_or(tokio_postgres::Client::is_closed)
+            {
+                let (config, schema) = {
+                    let cached = self.release.connection.lock().await;
+                    (cached.0.clone(), cached.1.clone())
+                };
+                *client = Some(Self::open_client(&config, schema.as_deref()).await?);
+            }
+            let client = client.as_ref().expect("release client initialized");
+            let n = client
+                .execute(
+                    "UPDATE leases
+                        SET owner_instance_id = NULL
+                      WHERE address=$1 AND owner_instance_id=$2 AND lease_epoch=$3",
+                    &[&address, &owner_instance_id, &lease_epoch],
+                )
+                .await?;
+            Ok::<_, anyhow::Error>(n > 0)
+        };
+        match tokio::time::timeout(Duration::from_secs(5), release).await {
+            Ok(Ok(released)) => Ok(released),
+            Ok(Err(error)) => {
+                *self.release.client.lock().await = None;
+                self.schedule_release_repair();
+                Err(error)
+            }
+            Err(_) => {
+                *self.release.client.lock().await = None;
+                self.schedule_release_repair();
+                Err(anyhow!(
+                    "postgres lease release exceeded its 5s shutdown budget"
+                ))
+            }
+        }
     }
 
     async fn release_epoch_lease_for_detach(
