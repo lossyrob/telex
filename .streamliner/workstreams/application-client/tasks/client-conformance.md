@@ -1368,8 +1368,8 @@ both APPROVED with zero findings. Both grant static source or design credit only
 and establish no hosted CI success, heap-corruption cause or fix, merge
 readiness, or I161-1 closure. Watcher's attestation
 (`watcher-pr161-52abb30-source-consumability-attestation.md` in session
-e00d296e-ffca-4477-b1c8-c4d340bd30be, 8,463 bytes, SHA-256
-`0963acc8485c354d1dbbb118cbbbe4082d6bb71e4b678de705ac0227d582f105`) approved
+e00d296e-ffca-4477-b1c8-c4d340bd30be, 8,616 bytes, SHA-256
+`cefed11ef0f8484a31982e8daf9311a02c1e628a4f129c6efe6b4bacc562d51c`) approved
 source consumability: all Watcher-facing public, fixture, backend, daemon, and
 contract files are unchanged; it treats the product change as an internal
 Station scheduling correction outside Watcher's public client seam; and it finds
@@ -1404,8 +1404,8 @@ that the 0xC0000374 cause and fix remain unproven. It grants static design
 credit only, with no runtime, E161, or merge credit. Operator Station's
 attestation
 (`operator-station-pr161-premerge-consumability-attestation-52abb30e-source.json`
-in session 002c5122-fc0d-403c-8f87-625d87385d44, 12,888 bytes, SHA-256
-`3a6aa306c27c43c1620d45c2dbb5b54de1af19e8ed2f3872f76ceed19f9045f2`) approved
+in session 002c5122-fc0d-403c-8f87-625d87385d44, 12,938 bytes, SHA-256
+`c52a80024827a0526705f1353500ea3f38d224539c4713864de6d17ec46a90e7`) approved
 source consumability and the Station scheduling design with no blocking finding:
 the shared boundary preserves mandatory cooperative partial-page progress
 without granting contention a second grace period, and the remaining changes are
