@@ -1,0 +1,42 @@
+name: macOS containment investigation
+
+on:
+  push:
+    branches:
+      - lossyrob-macos-watcher-containment
+    paths:
+      - tests/macos_containment_probe.c
+      - tests/macos_containment_probe.py
+      - .github/workflows/macos-containment-investigation.yml
+
+permissions:
+  contents: read
+
+jobs:
+  counterexamples:
+    name: Owned-process counterexamples (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - macos-latest
+          - macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compile native kernel-event probe
+        run: cc -std=c11 -Wall -Wextra -Werror tests/macos_containment_probe.c -o "$RUNNER_TEMP/kqueue-probe"
+      - name: Record native counterexamples
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tests/macos_containment_probe.py "$RUNNER_TEMP/kqueue-probe" \
+            2>&1 | tee "$RUNNER_TEMP/macos-containment-probe.jsonl"
+      - name: Preserve evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-containment-${{ matrix.os }}-${{ github.sha }}
+          path: ${{ runner.temp }}/macos-containment-probe.jsonl
+          if-no-files-found: error
