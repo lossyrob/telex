@@ -2307,6 +2307,7 @@ impl ResolvedBootstrap {
 async fn resolve_bootstrap_expected(
     policy: &crate::daemon_bootstrap::BootstrapPolicy,
 ) -> Result<ResolvedBootstrap> {
+    ensure_bootstrap_mapped_identity_supported()?;
     use crate::daemon_bootstrap::BootstrapPolicy;
     match policy {
         BootstrapPolicy::InstalledCurrent {
@@ -2389,6 +2390,19 @@ async fn resolve_bootstrap_expected(
             })
         }
     }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn ensure_bootstrap_mapped_identity_supported() -> Result<()> {
+    Err(DaemonError::Unsupported {
+        capability: "running peer executable file identity",
+        message: "this Unix platform cannot prove the mapped executable file identity".into(),
+    })
+}
+
+#[cfg(any(not(unix), target_os = "linux"))]
+fn ensure_bootstrap_mapped_identity_supported() -> Result<()> {
+    Ok(())
 }
 
 fn verify_helloack_against_selection(

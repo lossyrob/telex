@@ -4648,7 +4648,31 @@ fn station_intent_upgrade_runs_the_selected_successor_and_restores_push() {
         .build()
         .expect("test runtime");
 
-    let mut attach = env.command_with_session(session);
+    let source = env.bin.to_string_lossy().into_owned();
+    let root_arg = install_root.to_string_lossy().into_owned();
+    env.run_with_session(
+        session,
+        [
+            "--json",
+            "upgrade",
+            "--from",
+            &source,
+            "--version",
+            "vtest-station-predecessor",
+            "--root",
+            &root_arg,
+            "--skip-drain",
+        ],
+        Duration::from_secs(30),
+    )
+    .assert_success("install selected predecessor");
+    let predecessor = install_root
+        .join("versions")
+        .join("vtest-station-predecessor")
+        .join(format!("telex{}", std::env::consts::EXE_SUFFIX));
+
+    let mut attach = Command::new(&predecessor);
+    env.configure_command(&mut attach, session);
     configure_copilot_home(&mut attach, &copilot_runtime_home(&env));
     attach.args([
         "--json",
@@ -4671,9 +4695,8 @@ fn station_intent_upgrade_runs_the_selected_successor_and_restores_push() {
         "the predecessor must observe the recoverable intent before drain"
     );
 
-    let source = env.bin.to_string_lossy().into_owned();
-    let root_arg = install_root.to_string_lossy().into_owned();
-    let mut upgrade = env.command_with_session(session);
+    let mut upgrade = Command::new(&predecessor);
+    env.configure_command(&mut upgrade, session);
     configure_copilot_home(&mut upgrade, &copilot_runtime_home(&env));
     upgrade.env("TELEX_INSTALL_ROOT", &install_root).args([
         "--json",
