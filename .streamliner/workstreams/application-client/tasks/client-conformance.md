@@ -3,10 +3,10 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at head `ec8b88f7` with source
-  review approved after required CI failed at `2b8ade1d`, required CI at the
-  new head failed in one Windows job, and proof-isolation incident I161-1
-  unresolved
+- **Status:** in progress; PR #161 is open at head `7505568c` with source
+  review approved after required CI failed at `2b8ade1d` and `ec8b88f7`,
+  required CI at the new head not yet recorded, and proof-isolation incident
+  I161-1 unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -525,6 +525,35 @@ and Windows `InstalledCurrent` Postgres process proof (job 119687972934) jobs.
 Those two results are diagnostic evidence only: the run failed, and the head has
 no CI or readiness credit. The `ec8b88f7` source approvals stand as source
 review only.
+
+The writer then submitted head `7505568cc57a10300f94a2f1e8ab5c88af5cea3b` (tree
+`f532f9863a41d53c1dfef1cc8bc8596c994a7e6b`), a one-path change to
+`src/daemon_bootstrap.rs` (+42/-76) intended to address that failure. Before
+`ec8b88f7`, bootstrap already compared Windows SIDs by converting the string
+forms of its fixed trusted principals into native binary SID buffers (`SidBuf`,
+allocated by `ConvertStringSidToSidW` and freed on drop). `ec8b88f7` did not
+introduce that lifecycle; it routed the expanded self-owner set through it.
+`7505568c` removes the string-to-binary SID round trip from bootstrap authority
+checks. Bootstrap now converts each borrowed owner or access-control-entry SID
+returned by Windows to a string with `ConvertSidToStringSidW`, copies the result
+into a Rust string, immediately frees only the returned UTF-16 allocation, and
+compares that string with the unchanged cached self-owner set and the fixed
+trusted principals. SID-to-string conversion and security-descriptor acquisition
+still allocate native memory. Trusted principals, access masks, ancestor-owner
+allowances, and the `platform_fs` self-owner set are unchanged.
+
+Local's bounded review approved `7505568c` with no findings (report SHA-256
+`c2dbb3c570dfd636a699c4b4c4edf8cd5519fe841275c49a4e95ea5177155af6`). Two
+retained `gpt-6-astra` reviewers, run with high reasoning and long context,
+approved `ec8b88f7..7505568c` with no actionable findings (artifact SHA-256
+`ccefe15201e1a9f84275473e7c66a499c28171567f33489310b62f684c7a284f`; product
+merge base `e4f585a7`). That artifact is the updated version that records
+Local's correction of the history above; Local hash-checked its earlier version.
+Neither review shows that the earlier SID lifecycle caused the heap corruption,
+that `7505568c` fixes it, or that it reduces runtime risk; only CI can establish
+the runtime outcome. The earlier source resolutions of L161-1 through L161-5 are
+conserved. These are source approvals only. CI run 39740654750 was started at
+`7505568c`; its result is not recorded here.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the

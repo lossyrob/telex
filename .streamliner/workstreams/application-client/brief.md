@@ -269,6 +269,30 @@ Postgres process proof jobs. Those two results are diagnostic evidence only: the
 run failed, and the head has no CI or readiness credit. The `ec8b88f7` source
 approvals stand as source review only.
 
+The writer then submitted head `7505568c`, a one-path change to
+`src/daemon_bootstrap.rs` (+42/-76) intended to address that failure. Before
+`ec8b88f7`, bootstrap already compared Windows SIDs by converting the string
+forms of its fixed trusted principals into native binary SID buffers (`SidBuf`,
+allocated by `ConvertStringSidToSidW` and freed on drop). `ec8b88f7` did not
+introduce that lifecycle; it routed the expanded self-owner set through it.
+`7505568c` removes the string-to-binary SID round trip from bootstrap authority
+checks. Bootstrap now converts each borrowed owner or access-control-entry SID
+returned by Windows to a string with `ConvertSidToStringSidW`, copies the result
+into a Rust string, immediately frees only the returned UTF-16 allocation, and
+compares that string with the unchanged cached self-owner set and the fixed
+trusted principals. SID-to-string conversion and security-descriptor acquisition
+still allocate native memory. Trusted principals, access masks, ancestor-owner
+allowances, and the `platform_fs` self-owner set are unchanged.
+
+Local's bounded review approved `7505568c` with no findings, and two retained
+`gpt-6-astra` reviewers, run with high reasoning and long context, approved
+`ec8b88f7..7505568c` with no actionable findings. Neither review shows that the
+earlier SID lifecycle caused the heap corruption, that `7505568c` fixes it, or
+that it reduces runtime risk; only CI can establish the runtime outcome. The
+earlier source resolutions of L161-1 through L161-5 are conserved. These are
+source approvals only. CI run 39740654750 was started at `7505568c`; its result
+is not recorded here.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access
