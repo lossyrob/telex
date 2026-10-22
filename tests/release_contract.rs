@@ -242,6 +242,9 @@ fn ci_retains_windows_heap_corruption_diagnostics() {
             && ci.contains("Windows Error Reporting\\LocalDumps")
             && ci.contains("PageHeapFlags")
             && ci.contains("0x02000000")
+            && ci.contains("CARGO_PROFILE_DEV_DEBUG")
+            && ci.contains("CARGO_PROFILE_TEST_DEBUG")
+            && ci.contains("matching telex.exe and telex.pdb")
             && ci.contains("daemon_process_sqlite")
             && ci.contains("windows-build-test-crash-")
             && ci.contains("windows-heap-diagnostics-"),
