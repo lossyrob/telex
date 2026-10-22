@@ -15930,24 +15930,11 @@ mod platform {
     #[cfg(not(target_os = "linux"))]
     fn peer_process_file_identity(
         _pid: u32,
-        fallback_path: &Path,
+        _fallback_path: &Path,
     ) -> Result<crate::daemon_bootstrap::FileIdentity> {
-        use std::os::unix::fs::MetadataExt;
-        // macOS: `KERN_PROCARGS2` and `proc_pidpath` cannot atomically hand
-        // back a file descriptor. Fall back to the canonical path (already
-        // verified as matching the selection), accepting a bounded TOCTOU
-        // window that is tighter than the one guarded by the parent's
-        // selector admission.
-        let meta = std::fs::metadata(fallback_path).map_err(|e| {
-            io_err(
-                "reading peer process image identity",
-                std::io::Error::new(e.kind(), format!("{}: {e}", fallback_path.display())),
-            )
-        })?;
-        Ok(crate::daemon_bootstrap::FileIdentity {
-            kind: crate::daemon_bootstrap::FileIdentityKind::UnixDevIno,
-            high: meta.dev(),
-            low: meta.ino(),
+        Err(DaemonError::Unsupported {
+            capability: "running peer executable file identity",
+            message: "this Unix platform cannot prove the mapped executable file identity".into(),
         })
     }
 

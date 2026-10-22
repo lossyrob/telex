@@ -282,11 +282,21 @@ impl Isolation {
             .map(str::to_string)
     }
 
-    pub fn daemon_pid(&self) -> Option<u32> {
-        self.cap_json()?
+    fn daemon_identity_from_cap(cap: &serde_json::Value) -> Option<(u32, u64)> {
+        let pid = cap
             .get("server_pid")
             .and_then(|v| v.as_u64())
-            .and_then(|pid| u32::try_from(pid).ok())
+            .and_then(|pid| u32::try_from(pid).ok())?;
+        let start_time = cap.get("server_start_time").and_then(|v| v.as_u64())?;
+        Some((pid, start_time))
+    }
+
+    fn daemon_identity(&self) -> Option<(u32, u64)> {
+        Self::daemon_identity_from_cap(&self.cap_json()?)
+    }
+
+    pub fn daemon_pid(&self) -> Option<u32> {
+        self.daemon_identity().map(|(pid, _)| pid)
     }
 
     pub fn daemon_running(&self) -> bool {
@@ -307,36 +317,32 @@ impl Isolation {
         );
     }
 
-    pub fn stop_daemon_best_effort(&self) {
-        let _ = self.stop_daemon_within(Duration::from_secs(20));
+    pub fn stop_daemon_best_effort(&self) -> bool {
+        self.stop_daemon_within(Duration::from_secs(20))
     }
 
     fn stop_daemon_within(&self, timeout: Duration) -> bool {
-        let pid = self.daemon_pid();
+        let identity = self.daemon_identity();
         let _ = self.run_cli(
             ["--json", "daemon", "stop", "--drain"],
             Duration::from_secs(20),
         );
-        if self.wait_until_stopped(pid, timeout) {
-            return true;
-        }
-        // The graceful path authenticates the peer against the *calling*
-        // image. A test that switched `current` or pinned a different target
-        // can leave a predecessor this binary may not authenticate to, so fall
-        // back to terminating the recorded process. Isolation is never leaked.
-        if let Some(pid) = pid {
-            terminate_process(pid);
-        }
-        self.wait_until_stopped(pid, timeout)
+        self.wait_until_stopped(identity, timeout)
     }
 
-    fn wait_until_stopped(&self, pid: Option<u32>, timeout: Duration) -> bool {
+    fn wait_until_stopped(&self, identity: Option<(u32, u64)>, timeout: Duration) -> bool {
         let deadline = Instant::now() + timeout;
         while Instant::now() < deadline {
             // Wait for the endpoint to go away *and* for the recorded process
             // to actually exit: a still-terminating daemon keeps its image
             // mapped and can still answer a racing connect.
-            if pid.map(|pid| !process_alive(pid)).unwrap_or(true) && !self.daemon_running() {
+            if identity
+                .map(|(pid, start_time)| {
+                    !telex::session_watch::process_alive_with_start_time(pid, Some(start_time))
+                })
+                .unwrap_or(true)
+                && !self.daemon_running()
+            {
                 return true;
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -356,8 +362,9 @@ impl Isolation {
 
     /// Best-effort teardown. Safe to call more than once.
     pub fn cleanup(&self) {
-        self.stop_daemon_best_effort();
-        let _ = std::fs::remove_dir_all(&self.root);
+        if self.stop_daemon_best_effort() {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
     }
 }
 
@@ -770,5 +777,24 @@ mod tests {
         output.assert_success("large piped output fixture");
         assert!(output.stdout.contains(&"x".repeat(1024)));
         assert!(output.stderr.contains(&"y".repeat(1024)));
+    }
+
+    #[test]
+    fn forced_teardown_identity_requires_pid_and_generation() {
+        assert_eq!(
+            Isolation::daemon_identity_from_cap(&serde_json::json!({
+                "server_pid": 42,
+                "server_start_time": 99
+            })),
+            Some((42, 99))
+        );
+        assert_eq!(
+            Isolation::daemon_identity_from_cap(&serde_json::json!({"server_pid": 42})),
+            None
+        );
+        assert_eq!(
+            Isolation::daemon_identity_from_cap(&serde_json::json!({"server_start_time": 99})),
+            None
+        );
     }
 }

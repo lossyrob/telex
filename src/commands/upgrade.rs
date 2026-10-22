@@ -1,4 +1,4 @@
-use anyhow::{anyhow, bail, Result};
+use anyhow::{anyhow, bail, Context, Result};
 use serde_json::json;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
@@ -286,7 +286,8 @@ async fn perform_upgrade(
     let drain = if args.no_switch || args.skip_drain {
         json!({"skipped": true})
     } else {
-        drain_daemon(ctx, args.drain_timeout_ms).await?
+        let selected_predecessor = install::current_binary(layout)?;
+        drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_deref()).await?
     };
     for warning in &installed.warnings {
         eprintln!("warning: {warning}");
@@ -440,7 +441,8 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     let drain = if args.skip_drain {
         json!({"skipped": true})
     } else {
-        drain_daemon(ctx, args.drain_timeout_ms).await?
+        let selected_predecessor = install::current_binary(&layout)?;
+        drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_deref()).await?
     };
     let switched = install::switch_to(&layout, &target)?;
     drop(selector_admission);
@@ -673,7 +675,45 @@ fn unauthorized_drain_message(message: &str, response_rejected: bool) -> String 
     )
 }
 
-async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
+fn validate_drain_caller_paths(caller: &Path, selected_executable: Option<&Path>) -> Result<()> {
+    let Some(selected_executable) = selected_executable else {
+        bail!(
+            "refusing ordinary daemon drain because the target install root has no selected \
+             current image; pass --skip-drain for an explicit break-glass transition"
+        );
+    };
+    if caller != selected_executable {
+        bail!(
+            "refusing ordinary daemon drain because the caller does not match the target install \
+             root's selected current image; run the selected binary or pass --skip-drain for the \
+             explicit break-glass transition"
+        );
+    }
+    Ok(())
+}
+
+fn validate_drain_caller(selected_executable: Option<&Path>) -> Result<()> {
+    let caller = std::env::current_exe()
+        .context("resolve the upgrade caller executable")?
+        .canonicalize()
+        .context("canonicalize the upgrade caller executable")?;
+    let Some(selected_executable) = selected_executable else {
+        return validate_drain_caller_paths(&caller, None);
+    };
+    let selected = selected_executable.canonicalize().with_context(|| {
+        format!(
+            "canonicalize selected predecessor {}",
+            selected_executable.display()
+        )
+    })?;
+    validate_drain_caller_paths(&caller, Some(&selected))
+}
+
+async fn drain_daemon(
+    ctx: &Ctx,
+    timeout_ms: u64,
+    selected_executable: Option<&Path>,
+) -> Result<serde_json::Value> {
     let store_key = ctx.store_key()?;
     let paths = crate::daemon::DaemonPaths::current()?;
     let cap = match crate::daemon::read_cap_file(&paths.cap_path) {
@@ -683,6 +723,7 @@ async fn drain_daemon(ctx: &Ctx, timeout_ms: u64) -> Result<serde_json::Value> {
         }
         Err(e) => return Err(e.into()),
     };
+    validate_drain_caller(selected_executable)?;
     let server_pid = cap.server_pid;
     let server_start_time = cap.server_start_time;
     let timeout = Duration::from_millis(timeout_ms.max(1));
@@ -1328,6 +1369,20 @@ mod tests {
             formatted.contains(&raw_message),
             "message should include original detail: {formatted}"
         );
+    }
+
+    #[test]
+    fn ordinary_drain_requires_the_target_roots_selected_image() {
+        let selected = Path::new("/install-b/versions/v1/telex");
+        assert!(validate_drain_caller_paths(selected, Some(selected)).is_ok());
+
+        let mismatch = validate_drain_caller_paths(Path::new("/install-a/telex"), Some(selected))
+            .expect_err("a caller from another install root must not drain");
+        assert!(mismatch.to_string().contains("does not match"));
+
+        let missing = validate_drain_caller_paths(Path::new("/install-a/telex"), None)
+            .expect_err("a root without current has no ordinary drain authority");
+        assert!(missing.to_string().contains("--skip-drain"));
     }
 
     #[test]

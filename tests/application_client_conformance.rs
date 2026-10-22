@@ -2800,24 +2800,6 @@ mod postgres_leg {
             let _ = handle.await;
             result.unwrap_or_else(|e| panic!("admin statement failed: {e}"));
         }
-
-        /// Drop schemas leaked by a previously hard-killed run without ever
-        /// touching a live one: match only the exact per-run/per-case shape and
-        /// require the embedded creation timestamp to be comfortably old.
-        pub async fn sweep_leftover_schemas(&self, base: &str) {
-            let cutoff_ms = now_ms() - 3_600_000;
-            self.admin_exec(&format!(
-                "DO $$ DECLARE s text; ts bigint; BEGIN \
-                   FOR s IN SELECT schema_name FROM information_schema.schemata \
-                            WHERE schema_name ~ '^{base}_[0-9]+_[0-9]+_[0-9]+$' \
-                   LOOP ts := substring(s from '_([0-9]+)_[0-9]+$')::bigint; \
-                     IF ts < {cutoff_ms} THEN \
-                       EXECUTE format('DROP SCHEMA IF EXISTS %I CASCADE', s); \
-                     END IF; \
-                   END LOOP; END $$;"
-            ))
-            .await;
-        }
     }
 
     #[async_trait::async_trait]
@@ -3043,8 +3025,6 @@ mod postgres_leg {
             profiles: profiles.clone(),
             counter: std::sync::atomic::AtomicU64::new(0),
         };
-        leg.sweep_leftover_schemas(&base).await;
-
         let executed = run_battery(&iso, &leg, &profiles).await;
         assert_coverage(&executed);
         drop(restore);
