@@ -941,11 +941,11 @@ detector results. Mixed registries remain usable: unsupported v1 registrations
 are visibly paused/blocked with `unsupported-registration-version`, while valid
 v2 watches continue.
 
-The `telex-watcher` crate contains the v2 runtime implementation. Detectors under
-`telex-watcher/examples/detectors` remain historical v1 evidence and are not v2
-runtime inputs. The separate `telex-watcher/examples/v2` pack provides optional
-teaching examples and exercises the v2 schemas independently of runtime
-execution. Neither example pack establishes runtime conformance.
+The former spike implementation in the `telex-watcher` crate and the retained
+detectors under `telex-watcher/examples/detectors` remain historical v1
+implementation evidence. The crate's current runtime implements the v2 contract;
+`telex-watcher/examples/v2` and `telex-watcher/field-validation/github-pr`
+consume that contract. Retained v1 artifacts do not claim v2 conformance.
 
 Baseline migration is explicit:
 
