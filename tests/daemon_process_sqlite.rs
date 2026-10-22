@@ -261,9 +261,7 @@ impl ProcessEnv {
 
 impl Drop for ProcessEnv {
     fn drop(&mut self) {
-        if self.stop_daemon_best_effort() {
-            let _ = std::fs::remove_dir_all(&self.root);
-        }
+        let _ = self.stop_daemon_best_effort();
     }
 }
 

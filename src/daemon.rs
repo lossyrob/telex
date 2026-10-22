@@ -16647,18 +16647,6 @@ mod platform {
     mod tests {
         use super::*;
 
-        #[cfg(all(unix, not(target_os = "linux")))]
-        #[test]
-        fn bootstrap_refuses_before_spawn_without_mapped_image_identity() {
-            assert!(matches!(
-                ensure_bootstrap_mapped_identity_supported(),
-                Err(DaemonError::Unsupported {
-                    capability: "running peer executable file identity",
-                    ..
-                })
-            ));
-        }
-
         #[test]
         fn windows_token_user_alignment_preserves_peer_identity() {
             let token = current_process_token().expect("current process token");
@@ -16989,6 +16977,18 @@ mod tests {
     use super::*;
     use crate::daemon_ipc::{ERROR_UNAUTHORIZED, REDACTED_SECRET};
     use crate::ipc::test_support::short_runtime_root;
+
+    #[cfg(all(unix, not(target_os = "linux")))]
+    #[test]
+    fn bootstrap_refuses_before_spawn_without_mapped_image_identity() {
+        assert!(matches!(
+            ensure_bootstrap_mapped_identity_supported(),
+            Err(DaemonError::Unsupported {
+                capability: "running peer executable file identity",
+                ..
+            })
+        ));
+    }
 
     #[test]
     fn wait_ownership_detail_preserves_durable_membership_classification() {
