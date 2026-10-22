@@ -236,6 +236,11 @@ async fn perform_upgrade(
             .map_err(|error| {
                 anyhow!("acquire exclusive selector admission before install/switch: {error}")
             })?;
+    let selected_predecessor = if args.no_switch || args.skip_drain {
+        None
+    } else {
+        preflight_selected_predecessor_for_drain(layout)?
+    };
     if layout.versions_dir.join(&plan.tag).exists() {
         bail!(
             "installed version {} is immutable; choose a new version tag or use rollback/switch",
@@ -286,9 +291,6 @@ async fn perform_upgrade(
     let drain = if args.no_switch || args.skip_drain {
         json!({"skipped": true})
     } else {
-        let selected_predecessor =
-            crate::daemon_bootstrap::resolve_selected_current_for_drain(&layout.root)
-                .map_err(|error| anyhow!("validate selected predecessor before drain: {error}"))?;
         drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_deref()).await?
     };
     for warning in &installed.warnings {
@@ -429,6 +431,11 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
             .map_err(|error| {
                 anyhow!("acquire exclusive selector admission before rollback resolution: {error}")
             })?;
+    let selected_predecessor = if args.skip_drain {
+        None
+    } else {
+        preflight_selected_predecessor_for_drain(&layout)?
+    };
     let target = match args.version {
         Some(tag) => tag,
         None => install::version_info(Some(layout.root.clone()))?
@@ -443,9 +450,6 @@ pub async fn rollback(ctx: &Ctx, args: RollbackArgs) -> Result<i32> {
     let drain = if args.skip_drain {
         json!({"skipped": true})
     } else {
-        let selected_predecessor =
-            crate::daemon_bootstrap::resolve_selected_current_for_drain(&layout.root)
-                .map_err(|error| anyhow!("validate selected predecessor before drain: {error}"))?;
         drain_daemon(ctx, args.drain_timeout_ms, selected_predecessor.as_deref()).await?
     };
     let switched = install::switch_to(&layout, &target)?;
@@ -713,6 +717,26 @@ fn validate_drain_caller(selected_executable: Option<&Path>) -> Result<()> {
     validate_drain_caller_paths(&caller, Some(&selected))
 }
 
+fn preflight_selected_predecessor_for_drain(
+    layout: &install::InstallLayout,
+) -> Result<Option<PathBuf>> {
+    let selected = crate::daemon_bootstrap::resolve_selected_current_for_drain(&layout.root)
+        .map_err(|error| anyhow!("validate selected predecessor before drain: {error}"))?;
+    if let Some(selected) = selected {
+        validate_drain_caller(Some(&selected))?;
+        return Ok(Some(selected));
+    }
+    let paths = crate::daemon::DaemonPaths::current()?;
+    match crate::daemon::read_cap_file(&paths.cap_path) {
+        Err(DaemonError::NotRunning(_)) => Ok(None),
+        Ok(_) => {
+            validate_drain_caller(None)?;
+            unreachable!()
+        }
+        Err(error) => Err(error.into()),
+    }
+}
+
 async fn drain_daemon(
     ctx: &Ctx,
     timeout_ms: u64,
@@ -727,15 +751,6 @@ async fn drain_daemon(
         }
         Err(e) => return Err(e.into()),
     };
-    if selected_executable.is_none() {
-        let (Some(pid), Some(start_time)) = (cap.server_pid, cap.server_start_time) else {
-            validate_drain_caller(None)?;
-            unreachable!();
-        };
-        if !crate::session_watch::process_alive_with_start_time(pid, Some(start_time)) {
-            return Ok(json!({"drained": false, "status": "not_running"}));
-        }
-    }
     validate_drain_caller(selected_executable)?;
     let server_pid = cap.server_pid;
     let server_start_time = cap.server_start_time;

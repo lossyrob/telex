@@ -4440,13 +4440,22 @@ fn wait_until_intent_observed(
     address: &str,
     timeout: Duration,
 ) -> bool {
+    wait_until_intent_observed_with_executable(env, &env.bin, session, address, timeout)
+}
+
+fn wait_until_intent_observed_with_executable(
+    env: &ProcessEnv,
+    executable: &Path,
+    session: &str,
+    address: &str,
+    timeout: Duration,
+) -> bool {
     let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        let status = env.run_with_session(
-            session,
-            ["--json", "--address", address, "status"],
-            Duration::from_secs(8),
-        );
+        let mut command = Command::new(executable);
+        env.configure_command(&mut command, session);
+        command.args(["--json", "--address", address, "status"]);
+        let status = run_command_with_capture(command, &env.root, Duration::from_secs(8));
         if status.code == Some(0) {
             let json = status.json("station status");
             if json
@@ -4637,6 +4646,7 @@ fn station_intent_daemon_restart_restores_push_without_manual_resume() {
     );
 }
 
+#[cfg(any(windows, target_os = "linux"))]
 #[test]
 fn station_intent_upgrade_runs_the_selected_successor_and_restores_push() {
     let env = ProcessEnv::new("station-intent-upgrade");
@@ -4691,7 +4701,13 @@ fn station_intent_upgrade_runs_the_selected_successor_and_restores_push() {
         telex::intent_test_support::ProducerBehavior::Healthy,
     ));
     assert!(
-        wait_until_intent_observed(&env, session, address, Duration::from_secs(30)),
+        wait_until_intent_observed_with_executable(
+            &env,
+            &predecessor,
+            session,
+            address,
+            Duration::from_secs(30)
+        ),
         "the predecessor must observe the recoverable intent before drain"
     );
 
