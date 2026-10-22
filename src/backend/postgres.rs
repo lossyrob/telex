@@ -6,7 +6,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use async_trait::async_trait;
 use tokio::sync::{Mutex as AsyncMutex, MutexGuard};
 use tokio_postgres::error::SqlState;
-use tokio_postgres::{IsolationLevel, Row, Transaction};
+use tokio_postgres::{GenericClient, IsolationLevel, Row, Transaction};
 
 use super::{
     application_compound_state_delta, application_operation_state_delta, retryable_backend_error,
@@ -434,7 +434,7 @@ fn fanout_recipients(to_addr: &str, cc: Option<&str>) -> Vec<String> {
     recipients
 }
 
-async fn pg_now_ms(client: &tokio_postgres::Client) -> Result<i64> {
+async fn pg_now_ms(client: &(impl GenericClient + Sync)) -> Result<i64> {
     Ok(client
         .query_one(
             "SELECT floor(extract(epoch from clock_timestamp()) * 1000)::bigint",
@@ -671,7 +671,9 @@ async fn pg_insert_message(
     ))
 }
 
-async fn raise_clock_hwm_to_existing_timestamps(client: &tokio_postgres::Client) -> Result<()> {
+async fn raise_clock_hwm_to_existing_timestamps(
+    client: &(impl GenericClient + Sync),
+) -> Result<()> {
     client
         .execute(
             "UPDATE clock_hwm
@@ -744,10 +746,9 @@ async fn materialize_pending_delivery_rows_for_recipient_tx(
 }
 
 async fn backfill_existing_deliveries_consumed_once(
-    client: &mut tokio_postgres::Client,
+    client: &(impl GenericClient + Sync),
 ) -> Result<()> {
-    let tx = client.transaction().await?;
-    let complete: bool = tx
+    let complete: bool = client
         .query_one(
             "SELECT EXISTS(
                 SELECT 1 FROM telex_schema_meta
@@ -758,29 +759,29 @@ async fn backfill_existing_deliveries_consumed_once(
         .await?
         .get(0);
     if !complete {
-        tx.execute(
-            "UPDATE deliveries
+        client
+            .execute(
+                "UPDATE deliveries
              SET consumed_at_ms = delivered_at_ms
              WHERE consumed_at_ms IS NULL",
-            &[],
-        )
-        .await?;
-        tx.execute(
-            "INSERT INTO telex_schema_meta(key, value)
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                "INSERT INTO telex_schema_meta(key, value)
              VALUES ('delivery_consumed_backfill_v1_complete', '1')
              ON CONFLICT(key) DO UPDATE SET value='1'",
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
     }
 
-    tx.commit().await?;
     Ok(())
 }
 
-async fn backfill_delivery_rows_once(client: &mut tokio_postgres::Client) -> Result<()> {
-    let tx = client.transaction().await?;
-    let complete: bool = tx
+async fn backfill_delivery_rows_once(client: &(impl GenericClient + Sync)) -> Result<()> {
+    let complete: bool = client
         .query_one(
             "SELECT EXISTS(
                 SELECT 1 FROM telex_schema_meta
@@ -791,41 +792,42 @@ async fn backfill_delivery_rows_once(client: &mut tokio_postgres::Client) -> Res
         .await?
         .get(0);
     if !complete {
-        tx.execute(
-            "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
+        client
+            .execute(
+                "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
              SELECT m.id, m.to_addr, m.created_at_ms, NULL
              FROM messages m
              ON CONFLICT(message_id, recipient) DO NOTHING",
-            &[],
-        )
-        .await?;
-        tx.execute(
-            "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                "INSERT INTO deliveries(message_id, recipient, delivered_at_ms, consumed_at_ms)
              SELECT m.id, btrim(cc_addr), m.created_at_ms, m.created_at_ms
              FROM messages m
              CROSS JOIN LATERAL unnest(string_to_array(COALESCE(m.cc, ''), ',')) AS cc_addr
              WHERE btrim(cc_addr) <> '' AND btrim(cc_addr) <> m.to_addr
              ON CONFLICT(message_id, recipient) DO NOTHING",
-            &[],
-        )
-        .await?;
-        tx.execute(
-            "INSERT INTO telex_schema_meta(key, value)
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                "INSERT INTO telex_schema_meta(key, value)
              VALUES ('delivery_backfill_v2_complete', '1')
              ON CONFLICT(key) DO UPDATE SET value='1'",
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
     }
-    tx.commit().await?;
     Ok(())
 }
 
 async fn backfill_terminal_disposition_consumption_once(
-    client: &mut tokio_postgres::Client,
+    client: &(impl GenericClient + Sync),
 ) -> Result<()> {
-    let tx = client.transaction().await?;
-    let complete: bool = tx
+    let complete: bool = client
         .query_one(
             "SELECT EXISTS(
                 SELECT 1 FROM telex_schema_meta
@@ -850,45 +852,31 @@ async fn backfill_terminal_disposition_consumption_once(
                AND d.consumed_at_ms IS NULL",
             terminal_dispositions_sql_list()
         );
-        tx.execute(&sql, &[]).await?;
-        tx.execute(
-            "INSERT INTO telex_schema_meta(key, value)
+        client.execute(&sql, &[]).await?;
+        client
+            .execute(
+                "INSERT INTO telex_schema_meta(key, value)
              VALUES ('terminal_disposition_consumption_v1_complete', '1')
              ON CONFLICT(key) DO UPDATE SET value='1'",
-            &[],
-        )
-        .await?;
+                &[],
+            )
+            .await?;
     }
 
-    tx.commit().await?;
     Ok(())
 }
 
-async fn acquire_schema_migration_lock(client: &tokio_postgres::Client) -> Result<()> {
+async fn acquire_schema_migration_lock(client: &(impl GenericClient + Sync)) -> Result<()> {
     client
         .query_one(
-            "SELECT pg_advisory_lock(hashtextextended(current_schema(), 0))",
+            "SELECT pg_advisory_xact_lock(hashtextextended(current_schema(), 0))",
             &[],
         )
         .await?;
     Ok(())
 }
 
-async fn release_schema_migration_lock(client: &tokio_postgres::Client) -> Result<()> {
-    let released: bool = client
-        .query_one(
-            "SELECT pg_advisory_unlock(hashtextextended(current_schema(), 0))",
-            &[],
-        )
-        .await?
-        .get(0);
-    if !released {
-        bail!("schema migration advisory lock was not held");
-    }
-    Ok(())
-}
-
-async fn current_schema_version(client: &tokio_postgres::Client) -> Result<i64> {
+async fn current_schema_version(client: &(impl GenericClient + Sync)) -> Result<i64> {
     let exists: bool = client
         .query_one(
             "SELECT to_regclass('telex_schema_version') IS NOT NULL",
@@ -908,7 +896,7 @@ async fn current_schema_version(client: &tokio_postgres::Client) -> Result<i64> 
         .get(0))
 }
 
-async fn publish_schema_version(client: &tokio_postgres::Client) -> Result<()> {
+async fn publish_schema_version(client: &(impl GenericClient + Sync)) -> Result<()> {
     client
         .execute(
             "INSERT INTO telex_schema_version(singleton, version) VALUES (1, $1)
@@ -1031,24 +1019,24 @@ impl Backend for PgBackend {
 
     async fn init_schema(&self) -> Result<()> {
         let mut client = self.client().await?;
-        let schema_version = current_schema_version(&client).await?;
+        let tx = client.transaction().await?;
+        acquire_schema_migration_lock(&tx).await?;
+        let schema_version = current_schema_version(&tx).await?;
         if schema_version > CURRENT_SCHEMA_VERSION {
             bail!(
                 "Postgres schema version {schema_version} is newer than supported version {CURRENT_SCHEMA_VERSION}"
             );
         }
-        client.batch_execute(SCHEMA).await?;
+        tx.batch_execute(SCHEMA).await?;
         let store_id = new_logical_store_id()?;
-        client
-            .execute(
-                "INSERT INTO application_store_identity(singleton, logical_store_id)
+        tx.execute(
+            "INSERT INTO application_store_identity(singleton, logical_store_id)
                  VALUES (1, $1) ON CONFLICT(singleton) DO NOTHING",
-                &[&store_id],
-            )
-            .await?;
-        client
-            .batch_execute(
-                "ALTER TABLE leases ADD COLUMN IF NOT EXISTS lease_epoch bigint;
+            &[&store_id],
+        )
+        .await?;
+        tx.batch_execute(
+            "ALTER TABLE leases ADD COLUMN IF NOT EXISTS lease_epoch bigint;
                  ALTER TABLE leases ADD COLUMN IF NOT EXISTS owner_instance_id text;
                  ALTER TABLE deliveries ADD COLUMN IF NOT EXISTS consumed_at_ms bigint;
                  ALTER TABLE dispositions ADD COLUMN IF NOT EXISTS origin text;
@@ -1075,28 +1063,22 @@ impl Backend for PgBackend {
                  );
                  CREATE INDEX IF NOT EXISTS detach_tombstones_session_idx
                     ON detach_tombstones(session_id);",
-            )
-            .await?;
-        let now = pg_now_ms(&client).await?;
-        client
-            .execute(
-                "INSERT INTO clock_hwm(id, hwm_ms) VALUES (1, $1)
+        )
+        .await?;
+        let now = pg_now_ms(&tx).await?;
+        tx.execute(
+            "INSERT INTO clock_hwm(id, hwm_ms) VALUES (1, $1)
                  ON CONFLICT(id) DO NOTHING",
-                &[&now],
-            )
-            .await?;
-        acquire_schema_migration_lock(&client).await?;
-        let migration = async {
-            backfill_existing_deliveries_consumed_once(&mut client).await?;
-            backfill_delivery_rows_once(&mut client).await?;
-            backfill_terminal_disposition_consumption_once(&mut client).await?;
-            raise_clock_hwm_to_existing_timestamps(&client).await?;
-            publish_schema_version(&client).await
-        }
-        .await;
-        let unlock = release_schema_migration_lock(&client).await;
-        migration?;
-        unlock
+            &[&now],
+        )
+        .await?;
+        backfill_existing_deliveries_consumed_once(&tx).await?;
+        backfill_delivery_rows_once(&tx).await?;
+        backfill_terminal_disposition_consumption_once(&tx).await?;
+        raise_clock_hwm_to_existing_timestamps(&tx).await?;
+        publish_schema_version(&tx).await?;
+        tx.commit().await?;
+        Ok(())
     }
 
     async fn logical_store_id(&self) -> Result<String> {
@@ -1180,7 +1162,7 @@ impl Backend for PgBackend {
 
     async fn claim_lease(&self, claim: &LeaseClaim, window_secs: i64) -> Result<LeaseOutcome> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         let live_floor = now - window_secs * 1000;
         let rows = client
             .query(
@@ -1221,7 +1203,7 @@ impl Backend for PgBackend {
 
     async fn heartbeat(&self, address: &str) -> Result<()> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         client
             .execute(
                 "UPDATE leases SET heartbeat_at_ms=$2 WHERE address=$1",
@@ -1260,7 +1242,7 @@ impl Backend for PgBackend {
 
     async fn occupancy(&self, address: &str, window_secs: i64) -> Result<Occupancy> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         let row = client
             .query_opt(
                 "SELECT occupant, heartbeat_at_ms, owner_instance_id FROM leases WHERE address=$1",
@@ -1457,7 +1439,7 @@ impl Backend for PgBackend {
     ) -> Result<bool> {
         let result = async {
             let client = self.client().await?;
-            let now = pg_now_ms(&client).await?;
+            let now = pg_now_ms(&*client).await?;
             let n = client
                 .execute(
                     "UPDATE leases
@@ -1794,7 +1776,7 @@ impl Backend for PgBackend {
         reason: &str,
     ) -> Result<()> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         client
             .execute(
                 "INSERT INTO detach_tombstones(session_id, address, reason, at_ms)
@@ -1897,7 +1879,7 @@ impl Backend for PgBackend {
         reason: &str,
     ) -> Result<()> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         client
             .execute(
                 "INSERT INTO application_detach_intents(
@@ -1997,7 +1979,7 @@ impl Backend for PgBackend {
         occupant: Option<&str>,
     ) -> Result<()> {
         let client = self.client().await?;
-        let now = pg_now_ms(&client).await?;
+        let now = pg_now_ms(&*client).await?;
         client
             .execute(
                 "INSERT INTO deliveries(message_id, recipient, occupant, delivered_at_ms, consumed_at_ms) \
