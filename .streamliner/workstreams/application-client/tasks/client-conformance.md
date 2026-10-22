@@ -3,10 +3,10 @@
 - **Workstream:** `application-client`
 - **Node:** `client-conformance`
 - **Type:** implementation
-- **Status:** in progress; PR #161 is open at head `7505568c`, which has source
-  review approval, passing required CI, and both consumer attestations approved,
-  but the Local Daemon design inspection required changes; a successor head is
-  assigned, and proof-isolation incident I161-1 is unresolved
+- **Status:** in progress; PR #161 is open at successor head `f02f0ee9`, which
+  is intended to address the Local Daemon design findings at `7505568c`; its
+  retained delta review approved it, its required CI and Local source review are
+  under way, and proof-isolation incident I161-1 is unresolved
 - **Attention:** focus
 - **Depends on:** completed `client-core`, completed `first-binding`
 - **Tracker:** [lossyrob/telex#152](https://github.com/lossyrob/telex/issues/152)
@@ -623,6 +623,29 @@ successor needs fresh source review, passing required CI, both consumer
 attestations, and both design inspections. The campaign disposition on the
 Application Client inspector profile remains open. Merge authorization, merge,
 and closure remain outstanding.
+
+Successor head `f02f0ee9` (tree `f402c866`) moved PR #161 from `7505568c`
+through 13 commits (immediate parent `576ecebb`) that change eight paths
+(+562/-120) and are intended to address D161-1, D161-2a, D161-2b, and D161-3.
+The retained gpt-6-astra delta review (artifact `REVIEW-PR161-F02F0EE-DELTA.md`,
+6,897 bytes, SHA-256
+`dead034889886b40746bed0aa8322bab7fdee7b0d9c03f8bd94f3bba5475316c`; reviewer
+agents `20687f1b` and `fe04d9d4`, each with high reasoning and long context)
+approved the full range from `7505568c` with no remaining findings. It reports
+that drain now authenticates the locked root's selected predecessor, conformance
+setup drops only its own run's schema, fixture teardown no longer kills by
+numeric PID and keeps roots when process exit is uncertain, and non-Linux Unix
+bootstrap refuses before connecting or spawning. Its validation was compile-only
+because local runtime is frozen under I161-1. This is a source approval only; it
+does not resolve the design findings, which need fresh design inspections.
+Required CI run 39755917809 started at `f02f0ee9`, including the required Live
+Postgres parity (job 119747762473) and Windows `InstalledCurrent` Postgres
+process proof (job 119747762498) jobs, and Local's source review is assigned;
+neither result is recorded here. All `7505568c` CI, consumer, and design
+evidence is historical and gives the successor no credit. The successor has no
+gate credit yet: before merge it needs Local source approval, passing required
+CI, both consumer attestations, both design inspections, a disposition of
+I161-1, and campaign authorization.
 
 The released-v0.2.1 upgrade proof (E161-1) is not accepted. Official v0.2.1
 staging of the `d08e764c` candidate and public attachment succeeded, but the

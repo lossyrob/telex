@@ -351,6 +351,23 @@ attestations, and both design inspections. The campaign disposition on the
 Application Client inspector profile remains open. Merge authorization, merge,
 and closure remain outstanding.
 
+Successor head `f02f0ee9` (tree `f402c866`) moved PR #161 from `7505568c`
+through 13 commits that change eight paths (+562/-120) and are intended to
+address D161-1, D161-2a, D161-2b, and D161-3. The retained gpt-6-astra delta
+review approved the full range from `7505568c` with no remaining findings. It
+reports that drain now authenticates the locked root's selected predecessor,
+conformance setup drops only its own run's schema, fixture teardown no longer
+kills by numeric PID and keeps roots when process exit is uncertain, and
+non-Linux Unix bootstrap refuses before connecting or spawning. Its validation
+was compile-only because local runtime is frozen under I161-1. This is a source
+approval only; it does not resolve the design findings, which need fresh design
+inspections. Required CI run 39755917809 started at `f02f0ee9` and Local's
+source review is assigned; neither result is recorded here. All `7505568c` CI,
+consumer, and design evidence is historical and gives the successor no credit.
+The successor has no gate credit yet: before merge it needs Local source
+approval, passing required CI, both consumer attestations, both design
+inspections, a disposition of I161-1, and campaign authorization.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access control
