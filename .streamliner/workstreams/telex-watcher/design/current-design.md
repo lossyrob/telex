@@ -145,11 +145,15 @@ exact same operation after that result, and returns
 `RetentionBoundaryCrossed` when absence can no longer be proven. A retention
 boundary never authorizes retry.
 
-The semantic is merged, but Watcher runtime still requires the supported first
-binding and `client-conformance` proof across SQLite and Postgres. Until that
-evidence exists, Watcher recovery remains reconciliation-first and query-only
-when acceptance is uncertain. Production runtime stays blocked rather than
-parsing CLI output, using raw daemon IPC, or inventing a Watcher-private client.
+The supported public Rust binding and `client-conformance` proof across SQLite
+and credentialed Postgres are merged. Watcher's formal post-merge
+`consumer-integration-gate` passed against exact merged main `4d25fdff` and is
+reconciled complete on `main`. This completion does not weaken recovery: when
+acceptance is uncertain, Watcher remains reconciliation-first and query-only;
+only authoritative exact-operation `NotRecorded` permits bounded
+exact-same-operation retry, and `RetentionBoundaryCrossed` never authorizes
+retry. Production Watcher has no CLI-output, raw daemon IPC, or private-client
+fallback.
 
 ## Acceptance and dependency boundaries
 
@@ -159,12 +163,16 @@ without mandatory framework ceremony. That acceptance completes the
 `minimal-contract-accepted` checkpoint. It does not prove a production runtime,
 an operational five-minute workflow, or any later gate.
 
-`minimal-example-pack` is next-ready but has not been launched. Runtime work is
-no longer blocked on the contract-usability gate; `watcher-runtime-core` remains
-blocked on Application Client `first-binding` and `client-conformance` evidence
-for the merged non-acceptance semantics across both backends. The later
-`five-minute-custom-watch-gate` still owns operational proof that an agent can
-create, register, leave running, and diagnose a custom watch in five minutes.
+`minimal-example-pack` remains ready but unlaunched. `watcher-runtime-core` is
+ready, focus, and unlaunched: both Application Client dependencies are
+satisfied, and [issue #162](https://github.com/lossyrob/telex/issues/162) plus
+`.streamliner/workstreams/telex-watcher/tasks/watcher-runtime-core.md` are its
+reviewed and reconciled tracker and task specification. Campaign owns launch
+through the Streamliner workflow v2 adapter only after operator approval. Ready
+status grants no worker launch, release, tag, fleet, CLI, example, packaging, or
+Operator Station authority. The downstream `five-minute-custom-watch-gate`
+still owns operational proof that an agent can create, register, leave running,
+and diagnose a custom watch in five minutes.
 
 ## Superseded assumptions
 
