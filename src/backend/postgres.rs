@@ -1460,7 +1460,11 @@ impl Backend for PgBackend {
         owner_instance_id: &str,
         lease_epoch: i64,
     ) -> Result<bool> {
-        let client = self.client().await?;
+        // Drain must not queue behind unrelated work holding the backend's
+        // shared client mutex. Use a short-lived connection for the same
+        // fenced release so shutdown remains independent of ordinary request
+        // serialization without weakening owner/epoch checks.
+        let client = self.reconnect_client().await?;
         let n = client
             .execute(
                 "UPDATE leases

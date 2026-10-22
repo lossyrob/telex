@@ -109,6 +109,7 @@ impl ProcessEnv {
         cmd
     }
 
+    #[cfg(any(windows, target_os = "linux"))]
     fn set_daemon_executable(&self, executable: &Path) {
         *self.daemon_executable.lock().unwrap() = executable.to_path_buf();
     }
