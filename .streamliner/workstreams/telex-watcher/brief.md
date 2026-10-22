@@ -169,14 +169,14 @@ This acceptance is not production-runtime or five-minute operational proof.
 Issue [#144](https://github.com/lossyrob/telex/issues/144) and
 [`tasks/minimal-example-pack.md`](tasks/minimal-example-pack.md) now provide the
 fresh tracker and bounded task specification for `minimal-example-pack`. The
-node is in progress: on 2026-10-22 the operator approved its launch as the first
+node is complete. On 2026-10-22 the operator approved its launch as the first
 live merge-gate pilot, and Campaign launched owner session
-76a56ac2-dd56-403f-99e7-9eadb3458ffe. Campaign runs the gate, and the owner
-merges at the cleared SHA. `watcher-runtime-core` is also in progress. Its
-Application Client holds are discharged: `client-conformance` merged through
-PR #161 as `4d25fdff` on 2026-10-22, and Watcher's post-merge consumer
-integration gate receipt passed on that merged main. Issue
-[#162](https://github.com/lossyrob/telex/issues/162) and
+76a56ac2-dd56-403f-99e7-9eadb3458ffe. Campaign cleared PR #163 at exact head
+`fdb4f52f`, and the owner merged it as `5ad7eb04`; issue #144 closed.
+`watcher-runtime-core` is in progress. Its Application Client holds are
+discharged: `client-conformance` merged through PR #161 as `4d25fdff` on
+2026-10-22, and Watcher's post-merge consumer integration gate receipt passed on
+that merged main. Issue [#162](https://github.com/lossyrob/telex/issues/162) and
 [`tasks/watcher-runtime-core.md`](tasks/watcher-runtime-core.md) are its
 reviewed and reconciled tracker and task specification. On 2026-10-22 the
 operator approved launch through the Streamliner workflow v2 adapter, and

@@ -163,19 +163,19 @@ without mandatory framework ceremony. That acceptance completes the
 `minimal-contract-accepted` checkpoint. It does not prove a production runtime,
 an operational five-minute workflow, or any later gate.
 
-`watcher-runtime-core` and `minimal-example-pack` are in progress. On
-2026-10-22 the operator approved both launches through the Streamliner workflow
-v2 adapter. `watcher-runtime-core` runs under
-[issue #162](https://github.com/lossyrob/telex/issues/162) and
+`watcher-runtime-core` is in progress. On 2026-10-22 the operator approved its
+launch through the Streamliner workflow v2 adapter. It runs under issue #162 and
 `.streamliner/workstreams/telex-watcher/tasks/watcher-runtime-core.md`, its
 reviewed and reconciled tracker and task specification. Both Application Client
 dependencies are satisfied. Its merge gate runs in shadow mode, so the operator
-merges. `minimal-example-pack` runs under issue #144 as the first live
-merge-gate pilot: Campaign runs the gate, and the owner merges only at the
-cleared exact SHA. Neither launch grants release, tag, publish, fleet, CLI,
-packaging, I161-1, or Operator Station authority. The downstream
-`five-minute-custom-watch-gate` still owns operational proof that an agent can
-create, register, leave running, and diagnose a custom watch in five minutes.
+merges. `minimal-example-pack` completed under issue #144 in PR #163. Campaign
+ran the first live merge-gate pilot and cleared exact head
+`fdb4f52fa8e582cc97492787f0841e0b15af893f`, which the owner merged as
+`5ad7eb04c1357044315e433bd12f34347b6a4cf6`. Neither launch grants release, tag,
+publish, fleet, CLI, packaging, I161-1, or Operator Station authority. The
+downstream `five-minute-custom-watch-gate` still owns operational proof that an
+agent can create, register, leave running, and diagnose a custom watch in five
+minutes.
 
 ## Superseded assumptions
 
@@ -190,9 +190,16 @@ visible at-least-once duplicates, and the shared Application Client boundary.
 Issue #127 and unmerged PR #131 remain optional-example and implementation
 learning, not current product authority.
 
+Issue #144 and PR #163 closed the minimal-example extraction question. The
+selected scope is five standalone v2 examples for GitHub PRs, Azure DevOps
+builds, HTTP/JSON, local files, and commands, with offline schema and provider
+checks. They retain PR #131's useful boolean-typing, command-failure, and
+offline transport-testing lessons without adopting its mandatory template,
+provenance, kind-policy, preflight, downtime, or shared-framework machinery.
+Optional provider and credential hardening remains downstream project policy,
+not unresolved Watcher core scope.
+
 ## Unresolved design questions
 
 - Whether an explicit v1 compatibility adapter is worth maintaining instead of
   documented re-registration.
-- Which bounded examples or hardening techniques from PR #131 should be
-  extracted by the in-progress minimal example work.

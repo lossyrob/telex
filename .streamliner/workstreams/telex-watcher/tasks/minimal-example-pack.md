@@ -3,8 +3,8 @@
 - **Workstream:** `telex-watcher`
 - **Node:** `minimal-example-pack`
 - **Type:** implementation
-- **Status:** in progress; launched 2026-10-22 under Streamliner workflow v2
-- **Attention:** focus
+- **Status:** completed; PR #163 merged as `5ad7eb04` on 2026-10-22
+- **Attention:** watch
 - **Depends on:** completed `dumb-watcher-contract-gate`
 - **Tracker:** [lossyrob/telex#144](https://github.com/lossyrob/telex/issues/144)
 - **Owner session:** 76a56ac2-dd56-403f-99e7-9eadb3458ffe
@@ -145,6 +145,23 @@ under merge-gate policy `streamliner/telex/prompts/v2/telex-v2-merge-gate.md` in
 the planning repository (commit `c213a5e3`, blob `b10277f8`). The directive
 grants no release, tag, publish, or fleet authority, no I161-1 change, and no
 live merge for any item other than issue #144.
+
+The node completed on 2026-10-22. An independent App review passed PR #163 at
+exact head `fdb4f52fa8e582cc97492787f0841e0b15af893f` with no blocking or
+non-blocking findings, all 18 checks passed, and no review threads remained. At
+2026-10-22T20:03:40Z, Campaign commented `Merge cleared at
+fdb4f52fa8e582cc97492787f0841e0b15af893f` on the PR: the floor was met, every
+hard stop was clear, and the preference gate cleared with medium confidence as a
+merge with a debt note. The owner merged at 20:04:16Z with `--match-head-commit`
+as merge commit `5ad7eb04c1357044315e433bd12f34347b6a4cf6` (parents `e32e3f95`
+and `fdb4f52f`), and issue #144 closed as completed at 20:04:17Z. The recorded
+preference debt keeps the historical v1 examples beside the v2 pack, ships
+PowerShell-only examples, and leaves issue #162 to reword the
+`docs/design/watcher.md` sentence about the spike crate. When this was recorded,
+push CI run 39845623265 on the merge commit was still in progress and the
+owner's field report was pending; neither is a final-acceptance condition.
+Completion does not change `examples-accelerate-gate`,
+`watcher-hardening-recipes`, or the `usable-watcher` checkpoint.
 
 Its implementation must not change `watcher-runtime-core`,
 Application Client `client-conformance`, or
