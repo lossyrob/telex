@@ -1,4 +1,8 @@
-# Trusted-local detector examples
+# Historical v1 detector examples
+
+These frozen spike examples use v1. For the current optional authoring examples,
+see [Watcher v2 examples](../v2/README.md). Do not mix their registrations or
+detector results with the v2 contract.
 
 These editable PowerShell detectors implement the Watcher version-1 stdin/stdout contract. They only observe provider or local data: none merges, comments, approves, queues, or otherwise changes a provider.
 

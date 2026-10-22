@@ -45,6 +45,10 @@ jobs:
           PYTHONDONTWRITEBYTECODE: "1"
         run: python tests/release_candidate_test.py
 
+      - name: Test optional Watcher v2 examples
+        shell: pwsh
+        run: .\telex-watcher\examples\v2\tests\check-examples.ps1
+
       - name: Test native Windows capability publication observation
         if: runner.os == 'Windows'
         env:
