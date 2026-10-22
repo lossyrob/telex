@@ -803,8 +803,8 @@ was reviewed again. Both reviews state their limits: the hosted proof must pass
 at this exact head before E161-1 receives runtime credit; the proof establishes
 compatibility of a fresh layout written by the released installer, not drain of
 a live v0.2.1 daemon; and neither review grants CI, consumer, merge, release, or
-I161-1 credit. The implementer has requested Local's source and design reviews
-and fresh Watcher and Operator Station attestations. Required CI run 39805183080
+I161-1 credit. The implementer requested Local's source and design reviews and
+fresh Watcher and Operator Station attestations. Required CI run 39805183080
 completed with conclusion failure at 2026-10-22T15:39:42Z. Fifteen of its 17
 jobs passed, including Live Postgres parity and Windows InstalledCurrent
 Postgres process proofs, and two required Windows jobs failed. The new job
@@ -845,6 +845,90 @@ evidence carries over, and `5d21a63d` has no gate credit. The I161-1 workstation
 preservation and freeze are unchanged, and no release, tag, or fleet action is
 authorized.
 
+On 2026-10-22 the implementer pushed successor head `631aff22` (tree `ffa38ba6`)
+to resolve E161-1. It was three commits over `5d21a63d`. Relative to `4cd34938`
+it changed five paths (+476/-13): the CI workflow, Application Client
+documentation, the `InstalledCurrent` process test, the release contract test,
+and shared test isolation support. Production source was unchanged. The head
+deleted the custom PowerShell proof script and implemented the official v0.2.1
+compatibility proof as an ignored Windows test in the existing, reviewed Rust
+`InstalledCurrent` harness. CI verifies and downloads the official v0.2.1
+release, runs that test against the exact head, writes command logs and the
+proof report directly to files, and uploads the evidence. The proof creates
+owner-private Windows roots exclusively, so creation fails on an existing path.
+It changes no parent access control list and never deletes a proof root
+recursively; the ephemeral runner's teardown owns the roots. Shutdown reuses the
+existing exact-generation daemon stop. The implementer reported compile-only
+validation on Rust 1.99 and 1.98 (tests built without running, and Clippy), a
+clean YAML lint, and fresh gpt-6-astra, high-reasoning, long-context approvals
+with no findings: one for the exact delta from `5d21a63d` and one for the
+complete Application Client design at `631aff22`. Both were source-only and
+granted no CI, E161-1 runtime, merge, release, consumer, post-merge, or I161-1
+credit. Local's design inspection approved the head, finding P161-1 and P161-2
+structurally closed and the product design unchanged. Local's source review
+returned CHANGES REQUIRED. It found L161-7, L161-8, P161-1, and P161-2
+structurally closed in source, and it opened priority-2 finding L161-9: the new
+empty-installation proof can fail before the released writer publishes a current
+binary, and its destructor then panics a second time while resolving that
+missing binary, aborting the test process and masking the original failure.
+Local established this from source, not from a hosted run, and its design
+approval did not override the source finding. Both Local reviews kept the
+proof's scope: the official v0.2.1 writer installs the candidate into a fresh
+root with `--from` and `--skip-drain`, and the candidate then attaches through
+the public client. It does not prove a running predecessor daemon, an existing
+store, network paths, or every platform. Required CI run 39809448340 at
+`631aff22` had no failed job and no terminal result when the head moved; Local
+treats it as diagnostic only. No `4cd34938` or `5d21a63d` evidence carried over,
+and `631aff22` received no gate credit.
+
+The implementer then pushed head `dacf3d18` (tree `5c2123ad`), one commit over
+`631aff22` that changes two test paths (+16/-1), to fix L161-9. Best-effort
+teardown now resolves the current binary fallibly. When the selection is absent
+or invalid, it returns false and runs no command, so the original failure
+surfaces and the root is retained; it adds no fallback to an ambient binary or a
+raw process ID. A new Windows regression test drops an empty installation. The
+implementer reports compile-only validation and fresh gpt-6-astra exact-delta
+and design approvals; no artifact path or hash for those approvals has been
+supplied. Local's source review approved the head with no findings. L161-9 is
+resolved in source, the earlier proof findings remain closed, and production
+source is unchanged. Local qualifies that the regression covers refusal for a
+missing selection and an ordinary drop, not a drop during an existing panic or
+every invalid-selection case, and that source approval does not show the hosted
+proof running. Local's design inspection also approved the head. It accepts the
+L161-9 closure: best-effort stop returns false before acting when the current
+selection is missing, empty, unreadable, or invalid; the destructor adds no
+second panic; the root is retained; and the explicit stop requirements are
+unchanged. It records the same limit on the regression and is static design
+approval only. The implementer requested fresh Watcher and Operator Station
+attestations. Required CI run 39810406366 at this head completed with failure at
+16:15:00Z; 16 of 17 jobs passed. The required official v0.2.1 Rust-harness proof
+job 119934799074 (`Released v0.2.1 upgrade proof (Windows)`) succeeded, as did
+the live PostgreSQL parity job 119934798990, the Windows `InstalledCurrent`
+PostgreSQL process proof job 119934799083, and the Ubuntu build-and-test job
+119934799183. Required job 119934799106, `Build and test (windows-latest)`,
+failed in its Test step: in `tests/daemon_process_sqlite.rs`,
+`real_process_copilot_fallback_cold_start` panicked at line 24 because the send
+to the cold-start fallback exited with code -1073740940 (0xC0000374, which
+Windows names STATUS_HEAP_CORRUPTION), and that test binary reported 47 passed
+and 1 failed. No root cause or relevance to this head is inferred, no rerun is
+recorded, and diagnosis belongs to the implementer. The run grants no gate or
+readiness credit, and the successful proof job alone does not accept E161-1.
+Watcher's pre-merge attestation approved source consumability at `dacf3d18` and
+returned changes required for runtime qualification because of that failed
+required job. It is not the post-merge consumer gate. Operator Station's
+attestation likewise approved source consumability and returned changes required
+for runtime, withholding runtime consumer credit under blocker
+OS-PR161-DACF3D1-R1 for the same failed Windows test. It records that the public
+consumer fixtures and the incomplete-drop regression passed and that
+OS-PR161-0486BEE-1 remains closed. Neither consumer infers a cause or merge
+readiness. No `631aff22` or earlier evidence carries over. At `dacf3d18`,
+Local's source review and design inspection have approved; the Application
+Client design approval is reported by the implementer without a supplied
+artifact; Watcher and Operator Station withheld runtime credit; and exact-head
+CI failed in a required Windows test job. E161-1 and the I161-1 impact and
+isolation questions remain open, the I161-1 workstation preservation and freeze
+are unchanged, and no merge, release, tag, or fleet action is authorized.
+
 The released-v0.2.1 upgrade proof is not accepted. At `d08e764c`, the official
 v0.2.1 executable staged the candidate into a fresh fixture root and public
 attachment succeeded. The proof script, however, also rewrote the access control
@@ -861,9 +945,10 @@ merge credit. Local runtime and proof replay remain frozen, so runtime
 validation relies on CI; ordinary source and CI work may continue within that
 freeze. It does not change the gate evidence for PR head `4cd34938`, which
 remains scoped to that exact head. E161-1 validation and merge remain
-outstanding; the implementer is resolving E161-1 through a hosted CI proof whose
-first run at `5d21a63d` failed and whose script needs the Local repairs. The
-node stays in progress, and issue #152 stays open.
+outstanding; the implementer is resolving E161-1 through a hosted CI proof; the
+first attempt at `5d21a63d` failed, and the Rust-harness replacement proof job
+passed at `dacf3d18`, but that head's CI run failed in a required Windows test
+job. The node stays in progress, and issue #152 stays open.
 
 ## Decisions
 
