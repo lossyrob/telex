@@ -385,11 +385,13 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
     // authenticate the selected process image, observe that cap generation as
     // pending, and retry without sending Hello or spawning beside the child.
     let publication_marker = iso.root.join("cap-publication-delayed");
-    restore.set("TELEX_TEST_CAP_PUBLICATION_DELAY_MS", "750");
+    let spawn_counter = iso.root.join("restart-bootstrap-spawns");
+    restore.set("TELEX_TEST_CAP_PUBLICATION_DELAY_MS", "1500");
     restore.set(
         "TELEX_TEST_CAP_PUBLICATION_DELAY_MARKER",
         &publication_marker,
     );
+    restore.set("TELEX_TEST_BOOTSTRAP_SPAWN_COUNTER", &spawn_counter);
 
     // The next spawning call restarts the daemon, and bounded repair recovers
     // the membership.
@@ -408,6 +410,14 @@ async fn installed_current_crash_restart_and_reattach_recovers_membership() {
     assert!(
         publication_marker.is_file(),
         "the restart proof must exercise the endpoint-before-cap publication window"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&spawn_counter)
+            .expect("restart spawn counter")
+            .lines()
+            .count(),
+        1,
+        "the operation must remember its authenticated pending peer and suppress a second spawn"
     );
 }
 

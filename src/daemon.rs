@@ -2145,6 +2145,7 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
     let mut backoff = BACKOFF_INITIAL;
     let mut last_err: Option<DaemonError>;
     let existing_probe_deadline = Instant::now() + Duration::from_millis(250);
+    let mut authenticated_peer_pending = false;
 
     loop {
         match tokio::time::timeout(
@@ -2159,6 +2160,7 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
             }
             Ok(Err(e @ DaemonError::Bootstrap(_))) => return Err(e),
             Ok(Err(e @ DaemonError::PeerCapabilityPending(_))) => {
+                authenticated_peer_pending = true;
                 last_err = Some(e);
                 if Instant::now() >= deadline {
                     return Err(last_err.unwrap());
@@ -2169,6 +2171,18 @@ pub(crate) async fn connect_or_spawn_with_bootstrap(
             }
             Ok(Err(e)) => last_err = Some(e),
             Err(_) => last_err = Some(DaemonError::Timeout("connect attempt timed out".into())),
+        }
+        if authenticated_peer_pending {
+            if Instant::now() >= deadline {
+                return Err(last_err.unwrap_or_else(|| {
+                    DaemonError::PeerCapabilityPending(
+                        "authenticated peer did not finish capability publication".into(),
+                    )
+                }));
+            }
+            tokio::time::sleep(backoff).await;
+            backoff = std::cmp::min(backoff.saturating_mul(2), BACKOFF_MAX);
+            continue;
         }
         if Instant::now() >= existing_probe_deadline {
             break;
@@ -2537,6 +2551,7 @@ fn spawn_daemon_process_bootstrap(
 ) -> Result<()> {
     // Unix: `Command::env` scopes the additional environment variables to the
     // child process without mutating the parent's environment.
+    record_bootstrap_spawn();
     spawn_daemon_process_with_env(exe, env)
 }
 
@@ -2594,8 +2609,23 @@ fn spawn_daemon_process_bootstrap(
     // The bootstrap path holds an executable-file witness handle across
     // `CreateProcessW`. The witness is passed by borrow so it is dropped
     // strictly after the child process is created, not during the spawn.
+    record_bootstrap_spawn();
     let inherit_witness = witness.is_some();
     spawn_daemon_process_windows_native(exe, env, witness, inherit_witness)
+}
+
+fn record_bootstrap_spawn() {
+    #[cfg(debug_assertions)]
+    if let Some(marker) = std::env::var_os("TELEX_TEST_BOOTSTRAP_SPAWN_COUNTER") {
+        use std::io::Write;
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(marker)
+        {
+            let _ = file.write_all(b"spawn\n");
+        }
+    }
 }
 
 #[cfg(windows)]
