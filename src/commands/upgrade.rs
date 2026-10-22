@@ -723,6 +723,15 @@ async fn drain_daemon(
         }
         Err(e) => return Err(e.into()),
     };
+    if selected_executable.is_none() {
+        let Some(pid) = cap.server_pid else {
+            validate_drain_caller(None)?;
+            unreachable!();
+        };
+        if !crate::session_watch::process_alive_with_start_time(pid, cap.server_start_time) {
+            return Ok(json!({"drained": false, "status": "not_running"}));
+        }
+    }
     validate_drain_caller(selected_executable)?;
     let server_pid = cap.server_pid;
     let server_start_time = cap.server_start_time;

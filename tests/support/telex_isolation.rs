@@ -337,11 +337,12 @@ impl Isolation {
 
     /// Stop the daemon and wait until it is no longer serving.
     pub fn stop_daemon(&self) {
+        self.stop_daemon_with_timeout(Duration::from_secs(30));
+    }
+
+    pub fn stop_daemon_with_timeout(&self, timeout: Duration) {
         assert!(
-            self.stop_daemon_with_executable_within(
-                &self.current_binary(),
-                Duration::from_secs(30)
-            ),
+            self.stop_daemon_with_executable_within(&self.current_binary(), timeout),
             "daemon for {} did not stop within the deadline",
             self.label
         );
@@ -363,7 +364,7 @@ impl Isolation {
         let identity = self.daemon_identity();
         let mut command = self.command_for(executable);
         command.args(["--json", "daemon", "stop", "--drain"]);
-        let _ = run_with_timeout(command, Duration::from_secs(20));
+        let _ = run_with_timeout(command, timeout);
         self.wait_until_stopped(identity, timeout)
     }
 
@@ -376,11 +377,7 @@ impl Isolation {
                         return true;
                     }
                 }
-                DaemonIdentityEvidence::Absent => {
-                    if self.daemon_running_observation() == Some(false) {
-                        return true;
-                    }
-                }
+                DaemonIdentityEvidence::Absent => return false,
                 DaemonIdentityEvidence::Unverifiable => return false,
             }
             std::thread::sleep(Duration::from_millis(50));
@@ -398,11 +395,10 @@ impl Isolation {
         run_with_timeout(cmd, timeout)
     }
 
-    /// Best-effort teardown. Safe to call more than once.
+    /// Best-effort teardown. Roots are retained because endpoint absence cannot
+    /// be proven from a missing or stale capability record during publication.
     pub fn cleanup(&self) {
-        if self.stop_daemon_best_effort() {
-            let _ = std::fs::remove_dir_all(&self.root);
-        }
+        let _ = self.stop_daemon_best_effort();
     }
 }
 

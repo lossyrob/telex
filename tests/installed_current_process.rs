@@ -948,7 +948,7 @@ async fn installed_current_existing_peer_handshake_is_bounded() {
         output.stderr
     );
 
-    iso.stop_daemon();
+    iso.stop_daemon_with_timeout(Duration::from_secs(45));
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1668,7 +1668,9 @@ async fn exact_executable_fresh_policy_refuses_stale_running_image() {
     std::fs::copy(isolation::branch_binary(), &pinned).expect("replace exact executable pathname");
     let fresh = ApplicationClient::connect_with_daemon(
         config("proof", &db),
-        ApplicationDaemonBootstrap::ExactExecutable { executable: pinned },
+        ApplicationDaemonBootstrap::ExactExecutable {
+            executable: pinned.clone(),
+        },
     )
     .await
     .expect("fresh exact policy over replacement");
@@ -1680,7 +1682,10 @@ async fn exact_executable_fresh_policy_refuses_stale_running_image() {
         DaemonBootstrapFailure::ForeignDaemon,
         "fresh exact policy must reject the stale mapped peer before Hello"
     );
-    iso.stop_daemon_with_executable(&displaced);
+    drop(fresh);
+    std::fs::remove_file(&pinned).expect("remove replacement exact image");
+    std::fs::rename(&displaced, &pinned).expect("restore admitted exact image pathname");
+    iso.stop_daemon_with_executable(&pinned);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
