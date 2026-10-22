@@ -5,6 +5,7 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 static NEXT_ENV: AtomicUsize = AtomicUsize::new(1);
@@ -52,6 +53,7 @@ impl CmdOutput {
 #[derive(Debug)]
 struct ProcessEnv {
     bin: PathBuf,
+    daemon_executable: Mutex<PathBuf>,
     root: PathBuf,
     home: PathBuf,
     run_dir: PathBuf,
@@ -90,6 +92,7 @@ impl ProcessEnv {
         std::fs::create_dir_all(&state_dir).expect("create lock state dir");
         Self {
             bin: telex_bin(),
+            daemon_executable: Mutex::new(telex_bin()),
             root,
             home,
             run_dir,
@@ -104,6 +107,10 @@ impl ProcessEnv {
         let mut cmd = Command::new(&self.bin);
         self.configure_command(&mut cmd, session);
         cmd
+    }
+
+    fn set_daemon_executable(&self, executable: &Path) {
+        *self.daemon_executable.lock().unwrap() = executable.to_path_buf();
     }
 
     fn configure_command(&self, cmd: &mut Command, session: &str) {
@@ -171,12 +178,34 @@ impl ProcessEnv {
         self.run(["--json", "daemon", "status"], Duration::from_secs(4))
     }
 
-    fn stop_daemon_best_effort(&self) {
-        let _ = self.run(
-            ["--json", "daemon", "stop", "--drain"],
-            Duration::from_secs(4),
-        );
-        let _ = self.wait_until_not_running(Duration::from_secs(3));
+    fn daemon_identity(&self) -> Option<(u32, u64)> {
+        let cap_path = self.cap_path()?;
+        let cap: Value = serde_json::from_slice(&std::fs::read(cap_path).ok()?).ok()?;
+        let pid = cap
+            .get("server_pid")
+            .and_then(Value::as_u64)
+            .and_then(|pid| u32::try_from(pid).ok())?;
+        let start_time = cap.get("server_start_time").and_then(Value::as_u64)?;
+        Some((pid, start_time))
+    }
+
+    fn stop_daemon_best_effort(&self) -> bool {
+        let Some((pid, start_time)) = self.daemon_identity() else {
+            return false;
+        };
+        let executable = self.daemon_executable.lock().unwrap().clone();
+        let mut stop = Command::new(executable);
+        self.configure_command(&mut stop, &self.session_id);
+        stop.args(["--json", "daemon", "stop", "--drain"]);
+        let _ = run_command_with_capture(stop, &self.root, Duration::from_secs(30));
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while Instant::now() < deadline {
+            if !telex::session_watch::process_alive_with_start_time(pid, Some(start_time)) {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
     }
 
     fn wait_until_not_running(&self, timeout: Duration) -> bool {
@@ -232,8 +261,9 @@ impl ProcessEnv {
 
 impl Drop for ProcessEnv {
     fn drop(&mut self) {
-        self.stop_daemon_best_effort();
-        let _ = std::fs::remove_dir_all(&self.root);
+        if self.stop_daemon_best_effort() {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
     }
 }
 
@@ -4680,6 +4710,7 @@ fn station_intent_upgrade_runs_the_selected_successor_and_restores_push() {
         .join("versions")
         .join("vtest-station-predecessor")
         .join(format!("telex{}", std::env::consts::EXE_SUFFIX));
+    env.set_daemon_executable(&predecessor);
 
     let mut attach = Command::new(&predecessor);
     env.configure_command(&mut attach, session);
@@ -4726,6 +4757,11 @@ fn station_intent_upgrade_runs_the_selected_successor_and_restores_push() {
     ]);
     let upgraded = run_command_with_capture(upgrade, &env.root, Duration::from_secs(60));
     upgraded.assert_success("upgrade with successor reconciliation");
+    let successor = install_root
+        .join("versions")
+        .join("vtest-station-intent")
+        .join(format!("telex{}", std::env::consts::EXE_SUFFIX));
+    env.set_daemon_executable(&successor);
     let json = upgraded.json("upgrade with successor reconciliation");
     assert_eq!(
         json.pointer("/station_intent_reconcile/attempted")
@@ -4753,10 +4789,6 @@ fn station_intent_upgrade_runs_the_selected_successor_and_restores_push() {
         "verification must run the binary selected by the switch"
     );
 
-    let successor = install_root
-        .join("versions")
-        .join("vtest-station-intent")
-        .join(format!("telex{}", std::env::consts::EXE_SUFFIX));
     let mut status = Command::new(&successor);
     env.configure_command(&mut status, session);
     status.args(["--json", "--address", address, "status"]);

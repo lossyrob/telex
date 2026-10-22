@@ -1,4 +1,4 @@
-#![cfg(feature = "sqlite")]
+#![cfg(all(feature = "sqlite", any(windows, target_os = "linux")))]
 //! Real-process proofs for the `InstalledCurrent` Application Client bootstrap.
 //!
 //! Every test builds a unique, owner-private install root from the *branch*

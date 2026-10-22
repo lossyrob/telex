@@ -1,4 +1,7 @@
-#![cfg(any(feature = "sqlite", feature = "postgres"))]
+#![cfg(all(
+    any(feature = "sqlite", feature = "postgres"),
+    any(windows, target_os = "linux")
+))]
 //! One backend-neutral Application Client conformance battery.
 //!
 //! The *same* semantic scenario functions run against an isolated SQLite store

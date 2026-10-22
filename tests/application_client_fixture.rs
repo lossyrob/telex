@@ -1,4 +1,7 @@
-#![cfg(any(feature = "sqlite", feature = "postgres"))]
+#![cfg(all(
+    any(feature = "sqlite", feature = "postgres"),
+    any(windows, target_os = "linux")
+))]
 //! Executes the external, defaults-disabled consumer fixture against a
 //! production `InstalledCurrent` daemon.
 //!
