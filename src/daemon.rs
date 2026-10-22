@@ -2564,11 +2564,16 @@ pub async fn connect_or_spawn(store_key: &str) -> Result<DaemonClient> {
             )));
         }
         launches.push(Instant::now());
-        let _spawn_admission = spawn_daemon().await?;
+        let spawn_admission = spawn_daemon().await?;
 
         loop {
             if Instant::now() >= deadline {
                 break;
+            }
+            if let Some(failure) = spawn_admission.as_ref().and_then(|spawn| {
+                crate::daemon_bootstrap::take_child_bootstrap_failure(&spawn.result_path)
+            }) {
+                return Err(DaemonError::Bootstrap(failure));
             }
             match tokio::time::timeout(CONNECT_ATTEMPT_TIMEOUT, connect_existing(store_key)).await {
                 Ok(Ok(client)) => return Ok(client),
@@ -2616,31 +2621,51 @@ pub async fn request_connect_or_spawn(store_key: &str, request: &Request) -> Res
     }
 }
 
-async fn spawn_daemon() -> Result<Option<crate::daemon_bootstrap::SelectorAdmission>> {
+struct AdmittedSpawn {
+    _admission: crate::daemon_bootstrap::SelectorAdmission,
+    result_path: PathBuf,
+}
+
+impl Drop for AdmittedSpawn {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_file(&self.result_path);
+    }
+}
+
+async fn spawn_daemon() -> Result<Option<AdmittedSpawn>> {
     let exe = canonical_current_exe()?;
-    let Some(root) = std::env::var_os(crate::install::INSTALL_ROOT_ENV).map(PathBuf::from) else {
+    let inferred_root = crate::install::infer_install_root_from_exe(&exe);
+    let explicit_root = std::env::var_os(crate::install::INSTALL_ROOT_ENV).map(PathBuf::from);
+    let Some(root) = inferred_root.clone().or(explicit_root) else {
         spawn_daemon_process(&exe)?;
         return Ok(None);
     };
-    let Ok(policy) = crate::daemon_bootstrap::BootstrapPolicy::installed_current(root) else {
-        spawn_daemon_process(&exe)?;
-        return Ok(None);
+    let policy = match crate::daemon_bootstrap::BootstrapPolicy::installed_current(root) {
+        Ok(policy) => policy,
+        Err(_error) if inferred_root.is_none() => {
+            spawn_daemon_process(&exe)?;
+            return Ok(None);
+        }
+        Err(error) => return Err(DaemonError::Bootstrap(error)),
     };
     let Some(trusted_root) = policy.installed_current_root() else {
         spawn_daemon_process(&exe)?;
         return Ok(None);
     };
-    let Ok((selection, admission)) =
-        crate::daemon_bootstrap::resolve_installed_current_admitted(trusted_root).await
-    else {
-        spawn_daemon_process(&exe)?;
-        return Ok(None);
-    };
+    let (selection, admission) =
+        match crate::daemon_bootstrap::resolve_installed_current_admitted(trusted_root).await {
+            Ok(resolved) => resolved,
+            Err(_error) if inferred_root.is_none() => {
+                spawn_daemon_process(&exe)?;
+                return Ok(None);
+            }
+            Err(error) => return Err(DaemonError::Bootstrap(error)),
+        };
     if !same_canonical_path(&exe, &selection.target_exe) {
         drop(admission);
         spawn_daemon_process(&exe)?;
         return Ok(None);
-    }
+    };
     let paths = DaemonPaths::current()?;
     let result_path = paths
         .run_dir
@@ -2661,7 +2686,10 @@ async fn spawn_daemon() -> Result<Option<crate::daemon_bootstrap::SelectorAdmiss
         #[cfg(windows)]
         Some(&witness),
     )?;
-    Ok(Some(admission))
+    Ok(Some(AdmittedSpawn {
+        _admission: admission,
+        result_path,
+    }))
 }
 
 #[cfg(not(windows))]
