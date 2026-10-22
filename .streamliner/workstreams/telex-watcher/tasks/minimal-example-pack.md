@@ -163,6 +163,14 @@ owner's field report was pending; neither is a final-acceptance condition.
 Completion does not change `examples-accelerate-gate`,
 `watcher-hardening-recipes`, or the `usable-watcher` checkpoint.
 
+Both pending items have since resolved. Push CI run 39845623265 on the merge
+commit passed all 18 jobs at 2026-10-22T20:27:12Z. At 20:29:55Z the owner
+posted the field report on issue #144 with design impact `updated-docs`. It
+records all 198 focused example checks passing again from the merged commit,
+states that live provider credentials and TLS and durable Telex delivery were
+not tested, and leaves runtime, CLI, hardening recipes, and five-minute
+operational acceptance to their own nodes.
+
 Its implementation must not change `watcher-runtime-core`,
 Application Client `client-conformance`, or
 `five-minute-custom-watch-gate` status.
