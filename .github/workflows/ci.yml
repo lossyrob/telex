@@ -64,8 +64,34 @@ jobs:
       - name: Build
         run: cargo build --workspace --verbose
 
+      - name: Configure Windows crash dumps
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dumps = Join-Path $env:RUNNER_TEMP "telex-crash-dumps"
+          New-Item -ItemType Directory -Path $dumps -Force | Out-Null
+          $key = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+          New-Item -Path $key -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpFolder -Value $dumps `
+            -PropertyType ExpandString -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpType -Value 2 `
+            -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $key -Name DumpCount -Value 10 `
+            -PropertyType DWord -Force | Out-Null
+
       - name: Test
         run: cargo test --workspace --verbose
+
+      - name: Upload Windows crash evidence
+        if: failure() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-build-test-crash-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}\telex-crash-dumps
+            target\debug\telex.exe
+            target\debug\telex.pdb
+          if-no-files-found: warn
 
       - name: Complete SQLite Application Client suite
         # The public Application Client battery, the executable external
@@ -462,4 +488,73 @@ jobs:
         with:
           name: released-v021-upgrade-proof-${{ github.event.pull_request.head.sha || github.sha }}
           path: ${{ runner.temp }}\telex-v021-proof
+          if-no-files-found: error
+
+  windows-heap-diagnostics:
+    name: Windows heap diagnostics
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout the exact candidate head
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+
+      - name: Install Rust stable
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: stable
+
+      - name: Configure full PageHeap and crash dumps
+        shell: pwsh
+        run: |
+          $evidence = Join-Path $env:RUNNER_TEMP "telex-heap-diagnostics"
+          $dumps = Join-Path $evidence "dumps"
+          $logs = Join-Path $evidence "logs"
+          New-Item -ItemType Directory -Path $dumps, $logs -Force | Out-Null
+          "TELEX_HEAP_EVIDENCE=$evidence" |
+            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+          $wer = "HKLM:\SOFTWARE\Microsoft\Windows\Windows Error Reporting\LocalDumps"
+          New-Item -Path $wer -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpFolder -Value $dumps `
+            -PropertyType ExpandString -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpType -Value 2 `
+            -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $wer -Name DumpCount -Value 20 `
+            -PropertyType DWord -Force | Out-Null
+
+          $ifeo = "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Image File Execution Options\telex.exe"
+          New-Item -Path $ifeo -Force | Out-Null
+          New-ItemProperty -Path $ifeo -Name GlobalFlag -Value 0x02000000 `
+            -PropertyType DWord -Force | Out-Null
+          New-ItemProperty -Path $ifeo -Name PageHeapFlags -Value 0x3 `
+            -PropertyType DWord -Force | Out-Null
+
+      - name: Stress the full Windows process suite under PageHeap
+        shell: pwsh
+        env:
+          RUST_BACKTRACE: "1"
+          TELEX_BUILD_ID: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: |
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $log = Join-Path $env:TELEX_HEAP_EVIDENCE "logs\attempt-$attempt.txt"
+            cargo test --no-default-features --features sqlite `
+              --test daemon_process_sqlite -- --nocapture 2>&1 |
+              Tee-Object -FilePath $log
+            if ($LASTEXITCODE -ne 0) {
+              Start-Sleep -Seconds 10
+              exit $LASTEXITCODE
+            }
+          }
+
+      - name: Upload heap diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-heap-diagnostics-${{ github.event.pull_request.head.sha || github.sha }}
+          path: |
+            ${{ runner.temp }}\telex-heap-diagnostics
+            target\debug\telex.exe
+            target\debug\telex.pdb
           if-no-files-found: error

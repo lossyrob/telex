@@ -235,6 +235,21 @@ fn ci_requires_the_official_v021_to_exact_candidate_proof() {
 }
 
 #[test]
+fn ci_retains_windows_heap_corruption_diagnostics() {
+    let ci = read(".github/workflows/ci.yml");
+    assert!(
+        ci.contains("Windows heap diagnostics")
+            && ci.contains("Windows Error Reporting\\LocalDumps")
+            && ci.contains("PageHeapFlags")
+            && ci.contains("0x02000000")
+            && ci.contains("daemon_process_sqlite")
+            && ci.contains("windows-build-test-crash-")
+            && ci.contains("windows-heap-diagnostics-"),
+        "Windows CI must retain full-dump and PageHeap evidence for native heap failures"
+    );
+}
+
+#[test]
 fn source_metadata_invocation_grammar_is_stable() {
     // `telex upgrade` reads the downloaded binary's metadata by spawning
     // `telex --json version --root <path>`. That invocation grammar is a cross-version
