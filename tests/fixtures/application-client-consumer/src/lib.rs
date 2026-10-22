@@ -90,7 +90,19 @@ async fn attach_single_with_deadline(
 ) -> Result<(), String> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(30);
     loop {
-        let outcome = client.attach(std::slice::from_ref(spec)).await;
+        if tokio::time::Instant::now() >= deadline {
+            return Err(format!("{context} timed out after transient refusal"));
+        }
+        let mut operation = client.begin_attach(std::slice::from_ref(spec));
+        let outcome = match tokio::time::timeout_at(deadline, operation.run()).await {
+            Ok(outcome) => outcome,
+            Err(_) => {
+                return Err(format!(
+                    "{context} timed out with cancellation evidence: {:?}",
+                    operation.cancelled_outcome()
+                ));
+            }
+        };
         if outcome.ready {
             return Ok(());
         }
@@ -110,7 +122,11 @@ async fn attach_single_with_deadline(
         if remaining.is_zero() {
             return Err(format!("{context} timed out after transient refusal: {outcome:?}"));
         }
-        tokio::time::sleep(remaining.min(std::time::Duration::from_millis(100))).await;
+        tokio::time::sleep_until(
+            tokio::time::Instant::now()
+                + remaining.min(std::time::Duration::from_millis(100)),
+        )
+        .await;
     }
 }
 

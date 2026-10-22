@@ -371,11 +371,11 @@ impl Drop for Isolation {
 
 fn unique_root(label: &str) -> PathBuf {
     let id = NEXT_ID.fetch_add(1, Ordering::SeqCst);
-    harness_base_dir().join(format!(
-        "telex-app-{label}-{}-{}-{id}",
-        std::process::id(),
-        now_ms()
-    ))
+    #[cfg(windows)]
+    let name = format!("telex-app-{label}-{}-{}-{id}", std::process::id(), now_ms());
+    #[cfg(not(windows))]
+    let name = format!("{label}-{}-{}-{id}", std::process::id(), now_ms());
+    harness_base_dir().join(name)
 }
 
 /// Whether a process id still names a live process.
